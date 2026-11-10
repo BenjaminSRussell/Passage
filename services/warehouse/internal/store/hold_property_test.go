@@ -205,3 +205,37 @@ func TestHoldProperty_PickNeverMovesHeldUntilUsageDecision(t *testing.T) {
 		}
 	})
 }
+
+// A pick for a document line claims under the line's ref (the issueRef line
+// attribute), so the later ship of what it picked counts once: with 4 free,
+// the pick of 4 and the ship of the same 4 both pass, a pick without the ref
+// does not.
+func TestStore_PickClaimsUnderTheLinesIssueRef(t *testing.T) {
+	st, ctx, wh := setup(t)
+	holds := &issueclaim.Fake{}
+	st.WithHolds(holds)
+	item := ids.New()
+	pickSetup(t, st, ctx, wh, item, "10")
+	ref := issueclaim.SalesLineRef(ids.New())
+	w := plan(t, st, ctx, wh, "SALES_PICK", domain.NewLine{ItemID: item, Direction: domain.DirectionPick, Qty: dq("4"), Weight: dq("4"),
+		Attributes: map[string]string{issueclaim.RefAttribute: ref}})
+	if got := assign(t, st, ctx, wh, "picker", time.Now()); got == nil || got.ID != w.ID {
+		t.Fatalf("assign pick = %+v", got)
+	}
+	holds.Set(item, dq("10"), dq("6"))
+	if err := pickConfirm(st, ctx, w, "4"); err != nil {
+		t.Fatalf("pick of the free 4: %v", err)
+	}
+	p, _ := tenant.FromContext(ctx)
+	ship := issueclaim.Claim{LegalEntityID: p.LegalEntityID, ProductID: item, Warehouse: wh, Kind: issueclaim.Ship, Qty: dq("4"), Ref: ref, Key: "ship-" + ids.New()}
+	if err := holds.Claim(ctx, ship); err != nil {
+		t.Fatalf("ship of the 4 the line picked: %v", err)
+	}
+	if got := holds.Outstanding(item); !got.Equal(dq("4")) {
+		t.Fatalf("pick and ship of one line stand for %s, want 4", got)
+	}
+	ship.Ref, ship.Key = "", "ship-"+ids.New()
+	if err := holds.Claim(ctx, ship); !errors.Is(err, issueclaim.ErrHeld) {
+		t.Fatalf("a ship of 4 more with nothing free: %v", err)
+	}
+}

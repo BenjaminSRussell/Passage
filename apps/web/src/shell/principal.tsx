@@ -1,6 +1,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 declare const __PASSAGE_DEV_DUTIES__: string | undefined;
+declare const __PASSAGE_DEV_IDENTITY__: string | undefined;
 
 export function parseDuties(raw: string | undefined): string[] {
   return (raw ?? "")
@@ -11,6 +12,10 @@ export function parseDuties(raw: string | undefined): string[] {
 
 export function devDuties(): string[] {
   return parseDuties(typeof __PASSAGE_DEV_DUTIES__ === "string" ? __PASSAGE_DEV_DUTIES__ : undefined);
+}
+
+export function devIdentity(): string {
+  return typeof __PASSAGE_DEV_IDENTITY__ === "string" ? __PASSAGE_DEV_IDENTITY__ : "";
 }
 
 const PrincipalContext = createContext<readonly string[]>([]);

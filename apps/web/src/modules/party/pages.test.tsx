@@ -63,7 +63,7 @@ describe("party search", () => {
   it("looks up a party by id, opens it, and passes the page checks", async () => {
     api.handler = (call) => (call.url.pathname.endsWith(`/parties/${PARTY}`) ? json(200, org(PARTY, "Northwind")) : undefined);
     const { container } = renderAt("/party");
-    fireEvent.change(screen.getByLabelText("Party id"), {
+    fireEvent.change(screen.getByLabelText("Party"), {
       target: { value: PARTY },
     });
     fireEvent.click(screen.getByRole("button", { name: "Find party" }));
@@ -78,11 +78,11 @@ describe("party search", () => {
 
   it("validates the id before calling the API", async () => {
     renderAt("/party");
-    fireEvent.change(screen.getByLabelText("Party id"), {
+    fireEvent.change(screen.getByLabelText("Party"), {
       target: { value: "x" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Find party" }));
-    expect(await screen.findByText("Enter the party id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a party.")).toBeInTheDocument();
     expect(api.calls).toHaveLength(0);
   });
 
@@ -90,7 +90,7 @@ describe("party search", () => {
     let failing = true;
     api.handler = () => (failing ? problem(500, "COM-0500", "boom") : json(200, org(PARTY, "Northwind")));
     renderAt(`/party?id=${PARTY}`);
-    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
     failing = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Northwind")).toBeInTheDocument();
@@ -101,7 +101,7 @@ describe("party search", () => {
       throw new Error("offline");
     };
     renderAt(`/party?id=${PARTY}`);
-    expect(await screen.findByText(/offline \(COM-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/offline/)).toBeInTheDocument();
   });
 
   it("explains a missing party", async () => {
@@ -261,10 +261,10 @@ describe("duplicate candidates", () => {
       return undefined;
     };
     const { container } = renderAt("/party/duplicates");
-    fireEvent.change(screen.getByLabelText("First party id"), {
+    fireEvent.change(screen.getByLabelText("First party"), {
       target: { value: PARTY },
     });
-    fireEvent.change(screen.getByLabelText("Second party id"), {
+    fireEvent.change(screen.getByLabelText("Second party"), {
       target: { value: OTHER },
     });
     fireEvent.click(screen.getByRole("button", { name: "Compare" }));
@@ -295,10 +295,10 @@ describe("duplicate candidates", () => {
 
   it("rejects comparing a party with itself", async () => {
     renderAt("/party/duplicates");
-    fireEvent.change(screen.getByLabelText("First party id"), {
+    fireEvent.change(screen.getByLabelText("First party"), {
       target: { value: PARTY },
     });
-    fireEvent.change(screen.getByLabelText("Second party id"), {
+    fireEvent.change(screen.getByLabelText("Second party"), {
       target: { value: PARTY },
     });
     fireEvent.click(screen.getByRole("button", { name: "Compare" }));

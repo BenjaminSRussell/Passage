@@ -128,7 +128,7 @@ describe("sealed RFQ pages", () => {
   it("creates a sealed RFQ with weighted criteria", async () => {
     const fetchMock = stubFetch(() => json(sealedBefore, 201, { ETag: '"1"' }));
     const { container, router } = renderAt("/purchasing/rfqs/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Reply deadline"), { target: { value: "2099-11-01T17:00" } });
     fireEvent.change(screen.getByLabelText("Rank replies by"), { target: { value: "WEIGHTED_SCORE" } });
     fireEvent.click(screen.getByRole("checkbox", { name: /Sealed bids/ }));
@@ -202,7 +202,7 @@ describe("sealed RFQ pages", () => {
     });
     renderAt(`/purchasing/rfqs/${RFQ_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Save scores" }));
-    expect(await screen.findByText("missing duty procurement.rfq.award (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty procurement.rfq.award")).toBeInTheDocument();
   });
 
   it("marks sealed RFQs in the list", async () => {

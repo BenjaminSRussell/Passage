@@ -120,7 +120,7 @@ describe("validators", () => {
       "SVC-DSP-003: technician lacks skill WELDING",
       "SVC-DSP-007: overlaps",
     ]);
-    expect(ruleLines({ status: 500, code: "COM-0500", message: "boom", fields: {} })).toEqual(["boom (COM-0500)"]);
+    expect(ruleLines({ status: 500, code: "COM-0500", message: "boom", fields: {} })).toEqual([]);
   });
 
   it("validates scheduling data", () => {

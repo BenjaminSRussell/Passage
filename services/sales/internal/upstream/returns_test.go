@@ -28,11 +28,12 @@ func TestReadInvoice_AsksBillingWithTheReadDutyAndProjectsLines(t *testing.T) {
 			t.Errorf("duties %v", c.Duties)
 		}
 		_, _ = w.Write([]byte(`{"id":"` + invoiceID + `","legalEntityId":"` + h.le + `","customerId":"c1","number":"INV-1","currency":"USD","status":"POSTED","type":"SHIPMENT",
-			"lines":[{"lineNo":1,"qty":"10.000000","net":"1000.00","productId":"` + product + `","packingSlipId":"ps1","orderLineId":"ol1","creditedQty":"2"}]}`))
+			"lines":[{"lineNo":1,"qty":"10.000000","net":"1000.00","productId":"` + product + `","packingSlipId":"ps1","orderLineId":"ol1","creditedQty":"2","taxCode":"DE19","tax":"190.00","creditedTax":"38.00"}]}`))
 	})
 	inv, err := returnsOn(h).ReadInvoice(h.ctx, h.le, invoiceID)
 	if err != nil || path != "/v1/billing/invoices/"+invoiceID || !inv.Returnable || inv.Number != "INV-1" || len(inv.Lines) != 1 ||
-		!inv.Lines[0].Qty.Equal(decimal.NewFromInt(10)) || inv.Lines[0].PackingSlipID != "ps1" || !inv.Lines[0].CreditedQty.Equal(decimal.NewFromInt(2)) {
+		!inv.Lines[0].Qty.Equal(decimal.NewFromInt(10)) || inv.Lines[0].PackingSlipID != "ps1" || !inv.Lines[0].CreditedQty.Equal(decimal.NewFromInt(2)) ||
+		inv.Lines[0].TaxCode != "DE19" || !inv.Lines[0].Tax.Equal(decimal.NewFromInt(190)) || !inv.Lines[0].CreditedTax.Equal(decimal.NewFromInt(38)) {
 		t.Fatalf("invoice %+v %v (%s)", inv, err, path)
 	}
 }
@@ -168,7 +169,7 @@ func TestReceiveReturn_RefusesAJournalThatIsNotThisReceipt(t *testing.T) {
 }
 
 func TestPostRMACredit_SendsOnlyWhatReceivablesDerivesNothingFrom(t *testing.T) {
-	var got map[string]string
+	var got map[string]any
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request, h *harness) {
 		if r.URL.Path != "/v1/receivables/rma-credits" || h.claims(t, r, "receivables").Duties[0] != "ar.rmacredit.post" || r.Header.Get("Idempotency-Key") != "k1" {
 			t.Errorf("request %s %v", r.URL.Path, r.Header)
@@ -179,12 +180,21 @@ func TestPostRMACredit_SendsOnlyWhatReceivablesDerivesNothingFrom(t *testing.T) 
 		_, _ = w.Write([]byte(`{"openItemId":"oi","documentNumber":"CN-RMA-1","journalPostingId":"je"}`))
 	})
 	note, err := returnsOn(h).PostRMACredit(h.ctx, store.ARCredit{RMAID: "r1", RMANumber: "RMA-1", LegalEntityID: h.le, InvoiceNumber: "INV-1", PostingDate: "2027-03-01",
-		IdempotencyKey: "k1", Gross: decimal.NewFromInt(400), Restocking: decimal.NewFromInt(60), Net: decimal.NewFromInt(340)})
+		IdempotencyKey: "k1", InvoiceLines: []store.ARInvoiceLine{{LineNo: 2, Qty: decimal.RequireFromString("3.5")}}, Gross: decimal.NewFromInt(400), Restocking: decimal.NewFromInt(60), Net: decimal.NewFromInt(340),
+		TaxLines: []store.ARTaxLine{{Code: "DE19", Amount: decimal.RequireFromString("64.6")}, {Code: "DE7", Amount: decimal.NewFromInt(2)}}})
 	if err != nil || note.OpenItemID != "oi" || note.JournalPostingID != "je" {
 		t.Fatalf("note %+v %v", note, err)
 	}
-	if got["gross"] != "400.00" || got["net"] != "340.00" || got["invoiceNumber"] != "INV-1" || got["customerId"] != "" || got["ledgerId"] != "" {
+	if got["gross"] != "400.00" || got["net"] != "340.00" || got["invoiceNumber"] != "INV-1" || got["customerId"] != nil || got["ledgerId"] != nil {
 		t.Fatalf("body %+v", got)
+	}
+	invoiceLines, _ := got["invoiceLines"].([]any)
+	if len(invoiceLines) != 1 || invoiceLines[0].(map[string]any)["lineNo"] != float64(2) || invoiceLines[0].(map[string]any)["qty"] != "3.5" {
+		t.Fatalf("invoice lines %+v", got["invoiceLines"])
+	}
+	lines, _ := got["taxLines"].([]any)
+	if len(lines) != 2 || lines[0].(map[string]any)["code"] != "DE19" || lines[0].(map[string]any)["amount"] != "64.60" || lines[1].(map[string]any)["amount"] != "2.00" {
+		t.Fatalf("tax lines %+v", got["taxLines"])
 	}
 }
 

@@ -210,7 +210,7 @@ describe("Proposals on the new order form", () => {
     fireEvent.click(within(table).getByRole("button", { name: `Add a line for ${ACCESSORY}` }));
     expect(await screen.findByRole("group", { name: "Line 2" })).toBeInTheDocument();
     const added = within(screen.getByRole("group", { name: "Line 2" }));
-    expect(added.getByLabelText("Product")).toHaveValue(ACCESSORY);
+    expect(added.getByLabelText("Product")).toHaveAttribute("data-value", ACCESSORY);
     expect(added.getByLabelText("Site")).toHaveValue(SITE);
     expect(added.getByLabelText("Warehouse")).toHaveValue(WAREHOUSE);
     expect(added.getByLabelText("Unit price")).toHaveValue("");

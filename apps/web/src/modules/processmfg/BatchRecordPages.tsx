@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -46,6 +47,7 @@ import { GenealogyCard } from "./GenealogyCard";
 import { dash, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Duty that changes a batch's disposition; enforced by the service (AC-24.10). */
 export const DISPOSITION_DUTY = "production.batch-disposition.write";
@@ -77,7 +79,7 @@ export function DispositionBadge({ disposition }: { disposition: Disposition }) 
 function LoadError({ title, error, reload }: { title: string; error: Problem; reload: () => void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-      {error.message} ({error.code})
+      <ProblemMessage problem={error} />
     </Alert>
   );
 }
@@ -183,9 +185,9 @@ export function NewBatchPage() {
       <PageHeader title="Register batch" description="Creates the quality record of a batch. Attributes and disposition are recorded on the batch afterwards." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="batch-item" label="Item id" error={errors.itemId}>
+          <FormField id="batch-item" label="Item" error={errors.itemId}>
             {(c) => (
-              <Input {...c} value={itemId} onChange={(e) => { setItemId(e.target.value); key.current = newKey(); }} invalid={Boolean(errors.itemId)} />
+              <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => { setItemId(e.target.value); key.current = newKey(); }} invalid={Boolean(errors.itemId)} />
             )}
           </FormField>
           <FormField id="batch-number" label="Batch number" error={errors.batchNumber}>
@@ -207,7 +209,7 @@ export function NewBatchPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not register the batch" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -363,7 +365,7 @@ function RecordCard({
             live="alert"
             action={failure.code === "PMF-0104" ? <Button size="sm" onClick={reload}>Reload batch</Button> : undefined}
           >
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -442,7 +444,7 @@ function DispositionCard({ batch, reload, onChanged }: { batch: Batch; reload: (
             live="alert"
             action={failure.code === "PMF-0104" ? <Button size="sm" onClick={reload}>Reload batch</Button> : undefined}
           >
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -627,8 +629,8 @@ export function AttributeDefinitionsPage() {
     <div className={styles.stack}>
       <PageHeader title="Batch attribute definitions" description="The attributes an item's batches carry, with limits for numbers and options for enums." />
       <div className={styles.toolbar}>
-        <FormField id="definition-filter" label="Item id" hint="Leave empty for every item." error={filterValid ? undefined : "Enter the item id as a UUID."}>
-          {(c) => <Input {...c} value={filter} onChange={(e) => setFilter(e.target.value)} invalid={!filterValid} />}
+        <FormField id="definition-filter" label="Item" hint="Leave empty for every item." error={filterValid ? undefined : "Enter the item id as a UUID."}>
+          {(c) => <EntityLookup entity="product" {...c} value={filter} onChange={(e) => setFilter(e.target.value)} invalid={!filterValid} />}
         </FormField>
       </div>
       {state.error ? (
@@ -645,8 +647,8 @@ export function AttributeDefinitionsPage() {
       )}
       <Card title="Define an attribute">
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="def-item" label="Item id" error={errors.itemId}>
-            {(c) => <Input {...c} value={form.itemId} onChange={(e) => edit({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
+          <FormField id="def-item" label="Item" error={errors.itemId}>
+            {(c) => <EntityLookup entity="product" {...c} value={form.itemId} onChange={(e) => edit({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
           </FormField>
           <FormField id="def-name" label="Name" error={errors.name}>
             {(c) => <Input {...c} value={form.name} onChange={(e) => edit({ name: e.target.value })} invalid={Boolean(errors.name)} />}
@@ -691,7 +693,7 @@ export function AttributeDefinitionsPage() {
           {done ? <Alert tone="success" title={done} live="status" /> : null}
           {failure ? (
             <Alert tone="danger" title="Could not define the attribute" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <div className={styles.formActions}>

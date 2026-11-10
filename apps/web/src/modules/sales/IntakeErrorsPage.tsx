@@ -7,6 +7,7 @@ import { describeProblem, INTAKE_ERROR_STATUSES, listIntakeErrors, replayIntakeE
 import { formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Replaying needs this duty (SalesOrderMaintain); the service enforces it. */
 const DUTY_ORDER_WRITE = "sales.order.write";
@@ -105,7 +106,7 @@ export function IntakeErrorsPage() {
       </form>
       {replayProblem ? (
         <Alert tone="danger" title="The replay could not run" live="alert">
-          {replayProblem.message} ({replayProblem.code})
+          <ProblemMessage problem={replayProblem} />
         </Alert>
       ) : null}
       <Alert tone={batch && batch.failed > 0 ? "warning" : "success"} live="status">
@@ -115,7 +116,7 @@ export function IntakeErrorsPage() {
       </Alert>
       {state.error ? (
         <Alert tone="danger" title="Could not load the intake errors" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

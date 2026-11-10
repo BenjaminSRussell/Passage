@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -12,6 +13,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, uuidPattern, useResource, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const yesNo = (v: boolean) => (v ? "On" : "Off");
 
@@ -55,8 +57,8 @@ export function PolicyListPage() {
       />
       <Card title="Open a legal entity">
         <form className={styles.form} onSubmit={open} noValidate>
-          <FormField id="policy-entity" label="Legal entity id" error={error}>
-            {(control) => <Input {...control} value={entity} onChange={(e) => setEntity(e.target.value)} />}
+          <FormField id="policy-entity" label="Legal entity" error={error}>
+            {(control) => <EntityLookup entity="legalEntity" {...control} value={entity} onChange={(e) => setEntity(e.target.value)} />}
           </FormField>
           <div className={styles.actions}>
             <Button type="submit" variant="primary">
@@ -204,8 +206,8 @@ export function PolicyDetailPage() {
           >
             {failure
               ? failure.code === "PRC-POL-003"
-                ? `Someone else saved this policy since you opened it. Reload to see their settings, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else saved this policy since you opened it. Reload to see their settings, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">

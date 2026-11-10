@@ -87,7 +87,7 @@ describe("Price journals", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" });
     renderAt("/pricing/journals");
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.view");
   });
 });
 
@@ -109,7 +109,7 @@ describe("New price journal", () => {
       return undefined;
     };
     renderAt("/pricing/journals/new");
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Journal name"), { target: { value: "Autumn prices" } });
     fireEvent.change(screen.getByLabelText("Lines"), { target: { value: `UPDATE, ${R1}, 2, 5\n\ndelete, ${R2}, 2` } });
     fireEvent.click(screen.getByLabelText("Smart rounding"));
@@ -131,7 +131,7 @@ describe("New price journal", () => {
   it("puts a line error from the service on the lines field", async () => {
     server.handler = () => json(422, { code: "COM-0001", detail: "request is invalid", errors: { "lines[0].adjustPct": "must be a percentage above -100" } });
     renderAt("/pricing/journals/new");
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Journal name"), { target: { value: "x" } });
     fireEvent.change(screen.getByLabelText("Lines"), { target: { value: `UPDATE, ${R1}, 2, 5` } });
     fireEvent.click(screen.getByRole("button", { name: "Save journal" }));
@@ -225,7 +225,7 @@ describe("Price journal detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Post journal" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The action failed");
-    expect(alert).toHaveTextContent("another pricing manager posts it (PRC-0057)");
+    expect(alert).toHaveTextContent("another pricing manager posts it");
     expect(screen.getByRole("button", { name: "Post journal" })).toBeInTheDocument();
   });
 

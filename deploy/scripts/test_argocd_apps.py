@@ -466,6 +466,73 @@ class ArgoApplicationsTest(unittest.TestCase):
         self.assertEqual(granted, want)
         self.assertIn(dlq, topics)
 
+    def test_revrec_credit_note_consumer_acls(self):
+        # The revrec credit-note consumer (#29): its KafkaUser reads exactly billing's invoice topic, the channel billing's
+        # AsyncAPI declares for creditnote.booked, and the group the code uses, and writes the dead-letter topic it parks on.
+        api = (REPO / "services/revrec/internal/api/creditnotes_consumer.go").read_text()
+        cmd = (REPO / "services/revrec/cmd/revrec/consumer.go").read_text()
+        (topic,) = re.findall(r'BillingInvoiceTopic\s+=\s+"([^"]+)"', api)
+        (event_type,) = re.findall(r'CreditNoteBookedType\s+=\s+"([^"]+)"', api)
+        (group,) = re.findall(r'CreditNoteConsumerName\s+=\s+"([^"]+)"', api)
+        (dlq,) = re.findall(r'creditNoteDeadLetterTopic\s+=\s+"([^"]+)"', cmd)
+        spec = yaml.safe_load((REPO / "services/billing/events/asyncapi.yaml").read_text())
+        channels = {ch["address"] for ch in spec["channels"].values()
+                    for ref in ch["messages"].values()
+                    if spec["components"]["messages"][ref["$ref"].rsplit("/", 1)[1]]["name"] == event_type}
+        self.assertEqual(channels, {topic})
+        values = yaml.safe_load((REPO / "services/revrec/charts/revrec/values.yaml").read_text())
+        kafka = values["consumer"]["kafka"]
+        self.assertFalse(values["consumer"]["enabled"], "the revrec consumer is off by default, like the other consumers")
+        users, topics = self.synced_kafka_resources()
+        self.assertEqual((kafka["group"], kafka["dlqTopic"]), (group, dlq))
+        self.assertIn(kafka["username"], users, "deploy/kafka/revrec-consumer.yaml")
+        self.assertEqual(users[kafka["username"]], {("topic", topic): {"Read", "Describe"}, ("topic", dlq): {"Write", "Describe"},
+                                                    ("group", group): {"Read", "Describe"}})
+        self.assertIn(dlq, topics)
+
+    def test_receivables_billing_consumer_acls(self):
+        # The receivables billing consumer (#30): its KafkaUser reads exactly billing's invoice topic, the channel billing's
+        # AsyncAPI declares for invoice.posted and creditnote.posted, and the group the code uses, and writes the dead-letter
+        # topic it parks on.
+        api = (REPO / "services/receivables/internal/api/billing_consumer.go").read_text()
+        cmd = (REPO / "services/receivables/cmd/receivables/consumer.go").read_text()
+        (topic,) = re.findall(r'BillingInvoiceTopic\s+=\s+"([^"]+)"', api)
+        event_types = {re.findall(r'"(dev\.passage\.[^"]+)"', line)[0] for line in api.splitlines()
+                       if re.search(r'(InvoicePostedType|CreditNotePostedType)\s+=', line)}
+        (group,) = re.findall(r'BillingConsumerName\s+=\s+"([^"]+)"', api)
+        (dlq,) = re.findall(r'billingDeadLetterTopic\s+=\s+"([^"]+)"', cmd)
+        spec = yaml.safe_load((REPO / "services/billing/events/asyncapi.yaml").read_text())
+        for event_type in event_types:
+            channels = {ch["address"] for ch in spec["channels"].values()
+                        for ref in ch["messages"].values()
+                        if spec["components"]["messages"][ref["$ref"].rsplit("/", 1)[1]]["name"] == event_type}
+            self.assertEqual(channels, {topic}, event_type)
+        self.assertEqual(len(event_types), 2)
+        values = yaml.safe_load((REPO / "services/receivables/charts/receivables/values.yaml").read_text())
+        kafka = values["consumer"]["kafka"]
+        self.assertFalse(values["consumer"]["enabled"], "the receivables consumer is off by default, like the other consumers")
+        users, topics = self.synced_kafka_resources()
+        self.assertEqual((kafka["group"], kafka["dlqTopic"]), (group, dlq))
+        self.assertIn(kafka["username"], users, "deploy/kafka/receivables-consumer.yaml")
+        self.assertEqual(users[kafka["username"]], {("topic", topic): {"Read", "Describe"}, ("topic", dlq): {"Write", "Describe"},
+                                                    ("group", group): {"Read", "Describe"}})
+        self.assertIn(dlq, topics)
+
+    @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
+    def test_receivables_consumer_runs_non_root_with_a_locked_down_container(self):
+        out = subprocess.run(
+            ["helm", "template", "r", str(REPO / "services/receivables/charts/receivables"), "--set", "consumer.enabled=true",
+             "--set", "consumer.kafka.secret=k", "--set", "consumer.kafka.brokers=b:9092"],
+            capture_output=True, text=True, check=True).stdout
+        (consumer,) = [d for d in yaml.safe_load_all(out) if d and d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-consumer")]
+        pod = consumer["spec"]["template"]["spec"]
+        self.assertTrue(pod["securityContext"]["runAsNonRoot"])
+        self.assertEqual(pod["securityContext"]["seccompProfile"], {"type": "RuntimeDefault"})
+        container = pod["containers"][0]["securityContext"]
+        self.assertFalse(container["allowPrivilegeEscalation"])
+        self.assertTrue(container["readOnlyRootFilesystem"])
+        self.assertEqual(container["capabilities"], {"drop": ["ALL"]})
+
     def test_type_routed_outbox_connectors_match_their_asyncapi_channels(self):
         # outbox-sales and outbox-fulfillment route by the event type's entity, not aggregate_type (#480): every
         # message the service's AsyncAPI declares under its own topic prefix routes to that message's channel, the
@@ -503,6 +570,60 @@ class ArgoApplicationsTest(unittest.TestCase):
                                  f"{name}: debezium literal ACLs under {prefix} differ from the AsyncAPI channels")
                 routed |= channels
         self.assertLessEqual({"passage.sales.orderprogress", "passage.fulfillment.packingslip"}, routed)
+
+    def test_outbox_budgeting_publishes_only_topics_the_debezium_user_may_write(self):
+        docs = load_docs(DEPLOY / "kafka/connect.yaml")
+        (debezium,) = [d for d in docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "debezium"]
+        writable = {a["resource"]["name"] for a in debezium["spec"]["authorization"]["acls"]
+                    if a["resource"]["type"] == "topic" and a["resource"].get("patternType") == "literal"
+                    and "Write" in a["operations"]}
+        (cfg,) = [d["spec"]["config"] for d in docs if d["kind"] == "KafkaConnector" and d["metadata"]["name"] == "outbox-budgeting"]
+        chain = cfg["transforms"].split(",")
+        self.assertLess(chain.index("outbox"), chain.index("onlyPlan"), "the filter must see the routed topic")
+        self.assertLess(chain.index("onlyPlan"), chain.index("enrich"))
+        self.assertEqual("org.apache.kafka.connect.transforms.Filter", cfg["transforms.onlyPlan.type"])
+        self.assertIs(True, cfg["transforms.onlyPlan.negate"])
+        predicate = cfg["transforms.onlyPlan.predicate"]
+        self.assertIn(predicate, cfg["predicates"].split(","))
+        self.assertEqual("org.apache.kafka.connect.transforms.predicates.TopicNameMatches", cfg[f"predicates.{predicate}.type"])
+        pattern = re.compile(cfg[f"predicates.{predicate}.pattern"])
+        spec = yaml.safe_load((REPO / "services/budgeting/events/asyncapi.yaml").read_text())
+        channels = {c["address"] for c in spec["channels"].values()}
+        self.assertEqual({"passage.budget.plan"}, {t for t in channels | writable if pattern.fullmatch(t)})
+        self.assertLessEqual({t for t in channels if pattern.fullmatch(t)}, writable)
+
+    def test_outbox_billing_publishes_only_the_invoice_channel_the_debezium_user_may_write(self):
+        # Billing enqueues one aggregate type, so no Filter SMT is needed; the day a second one appears it would route to a
+        # topic without ACL or channel, which this test refuses until the connector filters it like outbox-budgeting.
+        docs = load_docs(DEPLOY / "kafka/connect.yaml")
+        (debezium,) = [d for d in docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "debezium"]
+        writable = {a["resource"]["name"] for a in debezium["spec"]["authorization"]["acls"]
+                    if a["resource"]["type"] == "topic" and a["resource"].get("patternType") == "literal"
+                    and "Write" in a["operations"]}
+        (cfg,) = [d["spec"]["config"] for d in docs if d["kind"] == "KafkaConnector" and d["metadata"]["name"] == "outbox-billing"]
+        self.assertEqual("aggregate_type", cfg["transforms.outbox.route.by.field"])
+        self.assertEqual("passage.billing", cfg["topic.prefix"])
+        self.assertEqual("passage.billing.${routedByValue}", cfg["transforms.outbox.route.topic.replacement"])
+        chain = cfg["transforms"].split(",")
+        self.assertEqual("outbox", chain[0])
+        self.assertEqual("enrich", chain[-1])
+        aggregates = set()
+        for f in (REPO / "services/billing/internal/store").glob("*.go"):
+            if not f.name.endswith("_test.go"):
+                aggregates |= set(re.findall(r'outbox\.Enqueue\(ctx, tx, "([^"]+)"', f.read_text()))
+        self.assertEqual({"invoice"}, aggregates, "a new billing aggregate type needs a channel, an ACL and a Filter in outbox-billing")
+        spec = yaml.safe_load((REPO / "services/billing/events/asyncapi.yaml").read_text())
+        channels = {c["address"] for c in spec["channels"].values()}
+        routed = {cfg["transforms.outbox.route.topic.replacement"].replace("${routedByValue}", a) for a in aggregates}
+        self.assertEqual(channels, routed)
+        self.assertLessEqual(routed, writable)
+        self.assertEqual({"passage.billing.invoice"}, {t for t in writable if t.startswith("passage.billing.")})
+        secrets = {d["metadata"]["name"] for f in manifests(DEPLOY / "envs/dev/kafka-secrets") for d in load_docs(f)
+                   if d["kind"] == "ExternalSecret"}
+        self.assertIn("debezium-cdc-billing", secrets)
+        (role,) = [d for f in manifests(DEPLOY / "envs/dev/kafka-secrets") for d in load_docs(f)
+                   if d["kind"] == "Role" and d["metadata"]["name"] == "passage-connect-read-debezium-cdc"]
+        self.assertIn("debezium-cdc-billing", role["rules"][0]["resourceNames"])
 
     @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")
     def test_temporal_values_match_its_database(self):

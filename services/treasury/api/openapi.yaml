@@ -907,6 +907,485 @@ paths:
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations:
+    post:
+      operationId: createBankReconciliation
+      summary: Open the reconciliation of one statement (one bank account and period) (FR-36.5)
+      description: |
+        One per statement (409 TRS-0504). Opening and closing balances come from the statement; the book balance and the
+        book items not yet on the statement are supplied by the caller and can be corrected until the period closes.
+        The service returns the difference `closing - (book + outstanding + excluded lines)`; a reconciliation closes only at zero.
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateBankReconciliationRequest"}
+      responses:
+        "201":
+          description: Reconciliation opened (or the stored one for a repeated key)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankReconciliation"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listBankReconciliations
+      summary: Reconciliations by bank account, period and state, newest period first
+      x-passage-duty: treasury.reconciliation.view
+      parameters:
+        - {name: legalEntityId, in: query, schema: {type: string, format: uuid}}
+        - {name: bankAccountId, in: query, schema: {type: string, format: uuid}}
+        - {name: state, in: query, schema: {type: string, enum: [open, closed, reopened]}}
+        - {name: periodFrom, in: query, description: Keeps reconciliations whose period ends on or after this date, schema: {type: string, format: date}}
+        - {name: periodTo, in: query, description: Keeps reconciliations whose period starts on or before this date, schema: {type: string, format: date}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: cursor, in: query, description: The nextCursor of the previous page, schema: {type: string}}
+      responses:
+        "200":
+          description: A page; nextCursor is present when more follow
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankReconciliationPage"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}:
+    get:
+      operationId: getBankReconciliation
+      summary: Read a reconciliation with its summary of matched, excluded and unmatched lines
+      x-passage-duty: treasury.reconciliation.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Reconciliation
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankReconciliation"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}:set-balances:
+    post:
+      operationId: setBankReconciliationBalances
+      summary: Replace the book balance and the book items not yet on the statement
+      description: |
+        Refused with 409 TRS-0506 once the period is closed. The book balance is stated by the caller, not read from the
+        ledger: every change is written to the reconciliation's audit trail (`balances_set`, with old and new values and the
+        actor) and the person is stored as `bookBalanceStatedBy`. That person cannot close the reconciliation (403 TRS-0520).
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookBalance, outstandingAmount]
+              additionalProperties: false
+              properties:
+                bookBalance: {type: string, description: "Signed decimal, at most the currency's minor units"}
+                outstandingAmount: {type: string, description: "Signed decimal, at most the currency's minor units"}
+      responses:
+        "200":
+          description: Balances stored; the version (ETag) is incremented
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankReconciliation"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}:close:
+    post:
+      operationId: closeBankReconciliation
+      summary: Close the period; its lines and matches are locked against change
+      description: |
+        Allowed only when every line is matched or excluded with a reason (422 TRS-0507) and the difference is zero
+        (422 TRS-0410), and no bank transaction from a line is still being posted or held for a person (409 TRS-0517, `errors.pendingLines`
+        lists the line numbers). The person who last stated the book balance cannot close it (403 TRS-0520). Records who closed it and when.
+        Closing a closed reconciliation answers 200 with it unchanged.
+      x-passage-duty: treasury.reconciliation.close
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Reconciliation closed
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankReconciliation"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}:reopen:
+    post:
+      operationId: reopenBankReconciliation
+      summary: Reopen a closed period with a reason; audited
+      description: |
+        Needs its own duty and a reason. The person who closed the period cannot reopen it (403 TRS-0509). Refused with
+        409 TRS-0508 while a later period of the same bank account is closed: reopen the later period first, latest first.
+        Only a closed reconciliation can be reopened (422 TRS-0510). The reopening and its reason are stored with the actor.
+      x-passage-duty: treasury.reconciliation.reopen
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReasonRequest"}
+      responses:
+        "200":
+          description: Reconciliation reopened; lines and matches accept changes again
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BankReconciliation"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:exclude:
+    post:
+      operationId: excludeStatementLine
+      summary: Take a statement line out of the reconciliation with a reason
+      description: A matched line must be unmatched first (409 TRS-0411). A repeated call answers 200 with the excluded line.
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/LineNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReasonRequest"}
+      responses:
+        "200":
+          description: Line excluded
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StatementLine"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:include:
+    post:
+      operationId: includeStatementLine
+      summary: Put an excluded statement line back to unmatched
+      x-passage-duty: treasury.reconciliation.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/LineNo"
+      responses:
+        "200":
+          description: Line unmatched again
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StatementLine"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:abandon:
+    post:
+      operationId: abandonLineTransaction
+      summary: Give up a bank transaction from a line that the ledger will never accept
+      description: |
+        For a transaction that is pending or held for a person (409 TRS-0522). It is stored as abandoned with the reason and the
+        actor and written to the audit trail. The line stays unmatched and no longer blocks the close; check the general ledger
+        by hand first, because an unanswered attempt may already have booked the entry. Then exclude the line or match it.
+        409 TRS-0523 when the line has no such transaction.
+      x-passage-duty: treasury.reconciliation.abandon
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/LineNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReasonRequest"}
+      responses:
+        "200":
+          description: Transaction abandoned
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LineTransaction"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/bank-reconciliations/{id}/lines/{lineNo}:create-transaction:
+    post:
+      operationId: createTransactionFromStatementLine
+      summary: Book a bank fee, interest or an unidentified receipt from a statement line and match the line to it
+      description: |
+        Posts the journal to the general ledger with the posting profile of the legal entity (`TREASURY_GL_PROFILES`), then
+        stores the entry, matches the line and moves the reconciliation's book balance by the line amount, in one transaction.
+        Once per statement line: the ledger key is derived from the statement and line, so repeating the request, also
+        after a lost answer, never posts twice. A line that already has its transaction answers 200 with it.
+        A bank fee needs money out, an unknown receipt money in, interest either. The line currency must equal the account currency (422 TRS-0512).
+        A refusal by the ledger or the profile (422 TRS-0518) stores nothing as matched, names the cause in `errors.ledgerCode` and releases
+        the line for another try, also with another kind. After an earlier attempt that went unanswered the entry may already exist in the
+        ledger, so a later refusal or an idempotency conflict does not release the line: it is held for a person (409 TRS-0522) until the
+        transaction is abandoned. A 401, 403 or 429 from the ledger is not a business refusal and gives 503 TRS-0519.
+        A ledger that does not answer gives 503 TRS-0519 and leaves the line pending; repeat the request. The same 503 answers when the
+        ledger accepted the entry but the match could not be saved; repeating is safe.
+        An unmapped bank account or a legal entity without a profile gives 422 TRS-0515 or TRS-0518.
+        503 TRS-0514 when the service has no ledger client.
+      x-passage-duty: treasury.reconciliation.post
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/LineNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              additionalProperties: false
+              properties:
+                kind: {type: string, enum: [bank_fee, interest, unknown_receipt]}
+      responses:
+        "200":
+          description: The line already had this transaction
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LineTransaction"}
+        "201":
+          description: Transaction posted and the line matched
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LineTransaction"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers:
+    post:
+      operationId: createEbicsSubscriber
+      summary: Register an EBICS user at a bank for one bank account
+      description: >-
+        A retry with the same Idempotency-Key returns the first subscriber (422 when the key was used with another body). The Vault key names are derived by the service from the tenant, legal entity and subscriber id and cannot be chosen by the caller;
+        no key material passes through the API. The subscriber starts in NEW.
+        TRS-0496 when host, partner and user exist already or the bank account has a subscriber, TRS-0497 for an unacceptable id or URL, 503 TRS-0502 when EBICS is not enabled.
+      x-passage-duty: treasury.ebics.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateEbicsSubscriberRequest"}
+      responses:
+        "201":
+          description: Subscriber created
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:
+    get:
+      operationId: getEbicsSubscriber
+      summary: Read a subscriber with its state and the hashes of the bank keys downloaded so far
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Subscriber
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:send-ini:
+    post:
+      operationId: sendEbicsIni
+      summary: Send the A006 signature key to the bank (INI) and return the letter to print
+      description: Allowed in NEW only (409 TRS-0498 otherwise). NEW to INI_SENT. 502 TRS-0501 when the bank refuses.
+      x-passage-duty: treasury.ebics.keys
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Order accepted by the bank
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsLetterResult"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "502": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:send-hia:
+    post:
+      operationId: sendEbicsHia
+      summary: Send the X002 and E002 keys to the bank (HIA) and return the letter to print
+      description: Allowed in INI_SENT only (409 TRS-0498 otherwise). INI_SENT to HIA_SENT.
+      x-passage-duty: treasury.ebics.keys
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Order accepted by the bank
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsLetterResult"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "502": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:fetch-bank-keys:
+    post:
+      operationId: fetchEbicsBankKeys
+      summary: Download the bank's keys (HPB) and store them unconfirmed
+      description: >-
+        Allowed in HIA_SENT or BANK_KEYS_PENDING. The keys are not used for anything until they are confirmed. The response carries
+        the hashes of the downloaded keys, to compare with the hashes on the bank's own letter. The caller is recorded as the person
+        who downloaded them and cannot confirm them (403 TRS-0503 on confirmation).
+      x-passage-duty: treasury.ebics.keys
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Subscriber
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "502": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:confirm-bank-keys:
+    post:
+      operationId: confirmEbicsBankKeys
+      summary: Activate the subscriber after the bank's key hashes were compared
+      description: >-
+        The hashes the bank printed must equal the hashes of the downloaded keys (422 TRS-0499 otherwise, and nothing is activated).
+        The confirmer recorded is the authenticated user, never a value from the body. BANK_KEYS_PENDING to READY. Needs a duty other
+        than the one that runs the key ceremony, and a different person than the one who downloaded the keys (403 TRS-0503).
+      x-passage-duty: treasury.ebics.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ConfirmEbicsBankKeysRequest"}
+      responses:
+        "200":
+          description: Subscriber
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}:unpark:
+    post:
+      operationId: unparkEbicsSubscriber
+      summary: Let a parked subscriber transact again after a person reviewed the bank's refusal
+      description: >-
+        409 TRS-0498 when the subscriber is not parked. The authenticated user and the time are written to an append-only audit row
+        in the same transaction. Needs If-Match with the subscriber's ETag (428 without it, 412 when stale).
+      x-passage-duty: treasury.ebics.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Subscriber
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsSubscriber"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/ebics-subscribers/{id}/letters/{order}:
+    get:
+      operationId: getEbicsLetter
+      summary: Rebuild the INI or HIA letter from the subscriber's public keys
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: order
+          in: path
+          required: true
+          schema: {type: string, enum: [INI, HIA]}
+      responses:
+        "200":
+          description: Letter
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EbicsLetter"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     Id:
@@ -914,6 +1393,12 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    LineNo:
+      name: lineNo
+      in: path
+      required: true
+      description: Line number within the statement, from 1
+      schema: {type: integer, minimum: 1}
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1375,3 +1860,140 @@ components:
           type: object
           description: Field name to message; parse errors carry "line"
           additionalProperties: {type: string}
+    CreateEbicsSubscriberRequest:
+      type: object
+      required: [legalEntityId, bankAccountId, hostId, partnerId, userId, url]
+      additionalProperties: false
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        hostId: {type: string, pattern: "^[A-Za-z0-9._-]{1,35}$"}
+        partnerId: {type: string, pattern: "^[A-Za-z0-9._-]{1,35}$"}
+        userId: {type: string, pattern: "^[A-Za-z0-9._-]{1,35}$"}
+        url: {type: string, description: HTTPS URL of the bank's EBICS server}
+    EbicsSubscriber:
+      type: object
+      required: [id, legalEntityId, bankAccountId, hostId, partnerId, userId, url, state, keysConfirmed, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        hostId: {type: string}
+        partnerId: {type: string}
+        userId: {type: string}
+        url: {type: string}
+        state: {type: string, enum: [NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY]}
+        keysConfirmed: {type: boolean}
+        confirmedBy: {type: string}
+        confirmedAt: {type: string, format: date-time}
+        parkedCode: {type: string, description: Return code of the bank refusal that parked the subscriber}
+        parkedText: {type: string}
+        bankKeyHashes:
+          type: object
+          properties:
+            x002: {type: string, description: "SHA-256 of the bank's X002 key, uppercase hex pairs"}
+            e002: {type: string}
+        version: {type: integer, minimum: 1}
+    EbicsLetter:
+      type: object
+      required: [order, text, hashes]
+      properties:
+        order: {type: string, enum: [INI, HIA]}
+        text: {type: string, description: Letter to print, sign and send to the bank}
+        hashes:
+          type: object
+          additionalProperties: {type: string}
+    EbicsLetterResult:
+      type: object
+      required: [letter]
+      properties:
+        subscriber: {$ref: "#/components/schemas/EbicsSubscriber"}
+        letter: {$ref: "#/components/schemas/EbicsLetter"}
+    ConfirmEbicsBankKeysRequest:
+      type: object
+      required: [x002Hash, e002Hash]
+      additionalProperties: false
+      properties:
+        x002Hash: {type: string, description: Hash printed on the bank's own letter for its authentication key}
+        e002Hash: {type: string, description: Hash printed on the bank's own letter for its encryption key}
+    ReasonRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 200}
+    CreateBankReconciliationRequest:
+      type: object
+      required: [statementId, bookBalance]
+      additionalProperties: false
+      properties:
+        statementId: {type: string, format: uuid}
+        bookBalance: {type: string, description: "Signed decimal, at most the currency's minor units"}
+        outstandingAmount: {type: string, description: "Book items not yet on the statement, signed; default 0"}
+    BankReconciliationLines:
+      type: object
+      required: [lines, matchedCount, matchedTotal, excludedCount, excludedTotal, unmatchedCount, unmatchedTotal]
+      properties:
+        lines: {type: integer}
+        matchedCount: {type: integer, description: Lines matched, including those created from a transaction}
+        matchedTotal: {type: string}
+        excludedCount: {type: integer}
+        excludedTotal: {type: string}
+        unmatchedCount: {type: integer}
+        unmatchedTotal: {type: string}
+    BankReconciliation:
+      type: object
+      required: [id, legalEntityId, bankAccountId, statementId, currency, periodFrom, periodTo, state, openingBalance, closingBalance, bookBalance, outstandingAmount, difference, summary, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        statementId: {type: string, format: uuid}
+        currency: {type: string}
+        periodFrom: {type: string, format: date}
+        periodTo: {type: string, format: date}
+        state: {type: string, enum: [open, closed, reopened]}
+        openingBalance: {type: string}
+        closingBalance: {type: string}
+        bookBalance: {type: string}
+        outstandingAmount: {type: string, description: "Signed. Positive: book payments not yet on the statement (outstanding checks). Negative: book receipts not yet on it (deposits in transit)."}
+        bookBalanceSource: {type: string, enum: [stated], description: The book balance is stated by a person, not read from the ledger}
+        bookBalanceStatedBy: {type: string, description: The person who last stated the book balance; cannot close the reconciliation}
+        bookBalanceStatedAt: {type: string, format: date-time}
+        difference: {type: string, description: "closing - (book + outstanding + excluded lines); zero to close"}
+        summary: {$ref: "#/components/schemas/BankReconciliationLines"}
+        closedBy: {type: string}
+        closedAt: {type: string, format: date-time}
+        reopenedBy: {type: string}
+        reopenedAt: {type: string, format: date-time}
+        reopenReason: {type: string}
+        version: {type: integer}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    BankReconciliationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/BankReconciliation"}
+        nextCursor: {type: string}
+    LineTransaction:
+      type: object
+      required: [id, reconciliationId, bankAccountId, statementId, lineNo, kind, amount, currency, postingDate, status, version]
+      properties:
+        id: {type: string, format: uuid}
+        reconciliationId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        statementId: {type: string, format: uuid}
+        lineNo: {type: integer}
+        kind: {type: string, enum: [bank_fee, interest, unknown_receipt]}
+        amount: {type: string, description: Signed as on the statement line, in the currency's minor units}
+        currency: {type: string}
+        postingDate: {type: string, format: date}
+        status: {type: string, enum: [pending, posted, refused, conflict, abandoned]}
+        ledgerEntryId: {type: string}
+        matchId: {type: string, format: uuid}
+        version: {type: integer}

@@ -22,6 +22,7 @@ import {
 import styles from "./pages.module.css";
 import { ChooseWarehouse, DECIMAL, Detail, INTEGER, LINE_STATUS_TONES, sentence, shortId, useWarehouse, UUID, WarehouseField, when, WORK_STATUS_TONES } from "./shared";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PAGE = 100;
 
@@ -99,7 +100,7 @@ export function WorkListPage() {
         </FormField>
       </div>
       <Alert tone="danger" title={assignFailure ? "Could not assign work" : undefined} live="alert">
-        {assignFailure ? `${assignFailure.message} (${assignFailure.code})` : null}
+        {assignFailure ? <ProblemMessage problem={assignFailure} /> : null}
       </Alert>
       <Alert tone="info" live="status">
         {nothing ? "No work is waiting in this warehouse." : null}
@@ -108,7 +109,7 @@ export function WorkListPage() {
         <ChooseWarehouse />
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the work" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -133,6 +134,7 @@ interface LineDraft {
   weight: string;
   volume: string;
   lps: string;
+  orderLineId: string;
 }
 
 export interface WorkDraft {
@@ -142,9 +144,9 @@ export interface WorkDraft {
   lines: LineDraft[];
 }
 
-type WorkErrors = Partial<Record<"warehouseId" | "priority" | `lines.${number}.${"itemId" | "qty" | "weight" | "volume" | "lps"}`, string>>;
+type WorkErrors = Partial<Record<"warehouseId" | "priority" | `lines.${number}.${"itemId" | "qty" | "weight" | "volume" | "lps" | "orderLineId"}`, string>>;
 
-const blankLine = (direction: Direction): LineDraft => ({ itemId: "", direction, qty: "", weight: "", volume: "", lps: "" });
+const blankLine = (direction: Direction): LineDraft => ({ itemId: "", direction, qty: "", weight: "", volume: "", lps: "", orderLineId: "" });
 
 export function validateWorkDraft(d: WorkDraft): WorkErrors {
   const errors: WorkErrors = {};
@@ -156,6 +158,7 @@ export function validateWorkDraft(d: WorkDraft): WorkErrors {
     if (l.weight !== "" && !DECIMAL.test(l.weight)) errors[`lines.${i}.weight`] = "Enter a weight of 0 or more.";
     if (l.volume !== "" && !DECIMAL.test(l.volume)) errors[`lines.${i}.volume`] = "Enter a volume of 0 or more.";
     if (l.lps !== "" && !INTEGER.test(l.lps)) errors[`lines.${i}.lps`] = "Enter a whole number.";
+    if (l.orderLineId !== "" && (l.direction !== "PICK" || !UUID.test(l.orderLineId.trim()))) errors[`lines.${i}.orderLineId`] = "Enter the sales order line id, a UUID, on a pick line.";
   });
   return errors;
 }
@@ -173,6 +176,7 @@ export function toWorkInput(d: WorkDraft) {
         ...(l.weight !== "" ? { weight: l.weight } : {}),
         ...(l.volume !== "" ? { volume: l.volume } : {}),
         ...(l.lps !== "" ? { lps: Number(l.lps) } : {}),
+        ...(l.orderLineId !== "" ? { orderLineId: l.orderLineId.trim().toLowerCase() } : {}),
       }),
     ),
   };
@@ -236,12 +240,12 @@ export function NewWorkPage() {
             {(c) => <Input {...c} inputMode="numeric" value={draft.priority} onChange={(e) => set({ priority: e.target.value })} invalid={Boolean(errors.priority)} />}
           </FormField>
           {draft.lines.map((line, i) => {
-            const field = (name: "itemId" | "qty" | "weight" | "volume" | "lps", label: string, optional = false) => (
+            const field = (name: "itemId" | "qty" | "weight" | "volume" | "lps" | "orderLineId", label: string, optional = false) => (
               <FormField id={`new-work-${i}-${name}`} label={label} optional={optional} error={errors[`lines.${i}.${name}`]}>
                 {(c) => (
                   <Input
                     {...c}
-                    inputMode={name === "itemId" ? undefined : "decimal"}
+                    inputMode={name === "itemId" || name === "orderLineId" ? undefined : "decimal"}
                     value={line[name]}
                     onChange={(e) => setLine(i, { [name]: e.target.value })}
                     invalid={Boolean(errors[`lines.${i}.${name}`])}
@@ -264,6 +268,7 @@ export function NewWorkPage() {
                 {field("weight", `Line ${i + 1} weight (kg)`, true)}
                 {field("volume", `Line ${i + 1} volume (m³)`, true)}
                 {field("lps", `Line ${i + 1} license plates`, true)}
+                {line.direction === "PICK" ? field("orderLineId", `Line ${i + 1} sales order line`, true) : null}
                 {draft.lines.length > 1 ? (
                   <Button variant="ghost" size="sm" onClick={() => set({ lines: draft.lines.filter((_, j) => j !== i) })}>
                     Remove line {i + 1}
@@ -357,7 +362,7 @@ export function WorkDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Work" />
         <Alert tone="danger" title="Could not load the work" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -472,7 +477,7 @@ export function WorkDetailPage() {
         </dl>
       </Card>
       <Alert tone="danger" title={failure?.title} live="alert">
-        {failure ? `${failure.problem.message} (${failure.problem.code})` : null}
+        {failure ? <ProblemMessage problem={failure.problem} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice ? (

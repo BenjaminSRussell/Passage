@@ -101,18 +101,18 @@ describe("charge code create", () => {
   it("asks for a ledger credit with a vendor debit and sends a vendor only with a vendor side", async () => {
     const mock = stubFetch(() => json(code, 201));
     const { router } = renderAt("/purchasing/charge-codes/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "REBILL" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Rebill" } });
     fireEvent.change(screen.getByLabelText("Debit side"), { target: { value: "VENDOR" } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.click(screen.getByRole("button", { name: "Save charge code" }));
     expect(await screen.findByText("A vendor debit needs a ledger credit.")).toBeInTheDocument();
     expect(mock).not.toHaveBeenCalled();
     // Back to an item debit and a ledger credit: no vendor side, so the vendor field goes and nothing is sent for it.
     fireEvent.change(screen.getByLabelText("Debit side"), { target: { value: "ITEM" } });
     fireEvent.change(screen.getByLabelText("Credit side"), { target: { value: "LEDGER" } });
-    expect(screen.queryByLabelText("Vendor id")).toBeNull();
+    expect(screen.queryByLabelText("Vendor")).toBeNull();
     fireEvent.change(screen.getByLabelText("Credit account id"), { target: { value: AUTO } });
     fireEvent.click(screen.getByRole("button", { name: "Save charge code" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/charge-codes/${ID}`));
@@ -124,7 +124,7 @@ describe("charge code create", () => {
   it("posts the code with an Idempotency-Key and opens it", async () => {
     const mock = stubFetch(() => json(code, 201, { ETag: '"1"' }));
     const { router } = renderAt("/purchasing/charge-codes/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "freight" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: " Freight " } });
     fireEvent.change(screen.getByLabelText("Default value"), { target: { value: "40" } });
@@ -149,11 +149,11 @@ describe("charge code create", () => {
   it("shows a duplicate code as a problem with its code", async () => {
     stubFetch(() => problem(409, "PRC-CHG-001", "the legal entity already has a charge code FREIGHT"));
     renderAt("/purchasing/charge-codes/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "FREIGHT" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Freight" } });
     fireEvent.click(screen.getByRole("button", { name: "Save charge code" }));
-    expect(await screen.findByText(/already has a charge code.*PRC-CHG-001/)).toBeInTheDocument();
+    expect(await screen.findByText(/already has a charge code/)).toBeInTheDocument();
   });
 });
 
@@ -190,7 +190,7 @@ describe("charge code detail", () => {
     await screen.findByRole("heading", { name: "Charge code FREIGHT" });
     expect(await screen.findByText("No auto charges")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByText(/Someone else changed this charge code.*PRC-CHG-002/)).toBeInTheDocument();
+    expect(await screen.findByText(/Someone else changed this charge code/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reload charge code" }));
     expect(await screen.findByDisplayValue("Someone's name")).toBeInTheDocument();
     expect(screen.queryByText(/PRC-CHG-002/)).toBeNull();
@@ -238,9 +238,9 @@ describe("auto charges", () => {
       return json({ items: [code] });
     });
     const { router } = renderAt(`/purchasing/auto-charges/new?chargeCodeId=${ID}`);
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     await screen.findByRole("option", { name: "FREIGHT - Freight" });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.click(screen.getByRole("button", { name: "Save auto charge" }));
     expect(await screen.findByText("Enter the currency; this charge is an amount of money.")).toBeInTheDocument();
     expect(mock.mock.calls.some(([, i]) => (i as RequestInit).method === "POST")).toBe(false);
@@ -269,9 +269,9 @@ describe("auto charges", () => {
       return json({ items: [code] });
     });
     const { router } = renderAt(`/purchasing/auto-charges/new?chargeCodeId=${ID}`);
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     await screen.findByRole("option", { name: "FREIGHT - Freight" });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "USD" } });
     expect(screen.queryByLabelText("Product id")).toBeNull();
     fireEvent.change(screen.getByLabelText("Charged on"), { target: { value: "PRODUCT" } });
@@ -301,8 +301,8 @@ describe("auto charges", () => {
     stubFetch(() => json({ items: [{ ...code, calc: "PERCENT", defaultValue: "2" }] }));
     renderAt(`/purchasing/auto-charges/new?chargeCodeId=${ID}`);
     fireEvent.change(await screen.findByLabelText("Applies to"), { target: { value: "ALL" } });
-    expect(screen.queryByLabelText("Vendor id")).toBeNull();
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    expect(screen.queryByLabelText("Vendor")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     await screen.findByRole("option", { name: "FREIGHT - Freight" });
     fireEvent.click(screen.getByRole("button", { name: "Save auto charge" }));
     expect(screen.queryByText("Enter the vendor or vendor group id (a UUID).")).toBeNull();
@@ -330,7 +330,7 @@ describe("auto charges", () => {
     expect((call[1] as RequestInit).headers).toMatchObject({ "If-Match": '"1"' });
     expect(JSON.parse((call[1] as RequestInit).body as string)).toMatchObject({ status: "INACTIVE", validTo: "2026-12-31", accountCode: "VENDOR" });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByText(/Someone else changed this auto charge.*PRC-CHG-003/)).toBeInTheDocument();
+    expect(await screen.findByText(/Someone else changed this auto charge/)).toBeInTheDocument();
   });
 });
 
@@ -366,8 +366,8 @@ describe("charges on a purchase order", () => {
       return json({ items: [] });
     });
     renderAt("/purchasing/purchase-orders/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Steel" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "10" } });
@@ -417,8 +417,8 @@ describe("charges on a purchase order", () => {
       return json({ items: [] });
     });
     renderAt("/purchasing/purchase-orders/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Steel" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "10" } });

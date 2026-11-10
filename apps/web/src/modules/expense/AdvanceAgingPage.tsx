@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeade
 import { checkAdvanceAging, describeProblem, type AgingInput, type AgingResult, type OverdueAdvance, type Problem } from "./api/client";
 import { DAY, DECIMAL, splitProblem, today } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -169,7 +170,7 @@ export function AdvanceAgingPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not check the advances" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

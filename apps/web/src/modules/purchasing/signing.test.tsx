@@ -103,7 +103,7 @@ describe("signing limit detail", () => {
     renderAt(`/purchasing/signing-limits/${ID}`);
     await screen.findByText("1,000.00 USD");
     fireEvent.click(screen.getByRole("button", { name: "Recertify for 12 months" }));
-    expect(await screen.findByText(/version 3, not 2.*PRC-SL-005/)).toBeInTheDocument();
+    expect(await screen.findByText(/version 3, not 2/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reload limit" }));
     await waitFor(() => expect(screen.queryByText(/PRC-SL-005/)).toBeNull());
     expect(reads).toBe(2);
@@ -147,8 +147,8 @@ describe("signing limit requests", () => {
   it("posts the request with an Idempotency-Key and opens it", async () => {
     const mock = stubFetch(() => json(request, 201, { ETag: '"1"' }));
     const { router } = renderAt("/purchasing/signing-limit-requests/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.change(screen.getByLabelText("Document"), { target: { value: "REQUISITION" } });
     fireEvent.change(screen.getByLabelText("Spending limit"), { target: { value: "2500" } });
     fireEvent.change(screen.getByLabelText("Approval limit"), { target: { value: "7000.50" } });
@@ -191,7 +191,7 @@ describe("signing limit requests", () => {
     renderAt(`/purchasing/signing-limit-requests/${ID}`);
     await screen.findByText("7,000.00 USD");
     fireEvent.click(screen.getByRole("button", { name: "Reject request" }));
-    expect(await screen.findByText(/cannot decide a request they made.*PRC-SL-003/)).toBeInTheDocument();
+    expect(await screen.findByText(/cannot decide a request they made/)).toBeInTheDocument();
   });
 
   it("offers no decision on a decided request", async () => {

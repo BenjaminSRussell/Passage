@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import {
   listBatches as defaultListBatches,
@@ -13,6 +14,7 @@ import { DispositionBadge } from "./BatchRecordPages";
 import { dash, QUANTITY, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const EXCLUSION_LABELS: Record<string, string> = {
   "PMF-0003": "Expired",
@@ -119,8 +121,8 @@ export function StoredPickingPage({ propose = defaultPropose, list = defaultList
       <form className={styles.stack} onSubmit={submit} noValidate>
         <Card title="Line">
           <div className={styles.form}>
-            <FormField id="sp-item" label="Item id" hint="The batches of this item are listed below." error={errors.itemId}>
-              {(c) => <Input {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={Boolean(errors.itemId)} />}
+            <FormField id="sp-item" label="Item" hint="The batches of this item are listed below." error={errors.itemId}>
+              {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={Boolean(errors.itemId)} />}
             </FormField>
             <FormField id="sp-posting" label="Posting date" error={errors.postingDate}>
               {(c) => <Input {...c} type="date" value={postingDate} onChange={(e) => setPostingDate(e.target.value)} invalid={Boolean(errors.postingDate)} />}
@@ -143,7 +145,7 @@ export function StoredPickingPage({ propose = defaultPropose, list = defaultList
           <Card title="Batches of the item">
             {batches.error ? (
               <Alert tone="danger" title="Could not load batches" live="alert" action={<Button size="sm" onClick={batches.reload}>Try again</Button>}>
-                {batches.error.message} ({batches.error.code})
+                <ProblemMessage problem={batches.error} />
               </Alert>
             ) : (
               <DataTable

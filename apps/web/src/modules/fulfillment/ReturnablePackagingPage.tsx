@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, listContainerTypes, listReturnableBalances, returnPackaging, type ContainerType, type Problem, type ReturnableBalance } from "./api/client";
@@ -6,6 +7,7 @@ import { formatDateTime, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ReturnableBalance>[] = [
   { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
@@ -89,13 +91,13 @@ export function ReturnablePackagingPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="rtp-filter" label="Customer id" hint="Show one customer's balances." optional>
-          {(control) => <Input {...control} value={customer} onChange={(event) => setCustomer(event.target.value)} />}
+        <FormField id="rtp-filter" label="Customer" hint="Show one customer's balances." optional>
+          {(control) => <EntityLookup entity="customer" {...control} value={customer} onChange={(event) => setCustomer(event.target.value)} />}
         </FormField>
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load returnable balances" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -118,8 +120,8 @@ export function ReturnablePackagingPage() {
       <Card title="Receive returned packaging">
         <form className={styles.form} onSubmit={submit} noValidate>
           <p className={styles.note}>A return above the customer&apos;s balance is refused (FUL-0015). Open a row above to fill in its customer and type.</p>
-          <FormField id="rtp-customer" label="Customer id" error={errors.customerId}>
-            {(control) => <Input {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => set({ customerId: event.target.value })} />}
+          <FormField id="rtp-customer" label="Customer" error={errors.customerId}>
+            {(control) => <EntityLookup entity="customer" {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => set({ customerId: event.target.value })} />}
           </FormField>
           <FormField id="rtp-type" label="Container type" error={errors.containerType}>
             {(control) => (

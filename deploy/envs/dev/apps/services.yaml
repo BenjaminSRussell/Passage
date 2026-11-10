@@ -51,6 +51,7 @@ spec:
           - { name: mcp-gateway, path: services/mcp-ts/charts/mcp-gateway, namespace: hello-ledger }
           - { name: metadata, path: services/metadata/charts/metadata, namespace: metadata }
           - { name: migration, path: services/migration/charts/migration, namespace: hello-ledger }
+          - { name: mobile, path: services/mobile/charts/mobile, namespace: hello-ledger }
           - { name: numbering, path: services/numbering/charts/numbering, namespace: hello-ledger }
           - { name: party, path: services/party/charts/party, namespace: hello-ledger }
           - { name: payables, path: services/payables/charts/payables, namespace: hello-ledger }
@@ -70,6 +71,7 @@ spec:
           - { name: sales, path: services/sales/charts/sales, namespace: hello-ledger }
           - { name: scheduler-opt, path: services/scheduler-py/charts/scheduler-opt, namespace: hello-ledger }
           - { name: scheduling, path: services/scheduling/charts/scheduling, namespace: hello-ledger }
+          - { name: search, path: services/search/charts/search, namespace: hello-ledger }
           - { name: shopfloor, path: services/shopfloor/charts/shopfloor, namespace: hello-ledger }
           - { name: tax, path: services/tax/charts/tax, namespace: hello-ledger }
           - { name: transport, path: services/transport/charts/transport, namespace: hello-ledger }

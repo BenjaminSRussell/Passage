@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { getSpc, listTestGroups, type SpcLimits, type SpcResult, type Violation } from "./api/client";
 import { shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const RULES: Record<number, string> = {
   1: "Rule 1: a point beyond 3σ",
@@ -193,8 +195,8 @@ export function SpcPage() {
       />
       <Card>
         <form className={styles.toolbar} onSubmit={show} noValidate aria-label="Choose a chart">
-          <FormField id="spc-item" label="Item id" error={errors.item}>
-            {(control) => <Input {...control} className={styles.mono} value={item} invalid={Boolean(errors.item)} onChange={(event) => setItem(event.target.value)} />}
+          <FormField id="spc-item" label="Item" error={errors.item}>
+            {(control) => <EntityLookup entity="product" {...control} value={item} invalid={Boolean(errors.item)} onChange={(event) => setItem(event.target.value)} />}
           </FormField>
           <FormField id="spc-group" label="Test group" optional hint={groups.error ? "Test groups could not be loaded." : undefined}>
             {(control) => (
@@ -233,7 +235,7 @@ export function SpcPage() {
         </Card>
       ) : chart.error ? (
         <Alert tone="danger" title="Could not compute the chart" live="alert" action={<Button size="sm" onClick={chart.reload}>Try again</Button>}>
-          {chart.error.message} ({chart.error.code})
+          <ProblemMessage problem={chart.error} />
         </Alert>
       ) : chart.loading || !chart.data ? (
         <div className={styles.stack} aria-busy="true">

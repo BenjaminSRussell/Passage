@@ -4,15 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "passage-dispatch"
-version = "0.1.0"
-description = "Passage dispatch feasibility and solver (wave 45)"
+version = "0.2.0"
+description = "Passage dispatch feasibility, greedy and CP-SAT solvers and the optimizer API (wave 45)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "ortools>=9.10",
+    "fastapi>=0.110",
+    "pydantic>=2.6",
+    "uvicorn>=0.29",
+    "cryptography>=42",
+]
 
 [project.optional-dependencies]
-# CP-SAT solver (not yet wired; see NOT-IMPLEMENTED.md).
-solver = ["ortools>=9.10"]
-dev = ["pytest>=8", "hypothesis>=6.100"]
+dev = ["pytest>=8", "hypothesis>=6.100", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

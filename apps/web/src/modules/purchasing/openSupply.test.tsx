@@ -35,7 +35,7 @@ describe("open supply", () => {
     expect(within(table).getAllByText("6 EA")).toHaveLength(2);
     expect(within(table).getByText("2027-03-02")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.change(screen.getByLabelText(/Warehouse id/), { target: { value: WH } });
+    fireEvent.change(screen.getByLabelText(/Warehouse/), { target: { value: WH } });
     fireEvent.change(screen.getByLabelText(/Due from/), { target: { value: "2027-03-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Show supply" }));
     await waitFor(() =>
@@ -48,9 +48,10 @@ describe("open supply", () => {
     renderAt("/purchasing/open-supply");
     await screen.findByRole("heading", { name: "No open supply" });
     const calls = fetchMock.mock.calls.length;
-    fireEvent.change(screen.getByLabelText(/Warehouse id/), { target: { value: "nope" } });
+    fireEvent.change(screen.getByLabelText("Due from"), { target: { value: "2027-03-05" } });
+    fireEvent.change(screen.getByLabelText("Due to"), { target: { value: "2027-03-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Show supply" }));
-    expect(await screen.findByText("Warehouse id must be a UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("The end date is before the start date.")).toBeInTheDocument();
     expect(fetchMock.mock.calls.length).toBe(calls);
   });
 
@@ -68,7 +69,7 @@ describe("open supply", () => {
   it("explains a load error", async () => {
     stubFetch(() => problem(503, "COM-0503", "unavailable"));
     renderAt("/purchasing/open-supply");
-    expect(await screen.findByText(/unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/unavailable/)).toBeInTheDocument();
   });
 
   it("pages with the cursor", async () => {

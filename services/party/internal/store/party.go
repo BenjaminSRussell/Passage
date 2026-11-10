@@ -153,7 +153,7 @@ func (s *Postgres) createOnce(ctx context.Context, in NewParty, next func(contex
 			}
 		}
 		if err := enqueue(ctx, tx, caller.TenantID, party.ID, partyevents.PartyCreated, partyevents.PartyCreatedData{
-			PartyID: party.ID, PartyNumber: party.PartyNumber, PartyType: party.PartyType, Name: party.Name,
+			PartyID: party.ID, PartyNumber: party.PartyNumber, PartyType: party.PartyType, Name: party.Name, Status: party.Status, Version: party.Version,
 		}); err != nil {
 			return err
 		}
@@ -244,7 +244,8 @@ func (s *Postgres) UpdateParty(ctx context.Context, requestedID string, version 
 		}
 		sort.Strings(changed)
 		if err := enqueue(ctx, tx, caller.TenantID, party.ID, partyevents.PartyUpdated, partyevents.PartyUpdatedData{
-			PartyID: party.ID, ChangedFields: domain.PublicFields(changed), Version: party.Version,
+			PartyID: party.ID, PartyNumber: party.PartyNumber, PartyType: party.PartyType, Name: party.Name, Status: party.Status,
+			ChangedFields: domain.PublicFields(changed), Version: party.Version,
 		}); err != nil {
 			return err
 		}

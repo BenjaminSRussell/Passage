@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { addBook, CONVENTIONS, describeProblem, METHODS, newKey, type Method, type NewBook, type Problem } from "./api/client";
 import { DATE, DECIMAL, sentence, today } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BookValues {
   bookCode: string;
@@ -174,7 +175,7 @@ export function AddBookPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not add the book" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

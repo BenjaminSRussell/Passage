@@ -216,7 +216,7 @@ describe("Kiosk job actions", () => {
 
   it("shows the dispatch list's error and empty states, and retries the load", async () => {
     await signIn(session(), json(500, { code: "COM-0500", detail: "Internal error" }));
-    expect(await screen.findByText("Internal error (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("Internal error")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start job" })).toBeNull();
     handler = (url) => (url.pathname.endsWith("/jobs") ? json(200, { items: [] }) : undefined);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));

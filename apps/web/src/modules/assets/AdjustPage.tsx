@@ -5,6 +5,7 @@ import { ADJUSTMENT_TYPES, adjustBook, describeProblem, getAsset, newKey, type A
 import { DATE, isZero, money, sentence, SIGNED_DECIMAL, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface AdjustValues {
   bookId: string;
@@ -55,7 +56,7 @@ export function AdjustPage() {
       <div className={styles.stack}>
         <PageHeader title="Adjust book" />
         <Alert tone="danger" title="Could not load the asset" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -168,7 +169,7 @@ export function AdjustPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not post the adjustment" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

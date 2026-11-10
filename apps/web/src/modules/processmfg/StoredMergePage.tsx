@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { holdsDuty } from "../../shell/dutyGate";
@@ -18,6 +19,7 @@ import { DispositionBadge } from "./BatchRecordPages";
 import { dash, QUANTITY, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Duty that merges batches; enforced by the service (FR-24.16). */
 export const MERGE_DUTY = "production.batch.merge";
@@ -201,8 +203,8 @@ export function StoredMergePage({ merge = (req, key) => defaultMerge(req, key), 
       <form className={styles.stack} onSubmit={submit} noValidate>
         <Card title="Merge">
           <div className={styles.form}>
-            <FormField id="sm-item" label="Item id" hint="The batches of this item are listed below." error={errors.itemId}>
-              {(c) => <Input {...c} value={itemId} onChange={(e) => { setItemId(e.target.value); touch(); }} invalid={Boolean(errors.itemId)} />}
+            <FormField id="sm-item" label="Item" hint="The batches of this item are listed below." error={errors.itemId}>
+              {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => { setItemId(e.target.value); touch(); }} invalid={Boolean(errors.itemId)} />}
             </FormField>
             <FormField id="sm-target" label="New batch number" error={errors.target}>
               {(c) => <Input {...c} value={target} onChange={(e) => { setTarget(e.target.value); touch(); }} invalid={Boolean(errors.target)} />}
@@ -222,7 +224,7 @@ export function StoredMergePage({ merge = (req, key) => defaultMerge(req, key), 
           <Card title="Batches of the item">
             {batches.error ? (
               <Alert tone="danger" title="Could not load batches" live="alert" action={<Button size="sm" onClick={batches.reload}>Try again</Button>}>
-                {batches.error.message} ({batches.error.code})
+                <ProblemMessage problem={batches.error} />
               </Alert>
             ) : (
               <DataTable
@@ -251,7 +253,7 @@ export function StoredMergePage({ merge = (req, key) => defaultMerge(req, key), 
           live="alert"
           action={failure.code === "PMF-0104" ? <Button size="sm" onClick={batches.reload}>Reload batches</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {result ? (

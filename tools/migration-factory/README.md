@@ -24,8 +24,13 @@ Built and tested:
   key `(system, company, table, id)` are skipped, so a re-run loads zero records (MIG-1505). Runs of
   one (system, company) serialize on an advisory lock.
 - **Parallel-run classifier** (`diff.go`): outer join on `(area, key)`, EXPECTED by rule `RND-001`
-  (≤ 0.01), EXPLAINED by an operator reason given for that area and key, otherwise UNEXPLAINED.
-  Sign-off gate: zero unexplained and explained ≤ 0.1 % of revenue (MIG-1509).
+  (≤ 0.01 per document the tuple sums, BR-49.7: a tuple carries its document count, and the replay
+  counts the legacy documents that posted to each account), EXPLAINED by an operator reason given
+  for that area and key, otherwise UNEXPLAINED. Sign-off gate: zero unexplained and explained
+  ≤ 0.1 % of revenue (MIG-1509).
+- **Parallel-run replay** (`replay.go`, `internal/replay`, D4): a legacy period's journals posted in
+  their original sequence through the ledger into a rehearsal ledger, and the trial balance read
+  back diffed with the legacy one (`POST /migration/parallel-runs/replay`).
 - **Cutover plan** (`cutover.go`): timed steps from T-14d to T+30d with pack load steps, rehearsal
   duration overrides, go/no-go sequencing (CUT-1601), the abort step at `abortOffsetHours`, the
   BR-49.9 abort state (CUT-1604), rollback once with two distinct approvers (CUT-1603), and a plan
@@ -37,6 +42,16 @@ Built and tested:
 - **Rollback plan** (`rollback.go`, FR-49.9): generated from the plan, starting with the decision
   point at the abort deadline, then stop Passage access, restore legacy write access, resume the
   coexistence adapters, export the postings since T-0 and re-key them.
+- **Rollback execution** (`internal/store/cutover.go`, BR-49.1, AC-49.7): the second approval
+  exports the re-keying files, moves the loaded and reconciled pack runs of the plan's legacy
+  companies and packs to ROLLED_BACK, hands every coexistence flag of those companies that Passage
+  masters back to LEGACY (listed on `cutover.plan.rolledback`, on which the integration hub resumes
+  the adapters), and with `ledgers` posts the compensating journals (`compensation.go`: one entry per
+  re-keying journal with every line flipped, from the stored lines, in the ledger pinned to each
+  legal entity, backing off and parking failures, reconciled over this plan's journals only).
+- **Coexistence flags** (`coexistence.go`, `internal/coexist`, FR-49.7, BR-49.10): which side masters
+  each entity kind of a legacy company, versioned, with every change on
+  `migration.coexistence.changed`; the router refuses a legacy change made after an entity's cutover.
 - **Pack catalog** (`catalog.go`, FR-49.1): the nine packs for AX 2012, D365 F&O, SAP ECC and
   S/4HANA with their FR-49.2 control totals and whether a run can be started today.
 - **Rollback re-keying export** (`rekey.go`, FR-49.9): the postings since T-0 given with the
@@ -59,6 +74,11 @@ Built and tested:
   count of non-zero combinations and the trial balance per currency. A run that names an
   open_items run of the same company also compares the open items per control account with the
   GL balance of that account (BR-49.2, MIG-1506).
+  `POST /api/v1/migration/runs/{id}/opening-journal` (`opening journal`, `gl_opening_posting`) then
+  posts the migrated balances through the ledger's posting API (`LEDGER_URL`) as one journal per
+  currency for a legal entity and ledger: refused whole with the difference named (MIG-1540) when a
+  currency's debits differ from its credits, never rounded, and idempotent by a fixed key per
+  company, legal entity and currency, so a repeat or a re-run of the import books nothing twice.
 - **On-hand stock** (`onhand.go`, `internal/store/onhand.go`): the onhand pack quarantines lines by
   uniqueness (legacy id and (item, site, warehouse, location, batch, serial)), referential (the
   item master given with the run) and domain (site, warehouse and unit present, quantity above
@@ -135,9 +155,16 @@ security tests also need `PASSAGE_TEST_APP_DATABASE_URL` (the `passage_app` role
 run as that role when it is set.
 
 The wave proof `TestWave49_SyntheticYearCutoverRehearsal` (database) runs a synthetic AX 2012 and
-SAP ECC year (three entities each) through the generated runbook and the rollback. Its extracts
-and expected values come from `internal/api/testdata/synth/synth_reference.py`, an independent
-standard-library reference; regenerate with `python3 -I internal/api/testdata/synth/synth_reference.py`.
+SAP ECC year (three entities each) through all nine packs, the generated runbook and the rollback.
+The open_items, gl_balances and project_wip extracts and expected values come from
+`internal/api/testdata/synth/synth_reference.py`, an independent standard-library reference;
+regenerate with `python3 -I internal/api/testdata/synth/synth_reference.py`. The other six packs'
+year is simulated at test time by `internal/api/synth_year_test.go`; the default is a 1/50 year and
+`PASSAGE_SYNTH_SCALE=full` runs the PRD fixture size (about 1.1M AX and 1.3M SAP legacy rows, about
+a minute and a half against a local Postgres). `TestWave49_ReplayMonthHasNoUnexplainedVariances`
+replays the 42k-document `fx-replay-month` (generated, `PASSAGE_REPLAY_DOCUMENTS` overrides the size), and
+`TestWave49_RollbackRehearsalRestoresLegacyCoexistence` checks the rollback's coexistence and
+compensations.
 
 Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc --noEmit`.
 
@@ -160,6 +187,10 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 | `POST /api/v1/cutover/plans/{id}/steps/{seq}/complete` | `migration.cutover-step.execute` |
 | `POST /api/v1/cutover/plans/{id}/rollback` | `migration.cutover.manage` (two different callers approve; the second runs it) |
 | `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `migration.cutover.manage` |
+| `POST`/`GET /api/v1/cutover/plans/{id}/rollback/compensations` | `migration.cutover.manage` |
+| `POST /api/v1/migration/parallel-runs/replay` | `migration.factory.run` |
+| `GET /api/v1/migration/coexistence` | `migration.factory.view` |
+| `PUT /api/v1/migration/coexistence/{system}/{company}/{entity}` | `migration.cutover.manage` |
 
 Duties are checked by the kernel's local `DutyPolicy`. The OPA decision point replaces it later
 (see NOT-IMPLEMENTED.md). Every POST accepts an optional `Idempotency-Key`; plan commands accept
@@ -172,7 +203,8 @@ Duties are checked by the kernel's local `DutyPolicy`. The OPA decision point re
 | `dev.passage.migration.pack.reconciled.v1` | every pack run, after its control totals are computed |
 | `dev.passage.migration.pack.loaded.v1` | a pass of the load into the target service ended, with its row counts and reconciliation result |
 | `dev.passage.cutover.step.completed.v1` | a runbook step is marked done |
-| `dev.passage.cutover.plan.rolledback.v1` | a plan's rollback is executed, with the re-keying line counts |
+| `dev.passage.cutover.plan.rolledback.v1` | a plan's rollback is executed, with the re-keying line counts, the pack runs rolled back and the coexistence flags handed back to LEGACY |
+| `dev.passage.migration.coexistence.changed.v1` | an entity kind's coexistence flag flips (a cutover, a flip back, or a rollback) |
 
 ## Error codes
 

@@ -124,7 +124,7 @@ describe("compliance lists", () => {
     let fail = true;
     handler = () => (fail ? json(500, { code: "COM-0500", detail: "database unavailable" }) : json(200, { items: [] }));
     renderAt("/quality/compliance/lists");
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No compliance lists yet")).toBeInTheDocument();
@@ -178,11 +178,11 @@ describe("item compliance", () => {
   it("refuses a malformed item id, then opens the item", async () => {
     handler = () => json(404, { code: "QM-0164", detail: "no composition is recorded for this item" });
     renderAt("/quality/compliance/items");
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: "widget" } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: "widget" } });
     fireEvent.click(screen.getByRole("button", { name: "Open item" }));
     expect(await screen.findByText("Enter the item id (a UUID).")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     fireEvent.click(screen.getByRole("button", { name: "Open item" }));
     expect(await screen.findByText("No composition declared yet")).toBeInTheDocument();
   });
@@ -244,7 +244,7 @@ describe("item compliance", () => {
   it("shows a load failure with a retry", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt(`/quality/compliance/items/${ITEM}`);
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -314,7 +314,7 @@ describe("stability studies", () => {
   it("shows a study that cannot be loaded as an error with a retry", async () => {
     handler = () => json(404, { code: "QM-0161", detail: "stability study not found" });
     renderAt(`/quality/stability/${STUDY}`);
-    expect(await screen.findByText("stability study not found (QM-0161)")).toBeInTheDocument();
+    expect(await screen.findByText("stability study not found")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -354,7 +354,7 @@ describe("SPC charts", () => {
     };
     const { container } = renderAt("/quality/spc");
     await screen.findByRole("option", { name: "STAB-LT v1" });
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Test group"), { target: { value: GROUP } });
     fireEvent.change(screen.getByLabelText("Test"), { target: { value: TEST } });
     fireEvent.click(screen.getByRole("button", { name: "Show chart" }));
@@ -376,7 +376,7 @@ describe("SPC charts", () => {
     unmount();
     reply = json(422, { code: "QM-0166", detail: "an X-bar/R chart needs subgroups of 2 to 25 samples; these orders have 1" });
     renderAt(`/quality/spc?itemId=${ITEM}&testId=${TEST}`);
-    expect(await screen.findByText("an X-bar/R chart needs subgroups of 2 to 25 samples; these orders have 1 (QM-0166)")).toBeInTheDocument();
+    expect(await screen.findByText("an X-bar/R chart needs subgroups of 2 to 25 samples; these orders have 1")).toBeInTheDocument();
   });
 });
 

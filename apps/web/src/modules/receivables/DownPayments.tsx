@@ -1,4 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -140,8 +142,8 @@ export interface DownPaymentDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validateDownPayment(v: DownPaymentDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (!UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
+  if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer.";
   const order = v.salesOrderId.trim();
   if (order !== "" && !UUID.test(order)) errors.salesOrderId = "Enter the sales order id (a UUID) or leave it empty.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a currency such as USD.";
@@ -203,10 +205,20 @@ export function NewDownPaymentPage() {
     }
   }
 
-  function text(id: string, field: Exclude<keyof DownPaymentDraft, "kind">, label: string, opts: { hint?: string; optional?: boolean; decimal?: boolean } = {}) {
+  function text(id: string, field: Exclude<keyof DownPaymentDraft, "kind">, label: string, opts: { entity?: LookupEntityKey; hint?: string; optional?: boolean; decimal?: boolean } = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} error={errors[field]} optional={opts.optional}>
-        {(c) => (
+        {(c) =>
+        opts.entity ? (
+          <EntityLookup
+            {...c}
+            entity={opts.entity}
+            scope={opts.entity === "customer" ? { legalEntityId: values.legalEntityId || undefined } : undefined}
+            value={values[field]}
+            onChange={(e) => update({ [field]: e.target.value } as Partial<DownPaymentDraft>)}
+            invalid={Boolean(errors[field])}
+          />
+        ) : (
           <Input
             {...c}
             className={styles.mono}
@@ -236,8 +248,8 @@ export function NewDownPaymentPage() {
               </Select>
             )}
           </FormField>
-          {text("nd-entity", "legalEntityId", "Legal entity id")}
-          {text("nd-customer", "customerId", "Customer id")}
+          {text("nd-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
+          {text("nd-customer", "customerId", "Customer", { entity: "customer" })}
           {text("nd-order", "salesOrderId", "Sales order id", { optional: true })}
           {text("nd-currency", "currency", "Currency")}
           {text("nd-amount", "amount", "Amount", { decimal: true })}

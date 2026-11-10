@@ -18,6 +18,7 @@ import { classifyItems, describeProblem, type ClassifiedItem, type ClassifyResul
 import { amount, isCurrency, isDecimal, isNonZero, isSignedDecimal } from "./format";
 import { RowGrid, type RowField } from "./RowGrid";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type ItemKey = "id" | "entityA" | "entityB" | "period" | "currency" | "amountA" | "amountB" | "nextPeriodA" | "nextPeriodB" | "fxApplies";
 type ItemValues = Record<ItemKey, string>;
@@ -215,7 +216,7 @@ export function ReconciliationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The pairs were not classified" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

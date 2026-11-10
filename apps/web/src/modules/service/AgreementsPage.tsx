@@ -21,6 +21,7 @@ import { DATE, DECIMAL, sentence, shortId, today, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Agreement>[] = [
   { key: "number", header: "Agreement", mono: true },
@@ -77,7 +78,7 @@ export function AgreementsPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="The expiry pass failed" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div className={styles.toolbar}>
@@ -341,7 +342,7 @@ export function NewAgreementPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the agreement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

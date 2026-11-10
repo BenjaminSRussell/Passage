@@ -25,6 +25,7 @@ import {
 import { dash, DECIMAL, formatDateTime, sentence, shortId, subtractDecimal, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /**
  * Reporting a delivery and reporting an invoice each need their own duty. The
@@ -110,7 +111,7 @@ export function OrderProgressCard({ orderId, version, status, orderType }: { ord
     >
       {state.error ? (
         <Alert tone="danger" title="Could not load the deliveries and invoices" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.loading && rows.length === 0 ? (
         <EmptyState compact headingLevel={3} title="Nothing delivered or invoiced yet" description="Packing slips and invoices that cover this order appear here and move its lines." />
@@ -166,7 +167,7 @@ export function OrderProgressListPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the deliveries and invoices" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -234,7 +235,7 @@ export function NewOrderProgressPage() {
       <div className={styles.stack}>
         <PageHeader title="Record delivery or invoice" actions={back} />
         <Alert tone="danger" title="Could not load the order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -401,14 +402,14 @@ export function NewOrderProgressPage() {
       />
       {failure ? (
         <Alert tone="danger" title={refusalTitle[failure.code] ?? "The report could not be recorded"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {!canRecord ? (
         <Alert tone="warning" title="You cannot record this">
           {reportKinds(order.orderType, order.status).length === 0
             ? `A ${sentence(order.orderType)} order that is ${sentence(order.status)} takes no delivery or invoice.`
-            : `Recording a delivery needs the ${DUTY_RECORD_DELIVERY} duty and recording an invoice the ${DUTY_RECORD_INVOICE} duty.`}
+            : "Deliveries are recorded automatically when a packing slip posts and invoiced quantities when the invoice posts, so there is nothing to record here by hand."}
         </Alert>
       ) : null}
       <Card>
@@ -513,7 +514,7 @@ export function CancelRemainderCard({ order, etag, onDone }: { order: Order; eta
         </p>
         {failure ? (
           <Alert tone="danger" title="The remainder was not cancelled" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {open.length > 1 ? (

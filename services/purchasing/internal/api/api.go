@@ -51,6 +51,7 @@ const (
 	dutyRequisitionCreate      = "procurement.requisition.create"
 	dutyPurchaseOrderMaintain  = "procurement.purchase-order.maintain"
 	dutyPurchaseOrderInquire   = "procurement.purchase-order.inquire"
+	dutyInboxRead              = "procurement.inbox.read"
 	dutyTradeAgreementMaintain = "procurement.trade-agreement.maintain"
 	dutyAgreementMaintain      = "procurement.agreement.maintain"
 	dutyPlanRowSettle          = "procurement.invoicing-plan.settle"
@@ -86,6 +87,7 @@ type API struct {
 	store       store.Store
 	policy      domain.ApprovalPolicy
 	memberships Memberships
+	vendors     VendorPrincipal
 	now         func() time.Time
 
 	requisitionsCreated       atomic.Int64
@@ -140,12 +142,15 @@ type API struct {
 	serviceLimitChecks     atomic.Int64
 	modelServiceSpecsSaved atomic.Int64
 	autoChargesSaved       atomic.Int64
+
+	poAcknowledged     atomic.Int64
+	poProposalsDecided atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
 // no group memberships.
 func New(s store.Store) *API {
-	return &API{store: s, policy: domain.DefaultApprovalPolicy(), memberships: NoMemberships{}, now: time.Now}
+	return &API{store: s, policy: domain.DefaultApprovalPolicy(), memberships: NoMemberships{}, vendors: NoVendorPrincipal{}, now: time.Now}
 }
 
 // WithMemberships replaces the group membership source.
@@ -297,6 +302,8 @@ func (a *API) Register(r chi.Router) {
 		a.registerSigningRoutes(r)
 		// Changes other services asked of purchase orders (slice 18).
 		a.registerInboundRoutes(r)
+		// Vendor acknowledgement of purchase orders and the vendor-scoped reads of the supplier portal (511-1).
+		a.registerAcknowledgementRoutes(r)
 	})
 }
 
@@ -348,6 +355,8 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_catalog_imports_committed_total", "Vendor catalog imports committed to a catalog.", a.catalogImportsCommitted.Load()},
 			{"purchasing_category_vendor_assignments_saved_total", "Category vendor assignments created or changed.", a.categoryVendorsSaved.Load()},
 			{"purchasing_charge_codes_saved_total", "Charge codes created or changed.", a.chargeCodesSaved.Load()},
+			{"purchasing_po_acknowledgements_total", "Vendor answers to purchase orders recorded; idempotent replays are counted.", a.poAcknowledged.Load()},
+			{"purchasing_po_proposals_decided_total", "Vendor proposals approved or declined by a buyer; idempotent replays are counted.", a.poProposalsDecided.Load()},
 			{"purchasing_service_specs_saved_total", "Service line specifications written by PUT.", a.serviceSpecsSaved.Load()},
 			{"purchasing_service_limit_checks_total", "Unplanned service limit checks answered (BR-17.19), allowed or refused.", a.serviceLimitChecks.Load()},
 			{"purchasing_model_service_specs_saved_total", "Model service specifications created or changed.", a.modelServiceSpecsSaved.Load()},

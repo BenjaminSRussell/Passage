@@ -6,6 +6,7 @@ import { Fields, type FieldSpec } from "./Fields";
 import { amount, isCurrency, isNonZero, isPositive } from "./format";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Key = keyof DividendRequest;
 
@@ -57,7 +58,7 @@ export function DividendsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The dividend was not eliminated" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

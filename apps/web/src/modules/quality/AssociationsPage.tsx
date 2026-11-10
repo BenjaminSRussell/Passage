@@ -18,6 +18,7 @@ import { CERT_LABELS, CERT_REQUIREMENTS, describePlan, pickFields, shortId, TRIG
 import styles from "./pages.module.css";
 import { emptyPlan, planFieldErrors, PlanFields, validatePlan, type PlanErrors, type PlanValues } from "./PlanFields";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type AssocTrigger = Exclude<Trigger, "MANUAL">;
 const TRIGGERS = (Object.keys(TRIGGER_LABELS) as Trigger[]).filter((t): t is AssocTrigger => t !== "MANUAL");
@@ -59,7 +60,7 @@ export function AssociationsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load quality associations" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -262,7 +263,7 @@ export function NewAssociationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the association" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

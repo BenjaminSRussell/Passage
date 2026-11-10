@@ -472,6 +472,31 @@ paths:
         '403': { description: 'AUTH-0003 (missing duty) or PTY-LEGAL-ENTITY-OUT-OF-SCOPE.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PTY-PROTECTED-FIELDS-INVALID: fields missing or null, unknown field, or malformed legal entity id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/pending-changes:
+    get:
+      operationId: listPendingChanges
+      x-passage-duty: party.read
+      description: >-
+        The changes still awaiting approval in the caller's tenant and legal entity scope, newest first. Also readable with
+        party.inbox.read, the narrow duty the batch service's My work inbox signs; that duty reads this list and nothing else.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
+      responses:
+        '200':
+          description: One page; nextCursor is present when another page follows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PendingChange' } }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/party/pending-changes/{id}:
     parameters:
       - { name: id, in: path, required: true, description: Pending change id., schema: { type: string, format: uuid } }
@@ -536,6 +561,118 @@ paths:
         '404': { description: 'PTY-CHANGE-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: 'PTY-CHANGE-DECIDED: decided differently or by someone else; the same decider repeating the same decision gets 200.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PTY-REASON-TOO-LONG: decision reason exceeds 500 Unicode characters.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/parties:search:
+    get:
+      operationId: searchParties
+      summary: Search parties by name or number
+      description: Read-only lookup for pickers. Case-insensitive match on the party name or number; % and _ match themselves. Merged parties are left out. Results are parties (id is the party id), ordered by name and paged by an opaque cursor.
+      x-passage-duty: party.read
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of hits. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, partyId, partyNumber, name]
+                      properties:
+                        id: { type: string, format: uuid }
+                        partyId: { type: string, format: uuid }
+                        partyNumber: { type: string }
+                        name: { type: string }
+                        accountNumber: { type: string }
+                        blocked: { type: string }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/vendors:search:
+    get:
+      operationId: searchVendors
+      summary: Search vendors by name or number
+      description: Read-only lookup for pickers. Case-insensitive match on the party name or number and the account number; % and _ match themselves. Merged parties are left out. Results are vendor roles in the caller's legal entities (narrowed to legalEntityId when given; each hit carries its legalEntityId) (id is the vendor role id; partyId the party), ordered by name and paged by an opaque cursor.
+      x-passage-duty: party.read
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+        - { name: legalEntityId, in: query, description: 'Only vendor roles in this legal entity.', schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of hits. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, partyId, partyNumber, name]
+                      properties:
+                        id: { type: string, format: uuid }
+                        partyId: { type: string, format: uuid }
+                        partyNumber: { type: string }
+                        name: { type: string }
+                        accountNumber: { type: string }
+                        blocked: { type: string }
+                        legalEntityId: { type: string, format: uuid }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/customers:search:
+    get:
+      operationId: searchCustomers
+      summary: Search customers by name or number
+      description: Read-only lookup for pickers. Case-insensitive match on the party name or number and the account number; % and _ match themselves. Merged parties are left out. Results are customer roles in the caller's legal entities (narrowed to legalEntityId when given; each hit carries its legalEntityId) (id is the customer role id; partyId the party), ordered by name and paged by an opaque cursor.
+      x-passage-duty: party.read
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+        - { name: legalEntityId, in: query, description: 'Only customer roles in this legal entity.', schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of hits. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, partyId, partyNumber, name]
+                      properties:
+                        id: { type: string, format: uuid }
+                        partyId: { type: string, format: uuid }
+                        partyNumber: { type: string }
+                        name: { type: string }
+                        accountNumber: { type: string }
+                        blocked: { type: string }
+                        legalEntityId: { type: string, format: uuid }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:

@@ -183,7 +183,7 @@ describe("Pricing workspace", () => {
       return undefined;
     };
     renderAt("/pricing");
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Nothing expires in the next 30 days")).toBeInTheDocument();
@@ -243,7 +243,7 @@ describe("Trade agreements", () => {
   it("shows the service error instead of the table", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" });
     renderAt("/pricing/agreements");
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.view");
     expect(screen.queryByRole("table")).toBeNull();
   });
 });
@@ -463,7 +463,7 @@ describe("Price simulation", () => {
     fill("Customer", "C1");
     fill("Product", "BOLT");
     fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
-    expect(await findAlert()).toHaveTextContent("request exceeds 500 lines (PRC-0009)");
+    expect(await findAlert()).toHaveTextContent("request exceeds 500 lines");
     expect(screen.getByLabelText("Product")).toHaveValue("BOLT");
   });
 });

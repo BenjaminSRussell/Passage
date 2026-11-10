@@ -14,6 +14,7 @@ import {
 import { OUTBOUND_EXAMPLES, OUTBOUND_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   partnerId: string;
@@ -109,7 +110,7 @@ export function OutboundDocumentPage() {
       <div className={styles.stack}>
         {header}
         <Alert tone="danger" title="Could not load partners" live="alert" action={<Button size="sm" onClick={partners.reload}>Try again</Button>}>
-          {partners.error.message} ({partners.error.code})
+          <ProblemMessage problem={partners.error} />
         </Alert>
       </div>
     );
@@ -191,7 +192,7 @@ export function OutboundDocumentPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not send the document" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

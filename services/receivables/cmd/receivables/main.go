@@ -16,15 +16,32 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/api"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/billingclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/taxclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/migrations"
 )
 
 func main() {
-	if err := run(); err != nil {
+	start, err := command(os.Args[1:])
+	if err == nil {
+		err = start(context.Background(), os.Getenv)
+	}
+	if err != nil {
 		slog.Error("receivables exited", "err", err)
 		os.Exit(1)
 	}
+}
+
+// command picks what the process runs: no argument serves the API, "consume" runs the billing consumer.
+func command(args []string) (func(context.Context, func(string) string) error, error) {
+	switch {
+	case len(args) == 0:
+		return func(context.Context, func(string) string) error { return run() }, nil
+	case args[0] == "consume" && len(args) == 1:
+		return consume, nil
+	}
+	return nil, fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the billing consumer)", args)
 }
 
 // parseRMALedgers reads RECEIVABLES_RMA_LEDGERS: a JSON object from legal entity id to the ledger id its RMA credit journals post to.
@@ -39,6 +56,27 @@ func parseRMALedgers(raw string) (map[string]string, error) {
 	for le, ledger := range out {
 		if !ids.Valid(le) || !ids.Valid(ledger) {
 			return nil, fmt.Errorf("RECEIVABLES_RMA_LEDGERS entry %q needs UUID legal entity and ledger ids", le)
+		}
+	}
+	return out, nil
+}
+
+func parseRMATaxAccounts(raw string) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	if raw == "" {
+		return out, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("RECEIVABLES_RMA_TAX_ACCOUNTS must be a JSON object of legal entity id to an object of tax code to GL account: %w", err)
+	}
+	for le, byCode := range out {
+		if !ids.Valid(le) {
+			return nil, fmt.Errorf("RECEIVABLES_RMA_TAX_ACCOUNTS entry %q needs a UUID legal entity id", le)
+		}
+		for code, account := range byCode {
+			if code == "" || account == "" {
+				return nil, fmt.Errorf("RECEIVABLES_RMA_TAX_ACCOUNTS entry %q needs a tax code and a GL account", le)
+			}
 		}
 	}
 	return out, nil
@@ -79,6 +117,22 @@ func run() error {
 		return err
 	}
 	s.WithRMALedgers(rmaLedgers)
+	rmaTaxAccounts, err := parseRMATaxAccounts(os.Getenv("RECEIVABLES_RMA_TAX_ACCOUNTS"))
+	if err != nil {
+		return err
+	}
+	var taxRecorder taxclient.Recorder
+	if tc, err := taxclient.FromEnv(os.Getenv); err != nil {
+		return err
+	} else if tc != nil {
+		taxRecorder = tc
+	}
+	s.WithRMATax(rmaTaxAccounts, taxRecorder)
+	if bc, err := billingclient.FromEnv(os.Getenv); err != nil {
+		return err
+	} else if bc != nil {
+		s.WithBilling(bc).WithReservations(bc)
+	}
 	h := api.New(s)
 	r := httpx.NewRouter()
 	h.Register(r)

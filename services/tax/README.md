@@ -21,7 +21,7 @@ DATABASE_URL=postgres://... go run ./cmd/tax
 | `MIGRATE_ON_START` | `true` applies `migrations/` at start (the chart sets it from `migrateOnStart`) |
 | `LEDGER_URL` | base URL of the ledger service; unset leaves `POST /v1/tax/settlements:run` answering 503 |
 | `LEDGER_TIMEOUT` | ledger call timeout, default 3s |
-| `PASSAGE_SERVICE_SIGNING_KEY` or `PASSAGE_SERVICE_SIGNING_KEY_FILE`, `PASSAGE_SERVICE_NAME` | the service identity the ledger call is signed with; required when `LEDGER_URL` is set. `service_grants.tax.ledger` in `policies/authz/data.json` (mirrored in `platform/go/tenant`) grants it `ledger.balance.read` and nothing else |
+| `PASSAGE_SERVICE_SIGNING_KEY` or `PASSAGE_SERVICE_SIGNING_KEY_FILE`, `PASSAGE_SERVICE_NAME` | the service identity the ledger call is signed with; required when `LEDGER_URL` is set. `service_grants.tax.ledger` in `policies/authz/data.json` (mirrored in `platform/go/tenant`) grants it `ledger.balance.read`, plus `ledger.entry.lookup`, `ledger.ledger.lookup` and `ledger.account.lookup` for the SAF-T export, and nothing else |
 
 ## API
 
@@ -74,6 +74,6 @@ Warnings in the response `warnings` array: TAX-0004 (no code shared by the group
 
 ## Handoffs outside the owned paths
 
-- `policies/authz/data.json`: grant the duty `tax.tax.calculate` to the service roles that call the endpoint; the new duties (`tax.transaction.record`, `tax.settlement.run`, `tax.recommit.run`, `tax.saft.export`, `tax.ledgerconfig.manage`) are seeded and need role assignments.
+- `policies/authz/data.json`: grant the duty `tax.tax.calculate` to the service roles that call the endpoint; `tax.transaction.record` is service-only (billing, receiving and receivables hold it through service grants; no role takes it); the new duties (`tax.settlement.run`, `tax.recommit.run`, `tax.saft.export`, `tax.ledgerconfig.manage`) are seeded and need role assignments.
 - `deploy/argocd`, the CI matrix and root `lint-charts`: add the tax application now that the chart exists.
 - The settlement domain posts through the `Poster` interface with key `post:tax:settlement:<id>:settle`; no client is wired because the clearing accounts of the posting are not specified.

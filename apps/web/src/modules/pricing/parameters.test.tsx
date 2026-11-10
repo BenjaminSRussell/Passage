@@ -9,7 +9,7 @@ const LE = "0190f0a0-0000-7000-8000-000000000001";
 const ADMIN = ["pricing.view", "pricing.admin"];
 
 function load() {
-  fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+  fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
   fireEvent.click(screen.getByRole("button", { name: "Load parameters" }));
 }
 
@@ -160,14 +160,14 @@ describe("Pricing parameters", () => {
     renderAt("/pricing/parameters", ADMIN);
     load();
     fireEvent.click(await screen.findByRole("button", { name: "Save parameters" }));
-    await waitFor(async () => expect(await findAlert()).toHaveTextContent("parameters version does not match (conflict_version)"));
+    await waitFor(async () => expect(await findAlert()).toHaveTextContent("parameters version does not match"));
   });
 
   it("shows a read failure", async () => {
     server.handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt("/pricing/parameters");
     load();
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
   });
   it("saves the price search mode and the small order thresholds", async () => {
     server.handler = (url, init) => {

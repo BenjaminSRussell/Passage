@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -53,6 +54,7 @@ type receivedFields struct {
 	CWQty           *int             `json:"cwQty"`
 	CatchWeight     *catchWeightSpec `json:"catchWeight"`
 	Batch           string           `json:"batch"`
+	ExpiryDate      string           `json:"expiryDate"`
 	Serials         []string         `json:"serials"`
 	LocationID      string           `json:"locationId"`
 	InventoryStatus string           `json:"inventoryStatus"`
@@ -99,6 +101,7 @@ type registerInput struct {
 	CWQty           int
 	CatchWeight     domain.CatchWeight
 	Batch           string
+	ExpiryDate      time.Time
 	Serials         []string
 	LocationID      string
 	InventoryStatus string
@@ -131,7 +134,7 @@ func parseCatchWeight(fields map[string]string, name string, spec *catchWeightSp
 }
 
 func parseReceived(fields map[string]string, prefix string, f receivedFields) registerInput {
-	in := registerInput{Batch: f.Batch, Serials: f.Serials, LocationID: f.LocationID, InventoryStatus: f.InventoryStatus}
+	in := registerInput{ExpiryDate: optionalDate(fields, prefix+"expiryDate", f.ExpiryDate), Batch: f.Batch, Serials: f.Serials, LocationID: f.LocationID, InventoryStatus: f.InventoryStatus}
 	if v, ok := decimalField(fields, prefix+"qty", f.Qty, true); ok {
 		if v.Sign() <= 0 {
 			fields[prefix+"qty"] = "must be greater than zero"
@@ -240,6 +243,7 @@ func registerFn(inputs map[int]registerInput, version int, poQty map[int]decimal
 			}
 			dr.Lines[i].Qty, dr.Lines[i].Tracking = in.Qty, domain.Tracking{Batch: in.Batch, Serials: in.Serials}
 			dr.Lines[i].CWQty, dr.Lines[i].CatchWeight = in.CWQty, in.CatchWeight
+			lines[i].ExpiryDate = in.ExpiryDate
 			lines[i].Qty, lines[i].Batch, lines[i].Serials, lines[i].LocationID, lines[i].InventoryStatus = in.Qty, in.Batch, in.Serials, in.LocationID, in.InventoryStatus
 			lines[i].CWQty, lines[i].CWNominal, lines[i].CWMin, lines[i].CWMax = in.CWQty, in.CatchWeight.Nominal, in.CatchWeight.Min, in.CatchWeight.Max
 		}

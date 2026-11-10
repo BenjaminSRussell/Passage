@@ -5,6 +5,7 @@ import { formatDateTime } from "./format";
 import { AckPill, CanonicalView, MessagePill } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Entry({ term, value, mono }: { term: string; value: string; mono?: boolean }) {
   return (
@@ -25,7 +26,7 @@ export function MessageDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Message" />
         <Alert tone="danger" title="Could not load the message" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

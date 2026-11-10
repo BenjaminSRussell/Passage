@@ -15,14 +15,17 @@ import (
 )
 
 type rmaCreditRequest struct {
-	RMAID         string          `json:"rmaId"`
-	RMANumber     string          `json:"rmaNumber"`
-	LegalEntityID string          `json:"legalEntityId"`
-	InvoiceNumber string          `json:"invoiceNumber"`
-	PostingDate   string          `json:"postingDate"`
-	Gross         decimal.Decimal `json:"gross"`
-	Restocking    decimal.Decimal `json:"restocking"`
-	Net           decimal.Decimal `json:"net"`
+	RMAID         string                 `json:"rmaId"`
+	RMANumber     string                 `json:"rmaNumber"`
+	LegalEntityID string                 `json:"legalEntityId"`
+	InvoiceNumber string                 `json:"invoiceNumber"`
+	InvoiceID     string                 `json:"invoiceId"`
+	PostingDate   string                 `json:"postingDate"`
+	Gross         decimal.Decimal        `json:"gross"`
+	Restocking    decimal.Decimal        `json:"restocking"`
+	Net           decimal.Decimal        `json:"net"`
+	TaxLines      []store.RMATaxLine     `json:"taxLines"`
+	InvoiceLines  []store.RMAInvoiceLine `json:"invoiceLines"`
 }
 
 func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +50,9 @@ func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
 	if req.InvoiceNumber == "" {
 		fields["invoiceNumber"] = "is required"
 	}
+	if len(req.TaxLines)+len(req.InvoiceLines) > 0 && !ids.Valid(req.InvoiceID) {
+		fields["invoiceId"] = "must be the billing invoice's UUID when taxLines or invoiceLines are sent"
+	}
 	if _, err := store.ParseDay(req.PostingDate); err != nil {
 		fields["postingDate"] = "must be YYYY-MM-DD"
 	}
@@ -62,12 +68,24 @@ func (a *API) postRMACredit(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, p)
 		return
 	}
+	if err := store.ValidateRMATax(req.TaxLines); err != nil {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeRMACreditInvalid, "the credit tax lines are inconsistent")
+		p.Errors = map[string]string{"taxLines": err.Error()}
+		httpx.Fail(w, r, p)
+		return
+	}
+	if err := store.ValidateRMAInvoiceLines(req.InvoiceLines); err != nil {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeRMACreditInvalid, "the credit invoice lines are inconsistent")
+		p.Errors = map[string]string{"invoiceLines": err.Error()}
+		httpx.Fail(w, r, p)
+		return
+	}
 	if !scopeAllows(w, r, req.LegalEntityID) {
 		return
 	}
 	out, err := a.store.PostRMACredit(r.Context(), store.RMACredit{
-		RMAID: req.RMAID, RMANumber: req.RMANumber, LegalEntityID: req.LegalEntityID, InvoiceNumber: req.InvoiceNumber,
-		PostingDate: req.PostingDate, Gross: req.Gross, Restocking: req.Restocking, Net: req.Net,
+		RMAID: req.RMAID, RMANumber: req.RMANumber, LegalEntityID: req.LegalEntityID, InvoiceNumber: req.InvoiceNumber, InvoiceID: req.InvoiceID,
+		PostingDate: req.PostingDate, Gross: req.Gross, Restocking: req.Restocking, Net: req.Net, TaxLines: req.TaxLines, InvoiceLines: req.InvoiceLines,
 	})
 	if err != nil {
 		a.fail("post rma credit", w, r, err)
@@ -92,6 +110,14 @@ func (a *API) listRMACredits(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.Status != "" && !rmaCreditStatuses[f.Status] {
 		badQuery(w, r, "status", "must be PENDING or POSTED")
+		return
+	}
+	switch q.Get("needsAttention") {
+	case "", "false":
+	case "true":
+		f.AttentionOnly = true
+	default:
+		badQuery(w, r, "needsAttention", "must be true or false")
 		return
 	}
 	switch q.Get("parked") {

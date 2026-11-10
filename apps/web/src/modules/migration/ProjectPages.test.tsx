@@ -154,7 +154,7 @@ describe("projects list", () => {
   it("shows the error state and retries", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
     renderAt("/migration/projects");
-    expect(await screen.findByText(/missing duty \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty/)).toBeInTheDocument();
     handler = () => json(200, { items: [copyProject] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Migration projects" })).toHaveTextContent("USMF to CAMF");
@@ -174,8 +174,8 @@ describe("new project", () => {
     expect(await screen.findByText("Enter a project name.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "USMF to CAMF" } });
-    fireEvent.change(screen.getByLabelText("Source legal entity id"), { target: { value: LE_A } });
-    fireEvent.change(screen.getByLabelText("Target legal entity id"), { target: { value: LE_B } });
+    fireEvent.change(screen.getByLabelText("Source legal entity"), { target: { value: LE_A } });
+    fireEvent.change(screen.getByLabelText("Target legal entity"), { target: { value: LE_B } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByRole("heading", { name: "USMF to CAMF" })).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST");
@@ -187,13 +187,13 @@ describe("new project", () => {
     handler = () => json(409, { code: "MIG-PROJECT-NAME-EXISTS", detail: "a migration project with this name already exists" });
     renderAt("/migration/projects/new");
     fireEvent.change(screen.getByLabelText("Type"), { target: { value: "migrate" } });
-    expect(screen.queryByLabelText("Source legal entity id")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Source legal entity")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AX customers" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByText("Choose the source system.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Source system"), { target: { value: "ax2012" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-    expect(await screen.findByText(/already exists \(MIG-PROJECT-NAME-EXISTS\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already exists/)).toBeInTheDocument();
   });
 });
 
@@ -217,7 +217,7 @@ describe("new project with a custom source system", () => {
     await screen.findByRole("option", { name: "Acme ERP" });
     expect(screen.queryByRole("option", { name: "AX box" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/^Connection/), { target: { value: acme.id } });
-    fireEvent.change(screen.getByLabelText(/^Target legal entity id/), { target: { value: LE_B } });
+    fireEvent.change(screen.getByLabelText(/^Target legal entity/), { target: { value: LE_B } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
@@ -242,7 +242,7 @@ describe("project detail", () => {
   it("shows a not-found error", async () => {
     handler = () => json(404, { code: "AUTH-0404", detail: "migration project not found" });
     renderAt(`/migration/projects/${PROJECT}`);
-    expect(await screen.findByText(/migration project not found \(AUTH-0404\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/migration project not found/)).toBeInTheDocument();
   });
 
   it("archives with the current version", async () => {
@@ -358,7 +358,7 @@ describe("project runs", () => {
   it("shows an error when the runs cannot be loaded", async () => {
     handler = (url) => (url.pathname.endsWith("/migration-runs") ? json(500, { code: "COM-0500", detail: "boom" }) : json(200, axProject));
     renderAt(`/migration/projects/${axProject.id}`);
-    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
   });
 
   it("starts a run under the preselected project with the project's source system", async () => {
@@ -392,7 +392,7 @@ describe("project runs", () => {
     await screen.findByRole("option", { name: "AX customers" });
     fireEvent.change(await screen.findByLabelText("Mapping spec"), { target: { value: SPEC } });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-    expect(await screen.findByText(/already active for this project.*MIG-RUN-ACTIVE/)).toBeInTheDocument();
+    expect(await screen.findByText(/already active for this project/)).toBeInTheDocument();
   });
 
   it("still starts a run without a project when projects cannot be loaded", async () => {
@@ -497,13 +497,13 @@ describe("key rewrite rules", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
     fireEvent.change(screen.getByLabelText("Rule 1 replace prefix"), { target: { value: "A" } });
     fireEvent.click(screen.getByRole("button", { name: "Save rules" }));
-    expect(await screen.findByText(/current version is 3 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/current version is 3/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload rules" })).toBeInTheDocument();
   });
 
   it("shows the error state for the rules", async () => {
     handler = (url) => (url.pathname.endsWith("/key-rewrite-rules") ? json(500, { code: "COM-0500", detail: "internal error" }) : json(200, copyProject));
     renderAt(`/migration/projects/${PROJECT}`);
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
   });
 });

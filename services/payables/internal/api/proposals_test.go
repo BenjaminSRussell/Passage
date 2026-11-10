@@ -69,6 +69,9 @@ type fakeStore struct {
 	propFilter  store.ProposalFilter
 	propLimit   int
 
+	proposalOf  map[string]string
+	proposalErr error
+
 	holdErr    error
 	holdNoop   bool
 	holdCalls  []string
@@ -93,6 +96,16 @@ func (f *fakeStore) Get(_ context.Context, id string) (store.OpenItem, error) {
 		}
 	}
 	return store.OpenItem{}, store.ErrNotFound
+}
+
+func (f *fakeStore) ProposalsOfItems(_ context.Context, ids []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, id := range ids {
+		if p, ok := f.proposalOf[id]; ok {
+			out[id] = p
+		}
+	}
+	return out, f.proposalErr
 }
 
 func (f *fakeStore) Candidates(_ context.Context, _, dueBy string) ([]domain.ProposalCandidate, error) {
@@ -290,6 +303,66 @@ func TestListOpenItems_PassesFiltersAndPages(t *testing.T) {
 }
 
 const defaultListLimit = 50
+
+func TestListOpenItems_ReadsByInvoiceAndNamesTheProposalHoldingTheItem(t *testing.T) {
+	s := newFakeStore()
+	s.items = []store.OpenItem{openItem(itemOne, vendorOne, "2026-02-01", "USD", "100.00"), openItem(itemTwo, vendorOne, "2026-02-02", "USD", "200.00")}
+	s.proposalOf = map[string]string{itemTwo: proposalID}
+	r, _ := proposalRouter(s, nil)
+	rec := reader.send(r, http.MethodGet, "/v1/payables/open-items?source_invoices="+itemOne+","+itemTwo, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if got := s.listFilter.SourceInvoiceIDs; len(got) != 2 || got[0] != itemOne || got[1] != itemTwo {
+		t.Fatalf("source invoices = %v", got)
+	}
+	items := decode(t, rec)["items"].([]any)
+	if first := items[0].(map[string]any); first["proposalId"] != nil {
+		t.Fatalf("an unreserved item names a proposal: %v", first)
+	}
+	if second := items[1].(map[string]any); second["proposalId"] != proposalID {
+		t.Fatalf("a reserved item lacks its proposal: %v", second)
+	}
+	one := decode(t, reader.send(r, http.MethodGet, "/v1/payables/open-items/"+itemTwo, ""))
+	if one["proposalId"] != proposalID {
+		t.Fatalf("single read lacks the proposal: %v", one)
+	}
+}
+
+func TestListOpenItems_RejectsBadSourceInvoicesAndHidesProposalLookupFault(t *testing.T) {
+	s := newFakeStore()
+	r, _ := proposalRouter(s, nil)
+	for _, query := range []string{"source_invoices=nope", "source_invoices=" + itemOne + ",nope", "source_invoices=" + strings.Repeat(itemOne+",", 200) + itemOne} {
+		body := wantProblem(t, reader.send(r, http.MethodGet, "/v1/payables/open-items?"+query, ""), http.StatusBadRequest, "COM-0001")
+		if errs, _ := body["errors"].(map[string]any); errs["source_invoices"] == nil {
+			t.Fatalf("errors lack source_invoices for %q: %v", query, body)
+		}
+	}
+	s.items = []store.OpenItem{openItem(itemOne, vendorOne, "2026-02-01", "USD", "100.00")}
+	s.proposalErr = errors.New("connection reset by peer")
+	rec := reader.send(r, http.MethodGet, "/v1/payables/open-items", "")
+	wantProblem(t, rec, http.StatusInternalServerError, "COM-0500")
+	if strings.Contains(rec.Body.String(), "connection reset") {
+		t.Fatalf("fault detail leaked: %s", rec.Body)
+	}
+}
+
+func TestListOpenItems_HeldFilterAndInboxDuty(t *testing.T) {
+	s := newFakeStore()
+	r, _ := proposalRouter(s, nil)
+	inbox := caller{duties: "payables.inbox.read", user: "inbox", entity: entityA}
+	if rec := inbox.send(r, http.MethodGet, "/v1/payables/open-items?held=true", ""); rec.Code != http.StatusOK || !s.listFilter.HeldOnly || !s.listFilter.OpenOnly {
+		t.Fatalf("held=true with the inbox duty: %d %+v", rec.Code, s.listFilter)
+	}
+	wantProblem(t, inbox.send(r, http.MethodGet, "/v1/payables/open-items", ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, inbox.send(r, http.MethodGet, "/v1/payables/open-items?held=true&value_in=USD", ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, inbox.send(r, http.MethodGet, "/v1/payables/open-items?held=false", ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, reader.send(r, http.MethodGet, "/v1/payables/open-items?held=maybe", ""), http.StatusBadRequest, "COM-0001")
+	wantProblem(t, caller{duties: "payment-hold.manage", entity: entityA}.send(r, http.MethodGet, "/v1/payables/open-items?held=true", ""), http.StatusForbidden, "AUTH-0003")
+	if rec := inbox.send(r, http.MethodGet, "/v1/payables/open-items/"+itemOne, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("the inbox duty reads one item: %d", rec.Code)
+	}
+}
 
 func TestListOpenItems_RejectsBadQueries(t *testing.T) {
 	r, _ := proposalRouter(newFakeStore(), nil)

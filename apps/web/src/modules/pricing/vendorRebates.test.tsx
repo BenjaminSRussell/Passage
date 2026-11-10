@@ -171,7 +171,7 @@ describe("Vendor claims on the agreement", () => {
     expect(await screen.findByText("The period was over-claimed: this claim creates a vendor invoice for the difference.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Settle by")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create claim for -150 USD" }));
-    expect(await findAlert()).toHaveTextContent("vendor rebate claim already processed (PRC-0015)");
+    expect(await findAlert()).toHaveTextContent("vendor rebate claim already processed");
   });
 
   it("does not offer claims on a customer agreement", async () => {
@@ -204,10 +204,9 @@ describe("Vendor rebate claims inquiry", () => {
     expect(totals).toHaveTextContent("Waiting for approval 2");
     expect(pageViolations(container)).toEqual([]);
 
-    fill("Vendor id", "V1");
-    fireEvent.click(screen.getByRole("button", { name: "Show claims" }));
-    expect(await screen.findByText("Enter the vendor id (a UUID).")).toBeInTheDocument();
-    fill("Vendor id", V1);
+    fill("Vendor", "V1");
+    expect(screen.getByLabelText("Vendor")).toHaveAttribute("data-value", "");
+    fill("Vendor", V1);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "APPROVED" } });
     fireEvent.click(screen.getByRole("button", { name: "Show claims" }));
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("APPROVED"));
@@ -226,7 +225,7 @@ describe("Vendor rebate claims inquiry", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.rebate.view" });
     renderAt("/pricing/rebates/claims");
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.rebate.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.rebate.view");
   });
 
   it("checks filters and sums per currency", () => {
@@ -266,7 +265,7 @@ describe("Vendor rebate claim detail", () => {
     };
     const first = renderAt(`/pricing/rebates/claims/${RC1}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve claim" }));
-    expect(await findAlert()).toHaveTextContent("cannot approve it (PRC-0046)");
+    expect(await findAlert()).toHaveTextContent("cannot approve it");
     first.unmount();
     server.handler = () => json(404, { code: "PRC-0044", detail: `no vendor rebate claim ${RC1}` });
     renderAt(`/pricing/rebates/claims/${RC1}`);

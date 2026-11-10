@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -27,6 +28,7 @@ import {
 import { MAX_DEPTH, MAX_NODES, draftFromOutline, newOutlineRow, toOutlineInput, type OutlineDraftRow } from "./outline";
 import { Details, LoadError, ShortId, StatusBadge, currencyPattern, dash, decimalPattern, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -109,8 +111,8 @@ export function OutlineEditor({ idPrefix, rows, onChange, errors }: { idPrefix: 
             </FormField>
             {r.kind === "ITEM" ? (
               <>
-                <FormField id={`${idPrefix}-${i}-product`} label="Service product id" optional error={errors[`outline[${i}].productId`]}>
-                  {(c) => <Input {...c} value={r.productId} onChange={(e) => set(i, { productId: e.target.value })} />}
+                <FormField id={`${idPrefix}-${i}-product`} label="Service product" optional error={errors[`outline[${i}].productId`]}>
+                  {(c) => <EntityLookup entity="product" {...c} value={r.productId} onChange={(e) => set(i, { productId: e.target.value })} />}
                 </FormField>
                 <FormField id={`${idPrefix}-${i}-qty`} label="Quantity" error={errors[`outline[${i}].qty`]}>
                   {(c) => <Input {...c} inputMode="decimal" value={r.qty} onChange={(e) => set(i, { qty: e.target.value })} />}
@@ -350,7 +352,7 @@ export function ServiceSpecPage() {
         actions={back}
       />
       <Alert tone="danger" live="alert">
-        {failure ? (stale ? `Someone else changed this order. Reload the page and try again. (${failure.code})` : `${failure.message} (${failure.code})`) : null}
+        {failure ? (stale ? <ProblemMessage problem={failure} message="Someone else changed this order. Reload the page and try again." /> : <ProblemMessage problem={failure} />) : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice}
@@ -437,7 +439,7 @@ export function ServiceSpecPage() {
               ) : null}
               {check?.failure ? (
                 <Alert tone="danger" live="alert">
-                  {check.failure.message} ({check.failure.code})
+                  <ProblemMessage problem={check.failure} />
                 </Alert>
               ) : null}
             </form>
@@ -645,8 +647,8 @@ function ModelFields({ id, form, set, errors, creating }: { id: string; form: Mo
     <div className={styles.grid}>
       {creating ? (
         <>
-          <FormField id={`${id}-legal-entity`} label="Legal entity id" error={errors.legalEntityId}>
-            {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+          <FormField id={`${id}-legal-entity`} label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
           </FormField>
           <FormField id={`${id}-code`} label="Code" hint="Upper case, for example MAINT-VISIT" error={errors.code}>
             {(c) => <Input {...c} value={form.code} maxLength={20} onChange={(e) => set({ code: e.target.value.toUpperCase() })} />}
@@ -716,7 +718,7 @@ export function ModelServiceSpecCreatePage() {
           <OutlineEditor idPrefix="msr" rows={rows} onChange={setRows} errors={errors} />
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -828,8 +830,8 @@ export function ModelServiceSpecDetailPage() {
           >
             {failure
               ? stale
-                ? `Someone else changed this model since you opened it. Reload to see their change, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else changed this model since you opened it. Reload to see their change, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">

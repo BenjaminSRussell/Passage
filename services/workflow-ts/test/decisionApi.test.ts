@@ -9,6 +9,9 @@ const OTHER_LE = "00000000-0000-0000-0000-0000000000a2";
 const TENANT = "00000000-0000-0000-0000-000000000001";
 const OTHER_TENANT = "00000000-0000-0000-0000-000000000002";
 const ECO = "00000000-0000-0000-0000-0000000000e1";
+const PLAN = "00000000-0000-0000-0000-0000000000b1";
+const UNIT = "00000000-0000-0000-0000-0000000000c1";
+const SCENARIO = "00000000-0000-0000-0000-0000000000b2";
 const NCR = "00000000-0000-0000-0000-0000000000c1";
 
 type Reading = Record<string, unknown> | "missing";
@@ -42,13 +45,14 @@ describe("decision routes", () => {
     signals = [];
     readings.clear();
     readings.set(`eco-approval:${ECO}`, { tenantId: TENANT, legalEntityId: LE, requester: "rita", status: "awaiting_approval" });
+    readings.set(`budget-plan:${PLAN}:1`, { tenantId: TENANT, legalEntityId: LE, requester: "pat", status: "awaiting_review" });
     readings.set(`capa:${NCR}`, { tenantId: TENANT, legalEntityId: LE, status: "awaiting_effectiveness", currentStep: 8, implementer: "engineer" });
   });
 
   function post(path: string, body: unknown, headers: Record<string, string> = {}) {
     return fetch(`${base}${path}`, {
       method: "POST",
-      headers: { "X-Passage-Tenant": TENANT, "X-Passage-User": "alice", "X-Passage-Legal-Entity": `${OTHER_LE},${LE.toUpperCase()}`, "X-Passage-Duties": "engineering.eco.approve,quality.capa.maintain", ...headers },
+      headers: { "X-Passage-Tenant": TENANT, "X-Passage-User": "alice", "X-Passage-Legal-Entity": `${OTHER_LE},${LE.toUpperCase()}`, "X-Passage-Duties": "engineering.eco.approve,quality.capa.maintain,budget.plan.decide", ...headers },
       body: JSON.stringify(body),
     });
   }
@@ -84,6 +88,42 @@ describe("decision routes", () => {
     expect((await post(`/v1/workflows/eco-approvals/${ECO}:approve`, {})).status).toBe(404);
     readings.set(`eco-approval:${ECO}`, { tenantId: TENANT, legalEntityId: LE, requester: "rita", status: "timed_out" });
     expect((await post(`/v1/workflows/eco-approvals/${ECO}:approve`, {})).status).toBe(409);
+    expect(signals).toEqual([]);
+  });
+
+  it("signals a budget plan stage sign-off with the actor from the request principal, never from the body", async () => {
+    const response = await post(`/v1/workflows/budget-plans/${PLAN}/stages/approve:sign-off`, { submission: 1, orgUnitId: UNIT, scenarioId: SCENARIO, actor: "mallory" });
+    expect(response.status).toBe(202);
+    expect(signals).toEqual([
+      { workflowId: `budget-plan:${PLAN}:1`, name: "budget-plan-decision", args: [{ decision: "sign-off", stage: "approve", orgUnitId: UNIT, scenarioId: SCENARIO, actor: "alice", scope: [OTHER_LE, LE] }] },
+    ]);
+  });
+
+  it("signals a budget plan rejection with a trimmed reason", async () => {
+    await post(`/v1/workflows/budget-plans/${PLAN}:reject`, { submission: 1, reason: " too high " });
+    expect(signals[0]?.args).toEqual([{ decision: "reject", reason: "too high", actor: "alice", scope: [OTHER_LE, LE] }]);
+  });
+
+  it.each([
+    ["no decide duty", `/v1/workflows/budget-plans/${PLAN}/stages/review:sign-off`, { submission: 1, orgUnitId: UNIT }, { "X-Passage-Duties": "engineering.eco.approve" }, 403],
+    ["the submitter", `/v1/workflows/budget-plans/${PLAN}/stages/review:sign-off`, { submission: 1, orgUnitId: UNIT }, { "X-Passage-User": "pat" }, 403],
+    ["another tenant", `/v1/workflows/budget-plans/${PLAN}/stages/review:sign-off`, { submission: 1, orgUnitId: UNIT }, { "X-Passage-Tenant": OTHER_TENANT }, 404],
+    ["a legal entity outside the user's scope", `/v1/workflows/budget-plans/${PLAN}/stages/review:sign-off`, { submission: 1, orgUnitId: UNIT }, { "X-Passage-Legal-Entity": OTHER_LE }, 403],
+    ["no submission", `/v1/workflows/budget-plans/${PLAN}/stages/review:sign-off`, { orgUnitId: UNIT }, {}, 400],
+    ["a bad org unit", `/v1/workflows/budget-plans/${PLAN}/stages/review:sign-off`, { submission: 1, orgUnitId: "x" }, {}, 400],
+    ["an approval without a scenario", `/v1/workflows/budget-plans/${PLAN}/stages/approve:sign-off`, { submission: 1, orgUnitId: UNIT }, {}, 400],
+    ["a review naming a scenario", `/v1/workflows/budget-plans/${PLAN}/stages/review:sign-off`, { submission: 1, orgUnitId: UNIT, scenarioId: SCENARIO }, {}, 400],
+    ["a rejection without a reason", `/v1/workflows/budget-plans/${PLAN}:reject`, { submission: 1 }, {}, 400],
+    ["a submission with no workflow", `/v1/workflows/budget-plans/${PLAN}:reject`, { submission: 2, reason: "x" }, {}, 404],
+  ])("refuses a budget plan decision from %s and signals nothing", async (_name, path, body, headers, status) => {
+    const response = await post(path, body, headers);
+    expect(response.status).toBe(status);
+    expect(signals).toEqual([]);
+  });
+
+  it("refuses a budget plan decision once the submission ended", async () => {
+    readings.set(`budget-plan:${PLAN}:1`, { tenantId: TENANT, legalEntityId: LE, requester: "pat", status: "approved" });
+    expect((await post(`/v1/workflows/budget-plans/${PLAN}:reject`, { submission: 1, reason: "x" })).status).toBe(409);
     expect(signals).toEqual([]);
   });
 

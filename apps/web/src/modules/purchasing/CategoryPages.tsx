@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -17,6 +18,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, StatusBadge, datePattern, statusLabel, todayIso, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUSES: AssignmentStatus[] = ["APPROVED", "PROVISIONAL", "BLOCKED"];
 
@@ -185,14 +187,14 @@ export function CategoryVendorCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Assignment">
           <div className={styles.grid}>
-            <FormField id="cv-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+            <FormField id="cv-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="cv-category" label="Category" hint="As written on requisition and PO lines and catalog entries" error={errors.category}>
               {(c) => <Input {...c} value={form.category} onChange={(e) => set({ category: e.target.value })} />}
             </FormField>
-            <FormField id="cv-vendor" label="Vendor id" error={errors.vendorId}>
-              {(c) => <Input {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
+            <FormField id="cv-vendor" label="Vendor" error={errors.vendorId}>
+              {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: form.legalEntityId || undefined }} {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
             </FormField>
             <FormField id="cv-status" label="Status" error={errors.status}>
               {(c) => (
@@ -217,7 +219,7 @@ export function CategoryVendorCreatePage() {
           </div>
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -349,8 +351,8 @@ export function CategoryVendorDetailPage() {
           >
             {failure
               ? stale
-                ? `Someone else changed this assignment since you opened it. Reload to see their change, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else changed this assignment since you opened it. Reload to see their change, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">
@@ -462,14 +464,14 @@ export function CategoryManagersPage() {
       <Card title="Add a manager">
         <form className={styles.form} onSubmit={onAdd} noValidate>
           <div className={styles.grid}>
-            <FormField id="cm-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => setForm({ ...form, legalEntityId: e.target.value })} />}
+            <FormField id="cm-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => setForm({ ...form, legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="cm-category" label="Category" error={errors.category}>
               {(c) => <Input {...c} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />}
             </FormField>
-            <FormField id="cm-worker" label="Worker id" error={errors.workerId}>
-              {(c) => <Input {...c} value={form.workerId} onChange={(e) => setForm({ ...form, workerId: e.target.value })} />}
+            <FormField id="cm-worker" label="Worker" error={errors.workerId}>
+              {(c) => <EntityLookup entity="worker" {...c} value={form.workerId} onChange={(e) => setForm({ ...form, workerId: e.target.value })} />}
             </FormField>
           </div>
           <div className={styles.actions}>
@@ -480,7 +482,7 @@ export function CategoryManagersPage() {
         </form>
       </Card>
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice}

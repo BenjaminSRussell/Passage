@@ -309,7 +309,7 @@ func (a *API) listLegalEntities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.LegalEntityFilter{Status: q.Get("status"), Country: q.Get("country"), Currency: q.Get("currency")}
+	f := store.LegalEntityFilter{Status: q.Get("status"), Country: q.Get("country"), Currency: q.Get("currency"), Query: q.Get("q")}
 	for _, c := range []struct {
 		field, rule string
 		invalid     bool

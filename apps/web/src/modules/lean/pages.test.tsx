@@ -230,7 +230,7 @@ describe("production flows", () => {
     const { container } = renderAt("/lean/flows/new");
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sauce line" } });
     fireEvent.change(screen.getByLabelText("Value stream id"), { target: { value: STREAM } });
-    fireEvent.change(screen.getByLabelText("Site id"), { target: { value: SITE } });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.change(screen.getByLabelText("Activity name"), { target: { value: "Mix" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Create flow" }));
@@ -257,7 +257,7 @@ describe("production flows", () => {
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Active from"), { target: { value: "2026-11-02" } });
     fireEvent.click(screen.getByRole("button", { name: "Activate flow" }));
-    expect(await findAlert()).toHaveTextContent("flow activity Fill has no output location (LEAN-0004)");
+    expect(await findAlert()).toHaveTextContent("flow activity Fill has no output location");
     expect(calls.at(-1)?.body).toEqual({ version: 1, activeFrom: "2026-11-02" });
     refuse = false;
     fireEvent.click(screen.getByRole("button", { name: "Activate flow" }));
@@ -303,7 +303,7 @@ describe("flow versions", () => {
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     fireEvent.change(field, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Create new version" }));
-    expect(await findAlert()).toHaveTextContent("already has a newer version (LEAN-0115)");
+    expect(await findAlert()).toHaveTextContent("already has a newer version");
   });
 
   it("activates a new version, refuses a start that is too early, and shows the replaced version's end", async () => {
@@ -321,7 +321,7 @@ describe("flow versions", () => {
     expect(await screen.findByText(/expires the version it replaces/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Active from"), { target: { value: "2026-11-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Activate flow" }));
-    expect(await findAlert()).toHaveTextContent("must start after version 1 started on 2026-11-02 (LEAN-0116)");
+    expect(await findAlert()).toHaveTextContent("must start after version 1 started on 2026-11-02");
     fireEvent.click(screen.getByRole("link", { name: "the previous version" }));
     expect(await screen.findByText("Version 1")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Flow facts" })).toHaveTextContent("Active to 2026-11-30");
@@ -384,8 +384,8 @@ describe("kanban rules", () => {
     const { container } = renderAt(`/lean/rules/new?flowId=${FLOW}`);
     await screen.findByRole("option", { name: "Sauce line" });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "mix-a" } });
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
-    fireEvent.change(screen.getByLabelText("Site id"), { target: { value: SITE } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.change(screen.getByLabelText("Quantity per card"), { target: { value: "50" } });
     fireEvent.change(screen.getByLabelText("Lead time (hours)"), { target: { value: "48" } });
     fireEvent.change(screen.getByLabelText("Daily demand"), { target: { value: "100" } });
@@ -436,7 +436,7 @@ describe("kanban rules", () => {
     };
     renderAt(`/lean/rules/${RULE}`);
     fireEvent.click(await screen.findByRole("button", { name: "Generate kanbans" }));
-    expect(await findAlert()).toHaveTextContent("rule MIX-A already has 3 active kanbans (max 3) (LEAN-0002)");
+    expect(await findAlert()).toHaveTextContent("rule MIX-A already has 3 active kanbans (max 3)");
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ ruleId: RULE });
   });
 });
@@ -481,7 +481,7 @@ describe("kanban board", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move MIX-A-0001" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("MIX-A-0001 stays in Planned");
-    expect(alert).toHaveTextContent("kanban move planned → completed is not allowed (LEAN-0001)");
+    expect(alert).toHaveTextContent("kanban move planned → completed is not allowed");
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ to: "completed", version: 2 });
     expect(within(screen.getByRole("list", { name: "Planned cards" })).getByText("MIX-A-0001")).toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: "Completed cards" })).queryByText("MIX-A-0001")).toBeNull();
@@ -506,7 +506,7 @@ describe("kanban board", () => {
       return json(200, { items: [] });
     };
     renderAt("/lean/board");
-    expect(await screen.findByText("service unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("service unavailable")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -570,7 +570,7 @@ describe("slice 2", () => {
     fireEvent.change(screen.getByLabelText("Completed quantity"), { target: { value: "20" } });
     fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "periodic-po" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview PO lines" }));
-    expect(await findAlert()).toHaveTextContent("no valid purchase agreement for service SVC-PLATING on 2027-03-10 (LEAN-0005)");
+    expect(await findAlert()).toHaveTextContent("no valid purchase agreement for service SVC-PLATING on 2027-03-10");
     expect((calls[0].body as { mode: string }).mode).toBe("periodic-po");
   });
 });
@@ -707,7 +707,7 @@ describe("slice 4: kanban jobs", () => {
     fireEvent.click(within(planned).getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("MIX-A-0002 · 1 Mix stays in Planned");
-    expect(alert).toHaveTextContent("(LEAN-0001)");
+    expect(alert).toHaveTextContent("LEAN-0001");
     expect(within(screen.getByRole("list", { name: "Planned jobs" })).getByText("MIX-A-0002")).toBeInTheDocument();
   });
 
@@ -722,7 +722,7 @@ describe("slice 4: kanban jobs", () => {
     unmount();
     handler = (url) => (url.pathname === "/api/v1/lean/board" ? json(503, { code: "COM-0500", detail: "service unavailable" }) : json(200, { items: [] }));
     renderAt(`/lean/work-cell?workCellId=${CELL}`);
-    expect(await screen.findByText("service unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("service unavailable")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -787,7 +787,7 @@ describe("slice 4: kanban jobs", () => {
     unmount();
     handler = () => json(404, { code: "LEAN-0103", detail: "kanban not found" });
     renderAt(`/lean/kanbans/${K2}`);
-    expect(await screen.findByText("kanban not found (LEAN-0103)")).toBeInTheDocument();
+    expect(await screen.findByText("kanban not found")).toBeInTheDocument();
   });
 });
 
@@ -875,7 +875,7 @@ describe("slice 5: flow costing", () => {
     expect(await screen.findByText("No costing periods yet")).toBeInTheDocument();
     fail = true;
     cleanupAndRender(`/lean/costing?flowId=${FLOW}`);
-    expect(await findAlert()).toHaveTextContent("production flow not found (LEAN-0101)");
+    expect(await findAlert()).toHaveTextContent("production flow not found");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No costing periods yet")).toBeInTheDocument();
@@ -936,7 +936,7 @@ describe("slice 5: flow costing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settle period" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Cards with jobs in this period are still open");
-    expect(alert).toHaveTextContent("1 kanbans open (MIX-A-0002) (LEAN-0003)");
+    expect(alert).toHaveTextContent("1 kanbans open (MIX-A-0002)");
     const first = calls.filter((c) => c.method === "POST").at(-1)!;
     expect(first.body).toEqual({ version: 1, materialCost: "900.10", conversionCost: "300", outputValue: "1150.25" });
     refuse = false;
@@ -1070,7 +1070,7 @@ describe("slice 6: rule analysis, backflush and export", () => {
     expect(tiles).toHaveTextContent("Active cards 3");
     fail = true;
     cleanupAndRender(`/lean/rules/${RULE}`);
-    expect(await findAlert()).toHaveTextContent("request failed validation (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("request failed validation");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No completed cycles in this period")).toBeInTheDocument();
@@ -1097,7 +1097,7 @@ describe("slice 6: rule analysis, backflush and export", () => {
 
     fireEvent.change(mix, { target: { value: "90" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview backflush" }));
-    expect(await findAlert()).toHaveTextContent("Fill completed 9 jobs in the period and needs a cost rate (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("Fill completed 9 jobs in the period and needs a cost rate");
     const sent = calls.find((c) => c.url.pathname.endsWith(":backflush"))!;
     // A read-only preview: only the rates given, and no Idempotency-Key.
     expect(sent.body).toEqual({ rates: [{ activityId: MIX, ratePerHour: "90" }] });
@@ -1134,7 +1134,7 @@ describe("slice 6: rule analysis, backflush and export", () => {
     expect(header(sent, "Accept")).toBe("text/csv");
     fail = true;
     fireEvent.click(screen.getByRole("button", { name: "Export periods" }));
-    expect(await findAlert()).toHaveTextContent("missing duty lean.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty lean.read");
     expect(screen.queryByRole("link", { name: "Download CSV" })).toBeNull();
   });
 });
@@ -1192,7 +1192,7 @@ describe("slice 7: retrying board commands", () => {
     };
     renderAt(`/lean/work-cell?workCellId=${CELL}`);
     fireEvent.click(await screen.findByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
-    expect(await findAlert()).toHaveTextContent("(LEAN-0001)");
+    expect(await findAlert()).toHaveTextContent("LEAN-0001");
     await waitFor(() => expect(screen.getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Start MIX-A-0002 · 1 Mix" }));
     await waitFor(() => expect(keysOf(`/api/v1/lean/kanban-jobs/${J2}:start`)).toHaveLength(2));
@@ -1331,7 +1331,7 @@ describe("slice 8: fixed-kanban count check", () => {
     renderAt(`/lean/rules/${RULE}`);
     fireEvent.change(await screen.findByLabelText("Daily demand"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Check count" }));
-    expect(await findAlert()).toHaveTextContent("kanban rule MIX-A is not a fixed rule (LEAN-0113)");
+    expect(await findAlert()).toHaveTextContent("kanban rule MIX-A is not a fixed rule");
     expect(screen.queryByRole("list", { name: "Kanban count check" })).toBeNull();
     refuse = false;
     fireEvent.click(screen.getByRole("button", { name: "Check count" }));

@@ -164,7 +164,7 @@ describe("cash advance list", () => {
     const fetchMock = stubFetch([503, { code: "COM-0503", detail: "cash advance, requisition and card persistence is not configured" }], [200, { items: [], nextCursor: "" }]);
     renderAt("/expense/cash-advances");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("(COM-0503)");
+    expect(alert).toHaveTextContent("COM-0503");
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No cash advances yet")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -195,7 +195,7 @@ describe("request a cash advance", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.click(screen.getByRole("button", { name: "Request advance" }));
-    expect(await findAlert()).toHaveTextContent("advance exceeds the limit 2000.00 (EXP-ADV-001)");
+    expect(await findAlert()).toHaveTextContent("advance exceeds the limit 2000.00");
     const first = call(fetchMock, 0);
     expect(first).toMatchObject({ url: "/api/v1/expense/cash-advances", method: "POST", body: { amount: "2500.00", currency: "USD", tripEnd: "2025-03-10" } });
     expect(first.body).not.toHaveProperty("travelRequisitionId");
@@ -226,7 +226,7 @@ describe("cash advance detail", () => {
     const fetchMock = stubFetch([200, advance()], [403, { code: "EXP-SOD-001", detail: "you requested this advance; another approver must decide it" }]);
     renderAt(`/expense/cash-advances/${ADV}`);
     fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
-    expect(await findAlert()).toHaveTextContent("another approver must decide it (EXP-SOD-001)");
+    expect(await findAlert()).toHaveTextContent("another approver must decide it");
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(call(fetchMock, 2).headers["Idempotency-Key"]).toBe(call(fetchMock, 1).headers["Idempotency-Key"]);
@@ -285,7 +285,7 @@ describe("travel requisitions", () => {
 
     stubFetch([500, { code: "COM-0500", detail: "internal error" }]);
     renderAt("/expense/travel-requisitions");
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
   });
 
   it("validates a requisition before sending", () => {
@@ -369,7 +369,7 @@ describe("travel requisitions", () => {
     );
     const view = renderAt(`/expense/travel-requisitions/${REQ}`);
     fireEvent.click(await screen.findByRole("button", { name: "Submit for approval" }));
-    expect(await findAlert()).toHaveTextContent("(EXP-TR-005)");
+    expect(await findAlert()).toHaveTextContent("EXP-TR-005");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(await screen.findByText("Awaiting approval")).toBeInTheDocument();
     view.unmount();
@@ -425,7 +425,7 @@ describe("card transactions", () => {
     expect(sent.headers["Idempotency-Key"]).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: ` ${LE}` } });
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    expect(await findAlert()).toHaveTextContent("was already imported (EXP-CARD-002)");
+    expect(await findAlert()).toHaveTextContent("was already imported");
     expect(call(fetchMock, 1).headers["Idempotency-Key"]).not.toBe(sent.headers["Idempotency-Key"]);
   });
 });

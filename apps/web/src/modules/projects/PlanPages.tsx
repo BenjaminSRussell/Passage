@@ -36,6 +36,7 @@ import { dash, planKindLabel, planKindTone } from "./labels";
 import plan from "./plans.module.css";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export function PlanBadge({ version }: { version: PlanVersion }) {
   return <Badge tone={planKindTone[version.kind]}>{planKindLabel[version.kind]}</Badge>;
@@ -138,12 +139,12 @@ export function ProjectPlansPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not create the plan version" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load the plan versions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.loading && plans.length === 0 ? (
         <Card>
@@ -314,7 +315,7 @@ export function WbsPage() {
       <div className={styles.stack}>
         <PageHeader title="Plan version" />
         <Alert tone="danger" title="Could not load the plan version" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -456,7 +457,7 @@ export function WbsPage() {
           live="alert"
           action={stale ? <Button size="sm" onClick={reload}>Reload plan</Button> : undefined}
         >
-          {stale ? "Reload to see the latest WBS; your unsaved changes are discarded." : `${failure.message} (${failure.code})`}
+          {stale ? "Reload to see the latest WBS; your unsaved changes are discarded." : <ProblemMessage problem={failure} />}
           {!stale && errorList.length > 0 ? (
             <ul className={plan.errorList}>
               {errorList.map(([k, v]) => (

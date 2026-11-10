@@ -41,10 +41,10 @@ describe("purchasing policy list", () => {
   it("opens a legal entity by id and refuses a malformed one", async () => {
     stubFetch(() => json({ items: [] }));
     const { router } = renderAt("/purchasing/policies");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: "nope" } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: "nope" } });
     fireEvent.click(screen.getByRole("button", { name: "Open policy" }));
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.click(screen.getByRole("button", { name: "Open policy" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/policies/${LE}`));
   });
@@ -101,7 +101,7 @@ describe("purchasing policy detail", () => {
     renderAt(`/purchasing/policies/${LE}`);
     fireEvent.click(await screen.findByLabelText("Allow invoicing before receipt"));
     fireEvent.click(screen.getByRole("button", { name: "Update policy" }));
-    expect(await screen.findByText(/Someone else saved this policy.*PRC-POL-003/)).toBeInTheDocument();
+    expect(await screen.findByText(/Someone else saved this policy/)).toBeInTheDocument();
     expect(screen.getByLabelText("Allow invoicing before receipt")).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Reload policy" }));
     expect(await screen.findByText("3")).toBeInTheDocument();

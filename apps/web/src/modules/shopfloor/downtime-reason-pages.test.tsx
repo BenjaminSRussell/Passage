@@ -85,7 +85,7 @@ describe("Downtime reasons list", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [] }));
     renderAt("/shopfloor/downtime-reasons");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No downtime reasons yet")).toBeInTheDocument();
@@ -113,7 +113,7 @@ describe("Downtime reasons list", () => {
     renderAt("/shopfloor/downtime-reasons");
     const table = await findTable({ name: "Downtime reasons" });
     fireEvent.click(await within(table).findByRole("button", { name: "Deactivate downtime reason JAM" }));
-    expect(await screen.findByText(/changed by someone else \(SF-0143\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/changed by someone else/)).toBeInTheDocument();
   });
 });
 
@@ -199,6 +199,6 @@ describe("Coding a downtime with the reason master", () => {
     await screen.findByLabelText("Reason code");
     fill("Reason code", "JAM");
     fireEvent.click(screen.getByRole("button", { name: "Save reason" }));
-    expect(await screen.findByText(/inactive \(SF-0159\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/inactive/)).toBeInTheDocument();
   });
 });

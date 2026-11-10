@@ -19,8 +19,10 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
 )
@@ -48,7 +50,13 @@ type API struct {
 	store        store.Store
 	maxFileBytes int64
 	now          func() time.Time
+	ebics        EBICS
+	channels     bankconnect.Channels
+	recons       Reconciliations
+	ledger       ledgerclient.Ledger
+	glProfiles   map[string]GLProfile
 
+	reconCounters
 	accountsCreated      atomic.Int64
 	accountsTransitioned atomic.Int64
 	statementsImported   atomic.Int64
@@ -80,6 +88,13 @@ func (a *API) WithMaxFileMB(mb int) (*API, error) {
 	}
 	a.maxFileBytes = int64(mb) << 20
 	return a, nil
+}
+
+// WithChannels sets the bank channels TREASURY_BANK_CHANNELS enabled, for the
+// payment-file producers that send through them.
+func (a *API) WithChannels(c bankconnect.Channels) *API {
+	a.channels = c
+	return a
 }
 
 // Register mounts every route on r.
@@ -125,6 +140,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-matches", a.listMatches)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/reconciliation-matches/{id}", a.getMatch)
 	r.With(authz.RequireDuty(dutyReconcile)).Post("/v1/treasury/reconciliation-matches/{id}:unmatch", a.unmatch)
+	a.registerBankReconciliation(r)
+	a.registerEBICS(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -152,6 +169,13 @@ func (a *API) Metrics() http.Handler {
 			{"treasury_reconciliation_auto_matches_total", "Matches stored by reconciliation runs.", a.autoMatches.Load()},
 			{"treasury_reconciliation_manual_matches_total", "Manual matches stored.", a.manualMatches.Load()},
 			{"treasury_reconciliation_unmatches_total", "Matches dissolved.", a.unmatches.Load()},
+			{"treasury_bank_reconciliations_created_total", "Bank reconciliations opened.", a.reconCreated.Load()},
+			{"treasury_bank_reconciliations_closed_total", "Bank reconciliations closed.", a.reconClosed.Load()},
+			{"treasury_bank_reconciliations_reopened_total", "Bank reconciliations reopened.", a.reconReopened.Load()},
+			{"treasury_reconciliation_lines_excluded_total", "Statement lines excluded with a reason.", a.linesExcluded.Load()},
+			{"treasury_line_transactions_posted_total", "Bank transactions created from statement lines and posted.", a.lineTxPosted.Load()},
+			{"treasury_line_transactions_refused_total", "Line transactions the ledger or the posting profile refused.", a.lineTxRefused.Load()},
+			{"treasury_line_transactions_unanswered_total", "Line transactions left pending because the ledger did not answer.", a.lineTxNoAnswer.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", m.name, m.help, m.name, m.name, m.value)
 		}
@@ -220,6 +244,7 @@ func validationFailed(w http.ResponseWriter, r *http.Request, fields map[string]
 
 // problemFrom turns domain rule violations into problem details; other errors pass through.
 func problemFrom(err error) error {
+	err = store.AsGuardError(err)
 	var de *domain.Error
 	if !errors.As(err, &de) {
 		return err

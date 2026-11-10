@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { dash, statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -226,7 +227,7 @@ export function MaterialRequirementsPage({ onOpenOrder }: MaterialRequirementsPa
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The material requirements are not available" live="alert">
           {state.error.status === 403
             ? "You need the View production orders duty to see the material requirements."
-            : `${state.error.message} (${state.error.code})`}
+            : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>
@@ -259,7 +260,7 @@ export function MaterialRequirementsPage({ onOpenOrder }: MaterialRequirementsPa
           )}
           {state.moreError ? (
             <Alert tone="danger" title="More material requirements could not be loaded" live="alert">
-              {`${state.moreError.message} (${state.moreError.code})`}
+              {<ProblemMessage problem={state.moreError} />}
             </Alert>
           ) : null}
           {state.nextCursor && !state.loading ? (
@@ -269,7 +270,7 @@ export function MaterialRequirementsPage({ onOpenOrder }: MaterialRequirementsPa
               </Button>
             </div>
           ) : null}
-          <p className={styles.hint}>Outstanding is required minus issued (posted picking lists, backflush included, net of reversals). Stock on hand is not compared yet (wave 16).</p>
+          <p className={styles.hint}>Outstanding is required minus issued (posted picking lists, backflush included, net of reversals). Stock on hand isn't compared yet.</p>
         </>
       )}
     </div>

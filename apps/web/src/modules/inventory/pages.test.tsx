@@ -163,7 +163,7 @@ describe("On-hand inquiry", () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty inventory.read" });
     renderAt("/inventory/onhand");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty inventory.read");
     expect(screen.queryByRole("table", { name: "On-hand" })).not.toBeInTheDocument();
     handler = () => json(200, { items: [onHandRow], truncated: false });
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
@@ -205,7 +205,7 @@ describe("Journal list", () => {
     first.unmount();
     handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/inventory/journals");
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
   });
 });
 
@@ -248,7 +248,7 @@ describe("New journal", () => {
 
     handler = () => json(403, { code: "AUTH-0003", detail: "the legal entity is outside your scope" });
     fireEvent.click(screen.getByRole("button", { name: "Create journal" }));
-    expect(await screen.findByText("the legal entity is outside your scope (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("the legal entity is outside your scope")).toBeInTheDocument();
   });
 });
 
@@ -315,7 +315,7 @@ describe("Journal detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Post journal" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The journal was not posted");
-    expect(alert).toHaveTextContent("(shortfall 4) (INV-NEG-001)");
+    expect(alert).toHaveTextContent("(shortfall 4)");
     expect(screen.getByRole("button", { name: "Post journal" })).toBeInTheDocument();
   });
 

@@ -30,6 +30,7 @@ import {
 } from "./api/client";
 import { dash, QUANTITY } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** A signed decimal with at most 12 integer digits and 6 decimals. */
 export const NUMBER = /^-?\d{1,12}(\.\d{1,6})?$/;
@@ -99,7 +100,7 @@ export function Refusal({ title, failure }: { title: string; failure: Problem | 
   if (!failure) return null;
   return (
     <Alert tone="danger" title={title} live="alert">
-      {failure.message} ({failure.code})
+      <ProblemMessage problem={failure} />
     </Alert>
   );
 }

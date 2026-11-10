@@ -59,6 +59,7 @@ const MaxEntries = 200000
 type Statement struct {
 	Format        string
 	StatementID   string
+	LegacyID      string // id an earlier parser version gave the same statement; empty when none
 	Sequence      int    // electronic sequence number, 0 when the format has none
 	Account       string // IBAN, or the bank's own account identifier when the file has none (BAI2, MT940 :25:, camt Othr/Id)
 	Currency      string

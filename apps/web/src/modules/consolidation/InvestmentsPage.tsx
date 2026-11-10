@@ -12,6 +12,7 @@ import { Fields, type FieldSpec } from "./Fields";
 import { amount, isCurrency, isDecimal, isNonZero, isPositive, isSignedDecimal } from "./format";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type EquityKey = "currency" | "ownershipPct" | "openingCarrying" | "netIncome" | "dividendsReceived";
 type DivestKey = "currency" | "proceeds" | "netAssetsCarrying" | "goodwill" | "nciCarrying" | "ctaRecycled";
@@ -132,7 +133,7 @@ export function InvestmentsPage() {
           {eq.failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The equity method was not applied" live="alert">
-                {eq.failure.message} ({eq.failure.code})
+                <ProblemMessage problem={eq.failure} />
               </Alert>
             </div>
           ) : null}
@@ -162,7 +163,7 @@ export function InvestmentsPage() {
             icon="percent"
             headingLevel={3}
             title="No equity-method result yet"
-            description="The form holds acceptance example AC-40.14. Apply it, or enter your own associate."
+            description="The form is filled in with an example. Apply it, or enter your own associate."
           />
         </Card>
       )}
@@ -172,7 +173,7 @@ export function InvestmentsPage() {
           {dv.failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The divestiture gain was not computed" live="alert">
-                {dv.failure.message} ({dv.failure.code})
+                <ProblemMessage problem={dv.failure} />
               </Alert>
             </div>
           ) : null}

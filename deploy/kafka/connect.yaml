@@ -92,6 +92,8 @@ spec:
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.sales.returnorder, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.sales.deliverytolerance, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.fulfillment.shipment, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.fulfillment.pick, patternType: literal}
@@ -119,6 +121,14 @@ spec:
       - resource: {type: topic, name: passage.fulfillment.returnablepackaging, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.fulfillment.exception, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.budget.plan, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.billing.invoice, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.manifest, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.fulfillment.warehouseoperationrule, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]
@@ -530,6 +540,118 @@ spec:
     transforms.outbox.route.by.field: type
     transforms.outbox.route.topic.regex: 'dev\.passage\.fulfillment\.(?<routedByValue>[a-z][a-z0-9]*)\.[a-z][a-z0-9]*\.v[0-9]+'
     transforms.outbox.route.topic.replacement: passage.fulfillment.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# Budgeting's outbox carries six aggregate types (register, budgetcheck, encumbrance, budgetreservation, investment_program, plan) but
+# only plan is published (plan.submitted, plan.approved, plan.rejected): it routes to passage.budget.plan, the AsyncAPI channel in
+# services/budgeting/events/asyncapi.yaml, which workflow-ts reads to start budgetPlanWorkflow (deploy/kafka/workflow-ts-consumer.yaml).
+# The stock Kafka Filter SMT with the TopicNameMatches predicate (both in Kafka 4.0 connect-transforms, no scripting) drops every
+# routed record whose topic is not passage.budget.plan, so the others never reach a topic the debezium user has no ACL for.
+# Adding a published aggregate type means widening the predicate pattern and adding its literal ACL (deploy/scripts/test_argocd_apps.py).
+# snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# debezium_cdc_budgeting has REPLICATION; the budgeting database and that role are provisioned with the service's database.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-budgeting
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.hello-ledger.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc-budgeting:username}
+    database.password: ${secrets:kafka/debezium-cdc-budgeting:password}
+    database.dbname: passage_budgeting
+    topic.prefix: passage.budget
+    slot.name: passage_outbox_budgeting
+    publication.name: passage_outbox_budgeting
+    publication.autocreate.mode: disabled
+    table.include.list: public.outbox
+    snapshot.mode: no_data
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
+    transforms: outbox,onlyPlan,enrich
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: aggregate_type
+    transforms.outbox.route.topic.replacement: passage.budget.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.onlyPlan.type: org.apache.kafka.connect.transforms.Filter
+    transforms.onlyPlan.predicate: isPlanTopic
+    transforms.onlyPlan.negate: true
+    predicates: isPlanTopic
+    predicates.isPlanTopic.type: org.apache.kafka.connect.transforms.predicates.TopicNameMatches
+    predicates.isPlanTopic.pattern: 'passage\.budget\.plan'
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# Billing's outbox carries one aggregate type, invoice, for invoice.posted, creditnote.posted and creditnote.booked: all three
+# route to passage.billing.invoice, the one AsyncAPI channel in services/billing/events/asyncapi.yaml, which revrec's credit-note
+# consumer reads (deploy/kafka/revrec-consumer.yaml). A second aggregate type needs its channel, its literal ACL on the debezium
+# user and a Filter SMT in front of enrich, as in outbox-budgeting (deploy/scripts/test_argocd_apps.py checks both).
+# snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# debezium_cdc_billing has REPLICATION; the billing database and that role are provisioned with the service's database.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-billing
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.hello-ledger.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc-billing:username}
+    database.password: ${secrets:kafka/debezium-cdc-billing:password}
+    database.dbname: passage_billing
+    topic.prefix: passage.billing
+    slot.name: passage_outbox_billing
+    publication.name: passage_outbox_billing
+    publication.autocreate.mode: disabled
+    table.include.list: public.outbox
+    snapshot.mode: no_data
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
+    transforms: outbox,enrich
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: aggregate_type
+    transforms.outbox.route.topic.replacement: passage.billing.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher

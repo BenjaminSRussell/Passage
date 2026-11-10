@@ -26,6 +26,7 @@ type Fake struct {
 	byKey    map[string]int
 	reversed map[string]string
 	postErr  error
+	curErr   map[string]error
 	lostErr  error
 	ledgers  map[string]string
 	closedTo string
@@ -48,6 +49,16 @@ func (f *Fake) FailPosts(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.postErr = err
+}
+
+// FailPostsIn makes every Post in currency return err until it is called with nil.
+func (f *Fake) FailPostsIn(currency string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.curErr == nil {
+		f.curErr = map[string]error{}
+	}
+	f.curErr[currency] = err
 }
 
 // PostAs sets the service identity that the entries stored from now on are recorded with, as the ledger records the verified
@@ -92,6 +103,9 @@ func (f *Fake) Post(_ context.Context, e Entry) (string, error) {
 	defer f.mu.Unlock()
 	if f.postErr != nil {
 		return "", f.postErr
+	}
+	if err := f.curErr[e.Currency]; err != nil {
+		return "", err
 	}
 	if f.refusesClosed(e.PostingDate, e.PostClosed) {
 		return "", &Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: CodePeriodClosed}
@@ -252,5 +266,53 @@ func (f *Fake) Balances(_ context.Context, q BalanceQuery) (AccountBalances, err
 		out.Rows = append(out.Rows, *b)
 	}
 	slices.SortFunc(out.Rows, func(a, b AccountBalance) int { return strings.Compare(a.Account, b.Account) })
+	return out, nil
+}
+
+func (f *Fake) JournalLines(_ context.Context, q LineQuery) ([]JournalLine, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []JournalLine
+	for _, s := range f.entries {
+		if s.LedgerID != q.LedgerID || s.LegalEntityID != q.LegalEntityID || s.PostingDate < q.DateFrom || s.PostingDate > q.DateTo {
+			continue
+		}
+		for i, l := range s.Lines {
+			out = append(out, JournalLine{EntryID: s.ID, Voucher: s.DocumentID, PostingDate: s.PostingDate, LineNumber: i + 1,
+				Account: l.Account, Credit: l.Credit, Amount: l.Amount, SourceType: s.SourceType, Text: l.Text})
+		}
+	}
+	return out, nil
+}
+
+func (f *Fake) Ledger(_ context.Context, _, ledgerID string) (Info, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	le, ok := f.ledgers[ledgerID]
+	if !ok {
+		return Info{}, ErrNotVisible
+	}
+	info := Info{LegalEntityID: le, Currency: "USD", ChartCode: "CHART"}
+	for _, s := range f.entries {
+		if s.LedgerID == ledgerID {
+			info.Currency = s.Currency
+			break
+		}
+	}
+	return info, nil
+}
+
+func (f *Fake) Accounts(_ context.Context, legalEntityID, _ string) (map[string]ChartAccount, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]ChartAccount{}
+	for _, s := range f.entries {
+		if s.LegalEntityID != legalEntityID {
+			continue
+		}
+		for _, l := range s.Lines {
+			out[l.Account] = ChartAccount{Name: "Account " + l.Account, Type: "asset", Postable: true}
+		}
+	}
 	return out, nil
 }

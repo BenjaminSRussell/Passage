@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, Card, EmptyState, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
@@ -19,6 +20,7 @@ import {
 import { CALC_LABELS } from "./freeGoodsFormat";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DUTY_ADMIN = "pricing.admin";
 
@@ -174,8 +176,8 @@ export function ParametersPage() {
       <PageHeader title="Pricing parameters" description="Settings that change how a legal entity prices and posts." />
       <Card>
         <form className={styles.form} onSubmit={load} noValidate>
-          <FormField id="pp-legal-entity" label="Legal entity id" error={idError}>
-            {(c) => <Input {...c} className={styles.mono} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={Boolean(idError)} />}
+          <FormField id="pp-legal-entity" label="Legal entity" error={idError}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={Boolean(idError)} />}
           </FormField>
           <div className={styles.formActions}>
             <Button type="submit" variant="secondary" loading={loading}>
@@ -186,7 +188,7 @@ export function ParametersPage() {
       </Card>
       {failure ? (
         <Alert tone="danger" title="Could not complete the request" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {loading ? <Skeleton height="tile" /> : null}

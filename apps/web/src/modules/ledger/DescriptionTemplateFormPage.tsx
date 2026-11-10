@@ -1,17 +1,18 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
 import {
   DESCRIPTION_FIELDS,
   fetchDescriptionTemplate,
-  LedgerApiError,
   putDescriptionTemplate,
   type DescriptionField,
   type DescriptionTemplate,
   type DescriptionTemplateInput,
 } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Entry description and line text limit (FR-11.17, LEDGER-0031). */
 export const MAX_DESCRIPTION = 255;
@@ -110,7 +111,7 @@ function TemplateForm({ id, initial, existing, lockVersion }: { id: string; init
   const queryClient = useQueryClient();
   const [values, setValues] = useState<TemplateDraft>(initial);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
   const update = (patch: Partial<TemplateDraft>) => setValues((prev) => ({ ...prev, ...patch }));
@@ -129,7 +130,7 @@ function TemplateForm({ id, initial, existing, lockVersion }: { id: string; init
       await queryClient.invalidateQueries({ queryKey: ["ledger", "description-templates"] });
       navigate("/ledger/description-templates");
     } catch (error) {
-      setFailure(error instanceof LedgerApiError ? `${error.message} (${error.code})` : (error as Error).message);
+      setFailure(error);
     } finally {
       setBusy(false);
     }
@@ -155,8 +156,8 @@ function TemplateForm({ id, initial, existing, lockVersion }: { id: string; init
           )}
         </FormField>
         {values.scope === "legal_entity" ? (
-          <FormField id="dt-legal-entity" label="Legal entity id" hint="Its template wins over the one for all legal entities." error={errors.legalEntityId}>
-            {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
+          <FormField id="dt-legal-entity" label="Legal entity" hint="Its template wins over the one for all legal entities." error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
         ) : null}
         <div className={styles.wide}>
@@ -195,7 +196,7 @@ function TemplateForm({ id, initial, existing, lockVersion }: { id: string; init
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the template" live="alert">
-              {failure}
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

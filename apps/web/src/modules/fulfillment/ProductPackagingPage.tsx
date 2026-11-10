@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, listProductPackaging, saveProductPackaging, type ProductPackaging, type Problem } from "./api/client";
 import { DECIMAL, MATERIAL_CODE, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ProductPackaging>[] = [
   { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
@@ -72,13 +74,13 @@ export function ProductPackagingPage() {
         description="The packaging each sold unit carries, per material. A packing slip posted with a ship-to country rates these weights as the statistical packaging fee."
       />
       <div className={styles.toolbar}>
-        <FormField id="packaging-product" label="Product id" hint="Show the packaging of one product." optional>
-          {(control) => <Input {...control} value={product} onChange={(event) => setProduct(event.target.value)} />}
+        <FormField id="packaging-product" label="Product" hint="Show the packaging of one product." optional>
+          {(control) => <EntityLookup entity="product" {...control} value={product} onChange={(event) => setProduct(event.target.value)} />}
         </FormField>
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load packaging materials" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -97,8 +99,8 @@ export function ProductPackagingPage() {
       <Card title="Set the packaging of a product">
         <form className={styles.form} onSubmit={submit} noValidate>
           <p className={styles.note}>Saving the same product and material replaces the weight. A weight of 0 stops the material counting.</p>
-          <FormField id="pp-product" label="Product id" error={errors.productId}>
-            {(control) => <Input {...control} value={values.productId} invalid={Boolean(errors.productId)} onChange={(event) => set({ productId: event.target.value })} />}
+          <FormField id="pp-product" label="Product" error={errors.productId}>
+            {(control) => <EntityLookup entity="product" {...control} value={values.productId} invalid={Boolean(errors.productId)} onChange={(event) => set({ productId: event.target.value })} />}
           </FormField>
           <FormField id="pp-material" label="Material code" error={errors.materialCode}>
             {(control) => <Input {...control} maxLength={32} value={values.materialCode} invalid={Boolean(errors.materialCode)} onChange={(event) => set({ materialCode: event.target.value.toUpperCase() })} />}

@@ -134,7 +134,7 @@ describe("Clear a quality-fail alert", () => {
     fireEvent.click(within(table).getByRole("button", { name: "Clear" }));
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "ok" } });
     fireEvent.click(screen.getByRole("button", { name: "Clear alert" }));
-    expect(await screen.findByText(/no open andon alert with that id \(SF-0162\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/no open andon alert with that id/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear alert" })).toBeEnabled();
   });
 });

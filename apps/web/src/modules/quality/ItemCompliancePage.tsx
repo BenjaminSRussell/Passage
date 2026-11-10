@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import {
@@ -18,6 +19,7 @@ import { KIND_LABELS } from "./ComplianceListsPage";
 import { DECIMAL, qty, REGION, shortId, UUID, validCAS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Looks an item up by id and opens its composition and compliance. */
 export function ItemLookupPage() {
@@ -48,8 +50,8 @@ export function ItemLookupPage() {
       />
       <Card>
         <form className={styles.toolbar} onSubmit={open} noValidate aria-label="Open item">
-          <FormField id="compliance-item" label="Item id" error={error ?? undefined}>
-            {(control) => <Input {...control} className={styles.mono} value={itemId} invalid={Boolean(error)} onChange={(event) => setItemId(event.target.value)} />}
+          <FormField id="compliance-item" label="Item" error={error ?? undefined}>
+            {(control) => <EntityLookup entity="product" {...control} value={itemId} invalid={Boolean(error)} onChange={(event) => setItemId(event.target.value)} />}
           </FormField>
           <Button type="submit" variant="primary">
             Open item
@@ -204,7 +206,7 @@ function CompositionForm({ itemId, current, onSaved }: { itemId: string; current
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the composition" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -281,7 +283,7 @@ function EvaluationPanel({ itemId }: { itemId: string }) {
         </form>
         {failure ? (
           <Alert tone="danger" title="Could not evaluate the item" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {result ? (
@@ -346,7 +348,7 @@ export function ItemCompliancePage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the composition" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : state.loading && !current ? (
         <div className={styles.stack} aria-busy="true">

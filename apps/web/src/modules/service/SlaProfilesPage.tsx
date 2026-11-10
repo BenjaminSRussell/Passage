@@ -5,6 +5,7 @@ import { createSlaProfile, describeProblem, listSlaProfiles, newKey, PRIORITIES,
 import { clock, DATE, duration, minuteOf } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const targetsText = (targets: SlaTarget[]) =>
   [...targets]
@@ -37,7 +38,7 @@ export function SlaProfilesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load SLA profiles" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -228,7 +229,7 @@ export function NewSlaProfilePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SVC-PROF-001" ? "That code is taken" : "Could not create the profile"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

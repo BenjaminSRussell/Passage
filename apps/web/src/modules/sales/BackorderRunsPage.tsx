@@ -19,6 +19,7 @@ import { strategyHelp } from "./BackorderRunPage";
 import { DECIMAL, formatDateTime, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -158,7 +159,7 @@ export function BackorderRunsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the backorder runs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -266,7 +267,7 @@ export function NewBackorderRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0027" ? "The run cannot be planned" : "Could not plan the run"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

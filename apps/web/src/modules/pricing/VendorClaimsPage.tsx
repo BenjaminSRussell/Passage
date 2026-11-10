@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile } from "../../shell/ui";
 import { listVendorClaims, type ClaimStatus, type VendorClaimFilter } from "./api/client";
@@ -7,6 +8,7 @@ import { sumDecimals, UUID } from "./format";
 import styles from "./pages.module.css";
 import { CLAIM_STATUS_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
 
@@ -57,8 +59,8 @@ export function VendorClaimsPage() {
         }
       />
       <form className={styles.toolbar} onSubmit={apply} noValidate>
-        <FormField id="vcl-vendor" label="Vendor id" optional error={errors.vendorId}>
-          {(c) => <Input {...c} className={styles.mono} value={draft.vendorId} onChange={(e) => setDraft({ ...draft, vendorId: e.target.value })} invalid={Boolean(errors.vendorId)} />}
+        <FormField id="vcl-vendor" label="Vendor" optional error={errors.vendorId}>
+          {(c) => <EntityLookup entity="vendor" {...c} value={draft.vendorId} onChange={(e) => setDraft({ ...draft, vendorId: e.target.value })} invalid={Boolean(errors.vendorId)} />}
         </FormField>
         <FormField id="vcl-period" label="Period" optional error={errors.period}>
           {(c) => <Input {...c} className={styles.mono} value={draft.period} onChange={(e) => setDraft({ ...draft, period: e.target.value })} invalid={Boolean(errors.period)} />}
@@ -76,7 +78,7 @@ export function VendorClaimsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the vendor rebate claims" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

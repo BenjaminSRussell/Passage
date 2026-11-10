@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -30,12 +31,13 @@ type Store interface {
 	CreateDimensionGroup(ctx context.Context, in domain.DimensionGroup) (domain.DimensionGroup, error)
 	GetDimensionGroup(ctx context.Context, id string) (domain.DimensionGroup, error)
 	CreateItemGroup(ctx context.Context, in domain.ItemGroup) (domain.ItemGroup, error)
+	ListItemGroups(ctx context.Context) ([]domain.ItemGroup, error)
 	CreateItemModelGroup(ctx context.Context, in domain.ItemModelGroup) (domain.ItemModelGroup, error)
 	CreateProduct(ctx context.Context, in domain.Product, idem string) (domain.Product, error)
 	GetProduct(ctx context.Context, id string) (domain.Product, error)
 	UpdateProduct(ctx context.Context, id string, patch domain.ProductPatch, version int) (domain.Product, error)
 	GetSavedConfiguration(ctx context.Context, id, productID string) (domain.ConfigurationRef, error)
-	ListProducts(ctx context.Context, limit int) ([]domain.Product, error)
+	ListProducts(ctx context.Context, q, after string, limit int) ([]domain.Product, error)
 	ExplodeVariants(ctx context.Context, masterID string, selected map[string][]string, limit int) (domain.ExplosionResult, error)
 	ListReleasedIDs(ctx context.Context, after string, limit int) ([]string, error)
 	LookupVariant(ctx context.Context, masterID string, values map[string]string) (domain.Product, error)
@@ -175,6 +177,46 @@ func (s *Postgres) CreateItemModelGroup(ctx context.Context, in domain.ItemModel
 	return in, problem(err, "PRD-NUM-FORMAT", "item model group code already exists")
 }
 
+func assertItemGroup(ctx context.Context, tx pgx.Tx, tenantID, itemGroupID string) error {
+	if itemGroupID == "" {
+		return nil
+	}
+	var found bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from item_group where tenant_id=$1 and id=$2)`, tenantID, itemGroupID).Scan(&found); err != nil {
+		return err
+	}
+	if !found {
+		pr := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
+		pr.Errors = map[string]string{"itemGroupId": "is not an item group of this tenant"}
+		return pr
+	}
+	return nil
+}
+
+func (s *Postgres) ListItemGroups(ctx context.Context) ([]domain.ItemGroup, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.ItemGroup{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text, code, name from item_group where tenant_id=$1 order by code`, p.TenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var g domain.ItemGroup
+			if err := rows.Scan(&g.ID, &g.Code, &g.Name); err != nil {
+				return err
+			}
+			out = append(out, g)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (s *Postgres) CreateProduct(ctx context.Context, in domain.Product, idem string) (domain.Product, error) {
 	p, err := principal(ctx)
 	if err != nil {
@@ -195,6 +237,9 @@ func (s *Postgres) CreateProduct(ctx context.Context, in domain.Product, idem st
 	if in.DimensionValues == nil {
 		in.DimensionValues = map[string]string{}
 	}
+	if err := domain.AssertServiceNotTracked(in); err != nil {
+		return domain.Product{}, domainProblem(err)
+	}
 	vals, _ := json.Marshal(in.DimensionValues)
 	svc, _ := json.Marshal(in.Service)
 	if in.Service == nil {
@@ -209,10 +254,14 @@ func (s *Postgres) CreateProduct(ctx context.Context, in domain.Product, idem st
 					Scan(&in.ID, &in.ProductNumber, &in.Subtype, &in.MasterID, &in.ProductType, &in.Name, &in.LifecycleState, &in.Version)
 			}
 		}
-		_, err := tx.Exec(ctx, `insert into product (tenant_id, id, product_number, subtype, master_id, product_type, name, description, search_name, base_uom, dimension_group_id, storage_dimension_group_id, tracking_dimension_group_id, lifecycle_state, dimension_values, variant_hash, service)
-			values ($1,$2,$3,$4,nullif($5,'')::uuid,$6,$7,$8,$9,$10,nullif($11,'')::uuid,nullif($12,'')::uuid,nullif($13,'')::uuid,$14,$15,$16,$17)`,
+		if err := assertItemGroup(ctx, tx, p.TenantID, in.ItemGroupID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `insert into product (tenant_id, id, product_number, subtype, master_id, product_type, name, description, search_name, base_uom, dimension_group_id, storage_dimension_group_id, tracking_dimension_group_id, lifecycle_state, dimension_values, variant_hash, service, item_group_id, batch_tracked, serial_tracked, catch_weight)
+			values ($1,$2,$3,$4,nullif($5,'')::uuid,$6,$7,$8,$9,$10,nullif($11,'')::uuid,nullif($12,'')::uuid,nullif($13,'')::uuid,$14,$15,$16,$17,nullif($18,'')::uuid,$19,$20,$21)`,
 			p.TenantID, in.ID, in.ProductNumber, in.Subtype, in.MasterID, in.ProductType, in.Name, in.Description, in.SearchName, in.BaseUOM,
-			in.DimensionGroupID, in.StorageDimensionGroupID, in.TrackingDimensionGroupID, in.LifecycleState, vals, in.VariantHash, svc)
+			in.DimensionGroupID, in.StorageDimensionGroupID, in.TrackingDimensionGroupID, in.LifecycleState, vals, in.VariantHash, svc,
+			in.ItemGroupID, in.BatchTracked, in.SerialTracked, in.CatchWeight)
 		if err != nil {
 			return err
 		}
@@ -224,7 +273,7 @@ func (s *Postgres) CreateProduct(ctx context.Context, in domain.Product, idem st
 			}
 		}
 		return emit(ctx, tx, pevents.ProductCreated, "product", in.ID, pevents.ProductCreatedData{
-			ProductID: in.ID, ProductNumber: in.ProductNumber, Subtype: in.Subtype, ProductType: in.ProductType, BaseUOM: in.BaseUOM,
+			ProductID: in.ID, ProductNumber: in.ProductNumber, Name: in.Name, Subtype: in.Subtype, ProductType: in.ProductType, BaseUOM: in.BaseUOM, LifecycleState: in.LifecycleState, Version: 1,
 		})
 	})
 	var pgErr *pgconn.PgError
@@ -262,10 +311,13 @@ func (s *Postgres) productConflict(ctx context.Context, tenantID string, in doma
 
 func scanProduct(row pgx.Row) (domain.Product, error) {
 	var p domain.Product
-	var master, dim, storage, tracking *string
+	var master, dim, storage, tracking, itemGroup *string
 	var vals, svc []byte
 	err := row.Scan(&p.ID, &p.ProductNumber, &p.Subtype, &master, &p.ProductType, &p.Name, &p.Description, &p.SearchName, &p.BaseUOM,
-		&dim, &storage, &tracking, &p.LifecycleState, &vals, &p.VariantHash, &svc, &p.Version)
+		&dim, &storage, &tracking, &p.LifecycleState, &vals, &p.VariantHash, &svc, &p.Version, &itemGroup, &p.BatchTracked, &p.SerialTracked, &p.CatchWeight)
+	if itemGroup != nil {
+		p.ItemGroupID = *itemGroup
+	}
 	if master != nil {
 		p.MasterID = *master
 	}
@@ -289,7 +341,8 @@ func scanProduct(row pgx.Row) (domain.Product, error) {
 }
 
 const productSelect = `id, product_number, subtype, master_id::text, product_type, name, description, search_name, base_uom,
-	dimension_group_id::text, storage_dimension_group_id::text, tracking_dimension_group_id::text, lifecycle_state, dimension_values, variant_hash, service, version`
+	dimension_group_id::text, storage_dimension_group_id::text, tracking_dimension_group_id::text, lifecycle_state, dimension_values, variant_hash, service, version,
+	item_group_id::text, batch_tracked, serial_tracked, catch_weight`
 
 // UpdateProduct applies a partial update when the stored version equals version
 // (412 otherwise) and bumps it.
@@ -324,13 +377,21 @@ func (s *Postgres) UpdateProduct(ctx context.Context, id string, patch domain.Pr
 			out = cur
 			return nil
 		}
-		if _, e := tx.Exec(ctx, `update product set name=$3, description=$4, search_name=$5, lifecycle_state=$6, version=version+1 where tenant_id=$1 and id=$2`,
-			p.TenantID, id, cur.Name, cur.Description, cur.SearchName, cur.LifecycleState); e != nil {
+		if err := domain.AssertServiceNotTracked(cur); err != nil {
+			return domainProblem(err)
+		}
+		if patch.ItemGroupID != nil {
+			if err := assertItemGroup(ctx, tx, p.TenantID, cur.ItemGroupID); err != nil {
+				return err
+			}
+		}
+		if _, e := tx.Exec(ctx, `update product set name=$3, description=$4, search_name=$5, lifecycle_state=$6, item_group_id=nullif($7,'')::uuid, batch_tracked=$8, serial_tracked=$9, catch_weight=$10, version=version+1 where tenant_id=$1 and id=$2`,
+			p.TenantID, id, cur.Name, cur.Description, cur.SearchName, cur.LifecycleState, cur.ItemGroupID, cur.BatchTracked, cur.SerialTracked, cur.CatchWeight); e != nil {
 			return e
 		}
 		cur.Version++
 		out = cur
-		return emit(ctx, tx, pevents.ProductUpdated, "product", id, pevents.ProductUpdatedData{ProductID: id, ChangedFields: changed, Version: cur.Version})
+		return emit(ctx, tx, pevents.ProductUpdated, "product", id, pevents.ProductUpdatedData{ProductID: id, ProductNumber: cur.ProductNumber, Name: cur.Name, ProductType: cur.ProductType, LifecycleState: cur.LifecycleState, ChangedFields: changed, Version: cur.Version})
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found")
@@ -375,17 +436,21 @@ func (s *Postgres) GetSavedConfiguration(ctx context.Context, id, productID stri
 	return out, err
 }
 
-func (s *Postgres) ListProducts(ctx context.Context, limit int) ([]domain.Product, error) {
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+
+func (s *Postgres) ListProducts(ctx context.Context, q, after string, limit int) ([]domain.Product, error) {
 	p, err := principal(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > MaxPage {
 		limit = 100
 	}
+	like := "%" + likeEscaper.Replace(strings.TrimSpace(q)) + "%"
 	var out []domain.Product
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+productSelect+` from product where tenant_id=$1 and subtype <> 'variant' order by product_number limit $2`, p.TenantID, limit)
+		rows, err := tx.Query(ctx, `select `+productSelect+` from product where tenant_id=$1 and subtype <> 'variant' and product_number > $2
+			and (product_number ilike $3 or search_name ilike $3 or name ilike $3) order by product_number limit $4`, p.TenantID, after, like, limit)
 		if err != nil {
 			return err
 		}
@@ -483,9 +548,10 @@ func (s *Postgres) ExplodeVariants(ctx context.Context, masterID string, selecte
 		for i, v := range result.Created {
 			id := ids.New()
 			dv, _ := json.Marshal(v.DimensionValues)
-			if _, err := tx.Exec(ctx, `insert into product (tenant_id, id, product_number, subtype, master_id, product_type, name, search_name, base_uom, dimension_group_id, lifecycle_state, dimension_values, variant_hash)
-				values ($1,$2,$3,'variant',$4,$5,$6,$6,$7,$8,$9,$10,$11)`,
-				p.TenantID, id, v.ProductNumber, masterID, master.ProductType, master.Name+" "+v.ProductNumber, master.BaseUOM, master.DimensionGroupID, domain.StateDraft, dv, v.VariantHash); err != nil {
+			if _, err := tx.Exec(ctx, `insert into product (tenant_id, id, product_number, subtype, master_id, product_type, name, search_name, base_uom, dimension_group_id, lifecycle_state, dimension_values, variant_hash, item_group_id, batch_tracked, serial_tracked, catch_weight)
+				values ($1,$2,$3,'variant',$4,$5,$6,$6,$7,$8,$9,$10,$11,nullif($12,'')::uuid,$13,$14,$15)`,
+				p.TenantID, id, v.ProductNumber, masterID, master.ProductType, master.Name+" "+v.ProductNumber, master.BaseUOM, master.DimensionGroupID, domain.StateDraft, dv, v.VariantHash,
+				master.ItemGroupID, master.BatchTracked, master.SerialTracked, master.CatchWeight); err != nil {
 				return err
 			}
 			idsCreated = append(idsCreated, id)
@@ -944,7 +1010,7 @@ func (s *Postgres) Search(ctx context.Context, q string, limit int) ([]domain.Pr
 	if limit <= 0 || limit > 20 {
 		limit = 10
 	}
-	like := "%" + q + "%"
+	like := "%" + likeEscaper.Replace(q) + "%"
 	var out []domain.Product
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+productSelect+` from product where tenant_id=$1 and (product_number ilike $2 or search_name ilike $2 or name ilike $2

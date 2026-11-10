@@ -1687,7 +1687,7 @@ paths:
     get:
       tags: [journal]
       operationId: listJournalBatches
-      summary: List manual journal batches
+      summary: List manual journal batches (also readable with ledger.inbox.read, which carries nothing else)
       x-passage-duty: ledger.journal.read
       parameters:
         - { name: ledger, in: query, schema: { type: string, format: uuid } }

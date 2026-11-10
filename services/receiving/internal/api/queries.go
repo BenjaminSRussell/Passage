@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -11,9 +12,12 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const (
@@ -25,6 +29,8 @@ const (
 var (
 	receiptStates = []domain.ReceiptState{domain.Arrived, domain.Registered, domain.Posted, domain.Cancelled}
 	grirStatuses  = []string{"OPEN", "PARTIAL", "CLEARED", "WRITTEN_OFF"}
+
+	invoiceStatuses = []string{domain.InvoiceStatusPosted, domain.InvoiceStatusAuditBlocked, domain.InvoiceStatusAuditRejected}
 )
 
 type query struct {
@@ -116,6 +122,57 @@ func (a *API) listReceipts(w http.ResponseWriter, r *http.Request) {
 		page.Items = append(page.Items, toReceiptBody(rec))
 	}
 	httpx.JSON(w, http.StatusOK, page)
+}
+
+type invoicePage struct {
+	Items      []invoiceBody `json:"items"`
+	NextCursor string        `json:"nextCursor,omitempty"`
+}
+
+func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
+	q := query{values: r.URL.Query(), fields: map[string]string{}}
+	f := store.InvoiceFilter{VendorID: q.uuid("vendorId"), ReceiptID: q.uuid("receiptId"), PurchaseOrderID: q.uuid("purchaseOrderId"), Status: q.values.Get("status"), Limit: q.limit()}
+	f.CursorCreatedAt, f.CursorID = q.cursor()
+	if f.Status != "" && !slices.Contains(invoiceStatuses, f.Status) {
+		q.fields["status"] = "must be POSTED, AUDIT_BLOCKED or AUDIT_REJECTED"
+	}
+	if len(q.fields) > 0 {
+		httpx.Fail(w, r, validationProblem(q.fields))
+		return
+	}
+	rows, err := a.store.ListInvoices(r.Context(), f)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	page := invoicePage{Items: make([]invoiceBody, 0, len(rows))}
+	if len(rows) > f.Limit {
+		rows = rows[:f.Limit]
+		page.NextCursor = encodeCursor(rows[len(rows)-1].CreatedAt, rows[len(rows)-1].ID)
+	}
+	for _, inv := range rows {
+		page.Items = append(page.Items, toInvoiceBody(inv))
+	}
+	httpx.JSON(w, http.StatusOK, page)
+}
+
+func (a *API) getInvoice(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, validationProblem(map[string]string{"id": "must be a UUID"}))
+		return
+	}
+	inv, err := a.store.GetInvoice(r.Context(), id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	body := toInvoiceBody(inv)
+	if body.Match, err = a.invoiceMatch(r.Context(), inv); err != nil {
+		slog.ErrorContext(r.Context(), "invoice match left out: a receipt could not be read", "err", err, "invoiceId", inv.ID, "correlationId", middleware.GetReqID(r.Context()))
+		body.Match = nil
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 type grirItemBody struct {

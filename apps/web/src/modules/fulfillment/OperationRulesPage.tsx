@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
@@ -17,6 +18,7 @@ import { dash, formatDateTime, GROUP_LABELS, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Saving a rule needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
 const DUTY_SAVE = "fulfillment.warehouse.release";
@@ -151,7 +153,7 @@ export function OperationRulesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the posting and packing rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -167,11 +169,11 @@ export function OperationRulesPage() {
       {canSave ? (
         <Card title="Change the posting and packing rule">
           <form className={styles.form} onSubmit={submit} noValidate>
-            <FormField id="or-warehouse" label="Warehouse id" error={errors.warehouseId}>
-              {(control) => <Input {...control} value={values.warehouseId} invalid={Boolean(errors.warehouseId)} onChange={(event) => { const id = event.target.value; update({ warehouseId: id }); setVersion(state.data?.find((r) => r.warehouseId === id.trim())?.version ?? 0); }} />}
+            <FormField id="or-warehouse" label="Warehouse" error={errors.warehouseId}>
+              {(control) => <EntityLookup entity="warehouse" {...control} value={values.warehouseId} invalid={Boolean(errors.warehouseId)} onChange={(event) => { const id = event.target.value; update({ warehouseId: id }); setVersion(state.data?.find((r) => r.warehouseId === id.trim())?.version ?? 0); }} />}
             </FormField>
-            <FormField id="or-legal-entity" label="Legal entity id" hint="The legal entity the warehouse belongs to; filled in when you open a warehouse above." error={errors.legalEntityId}>
-              {(control) => <Input {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => update({ legalEntityId: event.target.value })} />}
+            <FormField id="or-legal-entity" label="Legal entity" hint="The legal entity the warehouse belongs to; filled in when you open a warehouse above." error={errors.legalEntityId}>
+              {(control) => <EntityLookup entity="legalEntity" prefill={false} {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => update({ legalEntityId: event.target.value })} />}
             </FormField>
             <FormField id="or-source" label="Posting date of a packing slip" hint="Entered: the poster names the date. Today: the day of the post unless the poster names another. Ship timestamp: always the day of the post; a different date is refused.">
               {(control) => (

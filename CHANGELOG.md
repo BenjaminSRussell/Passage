@@ -10,6 +10,204 @@ release may change public APIs.
 
 ### Added
 
+- Products carry an item group and batch, serial number and catch weight flags (product migration 0003; `GET /v1/product/setup/item-groups`), settable on create and edit under "More options" in the web app and shown on the detail page; purchase order and sales order lines default their unit from the picked product's base unit, and sales order lines pick the product through the shared lookup (#529).
+- Web: vendor invoice list gains a due date column and captured or needs-review documents; the invoice detail shows the match with the receipt (computed on read with the default tolerances, per-line price differences) and payment status from the payables open item (not due, due, in a payment proposal, paid, on hold with reason; "not available to you" without the duty). New `GET /v1/receiving/invoice-captures`, `match` on `GET /v1/receiving/invoices/{id}`, payables `source_invoices` filter and `proposalId` on open items (#533).
+- Receiving advance ship notices (#511, FR-20.10): `POST/GET /v1/receiving/asns` and `POST /v1/receiving/asns/{id}:start-receipt` (duties `receiving.asn.maintain`, `receiving.asn.receive`; migration 0024, table `receiving_asn` with forced tenant and legal-entity RLS). A notice's quantity per PO line is bounded by the open PO quantity less notices still holding quantity (`SUP-ASN-001`), a tracking number is used once per vendor and legal entity, trimmed and case-folded (`SUP-ASN-002`), and starting the receipt creates the ARRIVED receipt, records it on the notice and returns the `:register` body pre-filled with quantities, batches, expiry dates and serials (`SUP-ASN-003` on a second start); receipt lines now store `expiry_date` (migration 0025) and registration accepts `expiryDate`; cancelling the ARRIVED receipt reopens the notice; manual packing slips may not start with `ASN-`. Creates and starts are idempotent by key.
+- Web list standard (#505): shared `ListPage` on `DataTable` with a filter bar (text, select, date range, entity lookup) and chips, sortable columns, column chooser, saved views per user (named, default, versioned, kept behind a storage interface), CSV export of the loaded rows (quoted, formula-safe, says when more rows exist) and the standard loading, empty, filtered-empty, error and no-access states; applied to Purchase orders and Vendor invoices and documented in `apps/web/docs/lists.md`. The density toggle is now remembered per user, the demo "Apply saved view" button is gone, and the unsaved-changes baseline no longer freezes on a Tab press or a click outside the form.
+- Treasury: the bank reconciliation of a statement (#36, FR-36.5). A header per bank account and period carries opening, closing and book balance, line counts and the difference; `:close` needs every line matched or excluded with a reason and a zero difference, records who and when, and locks the period's lines and matches (database triggers), a second close is a no-op; `:reopen` has its own duty, needs a reason, is refused for the person who closed it and while a later period of the same account is closed. A bank fee, interest or unidentified receipt is created from a statement line, posted to the ledger once per line with the legal entity's posting profile (`TREASURY_GL_PROFILES`, `LEDGER_URL`; `treasury` gains `ledger.entry.post`) and matched; a lost ledger answer is safe to repeat. Duties `treasury.reconciliation.view|close|reopen|post|abandon`; migration `treasury/0010`. The stated book balance is audited and its stater cannot close the period; a refusal after an unanswered ledger attempt holds the line for a person (`:abandon`) instead of releasing it; the header, line and match-item triggers hold for the application role.
+
+- search: a new `services/search` module serves `GET /v1/search?q=&types=&limit=` over parties, products and purchase orders (#506). A consumer keeps a pg_trgm index current from the party, product and purchase order events (idempotent, ordered by event time, a merge removes the losers and re-indexes the survivor, a cancelled order stays searchable as CANCELLED); an exact number ranks first, then trigram similarity. The index is under forced tenant and legal-entity row-level security, and a caller searches a type only with its source's read duty. The party, product and purchase order events gain the fields the index needs (`search.index.write` flag duty, `search-index` service principal, `deploy/kafka/search-consumer.yaml`, gateway route `/v1/search`).
+- Payables: cutover import of open vendor items (`POST /v1/payables/opening-batches`, service-only) with idempotent batches, per-row errors, control totals and a read-back of counts and totals; nothing posts to the ledger (#49).
+- Receivables opens an item for every invoice and credit note billing posts (#30): a new consumer (`receivables consume`, group
+  and service principal `receivables-billing`, flag duty `receivables.openitem.from-billing`, dead-letter topic
+  `passage.receivables.invoices.dlq`, `deploy/kafka/receivables-consumer.yaml`, off by default in the chart) reads
+  `invoice.posted` and `creditnote.posted` from `passage.billing.invoice` and opens one INVOICE item per installment (the whole
+  gross when there is no plan) or one negative CREDIT_NOTE item linked to the credited invoice. A document is keyed by (type,
+  billing id, installment), so a replay changes nothing; an event it cannot apply (installments that do not add up, a document
+  number already taken, a credit note for another customer or currency) is dead-lettered with its reason in the
+  `x-dlq-detail` header; a lost database is retried without limit (`eventing.Transient`), a credit note waits for its invoice.
+  An RMA credit finds an installment invoice by its billing id and is bounded by the sum of the installments, and cash
+  application matches `INV-1` to `INV-1/1..n`. The platform consumer gained `eventing.Transient` and the `x-dlq-detail` header.
+
+- Web: five task-based user guides in `docs/user/` (vendor invoice and payment, purchase order, customer payment, order to invoice, company set-up) and a route help map (`shell/help/routeHelp.ts`, `helpForRoute`) with an entry for each procure-to-pay and order-to-cash page. Tests fail on a page without its own help entry, a broken guide link or a spec id, wave reference or problem code in the text (#507). The help side panel is not part of this change.
+- Web: "My work" is a real inbox (#499). It lists what waits for you from `GET /v1/inbox` in your working legal entity, filterable by type, with the reason, age, due date and an Open link; customer changes can be approved or rejected in place (with confirmation) by users who hold the approve duty. It names sources that could not be loaded, notes truncated sources, pages with "Load more" and asks you to reload from the start when the sources changed. Home shows a My work summary (count and the top five) and marks the current workspace. The sample inbox rows are gone, and the Inbox menu entry now needs `inbox.read`. In production, assign the `inbox.read` duty to the roles of everyone who should see My work; until then My work and the Home summary do not appear.
+- Web: plain-language messages for the vendor PO acknowledgement problems (`PRC-ACK-001` to `PRC-ACK-005`) and the sales report problems (`BIL-0110` to `BIL-0112`), which the catalog test requires for every code the services return.
+- purchasing: a vendor can accept, reject or propose line changes (quantity, delivery date, price) to the latest version of a confirmed PO, and the buyer approves (next PO version) or declines; vendor-scoped reads take the vendor only from a verified principal, with `procurement.vendor-portal.*` duties that are service-only (#511, subtask 1)
+- Web: payables module with vendor open items (filters, paging, hold and release), payment proposals (list, create, detail with totals and held items, approve and cancel with a confirm step and segregation-of-duties messages); payables open items now return `paymentHoldReason` (#528).
+- Billing reports INVOICED to the sales order (#29): posting an invoice that bills order lines queues one report per (invoice, order) in the post transaction (`sales_invoice_report`, migration 0014), and a leased reporter (`SALES_URL`, `BILLING_SALES_REPORT_INTERVAL`; chart `salesUrl`, `salesReportInterval`) sends it to sales' `:record-progress` as `service:billing-sales-report` with only `sales.order.record-invoice` (now `service_only`), key `billing-invoice:{invoiceId}:{orderId}`, retrying with backoff and parking a refused report with its reason; credit notes are not reported (sales has no reversal of an invoice). `SLS-0058`/`SLS-0059` answers are retried as "not yet" until the delivery report arrives; `GET /v1/billing/sales-reports` and `POST /v1/billing/sales-reports/{id}:retry` list and re-queue parked reports, the counter `billing_sales_reports_parked_total` counts them, and a batch is sized to fit the lease. The web record form now says deliveries and invoices are recorded automatically.
+- Billing records output tax transactions with the tax service (#29): booking an invoice or credit note to the GL queues one report in the booking transaction (`tax_transaction_report`, migration 0015) with one `output` transaction per tax code at the tax the document already holds (negative on a credit note), and a leased reporter (`TAX_URL`, `BILLING_TAX_REPORT_INTERVAL`; chart `taxUrl`, `taxReportInterval`) sends it to `POST /v1/tax/transactions` as `service:billing-tax-report` with backoff and parking; operators list and retry parked reports at `/v1/billing/tax-reports`. `tax.transaction.record` is now service-only and billing holds it.
+- batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
+  approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
+  source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners
+  gain the matching read paths: party `GET /v1/party/pending-changes`, payables `held=true` on `GET /v1/payables/open-items`, and
+  the narrow duties `procurement.inbox.read`, `ledger.inbox.read`, `party.inbox.read` and `payables.inbox.read`.
+- Billing: posted invoices and credit notes book their GL journal without an API request. An auto-book worker (`BILLING_GL_AUTOBOOK_TENANT_IDS`, `BILLING_GL_AUTOBOOK_INTERVAL`; chart `autoBook`) runs the `gl-postings` run per tenant and legal entity, idempotent per document and safe to retry after a lost ledger answer; the `outbox-billing` Debezium connector (CDC migrations 0012-0013, `debezium-cdc-billing` secret, `passage.billing.invoice` ACL) publishes billing's events, with a deploy test that checks the route against the AsyncAPI channel and ACLs (#29).
+
+### Fixed
+
+- Receivables: an RMA credit now reserves its invoice lines in billing (`credit-reservations`, key `rma-credit:{legalEntity}:{rmaId}`) before it is stored, commits the reservation once the credit posts and releases it when the credit is parked, so an RMA credit and a billing credit note can no longer credit the same invoice line past what was invoiced; sales sends the invoice lines the returned products fall on, split across invoice lines like the tax reversal (#513). Deploy sales before receivables: with `BILLING_URL` set, receivables refuses a credit without `invoiceLines`.
+- Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).
+- Review fixes on the batch-2 lane: the integration hub gains `GET /v1/hub/coexistence` and `POST /v1/hub/coexistence:retry-parked`
+  so parked coexistence rows can be seen and retried (`hub.delivery.read`, `hub.subscription.write`); a replayed revrec
+  credit-note line is acknowledged from its stored reversal after the contract was cancelled; the migration factory refuses a
+  parallel-run tuple claiming more documents than the run replayed (RND-001); the debezium user gains literal write ACLs for
+  `passage.sales.deliverytolerance`, `passage.fulfillment.manifest` and `passage.fulfillment.warehouseoperationrule`; the
+  revrec README states that booked credit notes show as a reconciliation difference until its consumer is enabled.
+
+### Added
+
+- Per-tenant feature enablement (#504): `platform/go/features` holds the feature catalog (module, plain-language name, dependencies) and industry templates (Distribution, Manufacturing, Process manufacturing, Services) as data; identity gains `GET`/`PUT /v1/tenant/features` (tenant administrator only to change, audited, `IDN-FEATURE-DEPENDENCY` when a change would break a dependency, everything on by default) with migration 0012 and duties `identity.feature.view` and `identity.feature.maintain`; a `features.Require` middleware answers a disabled feature with a plain-words `FEAT-0001` problem, fails open and caches 30 s, and is wired in processmfg when `IDENTITY_URL` is set. Also fixes the `warehouse.offline-conflict.resolve` glob in `data.json` that identity's catalogue loader rejected.
+- Web form standard (#505): `FormSection` (More options / Advanced), `FormField required`, shared field help in `copy.fieldHelp`, `FormErrorSummary` that focuses the first problem, and `useUnsavedChanges` (dialog on in-app navigation, warning on tab close); applied to Record payment and New requisition; documented in `apps/web/docs/forms.md`.
+- Product: the web product pages run on the product service instead of built-in sample data: search by number or name with
+  keyset paging, product detail, and create and edit forms with field checks and plain-language errors (#529). `GET
+  /v1/product/products` gains `q`, `limit` (1 to 100, default 50) and `cursor`, and answers `nextCursor` when more follow.
+
+- Web: vendor invoice list (`/ap-invoices`, status and vendor filters, load more) and invoice detail (`/ap-invoices/:id`: lines, hold or rejection reason, ledger entry, links to the receipts and purchase orders) (#533); the detail reads `GET /v1/receiving/invoices/{id}`.
+- Migration factory: `POST /api/v1/migration/runs/{id}/opening-journal` posts the migrated GL balances of a gl_balances run to a legal entity's ledger through the ledger's posting API, one balanced journal per currency, refused whole with the difference named (MIG-1540) when a currency does not balance, idempotent by a fixed key per company, legal entity and currency (`gl_opening_posting`, migration 0024); `GET` lists what was posted, and a fully posted gl_balances pack no longer needs a go/no-go waiver (49-1, #49).
+- Billing credit reservations (#513): `POST /v1/billing/invoices/{id}/credit-reservations` (idempotent per RMA, line-level qty/net/tax) plus `POST /v1/billing/credit-reservations/{id}:commit` and `:release` (service duty `billing.credit-reservation.write` only; a released key can be retried under the bound) hold part of a posted invoice for a credit issued outside billing; reservations count with posted credit notes under the invoice's row lock, so the total credited can no longer exceed the invoiced amount (`BIL-0005`); the invoice read shows `credited.reserved` and `reservedQty`; receivables is granted `billing.credit-reservation.write` (receivables wiring follows).
+- Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 235 existing raw id fields in 134 files are allowlisted for conversion, including helper-built, template and placeholder labels the first version of the guard missed (#500).
+- Budget planning (#38, P4): budgeting plan processes with Draft, Submitted, Reviewed and Approved stages, stage owners per org
+  unit, up to 10 scenarios with copy-from, a plan grid (account x cost center x period) with bulk upsert under ETag and
+  If-Match, even and prior-year-actuals spreading, and RLS on the five new tables. workflow-ts runs the approval as a Temporal
+  workflow per submission; approval posts the scenario as the Original budget register entry that budget control reads.
+- Usability program (#510): persona task scripts, a baseline report template and a release usability gate in
+  `apps/web/docs`, and a "Usability gate" section in the release notes template.
+- Plain-language error messages (#501): the web problem catalog now covers every error code of the party, ledger, tax and
+  product services, and the coverage test reads their Go sources so a new code without a message fails it.
+- Receiving: `GET /v1/receiving/invoices` lists vendor invoices with their lines and ledger entry id, filtered by
+  vendor, receipt, purchase order or status, keyset-paged and scoped to the caller's legal entities
+  (`receiving.ap.inquire`); `GET /v1/receiving/receipts?purchaseOrderId=` already existed and now has an API test (#502).
+- Treasury EBICS wiring (#36): subscriber onboarding routes with split duties (`treasury.ebics.write|keys|approve`; the confirmer is the authenticated user), a statement poller (`TREASURY_EBICS_POLL_WORKERS`), the `ebics` bank channel behind `TREASURY_BANK_CHANNELS`, downloads acknowledged only after import with per-statement account routing, E002 private key wiped after use with its public key stored apart, A006 over the order without CR/LF/Ctrl-Z.
+- EBICS H004 bank connectivity in treasury (#36, FR-36.12): `internal/ebics` replaces the unencrypted upload subset. A
+  subscriber moves NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY (migration 0009; bank key hashes must be confirmed by
+  a named person before any order). Keys stay in Vault: A006 (RSASSA-PSS) and X002 (PKCS#1 v1.5) sign in transit, E002 is
+  read from KV for each unwrap. Orders carry the C14N `AuthSignature`, E002 hybrid encryption (AES-128-CBC, RSA key
+  transport), zlib and segmentation; the bank's answers are verified against its X002 key. Upload CCT, CDD, CDB, CIP;
+  download C53, C52, C54, HAC, PTK, STA, VMK; C53 and STA feed the existing statement import. Return codes map to
+  back-off (bounded retries) or park (subscriber refuses orders until a person unparks it). Tested against an in-process
+  fake bank that verifies signatures, decrypts, segments and answers in H004; live bank sandbox and Vault stay with #213.
+- Mobile warehouse execution service (`services/mobile`, wave 32, #32): device sessions with idle timeout, takeover and resume, role- and site-based menus with SSE publish notice, versioned server-driven flows and step runner calling the warehouse work API (new `mobile` service grant), GS1-128/DataMatrix scan parsing, idempotent offline replay with conflict parking and a supervisor resolve queue, chart, migrations with forced RLS, authz routes, OpenAPI and AsyncAPI.
+- Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
+  seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new
+  `services/identity/cmd/devgateway` (JWT verification, OPA enforcement, identity headers from claims) and the web
+  app. The web app signs in through Keycloak with the authorization-code flow and PKCE when `PASSAGE_OIDC_ISSUER` is
+  set and sends the bearer token on `/api/` calls. `tools/e2e` runs vendor, purchase order, receipt, invoice and
+  ledger entry against the real service binaries, directly and through the gateway with a real OPA, and checks that
+  a non-admin gets 403 on admin routes. `roadmap/waves.json` records which waves a test verifies end to end.
+- Dispatch optimization (#45): passage-dispatch solves a day with CP-SAT (greedy fallback on timeout or infeasible model) behind `POST /v1/dispatch/runs` and `GET /v1/dispatch/runs/{id}`, honoring skills, shifts, windows, due times, pinned visits and overtime. Fieldservice `POST /v1/service/dispatch/optimizations` snapshots a territory-day's open work orders, technicians and held visits, calls it over a duty-scoped service token (new fieldservice to dispatch grant in `platform/go/tenant` and `policies/authz/data.json`), backs off and parks failures, and `:accept` writes the plan back through the assignment path (migration 0011, codes `SVC-DSP-014` to `017`, `DISPATCH_URL`). The technician mobile app and a deployment chart for dispatch are still open.
+- EDI: an inbound 850 or ORDERS becomes a sales order (#35 P4a). Partner item cross-references (BP, VP, UP or EN to product,
+  site and warehouse) and partner sales defaults under `edi.admin` with legal-entity RLS (migration 0010);
+  `POST /edi/v1/messages/{id}:post` places the order with sales under the new service grant `edi` -> `sales`
+  `sales.channel.intake` (key = message id, externalRef = partner id and PO number), records the sales order on the
+  message (POSTED, `message.posted`), and parks what it cannot map or sales refuses (FAILED with a park code in the
+  message monitor).
+  The edi background poster posts MAPPED orders of partners that have not turned `autoPost` off, as the new service
+  principal `edi-sales` (only `sales.channel.intake`; `platform/go/tenant` and `policies/authz/data.json`), with back-off;
+  reprocess skips parked orders; units of measure are mapped per partner (`unitMap`; none passes units through, EDI-0024 parks a unit missing from an existing map);
+  a retry sends the body pinned at the first attempt; `MarkPosted` errors when no row matches; unknown partner is 404
+  on the xref list and sales defaults (migration 0011).
+- Role-based workspaces and navigation in the web app (#498): the sidebar shows one of ten persona workspaces (AP clerk,
+  AR and collections clerk, buyer, receiving and warehouse worker, sales rep or order desk, production planner,
+  shop-floor supervisor, accountant or controller, HR or payroll admin, tenant admin) with 17 to 20 entries each in
+  task language, switchable and holdable several at a time, instead of every module. The new All features page groups
+  every entry the user may open by eight business areas, with technical screens under Advanced and a filter that also
+  matches the old screen names; search uses the task labels too. Workspaces and areas are data
+  (`apps/web/src/shell/workspaces/workspaces.json`) with a loader that accepts a per-tenant override. The audit of all
+  607 sidebar entries (`navAudit.json`: keep, merge or advanced, area and task label) is committed, and a test fails
+  when a module adds an entry that is not classified. Duty gating still applies inside workspaces.
+- RMA credit notes reverse the original invoice tax (#30): sales derives the reversal per tax code from the stored invoice
+  line tax (pro rata, half-even to the cent, net of billing credits and earlier returns; history in `return_order_tax`),
+  receivables debits the pinned tax accounts, credits 1200 net plus tax, records negative output transactions with the tax
+  service and bounds the credit with its tax against the invoice and checks every tax code against the billing invoice (read-only `billing.invoice.read`, `BILLING_URL`): unbilled codes and over-claims are refused; billing exposes `creditedTax` per invoice line. The
+  receivables service gains the `tax.transaction.record` grant and `RECEIVABLES_RMA_TAX_ACCOUNTS` / `TAX_URL` settings.
+- SAF-T structural validation for the tax extract (#13): `saft.Build` accepts Customers, Suppliers and
+  GeneralLedgerEntries and checks them in Go (required elements, balanced transactions, control totals, party
+  references) because the official OECD XSD cannot be fetched automatically; the test XSD subset covers the sections.
+- `GET /v1/tax/saft?ledger_id=` exports the ledger's journals as GeneralLedgerEntries (#13): new
+  `ledgerclient.JournalLines`, the `tax` service grant gains `ledger.entry.lookup` and `ledger.ledger.lookup`, and the ledger
+  must belong to the caller's legal entity. Customers and Suppliers stay unfilled (no party reference on ledger lines).
+  The extract now carries GeneralLedgerAccounts from the chart, AmountStructure amounts and the OECD Transaction elements,
+  needs a currency equal to the ledger's (422 TAX-0011), maps unusable ledger data to 502 TAX-0012, and the `tax` grant also
+  gains `ledger.account.lookup`.
+- Postgres backups and tenant-scoped point-in-time restore (#48, P3a): the multi-region chart renders a
+  barman-cloud `ObjectStore` (per-region bucket, 30 d retention), continuous WAL archiving from the CNPG cluster, a
+  daily `ScheduledBackup` and `PassageBackupStale` / `PassageWalArchiveFailing` alerts; `tools/tenant-restore`
+  prints the recovery manifest for a scratch cluster at a timestamp and copies one tenant's rows back into the
+  live database, dry run by default. The restore drill on a cluster and the pen test stay open.
+- Product costing: activation revaluation report and mass roll by stored-BOM selection (#39). `GET
+  /v1/product-costing/activations/{id}/revaluation-report` (duty `productcost.view`) sets each stored activation line
+  beside the inventory on-hand read again from the inventory service for the posting date (the existing
+  `inventory.read`-only grant) and reports `tiedToJournal` (lines, total and booked journal agree) and `tiedToOnHand`.
+  `POST /v1/product-costing/versions/{id}/roll` takes `"selection": "allActive"` instead of `itemIds`: the roots are
+  every item with an active material BOM at the site on `asOf`, listed from engineering (`ActiveBOMProducts`), up to
+  50,000, so the request stays small against the 4 MiB body cap (tested with 30,000 BOMs whose equivalent body is over
+  4 MiB).
+- Wave 10 proof P4a (#10): the demo manufacturer's seven AX tables now migrate through the real `target.Loader`
+  (signed service tokens over HTTP to the owning services' import routes, read-back reconciliation) with the
+  cross-reference in Postgres, instead of the in-memory `MemLoader`
+  (`TestPostgres_AXDemoExtractMigratesThroughTheRealLoader`). The recorded demo stays a human step.
+- Plain-language copy and actionable errors in the web app (#501, part of #497): a UX writing guide
+  (`apps/web/docs/ux-writing.md`), rendered strings free of spec, wave and slice references with a test that fails if one
+  returns, and a user-facing message catalog keyed by problem code. `ProblemMessage` shows the message and what to do,
+  with the code, the server's own text and the request id under "Details". The catalog covers every code the purchasing,
+  receiving, payables, sales, inventory, fulfillment, billing, receivables and pricing services can return, and a test
+  reads their Go sources so a new code without a message fails the build. The pull request template gains a copy-review
+  item for web changes. The in-app glossary tooltips from the issue's scope are not part of this change.
+- Partner simulator round trips for every transaction set edi supports (#35, AC-35.1): the in-test demo distributor
+  gains its own EDIFACT reader and writer next to its X12 one (neither uses `internal/domain`) and trades over the
+  real transports. Over AS2 (`TestPartnerSim_X12RemittanceStatusAndTA1OverAS2`) it sends an 820 group and a 214 that
+  are mapped and answered with 997s, and a 204 rejected as unsupported; it reads our 820 and 214 and answers with a
+  997, a TA1 A beside a 997 E, and a TA1 R; its duplicate is answered with TA1 R 025 and a wrong IEA02 with TA1 R 001.
+  Over SFTP (`TestPartnerSim_EdifactRoundTripOverSFTP`) it sends ORDERS, DESADV and INVOIC with a decimal comma and
+  released service characters and reads the CONTRL (UCM 29 for a CNT mismatch), gets CONTRL UCI 4 26 for a duplicate,
+  and reads our DESADV, INVOIC and ORDERS and answers them with CONTRLs the service matches (ACKED, or FAILED for a
+  UCM 4). AC-35.1 is still not fully met: the 855 and the 856/810 are not produced without a manual step
+  (`services/edi/NOT-IMPLEMENTED.md`). 204 and 990 remain unsupported.
+- Fulfillment reports posted packing slips to sales (#496): each post queues one report per (slip, order)
+  (fulfillment migration 0035, `sales_delivery_report`), and a reporter in every API replica (`SALES_URL`,
+  `SALES_REPORT_INTERVAL`; chart `salesUrl`, `salesReportInterval`) sends it after the post commits to
+  `POST /v1/sales/orders/{id}:record-progress`: kind DELIVERED, `sourceRef` the slip number, the slip's quantities,
+  `actualWeight` on catch-weight lines and the pick tracking (batch, serial, quantity; no location), with a stable
+  `Idempotency-Key` per (slip, order). Reports are leased (`FOR UPDATE SKIP LOCKED`), retried with back-off on an
+  outage, 5xx, 401, 403, 408 or 429, and parked on any other 4xx or after 20 attempts;
+  `GET /v1/fulfillment/sales-delivery-reports` lists them and `POST /v1/fulfillment/sales-delivery-reports/{id}:retry`
+  queues a parked one again. A slip cancelled before it was reported is withdrawn; one cancelled after stays reported,
+  since sales has no reversal of a delivery. Calls are signed as fulfillment with only `sales.order.record-delivery`,
+  acting as the new service principal `service:fulfillment-sales-report`; `sales.order.record-delivery` is now
+  service-only. Sales' `:record-progress` lines take `lineId` as an alternative to `lineNo`, which is how fulfillment
+  names them. Ops: give fulfillment a signing key, list its public key in the sales chart's
+  `serviceIdentity.publicKeys`, then set `salesUrl`.
+- Migration factory wave proof on all nine packs, the month replay and the rollback rehearsal (#49):
+  `TestWave49_SyntheticYearCutoverRehearsal` now migrates the synthetic AX 2012 and SAP ECC years (three entities each)
+  through all nine packs with every control total MATCH; the onhand, open_orders, bank_balances, wip_prod, fixed_assets
+  and payroll_ytd year is simulated at test time (`internal/api/synth_year_test.go`, `PASSAGE_SYNTH_SCALE=full` for the
+  1.1M AX and 1.3M SAP row fixture size). RND-001 now allows 0.01 per document as BR-49.7 says: a parallel-run tuple
+  and variance carry an optional `documents` count (the replay counts, per account, the documents that posted to it;
+  migration 0022), and the generated 42k-document `fx-replay-month` replays with no unexplained variance. Executing a
+  cutover rollback now moves the plan's loaded and reconciled pack runs to ROLLED_BACK (BR-49.1, migration 0023; such
+  a run is no longer loaded into receivables), flips every coexistence flag of the plan's legacy companies back to
+  LEGACY in the same transaction, lists them on `dev.passage.cutover.plan.rolledback.v1` with the rolled-back run count,
+  and, given `ledgers`, posts the compensating journals at once (a ledger problem is reported in `rollbackOutcome`).
+  Every flag change writes the new `dev.passage.migration.coexistence.changed.v1`. The integration hub records the mode
+  each legacy coexistence adapter should be in from both events, in flag version order, and suspends or resumes the
+  adapter with backoff and parking (`src/coexistence.ts`, hub migration 0007, `HUB_COEXISTENCE_INTERVAL_MS`); the AX and
+  SAP adapter implementations are still to come, so a row without one parks with `HUB-COEXIST-NO-ADAPTER`. Add
+  `passage.cutover.plan` and `passage.migration.coexistence` to the hub's `HUB_TOPICS` to drive it.
+- Credit-note reversal in revrec (#29, P3): billing now publishes `dev.passage.billing.creditnote.booked.v1` when it books a
+  credit note's journal, with the allocated and deferred amounts the journal reversed per line (the deferred part is its
+  Dr 2400) and the order and product of the credited line. `creditnote.posted` cannot carry these, because it is published
+  before the journal exists. A new revrec consumer (`revrec consume`, group and service principal `revrec-creditnotes`, duty
+  `revrec.creditnote.reverse`, dead-letter topic `passage.revrec.creditnotes.dlq`, `deploy/kafka/revrec-consumer.yaml`,
+  chart `consumer.*` off by default) reverses the schedules of the credited obligations. It reduces the unrecognized
+  schedule pro rata first, and a line taken to zero is REVERSED. Any excess reverses recognized revenue (ASC 606 change in
+  transaction price, applied to the unsatisfied part first). The consumer is idempotent per (credit note, line); rule
+  failures (`REV-0300` to `REV-0304`) are parked and other failures retried. `POST /v1/revrec/journal-postings` posts the
+  reversed revenue as Dr 4000 / Cr 2400 on the credit note's posting date. A refused posting backs off and is parked after
+  5 refusals, and the configured ledger is pinned to its legal entity first (`REV-0203`; revrec's ledger grant gains
+  `ledger.ledger.lookup`). The roll-forward gains `reversed`, and `adjustments` now carries the credit notes. The GL 2400
+  reconciliation counts the credit-note debits (`creditNotes`) and stays tied through partial and full credit notes (revrec
+  migration 0008). The accountant-reviewed ASC 606 workbook (P2b) remains a human sign-off.
+
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin
@@ -230,6 +428,38 @@ release may change public APIs.
 
 ### Fixed
 
+- Quality holds now hold across every movement kind together (#33, Wave 33 AC2). Inventory's issue claims
+  (`POST /v1/inventory/issue-claims`) were tallied per kind, so a consume of 2 and a ship of 2 of the same free 2
+  both passed. Claims of every kind now count together, and the new optional `issueRef` (the document line the units
+  are issued for: `SALES_LINE:<order line id>` or `PRODUCTION_ORDER:<order id>:<item id>`) groups claims that are
+  successive steps of the same units. A pick and the ship of what it picked count once (the largest per-kind total of
+  the ref). Fulfillment's packing-slip post and production consumption send their ref, and a warehouse pick sends the
+  work line's `issueRef` attribute. Inventory's own issues are weighed against the outstanding claims too: journals
+  other than counts, status steps, transfers and blockings. A sales DELIVERED booking settles its order line's
+  claims, so stock issued through inventory and claimed before is no longer counted twice. A claim may not leave
+  free stock below zero while anything is held, so a hold placed after a pick also stops the ship of the staged units
+  until the usage decision. Inventory migrations 0038 and 0039 add `inventory_issue_claim.issue_ref` and the `ISSUED`
+  rows (NOT VALID checks, validated apart). Property test: `TestHoldProperty_MixedMovementsNeverReachHeldStock`.
+- Issue claims are settled by the issue that can be linked to them (#33). The DELIVERED booking of a sales order line now
+  settles only the claims of that line's ref, once and net of what left the warehouse; claims without a ref and claims of other
+  refs are never settled by an issue, so one line's delivery cannot release another line's pick and move held stock. Journals,
+  status steps and registrations settle nothing, and `transactions:apply` takes no `issueRef` (refused). Settlement keys start
+  `issued:` and `ClaimIssue` refuses a caller key that does.
+  Production consumption claims stay until released (production books none in inventory yet). Sales and inventory tests
+  follow a posted slip's `:record-progress` call to the event and the booking.
+- Warehouse picks for a sales order line are linked to the line's ship claim (#33). A work line takes the new optional
+  `orderLineId` (PICK only; becomes the `issueRef` attribute `SALES_LINE:<id>`, refused together with an explicit `issueRef`;
+  the web Create work form has a "sales order line" field on pick lines), so pick 5, ship 5 and a DELIVERED booking of 5 leave
+  nothing outstanding and the pick and ship of one line count once; a partial delivery of 3 leaves exactly 2. A pick with no
+  source document stays ref-less and is released explicitly. An `issueRef` must be canonical (`SALES_LINE:<lower-case uuid>` or
+  `PRODUCTION_ORDER:<uuid>:<uuid>`), else 400 on the warehouse work and the inventory claim APIs.
+- edi EDIFACT ORDERS (#35, found by the partner simulator): a charge amount (MOA 23 or 204) written with a decimal
+  comma was stored in the canonical order as text such as `12,50`, and one that was not a number passed unchecked; it
+  now takes the decimal point (two decimals unless the partner writes more, like the 850's SAC05) and a non-numeric
+  amount rejects the message with CONTRL code 12 at the MOA.
+- edi EDIFACT DESADV (#35, found by the partner simulator): the item reference in LIN 03 (the EANCOM GTIN, 7143 SRV
+  or EN) was ignored, so a DESADV identifying its items there alone was refused for want of an item reference; it is
+  now read like in ORDERS and INVOIC.
 - Inventory postings consumer (#480): replaying a sales delivery that emptied its on-hand row no longer fails as a
   reused Idempotency-Key (the row's running average had moved to zero, so the replay was a different request);
   entries already booked are skipped.

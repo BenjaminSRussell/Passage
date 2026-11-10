@@ -2,6 +2,7 @@ import { Alert, Badge, Button, Card, Skeleton } from "../../shell/ui";
 import { getPayload, type PayloadTree, type SegmentElement, type SegmentNode } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const KIND_LABELS: Record<SegmentNode["kind"], string> = {
   interchange: "Interchange",
@@ -75,7 +76,7 @@ export function RawPayloadCard({ interchangeId }: { interchangeId: string }) {
     <Card title="Raw payload" actions={state.data?.piiMasked ? <Badge tone="neutral">Personal data masked</Badge> : null}>
       {state.error ? (
         <Alert tone="danger" title="Could not load the raw payload" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.data ? (
         <div aria-busy="true">

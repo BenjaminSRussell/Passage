@@ -33,6 +33,7 @@ updates:
       - /services/ledger
       - /services/metadata
       - /services/migration
+      - /services/mobile
       - /services/numbering
       - /services/org
       - /services/party
@@ -54,6 +55,7 @@ updates:
       - /services/revrec
       - /services/sales
       - /services/scheduling
+      - /services/search
       - /services/shopfloor
       - /services/tax
       - /services/transport

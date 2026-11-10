@@ -96,7 +96,7 @@ describe("merge stored batches (slice 13)", () => {
       return undefined;
     };
     const { container } = renderAt("/processmfg/merge-stored");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     const listed = await findTable({ name: "Batches of the item" });
     expect(within(listed).getByText("L-B")).toBeInTheDocument();
     fill("New batch number", " L-AB ");
@@ -134,7 +134,7 @@ describe("merge stored batches (slice 13)", () => {
     expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
     expect(screen.getByText("Enter a batch number of 1 to 40 characters.")).toBeInTheDocument();
     expect(screen.getByText("Enter the warehouse of the batches.")).toBeInTheDocument();
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     expect(await screen.findByText("No batches registered for this item")).toBeInTheDocument();
     fill("New batch number", "X");
     fill("Warehouse", "W1");
@@ -146,7 +146,7 @@ describe("merge stored batches (slice 13)", () => {
   it("checks the quantity and cost of each chosen batch", async () => {
     handler = () => ({ status: 200, body: { items: [batch(A, "L-A"), batch(B, "L-B")] } });
     renderAt("/processmfg/merge-stored");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     await findTable({ name: "Batches of the item" });
     fill("New batch number", "X");
     fill("Warehouse", "W1");
@@ -166,7 +166,7 @@ describe("merge stored batches (slice 13)", () => {
       return undefined;
     };
     renderAt("/processmfg/merge-stored");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     await findTable({ name: "Batches of the item" });
     fill("New batch number", "X");
     fill("Warehouse", "W1");
@@ -185,8 +185,8 @@ describe("merge stored batches (slice 13)", () => {
   it("shows a load failure with a retry", async () => {
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/merge-stored");
-    fill("Item id", ITEM);
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    fill("Item", ITEM);
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 

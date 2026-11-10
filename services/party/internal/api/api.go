@@ -49,6 +49,7 @@ type API struct {
 	vendors   store.VendorStore
 	customers store.CustomerStore
 	merges    MergeStore
+	search    store.SearchStore
 	sequence  Sequencer
 
 	creditCounts     creditMetrics
@@ -116,6 +117,9 @@ func (a *API) Register(r chi.Router) {
 	}
 	if a.merges != nil {
 		a.registerMerge(r)
+	}
+	if a.search != nil {
+		a.registerSearch(r)
 	}
 }
 

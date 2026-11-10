@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listBackorders, type BackorderRow } from "./api/client";
@@ -6,6 +7,7 @@ import { ShipmentStatusBadge } from "./badges";
 import { dash, formatDateTime, shortId, SHORT_PICK_REASONS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Rows per page of the report. */
 export const BACKORDER_PAGE = 100;
@@ -114,8 +116,8 @@ export function BackordersPage() {
       />
       <Card title="Filter">
         <form className={styles.form} onSubmit={apply} noValidate>
-          <FormField id="bo-warehouse" label="Warehouse id" error={errors.warehouseId} optional>
-            {(control) => <Input {...control} {...field("warehouseId")} />}
+          <FormField id="bo-warehouse" label="Warehouse" error={errors.warehouseId} optional>
+            {(control) => <EntityLookup entity="warehouse" {...control} {...field("warehouseId")} />}
           </FormField>
           <FormField id="bo-status" label="Show">
             {(control) => (
@@ -145,7 +147,7 @@ export function BackordersPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load the backorders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

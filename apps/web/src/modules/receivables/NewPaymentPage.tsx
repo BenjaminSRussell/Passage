@@ -1,9 +1,13 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormErrorSummary, FormField, FormSection, Input, PageHeader, Select, summaryItems, useFormBaseline, useUnsavedChanges, type FormFieldTarget } from "../../shell/ui";
+import { copy } from "../../shell/copy";
 import { createPayment, describeProblem, newKey, PAYMENT_MODES, ReceivablesApiError, type PaymentInput, type PaymentMode, type Problem } from "./api/client";
 import { CURRENCY, DAY, DECIMAL, MODE_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -21,6 +25,26 @@ export interface PaymentDraft {
   shortPayReason: string;
   remittance: { reference: string; amount: string }[];
 }
+
+const FIELD_TARGETS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "np-legal-entity", label: "Legal entity" },
+  customerId: { id: "np-customer", label: "Customer" },
+  amount: { id: "np-amount", label: "Amount" },
+  currency: { id: "np-currency", label: "Currency" },
+  receivedDate: { id: "np-received", label: "Received date" },
+  valueDate: { id: "np-value", label: "Value date" },
+  sourceRef: { id: "np-ref", label: "Check or bank reference" },
+  payerName: { id: "np-payer", label: "Payer name" },
+  payerAccount: { id: "np-account", label: "Payer bank account" },
+  shortPayReason: { id: "np-short", label: "Short-pay reason" },
+};
+
+function remittanceTarget(key: string): FormFieldTarget | undefined {
+  const match = /^remittance\[(\d+)\]$/.exec(key);
+  return match ? { id: `np-rem-ref-${match[1]}`, label: `Reference ${Number(match[1]) + 1}` } : undefined;
+}
+
+const errorItems = (errors: Errors) => summaryItems(errors, FIELD_TARGETS, remittanceTarget);
 
 export function emptyPayment(day: string = today()): PaymentDraft {
   return {
@@ -42,8 +66,8 @@ export function emptyPayment(day: string = today()): PaymentDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validatePayment(v: PaymentDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (v.customerId.trim() !== "" && !UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID) or leave it empty.";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
+  if (v.customerId.trim() !== "" && !UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer or leave it empty.";
   if (!DECIMAL.test(v.amount.trim()) || /^0+(\.0+)?$/.test(v.amount.trim())) errors.amount = "Enter an amount above zero, such as 1250.00.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as USD.";
   if (!DAY.test(v.receivedDate)) errors.receivedDate = "Enter the date the payment arrived.";
@@ -94,6 +118,8 @@ export function NewPaymentPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const [attempt, setAttempt] = useState(0);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline(values));
 
   function update(patch: Partial<PaymentDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -109,15 +135,21 @@ export function NewPaymentPage() {
     const found = validatePayment(values);
     setErrors(found);
     setFailure(null);
-    if (Object.keys(found).length > 0) return;
+    if (Object.keys(found).length > 0) {
+      setAttempt((n) => n + 1);
+      return;
+    }
     setBusy(true);
     try {
       const created = await createPayment(toPaymentInput(values), key.current);
+      release();
       navigate(`/receivables/payments/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
-      if (Object.keys(problem.fields).length > 0) setErrors(problem.fields);
-      else setFailure(problem);
+      if (Object.keys(problem.fields).length > 0) {
+        setErrors(problem.fields);
+        setAttempt((n) => n + 1);
+      } else setFailure(problem);
       // A refused request is final; only a network or server failure may be retried with the same key.
       if (!(error instanceof ReceivablesApiError) || error.status < 500) key.current = newKey();
     } finally {
@@ -126,10 +158,20 @@ export function NewPaymentPage() {
   }
 
   type TextField = "legalEntityId" | "customerId" | "sourceRef" | "amount" | "currency" | "payerName" | "payerAccount" | "shortPayReason";
-  function text(id: string, field: TextField, label: string, opts: { hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean } = {}) {
+  function text(id: string, field: TextField, label: string, opts: { entity?: LookupEntityKey; hint?: string; optional?: boolean; required?: boolean; mono?: boolean; decimal?: boolean } = {}) {
     return (
-      <FormField id={id} label={label} hint={opts.hint} optional={opts.optional} error={errors[field]}>
-        {(c) => (
+      <FormField id={id} label={label} hint={opts.hint} optional={opts.optional} required={opts.required} error={errors[field]}>
+        {(c) =>
+        opts.entity ? (
+          <EntityLookup
+            {...c}
+            entity={opts.entity}
+            scope={opts.entity === "customer" ? { legalEntityId: values.legalEntityId || undefined } : undefined}
+            value={values[field]}
+            onChange={(e) => update({ [field]: e.target.value } as Partial<PaymentDraft>)}
+            invalid={Boolean(errors[field])}
+          />
+        ) : (
           <Input
             {...c}
             className={opts.mono ? styles.mono : undefined}
@@ -148,9 +190,10 @@ export function NewPaymentPage() {
       <PageHeader title="Record payment" description="The payment arrives as Received. Match and apply it to open items from its page." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("np-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
-          {text("np-customer", "customerId", "Customer id", { optional: true, mono: true, hint: "Leave empty when the payer is not yet identified." })}
-          <FormField id="np-mode" label="Payment mode">
+          <FormErrorSummary items={errorItems(errors)} attempt={attempt} />
+          {text("np-legal-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true, required: true })}
+          {text("np-customer", "customerId", "Customer", { entity: "customer", optional: true, mono: true, hint: copy.fieldHelp.paymentCustomer })}
+          <FormField id="np-mode" label="Payment mode" required>
             {(c) => (
               <Select {...c} value={values.paymentMode} onChange={(e) => update({ paymentMode: e.target.value as PaymentMode })}>
                 {PAYMENT_MODES.map((m) => (
@@ -161,22 +204,20 @@ export function NewPaymentPage() {
               </Select>
             )}
           </FormField>
-          {text("np-ref", "sourceRef", "Check or bank reference", { optional: true, mono: true })}
-          {text("np-amount", "amount", "Amount", { mono: true, decimal: true })}
-          {text("np-currency", "currency", "Currency", { mono: true })}
-          <FormField id="np-received" label="Received date" error={errors.receivedDate}>
+          {text("np-amount", "amount", "Amount", { mono: true, decimal: true, required: true })}
+          {text("np-currency", "currency", "Currency", { mono: true, required: true })}
+          <FormField id="np-received" label="Received date" required error={errors.receivedDate}>
             {(c) => <Input {...c} type="date" value={values.receivedDate} onChange={(e) => update({ receivedDate: e.target.value })} invalid={Boolean(errors.receivedDate)} />}
           </FormField>
-          <FormField id="np-value" label="Value date" hint="Cash discounts count from this date." error={errors.valueDate}>
+          <FormField id="np-value" label="Value date" required hint={copy.fieldHelp.paymentValueDate} error={errors.valueDate}>
             {(c) => <Input {...c} type="date" value={values.valueDate} onChange={(e) => update({ valueDate: e.target.value })} invalid={Boolean(errors.valueDate)} />}
           </FormField>
-          {text("np-payer", "payerName", "Payer name", { optional: true, hint: "Matched against the names this customer paid under before." })}
-          {text("np-account", "payerAccount", "Payer bank account", {
-            optional: true,
-            mono: true,
-            hint: "IBAN or routing and account from the check or advice. Only a hash is kept, to recognise the payer next time.",
-          })}
-          {text("np-short", "shortPayReason", "Short-pay reason", { optional: true, hint: "Why the payer paid less than the invoice, if they said." })}
+          <FormSection collapse="more">
+            {text("np-ref", "sourceRef", "Check or bank reference", { optional: true, mono: true })}
+            {text("np-payer", "payerName", "Payer name", { optional: true, hint: copy.fieldHelp.paymentPayerName })}
+            {text("np-account", "payerAccount", "Payer bank account", { optional: true, mono: true, hint: copy.fieldHelp.paymentPayerAccount })}
+            {text("np-short", "shortPayReason", "Short-pay reason", { optional: true, hint: copy.fieldHelp.paymentShortReason })}
+          </FormSection>
           <fieldset className={styles.lineSet}>
             <legend className={styles.groupsLegend}>Remittance: the documents the payer says this pays</legend>
             {values.remittance.map((line, i) => (
@@ -205,7 +246,7 @@ export function NewPaymentPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not record the payment" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -219,6 +260,7 @@ export function NewPaymentPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

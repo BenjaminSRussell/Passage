@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, FormField, Textarea, type BadgeT
 import { describeProblem, type OutboundPreview, type Problem, type UnresolvedRef } from "./api/client";
 import { parseEventText, STARTER_EVENT, toJsonText } from "./outboundDomain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const unresolvedColumns: DataTableColumn<UnresolvedRef>[] = [
   { key: "name", header: "Lookup", mono: true },
@@ -65,7 +66,7 @@ export function OutboundPreviewPanel({ run, disabledReason }: { run(event: Recor
       ) : null}
       {failure ? (
         <Alert tone="danger" title="The preview could not run" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {result ? (

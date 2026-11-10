@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -15,6 +16,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, StatusBadge, decimalPattern, rankingLabels, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -243,8 +245,8 @@ function TypeFields({ id, form, set, errors, creating }: { id: string; form: Typ
         <div className={styles.grid}>
           {creating ? (
             <>
-              <FormField id={`${id}-legal-entity`} label="Legal entity id" error={errors.legalEntityId}>
-                {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+              <FormField id={`${id}-legal-entity`} label="Legal entity" error={errors.legalEntityId}>
+                {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
               </FormField>
               <FormField id={`${id}-code`} label="Code" hint="Upper case, for example SEALED" error={errors.code}>
                 {(c) => <Input {...c} value={form.code} maxLength={20} onChange={(e) => set({ code: e.target.value.toUpperCase() })} />}
@@ -330,7 +332,7 @@ export function RFQTypeCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <TypeFields id="rt" form={form} set={set} errors={errors} creating />
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -431,8 +433,8 @@ export function RFQTypeDetailPage() {
           >
             {failure
               ? stale
-                ? `Someone else changed this RFQ type since you opened it. Reload to see their change, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else changed this RFQ type since you opened it. Reload to see their change, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">

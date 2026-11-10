@@ -5,11 +5,11 @@ import { CommandPalette, type PaletteEntry } from "./CommandPalette";
 import { copy } from "./copy";
 import { holdsDuty, requiredDuty, visibleModules } from "./dutyGate";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
-import { demoNote } from "./metadata";
 import { NotAvailablePage } from "./pages/NotAvailablePage";
 import { resolvePage } from "./pageMeta";
-import { devDuties, PrincipalProvider } from "./principal";
-import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
+import { WorkContextProvider } from "./lookup/workContext";
+import { devDuties, devIdentity, PrincipalProvider } from "./principal";
+import { readDensity, writeDensity, type Density } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import styles from "./Shell.module.css";
 import { shellNav } from "./shellNav";
@@ -18,6 +18,8 @@ import { clickTrace } from "./telemetry";
 import { TopBar } from "./TopBar";
 import { Alert, Skeleton } from "./ui";
 import { workspaceIcon } from "./workspaceIcons";
+import { WorkspaceNavProvider } from "./workspaces/WorkspaceNav";
+import { loadWorkspaceConfig, resolveNavEntries, type WorkspaceConfig } from "./workspaces/model";
 
 const TOAST_MS = 4000;
 const DRAWER_BREAKPOINT = "(min-width: 960px)";
@@ -29,6 +31,8 @@ function isShown(el: HTMLElement): boolean {
 export interface ShellProps {
   modules: PassageModule[];
   duties?: readonly string[];
+  identity?: string;
+  workspaceConfig?: WorkspaceConfig;
 }
 
 function PageSkeleton() {
@@ -42,7 +46,7 @@ function PageSkeleton() {
   );
 }
 
-export function Shell({ modules: allModules, duties }: ShellProps) {
+export function Shell({ modules: allModules, duties, identity, workspaceConfig }: ShellProps) {
   const principalDuties = useMemo(() => duties ?? devDuties(), [duties]);
   const modules = useMemo(() => visibleModules(allModules, principalDuties), [allModules, principalDuties]);
   const navigate = useNavigate();
@@ -52,8 +56,8 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [toast, setToast] = useState("");
-  const [density, setDensity] = useState<Density>("comfortable");
-  const [personalization, setPersonalization] = useState<Personalization>({ views: [] });
+  const userId = identity ?? devIdentity();
+  const [density, setDensity] = useState<Density>(() => readDensity(userId));
   const searchRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -71,14 +75,27 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
     [available, pathname, allModules],
   );
 
+  const config = useMemo(() => workspaceConfig ?? loadWorkspaceConfig(), [workspaceConfig]);
+  const navEntries = useMemo(() => resolveNavEntries(modules, config.areas), [modules, config]);
+  const navEntryByTo = useMemo(() => new Map(navEntries.map((e) => [e.to, e])), [navEntries]);
   const entries = useMemo<PaletteEntry[]>(
     () => [
       ...shellNav.map((n) => ({ id: `shell:${n.to}`, group: copy.nav.general, label: n.label, to: n.to, icon: n.icon })),
       ...modules.flatMap((m) =>
-        m.nav.map((n) => ({ id: `${m.id}:${n.to}`, group: m.title, label: n.label, to: n.to, icon: workspaceIcon(m.id) })),
+        m.nav.map((n) => {
+          const entry = navEntryByTo.get(n.to);
+          return {
+            id: `${m.id}:${n.to}`,
+            group: m.title,
+            label: entry?.label ?? n.label,
+            to: n.to,
+            icon: workspaceIcon(m.id),
+            keywords: `${n.label} ${entry?.areaLabel ?? ""}`,
+          };
+        }),
       ),
     ],
-    [modules],
+    [modules, navEntryByTo],
   );
 
   const announce = useCallback((message: string, visual = false) => {
@@ -221,29 +238,25 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
     menuRef.current?.focus();
   }
 
-  function applySavedView() {
-    const view: SavedView = {
-      id: "default",
-      name: "Default",
-      entity: demoNote.id,
-      columns: demoNote.fields.map((f) => f.name),
-      density,
-    };
-    setPersonalization(applyView(saveView(personalization, view), view.id));
-    announce(copy.announce.savedViewApplied, true);
+  function toggleDensity() {
+    const next: Density = density === "compact" ? "comfortable" : "compact";
+    setDensity(next);
+    writeDensity(userId, next);
   }
 
   return (
     <PrincipalProvider duties={principalDuties}>
+      <WorkContextProvider identity={userId} enabled={principalDuties.includes("org.read")}>
+      <WorkspaceNavProvider entries={navEntries} config={config}>
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
           Skip to content
         </a>
         <div className={styles.frame}>
           <Sidebar
-            modules={modules}
             shellNav={shellNav}
             drawerOpen={drawerOpen}
+            announce={announceQuietly}
             searchRef={searchRef}
             onOpenSearch={openSearch}
             onCloseDrawer={closeDrawer}
@@ -256,9 +269,9 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
               menuRef={menuRef}
               drawerOpen={drawerOpen}
               compact={density === "compact"}
+              showContext={principalDuties.includes("org.read")}
               onOpenDrawer={() => setDrawerOpen(true)}
-              onApplyView={applySavedView}
-              onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
+              onToggleCompact={toggleDensity}
             />
             {online ? null : (
               <div className={styles.banner}>
@@ -284,6 +297,8 @@ export function Shell({ modules: allModules, duties }: ShellProps) {
         ) : null}
         {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
       </div>
+      </WorkspaceNavProvider>
+      </WorkContextProvider>
     </PrincipalProvider>
   );
 }

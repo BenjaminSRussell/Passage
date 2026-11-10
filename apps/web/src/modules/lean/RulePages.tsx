@@ -1,4 +1,5 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -41,6 +42,7 @@ import styles from "./pages.module.css";
 import { RuleAnalysisCard } from "./RuleAnalysis";
 import { RuleCountCheckCard } from "./RuleCountCheck";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function capacity(r: Rule): string {
   return r.numberOfKanbans === null ? String(r.activeKanbans) : `${r.activeKanbans} of ${r.numberOfKanbans}`;
@@ -75,7 +77,7 @@ export function RulesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load kanban rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -162,7 +164,7 @@ export function NewRulePage() {
     effectiveFrom: today(),
   });
   const [demand, setDemand] = useState({ dailyDemand: "", safetyPct: "10" });
-  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<ReactNode>(null);
   const [errors, setErrors] = useState<RuleErrors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -189,7 +191,7 @@ export function NewRulePage() {
       setSuggestion(`Suggested ${numberOfKanbans} cards. You can change it.`);
     } catch (error) {
       const problem = describeProblem(error);
-      setSuggestion(`${problem.message} (${problem.code})`);
+      setSuggestion(<ProblemMessage problem={problem} />);
     }
   }
 
@@ -222,11 +224,11 @@ export function NewRulePage() {
             <FormField id="rule-code" label="Code" hint="Cards are numbered CODE-0001, CODE-0002, …" error={errors.code}>
               {(c) => <Input {...c} value={values.code} maxLength={32} onChange={(e) => update({ code: e.target.value.toUpperCase() })} invalid={Boolean(errors.code)} />}
             </FormField>
-            <FormField id="rule-item" label="Item id" error={errors.itemId}>
-              {(c) => <Input {...c} className={styles.mono} value={values.itemId} onChange={(e) => update({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
+            <FormField id="rule-item" label="Item" error={errors.itemId}>
+              {(c) => <EntityLookup entity="product" {...c} value={values.itemId} onChange={(e) => update({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
             </FormField>
-            <FormField id="rule-site" label="Site id" error={errors.siteId}>
-              {(c) => <Input {...c} className={styles.mono} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
+            <FormField id="rule-site" label="Site" error={errors.siteId}>
+              {(c) => <EntityLookup entity="site" {...c} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
             </FormField>
             <FormField id="rule-flow" label="Production flow" optional>
               {(c) => (
@@ -319,7 +321,7 @@ export function NewRulePage() {
         ) : null}
         {failure ? (
           <Alert tone="danger" title="Could not create the rule" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -375,7 +377,7 @@ export function RuleDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Kanban rule" />
         <Alert tone="danger" title="Could not load the rule" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -477,7 +479,7 @@ export function RuleDetailPage() {
             {notice ? <Alert tone="success" title={notice} live="status" /> : null}
             {failure ? (
               <Alert tone="danger" title="Could not generate kanbans" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
           </div>

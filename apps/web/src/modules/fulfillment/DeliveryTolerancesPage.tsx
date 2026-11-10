@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
@@ -7,6 +8,7 @@ import { dash, formatDateTime, PERCENT, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Saving a tolerance needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
 const DUTY_SAVE = "fulfillment.packing-rule.maintain";
@@ -109,7 +111,7 @@ export function DeliveryTolerancesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the tolerances" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -126,11 +128,11 @@ export function DeliveryTolerancesPage() {
         <Card title="Add or change a tolerance">
           <form className={styles.form} onSubmit={submit} noValidate>
             <p className={styles.note}>One row per product and customer: saving the same product and customer replaces the row. Open a row above to edit it.</p>
-            <FormField id="tol-product" label="Product id" hint="Empty: every product." error={errors.productId} optional>
-              {(control) => <Input {...control} value={values.productId} invalid={Boolean(errors.productId)} onChange={(event) => update({ productId: event.target.value })} />}
+            <FormField id="tol-product" label="Product" hint="Empty: every product." error={errors.productId} optional>
+              {(control) => <EntityLookup entity="product" {...control} value={values.productId} invalid={Boolean(errors.productId)} onChange={(event) => update({ productId: event.target.value })} />}
             </FormField>
-            <FormField id="tol-customer" label="Customer id" hint="Empty: every customer." error={errors.customerId} optional>
-              {(control) => <Input {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => update({ customerId: event.target.value })} />}
+            <FormField id="tol-customer" label="Customer" hint="Empty: every customer." error={errors.customerId} optional>
+              {(control) => <EntityLookup entity="customer" {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => update({ customerId: event.target.value })} />}
             </FormField>
             <FormField id="tol-pct" label="Over-delivery (%)" hint="Percent of the planned quantity, 0 to 100. 0 allows no excess." error={errors.overdeliveryPct}>
               {(control) => <Input {...control} inputMode="decimal" value={values.overdeliveryPct} invalid={Boolean(errors.overdeliveryPct)} onChange={(event) => update({ overdeliveryPct: event.target.value })} />}

@@ -5,6 +5,7 @@ import { createRegistrations, describeProblem, listAbsenceCodes, listWorkers, ne
 import { today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   workerId: string;
@@ -96,7 +97,7 @@ export function RecordAbsencePage() {
       <PageHeader title="Record absence" description="The absence is stored on the day entered and becomes an absence-paid or absence-unpaid pay line the next time the worker's pay is calculated." />
       {loadError ? (
         <Alert tone="danger" title="Could not load workers and absence codes" live="alert" action={<Button size="sm" onClick={() => { workers.reload(); codes.reload(); }}>Try again</Button>}>
-          {loadError.message} ({loadError.code})
+          <ProblemMessage problem={loadError} />
         </Alert>
       ) : loading ? (
         <Skeleton height="tile" />
@@ -147,7 +148,7 @@ export function RecordAbsencePage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not record the absence" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

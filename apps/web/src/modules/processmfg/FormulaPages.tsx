@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -35,6 +36,7 @@ import {
 import { formatDateTime, LINE_TYPE_LABELS, PERCENT, percentAtMost100, percentBalanced, QUANTITY, shortId, sumPercent, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const listColumns: DataTableColumn<Formula>[] = [
   { key: "code", header: "Code", mono: true },
@@ -62,7 +64,7 @@ export function FormulasPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load formulas" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -231,8 +233,8 @@ export function NewFormulaPage() {
             {values.lines.map((line, i) => (
               <fieldset key={i} className={styles.lineRow}>
                 <legend className={styles.groupsLegend}>{`Line ${i + 1}`}</legend>
-                <FormField id={`line-${i}-item`} label="Item id" error={lineError(i, "itemId")}>
-                  {(c) => <Input {...c} value={line.itemId} className={styles.mono} onChange={(e) => updateLine(i, { itemId: e.target.value })} invalid={Boolean(lineError(i, "itemId"))} />}
+                <FormField id={`line-${i}-item`} label="Item" error={lineError(i, "itemId")}>
+                  {(c) => <EntityLookup entity="product" {...c} value={line.itemId} onChange={(e) => updateLine(i, { itemId: e.target.value })} invalid={Boolean(lineError(i, "itemId"))} />}
                 </FormField>
                 <FormField id={`line-${i}-type`} label="Type">
                   {(c) => (
@@ -290,7 +292,7 @@ export function NewFormulaPage() {
         </Card>
         {failure ? (
           <Alert tone="danger" title="Could not create the formula" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>
@@ -338,7 +340,7 @@ export function FormulaDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Formula" />
         <Alert tone="danger" title="Could not load the formula" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -408,7 +410,7 @@ export function FormulaDetailPage() {
           </form>
           {failure ? (
             <Alert tone="danger" title="Could not scale the formula" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           {preview ? (

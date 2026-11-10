@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,11 +28,13 @@ import (
 )
 
 const (
-	readyTimeout      = 500 * time.Millisecond
-	dutyView          = "product.read"
-	dutyMaintain      = "product.write"
-	dutyRelease       = "product.release"
-	dutyReleasedWrite = "product.released.write"
+	defaultProductPage = 50
+	maxProductPage     = 100
+	readyTimeout       = 500 * time.Millisecond
+	dutyView           = "product.read"
+	dutyMaintain       = "product.write"
+	dutyRelease        = "product.release"
+	dutyReleasedWrite  = "product.released.write"
 	// dutyImport is held by the migration loader service token; it opens only
 	// product create/update, attributes, identifiers, relations, release and the
 	// released-product patch; release and patch stay in its own legal entity.
@@ -97,6 +100,7 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutySetup)).Post("/v1/product/setup/dimension-groups", a.createDimensionGroup)
 	r.With(authz.RequireDuty(dutySetup)).Post("/v1/product/setup/item-groups", a.createItemGroup)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/setup/item-groups", a.listItemGroups)
 	r.With(authz.RequireDuty(dutySetup)).Post("/v1/product/setup/item-model-groups", a.createItemModelGroup)
 	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Post("/v1/product/products", a.createProduct)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products", a.listProducts)
@@ -227,6 +231,18 @@ func (a *API) createItemGroup(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, g)
 }
 
+func (a *API) listItemGroups(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	groups, err := a.store.ListItemGroups(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": groups})
+}
+
 type itemModelGroupRequest struct {
 	Code          string `json:"code"`
 	Name          string `json:"name"`
@@ -265,6 +281,10 @@ type createProductRequest struct {
 	SearchName       string                    `json:"searchName"`
 	BaseUOM          string                    `json:"baseUom"`
 	DimensionGroupID string                    `json:"dimensionGroupId"`
+	ItemGroupID      string                    `json:"itemGroupId"`
+	BatchTracked     bool                      `json:"batchTracked"`
+	SerialTracked    bool                      `json:"serialTracked"`
+	CatchWeight      bool                      `json:"catchWeight"`
 	LifecycleState   string                    `json:"lifecycleState"`
 	Service          *domain.ServiceAttributes `json:"service"`
 	// ID is a caller-chosen UUID, accepted only from a caller holding product.import.write.
@@ -323,6 +343,13 @@ func (a *API) createProduct(w http.ResponseWriter, r *http.Request) {
 		ID: req.ID, ProductNumber: strings.ToUpper(req.ProductNumber), Subtype: req.Subtype, ProductType: req.ProductType,
 		Name: req.Name, Description: req.Description, SearchName: req.SearchName, BaseUOM: strings.ToUpper(req.BaseUOM),
 		DimensionGroupID: req.DimensionGroupID, LifecycleState: req.LifecycleState, Service: req.Service,
+		ItemGroupID: req.ItemGroupID, BatchTracked: req.BatchTracked, SerialTracked: req.SerialTracked, CatchWeight: req.CatchWeight,
+	}
+	if in.ItemGroupID != "" && !ids.Valid(in.ItemGroupID) {
+		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
+		p.Errors = map[string]string{"itemGroupId": "must be an item group id"}
+		httpx.Fail(w, r, p)
+		return
 	}
 	if in.Subtype == "" {
 		in.Subtype = domain.SubtypeProduct
@@ -347,12 +374,37 @@ func (a *API) listProducts(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	items, err := a.store.ListProducts(r.Context(), 100)
+	query := r.URL.Query()
+	after := ""
+	if raw := query.Get("cursor"); raw != "" {
+		b, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor must be a nextCursor returned by a previous page"))
+			return
+		}
+		after = string(b)
+	}
+	limit := defaultProductPage
+	if raw := query.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxProductPage {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", fmt.Sprintf("limit must be 1 to %d", maxProductPage)))
+			return
+		}
+		limit = n
+	}
+	items, err := a.store.ListProducts(r.Context(), query.Get("q"), after, limit+1)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	out := map[string]any{}
+	if len(items) > limit {
+		items = items[:limit]
+		out["nextCursor"] = base64.RawURLEncoding.EncodeToString([]byte(items[limit-1].ProductNumber))
+	}
+	out["items"] = items
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 // updateProduct patches name, description, searchName and lifecycleState under
@@ -379,6 +431,9 @@ func (a *API) updateProduct(w http.ResponseWriter, r *http.Request) {
 	if patch.Name != nil && strings.TrimSpace(*patch.Name) == "" {
 		bad["name"] = "must not be empty"
 	}
+	if patch.ItemGroupID != nil && *patch.ItemGroupID != "" && !ids.Valid(*patch.ItemGroupID) {
+		bad["itemGroupId"] = "must be an item group id"
+	}
 	if patch.LifecycleState != nil && !domain.ValidLifecycle(*patch.LifecycleState) {
 		bad["lifecycleState"] = "must be draft, active, phase_out or obsolete"
 	}
@@ -398,6 +453,10 @@ func (a *API) updateProduct(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) getProduct(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
+		return
+	}
+	if !ids.Valid(chi.URLParam(r, "id")) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found"))
 		return
 	}
 	p, err := a.store.GetProduct(r.Context(), chi.URLParam(r, "id"))

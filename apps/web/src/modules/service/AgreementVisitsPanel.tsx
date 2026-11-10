@@ -17,6 +17,7 @@ import {
 import { dash, DATE, formatDateTime, sentence, shortId, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface VisitValues {
   lineIndex: string;
@@ -104,7 +105,7 @@ export function AgreementVisitsPanel({ agreement, onRecorded }: { agreement: Agr
       <Card title="Visits" headingLevel={3}>
         {visits.error ? (
           <Alert tone="danger" title="Could not load the visits" live="alert" action={<Button size="sm" onClick={visits.reload}>Try again</Button>}>
-            {visits.error.message} ({visits.error.code})
+            <ProblemMessage problem={visits.error} />
           </Alert>
         ) : (
           <>
@@ -169,7 +170,7 @@ export function AgreementVisitsPanel({ agreement, onRecorded }: { agreement: Agr
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not record the visit" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}
@@ -184,7 +185,7 @@ export function AgreementVisitsPanel({ agreement, onRecorded }: { agreement: Agr
       <Card title="Status history" headingLevel={3}>
         {history.error ? (
           <Alert tone="danger" title="Could not load the history" live="alert" action={<Button size="sm" onClick={history.reload}>Try again</Button>}>
-            {history.error.message} ({history.error.code})
+            <ProblemMessage problem={history.error} />
           </Alert>
         ) : (
           <DataTable

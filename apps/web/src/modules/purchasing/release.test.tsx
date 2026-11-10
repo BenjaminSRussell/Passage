@@ -75,7 +75,7 @@ describe("release runs", () => {
   it("starts a run with an Idempotency-Key and opens its record", async () => {
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(run(), 201) : json(run())));
     const { router } = renderAt("/purchasing/releases/new");
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Delivery window (days)"), { target: { value: "14" } });
     fireEvent.click(screen.getByRole("button", { name: "Release lines" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/releases/${RUN_ID}`));
@@ -88,9 +88,9 @@ describe("release runs", () => {
   it("shows the service's code when it refuses the run", async () => {
     stubFetch(() => problem(403, "AUTH-0003", "legal entity is outside the caller's scope"));
     renderAt("/purchasing/releases/new");
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.click(screen.getByRole("button", { name: "Release lines" }));
-    expect(await screen.findByText(/outside the caller's scope \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/outside the caller's scope/)).toBeInTheDocument();
   });
 
   it("shows a run with its orders and the lines it left in the queue", async () => {

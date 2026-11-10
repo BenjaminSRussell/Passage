@@ -78,7 +78,7 @@ describe("Sales groups", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.commission.view" });
     renderAt("/pricing/commission/sales-groups");
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view");
   });
 });
 
@@ -99,7 +99,7 @@ describe("New sales group", () => {
       return undefined;
     };
     renderAt("/pricing/commission/sales-groups/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Sales group name", "SG-East");
     fill("Rep id", "R1");
     fill("Share %", "60");
@@ -117,7 +117,7 @@ describe("New sales group", () => {
 
   it("refuses shares that do not add up to 100", async () => {
     renderAt("/pricing/commission/sales-groups/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Sales group name", "x");
     fill("Rep id", "R1");
     fill("Share %", "60");
@@ -171,7 +171,7 @@ describe("Sales group detail", () => {
     await screen.findByRole("heading", { name: "SG-East" });
     fill("Rate %", "3");
     fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
-    expect(await findAlert()).toHaveTextContent("(PRC-0038)");
+    expect(await findAlert()).toHaveTextContent("PRC-0038");
   });
 
   it("shows a load error with a retry", async () => {
@@ -226,7 +226,7 @@ describe("Commission transactions", () => {
       return json(503, { code: "COM-0500", detail: "database unavailable" });
     };
     renderAt(`/pricing/commission/transactions?salesGroupId=${SG}`);
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     expect(server.calls.find((c) => c.url.pathname.endsWith("/commission/transactions"))?.url.searchParams.get("salesGroupId")).toBe(SG);
   });
 });

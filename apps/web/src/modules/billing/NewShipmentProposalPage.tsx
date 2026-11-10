@@ -12,6 +12,7 @@ import {
 } from "./api/client";
 import { ACCOUNT, CURRENCY, DAY, DECIMAL, invoiceName, STATUS_LABELS, TAX_CODE, today, TYPE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -350,7 +351,7 @@ export function NewShipmentProposalPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

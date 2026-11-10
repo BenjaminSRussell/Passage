@@ -5,6 +5,7 @@ import { listResources, listSetupMatrices, type Resource, type SetupMatrix } fro
 import { formatDateTime, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface View {
   rows: SetupMatrix[];
@@ -57,7 +58,7 @@ export function SetupMatricesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load setup matrices" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

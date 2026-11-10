@@ -82,33 +82,6 @@ const glyphs = {
       <rect x="13" y="13" width="7" height="7" rx="1" />
     </>
   ),
-  users: (
-    <>
-      <circle cx="9" cy="8" r="3.5" />
-      <path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2" />
-    </>
-  ),
-  truck: (
-    <>
-      <path d="M2.5 6h11v10h-11zM13.5 9.5h4l3.5 3.5V16h-7.5" />
-      <circle cx="6.5" cy="17.5" r="1.75" />
-      <circle cx="17" cy="17.5" r="1.75" />
-    </>
-  ),
-  factory: <path d="M3 20V10l5 3V10l5 3V10l5 3V4h3v16zM7 17h2M12 17h2M17 17h1" />,
-  cart: (
-    <>
-      <path d="M3 4h2.5l2.2 10.5h10.6L20.5 7H6.4" />
-      <circle cx="9" cy="19" r="1.5" />
-      <circle cx="17" cy="19" r="1.5" />
-    </>
-  ),
-  briefcase: (
-    <>
-      <rect x="3" y="7" width="18" height="13" rx="2" />
-      <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 12.5h18" />
-    </>
-  ),
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof glyphs;

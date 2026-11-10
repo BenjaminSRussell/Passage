@@ -187,3 +187,72 @@ func TestInvoiceCapture_RepeatedDocumentSkipsTheExtractor(t *testing.T) {
 		t.Fatalf("extractor ran %d times", ex.Calls)
 	}
 }
+
+func (rg *rig) captureBoth(t *testing.T) (ubl, scan captureJSON) {
+	t.Helper()
+	ubl = decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("UBL", "", ublDocument), duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
+	time.Sleep(2 * time.Millisecond)
+	scan = decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "application/pdf", "%PDF-1.7 scan"), duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
+	return ubl, scan
+}
+
+func TestInvoiceCaptureList_ShowsCapturesNewestFirstFiltersByStatusAndPages(t *testing.T) {
+	rg := newCaptureRig(&domain.FakeExtractor{Result: scannedInvoice("0.55")})
+	ubl, scan := rg.captureBoth(t)
+	type page struct {
+		Items      []captureJSON `json:"items"`
+		NextCursor string        `json:"nextCursor"`
+	}
+	all := decode[page](t, rg.call(http.MethodGet, capturesPath, "", rg.inquirer()), http.StatusOK)
+	if len(all.Items) != 2 || all.Items[0].ID != scan.ID || all.Items[1].ID != ubl.ID || all.Items[0].Status != "NEEDS_REVIEW" || len(all.Items[0].ReviewReasons) != 1 {
+		t.Fatalf("all %+v, want the scan (needs review) before the UBL document", all)
+	}
+	review := decode[page](t, rg.call(http.MethodGet, capturesPath+"?status=NEEDS_REVIEW", "", rg.inquirer()), http.StatusOK)
+	if len(review.Items) != 1 || review.Items[0].ID != scan.ID {
+		t.Fatalf("needs review %+v", review)
+	}
+	first := decode[page](t, rg.call(http.MethodGet, capturesPath+"?limit=1", "", rg.inquirer()), http.StatusOK)
+	if len(first.Items) != 1 || first.NextCursor == "" {
+		t.Fatalf("first page %+v", first)
+	}
+	next := decode[page](t, rg.call(http.MethodGet, capturesPath+"?limit=1&cursor="+first.NextCursor, "", rg.inquirer()), http.StatusOK)
+	if len(next.Items) != 1 || next.Items[0].ID != ubl.ID || next.NextCursor != "" {
+		t.Fatalf("second page %+v", next)
+	}
+	empty := decode[page](t, rg.call(http.MethodGet, capturesPath, "", rg.inquirer(entityHeader, otherEntityID)), http.StatusOK)
+	if len(empty.Items) != 0 {
+		t.Fatalf("another legal entity sees %+v", empty)
+	}
+}
+
+func TestInvoiceCaptureList_RefusesBadFiltersAndMissingDuty(t *testing.T) {
+	rg := newCaptureRig(nil)
+	for _, query := range []string{"?status=POSTED", "?limit=0", "?cursor=junk"} {
+		if rec := rg.call(http.MethodGet, capturesPath+query, "", rg.inquirer()); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "COM-0001") {
+			t.Fatalf("%s: got %d %s, want 400 COM-0001", query, rec.Code, rec.Body)
+		}
+	}
+	if rec := rg.call(http.MethodGet, capturesPath, "", duty("receiving.vendor-invoice.post", "")); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("without the inquire duty got %d %s", rec.Code, rec.Body)
+	}
+	if rec := doWith(rg.h, http.MethodGet, capturesPath, "", headers{}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without a tenant got %d", rec.Code)
+	}
+}
+
+func TestInvoiceCaptureList_DropsADocumentOnceItsInvoiceIsPosted(t *testing.T) {
+	extracted := scannedInvoice("0.95")
+	extracted.InvoiceNumber, extracted.InvoiceDate, extracted.Currency = "INV-1", time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), "USD"
+	rg := newCaptureRig(&domain.FakeExtractor{Result: extracted})
+	decode[captureJSON](t, rg.call(http.MethodPost, capturesPath, captureRequest("OCR", "application/pdf", "%PDF-1.7 scan"), duty("receiving.vendor-invoice.post", rg.key())), http.StatusCreated)
+	type page struct {
+		Items []captureJSON `json:"items"`
+	}
+	if before := decode[page](t, rg.call(http.MethodGet, capturesPath, "", rg.inquirer()), http.StatusOK); len(before.Items) != 1 {
+		t.Fatalf("before posting %+v", before)
+	}
+	rg.invoiced(t, "PS-1", "inv-1", 40, "2.5", "")
+	if after := decode[page](t, rg.call(http.MethodGet, capturesPath, "", rg.inquirer()), http.StatusOK); len(after.Items) != 0 {
+		t.Fatalf("after posting %+v, want the captured document gone", after)
+	}
+}

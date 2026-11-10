@@ -40,7 +40,7 @@ const created: Journal = {
 };
 
 function fillImport(file: File) {
-  fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+  fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
   fireEvent.change(screen.getByLabelText("Journal name"), { target: { value: "Spring import" } });
   fireEvent.change(screen.getByLabelText("CSV file"), { target: { files: [file] } });
 }
@@ -100,7 +100,7 @@ describe("Price journal CSV import", () => {
     renderAt("/pricing/journals/import");
     fillImport(csvFile(`${CSV_HEADER}\n`));
     fireEvent.click(screen.getByRole("button", { name: "Import journal" }));
-    expect(await findAlert()).toHaveTextContent("the CSV file is larger than 32 MB (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("the CSV file is larger than 32 MB");
   });
 
   it("validates the draft and refuses a file over 32 MB", () => {
@@ -129,7 +129,7 @@ describe("Commission settlement", () => {
   });
 
   function fillSettlement() {
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("First invoice date"), { target: { value: "2027-03-01" } });
     fireEvent.change(screen.getByLabelText("Last invoice date"), { target: { value: "2027-03-31" } });
     fireEvent.change(screen.getByLabelText("Settle through"), { target: { value: "PAYROLL" } });
@@ -186,7 +186,7 @@ describe("Commission settlement", () => {
 
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.commission.view" });
     fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view");
   });
 
   it("validates the period before asking the service", () => {
@@ -214,7 +214,7 @@ describe("Record expiry on the workspace", () => {
     renderAt("/pricing");
     await screen.findByText("Nothing expires in the next 30 days");
     const card = screen.getByRole("heading", { name: "Record expiry" }).closest("div")!.parentElement!;
-    fireEvent.change(within(card).getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(within(card).getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(within(card).getByLabelText("Expire validity ended before"), { target: { value: "2026-03-20" } });
     fireEvent.click(within(card).getByRole("button", { name: "Expire ended agreements" }));
     expect(await screen.findByText("2 agreements expired.")).toBeInTheDocument();
@@ -235,7 +235,7 @@ describe("Record expiry on the workspace", () => {
     fireEvent.click(button);
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
-    fireEvent.change(screen.getAllByLabelText("Legal entity id").at(-1)!, { target: { value: LE } });
+    fireEvent.change(screen.getAllByLabelText("Legal entity").at(-1)!, { target: { value: LE } });
     fireEvent.click(button);
     expect(await screen.findByText("No agreements ended before that day.")).toBeInTheDocument();
   });

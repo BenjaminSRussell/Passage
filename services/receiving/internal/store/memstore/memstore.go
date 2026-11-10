@@ -55,6 +55,7 @@ type tenantData struct {
 	payees          map[string]store.OneTimePayee
 	captures        map[string]store.Capture
 	sheets          map[string]store.ServiceSheet
+	asns            map[string]store.Asn
 	selfBills       map[string]store.SelfBill
 	selfBillSeq     map[string]int
 	ersPrices       map[string]store.PriceConfirmation
@@ -97,7 +98,7 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	if t == nil {
 		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
 			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{},
-			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}, captures: map[string]store.Capture{}, sheets: map[string]store.ServiceSheet{}, selfBills: map[string]store.SelfBill{}}
+			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}, captures: map[string]store.Capture{}, sheets: map[string]store.ServiceSheet{}, asns: map[string]store.Asn{}, selfBills: map[string]store.SelfBill{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -218,7 +219,7 @@ func (t *tenantData) register(r store.Receipt, fn store.RegisterFunc) (store.Rec
 			if r.Lines[i].LineNo != l.LineNo {
 				continue
 			}
-			r.Lines[i].Qty, r.Lines[i].Batch, r.Lines[i].LocationID = l.Qty, l.Batch, l.LocationID
+			r.Lines[i].Qty, r.Lines[i].Batch, r.Lines[i].LocationID, r.Lines[i].ExpiryDate = l.Qty, l.Batch, l.LocationID, l.ExpiryDate
 			r.Lines[i].InventoryStatus = cmp.Or(l.InventoryStatus, "AVAILABLE")
 			r.Lines[i].Serials = slices.Sorted(slices.Values(l.Serials))
 			r.Lines[i].CWQty, r.Lines[i].CWNominal, r.Lines[i].CWMin, r.Lines[i].CWMax = l.CWQty, l.CWNominal, l.CWMin, l.CWMax
@@ -400,6 +401,48 @@ func (s *Store) ListReceipts(ctx context.Context, f store.ReceiptFilter) (out []
 				break
 			}
 		}
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) ListInvoices(ctx context.Context, f store.InvoiceFilter) (out []store.Invoice, err error) {
+	limit := pageLimit(f.Limit)
+	principal, _ := tenant.FromContext(ctx)
+	err = s.with(ctx, func(t *tenantData) error {
+		for _, inv := range t.invoiceDocs {
+			if !tenant.InLegalEntityScope(principal, inv.LegalEntityID) || (f.VendorID != "" && inv.VendorID != f.VendorID) || (f.Status != "" && inv.Status != f.Status) ||
+				skipForCursor(inv.CreatedAt, inv.ID, f.CursorCreatedAt, f.CursorID) {
+				continue
+			}
+			if (f.ReceiptID != "" || f.PurchaseOrderID != "") && !slices.ContainsFunc(inv.Lines, func(l store.InvoiceLine) bool {
+				r, ok := t.receipts[l.ReceiptID]
+				return ok && tenant.InLegalEntityScope(principal, r.LegalEntityID) && (f.ReceiptID == "" || l.ReceiptID == f.ReceiptID) &&
+					(f.PurchaseOrderID == "" || r.PurchaseOrderID == f.PurchaseOrderID)
+			}) {
+				continue
+			}
+			inv.Lines = slices.Clone(inv.Lines)
+			out = append(out, inv)
+		}
+		slices.SortFunc(out, func(a, b store.Invoice) int {
+			return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(b.ID, a.ID))
+		})
+		out = out[:min(len(out), limit+1)]
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) GetInvoice(ctx context.Context, id string) (out store.Invoice, err error) {
+	principal, _ := tenant.FromContext(ctx)
+	err = s.with(ctx, func(t *tenantData) error {
+		inv, ok := t.invoiceDocs[strings.ToLower(id)]
+		if !ok || !tenant.InLegalEntityScope(principal, inv.LegalEntityID) {
+			return store.ErrInvoiceNotFound
+		}
+		inv.Lines = slices.Clone(inv.Lines)
+		out = inv
 		return nil
 	})
 	return out, err
@@ -803,6 +846,12 @@ func (s *Store) Cancel(ctx context.Context, id string, fn store.AdjustFunc) (out
 		current.State = domain.Cancelled
 		current.Version++
 		t.receipts[id] = current
+		for key, a := range t.asns {
+			if a.ReceiptID == id {
+				a.Status, a.ReceiptID = domain.AsnOpen, ""
+				t.asns[key] = a
+			}
+		}
 		s.emit(adj)
 		out = cloneReceipt(current)
 		return nil

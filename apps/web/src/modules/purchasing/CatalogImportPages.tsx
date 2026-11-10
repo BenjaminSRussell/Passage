@@ -1,4 +1,5 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -41,6 +42,7 @@ import {
   type Failure,
 } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const IMPORT_STATUSES: CatalogImportStatus[] = [
   "STAGED",
@@ -242,18 +244,18 @@ export function CatalogImportCreatePage() {
         }
       />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Vendor file">
           <div className={styles.grid}>
             <FormField
               id="import-vendor"
-              label="Vendor id"
+              label="Vendor"
               error={errors.vendorId}
             >
               {(c) => (
-                <Input
+                <EntityLookup entity="vendor"
                   {...c}
                   value={vendorId}
                   onChange={(e) => setVendorId(e.target.value)}
@@ -517,7 +519,7 @@ export function CatalogImportDetailPage() {
         }
       />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice}

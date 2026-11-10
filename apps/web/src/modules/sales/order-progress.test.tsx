@@ -115,7 +115,7 @@ describe("Deliveries and invoices list", () => {
     first.unmount();
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "down" } });
     renderAt("/sales/order-progress");
-    expect(await screen.findByText(/down \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/down/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -331,11 +331,11 @@ describe("Record delivery or invoice", () => {
   it("warns and disables the form without the duty, and reports a load failure", async () => {
     handler = () => ({ status: 200, body: order(), etag: '"4"' });
     const first = renderAt(`/sales/orders/${ORDER_ID}/progress/new`, ["sales.order.read"]);
-    expect(await screen.findByText(/needs the sales.order.record-delivery duty/)).toBeInTheDocument();
+    expect(await screen.findByText(/recorded automatically when a packing slip posts and invoiced quantities when the invoice posts/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Record delivery" })).toBeDisabled();
     first.unmount();
     handler = () => ({ status: 404, body: { code: "SLS-0100", detail: "order not found" } });
     renderAt(`/sales/orders/${ORDER_ID}/progress/new`);
-    expect(await screen.findByText(/order not found \(SLS-0100\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/order not found/)).toBeInTheDocument();
   });
 });

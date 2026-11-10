@@ -1,9 +1,11 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { describeProblem, importPriceJournalCsv, newKey, type Problem } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The service's limit on one upload (maxJournalCSVBytes). */
 export const MAX_CSV_BYTES = 32 * 1024 * 1024;
@@ -109,9 +111,9 @@ export function ImportJournalPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="pi-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
+          <FormField id="pi-legal-entity" label="Legal entity" error={errors.legalEntityId}>
             {(c) => (
-              <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
+              <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
             )}
           </FormField>
           <FormField id="pi-name" label="Journal name" error={errors.name}>
@@ -155,7 +157,7 @@ export function ImportJournalPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not import the journal" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

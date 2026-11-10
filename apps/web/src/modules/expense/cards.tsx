@@ -31,6 +31,7 @@ import {
 import { splitProblem } from "./format";
 import { amount, usePaged, UUID, type Failure } from "./persisted";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -96,7 +97,7 @@ export function CardTransactionsPage() {
       </Card>
       {list.failure ? (
         <Alert tone="danger" title="The card transactions could not be loaded" live="alert" action={<Button size="sm" onClick={list.retry}>Try again</Button>}>
-          {list.failure.message} ({list.failure.code})
+          <ProblemMessage problem={list.failure} />
         </Alert>
       ) : null}
       <DataTable
@@ -245,7 +246,7 @@ export function CardImportPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The statement was not imported" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

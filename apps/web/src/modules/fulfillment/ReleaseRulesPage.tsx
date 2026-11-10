@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
@@ -7,6 +8,7 @@ import { dash, formatDateTime, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Saving a rule needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
 const DUTY_SAVE = "fulfillment.warehouse.release";
@@ -126,7 +128,7 @@ export function ReleaseRulesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the release rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -142,11 +144,11 @@ export function ReleaseRulesPage() {
       {canSave ? (
         <Card title="Change the release rule">
           <form className={styles.form} onSubmit={submit} noValidate>
-            <FormField id="rr-warehouse" label="Warehouse id" error={errors.warehouseId}>
-              {(control) => <Input {...control} value={values.warehouseId} invalid={Boolean(errors.warehouseId)} onChange={(event) => { const id = event.target.value; update({ warehouseId: id }); setVersion(state.data?.find((r) => r.warehouseId === id.trim())?.version ?? 0); }} />}
+            <FormField id="rr-warehouse" label="Warehouse" error={errors.warehouseId}>
+              {(control) => <EntityLookup entity="warehouse" {...control} value={values.warehouseId} invalid={Boolean(errors.warehouseId)} onChange={(event) => { const id = event.target.value; update({ warehouseId: id }); setVersion(state.data?.find((r) => r.warehouseId === id.trim())?.version ?? 0); }} />}
             </FormField>
-            <FormField id="rr-legal-entity" label="Legal entity id" hint="The legal entity the warehouse belongs to; filled in when you open a warehouse above." error={errors.legalEntityId}>
-              {(control) => <Input {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => update({ legalEntityId: event.target.value })} />}
+            <FormField id="rr-legal-entity" label="Legal entity" hint="The legal entity the warehouse belongs to; filled in when you open a warehouse above." error={errors.legalEntityId}>
+              {(control) => <EntityLookup entity="legalEntity" prefill={false} {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => update({ legalEntityId: event.target.value })} />}
             </FormField>
             <FormField id="rr-horizon" label="Release horizon (days)" hint="A line confirmed for a later date than today plus this is not released. 0 to 30." error={errors.horizonDays}>
               {(control) => <Input {...control} inputMode="numeric" value={values.horizonDays} invalid={Boolean(errors.horizonDays)} onChange={(event) => update({ horizonDays: event.target.value })} />}

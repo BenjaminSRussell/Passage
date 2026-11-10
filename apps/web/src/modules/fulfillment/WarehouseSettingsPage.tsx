@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
   listWarehouseSettings,
@@ -14,6 +15,7 @@ import { dash, formatDateTime, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const ACTION_LABELS: Record<ShortPickAction, string> = {
   KEEP_OPEN: "Keep open for a re-pick",
@@ -102,7 +104,7 @@ export function WarehouseSettingsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the warehouse settings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -118,11 +120,11 @@ export function WarehouseSettingsPage() {
       <Card title="Change the short pick action">
         <form className={styles.form} onSubmit={submit} noValidate>
           <p className={styles.note}>The action runs when a packing slip posts and leaves quantity still to ship. A shipment with packed stock waiting is left as it is.</p>
-          <FormField id="ws-warehouse" label="Warehouse id" error={error}>
-            {(control) => <Input {...control} value={warehouseId} invalid={Boolean(error)} onChange={(event) => { setWarehouseId(event.target.value); setVersion(0); key.renew(); }} />}
+          <FormField id="ws-warehouse" label="Warehouse" error={error}>
+            {(control) => <EntityLookup entity="warehouse" {...control} value={warehouseId} invalid={Boolean(error)} onChange={(event) => { setWarehouseId(event.target.value); setVersion(0); key.renew(); }} />}
           </FormField>
-          <FormField id="ws-legal-entity" label="Legal entity id" hint="The legal entity the warehouse belongs to; filled in when you open a warehouse above." error={legalEntityError}>
-            {(control) => <Input {...control} value={legalEntityId} invalid={Boolean(legalEntityError)} onChange={(event) => { setLegalEntityId(event.target.value); key.renew(); }} />}
+          <FormField id="ws-legal-entity" label="Legal entity" hint="The legal entity the warehouse belongs to; filled in when you open a warehouse above." error={legalEntityError}>
+            {(control) => <EntityLookup entity="legalEntity" prefill={false} {...control} value={legalEntityId} invalid={Boolean(legalEntityError)} onChange={(event) => { setLegalEntityId(event.target.value); key.renew(); }} />}
           </FormField>
           <FormField id="ws-action" label="Short pick action">
             {(control) => (

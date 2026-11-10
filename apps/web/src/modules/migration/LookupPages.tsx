@@ -23,6 +23,7 @@ import { EMPTY_LOOKUP_FORM, filterEntries, kindLabel, LOOKUP_KINDS, parseEntries
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Enforced by the service; not in policies/authz/data.json for the nav, so it gates the buttons only. */
 export const DUTY_LOOKUP_WRITE = "migration.project.write";
@@ -94,7 +95,7 @@ export function LookupListPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load lookup tables" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -186,7 +187,7 @@ export function NewLookupPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the table" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -224,7 +225,7 @@ export function LookupDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Lookup table" />
         <Alert tone="danger" title="Could not load this lookup table" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/lookups">
           Back to lookup tables
@@ -306,7 +307,7 @@ export function LookupDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not change the table" live="alert" action={<Button size="sm" onClick={state.reload}>Reload</Button>}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {table.status === "archived" ? (
@@ -360,7 +361,7 @@ export function LookupDetailPage() {
       {canWrite && table.status === "active" && !viewingOld && draft === null ? <LookupImportCard table={table} current={current} onImported={(next) => state.set(next)} onReload={() => { state.reload(); versions.reload(); }} /> : null}
       {versions.error ? (
         <Alert tone="danger" title="Could not load the version history" live="alert" action={<Button size="sm" onClick={versions.reload}>Try again</Button>}>
-          {versions.error.message} ({versions.error.code})
+          <ProblemMessage problem={versions.error} />
         </Alert>
       ) : (
         <DataTable label="Versions" columns={versionColumns} rows={versions.data ?? []} getRowKey={(row) => String(row.version)} loading={versions.loading} empty={{ title: "No versions", description: "A table always has at least version 1." }} />

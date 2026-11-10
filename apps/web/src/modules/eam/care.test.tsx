@@ -214,7 +214,7 @@ describe("asset detail: lifecycle, criticality and warranties", () => {
     expect(sent("POST", "/lifecycle")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Dispose permanently" }));
     expect(await screen.findByText("Could not change the asset's state")).toBeInTheDocument();
-    expect(screen.getByText(/the asset has open work orders \(EAM-AST-001\)/)).toBeInTheDocument();
+    expect(screen.getByText(/the asset has open work orders/)).toBeInTheDocument();
     expect(sent("POST", "/lifecycle")[0].body).toEqual({ to: "DISPOSED" });
   });
 
@@ -269,7 +269,7 @@ describe("asset detail: lifecycle, criticality and warranties", () => {
     expect(await within(form).findByText("Enter the vendor's party id (a UUID).")).toBeInTheDocument();
     expect(sent("POST", "/warranties")).toHaveLength(0);
     fireEvent.change(within(form).getByLabelText("Warranty type"), { target: { value: "OEM" } });
-    fireEvent.change(within(form).getByLabelText("Vendor party id"), { target: { value: VENDOR } });
+    fireEvent.change(within(form).getByLabelText("Vendor party"), { target: { value: VENDOR } });
     fireEvent.change(within(form).getByLabelText("Start date"), { target: { value: "2025-11-01" } });
     fireEvent.click(within(form).getByRole("button", { name: "Add warranty" }));
     expect(await findStatus()).toHaveTextContent("Warranty OEM recorded.");
@@ -400,7 +400,7 @@ describe("request triage", () => {
     renderAt("/eam/requests");
     fireEvent.click(within(await findTable({ name: "Maintenance requests" })).getByRole("button", { name: "Reject" }));
     expect(await screen.findByText("Could not update the request")).toBeInTheDocument();
-    expect(screen.getByText(/\(EAM-REQ-001\)/)).toBeInTheDocument();
+    expect(screen.getByText("EAM-REQ-001")).toBeInTheDocument();
   });
 });
 

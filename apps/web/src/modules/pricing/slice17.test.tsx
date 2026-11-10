@@ -120,7 +120,7 @@ describe("Edit campaign", () => {
     fill("Name", "Other");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("The campaign changed since you opened it")).toBeInTheDocument();
-    expect(await findAlert()).toHaveTextContent("(conflict_version)");
+    expect(await findAlert()).toHaveTextContent("conflict_version");
     expect(screen.getByLabelText("Name")).toHaveValue("Other");
   });
 });
@@ -171,7 +171,7 @@ describe("Reopen a closed rebate agreement", () => {
     fill("New valid to", "2027-12-31");
     fireEvent.click(screen.getByRole("button", { name: "Reopen agreement" }));
     expect(await screen.findByText("The agreement is closed")).toBeInTheDocument();
-    expect(await findAlert()).toHaveTextContent("(PRC-0031)");
+    expect(await findAlert()).toHaveTextContent("PRC-0031");
   });
 });
 
@@ -225,6 +225,6 @@ describe("Trade agreements export", () => {
     server.handler = (url) => (url.pathname.endsWith("/condition-records:export") ? json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" }) : json(200, { items: [] }));
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
     expect(await screen.findByText("Could not export the trade agreements")).toBeInTheDocument();
-    expect(await findAlert()).toHaveTextContent("(AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("AUTH-0003");
   });
 });

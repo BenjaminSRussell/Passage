@@ -6,6 +6,7 @@ import { formatDateTime, formatMinutes } from "./format";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function span(o: CapacityOverride): string {
   return formatMinutes(Math.round((Date.parse(o.end) - Date.parse(o.start)) / 60_000));
@@ -66,12 +67,12 @@ function Overrides({ resourceId }: { resourceId: string }) {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="The override was not removed" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load capacity overrides" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

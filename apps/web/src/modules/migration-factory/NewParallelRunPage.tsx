@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { describeProblem, newKey, startParallelRun, type ParallelRunRequest, type Problem } from "./api/client";
 import { parseTuples, PERIOD, SOURCE_LABELS, SOURCE_SYSTEMS, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ParallelRunValues {
   period: string;
@@ -140,7 +141,7 @@ export function NewParallelRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not start the parallel run" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

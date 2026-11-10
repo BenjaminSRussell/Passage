@@ -78,7 +78,7 @@ describe("LocationsPage", () => {
     server.handler = () => (fail ? json(503, { code: "COM-0500", detail: "database unavailable" }) : json(200, { items: [location] }));
     renderAt(`/warehouse/locations?warehouse=${WH}`);
     const alert = await screen.findByText("Could not load the locations");
-    expect(alert.closest("[role=alert]")).toHaveTextContent("database unavailable (COM-0500)");
+    expect(alert.closest("[role=alert]")).toHaveTextContent("database unavailable");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("R-05-02-01")).toBeInTheDocument();
@@ -88,13 +88,13 @@ describe("LocationsPage", () => {
     stubLocalStorage();
     server.handler = () => json(200, { items: [] });
     const first = renderAt("/warehouse/locations");
-    fill("Warehouse id", "not-a-uuid");
-    expect(screen.getByText("Enter the warehouse id, a UUID.")).toBeInTheDocument();
-    fill("Warehouse id", WH);
+    fill("Warehouse", "not-a-uuid");
+    expect(screen.getByLabelText("Warehouse")).toHaveAttribute("data-value", "");
+    fill("Warehouse", WH);
     expect(await screen.findByText("No locations yet")).toBeInTheDocument();
     first.unmount();
     renderAt("/warehouse/work");
-    expect(await screen.findByLabelText("Warehouse id")).toHaveValue(WH);
+    expect(await screen.findByLabelText("Warehouse")).toHaveAttribute("data-value", WH);
   });
 
   it("loads the next page from the cursor", async () => {
@@ -227,7 +227,7 @@ describe("NewDirectivePage", () => {
     renderAt(`/warehouse/directives/new?warehouse=${WH}`);
     fireEvent.click(screen.getByRole("button", { name: "Create directive" }));
     expect(await screen.findByText("lines[1].fromQty overlaps the quantity range of lines[0]")).toBeInTheDocument();
-    expect(screen.getByText("request failed validation (COM-0001)")).toBeInTheDocument();
+    expect(screen.getByText("request failed validation")).toBeInTheDocument();
   });
 
   it("refuses bad JSON before calling the service", async () => {

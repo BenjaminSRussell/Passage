@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useNavigate } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { deliveredNotInvoiced, type DniLine, type DniReport } from "./api/client";
 import { formatDate, formatMoney, shortId, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** How many slips the page lists; the totals always cover every open slip. */
 export const DNI_LINES = 500;
@@ -62,11 +64,11 @@ export function DeliveredNotInvoicedPage() {
       />
       <Card title="Report">
         <form className={styles.form} onSubmit={run} noValidate>
-          <FormField id="dni-le" label="Legal entity id" error={errors.legalEntityId}>
-            {(control) => <Input {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => setValues({ ...values, legalEntityId: event.target.value })} />}
+          <FormField id="dni-le" label="Legal entity" error={errors.legalEntityId}>
+            {(control) => <EntityLookup entity="legalEntity" {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => setValues({ ...values, legalEntityId: event.target.value })} />}
           </FormField>
-          <FormField id="dni-customer" label="Customer id" error={errors.customerId} optional>
-            {(control) => <Input {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => setValues({ ...values, customerId: event.target.value })} />}
+          <FormField id="dni-customer" label="Customer" error={errors.customerId} optional>
+            {(control) => <EntityLookup entity="customer" scope={{ legalEntityId: values.legalEntityId || undefined }} {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => setValues({ ...values, customerId: event.target.value })} />}
           </FormField>
           <FormField id="dni-asof" label="As of" error={errors.asOf}>
             {(control) => <Input {...control} type="date" value={values.asOf} invalid={Boolean(errors.asOf)} onChange={(event) => setValues({ ...values, asOf: event.target.value })} />}
@@ -82,7 +84,7 @@ export function DeliveredNotInvoicedPage() {
         <p className={styles.note}>Choose a legal entity to see its delivered-not-invoiced balance.</p>
       ) : report.error ? (
         <Alert tone="danger" title="Could not load the report" live="alert" action={<Button size="sm" onClick={report.reload}>Try again</Button>}>
-          {report.error.message} ({report.error.code})
+          <ProblemMessage problem={report.error} />
         </Alert>
       ) : (
         <>

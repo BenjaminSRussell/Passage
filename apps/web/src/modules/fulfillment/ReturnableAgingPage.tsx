@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { returnableAging, type AgedReturnableBalance } from "./api/client";
 import { formatDate, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Most balances one view shows; the counts above the table cover all of them. */
 export const AGING_LIMIT = 500;
@@ -92,8 +94,8 @@ export function ReturnableAgingPage() {
       />
       <Card title="Filter">
         <form className={styles.form} onSubmit={apply} noValidate>
-          <FormField id="aging-customer" label="Customer id" error={errors.customerId} optional>
-            {(control) => <Input {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => setValues({ ...values, customerId: event.target.value })} />}
+          <FormField id="aging-customer" label="Customer" error={errors.customerId} optional>
+            {(control) => <EntityLookup entity="customer" {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => setValues({ ...values, customerId: event.target.value })} />}
           </FormField>
           <FormField id="aging-days" label="Charge after days" hint="30 to 365. Empty uses each legal entity's rtp_charge_days (90 when none is saved)." error={errors.chargeDays} optional>
             {(control) => (
@@ -122,7 +124,7 @@ export function ReturnableAgingPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load the aging" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

@@ -43,6 +43,7 @@ import { changeOrderStatusLabel, changeOrderStatusTone, changeOrderTypeLabel, da
 import plan from "./plans.module.css";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const projectPath = (id: string) => `/projects/${encodeURIComponent(id)}`;
 const changeOrdersPath = (id: string) => `${projectPath(id)}/change-orders`;
@@ -147,7 +148,7 @@ export function ChangeOrdersPage() {
             </Button>
           }
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.loading && items.length === 0 && !filtered ? (
         <Card>
@@ -514,7 +515,7 @@ export function NewChangeOrderPage() {
         </Card>
         {failure ? (
           <Alert tone="danger" title={failureTitle[failure.code] ?? "Could not save the change order"} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.actions}>
@@ -590,7 +591,7 @@ export function ChangeOrderDetailPage() {
             </Button>
           }
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -691,7 +692,7 @@ export function ChangeOrderDetailPage() {
             ) : undefined
           }
         >
-          {stale ? "Reload to see the latest version, then try again." : `${failure.message} (${failure.code})`}
+          {stale ? "Reload to see the latest version, then try again." : <ProblemMessage problem={failure} />}
         </Alert>
       ) : null}
       <Card title="Header">

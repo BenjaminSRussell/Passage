@@ -95,6 +95,12 @@
     ],
     "depends_on": [
       1
+    ],
+    "verified_by": [
+      "tools/e2e/gateway_test.go",
+      "tools/e2e/devenv/devenv_test.go",
+      "services/identity/cmd/devgateway/gateway_test.go",
+      "policies/authz/authz_test.rego"
     ]
   },
   {
@@ -356,6 +362,9 @@
     ],
     "depends_on": [
       6
+    ],
+    "verified_by": [
+      "tools/e2e/flow_test.go"
     ]
   },
   {
@@ -559,6 +568,9 @@
     ],
     "depends_on": [
       10
+    ],
+    "verified_by": [
+      "tools/e2e/flow_test.go"
     ]
   },
   {
@@ -834,6 +846,9 @@
     ],
     "depends_on": [
       16
+    ],
+    "verified_by": [
+      "tools/e2e/flow_test.go"
     ]
   },
   {
@@ -879,6 +894,9 @@
     ],
     "depends_on": [
       17
+    ],
+    "verified_by": [
+      "tools/e2e/flow_test.go"
     ]
   },
   {

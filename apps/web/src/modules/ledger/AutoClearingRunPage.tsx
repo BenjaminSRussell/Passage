@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { fetchAutoClearingRule, fetchAutoClearingRules, fetchAutoClearingRun, fetchAutoClearingRuns, newKey, runAutoClearing, type AutoClearingGroup, type AutoClearingRun } from "./api/client";
@@ -73,7 +73,7 @@ export function AutoClearingRunPage() {
   const [date, setDate] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [simulation, setSimulation] = useState<AutoClearingRun | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState<"simulate" | "clear" | null>(null);
   const attempt = useRef<{ signature: string; key: string }>({ signature: "", key: "" });
 

@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -62,6 +63,7 @@ import {
 } from "./parts";
 import { AmendmentsPanel, EditDraftForm } from "./RfqAmend";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUSES: RFQStatus[] = ["DRAFT", "SENT", "REPLIES_OPEN", "CLOSED", "AWARDED", "CANCELLED"];
 
@@ -322,8 +324,8 @@ export function RFQCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Request">
           <div className={styles.grid}>
-            <FormField id="rfq-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
+            <FormField id="rfq-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="rfq-deadline" label="Reply deadline" hint="Your local time" error={errors.replyDeadline}>
               {(c) => <Input {...c} type="datetime-local" value={header.deadline} onChange={(e) => setH({ deadline: e.target.value })} />}
@@ -423,8 +425,8 @@ export function RFQCreatePage() {
                   ) : null}
                 </div>
                 <div className={styles.grid}>
-                  <FormField id={id("product")} label="Product id" optional error={err("productId")}>
-                    {(c) => <Input {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
+                  <FormField id={id("product")} label="Product" optional error={err("productId")}>
+                    {(c) => <EntityLookup entity="product" {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
                   </FormField>
                   <FormField id={id("description")} label="Description" optional hint="Needed when there is no product" error={err("description")}>
                     {(c) => <Input {...c} value={line.description} onChange={(e) => update(i, { description: e.target.value })} />}
@@ -444,7 +446,7 @@ export function RFQCreatePage() {
           })}
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -617,7 +619,7 @@ export function RFQDetailPage() {
         }
       />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice}
@@ -871,7 +873,7 @@ function ScoreForm({ rfq, onScored }: { rfq: RFQ; onScored(rfq: RFQ, vendorId: s
           ))}
         </div>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : error}
+          {failure ? <ProblemMessage problem={failure} /> : error}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -1035,7 +1037,7 @@ function ReplyForm({ rfq, onRecorded }: { rfq: RFQ; onRecorded(rfq: RFQ): void }
           );
         })}
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : errors.replies ?? null}
+          {failure ? <ProblemMessage problem={failure} /> : errors.replies ?? null}
         </Alert>
         <Alert tone="warning" live="status">
           {warnings.length > 0 ? warnings.map((w) => `Line ${w.lineNo}: ${w.detail} (${w.code})`).join(" ") : null}
@@ -1184,7 +1186,7 @@ function CompareAndAward({ rfq, onAwarded }: { rfq: RFQ; onAwarded(rfq: RFQ, ord
           );
         })}
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : errors.awards ?? null}
+          {failure ? <ProblemMessage problem={failure} /> : errors.awards ?? null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy} disabled={lines.length === 0}>

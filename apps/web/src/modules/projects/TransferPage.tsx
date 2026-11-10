@@ -16,6 +16,7 @@ import {
 import { dash } from "./labels";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const changeLabel: Record<NodeChangeKind, string> = { ADDED: "Added", CHANGED: "Changed", REMOVED: "Removed" };
 const changeTone: Record<NodeChangeKind, BadgeTone> = { ADDED: "success", CHANGED: "info", REMOVED: "warning" };
@@ -62,7 +63,7 @@ export function TransferPage() {
               <EmptyState
                 icon="grid"
                 title={notFound ? "Plan version not found" : "This plan cannot be transferred"}
-                description={notFound ? "This plan version does not exist for the project." : `${state.error.message} (${state.error.code})`}
+                description={notFound ? "This plan version does not exist for the project." : problemSummary(state.error)}
                 action={
                   <Link className={buttonClassName("secondary")} to={notFound ? plansLink : simLink}>
                     {notFound ? "Back to plans" : "Back to the simulation"}
@@ -72,7 +73,7 @@ export function TransferPage() {
             </Card>
           ) : (
             <Alert tone="danger" title="Could not compare the simulation" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-              {state.error.message} ({state.error.code})
+              <ProblemMessage problem={state.error} />
             </Alert>
           )}
         </div>
@@ -184,7 +185,7 @@ export function TransferPage() {
           live="alert"
           action={stale ? <Button size="sm" onClick={compareAgain}>Compare again</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title={`Conflicts (${view.conflicts.length})`}>

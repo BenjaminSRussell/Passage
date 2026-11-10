@@ -86,6 +86,10 @@ Procurement workspace live; demo vendors with price lists; purchasing policy con
 - [SAP MM purchasing](https://help.sap.com/docs/SAP_ERP)
 - [Odoo purchase module (reference flows)](https://www.odoo.com/documentation/18.0/applications/inventory_and_mrp/purchase.html)
 
+**Partly verified end to end by**
+
+- `tools/e2e/flow_test.go`
+
 **Depends on:** wave 16
 
 ---
@@ -128,6 +132,10 @@ Receiving and AP invoice workspaces; demo plant receives and matches invoices fo
 - [AX 2012 invoice matching](https://learn.microsoft.com/en-us/dynamicsax-2012/appuser-itpro/about-accounts-payable-invoice-matching)
 - [SAP logistics invoice verification](https://help.sap.com/docs/SAP_ERP)
 - [Peppol BIS Billing 3.0](https://docs.peppol.eu/poacc/billing/3.0/)
+
+**Partly verified end to end by**
+
+- `tools/e2e/flow_test.go`
 
 **Depends on:** wave 17
 

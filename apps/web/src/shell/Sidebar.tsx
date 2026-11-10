@@ -1,58 +1,33 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Link, NavLink, matchPath, useLocation } from "react-router-dom";
-import type { PassageModule } from "../modules/registry";
-import { groupByArea } from "./areas";
+import { useRef, type RefObject } from "react";
+import { Link, matchPath, NavLink, useLocation } from "react-router-dom";
 import { copy, shortcutHint } from "./copy";
 import { useFocusTrap } from "./hooks/useFocusTrap";
 import styles from "./Shell.module.css";
 import type { ShellNavItem } from "./shellNav";
 import { Button, Icon } from "./ui";
+import { useWorkspaceNav } from "./workspaces/WorkspaceNav";
+import { WorkspaceSwitcher } from "./workspaces/WorkspaceSwitcher";
 
 export interface SidebarProps {
-  modules: PassageModule[];
   shellNav: ShellNavItem[];
   drawerOpen: boolean;
+  announce(message: string): void;
   searchRef: RefObject<HTMLButtonElement | null>;
   onOpenSearch(): void;
   onCloseDrawer(): void;
 }
 
-/** Pages listed per open module before a "Show more" toggle; modules order their nav with everyday work first. */
-export const PAGE_LIMIT = 8;
-
-/** The module whose nav entry is the longest prefix of the path, so detail pages (/sales/orders/123) keep their module open. */
-function ownerOf(pathname: string, modules: PassageModule[]): PassageModule | undefined {
-  let best: { module: PassageModule; length: number } | undefined;
-  for (const m of modules) {
-    for (const n of m.nav) {
-      if (matchPath({ path: n.to, end: false }, pathname) !== null && (best === undefined || n.to.length > best.length)) {
-        best = { module: m, length: n.to.length };
-      }
-    }
-  }
-  return best?.module;
-}
-
-export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch, onCloseDrawer }: SidebarProps) {
-  const { pathname } = useLocation();
+export function Sidebar({ shellNav, drawerOpen, announce, searchRef, onOpenSearch, onCloseDrawer }: SidebarProps) {
   const asideRef = useRef<HTMLElement>(null);
-  const groups = useMemo(() => groupByArea(modules), [modules]);
-  // One area and one module open at a time, so the sidebar stays short: areas list modules, only the open module lists pages.
-  const [openArea, setOpenArea] = useState<string | null>(null);
-  const [openModule, setOpenModule] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState<Record<string, boolean>>({});
+  const { active, entries } = useWorkspaceNav();
+  const { pathname } = useLocation();
+  const covers = (to: string) => matchPath({ path: to, end: false }, pathname) !== null;
+  const outsideWorkspace =
+    shellNav.some((n) => matchPath({ path: n.to, end: true }, pathname) !== null) || active?.entries.some((e) => covers(e.to))
+      ? undefined
+      : entries.filter((e) => covers(e.to)).sort((a, b) => b.to.length - a.to.length)[0];
 
   useFocusTrap(asideRef, drawerOpen);
-
-  useEffect(() => {
-    const owner = ownerOf(pathname, modules);
-    if (owner) {
-      setOpenModule(owner.id);
-      const index = owner.nav.findIndex((n) => matchPath({ path: n.to, end: true }, pathname) !== null);
-      if (index >= PAGE_LIMIT) setShowAll((current) => ({ ...current, [owner.id]: true }));
-      setOpenArea(groups.find((g) => g.modules.some((m) => m.id === owner.id))?.area.id ?? null);
-    }
-  }, [pathname, modules, groups]);
 
   const dialogProps = drawerOpen ? { role: "dialog", "aria-modal": true, "aria-label": "Navigation" } : {};
 
@@ -99,6 +74,7 @@ export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch
           <kbd aria-hidden="true">{shortcutHint}</kbd>
         </button>
       </div>
+      <WorkspaceSwitcher announce={announce} />
       <nav aria-label="Workspaces" className={styles.nav}>
         <ul className={styles.list}>
           {shellNav.map((n) => (
@@ -110,76 +86,36 @@ export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch
             </li>
           ))}
         </ul>
-        <ul className={styles.list}>
-          {groups.map(({ area, modules: members }) => {
-            const areaOpen = openArea === area.id;
-            const areaHeaderId = `nav-area-${area.id}`;
-            const areaListId = `nav-area-list-${area.id}`;
-            return (
-              <li key={area.id} className={styles.group}>
-                <button
-                  type="button"
-                  id={areaHeaderId}
-                  className={styles.areaHeader}
-                  aria-expanded={areaOpen}
-                  aria-controls={areaListId}
-                  onClick={() => setOpenArea(areaOpen ? null : area.id)}
-                >
-                  <Icon name={area.icon} />
-                  <span className={styles.groupTitle}>{area.title}</span>
-                  <span className={styles.chevron}>
-                    <Icon name="chevronRight" />
-                  </span>
-                </button>
-                <ul id={areaListId} className={styles.list} aria-labelledby={areaHeaderId} hidden={!areaOpen}>
-                  {members.map((m) => {
-                    const moduleOpen = openModule === m.id;
-                    const headerId = `nav-group-${m.id}`;
-                    const listId = `nav-list-${m.id}`;
-                    return (
-                      <li key={m.id} className={styles.group}>
-                        <button
-                          type="button"
-                          id={headerId}
-                          className={styles.moduleHeader}
-                          aria-expanded={moduleOpen}
-                          aria-controls={listId}
-                          onClick={() => setOpenModule(moduleOpen ? null : m.id)}
-                        >
-                          <span className={styles.groupTitle}>{m.title}</span>
-                          <span className={styles.chevron}>
-                            <Icon name="chevronRight" />
-                          </span>
-                        </button>
-                        <ul id={listId} className={styles.list} aria-labelledby={headerId} hidden={!moduleOpen}>
-                          {(showAll[m.id] ? m.nav : m.nav.slice(0, PAGE_LIMIT)).map((n) => (
-                            <li key={n.to}>
-                              <NavLink end to={n.to} className={`${styles.item} ${styles.groupItem}`} onClick={onCloseDrawer}>
-                                {n.label}
-                              </NavLink>
-                            </li>
-                          ))}
-                          {m.nav.length > PAGE_LIMIT ? (
-                            <li>
-                              <button
-                                type="button"
-                                className={`${styles.item} ${styles.groupItem} ${styles.moreToggle}`}
-                                aria-expanded={showAll[m.id] === true}
-                                onClick={() => setShowAll((current) => ({ ...current, [m.id]: !current[m.id] }))}
-                              >
-                                {showAll[m.id] ? copy.nav.showFewer : copy.nav.showMore(m.nav.length - PAGE_LIMIT)}
-                              </button>
-                            </li>
-                          ) : null}
-                        </ul>
-                      </li>
-                    );
-                  })}
-                </ul>
+        {active ? (
+          <div className={styles.group}>
+            <h2 id="nav-active-workspace" className={styles.groupLabel}>
+              {active.label}
+            </h2>
+            <ul className={styles.list} aria-labelledby="nav-active-workspace">
+              {active.entries.map((n) => (
+                <li key={n.to}>
+                  <NavLink end to={n.to} className={styles.item} onClick={onCloseDrawer}>
+                    {n.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {outsideWorkspace ? (
+          <div className={styles.group}>
+            <h2 id="nav-current-page" className={styles.groupLabel}>
+              {copy.workspaces.currentPage}
+            </h2>
+            <ul className={styles.list} aria-labelledby="nav-current-page">
+              <li>
+                <NavLink to={outsideWorkspace.to} className={styles.item} onClick={onCloseDrawer}>
+                  {outsideWorkspace.label}
+                </NavLink>
               </li>
-            );
-          })}
-        </ul>
+            </ul>
+          </div>
+        ) : null}
       </nav>
     </aside>
   );

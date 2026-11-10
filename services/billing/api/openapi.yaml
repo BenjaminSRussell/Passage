@@ -295,12 +295,120 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
+  /v1/billing/sales-reports:
+    get:
+      operationId: listSalesReports
+      summary: List the reports of posted invoices to sales (#29), newest first.
+      x-passage-duty: billing.invoice.view (InvoiceView)
+      description: >
+        One report per (invoice, order) tells sales' `:record-progress` what an invoice billed (kind INVOICED). A PARKED report
+        carries the reason in `lastError` (sales refused it, or the attempts ran out); a report sales answers "not yet" (SLS-0058,
+        SLS-0059: the order is not shipped or the delivery has not been reported) is retried with backoff first. At most 200 items.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, REPORTED, PARKED] }
+      responses:
+        "200":
+          description: The reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SalesReport"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/sales-reports/{id}:retry:
+    post:
+      operationId: retrySalesReport
+      summary: Put a PARKED sales report back in the queue.
+      x-passage-duty: billing.invoice.post (InvoicePost)
+      description: >
+        A PARKED report becomes PENDING again, due now, with its attempts counted from zero; a PENDING one is returned as it is.
+        The body and the Idempotency-Key sent to sales do not change, so sales answers a report it already holds from its copy.
+        A REPORTED report is refused with 409 BIL-0111; an unknown one is 404 BIL-0110.
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesReport"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/tax-reports:
+    get:
+      operationId: listTaxReports
+      summary: List the reports of booked invoices and credit notes to the tax service (#29), newest first.
+      x-passage-duty: billing.invoice.view (InvoiceView)
+      description: >
+        Booking a document to the GL queues one report; a leased reporter records its output tax per tax code with the tax
+        service (`POST /v1/tax/transactions`), negative on a credit note. A PARKED report carries the reason in `lastError`
+        (the tax service refused it, or the attempts ran out). At most 200 items.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, REPORTED, PARKED] }
+      responses:
+        "200":
+          description: The reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TaxReport"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/tax-reports/{id}:retry:
+    post:
+      operationId: retryTaxReport
+      summary: Put a PARKED tax report back in the queue.
+      x-passage-duty: billing.invoice.post (InvoicePost)
+      description: >
+        A PARKED report becomes PENDING again, due now, with its attempts counted from zero; a PENDING one is returned as it is.
+        The body does not change, so the tax service answers a transaction it already holds as a duplicate. A REPORTED report is
+        refused with 409 BIL-0121; an unknown one is 404 BIL-0120.
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxReport"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
   /v1/billing/gl-postings:
     post:
       operationId: postGL
       summary: Book the invoice journal (FR-29.3) of posted invoices and credit notes in the general ledger.
       x-passage-duty: billing.invoice.post (InvoicePost)
       description: >
+        The auto-book worker (BILLING_GL_AUTOBOOK_TENANT_IDS) runs this same posting on a timer; calling it books what the worker has
+        not reached yet, and a document booked by either is never booked again (ledger key per document).
         Books one balanced entry per posted invoice not yet booked: Dr receivable
         (billed gross), Cr revenue per line account, Cr 2400, Cr / Dr contract position,
         Cr charges, Cr tax. The invoice lines, the receivable and the tax keep the contractual
@@ -453,6 +561,144 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "422":
           description: Credit beyond the remaining creditable amount or original not posted (BIL-0005), or Idempotency-Key reuse (idempotency_key_reuse).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/billing/invoices/{id}/credit-reservations:
+    post:
+      operationId: createCreditReservation
+      summary: Reserve part of a posted invoice for a credit issued outside billing (an RMA credit).
+      description: >
+        Takes the named quantities of the invoice's lines (and optionally
+        `chargeAmount`) under the invoice's row lock, the same lock credit note
+        posting takes, so posted credit notes plus active reservations never
+        exceed what was invoiced. Net and tax are planned like a credit note:
+        the original's tax pro rata, the last quantity of a line taking exactly
+        what is left. A reservation counts against the invoice until it is
+        released or consumed; `credited.reserved` and `reservedQty` on the invoice
+        read show it. Reserving again with the key of a released reservation
+        re-runs the bound under the same lock: it succeeds (200, RESERVED again)
+        or is refused 422 BIL-0005; the key of a consumed reservation replays it.
+        Beyond what the invoice still allows, or on an invoice that is not
+        posted, it is refused with 422 BIL-0005. The Idempotency-Key is stable
+        per RMA: the same key and body return the stored reservation (200),
+        the same key with another body is 422.
+      x-passage-duty: billing.credit-reservation.write (service only)
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditReservationRequest"
+      responses:
+        "201":
+          description: Credit reserved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "200":
+          description: Idempotent replay of an earlier request with the same key and body.
+          headers:
+            Idempotent-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: The invoice does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: A concurrent request holds the same Idempotency-Key (idempotency_in_progress).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Credit beyond the remaining creditable amount or invoice not posted (BIL-0005), or Idempotency-Key reuse (idempotency_key_reuse).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/billing/credit-reservations/{id}:release:
+    post:
+      operationId: releaseCreditReservation
+      summary: Release a credit reservation so its amount can be credited again.
+      description: >
+        Releasing a released reservation returns it unchanged. A consumed
+        reservation cannot be released (409 reservation_state). Reservations do
+        not expire; the caller releases or commits them.
+      x-passage-duty: billing.credit-reservation.write (service only)
+      parameters:
+        - $ref: "#/components/parameters/ReservationId"
+      responses:
+        "200":
+          description: The released reservation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: The reservation does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The reservation is consumed (reservation_state).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/billing/credit-reservations/{id}:commit:
+    post:
+      operationId: commitCreditReservation
+      summary: Mark a reservation consumed once the credit it held was issued.
+      description: >
+        RESERVED becomes CONSUMED; a consumed reservation keeps counting against
+        the invoice and can no longer be released. Committing a consumed
+        reservation returns it unchanged; a released one is refused (409
+        reservation_state).
+      x-passage-duty: billing.credit-reservation.write (service only)
+      parameters:
+        - $ref: "#/components/parameters/ReservationId"
+      responses:
+        "200":
+          description: The consumed reservation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: The reservation does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The reservation is released (reservation_state).
           content:
             application/problem+json:
               schema:
@@ -642,6 +888,22 @@ components:
         type: string
         minLength: 1
         maxLength: 255
+    ReservationId:
+      name: id
+      in: path
+      required: true
+      description: The credit reservation.
+      schema:
+        type: string
+        format: uuid
+    ReportId:
+      name: id
+      in: path
+      required: true
+      description: The report id.
+      schema:
+        type: string
+        format: uuid
     InvoiceId:
       name: id
       in: path
@@ -657,6 +919,39 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    SalesReport:
+      type: object
+      required: [id, legalEntityId, invoiceId, sourceRef, orderId, status, attempts, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        invoiceId: { type: string, format: uuid }
+        sourceRef: { type: string, description: The invoice number. }
+        orderId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, REPORTED, PARKED] }
+        attempts: { type: integer }
+        nextAttemptAt: { type: string, format: date-time }
+        lastStatus: { type: integer, description: What sales answered; absent when it did not answer. }
+        lastError: { type: string }
+        reportedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    TaxReport:
+      type: object
+      required: [id, legalEntityId, invoiceId, kind, sourceRef, status, attempts, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        invoiceId: { type: string, format: uuid, description: The invoice or credit note the report records. }
+        originalInvoiceId: { type: string, format: uuid, description: The invoice a credit note credits. }
+        kind: { type: string, enum: [INVOICE, CREDIT_NOTE] }
+        sourceRef: { type: string, description: The document number. }
+        status: { type: string, enum: [PENDING, REPORTED, PARKED] }
+        attempts: { type: integer }
+        nextAttemptAt: { type: string, format: date-time }
+        lastStatus: { type: integer, description: What the tax service answered; absent when it did not answer. }
+        lastError: { type: string }
+        reportedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
     SubscriptionRequest:
       type: object
       required: [legalEntityId, customerId, invoiceAccountId, currency, planCode, price, periodMonths, startDate, revenueAccount, taxCode, paymentTermDays]
@@ -878,6 +1173,54 @@ components:
             properties:
               lineNo: { type: integer, minimum: 1 }
               qty: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive; at most the line's remaining quantity." }
+    CreditReservationRequest:
+      type: object
+      required: [reference, lines]
+      additionalProperties: false
+      properties:
+        reference: { type: string, minLength: 1, maxLength: 255, description: "The credit's own identifier, for example the RMA id." }
+        chargeAmount:
+          type: string
+          pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$"
+          description: Header charges to reserve.
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items:
+            type: object
+            required: [lineNo, qty]
+            additionalProperties: false
+            properties:
+              lineNo: { type: integer, minimum: 1 }
+              qty: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive; at most the line's remaining quantity." }
+    CreditReservation:
+      type: object
+      required: [id, invoiceId, reference, status, currency, lines, totals, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        invoiceId: { type: string, format: uuid }
+        reference: { type: string }
+        status: { type: string, enum: [RESERVED, CONSUMED, RELEASED] }
+        currency: { type: string }
+        createdAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time }
+        totals:
+          type: object
+          properties:
+            net: { $ref: "#/components/schemas/Money" }
+            charges: { $ref: "#/components/schemas/Money" }
+            tax: { $ref: "#/components/schemas/Money" }
+            gross: { $ref: "#/components/schemas/Money" }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              lineNo: { type: integer, description: "The invoice line reserved." }
+              qty: { type: string }
+              net: { $ref: "#/components/schemas/Money" }
+              tax: { $ref: "#/components/schemas/Money" }
     Money:
       type: string
       pattern: "^-?[0-9]+\\.[0-9]+$"
@@ -892,9 +1235,10 @@ components:
             credited:
               type: object
               description: On a posted invoice that can be credited.
-              required: [gross, remaining]
+              required: [gross, reserved, remaining]
               properties:
                 gross: { $ref: "#/components/schemas/Money" }
+                reserved: { $ref: "#/components/schemas/Money" }
                 remaining: { $ref: "#/components/schemas/Money" }
             installments:
               type: array
@@ -925,6 +1269,8 @@ components:
                   taxCode: { type: string }
                   originalLineNo: { type: integer, description: "On a credit note: the credited line of the original." }
                   creditedQty: { type: string, description: "On a creditable invoice: quantity credited by posted credit notes." }
+                  reservedQty: { type: string, description: "On a creditable invoice with credit: quantity held by active credit reservations." }
+                  creditedTax: { type: string, description: "On a creditable invoice with credits: tax already reversed by posted credit notes." }
                   packingSlipId: { type: string, format: uuid, description: "Shipment and consolidated lines: the packing slip billed." }
                   packingSlipLineId: { type: string, format: uuid }
                   orderId: { type: string, format: uuid }

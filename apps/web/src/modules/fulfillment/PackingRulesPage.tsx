@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, listContainerTypes, listPackingRules, savePackingRule, type ContainerType, type PackingRule, type Problem } from "./api/client";
@@ -6,6 +7,7 @@ import { compareDecimal, DECIMAL, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<PackingRule>[] = [
   { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
@@ -99,13 +101,13 @@ export function PackingRulesPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="rules-product" label="Product id" hint="Show the rules of one product." optional>
-          {(control) => <Input {...control} value={product} onChange={(event) => setProduct(event.target.value)} />}
+        <FormField id="rules-product" label="Product" hint="Show the rules of one product." optional>
+          {(control) => <EntityLookup entity="product" {...control} value={product} onChange={(event) => setProduct(event.target.value)} />}
         </FormField>
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load packing rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -135,11 +137,11 @@ export function PackingRulesPage() {
               </Alert>
             </div>
           ) : null}
-          <FormField id="rule-product" label="Product id" error={errors.productId}>
-            {(control) => <Input {...control} value={values.productId} invalid={Boolean(errors.productId)} onChange={(event) => set({ productId: event.target.value })} />}
+          <FormField id="rule-product" label="Product" error={errors.productId}>
+            {(control) => <EntityLookup entity="product" {...control} value={values.productId} invalid={Boolean(errors.productId)} onChange={(event) => set({ productId: event.target.value })} />}
           </FormField>
-          <FormField id="rule-customer" label="Customer id" hint="Empty: the rule applies to every customer." error={errors.customerId} optional>
-            {(control) => <Input {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => set({ customerId: event.target.value })} />}
+          <FormField id="rule-customer" label="Customer" hint="Empty: the rule applies to every customer." error={errors.customerId} optional>
+            {(control) => <EntityLookup entity="customer" {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => set({ customerId: event.target.value })} />}
           </FormField>
           <FormField id="rule-type" label="Container type" error={errors.containerType}>
             {(control) => (

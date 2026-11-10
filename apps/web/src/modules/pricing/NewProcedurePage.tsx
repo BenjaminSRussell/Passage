@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { createProcedure, describeProblem, getProcedure, newKey, type ProcedureInput, type ProcedureStep, type Problem } from "./api/client";
@@ -6,6 +7,7 @@ import { PROCEDURE_NAME } from "./campaignFormat";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { cleanSteps, ProcedureStepsEditor, referenceSteps, validateSteps } from "./ProcedureStepsEditor";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -76,8 +78,8 @@ export function NewProcedurePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="pp-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-            {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
+          <FormField id="pp-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
           <FormField id="pp-name" label="Procedure name" hint="For example AX_STANDARD or SAP_RVAA01." error={errors.name}>
             {(c) => <Input {...c} className={styles.mono} value={values.name} onChange={(e) => update({ name: e.target.value.toUpperCase() })} invalid={Boolean(errors.name)} />}
@@ -86,7 +88,7 @@ export function NewProcedurePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the procedure" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

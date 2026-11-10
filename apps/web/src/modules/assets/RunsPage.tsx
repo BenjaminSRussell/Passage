@@ -6,6 +6,7 @@ import { StatusBadge } from "./badges";
 import { amount, dash, PERIOD, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface RunValues {
   legalEntityId: string;
@@ -123,7 +124,7 @@ export function RunsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failureTitle[failure.code] ?? "Could not propose the run"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -136,7 +137,7 @@ export function RunsPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load depreciation runs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -151,7 +152,7 @@ export function RunsPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more runs" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !state.error ? (
@@ -188,7 +189,7 @@ export function RunDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Depreciation run" />
         <Alert tone="danger" title="Could not load the run" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/assets/depreciation-runs">
           Back to runs
@@ -245,7 +246,7 @@ export function RunDetailPage() {
           live="alert"
           action={failure.code === "AST-0006" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <StatGroup label="Run totals">

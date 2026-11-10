@@ -98,6 +98,8 @@ type API struct {
 	capturesReview  atomic.Int64
 	sheetsCreated   atomic.Int64
 	sheetsDecided   atomic.Int64
+	asnsCreated     atomic.Int64
+	asnReceipts     atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -147,17 +149,24 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:correct", a.idempotent(a.correctReceipt))
 	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:cancel", a.idempotent(a.cancelReceipt))
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/grir", a.listGrir)
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoices", a.listInvoices)
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoices/{id}", a.getInvoice)
 	r.With(authz.RequireDuty(dutyReceivingAdmin)).Get("/v1/receiving/pending-postings", a.listPending)
 	r.With(authz.RequireDuty(dutyReceivingAdmin)).Post("/v1/receiving/pending-postings/{key}/resolve", a.idempotent(a.resolvePending))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoices:post", a.idempotent(a.postVendorInvoice))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/one-time-payees", a.idempotent(a.createOneTimePayee))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-captures", a.idempotent(a.createInvoiceCapture))
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoice-captures", a.listInvoiceCaptures)
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoice-captures/{id}", a.getInvoiceCapture)
 	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/ers-self-bills/{id}", a.getSelfBill)
 	r.With(authz.RequireDuty(dutySheetMaintain)).Post("/v1/receiving/service-entry-sheets", a.idempotent(a.createServiceSheet))
 	r.With(authz.RequireAnyDuty(dutySheetMaintain, dutySheetAccept)).Get("/v1/receiving/service-entry-sheets/{id}", a.getServiceSheet)
 	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:accept", a.idempotent(a.acceptServiceSheet))
 	r.With(authz.RequireDuty(dutySheetAccept)).Post("/v1/receiving/service-entry-sheets/{id}:reject", a.idempotent(a.rejectServiceSheet))
+	r.With(authz.RequireDuty(dutyAsnMaintain)).Post("/v1/receiving/asns", a.idempotent(a.createAsn))
+	r.With(authz.RequireAnyDuty(dutyAsnMaintain, dutyAsnReceive)).Get("/v1/receiving/asns", a.listAsns)
+	r.With(authz.RequireAnyDuty(dutyAsnMaintain, dutyAsnReceive)).Get("/v1/receiving/asns/{id}", a.getAsn)
+	r.With(authz.RequireDuty(dutyAsnReceive)).Post("/v1/receiving/asns/{id}:start-receipt", a.idempotent(a.startAsnReceipt))
 	r.With(authz.RequireDuty(dutyPayeeErase)).Post("/v1/receiving/one-time-payees:erase", a.idempotent(a.eraseOneTimePayees))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-adjustments:post", a.idempotent(a.postInvoiceAdjustment))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/plan-settlements:run", a.idempotent(a.runPlanSettlement))
@@ -198,6 +207,8 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_invoice_captures_review_total", "Captured documents held for review (low confidence, total mismatch or no vendor tax id).", &a.capturesReview},
 		{"receiving_service_entry_sheets_created_total", "Service entry sheets entered against purchase order lines.", &a.sheetsCreated},
 		{"receiving_service_entry_sheets_decided_total", "Service entry sheets accepted or rejected.", &a.sheetsDecided},
+		{"receiving_asns_created_total", "Advance ship notices created against purchase orders.", &a.asnsCreated},
+		{"receiving_asn_receipts_started_total", "Receipts started from an advance ship notice.", &a.asnReceipts},
 		{"receiving_invoices_audit_rejected_total", "Audit-blocked invoices rejected by an auditor, freeing their GR/IR quantity.", &a.auditRejected},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

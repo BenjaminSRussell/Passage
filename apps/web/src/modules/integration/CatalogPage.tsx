@@ -16,6 +16,7 @@ import {
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const LIFECYCLE_TONES: Record<CatalogLifecycle, { label: string; tone: BadgeTone }> = {
   active: { label: "Active", tone: "success" },
@@ -128,7 +129,7 @@ export function CatalogPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the catalog" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>
@@ -147,7 +148,7 @@ export function CatalogPage() {
           />
           {moreError ? (
             <Alert tone="danger" title="Could not load more" live="alert">
-              {moreError.message} ({moreError.code})
+              <ProblemMessage problem={moreError} />
             </Alert>
           ) : null}
           {next !== null && !state.loading ? (

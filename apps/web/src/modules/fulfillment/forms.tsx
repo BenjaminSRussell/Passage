@@ -4,13 +4,14 @@ import { useRef } from "react";
 import { Alert } from "../../shell/ui";
 import { newKey, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export function ProblemAlert({ title, problem }: { title: string; problem: Problem | null }) {
   if (!problem) return null;
   return (
     <div className={styles.formActions}>
       <Alert tone="danger" title={title} live="alert">
-        {problem.message} ({problem.code})
+        <ProblemMessage problem={problem} />
       </Alert>
     </div>
   );

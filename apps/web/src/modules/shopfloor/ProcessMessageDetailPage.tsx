@@ -16,6 +16,7 @@ import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { categoryLabel, DESTINATION_LABELS, DeliveryStatus, MessageStatus, limits } from "./processLabels";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const valueColumns: DataTableColumn<Characteristic>[] = [
   { key: "name", header: "Characteristic", mono: true },
@@ -90,7 +91,7 @@ export function ProcessMessageDetailPage() {
       ) : null}
       {state.error && !message ? (
         <Alert tone="danger" title="Could not load the process message" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !message ? (
         <Card>
@@ -249,7 +250,7 @@ function ReprocessForm({ messageId, destination, onDone, onCancel }: ReprocessFo
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not reprocess" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -327,7 +328,7 @@ function DeleteForm({ messageId, onDone, onCancel }: DeleteFormProps) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not delete" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

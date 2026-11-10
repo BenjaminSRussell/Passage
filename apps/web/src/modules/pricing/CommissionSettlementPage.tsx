@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import {
@@ -18,6 +19,7 @@ import { usePrincipalDuties } from "../../shell/principal";
 import { saveCsv } from "./settlementFile";
 import { addDays, DAY, sumDecimals, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const TARGET_LABELS: Record<SettlementTarget, string> = { AP: "Accounts payable", PAYROLL: "Payroll" };
 
@@ -140,9 +142,9 @@ export function CommissionSettlementPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={preview} noValidate>
-          <FormField id="cs-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
+          <FormField id="cs-legal-entity" label="Legal entity" error={errors.legalEntityId}>
             {(c) => (
-              <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
+              <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
             )}
           </FormField>
           <FormField id="cs-from" label="First invoice date" error={errors.from}>
@@ -165,7 +167,7 @@ export function CommissionSettlementPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not complete the settlement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

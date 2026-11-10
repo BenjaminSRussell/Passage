@@ -230,7 +230,7 @@ func ReconcileOnhand(r *PackRun, source, accepted []OnhandLine, loaded int, held
 // such a pack is not stock or balances in Passage, so the go/no-go checklist does not count it.
 var notPosted = map[Pack]string{
 	PackOnhand:      "staged in the factory only, not posted to the inventory ledger (H-S9-1)",
-	PackGLBalances:  "staged in the factory only, not posted to the general ledger (wave 12 handoff)",
+	PackGLBalances:  "staged in the factory only, not posted to the general ledger (post its opening journal)",
 	PackProjectWIP:  "staged in the factory only, not posted to project operations (D7)",
 	PackOpenOrders:  "staged in the factory only, not posted to sales or purchasing (H-S11-1)",
 	PackBankBal:     "staged in the factory only, not posted to treasury (H-S10-1)",

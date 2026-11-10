@@ -1,0 +1,39 @@
+# The revrec credit-note consumer (#29, `revrec consume`, group revrec-creditnotes) reverses the revenue schedules of
+# billing's creditnote.booked and parks what it cannot apply on passage.revrec.creditnotes.dlq. The chart's
+# consumer.kafka.username names this user. Literal ACLs: the user reads only billing's invoice topic (billing routes its outbox
+# by aggregate, so invoices and credit notes share passage.billing.invoice; the consumer skips the other types) and writes only
+# its dead-letter topic. The outbox-billing connector in connect.yaml creates passage.billing.invoice; the consumer stays off in
+# dev until it is enabled in the revrec chart.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: revrec-consumer
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: passage.billing.invoice, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.revrec.creditnotes.dlq, patternType: literal}
+        operations: [Write, Describe]
+      - resource: {type: group, name: revrec-creditnotes, patternType: literal}
+        operations: [Read, Describe]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: passage-revrec-creditnotes-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  topicName: passage.revrec.creditnotes.dlq
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: 2592000000

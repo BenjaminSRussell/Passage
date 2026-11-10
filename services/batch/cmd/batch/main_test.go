@@ -91,3 +91,29 @@ func TestRun_ProductURLWithoutSigningKeyStopsStartup(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestLoadInbox(t *testing.T) {
+	env := func(extra map[string]string) func(string) string {
+		base := map[string]string{"LEDGER_URL": "http://ledger:8080", "PASSAGE_SERVICE_NAME": "batch", "PASSAGE_SERVICE_SIGNING_KEY": testSigningKey()}
+		for k, v := range extra {
+			base[k] = v
+		}
+		return func(k string) string { return base[k] }
+	}
+	if agg, err := loadInbox(func(string) string { return "" }); err != nil || len(agg.Sources) != 4 {
+		t.Fatalf("no source URLs must still serve the inbox with every source unset: %v, %v", agg, err)
+	}
+	if agg, err := loadInbox(env(nil)); err != nil || agg.SourceTimeout != 3*time.Second || agg.Concurrency != 4 {
+		t.Fatalf("defaults = %+v, %v", agg, err)
+	}
+	for name, extra := range map[string]map[string]string{
+		"no signing key":     {"PASSAGE_SERVICE_SIGNING_KEY": ""},
+		"wrong service name": {"PASSAGE_SERVICE_NAME": "receiving"},
+		"bad timeout":        {"INBOX_SOURCE_TIMEOUT": "soon"},
+		"zero concurrency":   {"INBOX_CONCURRENCY": "0"},
+	} {
+		if _, err := loadInbox(env(extra)); err == nil {
+			t.Errorf("%s: startup must fail instead of calling sources without a valid service identity", name)
+		}
+	}
+}

@@ -10,6 +10,8 @@ import {
   type EventMessage,
 } from "../src/eventConsumer.js";
 import { loadReleasedSource, loadReleasedType } from "../src/tenderTriggers.js";
+import { planSubmittedSource, planSubmittedType } from "../src/budgetPlanTriggers.js";
+import { budgetPlanWorkflow, budgetPlanWorkflowId } from "../src/budgetPlanWorkflow.js";
 import { tenderResponseSignal, tenderWorkflow } from "../src/workflows.js";
 import { CARRIERS, LOAD_ID } from "./fakeTransport.js";
 
@@ -51,8 +53,26 @@ const outcome = (type: string) => ({
   data: { tenderId: "tender-1", loadId: LOAD_ID, carrierId: CARRIERS[0]!, rank: 1, response: "ACCEPTED" },
 });
 
+const PLAN = "00000000-0000-0000-0000-0000000000b1";
+const planSubmitted = (overrides: Record<string, unknown> = {}) => ({
+  specversion: "1.0",
+  id: "01a1abf2-4d5a-7674-9348-53a0e1e42492",
+  source: planSubmittedSource,
+  type: planSubmittedType,
+  subject: PLAN,
+  tenantid: TENANT,
+  data: { plan_id: PLAN, legal_entity_id: ENTITY, name: "FY27", fiscal_year: 2027, submission: 2, submitted_by: "pat" },
+  ...overrides,
+});
+
 function message(value: unknown, topic: string = TENDER_TOPICS[0]): EventMessage {
-  return { topic, partition: 2, offset: "41", key: Buffer.from(LOAD_ID), value: value === null ? null : Buffer.from(typeof value === "string" ? value : JSON.stringify(value)) };
+  return {
+    topic,
+    partition: 2,
+    offset: "41",
+    key: Buffer.from(LOAD_ID),
+    value: value === null ? null : Buffer.from(typeof value === "string" ? value : JSON.stringify(value)),
+  };
 }
 
 function setup(start = vi.fn().mockResolvedValue({}), signal = vi.fn().mockResolvedValue(undefined)) {
@@ -67,13 +87,13 @@ function setup(start = vi.fn().mockResolvedValue({}), signal = vi.fn().mockResol
 }
 
 describe("tender event consumer", () => {
-  it("is off without brokers and otherwise reads both transport topics in its own group", () => {
+  it("is off without brokers and otherwise reads the transport and budget plan topics in its own group", () => {
     expect(eventConsumerConfigFromEnv({})).toBeNull();
     expect(eventConsumerConfigFromEnv({ KAFKA_BROKERS: " , " })).toBeNull();
     expect(eventConsumerConfigFromEnv({ KAFKA_BROKERS: "k1:9093, k2:9093" })).toEqual({
       brokers: ["k1:9093", "k2:9093"],
       group: DEFAULT_GROUP,
-      topics: ["passage.tms.load", "passage.tms.tender"],
+      topics: ["passage.tms.load", "passage.tms.tender", "passage.budget.plan"],
       dlqTopic: DEFAULT_DLQ_TOPIC,
     });
     expect(
@@ -128,13 +148,19 @@ describe("tender event consumer", () => {
     expect(getHandle).toHaveBeenCalledWith(`tender:${TENANT}:${LOAD_ID}`);
     expect(signal).toHaveBeenCalledTimes(2);
     expect(signal).toHaveBeenCalledWith(tenderResponseSignal);
-    expect(await handle(message(outcome("dev.passage.tms.tender.expired.v1"), TENDER_TOPICS[1]))).toEqual({ action: "ignored", type: "dev.passage.tms.tender.expired.v1" });
+    expect(await handle(message(outcome("dev.passage.tms.tender.expired.v1"), TENDER_TOPICS[1]))).toEqual({
+      action: "ignored",
+      type: "dev.passage.tms.tender.expired.v1",
+    });
     expect(signal).toHaveBeenCalledTimes(2);
   });
 
   it("commits an outcome for a tender no workflow follows (a planner's own tender)", async () => {
     const { handle, dead } = setup(vi.fn(), vi.fn().mockRejectedValue(new WorkflowNotFoundError("none", "tender", undefined)));
-    expect(await handle(message(outcome("dev.passage.tms.tender.accepted.v1"), TENDER_TOPICS[1]))).toEqual({ action: "no-workflow", workflowId: `tender:${TENANT}:${LOAD_ID}` });
+    expect(await handle(message(outcome("dev.passage.tms.tender.accepted.v1"), TENDER_TOPICS[1]))).toEqual({
+      action: "no-workflow",
+      workflowId: `tender:${TENANT}:${LOAD_ID}`,
+    });
     expect(dead).toEqual([]);
   });
 
@@ -182,5 +208,47 @@ describe("tender event consumer", () => {
     const { handle, deadLetter } = setup();
     deadLetter.mockRejectedValueOnce(new Error("broker down"));
     await expect(handle(message("{not json"))).rejects.toThrow(/broker down/);
+  });
+
+  it("starts budgetPlanWorkflow from plan.submitted on the budget plan topic, one run per submission", async () => {
+    const { handle, start, dead } = setup();
+    expect(await handle(message(planSubmitted(), "passage.budget.plan"))).toEqual({ action: "started", workflowId: budgetPlanWorkflowId(PLAN, 2) });
+    expect(start).toHaveBeenCalledWith(
+      budgetPlanWorkflow,
+      expect.objectContaining({
+        workflowId: `budget-plan:${PLAN}:2`,
+        taskQueue: "passage-approvals",
+        workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+        args: [{ tenantId: TENANT, legalEntityId: ENTITY, planId: PLAN, submission: 2, requester: "pat" }],
+      }),
+    );
+    expect(dead).toEqual([]);
+  });
+
+  it("commits a redelivered plan.submitted while its workflow exists and ignores the plan's other events", async () => {
+    const { handle, start } = setup(vi.fn().mockRejectedValue(new WorkflowExecutionAlreadyStartedError("running", "budget-plan", "budgetPlanWorkflow")));
+    expect(await handle(message(planSubmitted(), "passage.budget.plan"))).toEqual({ action: "already-running", workflowId: budgetPlanWorkflowId(PLAN, 2) });
+    for (const type of ["dev.passage.budget.plan.approved.v1", "dev.passage.budget.plan.rejected.v1"]) {
+      expect(await handle(message(planSubmitted({ type }), "passage.budget.plan"))).toEqual({ action: "ignored", type });
+    }
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("dead-letters a plan.submitted from another source or without a valid submission, and starts nothing", async () => {
+    const { handle, start, dead } = setup();
+    const forged = await handle(message(planSubmitted({ source: "/passage/tms/transport" }), "passage.budget.plan"));
+    expect(forged).toMatchObject({ action: "dead-lettered" });
+    const bad = await handle(
+      message(planSubmitted({ data: { plan_id: PLAN, legal_entity_id: ENTITY, submission: 0, submitted_by: "pat" } }), "passage.budget.plan"),
+    );
+    expect(bad).toMatchObject({ action: "dead-lettered", reason: "submission must be a positive integer" });
+    expect(start).not.toHaveBeenCalled();
+    expect(dead.map((d) => d.headers["x-origin-topic"])).toEqual(["passage.budget.plan", "passage.budget.plan"]);
+  });
+
+  it("throws, so the message is retried, when Temporal is unreachable for a plan.submitted", async () => {
+    const { handle, dead } = setup(vi.fn().mockRejectedValue(new Error("temporal unavailable")));
+    await expect(handle(message(planSubmitted(), "passage.budget.plan"))).rejects.toThrow("temporal unavailable");
+    expect(dead).toEqual([]);
   });
 });

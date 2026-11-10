@@ -10,7 +10,9 @@ import (
 	"os"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/features"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/api"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/store"
 	"github.com/BenjaminSRussell/passage/services/processmfg/migrations"
@@ -58,6 +60,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 	// only a dev deployment binds the stand-in, whose signatures say unverified.
 	if getenv("PASSAGE_ENV") == "dev" {
 		h.WithReauth(api.DevReauth{})
+	}
+	if identityURL := getenv("IDENTITY_URL"); identityURL != "" {
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		if signer == nil {
+			return errors.New("IDENTITY_URL needs a service signing key (PASSAGE_SERVICE_NAME and PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
+		}
+		source := features.NewCache(features.NewHTTPSource(identityURL, nil, signer), features.DefaultTTL)
+		h.WithFeatureGate(features.Require(source, "process-manufacturing"))
 	}
 	h.Register(router)
 	addr := getenv("HTTP_ADDR")

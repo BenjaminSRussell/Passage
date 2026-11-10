@@ -25,7 +25,15 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
-	if err := run(context.Background(), os.Getenv); err != nil {
+	start := run
+	switch {
+	case len(os.Args) > 1 && os.Args[1] == "consume":
+		start = consume
+	case len(os.Args) > 1:
+		slog.Error("revrec stopped", "err", fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the credit-note consumer)", os.Args[1]))
+		os.Exit(2)
+	}
+	if err := start(context.Background(), os.Getenv); err != nil {
 		slog.Error("revrec stopped", "err", err)
 		os.Exit(1)
 	}

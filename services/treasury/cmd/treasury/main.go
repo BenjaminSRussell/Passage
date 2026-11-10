@@ -16,6 +16,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/api"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
@@ -49,8 +50,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	var vault *bankconnect.Vault
 	if vaultCfg.Enabled() {
-		vault := bankconnect.NewVault(vaultCfg)
+		vault = bankconnect.NewVault(vaultCfg)
 		defer func() {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -70,9 +72,27 @@ func run() error {
 			return err
 		}
 	}
-	a, err := api.New(store.New(pool)).WithMaxFileMB(maxMB)
+	pg := store.New(pool)
+	a, err := api.New(pg).WithMaxFileMB(maxMB)
 	if err != nil {
 		return err
+	}
+	if err := wireEBICS(ctx, a, pg, vault, vaultCfg); err != nil {
+		return err
+	}
+	a.WithReconciliations(pg)
+	ledger, err := ledgerclient.FromEnv(os.Getenv, "treasury")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	profiles := map[string]api.GLProfile{}
+	if raw := os.Getenv(api.EnvGLProfiles); raw != "" {
+		if profiles, err = api.ParseGLProfiles(raw); err != nil {
+			return err
+		}
+	}
+	if ledger != nil {
+		a.WithLedger(ledger, profiles)
 	}
 
 	router := httpx.NewRouter()

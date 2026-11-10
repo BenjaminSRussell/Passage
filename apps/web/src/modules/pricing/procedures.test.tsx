@@ -77,7 +77,7 @@ describe("Pricing procedures", () => {
     first.unmount();
     server.handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt("/pricing/procedures");
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -92,7 +92,7 @@ describe("New pricing procedure", () => {
     const { container } = renderAt("/pricing/procedures/new");
     expect(screen.getAllByRole("group")).toHaveLength(5);
     expect(pageViolations(container)).toEqual([]);
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
     expect(screen.getAllByRole("group")).toHaveLength(6);
     const groups = screen.getAllByLabelText(/^Exclusion group/);
@@ -113,7 +113,7 @@ describe("New pricing procedure", () => {
 
   it("blocks invalid steps before calling the service and removes a step", async () => {
     renderAt("/pricing/procedures/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fireEvent.change(screen.getAllByLabelText("Step number")[1], { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
     expect(await screen.findByText("Use a step number from 10 to 990.")).toBeInTheDocument();
@@ -127,7 +127,7 @@ describe("New pricing procedure", () => {
     renderAt(`/pricing/procedures/new?from=${P1}`);
     expect(await screen.findByRole("heading", { name: "New procedure version" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByRole("group")).toHaveLength(2));
-    expect(screen.getByLabelText("Legal entity id")).toHaveValue(LE);
+    expect(screen.getByLabelText("Legal entity")).toHaveAttribute("data-value", LE);
   });
 });
 
@@ -185,12 +185,12 @@ describe("Procedure detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Activate version 2" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("This version can no longer change");
-    expect(alert).toHaveTextContent("(PRC-0008)");
+    expect(alert).toHaveTextContent("PRC-0008");
   });
 
   it("shows the error state when the version is unknown", async () => {
     server.handler = () => json(404, { code: "PRC-0042", detail: "no pricing procedure x" });
     renderAt(`/pricing/procedures/${P2}`);
-    expect(await findAlert()).toHaveTextContent("(PRC-0042)");
+    expect(await findAlert()).toHaveTextContent("PRC-0042");
   });
 });

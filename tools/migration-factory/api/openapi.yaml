@@ -390,6 +390,86 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/opening-journal:
+    post:
+      operationId: postOpeningJournal
+      summary: Post the migrated GL balances of a gl_balances run to the general ledger as the opening journal
+      description: |
+        Posts the loaded `gl_opening_balance` rows of the run's legacy company to the ledger `ledgerId` of
+        the legal entity `legalEntityId` through the general ledger's ordinary posting API
+        (POST /v1/ledger/journal-entries, so the ledger's period, account and audit checks apply), as the
+        service `migration-factory`: one balanced journal per currency, dated `postingDate`, with one line
+        per account and dimension combination (debit for a positive balance, credit for a negative one).
+        The run must be gl_balances and LOADED or RECONCILED. The journal is refused whole, and nothing is
+        posted in any currency, when a currency's debits differ from its credits (for example because
+        balances were quarantined): the 422 MIG-1540 detail names each currency with its debits, credits and
+        difference. A balance with more decimals than its currency's minor unit is refused, never rounded.
+        The post is idempotent: the key of each journal is fixed by company, legal entity and currency, a
+        currency already posted with the same lines, ledger and date is returned as `alreadyPosted` and
+        sent again to no one (also from a re-run of the same import), and the same balances for another
+        ledger or date, or changed since, are refused with 409 MIG-0004 (correct by reversing in the
+        ledger). A refusal by the ledger (closed period, unknown account) is 422 MIG-1541 with the ledger's
+        code; journals of other currencies posted before it stay posted and the call can be repeated. An
+        unreachable ledger is 502 MIG-1533, an unconfigured one 503 MIG-1530, a ledger the legal entity
+        does not own 422 MIG-1531. Once every currency of the company is posted, the go/no-go checklist
+        counts the gl_balances pack as posted.
+      x-passage-duty: migration.factory.run
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, ledgerId, postingDate]
+              properties:
+                legalEntityId: {type: string, format: uuid, description: A legal entity in the caller's scope.}
+                ledgerId: {type: string}
+                postingDate: {type: string, format: date}
+      responses:
+        "200":
+          description: The opening journals of the legal entity, one per currency.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningJournals"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: getOpeningJournal
+      summary: The opening journals posted for the legacy company of a gl_balances run
+      description: Lists what was posted, per legal entity and currency, in the legal entities the caller may see.
+      x-passage-duty: migration.factory.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The posted journals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningJournals"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
   /api/v1/migration/runs/{id}/target-load:
     get:
       operationId: getTargetLoad
@@ -1157,9 +1237,17 @@ paths:
         made since go-live; lines dated before T-0 are counted as excluded, every line must be for
         an entity of the plan, and each journal (entity, document, currency) must balance. One bad
         posting rejects the request (MIG-0001) and leaves the plan as it was. The accepted lines are
-        stored with the plan and served by GET .../rekeying/{file}. Writes
-        dev.passage.cutover.plan.rolledback.v1 with the line counts. `version` works as on step
-        completion. The body may be up to 16 MiB.
+        stored with the plan and served by GET .../rekeying/{file}. In the same transaction the
+        loaded and reconciled pack runs of the plan's legacy companies and packs move to ROLLED_BACK
+        (BR-49.1; they are no longer loaded into a target or released), and every coexistence flag of
+        the plan's legacy companies that Passage masters goes back to LEGACY (FR-49.7), each writing
+        dev.passage.migration.coexistence.changed.v1. Writes dev.passage.cutover.plan.rolledback.v1
+        with the line counts, the rolled-back run count and the flags handed back, on which the
+        integration hub resumes the coexistence adapters (AC-49.7). With `ledgers` and a configured
+        ledger the executing request then posts the compensating journals as POST
+        .../rollback/compensations does; a failure there leaves the rollback in place and is reported
+        in `rollbackOutcome.compensationProblem`. `version` works as on step completion. The body may
+        be up to 16 MiB.
       x-passage-duty: migration.cutover.manage
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -1180,6 +1268,11 @@ paths:
                 version:
                   type: integer
                   minimum: 1
+                ledgers:
+                  type: array
+                  description: The ledger each entity's compensating journals are posted in, pinned as on POST .../rollback/compensations; used by the executing request. Each legal entity must be in the caller's scope.
+                  items:
+                    $ref: "#/components/schemas/EntityLedger"
       responses:
         "200":
           description: The plan with rolledBack true and the re-keying counts.
@@ -1294,7 +1387,10 @@ paths:
         `legalEntityId` (which must own it, MIG-1531), each under a fixed idempotency key. It then
         reads the ledger's period balance of every account the documents or `legacyTrialBalance`
         name and stores the diff against the legacy trial balance (the documents' own when none is
-        given) as a parallel run in REVIEW, idempotent by (period, system). A document the ledger
+        given) as a parallel run in REVIEW, idempotent by (period, system). Each legacy TB tuple
+        carries the number of documents that posted to its account, so the ledger's rounding of
+        every line to the currency's minor unit is EXPECTED under RND-001 up to 0.01 per document
+        (BR-49.7). A document the ledger
         refuses is listed in `rejected` and shows as TB variances; any other ledger failure is 502
         MIG-1533 and the replay can be repeated. Without a configured ledger the answer is 503 MIG-1530.
       x-passage-duty: migration.factory.run
@@ -1440,12 +1536,7 @@ paths:
                 ledgers:
                   type: array
                   items:
-                    type: object
-                    required: [entity, legalEntityId, ledgerId]
-                    properties:
-                      entity: {type: string}
-                      legalEntityId: {type: string, format: uuid}
-                      ledgerId: {type: string}
+                    $ref: "#/components/schemas/EntityLedger"
                 retryParked: {type: boolean}
       responses:
         "200":
@@ -2145,6 +2236,27 @@ components:
         SKIPPED equals what the target accepted before, so it was not sent; REJECTED carries the code (the target's
         AR-OPENING-* or the factory's MIG-LOAD-FIELD-REQUIRED / MIG-REF-UNRESOLVED / MIG-TARGET-REFUSED);
         NOT_AVAILABLE is open AP (MIG-TARGET-NOT-AVAILABLE).
+    OpeningJournals:
+      type: object
+      required: [runId, journals]
+      properties:
+        runId: {type: string, format: uuid}
+        journals:
+          type: array
+          items:
+            type: object
+            required: [currency, legalEntityId, ledgerId, postingDate, lineCount, debit, credit, entryId, alreadyPosted]
+            properties:
+              currency: {type: string}
+              legalEntityId: {type: string, format: uuid}
+              ledgerId: {type: string}
+              postingDate: {type: string, format: date}
+              lineCount: {type: integer}
+              debit: {type: string, description: Decimal total of the debit lines.}
+              credit: {type: string, description: Decimal total of the credit lines; equal to debit.}
+              entryId: {type: string, description: The journal entry the ledger booked.}
+              alreadyPosted: {type: boolean, description: True when an earlier call posted it; nothing was sent now.}
+              postedAt: {type: string, format: date-time}
     TargetLoad:
       type: object
       required: [runId, target, legalEntityId, importSource, status, clean, staged, created, updated, unchanged, skipped, rejected, notAvailable, pending, attempts, version]
@@ -2504,6 +2616,10 @@ components:
           description: The canonical tuple key, for example entity|account|dimensions|currency|period.
         amount:
           type: string
+        documents:
+          type: integer
+          minimum: 0
+          description: How many legacy documents the tuple sums. RND-001 allows 0.01 per document (BR-49.7), so a tuple of n documents is EXPECTED up to n x 0.01; absent or 0 counts as one document. When both sides give a count the larger one applies.
     ParallelRunRequest:
       type: object
       required: [period, sourceSystem, documentsReplayed, revenue]
@@ -2551,6 +2667,10 @@ components:
         delta:
           type: string
           description: passage - legacy.
+        documents:
+          type: integer
+          minimum: 0
+          description: The document count the per-document rule RND-001 scaled its tolerance by; absent when neither side gave one. A replay counts, per account, the legacy documents that posted to it.
         class:
           type: string
           enum: [EXPECTED, EXPLAINED, UNEXPLAINED]
@@ -3003,6 +3123,30 @@ components:
               type: integer
               minimum: 0
               description: Postings given with the rollback that were dated before T-0 and left out.
+        rollbackOutcome:
+          type: object
+          description: Present once the plan is rolled back. What the rollback did besides the re-keying export.
+          required: [packRunsRolledBack, coexistenceResumed]
+          properties:
+            packRunsRolledBack:
+              type: integer
+              minimum: 0
+              description: Pack runs of the plan's legacy companies and packs moved from LOADED or RECONCILED to ROLLED_BACK (BR-49.1).
+            coexistenceResumed:
+              type: integer
+              minimum: 0
+              description: Coexistence flags handed back to LEGACY (FR-49.7).
+            coexistence:
+              type: array
+              description: The flags handed back; on the executing request's response only.
+              items:
+                type: object
+            compensations:
+              type: object
+              description: The compensating-journal run the executing request made with `ledgers`, shaped as the POST .../rollback/compensations response.
+            compensationProblem:
+              type: string
+              description: Why the executing request posted no compensations although `ledgers` were given (the ledger is not configured, a ledger is foreign or pinned, the ledger failed); the rollback stands and POST .../rollback/compensations takes over.
         steps:
           type: array
           description: Present on generate, get and commands; absent in the list.
@@ -3013,6 +3157,14 @@ components:
           description: The generated rollback plan (FR-49.9), sent with the steps.
           items:
             $ref: "#/components/schemas/RollbackStep"
+    EntityLedger:
+      type: object
+      required: [entity, legalEntityId, ledgerId]
+      additionalProperties: false
+      properties:
+        entity: {type: string}
+        legalEntityId: {type: string, format: uuid}
+        ledgerId: {type: string}
     RekeyPosting:
       type: object
       required: [kind, entity, documentRef, postedAt, account, currency, amount]

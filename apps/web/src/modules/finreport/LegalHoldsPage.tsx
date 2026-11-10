@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { holdsDuty } from "../../shell/dutyGate";
@@ -18,6 +19,7 @@ import {
 import { formatBytes, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const MAX_HOLD_REASON = 500;
 
@@ -106,15 +108,15 @@ export function LegalHoldsPage() {
       {canHold ? (
         <Card title="Put a library on hold">
           <form className={styles.form} onSubmit={submit} noValidate aria-label="Put a library on hold">
-            <FormField id="fr-hold-entity" label="Legal entity id" error={errors.legalEntityId} hint="One hold can be in force for a legal entity.">
-              {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(e) => setValues({ ...values, legalEntityId: e.target.value })} />}
+            <FormField id="fr-hold-entity" label="Legal entity" error={errors.legalEntityId} hint="One hold can be in force for a legal entity.">
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(e) => setValues({ ...values, legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="fr-hold-reason" label="Reason" error={errors.reason} hint={`The matter, case or audit reference. At most ${MAX_HOLD_REASON} characters.`}>
               {(c) => <Input {...c} value={values.reason} invalid={Boolean(errors.reason)} onChange={(e) => setValues({ ...values, reason: e.target.value })} />}
             </FormField>
             {failure ? (
               <Alert tone="danger" title="The hold could not be placed" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
             <div className={styles.formActions}>
@@ -127,7 +129,7 @@ export function LegalHoldsPage() {
       ) : null}
       {holds.error ? (
         <Alert tone="danger" title="Could not load the legal holds" live="alert" action={<Button size="sm" onClick={holds.reload}>Try again</Button>}>
-          {holds.error.message} ({holds.error.code})
+          <ProblemMessage problem={holds.error} />
         </Alert>
       ) : (
         <DataTable
@@ -143,7 +145,7 @@ export function LegalHoldsPage() {
       <Card title="Retention sweeps">
       {sweeps.error ? (
         <Alert tone="danger" title="Could not load the retention sweeps" live="alert" action={<Button size="sm" onClick={sweeps.reload}>Try again</Button>}>
-          {sweeps.error.message} ({sweeps.error.code})
+          <ProblemMessage problem={sweeps.error} />
         </Alert>
       ) : (
         <DataTable
@@ -159,7 +161,7 @@ export function LegalHoldsPage() {
       <Card title="Ad-hoc run sweeps">
         {runSweeps.error ? (
           <Alert tone="danger" title="Could not load the ad-hoc run sweeps" live="alert" action={<Button size="sm" onClick={runSweeps.reload}>Try again</Button>}>
-            {runSweeps.error.message} ({runSweeps.error.code})
+            <ProblemMessage problem={runSweeps.error} />
           </Alert>
         ) : (
           <DataTable

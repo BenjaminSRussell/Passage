@@ -47,6 +47,8 @@ charts/processmfg     Helm chart (helm lint)
 DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/processmfg
 ```
 
+With `IDENTITY_URL` set, every route answers 403 `FEAT-0001` while the tenant has the `process-manufacturing` feature switched off (`platform/go/features`, fail open, 30 s cache). Unset, the service behaves as before.
+
 `DATABASE_URL` is required. `HTTP_ADDR` defaults to `:8080`. Batch record signing (21 CFR
 Part 11) answers 503 PMF-0135 until a step-up re-authentication verifier is bound;
 `PASSAGE_ENV=dev` binds a stand-in whose signatures record the method `dev-unverified`, so a

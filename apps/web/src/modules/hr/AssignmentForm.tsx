@@ -14,6 +14,7 @@ import {
 import { DATE, dayOf, validFte } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   workerId: string;
@@ -142,7 +143,7 @@ export function AssignmentForm({ position, onCreated, onCancel }: { position: Po
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title="Could not assign the worker" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}

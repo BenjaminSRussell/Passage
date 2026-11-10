@@ -4,6 +4,7 @@ import { listRoutePlans, type RoutePlanSummary } from "./api/client";
 import { formatDateTime, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** "12.5 km": a solver distance, to one decimal. */
 export const km = (value: number) => `${value.toFixed(1)} km`;
@@ -40,7 +41,7 @@ export function RoutePlansPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the route plans" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

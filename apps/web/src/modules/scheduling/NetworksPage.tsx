@@ -4,6 +4,7 @@ import { listNetworks, type Network } from "./api/client";
 import { dash } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Network>[] = [
   { key: "code", header: "Code", mono: true },
@@ -30,7 +31,7 @@ export function NetworksPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load resource networks" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

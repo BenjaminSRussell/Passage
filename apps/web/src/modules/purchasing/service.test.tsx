@@ -214,7 +214,7 @@ describe("service line page", () => {
     renderAt(PAGE);
     await screen.findByLabelText("Unplanned limit (USD)");
     fireEvent.click(screen.getByRole("button", { name: "Save specification" }));
-    expect(await screen.findByText("the planned services (650) are worth more than the line (500) (PRC-SRV-002)")).toBeInTheDocument();
+    expect(await screen.findByText("the planned services (650) are worth more than the line (500)")).toBeInTheDocument();
   });
 
   it("shows the outline and the limits and removes the specification after confirmation", async () => {
@@ -270,7 +270,7 @@ describe("service line page", () => {
     const stale = renderAt(PAGE);
     await screen.findByLabelText("Unplanned limit (USD)");
     fireEvent.click(screen.getByRole("button", { name: "Save specification" }));
-    expect(await screen.findByText("Someone else changed this order. Reload the page and try again. (PRC-PO-009)")).toBeInTheDocument();
+    expect(await screen.findByText("Someone else changed this order. Reload the page and try again.")).toBeInTheDocument();
     stale.unmount();
     stubFetch(() => problem(404, "PRC-PO-NOT-FOUND", "purchase order not found"));
     renderAt(PAGE);
@@ -321,7 +321,7 @@ describe("model service specifications", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save model" }));
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit).method === "POST")).toBe(false);
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "maint" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Maintenance visit" } });
     const row = screen.getByRole("group", { name: "Outline row 1" });
@@ -347,12 +347,12 @@ describe("model service specifications", () => {
   it("shows the service's refusal of a duplicate code", async () => {
     stubFetch((_url, init) => (init.method === "POST" ? problem(409, "PRC-SRV-006", "the legal entity already has a model service specification MAINT") : json({ items: [] })));
     renderAt("/purchasing/model-service-specs/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "MAINT" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Maintenance visit" } });
     fireEvent.click(screen.getByRole("button", { name: "Remove row 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Save model" }));
-    expect(await screen.findByText(/already has a model service specification MAINT \(PRC-SRV-006\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already has a model service specification MAINT/)).toBeInTheDocument();
   });
 
   it("changes a model under its version and reports a stale one", async () => {

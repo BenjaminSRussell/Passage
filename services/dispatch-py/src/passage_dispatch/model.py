@@ -31,6 +31,7 @@ class WorkOrder:
     priority: int = 4  # 1 is most urgent
     window_start: int | None = None
     window_end: int | None = None
+    due: int | None = None  # SLA due minute; finishing later is lateness in the objective, not a hard violation
 
 
 @dataclass(frozen=True)

@@ -145,7 +145,7 @@ spec:
       - SkipDryRunOnMissingResource=true
 ---
 # KafkaUsers and dead-letter KafkaTopics of the event consumers (receiving ERS, scheduling downtime, workflow-ts
-# tender, inventory postings). The User and
+# tender, inventory postings, revrec credit notes, receivables billing). The User and
 # Topic Operators run with the Kafka cluster, so this follows kafka-cluster; the consumers sync with the services
 # ApplicationSet (wave 2).
 apiVersion: argoproj.io/v1alpha1
