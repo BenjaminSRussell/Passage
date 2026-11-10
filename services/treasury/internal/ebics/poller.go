@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -17,6 +18,9 @@ const (
 	defaultPollInterval  = time.Hour
 	minPollInterval      = time.Minute
 	pollSubscriberBudget = 10 * time.Minute
+
+	maxLocalFailures = 5
+	CodeLocalFailure = "LOCAL-PROCESSING"
 )
 
 // PollableLister lists the subscribers of the principal's tenant that may be
@@ -80,15 +84,24 @@ func LoadPollConfig(getenv func(string) string) (PollConfig, bool, error) {
 // Poller downloads end-of-day statements for every pollable subscriber on an
 // interval and hands them to the statement import. It asks without a date range,
 // so the bank delivers everything it has not yet had a receipt for, however long
-// a subscriber was parked or the service was down; a fixed window would skip the
-// days before it. Client.FetchStatements with a range is the explicit backfill. A subscriber the bank parked
-// is not polled until a person unparks it; a back-off answer is retried by the
-// client with growing delays and, when the retries run out, again at the next tick.
+// a subscriber was parked or the service was down, for as long as the bank keeps
+// the data (its retention applies); a fixed window would skip the days before it.
+// Client.FetchStatements with a range is the explicit backfill. A subscriber the
+// bank parked is not polled until a person unparks it; a back-off answer is
+// retried by the client with growing delays and, when the retries run out, again
+// at the next tick. Files are imported one by one and the bank is acknowledged
+// only after all of them, so a delivery that fails here every time would be
+// fetched again at every tick: after maxLocalFailures consecutive ticks that
+// failed in processing (not at the bank), the subscriber is parked with
+// CodeLocalFailure so a person looks. The count is kept in memory per replica.
 type Poller struct {
 	Client *Client
 	Lister PollableLister
 	Sink   StatementSink
 	Config PollConfig
+
+	mu       sync.Mutex
+	failures map[string]int
 }
 
 // Loop polls once at start and then every Config.Interval until ctx ends.
@@ -157,11 +170,35 @@ func (p *Poller) pollOne(ctx context.Context, tenantID string, sub Subscriber) (
 	defer cancel()
 	n, err := p.Client.FetchStatements(runCtx, sub.ID, p.Config.OrderType, "", "", p.Sink)
 	switch {
-	case errors.Is(err, ErrNoData):
+	case err == nil || errors.Is(err, ErrNoData):
+		p.clearFailures(sub.ID)
 		return n, nil
 	case errors.Is(err, ErrParked):
 		slog.WarnContext(ctx, "ebics subscriber is parked, not polled", "subscriber", sub.ID)
 		return n, nil
+	case errors.Is(err, ErrLocal):
+		if count := p.recordFailure(sub.ID); count >= maxLocalFailures {
+			slog.ErrorContext(ctx, "ebics subscriber parked", "subscriber", sub.ID, "code", CodeLocalFailure, "failures", count)
+			text := fmt.Sprintf("%d statement polls in a row failed in processing: %v", count, err)
+			err = errors.Join(err, p.Client.park(ctx, sub.ID, &ReturnError{Code: CodeLocalFailure, Text: text, Disposition: Park}))
+			p.clearFailures(sub.ID)
+		}
 	}
 	return n, err
+}
+
+func (p *Poller) recordFailure(id string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.failures == nil {
+		p.failures = map[string]int{}
+	}
+	p.failures[id]++
+	return p.failures[id]
+}
+
+func (p *Poller) clearFailures(id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.failures, id)
 }

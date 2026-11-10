@@ -89,6 +89,8 @@ func (s *Postgres) CreateEBICSSubscriber(ctx context.Context, in NewEBICSSubscri
 		return ebics.Subscriber{}, httpx.NewProblem(http.StatusConflict, CodeSubscriberDuplicate, "an EBICS subscriber with this host, partner and user, or for this bank account, already exists")
 	case errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation:
 		return ebics.Subscriber{}, notFound(CodeAccountNotFound, "bank account not found for this legal entity")
+	case errors.As(err, &pgErr) && pgErr.Code == checkViolation:
+		return ebics.Subscriber{}, unprocessable(CodeSubscriberInvalid, "the subscriber breaks a rule of the table: "+pgErr.ConstraintName)
 	}
 	return out, err
 }

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -217,6 +218,18 @@ func TestCheckURL_Table(t *testing.T) {
 		{"https://203.0.113.9/ebics", false, true},
 		{"http://bank.example.com/ebics", false, true},
 		{"http://bank.example.com/ebics", true, true},
+		{"https://localhost./ebics", false, true},
+		{"https://bank.localhost/ebics", false, true},
+		{"https://2130706433/ebics", false, true},
+		{"https://0x7f.1/ebics", false, true},
+		{"https://127.1/ebics", false, true},
+		{"https://0177.0.0.1/ebics", false, true},
+		{"https://bank.cafe/ebics", false, false},
+		{"https://bank.example.com./ebics", false, false},
+		{"https://[::ffff:0:0:1]/ebics", false, true},
+		{"https://192.88.99.1/ebics", false, true},
+		{"https://[2001:20::1]/ebics", false, true},
+		{"https://127.0.0.1:8443/ebics", true, false},
 		{"http://localhost:8080", false, true},
 		{"http://127.0.0.1:8080", false, true},
 		{"http://[::1]:8080", false, true},
@@ -235,15 +248,14 @@ func TestCheckURL_Table(t *testing.T) {
 		{"ftp://bank.example.com", false, true},
 		{"", false, true},
 		{"http://localhost:8080", true, false},
+		{"http://bank.example.com/ebics", true, true},
 		{"http://127.0.0.1:8080", true, false},
 		{"http://[::1]:8080", true, false},
 		{"http://10.0.0.5", true, true},
 		{"https://10.0.0.5", true, true},
 	}
 	for _, c := range cases {
-		AllowLoopback(c.dev)
-		err := CheckURL(c.url)
-		AllowLoopback(false)
+		err := checkURL(c.url, c.dev)
 		if (err != nil) != c.wantFail {
 			t.Errorf("CheckURL(%q) dev=%t: err = %v, want failure %t", c.url, c.dev, err, c.wantFail)
 		}
@@ -265,47 +277,55 @@ func TestGuardDial_AllowlistsGlobalUnicastOnly(t *testing.T) {
 		{"[::ffff:127.0.0.1]:443", true}, {"[::ffff:10.0.0.1]:443", true},
 		{"[64:ff9b::7f00:1]:443", true}, {"[64:ff9b::a00:1]:443", true}, {"[64:ff9b:1::7f00:1]:443", true}, {"[64:ff9b:1::a00:1]:443", true},
 		{"[2002:7f00:1::]:443", true}, {"[2002:a00:1::]:443", true},
+		{"192.88.99.1:443", true}, {"[::ffff:0:a00:1]:443", true}, {"[2001:20::1]:443", true},
 		{"bank.example.com:443", true},
 	}
 	for _, c := range cases {
-		if err := guardDial("tcp", c.addr, nil); (err != nil) != c.blocked {
+		if err := guardDial(false)("tcp", c.addr, nil); (err != nil) != c.blocked {
 			t.Errorf("guardDial(%s) = %v, blocked want %t", c.addr, err, c.blocked)
 		}
 	}
-	AllowLoopback(true)
-	defer AllowLoopback(false)
-	if guardDial("tcp", "127.0.0.1:443", nil) != nil || guardDial("tcp", "[::1]:443", nil) != nil {
+	dev := guardDial(true)
+	if dev("tcp", "127.0.0.1:443", nil) != nil || dev("tcp", "[::1]:443", nil) != nil {
 		t.Error("loopback must pass in dev")
 	}
 	for _, a := range []string{"[64:ff9b::7f00:1]:443", "[2002:7f00:1::]:443", "10.0.0.1:443"} {
-		if guardDial("tcp", a, nil) == nil {
+		if dev("tcp", a, nil) == nil {
 			t.Errorf("%s must stay blocked in dev", a)
 		}
 	}
 }
 
-func TestBankHTTPClient_RefusesLoopbackPeerAndRedirects(t *testing.T) {
+func TestBankHTTP_RefusesLoopbackPeerAndRedirects(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		http.Redirect(w, r, "/elsewhere", http.StatusTemporaryRedirect)
 	}))
 	defer srv.Close()
-	client := BankHTTPClient(5 * time.Second)
+	closed := NewBankHTTP(5*time.Second, false)
 
 	for _, target := range []string{srv.URL, strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)} {
-		if resp, err := client.Post(target, "text/xml", strings.NewReader("<x/>")); err == nil {
+		req, _ := http.NewRequest(http.MethodPost, target, strings.NewReader("<x/>"))
+		if resp, err := closed.Do(req); err == nil {
 			_ = resp.Body.Close()
-			t.Fatalf("POST %s reached a loopback peer", target)
+			t.Fatalf("Do %s reached a loopback peer", target)
+		}
+		resp, err := closed.client.Post(target, "text/xml", strings.NewReader("<x/>"))
+		var opErr *net.OpError
+		if err == nil || !errors.As(err, &opErr) || opErr.Op != "dial" {
+			t.Fatalf("the dialer must refuse %s as a failed dial (not reached): %v", target, err)
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
 		}
 	}
 	if hits.Load() != 0 {
 		t.Fatalf("loopback server saw %d requests", hits.Load())
 	}
 
-	AllowLoopback(true)
-	defer AllowLoopback(false)
-	resp, err := client.Post(srv.URL, "text/xml", strings.NewReader("<x/>"))
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader("<x/>"))
+	resp, err := NewBankHTTP(5*time.Second, true).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

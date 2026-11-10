@@ -189,6 +189,10 @@ func TestEBICSSubscriber_IsolatedByTenantAndLegalEntityAndValidated(t *testing.T
 	if _, err := s.CreateEBICSSubscriber(ctx, bad, ""); problemCode(t, err) != CodeSubscriberInvalid {
 		t.Fatalf("plain http to a remote bank: %v", err)
 	}
+	bad.URL = "HTTPS://bank.example/ebics"
+	if _, err := s.CreateEBICSSubscriber(ctx, bad, ""); problemCode(t, err) != CodeSubscriberInvalid {
+		t.Fatalf("a URL the table's https check refuses must be a 422: %v", err)
+	}
 }
 
 func TestImportStatementFile_FeedsTheStatementImportAndReplays(t *testing.T) {
@@ -364,6 +368,29 @@ func TestImportStatementFile_MT940StoredUnderTheLegacyIDIsNotImportedTwice(t *te
 				t.Fatalf("statements = %d, want 1: a legacy-id row was imported again", n)
 			}
 		})
+	}
+}
+
+func TestImportStatementFile_LegacyIDWithAnotherClosingBalanceIsAConflict(t *testing.T) {
+	s, admin := newStore(t)
+	le := ids.New()
+	ctx := ctxFor(1, le)
+	acct := activeAccount(t, s, ctx, le)
+	file := func(credit, closing string) []byte {
+		return []byte(":20:DAILY\n:25:" + testIBAN + "\n:60F:C261021EUR1000,00\n:61:2610211021C" + credit + "NTRFNONREF\n:62F:C261021EUR" + closing + "\n")
+	}
+	if err := s.ImportStatementFile(ctx, acct.ID, "sta.txt", file("5,00", "1005,00")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(context.Background(), `update bank_statement set statement_id = 'DAILY'`); err != nil {
+		t.Fatal(err)
+	}
+	err := s.ImportStatementFile(ctx, acct.ID, "sta.txt", file("6,00", "1006,00"))
+	if err == nil || problemCode(t, err) != domain.CodeStatementConflict {
+		t.Fatalf("a statement under the legacy id with another closing balance must conflict, not replay or insert: %v", err)
+	}
+	if n := count(t, admin, `select count(*) from bank_statement`); n != 1 {
+		t.Fatalf("statements = %d, want the stored one only", n)
 	}
 }
 

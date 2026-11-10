@@ -16,7 +16,7 @@ import (
 
 const (
 	aesKeyLen        = 16
-	maxOrderDataSize = 50 << 20
+	maxOrderDataSize = 128 << 20
 )
 
 // KeyDigest is the EBICS hash of an RSA public key: SHA-256 over the lowercase

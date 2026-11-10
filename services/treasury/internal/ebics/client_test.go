@@ -419,6 +419,19 @@ func TestBank_RejectsRequestsSignedWithAnotherKey(t *testing.T) {
 	}
 }
 
+func TestPost_LoopbackBankIsRefusedUnlessAllowedAndNeverReached(t *testing.T) {
+	e := newEnv(t, false)
+	e.client.AllowLoopback = false
+	_, reached, err := e.client.post(context.Background(), e.sub(), []byte("<x/>"))
+	if err == nil || reached || e.bank.requests != 0 {
+		t.Fatalf("a loopback bank with loopback disallowed: err=%v reached=%t bank requests=%d", err, reached, e.bank.requests)
+	}
+	e.client = &Client{Store: e.store, AllowLoopback: true}
+	if _, reached, err := e.client.post(context.Background(), e.sub(), []byte("<x/>")); err == nil || !reached || e.bank.requests != 1 {
+		t.Fatalf("with loopback allowed the fake bank must be reached (it answers 400 to junk): err=%v reached=%t requests=%d", err, reached, e.bank.requests)
+	}
+}
+
 func TestUpload_ConnectionRefusedIsADefiniteFailure(t *testing.T) {
 	e := newEnv(t, false)
 	e.onboard()

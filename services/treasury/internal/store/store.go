@@ -39,6 +39,7 @@ const (
 	MaxStatementsListed   = 100
 	MaxLinesPage          = 500
 	uniqueViolation       = "23505"
+	checkViolation        = "23514"
 	eventSource           = "/passage/treasury/treasury"
 )
 

@@ -54,24 +54,26 @@ var (
 type Client struct {
 	Store       SubscriberStore
 	Keys        func(Subscriber) (Keys, error)
-	HTTP        *http.Client
 	HTTPTimeout time.Duration
 	SegmentSize int
 	Backoff     BackoffPolicy
 	Sleep       func(context.Context, time.Duration) error
 	Now         func() time.Time
 
+	// AllowLoopback lets requests go to a loopback bank over plain http (local development).
+	AllowLoopback bool
+
 	bankOnce   sync.Once
-	bankClient *http.Client
+	bankClient *bankconnect.BankHTTP
 }
 
-func (c *Client) bankHTTP() *http.Client {
+func (c *Client) bankHTTP() *bankconnect.BankHTTP {
 	c.bankOnce.Do(func() {
 		timeout := c.HTTPTimeout
 		if timeout <= 0 {
 			timeout = defaultHTTPTimeout
 		}
-		c.bankClient = bankconnect.BankHTTPClient(timeout)
+		c.bankClient = bankconnect.NewBankHTTP(timeout, c.AllowLoopback)
 	})
 	return c.bankClient
 }
@@ -114,7 +116,8 @@ func (c *Client) segmentSize() int {
 // post sends one request. reached is false when the request cannot have arrived
 // (context cancelled first, or the connection was never made).
 func (c *Client) post(ctx context.Context, sub Subscriber, body []byte) (raw []byte, reached bool, err error) {
-	if err := bankconnect.CheckURL(sub.URL); err != nil {
+	hc := c.bankHTTP()
+	if err := hc.Check(sub.URL); err != nil {
 		return nil, false, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sub.URL, bytes.NewReader(body))
@@ -124,10 +127,6 @@ func (c *Client) post(ctx context.Context, sub Subscriber, body []byte) (raw []b
 	req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
-	}
-	hc := c.HTTP
-	if hc == nil {
-		hc = c.bankHTTP()
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -637,98 +636,114 @@ type DownloadedFile struct {
 	Data []byte
 }
 
+const maxArchiveBytes = 1 << 30
+
+// ErrLocal marks a download that failed after the bank delivered it: the data
+// could not be decrypted, unpacked, size-checked or stored here. Retrying cannot
+// help until a person acts, so the poller counts these and parks the subscriber.
+var ErrLocal = errors.New("ebics: the delivered data could not be processed here")
+
+type fileSink func(context.Context, DownloadedFile) error
+
 // Download fetches the files of a download order (C53, C52, C54, HAC, PTK, STA,
 // VMK) for an optional date range (YYYY-MM-DD), reassembling the segments,
 // decrypting and decompressing them, and acknowledging with a transfer receipt.
-// A ZIP container is unpacked into its files. ErrNoData means the bank has
-// nothing new.
+// A ZIP container is unpacked into its files; their total is capped at
+// bankconnect.MaxFileBytes. ErrNoData means the bank has nothing new.
 func (c *Client) Download(ctx context.Context, id, orderType, from, to string) ([]DownloadedFile, error) {
-	return c.downloadWith(ctx, id, orderType, from, to, nil)
+	var files []DownloadedFile
+	err := c.downloadWith(ctx, id, orderType, from, to, func() fileSink {
+		files = nil
+		total := 0
+		return func(_ context.Context, f DownloadedFile) error {
+			if total += len(f.Data); total > bankconnect.MaxFileBytes {
+				return fmt.Errorf("the files total more than %d bytes; use FetchStatements to take them one by one", bankconnect.MaxFileBytes)
+			}
+			files = append(files, f)
+			return nil
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
-// downloadWith is Download with a hook that takes the unpacked files before the
-// receipt is sent: when the hook refuses, the bank is told the transfer failed
-// (ReceiptCode 1) and keeps the data, so a file is acknowledged only once it is
-// stored.
-func (c *Client) downloadWith(ctx context.Context, id, orderType, from, to string, process func(context.Context, []DownloadedFile) error) ([]DownloadedFile, error) {
+// downloadWith unpacks the download file by file into the sink newSink makes for
+// each attempt, before the receipt is sent: when a file is refused, the bank is
+// told the transfer failed (ReceiptCode 1) and keeps the data, so a download is
+// acknowledged only once every file is stored.
+func (c *Client) downloadWith(ctx context.Context, id, orderType, from, to string, newSink func() fileSink) error {
 	if !downloadOrders[orderType] {
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedOrder, orderType)
+		return fmt.Errorf("%w: %q", ErrUnsupportedOrder, orderType)
 	}
 	if (from == "") != (to == "") {
-		return nil, errors.New("ebics download: give both ends of the date range or neither")
+		return errors.New("ebics download: give both ends of the date range or neither")
 	}
 	sub, keys, bx, be, err := c.ready(ctx, id)
 	if err != nil {
-		return nil, err
-	}
-	var files []DownloadedFile
-	err = c.withBackoff(ctx, sub, func() error {
-		var err error
-		files, err = c.downloadOnce(ctx, sub, keys, bx, be, orderType, from, to, process)
 		return err
+	}
+	return c.withBackoff(ctx, sub, func() error {
+		return c.downloadOnce(ctx, sub, keys, bx, be, orderType, from, to, newSink())
 	})
-	return files, err
 }
 
-func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx, be *rsa.PublicKey, orderType, from, to string, process func(context.Context, []DownloadedFile) error) ([]DownloadedFile, error) {
+func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx, be *rsa.PublicKey, orderType, from, to string, sink fileSink) error {
 	n, err := nonce()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	r, err := c.exchange(ctx, sub, keys, bx, signable{doc: initRequest(sub, orderSpec{Type: orderType, Attribute: "DZHNN", From: from, To: to}, n, c.now(), bx, be, "")})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if r.txID == "" || r.numSegments < 1 {
-		return nil, errors.New("ebics download: bank gave no transaction id or segment count")
+		return errors.New("ebics download: bank gave no transaction id or segment count")
 	}
 	own, _, err := keys.Public(ctx, UsageE002)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	wrapped, err := transactionKeyOf(r.root, KeyDigest(own))
 	if err != nil {
-		return nil, fmt.Errorf("ebics download: %w", err)
+		return fmt.Errorf("ebics download: %w", err)
 	}
 	encoded, err := orderDataOf(r.root.child("body"))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var sb strings.Builder
 	sb.WriteString(encoded)
 	for seg := 1; ; seg++ {
 		if r.segment != seg || (seg == r.numSegments) != r.last {
-			return nil, fmt.Errorf("ebics download: expected segment %d of %d, bank sent %d (last=%t)", seg, r.numSegments, r.segment, r.last)
+			return fmt.Errorf("ebics download: expected segment %d of %d, bank sent %d (last=%t)", seg, r.numSegments, r.segment, r.last)
 		}
 		if seg == r.numSegments {
 			break
 		}
-		if sb.Len() > bankconnect.MaxFileBytes*2 {
-			return nil, errors.New("ebics download: order data exceeds the size limit")
+		if sb.Len() > maxOrderDataSize/3*4+maxMessageLen {
+			return fmt.Errorf("%w: order data exceeds the size limit", ErrLocal)
 		}
 		doc := phaseRequest(sub, r.txID, "Transfer", seg+1, seg+1 == r.numSegments, "")
 		next, err := c.exchange(ctx, sub, keys, bx, signable{doc: doc})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if next.txID != "" && next.txID != r.txID {
-			return nil, errors.New("ebics download: transaction id changed mid-transfer")
+			return errors.New("ebics download: transaction id changed mid-transfer")
 		}
 		next.numSegments, next.txID = r.numSegments, r.txID
 		more, err := orderDataOf(next.root.child("body"))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		sb.WriteString(more)
 		r = next
 	}
-	var files []DownloadedFile
 	plain, procErr := openDownload(ctx, keys, wrapped, sb.String())
 	if procErr == nil {
-		files, procErr = unpack(plain)
-	}
-	if procErr == nil && process != nil {
-		procErr = process(ctx, files)
+		procErr = unpack(ctx, plain, sink)
 	}
 	code := "0"
 	if procErr != nil {
@@ -737,12 +752,12 @@ func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx
 	receipt := phaseRequest(sub, r.txID, "Receipt", 0, false, `<TransferReceipt authenticate="true"><ReceiptCode>`+code+`</ReceiptCode></TransferReceipt>`)
 	_, rerr := c.exchange(ctx, sub, keys, bx, signable{doc: receipt})
 	if procErr != nil {
-		return nil, errors.Join(fmt.Errorf("ebics download: %w", procErr), rerr)
+		return errors.Join(fmt.Errorf("ebics download: %w: %w", ErrLocal, procErr), rerr)
 	}
 	if rerr != nil {
-		return nil, fmt.Errorf("ebics download receipt: %w", rerr)
+		return fmt.Errorf("ebics download receipt: %w", rerr)
 	}
-	return files, nil
+	return nil
 }
 
 func openDownload(ctx context.Context, keys Keys, wrappedKey []byte, encoded string) ([]byte, error) {
@@ -773,37 +788,45 @@ func decryptBody(ctx context.Context, keys Keys, root *xnode) ([]byte, error) {
 	return openDownload(ctx, keys, wrapped, encoded)
 }
 
-// unpack returns a ZIP container's files, or the data as one file. The sum of
-// the unpacked sizes is capped, so a small archive cannot expand without bound.
-func unpack(data []byte) ([]DownloadedFile, error) {
+// unpack hands a ZIP container's files, or the data as one file, to sink one at a
+// time, so only one unpacked file is held at once. A file is capped at
+// bankconnect.MaxFileBytes and the files together at maxArchiveBytes, so a small
+// archive cannot expand without bound. Every file is tried: a sink refusal does
+// not stop the next file, and the refusals are returned together.
+func unpack(ctx context.Context, data []byte, sink fileSink) error {
 	if !bytes.HasPrefix(data, []byte("PK\x03\x04")) {
-		return []DownloadedFile{{Name: "order-data", Data: data}}, nil
+		return sink(ctx, DownloadedFile{Name: "order-data", Data: data})
 	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, fmt.Errorf("ebics download: %w", err)
+		return err
 	}
-	var files []DownloadedFile
-	budget := int64(bankconnect.MaxFileBytes)
+	var errs []error
+	budget := int64(maxArchiveBytes)
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return nil, fmt.Errorf("ebics download: %w", err)
+			return err
 		}
-		b, err := io.ReadAll(io.LimitReader(rc, budget+1))
+		b, err := io.ReadAll(io.LimitReader(rc, bankconnect.MaxFileBytes+1))
 		rc.Close()
 		if err != nil {
-			return nil, fmt.Errorf("ebics download: %w", err)
+			return err
+		}
+		if len(b) > bankconnect.MaxFileBytes {
+			return fmt.Errorf("%s expands beyond %d bytes", f.Name, bankconnect.MaxFileBytes)
 		}
 		if budget -= int64(len(b)); budget < 0 {
-			return nil, errors.New("ebics download: archive expands beyond the size limit")
+			return fmt.Errorf("archive expands beyond %d bytes", maxArchiveBytes)
 		}
-		files = append(files, DownloadedFile{Name: path.Base(f.Name), Data: b})
+		if err := sink(ctx, DownloadedFile{Name: path.Base(f.Name), Data: b}); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", path.Base(f.Name), err))
+		}
 	}
-	return files, nil
+	return errors.Join(errs...)
 }
 
 // StatementSink takes one downloaded statement file for a bank account; the
@@ -825,17 +848,15 @@ func (c *Client) FetchStatements(ctx context.Context, id, orderType, from, to st
 		return 0, err
 	}
 	taken := 0
-	_, err = c.downloadWith(ctx, id, orderType, from, to, func(ctx context.Context, files []DownloadedFile) error {
-		var errs []error
+	err = c.downloadWith(ctx, id, orderType, from, to, func() fileSink {
 		taken = 0
-		for _, f := range files {
+		return func(ctx context.Context, f DownloadedFile) error {
 			if err := sink(ctx, sub.BankAccountID, f.Name, f.Data); err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", f.Name, err))
-				continue
+				return err
 			}
 			taken++
+			return nil
 		}
-		return errors.Join(errs...)
 	})
 	return taken, err
 }

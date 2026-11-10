@@ -40,7 +40,7 @@ func wireEBICS(ctx context.Context, a *api.API, pg *store.Postgres, vault *bankc
 	if err != nil {
 		return err
 	}
-	client := &ebics.Client{Store: pg, HTTPTimeout: timeout, Keys: func(s ebics.Subscriber) (ebics.Keys, error) {
+	client := &ebics.Client{Store: pg, HTTPTimeout: timeout, AllowLoopback: os.Getenv("TREASURY_ENV") == "dev", Keys: func(s ebics.Subscriber) (ebics.Keys, error) {
 		k, err := vault.EBICSKeys(bankconnect.EBICSKeyRefs{A006: s.A006Key, X002: s.X002Key, A006Version: s.A006Version, X002Version: s.X002Version,
 			E002KVMount: cfg.EBICSKVMount, E002KVPath: s.E002KVPath})
 		if err != nil {

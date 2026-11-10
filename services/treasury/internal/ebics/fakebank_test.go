@@ -16,7 +16,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,11 +24,6 @@ import (
 
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 )
-
-func TestMain(m *testing.M) {
-	bankconnect.AllowLoopback(true)
-	os.Exit(m.Run())
-}
 
 var (
 	keyOnce sync.Once
@@ -613,7 +607,7 @@ func newEnv(t *testing.T, useVault bool) *env {
 	e := &env{t: t, bank: newFakeBank(t, keys), store: &memStore{subs: map[string]Subscriber{}}, local: memoryKeys{a006: keys[0], x002: keys[1], e002: keys[2]}}
 	e.store.subs["sub-1"] = Subscriber{ID: "sub-1", LegalEntityID: "le-1", BankAccountID: "ba-1", HostID: "BANKHOST", PartnerID: "PARTNER1", UserID: "USER1",
 		URL: e.bank.srv.URL, A006Key: "ebics-a006", X002Key: "ebics-x002", E002KVPath: "passage/ebics-e002", State: StateNew}
-	c := &Client{Store: e.store, Sleep: func(_ context.Context, d time.Duration) error { e.sleeps = append(e.sleeps, d); return nil }}
+	c := &Client{Store: e.store, AllowLoopback: true, Sleep: func(_ context.Context, d time.Duration) error { e.sleeps = append(e.sleeps, d); return nil }}
 	if useVault {
 		e.vault = newFakeVault(t, keys[0], keys[1], keys[2])
 		vault := bankconnect.NewVault(bankconnect.VaultConfig{Addr: e.vault.srv.URL, Token: "s.test", SigningKeyNames: []string{"ebics-a006", "ebics-x002"}})

@@ -1,8 +1,12 @@
 package ebics
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -194,6 +198,81 @@ func TestPoller_ParkedForLongerThanAnyWindow_NothingIsSkippedAfterUnpark(t *test
 	}
 	if n, err := p.Once(context.Background()); err != nil || n != 0 {
 		t.Fatalf("receipted files must not come again: n=%d err=%v", n, err)
+	}
+}
+
+func TestPoller_BacklogLargerThanTheOldCapsIsImportedFileByFile(t *testing.T) {
+	e := newEnv(t, false)
+	e.onboard()
+	const files, fileSize = 3, 18 << 20
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	for i := range files {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: fmt.Sprintf("stmt-%d.xml", i), Method: zip.Store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		chunk := make([]byte, fileSize)
+		_, _ = rand.Read(chunk)
+		_, _ = w.Write(chunk)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if archive.Len() <= 50<<20 {
+		t.Fatalf("the backlog (%d bytes) must exceed the old 50 MB caps", archive.Len())
+	}
+	e.bank.served["C53"] = archive.Bytes()
+	e.bank.segChars = 3 << 20
+	var sizes []int
+	p := newPoller(e, &sinkLog{})
+	p.Sink = func(_ context.Context, _, _ string, data []byte) error {
+		sizes = append(sizes, len(data))
+		return nil
+	}
+	n, err := p.Once(context.Background())
+	if err != nil || n != files || len(sizes) != files || sizes[0] != fileSize {
+		t.Fatalf("n=%d err=%v sizes=%v", n, err, sizes)
+	}
+	if len(e.bank.receipts) != 1 || e.bank.receipts[0] != "0" {
+		t.Fatalf("receipts %v", e.bank.receipts)
+	}
+}
+
+func TestPoller_RepeatedLocalFailureParksTheSubscriberAndASuccessResetsTheCount(t *testing.T) {
+	e := newEnv(t, false)
+	e.onboard()
+	e.bank.served["C53"] = twoStatements(t)
+	sink := &sinkLog{failOn: "stmt-1.xml"}
+	p := newPoller(e, sink)
+	fail := func(times int) {
+		t.Helper()
+		for range times {
+			if _, err := p.Once(context.Background()); err == nil || !errors.Is(err, ErrLocal) {
+				t.Fatalf("a delivery that fails here must report it: %v", err)
+			}
+		}
+	}
+	fail(maxLocalFailures - 1)
+	if e.sub().ParkedCode != "" {
+		t.Fatalf("parked after %d failures, want %d", maxLocalFailures-1, maxLocalFailures)
+	}
+	sink.failOn = ""
+	if n, err := p.Once(context.Background()); err != nil || n != 2 {
+		t.Fatalf("recovery: n=%d err=%v", n, err)
+	}
+	sink.failOn = "stmt-1.xml"
+	fail(maxLocalFailures - 1)
+	if e.sub().ParkedCode != "" {
+		t.Fatal("a success must reset the count")
+	}
+	fail(1)
+	if got := e.sub().ParkedCode; got != CodeLocalFailure {
+		t.Fatalf("parked code %q, want %q", got, CodeLocalFailure)
+	}
+	before := e.bank.requests
+	if n, err := p.Once(context.Background()); err != nil || n != 0 || e.bank.requests != before {
+		t.Fatalf("a parked subscriber is not polled: n=%d err=%v requests +%d", n, err, e.bank.requests-before)
 	}
 }
 
