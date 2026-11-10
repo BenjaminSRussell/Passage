@@ -7,7 +7,7 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
 import { createProposal, PAYMENT_METHODS, type PaymentMethod } from "./api/client";
-import { METHOD_LABELS, today } from "./format";
+import { METHOD_LABELS, utcToday } from "./format";
 
 interface Exception {
   vendorId: string;
@@ -38,7 +38,7 @@ export function NewProposalPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const runId = useRef(newKey());
-  const [draft, setDraft] = useState<Draft>({ legalEntityId: "", currency: "", runDate: today(), dueBy: "", method: "TRANSFER", exceptions: [] });
+  const [draft, setDraft] = useState<Draft>({ legalEntityId: "", currency: "", runDate: utcToday(), dueBy: "", method: "TRANSFER", exceptions: [] });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const create = useMutation({
@@ -60,7 +60,7 @@ export function NewProposalPage() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const found = validateDraft(draft, today());
+    const found = validateDraft(draft, utcToday());
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     const overrides = Object.fromEntries(draft.exceptions.filter((x) => x.vendorId !== "").map((x) => [x.vendorId, x.method]));

@@ -15,6 +15,8 @@ function InvoiceNumber({ id }: { id: string }) {
   return <>{item.data ? item.data.invoiceNumber : item.isError ? "Not available" : "Loading…"}</>;
 }
 
+const LINE_PAGE = 10;
+
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 function counts(proposal: Proposal) {
@@ -25,8 +27,10 @@ export function ProposalDetailPage() {
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
   const duties = usePrincipalDuties();
+  const canReadItems = holdsDuty(duties, "open-item.read");
   const [confirm, setConfirm] = useState<"approve" | "cancel" | null>(null);
   const [shown, setShown] = useState<string | null>(null);
+  const [visibleLines, setVisibleLines] = useState(LINE_PAGE);
   const [notice, setNotice] = useState("");
 
   const proposal = useQuery({ queryKey: ["payables", "proposal", id], queryFn: () => getProposal(id) });
@@ -38,8 +42,18 @@ export function ProposalDetailPage() {
       queryClient.setQueryData(["payables", "proposal", id], updated);
       void queryClient.invalidateQueries({ queryKey: ["payables", "proposals"] });
     },
-    onSettled: () => setConfirm(null),
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: ["payables", "proposal", id] });
+    },
   });
+  const busy = decide.isPending;
+
+  function submitDecision() {
+    if (confirm === null || busy) return;
+    const action = confirm;
+    setConfirm(null);
+    decide.mutate(action);
+  }
 
   if (proposal.isPending) return <p role="status">Loading the payment proposal…</p>;
   if (proposal.isError) {
@@ -72,7 +86,10 @@ export function ProposalDetailPage() {
       key: "lines",
       header: "Invoices in payment",
       render: (g) => (
-        <Button size="sm" onClick={() => setShown(shown === g.id ? null : g.id)}>
+        <Button size="sm" onClick={() => {
+            setVisibleLines(LINE_PAGE);
+            setShown(shown === g.id ? null : g.id);
+          }}>
           {shown === g.id ? "Hide invoices" : `Show ${plural(g.lines.length, "invoice", "invoices")}`}
         </Button>
       ),
@@ -80,7 +97,7 @@ export function ProposalDetailPage() {
   ];
 
   const lineColumns = (currency: string): DataTableColumn<ProposalLine>[] => [
-    { key: "invoice", header: "Document", mono: true, render: (l) => <InvoiceNumber id={l.openItemId} /> },
+    ...(canReadItems ? [{ key: "invoice", header: "Document", mono: true, render: (l: ProposalLine) => <InvoiceNumber id={l.openItemId} /> }] : []),
     { key: "openAmount", header: "Amount open", align: "end", mono: true, render: (l) => formatAmount(l.openAmount, currency) },
     { key: "discount", header: "Discount", align: "end", mono: true, render: (l) => formatAmount(l.discount, currency) },
     { key: "withheld", header: "Tax withheld", align: "end", mono: true, render: (l) => formatAmount(l.withheld ?? "0", currency) },
@@ -104,14 +121,14 @@ export function ProposalDetailPage() {
     <div className={styles.stack}>
       <PageHeader
         title={`Payment proposal for ${p.runDate}`}
-        description={`Created by ${p.createdBy}${p.approvedBy ? `, approved by ${p.approvedBy}` : ""}. Invoices due by ${p.dueBy}.`}
+        description={`Created on ${p.createdAt.slice(0, 10)}${p.approvedBy ? " and approved" : ""}. Invoices due by ${p.dueBy}.`}
         actions={
           <>
             <Link className={buttonClassName("secondary")} to="/payables">
               All proposals
             </Link>
-            {canCancel ? <Button onClick={() => { decide.reset(); setConfirm("cancel"); }}>Cancel proposal</Button> : null}
-            {canApprove ? <Button variant="primary" onClick={() => { decide.reset(); setConfirm("approve"); }}>Approve proposal</Button> : null}
+            {canCancel ? <Button disabled={busy} onClick={() => { decide.reset(); setConfirm("cancel"); }}>Cancel proposal</Button> : null}
+            {canApprove ? <Button variant="primary" disabled={busy} onClick={() => { decide.reset(); setConfirm("approve"); }}>Approve proposal</Button> : null}
           </>
         }
       />
@@ -125,7 +142,8 @@ export function ProposalDetailPage() {
           <ProblemMessage problem={decide.error} />
         </Alert>
       ) : null}
-      {draft && !canApprove ? <p className={styles.note}>The person who created a proposal can't approve it. Ask another approver.</p> : null}
+      {draft && !canApprove ? <p className={styles.note}>You don't have approval rights for payment proposals. Ask an approver to approve this one.</p> : null}
+      {busy ? <p role="status">{decide.variables === "cancel" ? "Cancelling the proposal…" : "Approving the proposal…"}</p> : null}
       <StatGroup label="Proposal totals">
         <StatTile label="Status" value={<StatusPill status={PROPOSAL_LABELS[p.status]} />} />
         <StatTile label="Payments" value={payments} />
@@ -140,7 +158,7 @@ export function ProposalDetailPage() {
           <ul>
             {(p.excludedItems ?? []).map((x) => (
               <li key={x.itemId}>
-                <EntityName entity="vendor" id={x.vendorId} />, invoice <InvoiceNumber id={x.itemId} />. {EXCLUDED_REASON}
+                <EntityName entity="vendor" id={x.vendorId} />{canReadItems ? <>, invoice <InvoiceNumber id={x.itemId} /></> : null}. {EXCLUDED_REASON}
               </li>
             ))}
           </ul>
@@ -158,11 +176,14 @@ export function ProposalDetailPage() {
           <h2 className={styles.legend}>
             Invoices paid to <EntityName entity="vendor" id={open.vendorId} /> in {open.currency}
           </h2>
-          <DataTable label="Invoices in the payment" columns={lineColumns(open.currency)} rows={open.lines} getRowKey={(l) => l.openItemId} />
+          <DataTable label="Invoices in the payment" columns={lineColumns(open.currency)} rows={open.lines.slice(0, visibleLines)} getRowKey={(l) => l.openItemId} />
+          {open.lines.length > visibleLines ? (
+            <Button onClick={() => setVisibleLines((n) => n + LINE_PAGE)}>{`Show more invoices (${open.lines.length - visibleLines} left)`}</Button>
+          ) : null}
         </Card>
       ) : null}
       {confirm ? (
-        <ConfirmDialog {...confirmCopy} cancelLabel="Go back" onConfirm={() => decide.mutate(confirm)} onCancel={() => setConfirm(null)} />
+        <ConfirmDialog {...confirmCopy} cancelLabel="Go back" onConfirm={submitDecision} onCancel={() => setConfirm(null)} />
       ) : null}
     </div>
   );

@@ -26,16 +26,38 @@ export const METHOD_LABELS: Record<PaymentMethod, string> = {
 
 export const EXCLUDED_REASON = "The payee isn't verified yet. This expense reimbursement is left out until the employee is registered as a vendor.";
 
+const decimalsByCurrency = new Map<string, number>();
+
+function minorUnits(currency: string): number {
+  let known = decimalsByCurrency.get(currency);
+  if (known === undefined) {
+    try {
+      known = new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
+    } catch {
+      known = 2;
+    }
+    decimalsByCurrency.set(currency, known);
+  }
+  return known;
+}
+
 export function formatAmount(value: string, currency: string): string {
+  const digits = minorUnits(currency);
   const negative = value.startsWith("-");
   const [whole, fraction = ""] = (negative ? value.slice(1) : value).split(".");
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${negative ? "-" : ""}${grouped}.${fraction.padEnd(2, "0")} ${currency}`;
+  const extra = fraction.slice(digits).replace(/0+$/, "");
+  const decimals = (fraction.slice(0, digits).padEnd(digits, "0") + extra);
+  return `${negative ? "-" : ""}${grouped}${decimals === "" ? "" : `.${decimals}`} ${currency}`;
 }
 
 export function today(now: Date = new Date()): string {
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 10);
+}
+
+export function utcToday(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
 }
 
 export function isOverdue(item: Pick<OpenItem, "dueDate" | "status">, day: string): boolean {

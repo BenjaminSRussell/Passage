@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { ProblemMessage } from "../../shell/errors";
 import { holdsDuty } from "../../shell/dutyGate";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
@@ -41,7 +41,30 @@ export function OpenItemsPage() {
       setReason("");
       void queryClient.invalidateQueries({ queryKey: ["payables", "open-items"] });
     },
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: ["payables", "open-items"] });
+    },
   });
+
+  const busy = change.isPending;
+  const inFlight = useRef(false);
+
+  function send(v: { item: OpenItem; hold: boolean; reason: string }) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    change.mutate(v, { onSettled: () => { inFlight.current = false; } });
+  }
+  const filtered = vendorId !== "" || dueTo !== "" || status !== "OPEN";
+
+  function clearFilters() {
+    setVendorId("");
+    setDueTo("");
+    setStatus("OPEN");
+  }
+
+  function release(item: OpenItem) {
+    send({ item, hold: false, reason: "" });
+  }
 
   function startHold(item: OpenItem) {
     change.reset();
@@ -52,7 +75,7 @@ export function OpenItemsPage() {
 
   function submitHold(event: FormEvent) {
     event.preventDefault();
-    if (holding) change.mutate({ item: holding, hold: true, reason: reason.trim() });
+    if (holding) send({ item: holding, hold: true, reason: reason.trim() });
   }
 
   const columns: DataTableColumn<OpenItem>[] = [
@@ -85,11 +108,11 @@ export function OpenItemsPage() {
             header: "Actions",
             render: (i: OpenItem) =>
               CLOSED.includes(i.status) ? null : i.paymentHold ? (
-                <Button size="sm" loading={change.isPending && change.variables?.item.id === i.id} onClick={() => change.mutate({ item: i, hold: false, reason: "" })}>
+                <Button size="sm" disabled={busy} loading={busy && change.variables?.item.id === i.id} onClick={() => release(i)}>
                   {`Release hold on ${i.invoiceNumber}`}
                 </Button>
               ) : (
-                <Button size="sm" onClick={() => startHold(i)}>
+                <Button size="sm" disabled={busy} onClick={() => startHold(i)}>
                   {`Hold payment of ${i.invoiceNumber}`}
                 </Button>
               ),
@@ -120,6 +143,9 @@ export function OpenItemsPage() {
             </Select>
           )}
         </FormField>
+        {filtered ? (
+          <Button onClick={clearFilters}>Clear filters</Button>
+        ) : null}
       </div>
       {notice ? (
         <Alert tone="success" live="status">
@@ -145,10 +171,10 @@ export function OpenItemsPage() {
               </div>
             ) : null}
             <div className={styles.formActions}>
-              <Button type="submit" variant="primary" loading={change.isPending}>
+              <Button type="submit" variant="primary" disabled={busy} loading={busy}>
                 Put on hold
               </Button>
-              <Button onClick={() => setHolding(null)}>Cancel</Button>
+              <Button disabled={busy} onClick={() => setHolding(null)}>Cancel</Button>
             </div>
           </form>
         </Card>
@@ -164,7 +190,11 @@ export function OpenItemsPage() {
           rows={items}
           getRowKey={(i) => i.id}
           loading={result.isPending}
-          empty={{ title: "Nothing owed to vendors here", description: "Invoices appear here once they are posted. Try another status or clear the filters." }}
+          empty={
+            filtered
+              ? { title: "No open items match these filters", description: "Change or clear the filters to see more invoices." }
+              : { title: "Nothing owed to vendors here", description: "Invoices appear here once they are posted." }
+          }
         />
       )}
       {result.hasNextPage ? (

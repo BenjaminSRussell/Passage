@@ -1,14 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { clearResolvedOptions, setLookupFetcher } from "../../shell/lookup/entities";
 import { WorkContextProvider } from "../../shell/lookup/workContext";
 import { PrincipalProvider } from "../../shell/principal";
 import { json, pageViolations, server, useFakeServer } from "../../shell/testing/fakeServer";
 import type { OpenItem, Proposal } from "./api/client";
-import { today } from "./format";
+import { formatAmount, today, utcToday } from "./format";
 import payables from "./module";
 import { validateDraft } from "./NewProposalPage";
 
@@ -261,7 +261,7 @@ describe("payment proposals", () => {
     await user.click(screen.getByRole("button", { name: "Create proposal" }));
     await waitFor(() => expect(calls("POST", "/api/v1/payables/payment-proposals")).toHaveLength(2));
     const [first, second] = calls("POST", "/api/v1/payables/payment-proposals");
-    expect(first.body).toMatchObject({ legalEntityId: LE, legalEntityCurrency: "USD", runDate: today(), paymentMethod: "TRANSFER" });
+    expect(first.body).toMatchObject({ legalEntityId: LE, legalEntityCurrency: "USD", runDate: utcToday(), paymentMethod: "TRANSFER" });
     expect((second.body as { runId: string }).runId).toBe((first.body as { runId: string }).runId);
 
     await user.selectOptions(screen.getByLabelText("Pay by"), "WIRE");
@@ -342,7 +342,7 @@ describe("payment proposal detail", () => {
     const view = renderAt(`/payables/proposals/${PROPOSAL}`, READ);
     await screen.findByText("Contoso Ltd (V-1)");
     expect(screen.queryByRole("button", { name: "Approve proposal" })).not.toBeInTheDocument();
-    expect(screen.getByText(/can't approve it/)).toBeInTheDocument();
+    expect(screen.getByText(/You don't have approval rights/)).toBeInTheDocument();
     view.unmount();
     api(detail(proposal({ status: "APPROVED" })));
     renderAt(`/payables/proposals/${PROPOSAL}`, [...READ, "payment-proposal.approve", "payment-proposal.write"]);
@@ -372,5 +372,119 @@ describe("payment proposal detail", () => {
     renderAt(`/payables/proposals/${PROPOSAL}`);
     expect(await screen.findByText(/We couldn't find that record/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+});
+
+describe("dates and money", () => {
+  const evening = () => Object.assign(new Date("2026-11-11T02:30:00Z"), { getTimezoneOffset: () => 300 });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the UTC day for the payment date and the local day for the overdue marker", () => {
+    expect(utcToday(evening())).toBe("2026-11-11");
+    expect(today(evening())).toBe("2026-11-10");
+  });
+
+  it("defaults the payment date to the UTC day on a western-time-zone evening", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-11T02:30:00Z"));
+    api();
+    renderAt("/payables/proposals/new", [...READ, "payment-proposal.write"]);
+    expect(screen.getByLabelText("Payment date")).toHaveValue("2026-11-11");
+  });
+
+  it("formats by the currency's minor units without rounding the digits", () => {
+    expect(formatAmount("1000", "JPY")).toBe("1,000 JPY");
+    expect(formatAmount("1000.5", "KWD")).toBe("1,000.500 KWD");
+    expect(formatAmount("1000", "USD")).toBe("1,000.00 USD");
+    expect(formatAmount("-0.1", "EUR")).toBe("-0.10 EUR");
+    expect(formatAmount("12345678901234567.891", "USD")).toBe("12,345,678,901,234,567.891 USD");
+    expect(formatAmount("5.20", "ZZZ")).toBe("5.20 ZZZ");
+  });
+});
+
+describe("one request per action", () => {
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => ({ openItemId: `0000000${i}-0000-4000-8000-000000000000`, openAmount: "1.00", discount: "0", pay: "1.00", valued: "1.00" }));
+
+  it("sends approve once when the confirm button is double clicked", async () => {
+    const user = userEvent.setup();
+    api((url, init) => (url.pathname.endsWith(":approve") ? json(200, proposal({ status: "APPROVED" })) : init.method === "POST" ? undefined : url.pathname === `/api/v1/payables/payment-proposals/${PROPOSAL}` ? json(200, proposal()) : undefined));
+    renderAt(`/payables/proposals/${PROPOSAL}`, [...READ, "payment-proposal.approve"]);
+    await user.click(await screen.findByRole("button", { name: "Approve proposal" }));
+    await user.dblClick(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve proposal" }));
+    expect(await screen.findByText(/The proposal is approved/)).toBeInTheDocument();
+    expect(calls("POST", `/api/v1/payables/payment-proposals/${PROPOSAL}:approve`)).toHaveLength(1);
+    expect(screen.queryByText(/Could not approve/)).not.toBeInTheDocument();
+  });
+
+  it("explains a refused approval plainly and reloads the proposal", async () => {
+    const user = userEvent.setup();
+    api((url, init) => (url.pathname.endsWith(":approve") ? json(409, { code: "AP-PRP-002", detail: "items changed" }) : init.method === "POST" ? undefined : url.pathname === `/api/v1/payables/payment-proposals/${PROPOSAL}` ? json(200, proposal()) : undefined));
+    renderAt(`/payables/proposals/${PROPOSAL}`, [...READ, "payment-proposal.approve"]);
+    await user.click(await screen.findByRole("button", { name: "Approve proposal" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve proposal" }));
+    expect(await screen.findByText(/Only a draft payment proposal can be changed/)).toBeInTheDocument();
+    await waitFor(() => expect(calls("GET", `/api/v1/payables/payment-proposals/${PROPOSAL}`).length).toBeGreaterThan(1));
+  });
+
+  it("sends hold once and release once on a double click", async () => {
+    const user = userEvent.setup();
+    let held = false;
+    api((url) => {
+      if (url.pathname === "/api/v1/payables/open-items") return json(200, { items: [item({ paymentHold: held })] });
+      if (url.pathname.endsWith(":hold")) {
+        held = true;
+        return json(200, item());
+      }
+      if (url.pathname.endsWith(":release")) return json(200, item());
+      return undefined;
+    });
+    const stubbed = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      if (/:(hold|release)$/.test(String(input))) await new Promise((resolve) => setTimeout(resolve, 100));
+      return stubbed(input, init);
+    });
+    renderAt("/payables/open-items", [...READ, "payment-hold.manage"]);
+    await user.click(await screen.findByRole("button", { name: "Hold payment of INV-1001" }));
+    await user.dblClick(screen.getByRole("button", { name: "Put on hold" }));
+    await screen.findByText(/INV-1001 is on hold/);
+    expect(calls("POST", `/api/v1/payables/open-items/${ITEM}:hold`)).toHaveLength(1);
+    await user.dblClick(await screen.findByRole("button", { name: "Release hold on INV-1001" }));
+    await screen.findByText(/INV-1001 is released/);
+    expect(calls("POST", `/api/v1/payables/open-items/${ITEM}:release`)).toHaveLength(1);
+  });
+
+  it("looks up invoice numbers only for the visible lines and only with the open item duty", async () => {
+    const user = userEvent.setup();
+    const big = proposal({ groups: [{ ...proposal().groups[0], lines: lines(12) }] });
+    api((url) => (url.pathname === `/api/v1/payables/payment-proposals/${PROPOSAL}` ? json(200, big) : url.pathname.startsWith("/api/v1/payables/open-items/") ? json(200, item({ invoiceNumber: "INV-X" })) : undefined));
+    const view = renderAt(`/payables/proposals/${PROPOSAL}`, READ);
+    await user.click(await screen.findByRole("button", { name: "Show 12 invoices" }));
+    await screen.findAllByText("INV-X");
+    expect(server.calls.filter((c) => c.url.pathname.startsWith("/api/v1/payables/open-items/"))).toHaveLength(10);
+    await user.click(screen.getByRole("button", { name: /Show more invoices \(2 left\)/ }));
+    await waitFor(() => expect(server.calls.filter((c) => c.url.pathname.startsWith("/api/v1/payables/open-items/"))).toHaveLength(12));
+    view.unmount();
+    server.calls = [];
+    renderAt(`/payables/proposals/${PROPOSAL}`, ["payment-proposal.read"]);
+    await user.click(await screen.findByRole("button", { name: "Show 12 invoices" }));
+    expect(screen.queryByRole("columnheader", { name: "Document" })).not.toBeInTheDocument();
+    expect(server.calls.filter((c) => c.url.pathname.startsWith("/api/v1/payables/open-items/"))).toHaveLength(0);
+  });
+
+  it("tells a filtered empty list from a first visit and clears the filters", async () => {
+    const user = userEvent.setup();
+    api((url) => (url.pathname === "/api/v1/payables/open-items" ? json(200, { items: url.searchParams.get("due_to") ? [] : [item()] }) : undefined));
+    renderAt("/payables/open-items");
+    await screen.findByText("INV-1001");
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Due by/), "2020-01-01");
+    expect(await screen.findByText("No open items match these filters")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("INV-1001")).toBeInTheDocument();
   });
 });
