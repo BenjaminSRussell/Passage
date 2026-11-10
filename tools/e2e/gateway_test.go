@@ -171,7 +171,7 @@ func TestGatewayEnforcesSeededDutiesInFrontOfTheRealServices(t *testing.T) {
 	})
 
 	t.Run("a clerk may still use what their duties allow", func(t *testing.T) {
-		resp, err := api(clerkUser, nil).Do(ctx, http.MethodGet, "/v1/ledger/journal-lines", nil, nil)
+		resp, err := api(clerkUser, nil).Do(ctx, http.MethodGet, "/v1/ledger/journal-lines?ledger="+s.LedgerID, nil, nil)
 		if err != nil || resp.Status/100 != 2 {
 			t.Fatalf("status %d err %v: %s", resp.Status, err, resp.Body)
 		}

@@ -32,8 +32,8 @@ func TestComposeDeclaresTheLocalInfrastructure(t *testing.T) {
 		}
 	}
 	for _, m := range regexp.MustCompile(`(?m)^\s+image: (\S+)$`).FindAllStringSubmatch(text, -1) {
-		if !strings.Contains(m[1], ":") || strings.HasSuffix(m[1], ":latest") {
-			t.Errorf("image %s is not pinned to a version", m[1])
+		if !regexp.MustCompile(`@sha256:[0-9a-f]{64}$`).MatchString(m[1]) {
+			t.Errorf("image %s is not pinned by digest", m[1])
 		}
 	}
 	if !strings.Contains(text, "--import-realm") {

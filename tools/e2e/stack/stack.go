@@ -144,6 +144,18 @@ func (s *Stack) psql(args ...string) error {
 	return nil
 }
 
+func (s *Stack) queryOne(service, query string) (string, error) {
+	dbURL, err := s.databaseURL(service)
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command("psql", dbURL, "-X", "-A", "-t", "-c", query).Output()
+	if err != nil {
+		return "", fmt.Errorf("psql %s: %w", service, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func (s *Stack) ensureDatabase(name string, fresh bool) error {
 	db := s.DatabaseName(name)
 	if fresh {
