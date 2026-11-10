@@ -295,7 +295,7 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig }
             {toast}
           </div>
         ) : null}
-        {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
+        {paletteOpen ? <CommandPalette entries={entries} identity={userId} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
       </div>
       </WorkspaceNavProvider>
       </WorkContextProvider>
