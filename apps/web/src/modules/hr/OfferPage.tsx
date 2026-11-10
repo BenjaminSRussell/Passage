@@ -49,7 +49,7 @@ export function validateHire(v: HireValues): { errors: Record<string, string>; i
   } else if (!UUID.test(v.workerId.trim())) errors.workerId = "Choose the new worker.";
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose the legal entity.";
   if (v.fteShare.trim() !== "" && !validFte(v.fteShare, 1)) errors.fteShare = "Use a decimal above 0 and up to 2.00, with at most two decimals.";
-  if (v.compPlanId.trim() !== "" && !UUID.test(v.compPlanId.trim())) errors.compPlanId = "Enter the compensation plan's id.";
+  if (v.compPlanId.trim() !== "" && !UUID.test(v.compPlanId.trim())) errors.compPlanId = "Choose a compensation plan, or clear it.";
   if (Object.keys(errors).length > 0) return { errors };
   const worker: Pick<HireFromOffer, "workerId" | "newWorker"> = creating
     ? {
@@ -160,7 +160,16 @@ function HireForm({ offerId, onConverted }: { offerId: string; onConverted(): vo
         options={Object.entries(employmentTypeLabel)}
       />
       {text("fteShare", "FTE share", true)}
-      {text("compPlanId", "Compensation plan id", true, "Setting pay needs the compensation administrator duty.")}
+      <LookupField
+        entity="compensationPlan"
+        id="hire-compPlanId"
+        label="Compensation plan"
+        optional
+        hint="Setting pay needs the compensation administrator duty."
+        value={values.compPlanId}
+        error={form.errors.compPlanId}
+        onChange={(compPlanId) => set({ compPlanId })}
+      />
       <FormActions errors={form.errors} busy={form.busy} submit="Hire from offer" failure={form.failure} failureTitle="Could not hire from the offer" />
     </form>
   );

@@ -11,7 +11,16 @@ export type LookupEntityKey =
   | "currency"
   | "operatingUnit"
   | "itemGroup"
-  | "vendorGroup";
+  | "vendorGroup"
+  | "bankAccount"
+  | "position"
+  | "compensationPlan"
+  | "calendar"
+  | "resourceGroup"
+  | "campaign"
+  | "fund"
+  | "user"
+  | "load";
 
 export interface LookupOption {
   id: string;
@@ -22,6 +31,7 @@ export interface LookupOption {
   batchTracked?: boolean;
   serialTracked?: boolean;
   catchWeight?: boolean;
+  currency?: string;
 }
 
 export interface LookupScope {
@@ -380,7 +390,139 @@ const vendorGroupDef: LookupDef = {
     ),
 };
 
+/** One record of a service that answers GET {path}/{id} with the record itself. */
+async function getOne(path: string, id: string, signal?: AbortSignal): Promise<Raw> {
+  return (await getJson(`${path}/${encodeURIComponent(id)}`, signal)) as Raw;
+}
+
+/** A lookup over a list route with no text search: every page is read (bounded) and filtered in the browser. */
+function listedEntity(
+  noun: string,
+  path: string,
+  map: (row: Raw) => LookupOption | null,
+  params: (scope: LookupScope) => Record<string, string | undefined> = () => ({}),
+  keep: (row: Raw, scope: LookupScope) => boolean = () => true,
+): LookupDef {
+  return {
+    noun,
+    search: async (q, scope, signal) =>
+      narrow(present((await listRows(path, params(scope), signal)).filter((row) => keep(row, scope)).map(map)), q),
+    resolve: async (id, signal) => map(await getOne(path, id, signal)),
+  };
+}
+
+/** A bank account reads "OPS-EUR (DE89 **** 3000 · EUR · DE01)": accounts carry a code, not a name. */
+function bankAccountOption(row: Raw, entityCode?: string): LookupOption | null {
+  const hit = option(row, ["accountCode"], []);
+  if (!hit) {
+    return null;
+  }
+  const currency = text(row, "currency");
+  const number = [text(row, "ibanMasked"), currency, entityCode].filter(Boolean).join(" · ");
+  return { ...hit, number: number || undefined, currency };
+}
+
+/** Bank accounts are listed per legal entity; with no legal entity in scope every entity's accounts are read. */
+const bankAccountDef: LookupDef = {
+  noun: "bank account",
+  createHref: "/treasury/bank-accounts/new",
+  search: async (q, scope, signal) => {
+    const entities = scope.legalEntityId
+      ? [{ id: scope.legalEntityId, code: undefined as string | undefined }]
+      : present(items(await getJson(`/api/v1/org/legal-entities${query({ limit: String(PAGE_SIZE) })}`, signal)).map((row) => option(row, ["name"], ["code"]))).map(
+          (entry) => ({ id: entry.id, code: entry.number }),
+        );
+    const lists = await Promise.all(
+      entities.map(async (entity) =>
+        items(await getJson(`/api/v1/treasury/bank-accounts${query({ legalEntityId: entity.id })}`, signal)).map((row) => bankAccountOption(row, entity.code)),
+      ),
+    );
+    return narrow(present(lists.flat()), q);
+  },
+  resolve: async (id, signal) => bankAccountOption(await getOne("/api/v1/treasury/bank-accounts", id, signal)),
+};
+
+/** A position has a number and a job code but no name of its own. */
+const positionDef = listedEntity(
+  "position",
+  "/api/v1/hr/positions",
+  (row) => option(row, ["positionNumber"], ["jobCode"]),
+  () => ({ limit: "100" }),
+  (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+);
+
+async function compensationPlanOptions(signal?: AbortSignal): Promise<LookupOption[]> {
+  return present(
+    (await listRows("/api/v1/hr/compensation/plans", { limit: "100" }, signal)).map((row) => {
+      const hit = option(row, ["name"], ["code"]);
+      return hit ? { ...hit, currency: text(row, "currency") } : null;
+    }),
+  );
+}
+
+/** Compensation plans have no single-plan route, so a plan's name is found in the list. */
+const compensationPlanDef: LookupDef = {
+  noun: "compensation plan",
+  createHref: "/hr/compensation/plans/new",
+  search: async (q, _scope, signal) => narrow(await compensationPlanOptions(signal), q),
+  resolve: async (id, signal) => (await compensationPlanOptions(signal)).find((entry) => entry.id === id) ?? null,
+};
+
+const codeAndName = (row: Raw) => option(row, ["name"], ["code"]);
+
+/** A load has no name: it reads by where it goes and when it is picked up, with its mode and status. */
+function loadOption(row: Raw): LookupOption | null {
+  const id = text(row, "id");
+  const region = text(row, "shipToRegion");
+  const pickup = text(row, "pickupDate");
+  if (!id || !region) {
+    return null;
+  }
+  const number = [text(row, "mode"), text(row, "status")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
+  return { id, name: pickup ? `${region}, pickup ${pickup}` : region, number: number || undefined };
+}
+
+function userOption(row: Raw): LookupOption | null {
+  return option(row, ["displayName", "email"], ["email"], ["userId", "id"]);
+}
+
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  bankAccount: bankAccountDef,
+  position: positionDef,
+  compensationPlan: compensationPlanDef,
+  calendar: listedEntity("work calendar", "/api/v1/engineering/calendars", codeAndName, () => ({ limit: "100" })),
+  resourceGroup: listedEntity("resource group", "/api/v1/engineering/resource-groups", codeAndName, (scope) => ({ limit: "100", siteId: scope.siteId })),
+  campaign: listedEntity(
+    "campaign",
+    "/api/v1/pricing/campaigns",
+    (row) => {
+      const hit = option(row, ["name"], []);
+      const from = text(row, "validFrom");
+      const to = text(row, "validTo");
+      return hit && from && to ? { ...hit, number: `${from} to ${to}` } : hit;
+    },
+    (scope) => ({ legalEntityId: scope.legalEntityId }),
+  ),
+  fund: listedEntity(
+    "fund",
+    "/api/v1/pricing/funds",
+    (row) => {
+      const hit = option(row, ["name"], ["type"]);
+      return hit ? { ...hit, currency: text(row, "currency") } : null;
+    },
+    (scope) => ({ legalEntityId: scope.legalEntityId }),
+  ),
+  load: listedEntity("load", "/api/v1/transport/loads", loadOption, () => ({}), (row, scope) => !scope.siteId || text(row, "shipFromSiteId") === scope.siteId),
+  user: {
+    noun: "user",
+    search: async (q, scope, signal) =>
+      present(
+        items(
+          await getJson(`/api/v1/identity/users${query({ q, status: "active", legalEntityId: scope.legalEntityId, limit: String(PAGE_SIZE) })}`, signal),
+        ).map(userOption),
+      ),
+    resolve: async (id, signal) => userOption(await getOne("/api/v1/identity/users", id, signal)),
+  },
   operatingUnit: operatingUnitDef,
   itemGroup: itemGroupDef,
   vendorGroup: vendorGroupDef,

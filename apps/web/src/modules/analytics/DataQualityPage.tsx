@@ -41,6 +41,7 @@ import { count, dateTime, enumLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 /** Mirrors BR-46.15: three consecutive below-threshold evaluations escalate. */
 const ESCALATE_AFTER = 3;
@@ -113,7 +114,7 @@ export function DataQualityPage() {
     const next = { asset: draft.asset.trim(), ruleType: draft.ruleType, owner: draft.owner.trim() };
     const errors: Partial<Record<keyof DQRuleFilter, string>> = {};
     if (next.asset !== "" && !ASSET_FQN.test(next.asset)) errors.asset = "Use a dotted lower-case asset such as core.vendor.";
-    if (next.owner !== "" && !UUID.test(next.owner)) errors.owner = "Use the owner's user id (a UUID).";
+    if (next.owner !== "" && !UUID.test(next.owner)) errors.owner = "Choose an owner, or clear it.";
     setFilterErrors(errors);
     if (Object.keys(errors).length === 0) setFilter(next);
   }
@@ -157,11 +158,11 @@ export function DataQualityPage() {
             </Select>
           )}
         </FormField>
-        <FormField id="dq-filter-owner" label="Owner user id" error={filterErrors.owner} optional>
+        <FormField id="dq-filter-owner" label="Owner" error={filterErrors.owner} optional>
           {(control) => (
-            <Input
+            <EntityLookup
               {...control}
-              className={styles.mono}
+              entity="user"
               value={draft.owner}
               invalid={Boolean(filterErrors.owner)}
               onChange={(e) => setDraft((d) => ({ ...d, owner: e.target.value }))}
@@ -243,7 +244,7 @@ export function validateRule(d: Draft): DraftErrors {
   if (!/^\d{1,3}(\.\d{1,2})?$/.test(d.thresholdPct) || Number(d.thresholdPct) > 100) {
     errors.thresholdPct = "Enter a percentage from 0 to 100 with at most two decimals.";
   }
-  if (!UUID.test(d.ownerUserId)) errors.ownerUserId = "Enter the owner's user id.";
+  if (!UUID.test(d.ownerUserId)) errors.ownerUserId = "Choose the owner.";
   return errors;
 }
 
@@ -344,8 +345,8 @@ function RuleForm({ initial, existing, onSaved }: { initial: Draft; existing: DQ
             </Select>
           )}
         </FormField>
-        <FormField id="dq-owner" label="Owner user id" hint="The owner gets the daily task when the rule fails." error={errors.ownerUserId}>
-          {(control) => <Input {...control} {...field("ownerUserId")} className={styles.mono} value={draft.ownerUserId} onChange={(e) => set("ownerUserId", e.target.value)} />}
+        <FormField id="dq-owner" label="Owner" hint="The owner gets the daily task when the rule fails." error={errors.ownerUserId}>
+          {(control) => <EntityLookup {...control} {...field("ownerUserId")} entity="user" value={draft.ownerUserId} onChange={(e) => set("ownerUserId", e.target.value)} />}
         </FormField>
         <FormField id="dq-status" label="Status">
           {(control) => (

@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { errorText } from "./screens";
 import styles from "./pages.module.css";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const forbiddenStatus = 403;
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -196,8 +197,8 @@ export function ResourceGroupCreatePage({ onCreated, onCancel }: Props) {
           <Field id="new-group-site" label="Site" error={failed.fields.siteId}>
             {(control) => <Input {...control} value={siteId} onChange={(e) => setSiteId(e.target.value)} required maxLength={64} />}
           </Field>
-          <Field id="new-group-calendar" label="Calendar id" optional error={failed.fields.calendarId} hint="The group's resources use this calendar unless they name their own.">
-            {(control) => <Input {...control} value={calendarId} onChange={(e) => setCalendarId(e.target.value)} />}
+          <Field id="new-group-calendar" label="Calendar" optional error={failed.fields.calendarId} hint="The group's resources use this calendar unless they name their own.">
+            {(control) => <EntityLookup {...control} entity="calendar" value={calendarId} invalid={Boolean(failed.fields.calendarId)} onChange={(e) => setCalendarId(e.target.value)} />}
           </Field>
           <Actions label="Create resource group" submitting={submitting} onCancel={onCancel} error={failed.form} />
         </form>
@@ -304,11 +305,11 @@ export function ResourceCreatePage({ onCreated, onCancel }: Props) {
           <Field id="new-res-capacity" label="Capacity per day (h)" optional error={failed.fields.capacityPerDayH} hint="0 when empty.">
             {(control) => <Input {...control} inputMode="decimal" value={capacity} onChange={(e) => setCapacity(e.target.value)} />}
           </Field>
-          <Field id="new-res-group" label="Group id" optional error={failed.fields.groupId} hint="A resource group at the same site.">
-            {(control) => <Input {...control} value={groupId} onChange={(e) => setGroupId(e.target.value)} />}
+          <Field id="new-res-group" label="Resource group" optional error={failed.fields.groupId} hint="A resource group at the same site.">
+            {(control) => <EntityLookup {...control} entity="resourceGroup" value={groupId} invalid={Boolean(failed.fields.groupId)} onChange={(e) => setGroupId(e.target.value)} />}
           </Field>
-          <Field id="new-res-calendar" label="Calendar id" optional error={failed.fields.calendarId} hint="Leave empty to use the group's calendar.">
-            {(control) => <Input {...control} value={calendarId} onChange={(e) => setCalendarId(e.target.value)} />}
+          <Field id="new-res-calendar" label="Calendar" optional error={failed.fields.calendarId} hint="Leave empty to use the group's calendar.">
+            {(control) => <EntityLookup {...control} entity="calendar" value={calendarId} invalid={Boolean(failed.fields.calendarId)} onChange={(e) => setCalendarId(e.target.value)} />}
           </Field>
           <span className={styles.check}>
             <Input id="new-res-exclusive" type="checkbox" checked={exclusive} onChange={(e) => setExclusive(e.target.checked)} />
