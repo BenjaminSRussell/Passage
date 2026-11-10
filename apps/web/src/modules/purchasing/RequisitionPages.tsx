@@ -9,14 +9,19 @@ import {
   ConfirmDialog,
   DataTable,
   EmptyState,
+  FormErrorSummary,
   FormField,
+  FormSection,
   Input,
   PageHeader,
   Select,
   Textarea,
   buttonClassName,
+  useUnsavedChanges,
   type DataTableColumn,
+  type FormErrorItem,
 } from "../../shell/ui";
+import { copy } from "../../shell/copy";
 import {
   actOnRequisition,
   cancelRequisitionLine,
@@ -311,6 +316,35 @@ export function RequisitionEditPage() {
   return <RequisitionForm existing={req} />;
 }
 
+const LINE_FIELD_IDS: Record<string, [string, string]> = {
+  qty: ["qty", "Quantity"],
+  requestedDate: ["date", "Requested date"],
+  warehouseId: ["warehouse", "Deliver to warehouse"],
+  siteId: ["site", "Site"],
+  productId: ["product", "Product"],
+  description: ["description", "Description"],
+  estimatedUnitPrice: ["price", "Estimated unit price"],
+  preferredVendorId: ["vendor", "Preferred vendor"],
+  unit: ["unit", "Unit"],
+};
+
+const HEADER_FIELD_IDS: Record<string, [string, string]> = {
+  legalEntityId: ["req-legal-entity", "Legal entity"],
+  operatingUnitId: ["req-operating-unit", "Operating unit id"],
+  currency: ["req-currency", "Currency"],
+};
+
+function requisitionErrorItems(errors: Errors): FormErrorItem[] {
+  return Object.entries(errors).flatMap(([key, message]) => {
+    const header = HEADER_FIELD_IDS[key];
+    if (header) return [{ fieldId: header[0], label: header[1], message }];
+    const line = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+    const target = line ? LINE_FIELD_IDS[line[2]] : undefined;
+    if (line && target) return [{ fieldId: `req-line-${line[1]}-${target[0]}`, label: `Line ${Number(line[1]) + 1} ${target[1].toLowerCase()}`, message }];
+    return key === "lines" ? [{ label: "Lines", message }] : [];
+  });
+}
+
 function RequisitionForm({ existing }: { existing?: Requisition }) {
   const navigate = useNavigate();
   const [legalEntityId, setLegalEntityId] = useState(existing?.legalEntityId ?? "");
@@ -322,6 +356,9 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
   const [busy, setBusy] = useState(false);
   // One key per logical create so a retry after a network failure cannot duplicate it.
   const key = useMemo(() => newIdempotencyKey(), [legalEntityId, operatingUnitId, currency, lines]);
+  const initial = useRef(JSON.stringify([legalEntityId, operatingUnitId, currency, lines]));
+  const [attempt, setAttempt] = useState(0);
+  const { prompt, release } = useUnsavedChanges(JSON.stringify([legalEntityId, operatingUnitId, currency, lines]) !== initial.current);
 
   const update = (index: number, patch: Partial<LineDraft>) => setLines((ls) => ls.map((l, i) => (i === index ? { ...l, ...patch } : l)));
 
@@ -330,7 +367,10 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
     const found = validateRequisition(legalEntityId.trim(), currency, lines, operatingUnitId.trim());
     setErrors(found);
     setFailure(null);
-    if (Object.keys(found).length > 0) return;
+    if (Object.keys(found).length > 0) {
+      setAttempt((n) => n + 1);
+      return;
+    }
     setBusy(true);
     try {
       if (existing) {
@@ -341,15 +381,20 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
           { operatingUnitId: operatingUnitId.trim(), currency: input.currency, lines: input.lines },
           key,
         );
+        release();
         navigate(`/purchasing/requisitions/${body.id}`, { state: { warnings: body.warnings ?? [] } });
         return;
       }
       const { body } = await createRequisition(toInput(legalEntityId.trim(), currency, lines, operatingUnitId.trim()), key);
+      release();
       navigate(`/purchasing/requisitions/${body.id}`, { state: { warnings: body.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
       setFailure(problem);
-      if (problem.errors) setErrors(problem.errors);
+      if (problem.errors) {
+        setErrors(problem.errors);
+        setAttempt((n) => n + 1);
+      }
     } finally {
       setBusy(false);
     }
@@ -376,19 +421,22 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
         }}
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={requisitionErrorItems(errors)} attempt={attempt} />
         <Card title="Requisition">
           <div className={styles.grid}>
-            <FormField id="req-legal-entity" label="Legal entity" error={field("legalEntityId")}>
+            <FormField id="req-legal-entity" label="Legal entity" required error={field("legalEntityId")}>
               {(control) => <EntityLookup entity="legalEntity" {...control} value={legalEntityId} disabled={existing !== undefined} onChange={(e) => setLegalEntityId(e.target.value)} />}
             </FormField>
-            <FormField id="req-operating-unit" label="Operating unit id" optional hint="Decides which catalogs you can pick from" error={field("operatingUnitId")}>
-              {(control) => <Input {...control} value={operatingUnitId} onChange={(e) => setOperatingUnitId(e.target.value)} />}
-            </FormField>
-            <FormField id="req-currency" label="Currency" error={field("currency")}>
+            <FormField id="req-currency" label="Currency" required error={field("currency")}>
               {(control) => (
                 <Input {...control} value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
               )}
             </FormField>
+            <FormSection collapse="more" defaultOpen={operatingUnitId !== ""}>
+              <FormField id="req-operating-unit" label="Operating unit id" optional hint={copy.fieldHelp.requisitionOperatingUnit} error={field("operatingUnitId")}>
+                {(control) => <Input {...control} value={operatingUnitId} onChange={(e) => setOperatingUnitId(e.target.value)} />}
+              </FormField>
+            </FormSection>
           </div>
         </Card>
         <Card
@@ -487,6 +535,7 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

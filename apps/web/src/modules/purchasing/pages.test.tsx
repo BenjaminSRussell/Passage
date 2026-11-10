@@ -137,6 +137,19 @@ describe("new requisition", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("warns on tab close only once the form has unsaved lines", async () => {
+    stubFetch(() => json({}));
+    renderAt("/purchasing/requisitions/new");
+    const description = await screen.findByLabelText("Description");
+    const clean = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
+    fireEvent.change(description, { target: { value: "Laptop" } });
+    const dirty = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirty);
+    expect(dirty.defaultPrevented).toBe(true);
+  });
+
   it("posts the lines with an Idempotency-Key and opens the new requisition with its warnings", async () => {
     const fetchMock = stubFetch((_url, init) => {
       if (init.method === "POST") {

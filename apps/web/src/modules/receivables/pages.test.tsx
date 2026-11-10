@@ -181,6 +181,8 @@ describe("Record payment", () => {
     fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
     expect(await screen.findByText("Choose a legal entity.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
+    expect(screen.getByLabelText("Legal entity")).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Legal entity: Choose a legal entity." })).toBeInTheDocument();
 
     fill("Legal entity", LE);
     fill("Customer", CUST);
