@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Fixed
 
+- Receivables: an RMA credit now reserves its invoice lines in billing (`credit-reservations`, key `rma-credit:{legalEntity}:{rmaId}`) before it is stored, commits the reservation once the credit posts and releases it when the credit is parked, so an RMA credit and a billing credit note can no longer credit the same invoice line past what was invoiced; sales sends the invoice line numbers and quantities (#513).
 - Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).
 - Review fixes on the batch-2 lane: the integration hub gains `GET /v1/hub/coexistence` and `POST /v1/hub/coexistence:retry-parked`
   so parked coexistence rows can be seen and retried (`hub.delivery.read`, `hub.subscription.write`); a replayed revrec
