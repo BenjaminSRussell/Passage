@@ -1,4 +1,6 @@
 import { DECIMAL, UUID } from "../../shell/api/http";
+import type { BadgeTone } from "../../shell/ui";
+import type { InvoiceStatus } from "./api/client";
 
 export { DECIMAL, UUID };
 
@@ -14,6 +16,14 @@ export interface InvoiceCandidate {
 export interface InvoiceNavState {
   items?: InvoiceCandidate[];
 }
+
+export const invoiceStatusLabel: Record<InvoiceStatus, string> = {
+  POSTED: "Posted",
+  AUDIT_BLOCKED: "Held for audit",
+  AUDIT_REJECTED: "Rejected after audit",
+};
+
+export const invoiceStatusTone: Record<InvoiceStatus, BadgeTone> = { POSTED: "success", AUDIT_BLOCKED: "warning", AUDIT_REJECTED: "danger" };
 
 const SCALE = 6;
 const ONE = 10n ** BigInt(SCALE);

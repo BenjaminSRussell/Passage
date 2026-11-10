@@ -433,6 +433,20 @@ func (s *Store) ListInvoices(ctx context.Context, f store.InvoiceFilter) (out []
 	return out, err
 }
 
+func (s *Store) GetInvoice(ctx context.Context, id string) (out store.Invoice, err error) {
+	principal, _ := tenant.FromContext(ctx)
+	err = s.with(ctx, func(t *tenantData) error {
+		inv, ok := t.invoiceDocs[strings.ToLower(id)]
+		if !ok || !tenant.InLegalEntityScope(principal, inv.LegalEntityID) {
+			return store.ErrInvoiceNotFound
+		}
+		inv.Lines = slices.Clone(inv.Lines)
+		out = inv
+		return nil
+	})
+	return out, err
+}
+
 func (s *Store) ListGrir(ctx context.Context, f store.GrirFilter) (page store.GrirPage, err error) {
 	limit := pageLimit(f.Limit)
 	err = s.with(ctx, func(t *tenantData) error {

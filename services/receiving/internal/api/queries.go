@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
+	"github.com/go-chi/chi/v5"
 )
 
 const (
@@ -150,6 +152,20 @@ func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
 		page.Items = append(page.Items, toInvoiceBody(inv))
 	}
 	httpx.JSON(w, http.StatusOK, page)
+}
+
+func (a *API) getInvoice(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, validationProblem(map[string]string{"id": "must be a UUID"}))
+		return
+	}
+	inv, err := a.store.GetInvoice(r.Context(), id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, toInvoiceBody(inv))
 }
 
 type grirItemBody struct {

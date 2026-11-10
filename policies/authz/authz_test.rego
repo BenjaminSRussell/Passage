@@ -107,6 +107,7 @@ segregation_denials := [
 	["platform.release.view", "POST", "/v1/platform/releases"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
+	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],
 	["party.write", "GET", "/v1/party/vendors:search"],
 	["party.vendor-bank.write", "GET", "/v1/party/customers:search"],
 ]
@@ -141,6 +142,7 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/ers-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoices/i1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],
