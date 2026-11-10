@@ -30,6 +30,10 @@ release may change public APIs.
 
 ### Added
 
+- Product: the web product pages run on the product service instead of built-in sample data: search by number or name with
+  keyset paging, product detail, and create and edit forms with field checks and plain-language errors (#529). `GET
+  /v1/product/products` gains `q`, `limit` (1 to 100, default 50) and `cursor`, and answers `nextCursor` when more follow.
+
 - Web: vendor invoice list (`/ap-invoices`, status and vendor filters, load more) and invoice detail (`/ap-invoices/:id`: lines, hold or rejection reason, ledger entry, links to the receipts and purchase orders) (#533); the detail reads `GET /v1/receiving/invoices/{id}`.
 - Migration factory: `POST /api/v1/migration/runs/{id}/opening-journal` posts the migrated GL balances of a gl_balances run to a legal entity's ledger through the ledger's posting API, one balanced journal per currency, refused whole with the difference named (MIG-1540) when a currency does not balance, idempotent by a fixed key per company, legal entity and currency (`gl_opening_posting`, migration 0024); `GET` lists what was posted, and a fully posted gl_balances pack no longer needs a go/no-go waiver (49-1, #49).
 - Billing credit reservations (#513): `POST /v1/billing/invoices/{id}/credit-reservations` (idempotent per RMA, line-level qty/net/tax) plus `POST /v1/billing/credit-reservations/{id}:commit` and `:release` (service duty `billing.credit-reservation.write` only; a released key can be retried under the bound) hold part of a posted invoice for a credit issued outside billing; reservations count with posted credit notes under the invoice's row lock, so the total credited can no longer exceed the invoiced amount (`BIL-0005`); the invoice read shows `credited.reserved` and `reservedQty`; receivables is granted `billing.credit-reservation.write` (receivables wiring follows).
