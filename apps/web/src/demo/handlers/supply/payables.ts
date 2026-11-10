@@ -1,6 +1,6 @@
 // Payables service (/api/v1/payables) for the demo: vendor open items, payment proposals and payment runs.
 // Typed against the module's own client types so shape drift fails `tsc`.
-import type { OpenItem, PaymentRun, Proposal, ProposalGroup } from "../../../modules/payables/api/client";
+import type { OpenItem, PaymentRun, Proposal, ProposalGroup, RemittanceAdvice, VendorBlock } from "../../../modules/payables/api/client";
 import { LEGAL_ENTITY, VENDORS } from "../../company";
 import { reply, route } from "../../backend";
 import { at, day, dec, newId, table, uid } from "../../store";
@@ -78,6 +78,9 @@ const proposals = table<Proposal>([
 
 const runs = table<PaymentRun>([]);
 
+// Vendors on payment hold (the service's vendor blocks), by vendor id; the demo has one legal entity.
+const vendorBlocks = new Map<string, VendorBlock>();
+
 const summary = (p: Proposal) => ({ ...p, groups: undefined });
 const notFound = (what: string) => reply.problem(404, "COM-0404", `${what} not found`);
 
@@ -113,6 +116,23 @@ route("POST", `${BASE}/open-items/{id}:release`, ({ params }) => {
   return openItems.update(params.id, { paymentHold: false, paymentHoldReason: undefined });
 });
 
+route("GET", `${BASE}/vendor-blocks`, ({ query }) => {
+  const vendor = query.get("vendor");
+  return { items: [...vendorBlocks.values()].filter((b) => !vendor || b.vendorId === vendor).sort((a, b) => b.blockedAt.localeCompare(a.blockedAt)) };
+});
+
+route("POST", `${BASE}/vendors/{id}:block`, ({ params, body }) => {
+  const reason = ((body as { reason?: string } | undefined)?.reason ?? "").trim();
+  if (reason === "") return reply.problem(400, "COM-0001", "request validation failed", { reason: "is required, at most 500 characters" });
+  vendorBlocks.set(params.id, { vendorId: params.id, legalEntityId: LEGAL_ENTITY.id, reason, blockedBy: "dev", blockedAt: vendorBlocks.get(params.id)?.blockedAt ?? at(0) });
+  return { vendorId: params.id, legalEntityId: LEGAL_ENTITY.id, blocked: true, reason };
+});
+
+route("POST", `${BASE}/vendors/{id}:unblock`, ({ params }) => {
+  if (!vendorBlocks.delete(params.id)) return notFound("vendor block");
+  return { vendorId: params.id, legalEntityId: LEGAL_ENTITY.id, blocked: false };
+});
+
 route("GET", `${BASE}/payment-proposals`, ({ query }) => {
   const status = query.get("status");
   return { items: proposals.all().filter((p) => !status || p.status === status).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(summary) };
@@ -120,7 +140,7 @@ route("GET", `${BASE}/payment-proposals`, ({ query }) => {
 
 route("POST", `${BASE}/payment-proposals`, ({ body }) => {
   const input = body as { runDate: string; runId: string; dueBy?: string; paymentMethod: Proposal["paymentMethod"]; legalEntityCurrency: string };
-  const due = openItems.all().filter((i) => i.status === "OPEN" && !i.paymentHold && !i.proposalId && (!input.dueBy || i.dueDate <= input.dueBy));
+  const due = openItems.all().filter((i) => i.status === "OPEN" && !i.paymentHold && !vendorBlocks.has(i.vendorId) && !i.proposalId && (!input.dueBy || i.dueDate <= input.dueBy));
   if (due.length === 0) return reply.problem(422, "AP-PRP-005", "nothing is due on the run date");
   const byVendor = new Map<string, OpenItem[]>();
   for (const i of due) byVendor.set(i.vendorId, [...(byVendor.get(i.vendorId) ?? []), i]);
@@ -155,9 +175,10 @@ route("POST", `${BASE}/payment-runs`, ({ body }) => {
   const p = proposals.get(proposalId);
   if (!p) return notFound("payment proposal");
   if (p.status !== "APPROVED") return reply.problem(409, "AP-PRP-002", "payment proposal is not approved");
-  proposals.update(proposalId, { status: "EXECUTING" });
+  const runId = newId();
+  proposals.update(proposalId, { status: "EXECUTING", paymentRunId: runId });
   const run: PaymentRun = {
-    id: newId(),
+    id: runId,
     legalEntityId: p.legalEntityId,
     proposalId,
     status: "RUNNING",
@@ -172,6 +193,36 @@ route("GET", `${BASE}/payment-runs/{id}/file`, ({ params }) => {
   const r = runs.get(params.id);
   if (!r?.fileGeneratedAt) return notFound("payment file");
   return reply.ok({ note: "Bank file (demo)" });
+});
+
+route("GET", `${BASE}/payment-runs/{id}/remittances/{vendorId}`, ({ params, query }) => {
+  const r = runs.get(params.id);
+  if (!r) return notFound("payment run");
+  if (r.status !== "COMPLETED") return reply.problem(409, "AP-RUN-018", `a remittance advice is available once the payment run is completed; the run is ${r.status}`);
+  const p = proposals.get(r.proposalId);
+  const payments = r.payments
+    .filter((pay) => pay.vendorId === params.vendorId)
+    .map((pay) => ({
+      endToEndId: pay.endToEndId,
+      currency: pay.currency,
+      paymentMethod: pay.paymentMethod,
+      amount: pay.amount,
+      lines: (p?.groups.find((g) => g.id === pay.groupId)?.lines ?? []).map((l) => {
+        const item = openItems.get(l.openItemId);
+        // As the service: paid to the vendor is the line's pay amount less the tax withheld.
+        const withheld = l.withheld ?? "0.00";
+        return { openItemId: l.openItemId, invoiceNumber: item?.invoiceNumber ?? "", invoiceDate: item?.invoiceDate ?? "", openAmount: l.openAmount, discount: l.discount, withheld, paid: dec(Number(l.pay) - Number(withheld)) };
+      }),
+    }));
+  if (payments.length === 0) return notFound("payment to this vendor");
+  const advice: RemittanceAdvice = { runId: r.id, proposalId: r.proposalId, legalEntityId: r.legalEntityId, vendorId: params.vendorId, paymentDate: p?.runDate ?? "", completedAt: r.completedAt, payments };
+  if (query.get("format") !== "csv") return advice;
+  const rows = [["Payment reference", "Payment date", "Currency", "Invoice", "Invoice date", "Amount open", "Discount", "Tax withheld", "Paid"]];
+  for (const pay of payments) {
+    for (const l of pay.lines) rows.push([pay.endToEndId, advice.paymentDate, pay.currency, l.invoiceNumber, l.invoiceDate, l.openAmount, l.discount, l.withheld, l.paid]);
+    rows.push([pay.endToEndId, advice.paymentDate, pay.currency, "Total", "", "", "", "", pay.amount]);
+  }
+  return reply.text(rows.map((row) => row.join(",")).join("\n"), "text/csv; charset=utf-8", `remittance-advice-${r.id}-${params.vendorId}.csv`);
 });
 
 route("GET", `${BASE}/payment-runs/{id}`, ({ params }) => runs.get(params.id) ?? notFound("payment run"));

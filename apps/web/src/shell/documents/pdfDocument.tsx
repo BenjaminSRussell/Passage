@@ -6,8 +6,12 @@ import { formatOption, resolveOption, type LookupEntityKey } from "../lookup/ent
 import { usePrincipalDuties } from "../principal";
 import { Alert, Button } from "../ui";
 
-/** Business documents the print service renders as PDF (services/print, POST /print/v1/documents:render). */
-export type DocumentType = "PURCHASE_ORDER" | "CUSTOMER_INVOICE" | "PACKING_SLIP";
+/**
+ * Business documents the print service renders as PDF (services/print, POST /print/v1/documents:render).
+ * REMITTANCE_ADVICE is sent by the payment run page; a print service that does not know the type refuses it
+ * and the button shows the reason in place.
+ */
+export type DocumentType = "PURCHASE_ORDER" | "CUSTOMER_INVOICE" | "PACKING_SLIP" | "REMITTANCE_ADVICE";
 
 export interface DocumentParty {
   label?: string;
@@ -90,7 +94,7 @@ function save(blob: Blob, filename: string): void {
  * The "Download PDF" action of a document page. `build` gathers the document's data (names, not ids);
  * a document the service cannot render shows its reason in place, and the page keeps working.
  */
-export function DownloadPdfButton({ build, filename }: { build: () => Promise<DocumentRequest>; filename: string }) {
+export function DownloadPdfButton({ build, filename, label = "Download PDF" }: { build: () => Promise<DocumentRequest>; filename: string; label?: string }) {
   const duties = usePrincipalDuties();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<unknown>(null);
@@ -111,7 +115,7 @@ export function DownloadPdfButton({ build, filename }: { build: () => Promise<Do
   return (
     <>
       <Button loading={busy} onClick={() => void run()}>
-        Download PDF
+        {label}
       </Button>
       {problem ? (
         <Alert tone="danger" title="This document can't be downloaded as a PDF" live="alert">

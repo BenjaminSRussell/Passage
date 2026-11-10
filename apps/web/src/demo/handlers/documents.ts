@@ -1,5 +1,5 @@
 // Print service document rendering (/api/v1/print/documents:render) for the demo. Answers with a small
-// one-page PDF that lists the document's text, so "Download PDF" works on the order, invoice and packing slip pages.
+// one-page PDF that lists the document's text, so "Download PDF" works on the order, invoice, packing slip and payment run pages.
 import type { DocumentRequest } from "../../shell/documents/pdfDocument";
 import { DemoResponse, route } from "../backend";
 
@@ -28,7 +28,7 @@ function pdf(lines: string[]): Uint8Array {
 
 route("POST", "/api/v1/print/documents:render", ({ body }) => {
   const d = body as DocumentRequest;
-  const title = { PURCHASE_ORDER: "Purchase order", CUSTOMER_INVOICE: "Invoice", PACKING_SLIP: "Packing slip" }[d.documentType];
+  const title = { PURCHASE_ORDER: "Purchase order", CUSTOMER_INVOICE: "Invoice", PACKING_SLIP: "Packing slip", REMITTANCE_ADVICE: "Remittance advice" }[d.documentType];
   const lines = [
     `${d.legalEntity.name} - ${title} ${d.number}`,
     ...(d.legalEntity.address ?? []),

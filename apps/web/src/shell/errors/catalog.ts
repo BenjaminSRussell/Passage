@@ -203,6 +203,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "AP-RUN-015": { message: "An open item changed after the proposal was approved.", action: "Create and approve a new proposal." },
   "AP-RUN-016": { message: "A payment run needs a signed-in user.", action: "Sign in again, then try again." },
   "AP-RUN-017": { message: "A payee isn't in the vendor master.", action: "Create the vendor, or remove the payment from the run." },
+  "AP-RUN-018": { message: "A remittance advice is available only once the payment run is complete.", action: "Complete the run, then open the remittance advice again." },
   "AP-STS-001": { message: "The bank rejected the payment.", action: "Check the bank's reason, correct the payment and send it again." },
   "AP-STS-002": { message: "The bank reported a payment we don't recognize.", action: "Contact support with the details below." },
   "PAY-0001": { message: "Some of the payment details aren't valid.", action: "Check the fields marked in the form and try again." },

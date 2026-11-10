@@ -17,6 +17,8 @@ const (
 	CodeRunItemChanged = "AP-RUN-015"
 	CodeRunIdentity    = "AP-RUN-016"
 	CodeRunPayee       = "AP-RUN-017"
+	// CodeRunNotCompleted refuses a remittance advice for a run that is not completed.
+	CodeRunNotCompleted = "AP-RUN-018"
 
 	RunRunning   = "RUNNING"
 	RunCompleted = "COMPLETED"

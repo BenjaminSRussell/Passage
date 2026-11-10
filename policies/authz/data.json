@@ -804,7 +804,8 @@
     "aging.reconcile": {"permissions": [{"resource": "/v1/payables/aging:reconcile", "methods": ["GET"]}]},
     "open-item.read": {"permissions": [
       {"resource": "/v1/payables/open-items", "methods": ["GET"]},
-      {"resource": "/v1/payables/open-items/*", "methods": ["GET"]}
+      {"resource": "/v1/payables/open-items/*", "methods": ["GET"]},
+      {"resource": "/v1/payables/vendor-blocks", "methods": ["GET"]}
     ]},
     "payment-proposal.write": {"permissions": [{"resource": "/v1/payables/payment-proposals", "methods": ["POST"]}, {"resource": "/v1/payables/payment-proposals/*:cancel", "methods": ["POST"]}]},
     "payment-proposal.read": {"permissions": [
@@ -823,7 +824,8 @@
     "opening-item.import.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/opening-batches", "methods": ["GET"]}]},
     "vendor-block.manage": {"permissions": [
       {"resource": "/v1/payables/vendors/*:block", "methods": ["POST"]},
-      {"resource": "/v1/payables/vendors/*:unblock", "methods": ["POST"]}
+      {"resource": "/v1/payables/vendors/*:unblock", "methods": ["POST"]},
+      {"resource": "/v1/payables/vendor-blocks", "methods": ["GET"]}
     ]},
     "payment-run.execute": {"permissions": [
       {"resource": "/v1/payables/payment-runs", "methods": ["POST"]},
@@ -835,7 +837,8 @@
       {"resource": "/v1/payables/payment-runs/*/file", "methods": ["GET"]}
     ]},
     "payment-run.read": {"permissions": [
-      {"resource": "/v1/payables/payment-runs/*", "methods": ["GET"]}
+      {"resource": "/v1/payables/payment-runs/*", "methods": ["GET"]},
+      {"resource": "/v1/payables/payment-runs/*/remittances/*", "methods": ["GET"]}
     ]},
     "party.write": {"permissions": [
       {"resource": "/v1/party/tax-registrations:validate", "methods": ["POST"]},

@@ -537,6 +537,15 @@ test_payment_run_duties_are_separate_from_proposal_duties if {
 	not allowed("payment-proposal.read", "GET", "/v1/payables/payment-runs/r1")
 }
 
+test_payment_run_read_opens_the_remittance_advice_only if {
+	allowed("payment-run.read", "GET", "/v1/payables/payment-runs/r1/remittances/v1")
+	not allowed("payment-run.read", "POST", "/v1/payables/payment-runs/r1/remittances/v1")
+	not allowed("payment-run.read", "GET", "/v1/payables/payment-runs/r1/remittances")
+	not allowed("payment-run.execute", "GET", "/v1/payables/payment-runs/r1/remittances/v1")
+	not allowed("payment-proposal.read", "GET", "/v1/payables/payment-runs/r1/remittances/v1")
+	not allowed("open-item.read", "GET", "/v1/payables/payment-runs/r1/remittances/v1")
+}
+
 test_payment_proposal_duties_are_separate if {
 	allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals")
 	not allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals/p1:approve")
@@ -566,6 +575,16 @@ test_payment_hold_and_vendor_block_duties_open_only_their_routes if {
 	not allowed("vendor-block.manage", "POST", "/v1/payables/open-items/i1:hold")
 	not allowed("payment-proposal.write", "POST", "/v1/payables/vendors/v1:block")
 	not allowed("payment-proposal.approve", "POST", "/v1/payables/open-items/i1:release")
+}
+
+test_vendor_block_list_is_read_by_blockers_and_open_item_readers if {
+	allowed("vendor-block.manage", "GET", "/v1/payables/vendor-blocks")
+	allowed("open-item.read", "GET", "/v1/payables/vendor-blocks")
+	not allowed("open-item.read", "POST", "/v1/payables/vendors/v1:block")
+	not allowed("open-item.read", "POST", "/v1/payables/vendors/v1:unblock")
+	not allowed("vendor-block.manage", "POST", "/v1/payables/vendor-blocks")
+	not allowed("payment-hold.manage", "GET", "/v1/payables/vendor-blocks")
+	not allowed("payment-proposal.read", "GET", "/v1/payables/vendor-blocks")
 }
 
 test_fulfillment_operation_rules if {

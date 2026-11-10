@@ -265,6 +265,29 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/vendor-blocks:
+    get:
+      operationId: listVendorBlocks
+      summary: List the vendors blocked for payment in a legal entity (issue #528)
+      x-passage-duty: vendor-block.manage
+      description: The vendors blocked for payment in one legal entity (legal_entity, defaulting to the caller's legal-entity scope; an entity outside the caller's scope is a 403), newest block first, at most 500. vendor narrows the list to one vendor, so an empty list means the vendor is not blocked. Readable with vendor-block.manage or open-item.read, so a clerk can see why a vendor's items are left out of proposals.
+      parameters:
+        - { name: legal_entity, in: query, schema: { type: string, format: uuid } }
+        - { name: vendor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The blocks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/VendorBlockEntry' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/payables/employee-vendors/{workerId}:
     put:
       operationId: registerEmployeeVendor
@@ -525,6 +548,30 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-runs/{id}/remittances/{vendorId}:
+    get:
+      operationId: getRemittanceAdvice
+      summary: Remittance advice of one vendor in a completed payment run (issue #528)
+      x-passage-duty: payment-run.read
+      description: Each payment the run made to the vendor and the invoices it settled, with the open amount, the cash discount taken, the tax withheld and the amount paid (open amount less discount and withholding; the lines of a payment add up to its amount). It carries no bank details, so it needs the read duty only. A run that is not COMPLETED is a 409 AP-RUN-018; a vendor the run did not pay is a 404. format=csv answers a CSV download (UTF-8 with a byte order mark, one row per invoice and a Total row per payment; a text cell that starts like a formula is prefixed with an apostrophe).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: vendorId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
+      responses:
+        '200':
+          description: The remittance advice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemittanceAdvice' }
+            text/csv:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /v1/payables/payment-runs/{id}/file:
     get:
@@ -836,6 +883,48 @@ components:
         legalEntityId: { type: string, format: uuid }
         blocked: { type: boolean }
         reason: { type: string, description: Present when blocked. }
+    VendorBlockEntry:
+      type: object
+      required: [vendorId, legalEntityId, reason, blockedAt]
+      properties:
+        vendorId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        reason: { type: string }
+        blockedBy: { type: string, description: The user who last blocked the vendor; absent for blocks made before blocks recorded it. }
+        blockedAt: { type: string, format: date-time, description: When the vendor was first blocked; blocking again replaces the reason but keeps this time. }
+    RemittanceAdvice:
+      type: object
+      required: [runId, proposalId, legalEntityId, vendorId, paymentDate, payments]
+      properties:
+        runId: { type: string, format: uuid }
+        proposalId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        paymentDate: { type: string, format: date, description: The run date of the proposal. }
+        completedAt: { type: string, format: date-time }
+        payments:
+          type: array
+          items:
+            type: object
+            required: [endToEndId, currency, paymentMethod, amount, lines]
+            properties:
+              endToEndId: { type: string, description: The payment reference the bank file carries. }
+              currency: { type: string }
+              paymentMethod: { type: string }
+              amount: { type: string }
+              lines:
+                type: array
+                items:
+                  type: object
+                  required: [openItemId, invoiceNumber, invoiceDate, openAmount, discount, withheld, paid]
+                  properties:
+                    openItemId: { type: string, format: uuid }
+                    invoiceNumber: { type: string }
+                    invoiceDate: { type: string, format: date }
+                    openAmount: { type: string }
+                    discount: { type: string }
+                    withheld: { type: string }
+                    paid: { type: string }
     PaymentProposalSummary:
       type: object
       required: [id, legalEntityId, runDate, runId, dueBy, legalEntityCurrency, paymentMethod, status, createdBy, createdAt, totalValued]
@@ -903,6 +992,7 @@ components:
         cancelledAt: { type: string, format: date-time }
         executedAt: { type: string, format: date-time }
         failedAt: { type: string, format: date-time }
+        paymentRunId: { type: string, format: uuid, description: The payment run started from the proposal (at most one); absent until a run starts, and kept once the proposal is EXECUTED or FAILED. }
         totalValued: { type: string, description: Sum of group valued amounts in legalEntityCurrency. }
         totalWithheld: { type: object, additionalProperties: { type: string }, description: Tax withheld per group currency; never summed across currencies. }
         excludedItems:
