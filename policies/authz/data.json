@@ -2053,6 +2053,7 @@
     ]},
     "budget.check": {"permissions": [
       {"resource": "/v1/budget/checks", "methods": ["POST"]},
+      {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:release", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:relieve", "methods": ["POST"]},
       {"resource": "/v1/budget/reservations/*:consume", "methods": ["POST"]}

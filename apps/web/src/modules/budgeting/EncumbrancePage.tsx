@@ -200,6 +200,7 @@ export function EncumbrancePage() {
             {enc.sourceDocumentId}
           </Detail>
           <Detail term="Source">{enc.sourceType}</Detail>
+          <Detail term="Stage">{enc.stage === "pre" ? "Pre-encumbrance from a requisition, waiting for its purchase order" : "Encumbrance"}</Detail>
           <Detail term="Line" mono>
             {enc.sourceLineId}
           </Detail>
@@ -228,7 +229,7 @@ export function EncumbrancePage() {
           {field("poUnitPrice", "PO unit price", "Relief is quantity × PO price, capped at the remaining reservation.")}
           {field("invoiceAmount", "Invoice amount")}
           <div className={styles.formActions}>
-            <Button type="submit" variant="primary" loading={busy} disabled={enc.status === "Relieved" || enc.status === "Released"}>
+            <Button type="submit" variant="primary" loading={busy} disabled={enc.status === "Relieved" || enc.status === "Released" || enc.stage === "pre"}>
               Relieve encumbrance
             </Button>
           </div>

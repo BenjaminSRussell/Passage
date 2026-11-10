@@ -66,7 +66,7 @@ export interface Balance {
 }
 
 export interface EncumbranceHistory {
-  type: "Reserve" | "Adjust" | "Relieve" | "Consume" | "Release";
+  type: "Reserve" | "Adjust" | "Relieve" | "Consume" | "Release" | "Convert";
   amount: string;
   documentId: string;
   at: string;
@@ -87,6 +87,8 @@ export interface Encumbrance {
   /** reserved - relieved - released. */
   remaining: string;
   status: EncumbranceStatus;
+  /** A requisition reserves a pre-encumbrance; the purchase order converts it into an encumbrance (FR-38.5). */
+  stage?: "pre" | "encumbrance";
   history: EncumbranceHistory[];
   createdAt: string;
 }
