@@ -272,3 +272,10 @@ the worker by badge, as registrations do, and the list holds nothing a `GET jobs
 | Auto-stop after more than 24 hours | A registration is at most 24 hours, so a start left open longer is auto-stopped at its start plus 24 hours and flagged `auto-stop-capped` for review, rather than at the new start. Confirm, or should the auto clock-out job (D2h) end it at the shift end? |
 | Point job-stops | The PRD has `started_at` and `stopped_at` on every registration. This build stops work with a closed `job-stop` that repeats the job's start; a `job-stop` without `stoppedAt` ends the open start without hours. Confirm the kiosk never needs the server to find the start. |
 | Reports after deletion | A consumer that reports on a deleted message gets SF-0120 and nothing is recorded. Confirm the consumers should treat that as final rather than have the outcome stored for audit. |
+
+## Tenant sweeper (#25, 25-1)
+
+`shopfloor sweep` (chart `sweeper.enabled`) now calls the andon sweep, OEE rollup, auto clock-out and process message
+retry on their schedules for the tenants in `SWEEP_TENANT_IDS`, so the "scheduler" handoffs in rows D2h, D4, D8a and the
+rollup above are built for the listed tenants. Still open: reading the tenant list from a tenant directory instead of
+configuration, the configurable andon thresholds and a run against a live cluster (tests use a fake store).

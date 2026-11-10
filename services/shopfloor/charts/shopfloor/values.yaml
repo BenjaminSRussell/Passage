@@ -50,3 +50,21 @@ consumer:
     limits:
       cpu: 500m
       memory: 256Mi
+
+# The tenant sweeper (#25, 25-1): `shopfloor sweep` runs the andon sweep (1m), OEE rollup (15m),
+# auto clock-out (1h) and process message retry (1m) for the listed tenants. "0" switches a job off.
+sweeper:
+  enabled: false
+  tenantIds: ""        # comma-separated tenant UUIDs
+  andonInterval: 1m
+  rollupInterval: 15m
+  autoClockInterval: 1h
+  retryInterval: 1m
+  autoClockAfterHours: 16
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi

@@ -604,6 +604,19 @@ export MIGRATE_ON_START=true   # dev only; stage/prod run migrations as an Argo 
 go run ./cmd/shopfloor
 ```
 
+### Tenant sweeper
+
+`go run ./cmd/shopfloor sweep` runs the scheduled jobs in process, so no external scheduler has to call them: the andon
+sweep (every minute, same as `andon:sweep`), the OEE rollup (every 15 minutes over the last four completed 15 minute
+buckets, same as `oee:rollup`), the auto clock-out (hourly, same as `registrations:auto-clock-out`) and the process
+message retry (every minute, same as `process-messages:retry-due`). Settings: `SWEEP_TENANT_IDS` (comma-separated tenant
+UUIDs, required), `SWEEP_ANDON_INTERVAL`, `SWEEP_ROLLUP_INTERVAL`, `SWEEP_AUTO_CLOCK_INTERVAL`, `SWEEP_RETRY_INTERVAL`
+(Go durations of at least 10s, `0` switches a job off) and `SWEEP_AUTO_CLOCK_AFTER_HOURS` (4 to 24, default 16). Each job
+runs per tenant under that tenant's row-level security as `system:shopfloor-sweeper` with its own 2 minute timeout; a
+failing tenant is logged and counted (`shopfloor_sweep_failures_total{job}`) and the others still run. The Helm chart
+starts it with `sweeper.enabled` and `sweeper.tenantIds`, as one replica. Listing tenants is by configuration; a tenant
+directory to read them from is not built.
+
 Ports: `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`).
 
 ## Test
