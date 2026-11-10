@@ -8,7 +8,7 @@ Passage is an open-architecture **ERP** (enterprise resource planning) system: t
 - The dev gateway is a local stand-in for the Envoy gateway ([#82](https://github.com/BenjaminSRussell/Passage/issues/82)); the Kubernetes gateway is not exercised locally.
 - Kafka runs but no service connects to it in this stack, so event-driven side effects (postings consumers, projections) do not happen.
 - Receiving runs in its fake mode (`PASSAGE_ALLOW_FAKES=1`): periods are not checked and posting accounts are defaults.
-- The Keycloak and Docker bring-up is documented but has not been run on CI; the Playwright login spec needs the live stack.
+- The browser path (Keycloak sign-in, then web app, then API through the dev gateway) has not been run live: there was no Docker where it was built and CI is blocked. The `tools/e2e` flow exercises the services directly. After `make dev`, run `apps/web/e2e/login.live.spec.ts` (`PASSAGE_E2E_LIVE_URL=http://localhost:5173`) to check it.
 
 See [roadmap/README.md](roadmap/README.md) for where each wave stands.
 

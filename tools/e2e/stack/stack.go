@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -144,12 +145,18 @@ func (s *Stack) psql(args ...string) error {
 	return nil
 }
 
-func (s *Stack) queryOne(service, query string) (string, error) {
+func (s *Stack) queryOne(service, tenantID, script string, vars map[string]string) (string, error) {
 	dbURL, err := s.databaseURL(service)
 	if err != nil {
 		return "", err
 	}
-	out, err := exec.Command("psql", dbURL, "-X", "-A", "-t", "-c", query).Output()
+	args := []string{dbURL, "-X", "-A", "-t", "-q", "-v", "ON_ERROR_STOP=1", "-v", "tenant=" + tenantID}
+	for k, v := range vars {
+		args = append(args, "-v", k+"="+v)
+	}
+	cmd := exec.Command("psql", args...)
+	cmd.Stdin = strings.NewReader("SELECT set_config('passage.tenant_id', :'tenant', false) \\gset\n" + script)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("psql %s: %w", service, err)
 	}
@@ -270,6 +277,7 @@ func (s *Stack) spawn(name, dir string, env []string, command string, args ...st
 	cmd := exec.Command(command, args...)
 	cmd.Dir, cmd.Env = dir, env
 	cmd.Stdout, cmd.Stderr = logFile, logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
 		return nil, fmt.Errorf("start %s: %w", name, err)
@@ -359,7 +367,7 @@ func (s *Stack) Stop() {
 	defer s.mu.Unlock()
 	for _, p := range s.procs {
 		if p.cmd.Process != nil {
-			_ = p.cmd.Process.Signal(os.Interrupt)
+			_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGINT)
 		}
 	}
 	for _, p := range s.procs {

@@ -23,7 +23,7 @@ var seedAccounts = []struct{ Number, Name, Type string }{
 }
 
 func (s *Stack) existingLedgerID() (string, error) {
-	return s.queryOne("ledger", fmt.Sprintf(`SELECT id FROM ledger WHERE tenant_id = '%s' AND code = '%s'`, Tenant, LedgerCode))
+	return s.queryOne("ledger", Tenant, "SELECT id FROM ledger WHERE tenant_id = :'tenant'::uuid AND code = :'code';\n", map[string]string{"code": LedgerCode})
 }
 
 // SeedLedger creates the ledger and chart accounts receiving posts to and returns the ledger id. It is safe to call
