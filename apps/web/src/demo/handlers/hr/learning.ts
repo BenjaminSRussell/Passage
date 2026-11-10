@@ -1,7 +1,7 @@
 // Skills, certifications, courses and questionnaires for the demo.
 import { reply, route } from "../../backend";
 import { at, day, uid } from "../../store";
-import { person } from "./people";
+import { person, personById } from "./people";
 
 const K_SKILL = 710;
 const K_COURSE = 711;
@@ -24,6 +24,16 @@ const SKILLS = [
 ];
 const skillRow = (s: (typeof SKILLS)[number]) => ({ id: uid(K_SKILL, s.n), code: s.code, name: s.name, scaleMax: s.scale, createdAt: at(s.added) });
 route("GET", "/api/v1/hr/skills", () => PAGE(SKILLS.map(skillRow)));
+// Floor staff (those with a shop-floor resource) hold three rated skills; office staff hold GD&T or none.
+route("GET", "/api/v1/hr/workers/{id}/skills", ({ params }) => {
+  const p = personById(params.id);
+  if (!p) return reply.problem(404, "HR-0404", "No worker with that id");
+  const n = Number(p.number.slice(2));
+  const held = p.resource ? [0, 1, 2].map((k) => SKILLS[(n + k * 3) % SKILLS.length]) : n % 2 === 0 ? [SKILLS[7]] : [];
+  return PAGE(
+    held.map((s, k) => ({ workerId: p.id, skillId: uid(K_SKILL, s.n), skillCode: s.code, skillName: s.name, scaleMax: s.scale, rating: Math.max(1, s.scale - ((n + k) % 3)), assessedOn: day(-30 - k * 45), updatedAt: at(-30 - k * 45) })),
+  );
+});
 
 // Courses and sessions.
 const OUTCOME = (code: string, rating: number) => {
@@ -95,6 +105,12 @@ const CERTS = [
   { n: 5, who: "W-0158", code: "FORKLIFT", name: "Powered industrial truck operator", issuer: "Cedar Ridge EHS", left: 52 },
   { n: 6, who: "W-0164", code: "LOTO-AUTH", name: "LOTO authorized employee", issuer: "Cedar Ridge EHS", left: 88 },
 ];
+route("GET", "/api/v1/hr/workers/{id}/certifications", ({ params, query }) => {
+  const p = personById(params.id);
+  if (!p) return reply.problem(404, "HR-0404", "No worker with that id");
+  const items = CERTS.filter((c) => c.who === p.number).map((c) => ({ id: uid(K_CERT, c.n), workerId: p.id, code: c.code, name: c.name, issuer: c.issuer, issuedOn: day(c.left - 365), expiresOn: day(c.left), valid: true }));
+  return { asOf: query.get("asOf") ?? day(0), items };
+});
 route("GET", "/api/v1/hr/certifications/expiring", ({ query }) => {
   const within = Number(query.get("withinDays") ?? "60");
   const asOf = query.get("asOf") ?? day(0);

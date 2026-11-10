@@ -2,10 +2,11 @@
 // the entity lookups that turn ids into names (shell/lookup/entities.ts). Imported after the area handlers, so an
 // area file that serves one of these paths more specifically wins.
 import type { InboxPage } from "../../shell/inbox/inbox";
-import { CUSTOMERS, ITEMS, LEGAL_ENTITY, SITES, VENDORS, WAREHOUSES, WORKERS, type Item, type Party } from "../company";
+import { CUSTOMERS, ITEMS, LEGAL_ENTITY, SITES, VENDORS, WAREHOUSES, type Item, type Party } from "../company";
 import { rankBySearch } from "../../shell/search/match";
 import { reply, route } from "../backend";
 import { at, day } from "../store";
+import { PEOPLE } from "./hr/people";
 
 const ORG = "/api/v1/org";
 
@@ -90,7 +91,8 @@ route("GET", "/api/v1/product/products/{id}", ({ params }) => {
   return i ? product(i) : reply.problem(404, "PRD-0404", "No product with that id");
 });
 
-const workers = WORKERS.map((w) => ({ id: w.id, personnelNumber: w.number, legalName: w.name, preferredName: w.name, status: "active" }));
+// Every person of the demo company (hr/people.ts holds the six floor workers of company.ts under the same ids, plus the office staff).
+const workers = PEOPLE.map((p) => ({ id: p.id, personnelNumber: p.number, legalName: p.name, preferredName: p.preferredName ?? p.name, status: "active" }));
 route("GET", "/api/v1/hr/workers", ({ query }) => ({ items: limit(workers.filter((w) => matches(query.get("q"), w.legalName, w.personnelNumber)), query) }));
 route("GET", "/api/v1/hr/workers/{id}", ({ params }) => workers.find((w) => w.id === params.id) ?? reply.problem(404, "HR-0404", "No worker with that id"));
 
