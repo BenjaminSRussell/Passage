@@ -1728,6 +1728,14 @@ test_reporting_balance_verification_routes if {
 	not allowed("reporting.audit.view", "POST", "/v1/reporting/balance-verifications")
 }
 
+test_org_demo_company_manage_reaches_only_the_demo_load if {
+	allowed("org.demo-company.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "GET", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/import")
+	not allowed("org.package.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.read", "POST", "/v1/org/demo-company")
+}
+
 test_org_package_manage_reaches_only_export_and_import if {
 	allowed("org.package.manage", "POST", "/v1/org/export")
 	allowed("org.package.manage", "POST", "/v1/org/import")
