@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Button, DataTable, FormField, PageHeader, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { getParty, type Party } from "./api/client";
+import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { getParty, searchRoles, type Party, type RoleHit } from "./api/client";
 import { isUuid, partyTypeLabel } from "./format";
 import styles from "./pages.module.css";
 import { ProblemAlert } from "./parts";
@@ -14,6 +14,61 @@ const columns: DataTableColumn<Party>[] = [
   { key: "partyType", header: "Type", render: (row) => partyTypeLabel[row.partyType] ?? row.partyType },
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
 ];
+
+const roleColumns: DataTableColumn<RoleHit>[] = [
+  { key: "accountNumber", header: "Account", mono: true },
+  { key: "name", header: "Name" },
+  { key: "role", header: "Role", render: (row) => <Badge tone={row.role === "customer" ? "info" : "neutral"}>{row.role === "customer" ? "Customer" : "Vendor"}</Badge> },
+];
+
+/** Customers and vendors you can browse and filter without knowing a party first. */
+function Browse() {
+  const navigate = useNavigate();
+  const [kind, setKind] = useState<"all" | "customer" | "vendor">("all");
+  const [draft, setDraft] = useState("");
+  const [q, setQ] = useState("");
+  const state = useLoad((signal) => searchRoles(kind, q, signal), `${kind}|${q}`);
+  return (
+    <div className={styles.stack}>
+      <form
+        className={styles.toolbar}
+        role="search"
+        aria-label="Browse customers and vendors"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setQ(draft.trim());
+        }}
+      >
+        <FormField id="browse-kind" label="Show" optional>
+          {(control) => (
+            <Select {...control} value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
+              <option value="all">Customers and vendors</option>
+              <option value="customer">Customers</option>
+              <option value="vendor">Vendors</option>
+            </Select>
+          )}
+        </FormField>
+        <FormField id="browse-q" label="Name or number" optional>
+          {(control) => <Input {...control} type="search" value={draft} onChange={(event) => setDraft(event.target.value)} />}
+        </FormField>
+        <Button type="submit">Filter</Button>
+      </form>
+      {state.error && !state.data ? (
+        <ProblemAlert problem={state.error} title="Could not load customers and vendors" retry={state.reload} />
+      ) : (
+        <DataTable
+          label="Customers and vendors"
+          columns={roleColumns}
+          rows={state.data ?? []}
+          getRowKey={(row) => `${row.role}-${row.id}`}
+          loading={state.loading}
+          empty={{ title: "Nobody matches", description: "Check the spelling, or search by the account number." }}
+          onRowOpen={(row) => navigate(`/party/${row.partyId}`)}
+        />
+      )}
+    </div>
+  );
+}
 
 function Result({ id }: { id: string }) {
   const navigate = useNavigate();
@@ -75,11 +130,7 @@ export function SearchPage() {
       </form>
       {id && !isUuid(id) ? <Alert tone="warning">The id in the address is not a UUID.</Alert> : null}
       {isUuid(id) ? <Result id={id} /> : null}
-      {!id ? (
-        <p className={styles.note}>
-          Choose a party to load its record.
-        </p>
-      ) : null}
+      {!id ? <Browse /> : null}
     </div>
   );
 }

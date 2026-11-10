@@ -16,6 +16,7 @@ import { BASIS_LABELS, CONTRACT_STATUS_LABELS, DAY, METHOD_LABELS, PERIOD, SCHED
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 function Detail({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -138,7 +139,7 @@ export function RevenueContractDetailPage() {
   const currency = contract.currency;
   const obligationColumns: DataTableColumn<ContractObligation>[] = [
     { key: "lineNo", header: "Line", mono: true, align: "end" },
-    { key: "productId", header: "Product", mono: true },
+    { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
     { key: "method", header: "Recognition", render: (o) => METHOD_LABELS[o.method] ?? o.method },
     { key: "sspSource", header: "SSP source", render: (o) => SSP_SOURCE_LABELS[o.sspSource] ?? o.sspSource },
     { key: "ssp", header: "SSP", mono: true, align: "end", render: (o) => `${o.ssp} ${currency}` },

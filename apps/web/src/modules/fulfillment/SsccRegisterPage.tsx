@@ -4,10 +4,11 @@ import { Link } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { ssccRegister, type SsccRow } from "./api/client";
 import { ContainerStatusBadge } from "./badges";
-import { formatDate, formatDateTime, shortId, UUID } from "./format";
+import { formatDate, formatDateTime, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** Rows per page of the register. */
 export const SSCC_PAGE = 100;
@@ -22,7 +23,7 @@ const columns: DataTableColumn<SsccRow>[] = [
     mono: true,
     render: (row) => <Link to={`/fulfillment/shipments/${row.shipmentId}`}>{row.shipmentNumber}</Link>,
   },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "issuedAt", header: "Issued", render: (row) => formatDateTime(row.issuedAt) },
   { key: "noReuseUntil", header: "No reuse until", render: (row) => formatDate(row.noReuseUntil) },
 ];

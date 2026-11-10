@@ -32,10 +32,10 @@ export function CapacityBlocksPage() {
     const [rows, resources] = await Promise.all([listCapacityBlocks(resourceId, signal), listResources(signal)]);
     return { rows, resources };
   }, resourceId);
-  const codes: Record<string, string> = Object.fromEntries((state.data?.resources ?? []).map((r) => [r.id, r.code]));
+  const codes: Record<string, string> = Object.fromEntries((state.data?.resources ?? []).map((r) => [r.id, `${r.name} (${r.code})`]));
 
   const columns: DataTableColumn<CapacityBlock>[] = [
-    { key: "resourceId", header: "Resource", mono: true, render: (b) => codes[b.resourceId] ?? shortId(b.resourceId) },
+    { key: "resourceId", header: "Resource", render: (b) => codes[b.resourceId] ?? shortId(b.resourceId) },
     { key: "code", header: "Code", mono: true },
     { key: "window", header: "When", render: (b) => describeWindow(b) },
     { key: "condition", header: "Condition", mono: true, render: (b) => describeCondition(b.condition) },

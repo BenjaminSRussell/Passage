@@ -1,0 +1,12 @@
+/* Keeps the id-copy disclosure from adding a marker triangle and wrapping inside table cells and summaries. */
+.named summary {
+  list-style: none;
+}
+
+.named summary::-webkit-details-marker {
+  display: none;
+}
+
+.named {
+  display: inline-block;
+}

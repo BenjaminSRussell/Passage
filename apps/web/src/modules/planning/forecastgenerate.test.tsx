@@ -93,7 +93,7 @@ describe("Statistical forecast card (FR-22.9)", () => {
     const form = await fill({ item: ITEM, site: SITE, history: "10 12 14 16", first: "2026-12-01" });
     fireEvent.click(within(form).getByRole("button", { name: "Generate forecast" }));
 
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("11 statistical cells written, 1 left as they were"));
+    await waitFor(() => expect(screen.getAllByRole("status").map((e) => e.textContent).join(" ")).toContain("11 statistical cells written, 1 left as they were"));
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
     expect(post[0]).toBe("/api/v1/planning/forecasts/BASE:generate");
     expect((post[1]?.headers as Record<string, string>)["If-Match"]).toBe('"3"');

@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -19,6 +19,7 @@ import { dash, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** Changing delivery terms needs this duty (enforced by the service; the route rows are seeded under #313). */
 export const DUTY_DELIVERY_TERMS_MAINTAIN = "sales.parameter.maintain";
@@ -109,7 +110,7 @@ function WeekdayFields({ values, errors, readOnly, onChange }: WeekdayFieldsProp
 
 const columns: DataTableColumn<DeliveryTerms>[] = [
   { key: "customerId", header: "Customer", mono: true, render: (t) => <Link to={`/sales/delivery-terms/${t.id}`}>{shortId(t.customerId)}</Link> },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (t) => shortId(t.legalEntityId) },
+  { key: "legalEntityId", header: "Legal entity", render: (t) => <EntityName entity="legalEntity" id={t.legalEntityId} /> },
   { key: "transportDays", header: "Transport days", align: "end" },
   { key: "receivingDays", header: "Receives", render: (t) => weekdayNames(t.receivingDays) },
   { key: "updatedAt", header: "Changed", render: (t) => formatDateTime(t.updatedAt) },
@@ -301,19 +302,18 @@ export function DeliveryTermsDetailPage() {
     }
   }
 
-  const facts: [string, string][] = [
-    ["Customer", terms.customerId],
-    ["Legal entity", terms.legalEntityId],
+  const facts: [string, ReactNode][] = [
+    ["Customer", <EntityName entity="customer" id={terms.customerId} />],
+    ["Legal entity", <EntityName entity="legalEntity" id={terms.legalEntityId} />],
     ["Transport days", String(terms.transportDays)],
     ["Receives", weekdayNames(terms.receivingDays) || dash],
     ["Changed", `${formatDateTime(terms.updatedAt)} by ${terms.updatedBy}`],
   ];
-  const mono = new Set(["Customer", "Legal entity"]);
 
   return (
     <div className={styles.stack}>
       <PageHeader
-        title={`Delivery terms of customer ${shortId(terms.customerId)}`}
+        title="Delivery terms"
         actions={
           <Link className={buttonClassName("ghost")} to="/sales/delivery-terms">
             Back to delivery terms
@@ -325,7 +325,7 @@ export function DeliveryTermsDetailPage() {
           {facts.map(([term, value]) => (
             <div key={term} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
-              <dd className={mono.has(term) ? `${styles.value} ${styles.mono}` : styles.value}>{value}</dd>
+              <dd className={styles.value}>{value}</dd>
             </div>
           ))}
         </dl>

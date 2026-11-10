@@ -19,6 +19,7 @@ import { formatDateTime, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -96,11 +97,11 @@ export function ProductListingsPage() {
 
   const columns: DataTableColumn<ProductListing>[] = [
     { key: "listingType", header: "Type", render: (r) => <Badge tone={r.listingType === "DENY" ? "danger" : "success"}>{sentence(r.listingType)}</Badge> },
-    { key: "productId", header: "Product", mono: true },
+    { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
     { key: "scopeType", header: "Applies to", render: (r) => sentence(r.scopeType) },
     { key: "scopeKey", header: "Customer or group", mono: true },
     { key: "validity", header: "Valid", render: validity },
-    { key: "legalEntityId", header: "Legal entity", mono: true, render: (r) => shortId(r.legalEntityId) },
+    { key: "legalEntityId", header: "Legal entity", render: (r) => <EntityName entity="legalEntity" id={r.legalEntityId} /> },
     { key: "createdAt", header: "Added", render: (r) => `${formatDateTime(r.createdAt)} by ${r.createdBy}` },
     {
       key: "actions",

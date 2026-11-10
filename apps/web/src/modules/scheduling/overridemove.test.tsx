@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GanttBar, Resource } from "./api/client";
 import { dayStart, today } from "./format";
 import { jobsOf } from "./gantt";
+import { resetOrderCache } from "../mfg-shared/orders";
 import scheduling from "./module";
 
 const MIX = "3f1c0000-0000-4000-8000-000000000001";
@@ -28,6 +29,7 @@ const bars = [bar(JOB1, 10, at(8), at(9)), bar(JOB2, 20, at(9), at(11), { blockB
 
 beforeEach(() => {
   moves = [];
+  resetOrderCache();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
@@ -37,6 +39,7 @@ beforeEach(() => {
       const reply =
         (url.pathname.endsWith("/resources") ? { status: 200, body: { items: resources } } : undefined) ??
         (url.pathname.endsWith("/gantt") ? { status: 200, body: { items: bars } } : undefined) ??
+        (url.pathname.endsWith(`/production/orders/${ORDER}`) ? { status: 200, body: { id: ORDER, orderNumber: "MO-1001", productId: "" } } : undefined) ??
         handler(url, body) ?? { status: 404, body: { code: "TEST-404", detail: `no fake for ${url.pathname}` } };
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
     }),
@@ -91,8 +94,8 @@ describe("Override scheduling constraints", () => {
     };
     renderWorkspace();
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     expect(await screen.findByText("This move breaks a constraint and cannot be saved")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Confirm move/ })).not.toBeInTheDocument();
@@ -112,8 +115,8 @@ describe("Override scheduling constraints", () => {
         : undefined;
     renderWorkspace();
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     expect(await screen.findByText("This move breaks a constraint and cannot be saved")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Preview with override" })).not.toBeInTheDocument();
@@ -124,8 +127,8 @@ describe("Override scheduling constraints", () => {
     handler = (url, body) => (url.pathname.endsWith(":move") && body ? { status: 200, body: body.overrideConstraints ? booked : refused } : undefined);
     renderWorkspace();
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     fireEvent.click(await screen.findByRole("button", { name: "Preview with override" }));
     expect(await screen.findByText(/Even with the override this move cannot be saved/)).toBeInTheDocument();
@@ -142,8 +145,8 @@ describe("Override scheduling constraints", () => {
     };
     renderWorkspace();
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     fireEvent.click(await screen.findByRole("button", { name: "Preview with override" }));
     expect(await screen.findByText(/needs the scheduling\.constraints\.override duty/)).toBeInTheDocument();

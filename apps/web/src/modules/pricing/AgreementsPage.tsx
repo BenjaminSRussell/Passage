@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { EntityName } from "../../shell/lookup/EntityName";
 import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { CONDITION_TYPES, describeProblem, exportConditionRecords, listConditionRecords, RECORD_STATUSES, type ConditionRecord, type ConditionType, type Problem, type RecordStatus, type RecordsExport } from "./api/client";
 import { describeCustomer, describePercent, describeProduct, TYPE_LABELS } from "./format";
@@ -9,8 +10,8 @@ import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ConditionRecord>[] = [
   { key: "type", header: "Type", render: (row) => TYPE_LABELS[row.type] },
-  { key: "customerKey", header: "Customer", render: describeCustomer },
-  { key: "productKey", header: "Product", mono: true, render: describeProduct },
+  { key: "customerKey", header: "Customer", render: (row) => (row.customerKind === "customer" ? <EntityName entity="customer" id={row.customerKey} fallback={row.customerKey} /> : describeCustomer(row)) },
+  { key: "productKey", header: "Product", render: (row) => (row.productKind === "product" ? <EntityName entity="product" id={row.productKey} fallback={row.productKey} /> : describeProduct(row)) },
   { key: "currency", header: "Currency", mono: true },
   { key: "fromQuantity", header: "From qty", mono: true, align: "end" },
   { key: "amount", header: "Amount", mono: true, align: "end" },

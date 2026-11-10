@@ -4,6 +4,7 @@ import { deletePlannedOrder, isOpen, updatePlannedOrder, type PlannedOrder, type
 import { describeError, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -186,8 +187,8 @@ export function MaintainOrderCard({ order, onChanged, onDeleted, onReload }: Pro
             {(a11y) => <Input {...a11y} type="date" value={draft.deliveryDate} onChange={(e) => set("deliveryDate")(e.target.value)} />}
           </FormField>
           {order.orderType === "purchase" ? (
-            <FormField id="order-vendor" label="Vendor" hint="Vendor id (UUID) for the planned purchase." optional error={errors.vendorId}>
-              {(a11y) => <Input {...a11y} value={draft.vendorId} onChange={(e) => set("vendorId")(e.target.value)} />}
+            <FormField id="order-vendor" label="Vendor" optional error={errors.vendorId}>
+              {(a11y) => <EntityLookup {...a11y} entity="vendor" value={draft.vendorId} onChange={(e) => set("vendorId")(e.target.value)} />}
             </FormField>
           ) : null}
           {errors.form ? (

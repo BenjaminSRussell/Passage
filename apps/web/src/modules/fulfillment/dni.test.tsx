@@ -47,7 +47,7 @@ describe("delivered not invoiced", () => {
     const table = await findTable({ name: "Delivered not invoiced as of 2026-10-21" });
     const row = (await within(table).findByText("PS-0000003")).closest("tr");
     const cells = Array.from(row?.querySelectorAll("td, th") ?? []).map((cell) => cell.textContent);
-    expect(cells).toEqual(["PS-0000003", "2026-10-18", "3", "0195f0a0", "0195f0a0", "125.00 USD"]);
+    expect(cells).toEqual(["PS-0000003", "2026-10-18", "3", "Not available⋯Copy id", "Sales order", "125.00 USD"]);
     const totals = screen.getByRole("list", { name: "Delivered not invoiced totals" });
     expect(totals.textContent).toContain("Open on 1405 (USD)");
     expect(totals.textContent).toContain("250.00 USD");

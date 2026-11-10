@@ -1,8 +1,8 @@
 // Engineering service (/api/v1/engineering) for the demo: bill of material versions built from company.ts.
-// Product ids are item numbers because the engineering screens show them raw.
-import type { BomLine, BomVersion, UsedBy } from "../../../modules/engineering/api/client";
+// Products, sites and resources carry the real ids of company.ts; the screens turn them into names.
+import type { BomLine, BomVersion, Resource, UsedBy } from "../../../modules/engineering/api/client";
 import { reply, route } from "../../backend";
-import { BOMS, PLANT, itemByNumber } from "../../company";
+import { BOMS, PLANT, RESOURCES, itemByNumber } from "../../company";
 import { day, dec, table, uid } from "../../store";
 
 const BASE = "/api/v1/engineering";
@@ -13,7 +13,7 @@ function lines(product: string, tweak: (l: { component: string; qty: number }) =
     const raw = itemByNumber(l.component).kind === "raw";
     return {
       lineNo: (i + 1) * 10,
-      componentProductId: l.component,
+      componentProductId: itemByNumber(l.component).id,
       quantity: dec(l.qty, 4),
       lineType: "item",
       scrapConst: "0.0000",
@@ -28,8 +28,8 @@ function version(product: string, status: string, from: number, to: number | und
   seq += 1;
   return {
     id: uid(KIND_BOM, seq),
-    productId: product,
-    siteId: PLANT.code,
+    productId: itemByNumber(product).id,
+    siteId: PLANT.id,
     effectiveFrom: day(from),
     effectiveTo: to === undefined ? undefined : day(to),
     fromQty: "1",
@@ -76,7 +76,14 @@ route("GET", `${BASE}/bom-versions`, (req) => {
 });
 
 route("GET", `${BASE}/boms:where-used`, (req) => {
-  const component = req.query.get("component") ?? "";
+  const wanted = req.query.get("component") ?? "";
+  const component = (() => {
+    try {
+      return itemByNumber(wanted).id;
+    } catch {
+      return wanted;
+    }
+  })();
   const items: UsedBy[] = boms
     .all()
     .filter((b) => b.status === "active" && (b.lines ?? []).some((l) => l.componentProductId === component))
@@ -100,3 +107,21 @@ route("POST", `${BASE}/bom-versions/{id}:cancel`, (req) => {
   const b = boms.get(req.params.id);
   return b ? reply.ok(boms.update(b.id, { status: "cancelled" })) : reply.problem(404, "ENG-BOM-NOTFOUND", "This BOM version does not exist.");
 });
+
+// The resource master, which production forms and screens read to show work center names.
+const resourceRows: Resource[] = RESOURCES.map((r) => ({
+  id: r.id,
+  code: r.code,
+  name: r.name,
+  type: r.code === "ASM-02" ? "machine" : "work-center",
+  siteId: PLANT.id,
+  efficiencyPct: r.code === "BAL-01" ? "92" : "100",
+  capacityPerDayH: String(r.hoursPerDay),
+  exclusive: true,
+}));
+route("GET", `${BASE}/resources`, (req) => {
+  const q = (req.query.get("q") ?? "").toLowerCase();
+  const rows = resourceRows.filter((r) => !q || r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q));
+  return { items: rows.slice(0, Number(req.query.get("limit") ?? 100)) };
+});
+route("GET", `${BASE}/resources/{id}`, (req) => resourceRows.find((r) => r.id === req.params.id || r.code === req.params.id) ?? reply.problem(404, "ENG-RES-NOTFOUND", "This resource does not exist."));

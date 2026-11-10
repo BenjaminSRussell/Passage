@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import type { GanttBar, Network, Operation, Resource, Run, RunKpis } from "./api/client";
 import { dayStart, today } from "./format";
+import { resetOrderCache } from "../mfg-shared/orders";
+import { resetResourceCache } from "../mfg-shared/resources";
 import scheduling from "./module";
 import { parseIds, validateRun } from "./NewRunPage";
 import { emptyOperation, parseAttributes, validateOperation } from "./NewOperationPage";
@@ -37,12 +39,22 @@ function json(status: number, body: unknown): Reply {
 
 beforeEach(() => {
   calls = [];
+  resetOrderCache();
+  resetResourceCache();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
-      calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
-      const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+      // The order numbers and engineering resources the screens look up are not what these tests are about.
+      const lookup = url.pathname.endsWith("/production/orders")
+        ? json(200, { items: [{ id: ORDER, orderNumber: "MO-1001" }] })
+        : url.pathname.endsWith(`/production/orders/${ORDER}`)
+          ? json(200, { id: ORDER, orderNumber: "MO-1001", productId: "" })
+          : url.pathname.endsWith("/engineering/resources")
+            ? json(200, { items: [] })
+            : undefined;
+      if (!lookup) calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      const reply = lookup ?? handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
     }),
   );
@@ -62,6 +74,12 @@ function renderAt(path: string) {
       </Routes>
     </MemoryRouter>,
   );
+}
+
+async function pickOrder() {
+  const select = screen.getByLabelText("Production order");
+  await waitFor(() => expect(within(select).getByRole("option", { name: "MO-1001" })).toBeInTheDocument());
+  fireEvent.change(select, { target: { value: ORDER } });
 }
 
 function header(call: { init: RequestInit }, name: string): string | null {
@@ -201,7 +219,7 @@ describe("Scheduling workspace", () => {
     renderAt("/scheduling");
     const table = await findTable({ name: "Jobs in window" });
     await waitFor(() => expect(within(table).getAllByRole("button", { name: /^Move order/ })).toHaveLength(2));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.change(screen.getByLabelText("New start (UTC)"), { target: { value: at(12).slice(0, 16) } });
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
 
@@ -227,8 +245,8 @@ describe("Scheduling workspace", () => {
     );
     const { container } = renderAt("/scheduling");
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Move order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Move order MO-1001 operation 10" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview move" }));
     expect(await screen.findByText("This move breaks a constraint and cannot be saved")).toBeInTheDocument();
     expect(screen.getByRole("listitem")).toHaveTextContent("overlaps a booked job on the resource (SCHED-0001)");
@@ -244,15 +262,15 @@ describe("Scheduling workspace", () => {
     });
     renderAt("/scheduling");
     const table = await findTable({ name: "Jobs in window" });
-    await waitFor(() => within(table).getByRole("button", { name: "Firm order b1000000 operation 10" }));
-    fireEvent.click(within(table).getByRole("button", { name: "Firm order b1000000 operation 10" }));
+    await waitFor(() => within(table).getByRole("button", { name: "Firm order MO-1001 operation 10" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Firm order MO-1001 operation 10" }));
     expect(await screen.findByText(/Operation 10 is firmed/)).toBeInTheDocument();
     const firm = calls.find((c) => c.url.pathname.endsWith(`/jobs/${JOB1}:firm`))!;
     expect(firm.body).toEqual({ firmed: true });
     expect(header(firm, "Idempotency-Key")).toBeTruthy();
 
     handler = workspace((url) => (url.pathname.endsWith(":firm") ? json(404, { code: "SCHED-0105", detail: "scheduled job not found" }) : undefined));
-    fireEvent.click(within(table).getByRole("button", { name: "Unfirm order b1000000 operation 20" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Unfirm order MO-1001 operation 20" }));
     expect(await screen.findByText("scheduled job not found")).toBeInTheDocument();
   });
 
@@ -319,7 +337,7 @@ describe("Schedule runs", () => {
     expect(within(table).getByText("Forward")).toBeInTheDocument();
     expect(within(table).getByText("Backward")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.click(within(table).getByRole("button", { name: "7e000000" }));
+    fireEvent.click(within(table).getAllByRole("button")[0]);
     expect(await screen.findByRole("heading", { name: "Schedule run" })).toBeInTheDocument();
     expect(await screen.findByText(/no candidate resource has open capacity/)).toBeInTheDocument();
     expect(screen.getByText("Heuristic")).toBeInTheDocument();
@@ -573,7 +591,7 @@ describe("Operations", () => {
     const { container } = renderAt("/scheduling/operations/new");
     const fill = await screen.findByLabelText("FILL-1");
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.change(screen.getByLabelText("Order id"), { target: { value: ORDER.toUpperCase() } });
+    await pickOrder();
     fireEvent.change(screen.getByLabelText("Minutes"), { target: { value: "90" } });
     fireEvent.change(screen.getByLabelText("Due (UTC)"), { target: { value: "2026-11-02T17:00" } });
     fireEvent.click(fill);
@@ -595,7 +613,7 @@ describe("Operations", () => {
     const { container } = renderAt("/scheduling/operations/new");
     fireEvent.click(await screen.findByLabelText("FILL-1"));
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.change(screen.getByLabelText("Order id"), { target: { value: ORDER } });
+    await pickOrder();
     fireEvent.change(screen.getByLabelText("Operation number"), { target: { value: "20" } });
     fireEvent.change(screen.getByLabelText("Minutes"), { target: { value: "60" } });
     fireEvent.change(screen.getByLabelText(/^Setup group/), { target: { value: "WHITE" } });
@@ -632,7 +650,7 @@ describe("Operations", () => {
     // A candidate cannot be picked as its own secondary.
     expect(screen.getByLabelText("FILL-1 (candidate)")).toBeDisabled();
     fireEvent.click(document.getElementById(`operation-secondary-${MIX}`)!);
-    fireEvent.change(screen.getByLabelText("Order id"), { target: { value: ORDER } });
+    await pickOrder();
     fireEvent.change(screen.getByLabelText("Minutes"), { target: { value: "60" } });
     fireEvent.click(screen.getByRole("button", { name: "Add operation" }));
     expect(await findTable({ name: "Operations" })).toBeInTheDocument();
@@ -668,7 +686,7 @@ describe("Operations", () => {
     };
     renderAt("/scheduling/operations/new");
     fireEvent.click(await screen.findByLabelText("MIX-1"));
-    fireEvent.change(screen.getByLabelText("Order id"), { target: { value: ORDER } });
+    await pickOrder();
     fireEvent.change(screen.getByLabelText("Minutes"), { target: { value: "60" } });
     fireEvent.change(screen.getByLabelText(/^Resource network/), { target: { value: NETWORK } });
     fireEvent.click(screen.getByRole("button", { name: "Add operation" }));

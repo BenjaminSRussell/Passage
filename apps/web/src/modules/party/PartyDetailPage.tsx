@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
+import { Named } from "../purchasing/Named";
 import { Alert, Badge, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { getParty, listPartyVendors, type Vendor } from "./api/client";
 import { displayOrDash, DUTY_WRITE, formatDateTime, partyTypeLabel } from "./format";
@@ -12,7 +13,7 @@ import { useLoad } from "./useLoad";
 
 const vendorColumns: DataTableColumn<Vendor>[] = [
   { key: "accountNumber", header: "Account", mono: true },
-  { key: "legalEntityId", header: "Legal entity", mono: true },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <Named entity="legalEntity" id={row.legalEntityId} /> },
   { key: "currencyCode", header: "Currency", mono: true },
   {
     key: "blocked",
@@ -102,13 +103,13 @@ export function PartyDetailPage() {
         }
       />
       {party.redirected ? (
-        <Alert tone="info" title="This id was merged">
-          The id you opened ({party.requestedId}) now points at surviving party {party.partyNumber}. Merge is not offered here.
+        <Alert tone="info" title="This party was merged">
+          The record you opened now points at surviving party {party.partyNumber}. Merge is not offered here.
         </Alert>
       ) : null}
       {party.status === "merged" && party.mergedIntoId ? (
         <Alert tone="warning" title="Merged party">
-          This record was merged into <Link to={`/party/${party.mergedIntoId}`}>{party.mergedIntoId}</Link>.
+          This record was merged into <Link to={`/party/${party.mergedIntoId}`}>the surviving party</Link>.
         </Alert>
       ) : null}
       <Card>
@@ -119,9 +120,6 @@ export function PartyDetailPage() {
           <Entry term="Type">{partyTypeLabel[party.partyType] ?? party.partyType}</Entry>
           <Entry term="Status">
             <StatusPill status={party.status} />
-          </Entry>
-          <Entry term="Id" mono>
-            {party.id}
           </Entry>
           {person ? (
             <>

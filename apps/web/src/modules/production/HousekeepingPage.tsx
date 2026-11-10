@@ -13,10 +13,11 @@ import {
 import { dash, statusLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const candidateColumns: DataTableColumn<HousekeepingOrder>[] = [
   { key: "orderNumber", header: "Order", mono: true },
-  { key: "siteId", header: "Site", mono: true },
+  { key: "siteId", header: "Site", render: (row) => (row.siteId === "All" ? "All sites" : <EntityName entity="site" id={row.siteId} fallback={row.siteId} />) },
   { key: "status", header: "Status", render: (row) => statusLabel[row.status] },
   { key: "quantity", header: "Quantity", align: "end" },
   { key: "qtyReportedFinished", header: "Reported finished", align: "end" },

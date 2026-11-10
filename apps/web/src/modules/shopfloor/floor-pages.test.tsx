@@ -4,6 +4,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import type { Andon, Downtime, Machine, OeeBucket, PayExport } from "./api/client";
+import { resetOrderCache } from "../mfg-shared/orders";
+import { resetResourceCache } from "../mfg-shared/resources";
 import shopfloor from "./module";
 import { validateMachine } from "./NewMachinePage";
 import { dayWindow } from "./OeePage";
@@ -21,19 +23,30 @@ function pageViolations(container: HTMLElement) {
   return checkAxeAA(container).filter((v) => !shellRules.has(v.id));
 }
 
+const isExtra = (url: URL) => url.pathname.endsWith("/engineering/resources") || url.pathname.includes("/production/orders");
+function extra(url: URL): Reply | undefined {
+  if (url.pathname.endsWith("/engineering/resources")) return { status: 200, body: { items: [{ id: RESOURCE, code: "MIX-1", name: "Mixer" }] } };
+  if (url.pathname.endsWith("/production/orders")) return { status: 200, body: { items: [{ id: ORDER, orderNumber: "MO-77" }] } };
+  if (url.pathname.endsWith(`/production/orders/${ORDER}`)) return { status: 200, body: { id: ORDER, orderNumber: "MO-77", productId: "" } };
+  return undefined;
+}
+const ORDER = "0195f0a0-0000-7000-8000-000000000040";
+
 let handler: Handler;
 let calls: { method: string; url: URL; init: RequestInit; body: unknown }[];
 const json = (status: number, body: unknown): Reply => ({ status, body });
 
 beforeEach(() => {
   calls = [];
+  resetResourceCache();
+  resetOrderCache();
   handler = () => undefined;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
-      calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
-      const reply = handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+      if (!isExtra(url)) calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      const reply = handler(url, init) ?? extra(url) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
       return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
     }),
   );
@@ -58,6 +71,11 @@ function renderAt(path: string) {
 const header = (call: { init: RequestInit }, name: string) => new Headers(call.init.headers).get(name);
 const posts = (suffix: string) => calls.filter((c) => c.method === "POST" && c.url.pathname.endsWith(suffix));
 const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+const pick = async (label: string, value: string) => {
+  const select = screen.getByLabelText(label);
+  await waitFor(() => expect(select.querySelector(`option[value="${value}"]`)).not.toBeNull());
+  fireEvent.change(select, { target: { value } });
+};
 
 const machine: Machine = {
   id: "0195f0a0-0000-7000-8000-000000000020",
@@ -125,7 +143,7 @@ describe("Machines", () => {
     const { container } = renderAt("/shopfloor/machines/new");
     expect(pageViolations(container)).toEqual([]);
     fill("Machine code", "M-101");
-    fill("Resource id", RESOURCE);
+    await pick("Work center", RESOURCE);
     fill("Ideal cycle time (seconds)", "60");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));
     expect(await findTable({ name: "Machines" })).toBeInTheDocument();
@@ -137,12 +155,12 @@ describe("Machines", () => {
   it("puts an already registered code on the field and sends nothing for an invalid form", async () => {
     renderAt("/shopfloor/machines/new");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));
-    expect(await screen.findByText("Enter the resource id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the work center.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
 
     handler = () => json(409, { code: "SF-0109", detail: "machine code or resource is already registered" });
     fill("Machine code", "M-101");
-    fill("Resource id", RESOURCE);
+    await pick("Work center", RESOURCE);
     fill("Ideal cycle time (seconds)", "60");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));
     expect(await screen.findByText("This machine code or resource is already registered.")).toBeInTheDocument();

@@ -5,6 +5,7 @@ import { dash, formatDateTime, pickFields, qty, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** True when the order's decision released quantity, so a CoA can be issued (FR-33.9). */
 export function coaReleasable(order: OrderView): boolean {
@@ -55,7 +56,7 @@ export function specification(line: CoALine): string {
 const revisionColumns = (onView: (doc: CoA) => void, selected?: string): DataTableColumn<CoA>[] => [
   { key: "revision", header: "Revision", align: "end", render: (row) => String(row.revision) },
   { key: "shipmentId", header: "Shipment", mono: true, render: (row) => (row.shipmentId ? shortId(row.shipmentId) : "Batch certificate") },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => (row.customerId ? shortId(row.customerId) : dash) },
+  { key: "customerId", header: "Customer", render: (row) => (row.customerId ? <EntityName entity="customer" id={row.customerId} fallback={row.customerId} /> : dash) },
   { key: "supersedes", header: "Supersedes", mono: true, render: (row) => (row.supersedes ? shortId(row.supersedes) : dash) },
   { key: "reason", header: "Reason", render: (row) => row.reason || dash },
   { key: "signedBy", header: "Signed by", render: (row) => row.signedBy || dash },

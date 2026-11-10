@@ -18,6 +18,7 @@ import {
 import { proposalLabel, splitAllocationLabel, yesNo } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const percentPattern = /^\d{1,4}(\.\d{1,2})?$/;
@@ -71,7 +72,7 @@ export function validateParameters(p: ProductionParametersInput): Record<string,
 }
 
 const columns: DataTableColumn<ProductionParameters>[] = [
-  { key: "siteId", header: "Site", mono: true },
+  { key: "siteId", header: "Site", render: (row) => (row.siteId === "All" ? "All sites" : <EntityName entity="site" id={row.siteId} fallback={row.siteId} />) },
   { key: "rafTolerancePct", header: "RAF tolerance %", align: "end" },
   { key: "overConsumptionPct", header: "Over-consumption %", align: "end" },
   { key: "autoStartOnFeedback", header: "Auto-start", render: (row) => yesNo(row.autoStartOnFeedback) },

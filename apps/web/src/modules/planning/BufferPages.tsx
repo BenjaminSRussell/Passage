@@ -34,6 +34,7 @@ import { compareQty } from "./ItemCoveragePage";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PROFILES = "/planning/buffer-profiles";
 export const BUFFERS = "/planning/ddmrp-buffers";
@@ -414,8 +415,22 @@ export function BufferProfilePage() {
 }
 
 const bufferColumns: DataTableColumn<DdmrpBuffer>[] = [
-  { key: "item", header: "Item", mono: true, render: (b) => b.itemId },
-  { key: "scope", header: "Site / warehouse", mono: true, render: (b) => (b.warehouseId ? `${b.siteId} / ${b.warehouseId}` : b.siteId) },
+  { key: "item", header: "Item", render: (b) => <EntityName entity="product" id={b.itemId} fallback={b.itemId} /> },
+  {
+    key: "scope",
+    header: "Site / warehouse",
+    render: (b) => (
+      <>
+        <EntityName entity="site" id={b.siteId} fallback={b.siteId} />
+        {b.warehouseId ? (
+          <>
+            {" / "}
+            <EntityName entity="warehouse" id={b.warehouseId} fallback={b.warehouseId} />
+          </>
+        ) : null}
+      </>
+    ),
+  },
   { key: "profile", header: "Profile", mono: true, render: (b) => b.profileCode },
   { key: "nfp", header: "Net flow", align: "end", render: (b) => trimQty(b.netFlow) },
   { key: "tor", header: "Top of red", align: "end", render: (b) => trimQty(b.zones.topOfRed) },

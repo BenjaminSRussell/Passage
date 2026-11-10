@@ -19,6 +19,7 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** Most movements one view shows, newest first. */
 export const MOVEMENT_LIMIT = 200;
@@ -32,7 +33,7 @@ const KINDS: Record<ReturnableMovementKind, { label: string; tone: BadgeTone }> 
 
 const columns: DataTableColumn<ReturnableMovement>[] = [
   { key: "createdAt", header: "When", render: (row) => formatDateTime(row.createdAt) },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "containerType", header: "Container type", mono: true },
   {
     key: "kind",
