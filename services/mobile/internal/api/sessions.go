@@ -41,16 +41,20 @@ type runDoc struct {
 // gets that answer instead of a wrong-step conflict.
 type lastCommand struct {
 	Key     string          `json:"key"`
+	Hash    string          `json:"hash"`
 	Command string          `json:"command"`
 	Work    json.RawMessage `json:"work,omitempty"`
 	Run     *runResponse    `json:"run,omitempty"`
 }
 
-func (d runDoc) answered(key, command string) *lastCommand {
-	if d.Last != nil && d.Last.Key == key && d.Last.Command == command {
-		return d.Last
+func (d runDoc) answered(idem store.Idem, command string) (*lastCommand, error) {
+	if d.Last == nil || d.Last.Key != idem.Key || d.Last.Command != command {
+		return nil, nil
 	}
-	return nil
+	if d.Last.Hash != idem.Hash {
+		return nil, store.ErrIdempotencyReuse
+	}
+	return d.Last, nil
 }
 
 func docOf(s store.Session) runDoc {
@@ -308,7 +312,7 @@ func (a *API) assignWork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, id := r.Context(), chi.URLParam(r, "id")
-	out, replayed, err := store.Idempotent(ctx, a.st, idem, http.StatusOK, func() (assignResponse, error) { return a.applyAssign(ctx, id, idem.Key) })
+	out, replayed, err := store.Idempotent(ctx, a.st, idem, http.StatusOK, func() (assignResponse, error) { return a.applyAssign(ctx, id, idem) })
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -316,15 +320,22 @@ func (a *API) assignWork(w http.ResponseWriter, r *http.Request) {
 	answer(w, http.StatusOK, replayed, out)
 }
 
-func (a *API) applyAssign(ctx context.Context, id, key string) (assignResponse, error) {
+func (a *API) applyAssign(ctx context.Context, id string, idem store.Idem) (assignResponse, error) {
 	s, err := a.ownSession(ctx, id)
 	if err != nil {
 		return assignResponse{}, err
 	}
-	if last := docOf(s).answered(key, "assign"); last != nil {
+	last, err := docOf(s).answered(idem, "assign")
+	if err != nil {
+		return assignResponse{}, err
+	}
+	if last != nil {
 		return assignResponse{Work: last.Work, Session: s}, nil
 	}
-	out, err := a.wh.Do(ctx, "assign", key, map[string]string{"warehouseId": s.WarehouseID})
+	if s.Lapsed(a.now(), a.idle) {
+		return assignResponse{}, store.ErrSessionStale
+	}
+	out, err := a.wh.Do(ctx, "assign", idem.Key, map[string]string{"warehouseId": s.WarehouseID})
 	if err != nil {
 		return assignResponse{}, transportError{err}
 	}
@@ -344,7 +355,7 @@ func (a *API) applyAssign(ctx context.Context, id, key string) (assignResponse, 
 	}
 	doc := docOf(s)
 	doc.Seed, doc.Run = work.Values(), nil
-	doc.Last = &lastCommand{Key: key, Command: "assign", Work: raw}
+	doc.Last = &lastCommand{Key: idem.Key, Hash: idem.Hash, Command: "assign", Work: raw}
 	saved, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), work.ID, a.now(), a.idle)
 	if err != nil {
 		return assignResponse{}, err
@@ -457,7 +468,7 @@ func (a *API) submitStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, id, step := r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "step")
-	out, replayed, err := store.Idempotent(ctx, a.st, idem, http.StatusOK, func() (runResponse, error) { return a.applyStep(ctx, id, step, idem.Key, req) })
+	out, replayed, err := store.Idempotent(ctx, a.st, idem, http.StatusOK, func() (runResponse, error) { return a.applyStep(ctx, id, step, idem, req) })
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -465,14 +476,21 @@ func (a *API) submitStep(w http.ResponseWriter, r *http.Request) {
 	answer(w, http.StatusOK, replayed, out)
 }
 
-func (a *API) applyStep(ctx context.Context, id, step, key string, req submitRequest) (runResponse, error) {
+func (a *API) applyStep(ctx context.Context, id, step string, idem store.Idem, req submitRequest) (runResponse, error) {
 	s, err := a.ownSession(ctx, id)
 	if err != nil {
 		return runResponse{}, err
 	}
 	doc := docOf(s)
-	if last := doc.answered(key, step); last != nil && last.Run != nil {
+	last, err := doc.answered(idem, step)
+	if err != nil {
+		return runResponse{}, err
+	}
+	if last != nil && last.Run != nil {
 		return *last.Run, nil
+	}
+	if s.Lapsed(a.now(), a.idle) {
+		return runResponse{}, store.ErrSessionStale
 	}
 	if doc.Run == nil {
 		return runResponse{}, httpx.NewProblem(http.StatusConflict, codeStep, "the session has no flow run in progress")
@@ -493,7 +511,7 @@ func (a *API) applyStep(ctx context.Context, id, step, key string, req submitReq
 	}
 	next, workID := res.State, s.CurrentWorkID
 	if res.Call != nil {
-		out, err := a.wh.Do(ctx, res.Call.Op, key, res.Call.Params)
+		out, err := a.wh.Do(ctx, res.Call.Op, idem.Key, res.Call.Params)
 		if err != nil {
 			return runResponse{}, transportError{err}
 		}
@@ -509,7 +527,7 @@ func (a *API) applyStep(ctx context.Context, id, step, key string, req submitReq
 		}
 	}
 	result := viewOf(draft, next)
-	doc.Run, doc.Last = &next, &lastCommand{Key: key, Command: step, Run: &result}
+	doc.Run, doc.Last = &next, &lastCommand{Key: idem.Key, Hash: idem.Hash, Command: step, Run: &result}
 	if _, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), workID, a.now(), a.idle); err != nil {
 		return runResponse{}, err
 	}

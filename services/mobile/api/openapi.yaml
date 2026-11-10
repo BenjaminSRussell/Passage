@@ -278,7 +278,7 @@ paths:
       description: >
         action reapply records the decision to move the inventory as scanned and
         emits offline.resolved.v1; the mobile service does not move it. action
-        reject ends the transaction. Either unblocks the device's queue.
+        reject ends the transaction, and also closes a PENDING one that holds a device queue. Either unblocks the device's queue.
         If-Match is the conflict version (required); a mismatch, or a conflict
         already resolved, is 412.
       x-passage-duty: warehouse.offline-conflict.resolve

@@ -206,7 +206,8 @@ func (s *Store) ListConflicts(ctx context.Context, after time.Time, afterKey str
 
 // Resolve records a supervisor's decision on a CONFLICT (BR-32.4). ifMatch is
 // the conflict's version, so two supervisors cannot both resolve it. REJECT
-// ends the transaction as REJECTED; REAPPLY keeps it CONFLICT with the
+// ends the transaction as REJECTED (it also closes a PENDING one, which a
+// supervisor does to free a device queue held by a user who left); REAPPLY keeps it CONFLICT with the
 // resolution set and tells consumers through dev.passage.mobile.offline.resolved.v1
 // to move the inventory as scanned.
 func (s *Store) Resolve(ctx context.Context, idem Idem, key, action string, ifMatch int) (OfflineTx, bool, error) {
@@ -219,7 +220,7 @@ func (s *Store) Resolve(ctx context.Context, idem Idem, key, action string, ifMa
 				status = TxRejected
 			}
 			t, err := scanTx(tx.QueryRow(ctx, `update offline_transaction set replay_status = $3, resolution = $4, resolved_by = $5, resolved_at = now(), version = version + 1
-				where tenant_id = $1 and idempotency_key = $2 and replay_status = 'CONFLICT' and resolution = '' and ($6 = 0 or version = $6) returning `+txColumns,
+				where tenant_id = $1 and idempotency_key = $2 and ((replay_status = 'CONFLICT' and resolution = '') or (replay_status = 'PENDING' and $4 = 'REJECT')) and ($6 = 0 or version = $6) returning `+txColumns,
 				tenantID(ctx), key, status, action, userID(ctx), ifMatch))
 			if errors.Is(err, pgx.ErrNoRows) {
 				var exists bool

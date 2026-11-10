@@ -20,6 +20,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	kernelevents "github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	evts "github.com/BenjaminSRussell/passage/services/mobile/internal/events"
@@ -135,86 +136,92 @@ func once[T any](ctx context.Context, tx pgx.Tx, idem Idem, status int, fn func(
 // fails the claim is released and the key can be retried.
 func Idempotent[T any](ctx context.Context, s *Store, idem Idem, status int, fn func() (T, error)) (T, bool, error) {
 	var zero, out T
-	var claimed bool
+	var nonce string
 	if err := s.inTx(ctx, func(tx pgx.Tx) (err error) {
-		out, claimed, err = claim[T](ctx, tx, idem)
+		out, nonce, err = claim[T](ctx, tx, idem)
 		return err
 	}); err != nil {
 		return zero, false, err
 	}
-	if !claimed {
+	if nonce == "" {
 		return out, true, nil
 	}
 	out, err := fn()
 	if err == nil {
-		err = s.storeResult(ctx, idem, status, out)
+		err = s.storeResult(ctx, idem, nonce, status, out)
 	}
 	if err != nil {
-		s.releaseClaim(ctx, idem)
+		s.releaseClaim(ctx, idem, nonce)
 		return zero, false, err
 	}
 	return out, false, nil
 }
 
-func claim[T any](ctx context.Context, tx pgx.Tx, idem Idem) (T, bool, error) {
+// claim returns a non-empty nonce when the caller now owns the key; the nonce
+// is kept in the in-progress row so a retaken claim is not written by the
+// runner that lost it. Otherwise it returns the stored answer.
+func claim[T any](ctx context.Context, tx pgx.Tx, idem Idem) (T, string, error) {
 	var zero T
-	tid := tenantID(ctx)
+	tid, nonce := tenantID(ctx), ids.New()
 	if _, err := tx.Exec(ctx, `delete from idempotency_keys where tenant_id = $1 and key = $2 and created_at < now() - interval '24 hours'`, tid, idem.Key); err != nil {
-		return zero, false, err
+		return zero, "", err
 	}
-	tag, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status) values ($1, $2, $3, 0)
-		on conflict (tenant_id, key) do nothing`, tid, idem.Key, idem.Hash)
+	tag, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status, response_body) values ($1, $2, $3, 0, to_jsonb($4::text))
+		on conflict (tenant_id, key) do nothing`, tid, idem.Key, idem.Hash, nonce)
 	if err != nil {
-		return zero, false, err
+		return zero, "", err
 	}
 	if tag.RowsAffected() == 1 {
-		return zero, true, nil
+		return zero, nonce, nil
 	}
 	var hash string
 	var status int
 	var body []byte
 	if err := tx.QueryRow(ctx, `select request_hash, response_status, response_body from idempotency_keys where tenant_id = $1 and key = $2`,
 		tid, idem.Key).Scan(&hash, &status, &body); err != nil {
-		return zero, false, err
+		return zero, "", err
 	}
 	if hash != idem.Hash {
-		return zero, false, ErrIdempotencyReuse
+		return zero, "", ErrIdempotencyReuse
 	}
 	if status == 0 {
-		taken, err := tx.Exec(ctx, `update idempotency_keys set created_at = now()
-			where tenant_id = $1 and key = $2 and response_status = 0 and created_at < now() - $3 * interval '1 second'`, tid, idem.Key, int(claimTTL.Seconds()))
+		taken, err := tx.Exec(ctx, `update idempotency_keys set created_at = now(), response_body = to_jsonb($4::text)
+			where tenant_id = $1 and key = $2 and response_status = 0 and created_at < now() - $3 * interval '1 second'`, tid, idem.Key, int(claimTTL.Seconds()), nonce)
 		if err != nil {
-			return zero, false, err
+			return zero, "", err
 		}
 		if taken.RowsAffected() == 0 {
-			return zero, false, ErrInProgress
+			return zero, "", ErrInProgress
 		}
-		return zero, true, nil
+		return zero, nonce, nil
 	}
 	var out T
 	if err := json.Unmarshal(body, &out); err != nil {
-		return zero, false, fmt.Errorf("decode stored response: %w", err)
+		return zero, "", fmt.Errorf("decode stored response: %w", err)
 	}
-	return out, false, nil
+	return out, "", nil
 }
 
-func (s *Store) storeResult(ctx context.Context, idem Idem, status int, out any) error {
+func (s *Store) storeResult(ctx context.Context, idem Idem, nonce string, status int, out any) error {
 	body, err := json.Marshal(out)
 	if err != nil {
 		return err
 	}
 	return s.inTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `update idempotency_keys set response_status = $3, response_body = $4 where tenant_id = $1 and key = $2`,
-			tenantID(ctx), idem.Key, status, body)
+		tag, err := tx.Exec(ctx, `update idempotency_keys set response_status = $3, response_body = $4
+			where tenant_id = $1 and key = $2 and response_status = 0 and response_body = to_jsonb($5::text)`, tenantID(ctx), idem.Key, status, body, nonce)
+		if err == nil && tag.RowsAffected() == 0 {
+			return ErrInProgress
+		}
 		return err
 	})
 }
 
-func (s *Store) releaseClaim(ctx context.Context, idem Idem) {
+func (s *Store) releaseClaim(ctx context.Context, idem Idem, nonce string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
 	defer cancel()
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `delete from idempotency_keys where tenant_id = $1 and key = $2 and response_status = 0`, tenantID(ctx), idem.Key)
+		_, err := tx.Exec(ctx, `delete from idempotency_keys where tenant_id = $1 and key = $2 and response_status = 0 and response_body = to_jsonb($3::text)`, tenantID(ctx), idem.Key, nonce)
 		return err
 	})
 	if err != nil {

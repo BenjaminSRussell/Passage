@@ -665,3 +665,89 @@ func TestIdempotentRepeatWhileRunningIsInProgressAndAStaleClaimIsRetaken(t *test
 		t.Fatalf("a claim left by a crash is retryable after its time: %d %v %v", out, replayed, err)
 	}
 }
+
+func TestARetakenClaimIsNotOverwrittenOrReleasedByTheRunnerThatLostIt(t *testing.T) {
+	st, admin, ctx := setup(t)
+	age := func(key string) {
+		if _, err := admin.Exec(ctx, `update idempotency_keys set created_at = now() - interval '2 minutes' where key = $1`, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idem := Idem{Key: "retaken", Hash: "h"}
+	started, release := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		_, _, err := Idempotent(ctx, st, idem, 200, func() (int, error) {
+			close(started)
+			<-release
+			return 1, nil
+		})
+		first <- err
+	}()
+	<-started
+	age(idem.Key)
+	if out, replayed, err := Idempotent(ctx, st, idem, 200, func() (int, error) { return 2, nil }); err != nil || replayed || out != 2 {
+		t.Fatalf("the retaking runner finishes: %d %v %v", out, replayed, err)
+	}
+	close(release)
+	if err := <-first; !errors.Is(err, ErrInProgress) {
+		t.Fatalf("the first runner must not store over the retaken key: %v", err)
+	}
+	if out, replayed, err := Idempotent(ctx, st, idem, 200, func() (int, error) { return 3, nil }); err != nil || !replayed || out != 2 {
+		t.Fatalf("the retaking runner's answer stands: %d %v %v", out, replayed, err)
+	}
+
+	failing := Idem{Key: "retaken-fail", Hash: "h"}
+	started, release = make(chan struct{}), make(chan struct{})
+	boom := errors.New("late failure")
+	go func() {
+		_, _, err := Idempotent(ctx, st, failing, 200, func() (int, error) {
+			close(started)
+			<-release
+			return 0, boom
+		})
+		first <- err
+	}()
+	<-started
+	age(failing.Key)
+	secondStarted, secondRelease, second := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		_, _, err := Idempotent(ctx, st, failing, 200, func() (int, error) {
+			close(secondStarted)
+			<-secondRelease
+			return 4, nil
+		})
+		second <- err
+	}()
+	<-secondStarted
+	close(release)
+	if err := <-first; !errors.Is(err, boom) {
+		t.Fatal(err)
+	}
+	if _, _, err := Idempotent(ctx, st, failing, 200, func() (int, error) { return 5, nil }); !errors.Is(err, ErrInProgress) {
+		t.Fatalf("the first runner's release must not delete the retaken claim: %v", err)
+	}
+	close(secondRelease)
+	if err := <-second; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSupervisorRejectFreesADeviceQueueHeldByAnotherUsersPendingEntry(t *testing.T) {
+	st, _, ctx := setup(t)
+	alice := as(ctx, "alice", dutyExecute)
+	if _, err := st.Record(alice, OfflineIn{DeviceID: "dev-held", Seq: 1, Command: "ConfirmWorkLine", Payload: []byte(`{}`), CapturedAt: time.Now(), Hash: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	sup := as(ctx, "sup", dutySupervise)
+	if _, _, err := st.Resolve(sup, key("rp"), "dev-held:1", ResolveReapply, 0); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("only a reject closes a pending entry: %v", err)
+	}
+	out, _, err := st.Resolve(sup, key("rp2"), "dev-held:1", ResolveReject, 0)
+	if err != nil || out.Status != TxRejected || out.ResolvedBy != "sup" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if next, _ := st.NextPending(sup, "dev-held"); next != nil {
+		t.Fatalf("the queue is free: %+v", next)
+	}
+}

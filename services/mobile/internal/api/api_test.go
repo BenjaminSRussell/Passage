@@ -684,23 +684,26 @@ func TestAStepRetriedAfterItsKeyRecordWasLostGetsTheSameAnswer(t *testing.T) {
 	p, _ := tenant.FromContext(ctx)
 	p.UserID = "alice"
 	ctx = tenant.With(ctx, p)
-	first, err := h.api.applyStep(ctx, id, "scan_location", "lost-1", submitRequest{Value: "A-01-02"})
+	first, err := h.api.applyStep(ctx, id, "scan_location", store.Idem{Key: "lost-1", Hash: "h"}, submitRequest{Value: "A-01-02"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := h.api.applyStep(ctx, id, "scan_location", "lost-1", submitRequest{Value: "A-01-02"})
+	again, err := h.api.applyStep(ctx, id, "scan_location", store.Idem{Key: "lost-1", Hash: "h"}, submitRequest{Value: "A-01-02"})
 	if err != nil || !reflect.DeepEqual(again, first) {
 		t.Fatalf("the retry must repeat the first answer, not 409 wrong step: %+v %v", again, err)
 	}
-	if _, err := h.api.applyStep(ctx, id, "scan_location", "other-key", submitRequest{Value: "A-01-02"}); err == nil {
+	if _, err := h.api.applyStep(ctx, id, "scan_location", store.Idem{Key: "other-key", Hash: "h"}, submitRequest{Value: "A-01-02"}); err == nil {
 		t.Fatal("a different key on the spent step is still a wrong step")
 	}
-	firstAssign, err := h.api.applyAssign(ctx, id, "lost-as")
+	if _, err := h.api.applyStep(ctx, id, "scan_location", store.Idem{Key: "lost-1", Hash: "another body"}, submitRequest{Value: "A-01-03"}); !errors.Is(err, store.ErrIdempotencyReuse) {
+		t.Fatalf("the saved answer is only for the same request: %v", err)
+	}
+	firstAssign, err := h.api.applyAssign(ctx, id, store.Idem{Key: "lost-as", Hash: "h"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var want, got any
-	againAssign, err := h.api.applyAssign(ctx, id, "lost-as")
+	againAssign, err := h.api.applyAssign(ctx, id, store.Idem{Key: "lost-as", Hash: "h"})
 	if err != nil || json.Unmarshal(firstAssign.Work, &want) != nil || json.Unmarshal(againAssign.Work, &got) != nil || !reflect.DeepEqual(got, want) || len(h.wh.calls) != 2 {
 		t.Fatalf("assign retry: %+v %v calls=%v", againAssign, err, h.wh.calls)
 	}
@@ -769,5 +772,26 @@ func TestReplayFailureMapsErrorsByKind(t *testing.T) {
 	fail(rec, httptest.NewRequest("GET", "/", nil), replayFailure(store.ErrConflict))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("a unique violation is a 409, got %d", rec.Code)
+	}
+}
+
+func TestAnIdleSessionIsRefusedBeforeAnyWarehouseSideEffect(t *testing.T) {
+	h := newHarness(t)
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/flows:install-core", duties: dutyAdmin, key: "core"}), http.StatusOK, "")
+	id := h.assigned("alice", "dev-se")
+	h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs", duties: dutyExecute, body: `{"flowCode":"PICK"}`})
+	for i, in := range []struct{ step, body string }{
+		{"scan_location", `{"value":"A-01-02"}`}, {"scan_item", `{"value":"0112345678901231"}`}, {"enter_qty", `{"value":"5"}`}, {"qty_check", `{"outcome":"full"}`}, {"confirm_pick", `{}`},
+	} {
+		expect(t, h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs/current/steps/" + in.step + ":submit", duties: dutyExecute, key: "se" + string(rune('a'+i)), body: in.body}), http.StatusOK, "")
+	}
+	calls := len(h.wh.calls)
+	h.now = h.now.Add(31 * time.Minute)
+	confirm := h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs/current/steps/call_confirm:submit", duties: dutyExecute, key: "se-call", body: `{}`})
+	expect(t, confirm, http.StatusConflict, codeSessionStale)
+	assign := h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":assign-work", duties: dutyExecute, key: "se-assign"})
+	expect(t, assign, http.StatusConflict, codeSessionStale)
+	if len(h.wh.calls) != calls {
+		t.Fatalf("the warehouse was called for an idle session: %v", h.wh.calls[calls:])
 	}
 }
