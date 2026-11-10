@@ -3,6 +3,7 @@ import { cx } from "./cx";
 import styles from "./DataTable.module.css";
 import { EmptyState } from "./EmptyState";
 import { Icon } from "./Icon";
+import { InsideControl } from "./insideControl";
 import { Skeleton } from "./Skeleton";
 
 export type SortDirection = "ascending" | "descending";
@@ -125,7 +126,7 @@ export function DataTable<T>({ label, columns, rows, getRowKey, loading = false,
                   <td key={column.key} className={cellClass(column)}>
                     {onRowOpen && columnIndex === 0 ? (
                       <button type="button" className={styles.rowLink}>
-                        {cellValue(column, row)}
+                        <InsideControl.Provider value={true}>{cellValue(column, row)}</InsideControl.Provider>
                       </button>
                     ) : (
                       cellValue(column, row)

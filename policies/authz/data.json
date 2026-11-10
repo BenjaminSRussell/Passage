@@ -2053,6 +2053,7 @@
     ]},
     "budget.check": {"permissions": [
       {"resource": "/v1/budget/checks", "methods": ["POST"]},
+      {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:release", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances/*:relieve", "methods": ["POST"]},
       {"resource": "/v1/budget/reservations/*:consume", "methods": ["POST"]}
@@ -2091,6 +2092,7 @@
       {"resource": "/v1/budget/plans", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["GET"]},
+      {"resource": "/v1/budget/plans/*/scenarios:compare", "methods": ["GET"]},
       {"resource": "/v1/budget/available", "methods": ["GET"]},
       {"resource": "/v1/budget/checks", "methods": ["GET"]},
       {"resource": "/v1/budget/checks/*", "methods": ["GET"]},
@@ -3457,12 +3459,16 @@
       {"resource": "/v1/treasury/reconciliation-rules/*:deactivate", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-runs", "methods": ["POST"]}
     ]},
-    "treasury.statement.import": {"permissions": [{"resource": "/v1/treasury/statements/import", "methods": ["POST"]}]},
+    "treasury.statement.import": {"permissions": [
+      {"resource": "/v1/treasury/statements/import", "methods": ["POST"]},
+      {"resource": "/v1/treasury/intraday-reports/import", "methods": ["POST"]}
+    ]},
     "treasury.view": {"permissions": [
       {"resource": "/v1/treasury/bank-accounts", "methods": ["GET"]},
       {"resource": "/v1/treasury/bank-accounts/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/bank-accounts/*/statements", "methods": ["GET"]},
       {"resource": "/v1/treasury/cash-forecast", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-position", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/ebics-subscribers/*", "methods": ["GET"]},

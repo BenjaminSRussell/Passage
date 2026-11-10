@@ -42,6 +42,10 @@ func (f *fakeStore) RelieveEncumbrance(_ context.Context, _, _ string, in store.
 	return http.StatusOK, []byte(`{}`), nil
 }
 
+func (f *fakeStore) ConvertPreEncumbrance(_ context.Context, _, _ string, in store.ConvertRequest) (int, []byte, error) {
+	return http.StatusOK, []byte(`{"encumbranceId":"` + in.EncumbranceID + `"}`), nil
+}
+
 func (f *fakeStore) ReleaseEncumbrance(_ context.Context, _, _ string, in store.ReleaseRequest) (int, []byte, error) {
 	f.calls++
 	f.releaseIn = in

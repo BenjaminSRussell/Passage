@@ -66,7 +66,7 @@ export interface Balance {
 }
 
 export interface EncumbranceHistory {
-  type: "Reserve" | "Adjust" | "Relieve" | "Consume" | "Release";
+  type: "Reserve" | "Adjust" | "Relieve" | "Consume" | "Release" | "Convert";
   amount: string;
   documentId: string;
   at: string;
@@ -87,6 +87,8 @@ export interface Encumbrance {
   /** reserved - relieved - released. */
   remaining: string;
   status: EncumbranceStatus;
+  /** A requisition reserves a pre-encumbrance; the purchase order converts it into an encumbrance (FR-38.5). */
+  stage?: "pre" | "encumbrance";
   history: EncumbranceHistory[];
   createdAt: string;
 }
@@ -271,7 +273,7 @@ export function describeError(err: unknown, fallback: string): string {
   return [`${err.problem.code}: ${err.message}`, ...fields].join("; ");
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await apiFetch(path, {
     ...init,
     credentials: "same-origin",
@@ -291,7 +293,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 /** Commands carry an Idempotency-Key; the page keeps one key per form content so a retry is a replay. */
-function command<T>(path: string, body: unknown, idempotencyKey: string): Promise<T> {
+export function command<T>(path: string, body: unknown, idempotencyKey: string): Promise<T> {
   return request<T>(path, {
     method: "POST",
     headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
@@ -299,7 +301,7 @@ function command<T>(path: string, body: unknown, idempotencyKey: string): Promis
   });
 }
 
-function query(params: Record<string, string | undefined>): string {
+export function query(params: Record<string, string | undefined>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
   const s = q.toString();

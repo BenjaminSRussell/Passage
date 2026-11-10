@@ -900,6 +900,23 @@ const p2pMore: Record<string, ProblemCatalogEntry> = {
   "PRC-VERSION-CONFLICT": { message: "Someone else changed this record after you opened it.", action: RELOAD_AND_REDO },
 };
 
+const treasury: Record<string, ProblemCatalogEntry> = {
+  "TRS-0410": { message: "The bank statement and the books still differ, so the period can't close.", action: "Match, exclude or book the remaining lines until the difference is zero." },
+  "TRS-0504": { message: "This statement already has a reconciliation.", action: "Open the existing reconciliation from the list." },
+  "TRS-0506": { message: "This period is closed, so its lines and balances are locked.", action: "Reopen the period with a reason if it needs a change." },
+  "TRS-0507": { message: "Some statement lines are neither matched nor excluded.", action: "Match, book or exclude each remaining line, then close again." },
+  "TRS-0508": { message: "A later period of this bank account is closed.", action: "Reopen the latest closed period first." },
+  "TRS-0509": { message: "You closed this period, so you can't reopen it.", action: "Ask a colleague to reopen it." },
+  "TRS-0510": { message: "Only a closed period can be reopened.", action: "Reload the page to see the current state." },
+  "TRS-0512": { message: "This line can't be booked as that kind of transaction.", action: "Pick the kind that fits the direction and currency of the line." },
+  "TRS-0517": { message: "A bank transaction from one of the lines is still being posted.", action: "Wait for it to finish, or give it up after checking the ledger, then close again." },
+  "TRS-0518": { message: "The ledger refused the transaction.", action: "Check the bank account's ledger setup, then try again." },
+  "TRS-0519": { message: "The ledger did not answer. The transaction may still be posted.", action: "Try the same action again; it will not post twice." },
+  "TRS-0525": { message: "A report with this id was already imported with other balances.", action: "Ask the bank for a new report; an imported report is never overwritten." },
+  "TRS-0526": { message: "The cash position is not turned on for this deployment.", action: "Ask an administrator to enable it." },
+  "TRS-0520": { message: "You stated the book balance, so you can't close this period.", action: "Ask a colleague to close it." },
+};
+
 const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0143": { message: "Someone else changed the worker after you opened it.", action: RELOAD_AND_REDO },
 };
@@ -926,6 +943,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...ledgerSetup,
   ...p2pGaps,
   ...p2pMore,
+  ...treasury,
   ...shared,
 });
 

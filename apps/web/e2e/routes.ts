@@ -5,12 +5,10 @@
  */
 export const ROUTES: readonly string[] = [
   "/",
-  "/notes",
   "/features",
   "/whats-new",
   "/design-system",
   "/metadata/Vendor",
-  "/close",
   "/workflow",
   "/workflow/inbox",
   "/workflow/designer",
@@ -29,7 +27,6 @@ export const ROUTES: readonly string[] = [
   "/admin/import",
   "/admin/documents",
   "/admin/texts",
-  "/tax",
   "/payables",
   "/party",
   "/party/new",

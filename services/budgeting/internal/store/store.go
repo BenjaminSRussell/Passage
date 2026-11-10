@@ -198,6 +198,7 @@ type EncumbranceView struct {
 	Released            decimal.Decimal `json:"released"`
 	Remaining           decimal.Decimal `json:"remaining"`
 	Status              string          `json:"status"`
+	Stage               string          `json:"stage"`
 	History             []historyEntry  `json:"history"`
 	CreatedAt           string          `json:"createdAt"`
 }
@@ -372,6 +373,7 @@ type historyEntry struct {
 type prior struct {
 	id        string
 	balanceID string
+	stage     string
 	reserved  decimal.Decimal
 	relieved  decimal.Decimal
 }
@@ -381,8 +383,8 @@ type prior struct {
 func lockPrior(ctx context.Context, tx pgx.Tx, tenantID, lineID string) (*prior, error) {
 	var p prior
 	var reserved, relieved, released string
-	err := tx.QueryRow(ctx, `select id::text, balance_id::text, reserved::text, relieved::text, released::text from encumbrance
-		where tenant_id = $1 and source_line_id = $2 for update`, tenantID, lineID).Scan(&p.id, &p.balanceID, &reserved, &relieved, &released)
+	err := tx.QueryRow(ctx, `select id::text, balance_id::text, stage, reserved::text, relieved::text, released::text from encumbrance
+		where tenant_id = $1 and source_line_id = $2 for update`, tenantID, lineID).Scan(&p.id, &p.balanceID, &p.stage, &reserved, &relieved, &released)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -415,6 +417,7 @@ func (s *Postgres) CheckBudget(ctx context.Context, key, hash string, req CheckR
 			Result: domain.Pass, CheckedAt: now(), Lines: make([]LineResult, 0, len(req.Lines))}
 		priors := make([]*prior, len(req.Lines))
 		outcomes := make([]domain.CheckOutcome, len(req.Lines))
+		stages := make([]string, len(req.Lines))
 		for i, l := range req.Lines {
 			b := balances[balanceKey(l.DimensionKey, l.SpanKey)]
 			pr, err := lockPrior(ctx, tx, p.TenantID, l.LineID)
@@ -423,7 +426,16 @@ func (s *Postgres) CheckBudget(ctx context.Context, key, hash string, req CheckR
 			}
 			in := domain.CheckInput{Amount: l.Amount, Override: override}
 			line := LineResult{LineID: l.LineID, DimensionKey: l.DimensionKey, SpanKey: l.SpanKey, Amount: l.Amount}
+			stage := domain.StageEncumbrance
+			if req.DocumentType == "Requisition" {
+				stage = domain.StagePre
+			}
 			if pr != nil {
+				stage = pr.stage
+				if pr.stage == domain.StagePre && req.DocumentType != "Requisition" {
+					return 0, nil, httpx.NewProblem(http.StatusConflict, CodeLinePre,
+						fmt.Sprintf("line %s is a pre-encumbrance of a requisition; convert it to the purchase order line first", l.LineID))
+				}
 				if pr.balanceID != b.id {
 					return 0, nil, httpx.NewProblem(http.StatusConflict, CodeLineMoved,
 						fmt.Sprintf("line %s is already reserved against another control combination or rule version", l.LineID))
@@ -433,8 +445,12 @@ func (s *Postgres) CheckBudget(ctx context.Context, key, hash string, req CheckR
 			}
 			out := domain.Check(b.bal, th, in)
 			// Later lines on the same combination see this line's reservation.
-			b.bal.Encumbrances = b.bal.Encumbrances.Add(out.Reserve)
-			priors[i], outcomes[i] = pr, out
+			if stage == domain.StagePre {
+				b.bal.PreEncumbrances = b.bal.PreEncumbrances.Add(out.Reserve)
+			} else {
+				b.bal.Encumbrances = b.bal.Encumbrances.Add(out.Reserve)
+			}
+			priors[i], outcomes[i], stages[i] = pr, out, stage
 			line.Result, line.Available, line.Net, line.OverPct, line.Trace = out.Result, out.Available, out.Net, out.OverPct, out.Trace
 			resp.Lines = append(resp.Lines, line)
 			if slices.Contains(out.Trace, "override") {
@@ -450,7 +466,7 @@ func (s *Postgres) CheckBudget(ctx context.Context, key, hash string, req CheckR
 		if resp.Result != domain.Fail {
 			for i, l := range req.Lines {
 				b := balances[balanceKey(l.DimensionKey, l.SpanKey)]
-				id, err := reserve(ctx, tx, p.TenantID, rule, b.id, l, req, priors[i], outcomes[i].Reserve, resp.CheckedAt)
+				id, err := reserve(ctx, tx, p.TenantID, rule, b.id, l, req, priors[i], stages[i], outcomes[i].Reserve, resp.CheckedAt)
 				if err != nil {
 					return 0, nil, err
 				}
@@ -463,14 +479,14 @@ func (s *Postgres) CheckBudget(ctx context.Context, key, hash string, req CheckR
 
 // reserve applies one line's reservation: the balance and the encumbrance move
 // together. It returns the line's encumbrance id ("" when nothing is reserved).
-func reserve(ctx context.Context, tx pgx.Tx, tenantID string, rule Rule, balanceID string, l CheckLine, req CheckRequest, pr *prior, amount decimal.Decimal, at string) (string, error) {
+func reserve(ctx context.Context, tx pgx.Tx, tenantID string, rule Rule, balanceID string, l CheckLine, req CheckRequest, pr *prior, stage string, amount decimal.Decimal, at string) (string, error) {
 	if amount.IsZero() {
 		if pr == nil {
 			return "", nil
 		}
 		return pr.id, nil
 	}
-	if _, err := tx.Exec(ctx, `update budget_control_balance set encumbrances = encumbrances + $3, version = version + 1 where tenant_id = $1 and id = $2`,
+	if _, err := tx.Exec(ctx, `update budget_control_balance set `+stageColumn(stage)+` = `+stageColumn(stage)+` + $3, version = version + 1 where tenant_id = $1 and id = $2`,
 		tenantID, balanceID, amount); err != nil {
 		return "", err
 	}
@@ -489,9 +505,9 @@ func reserve(ctx context.Context, tx pgx.Tx, tenantID string, rule Rule, balance
 		return pr.id, err
 	}
 	id := ids.New()
-	_, err = tx.Exec(ctx, `insert into encumbrance (tenant_id, id, legal_entity_id, balance_id, source_type, source_line_id, source_document_id, reserved, status, lines)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
-		tenantID, id, rule.LegalEntityID, balanceID, req.DocumentType, l.LineID, req.DocumentID, amount, domain.StatusOpen, string(hist))
+	_, err = tx.Exec(ctx, `insert into encumbrance (tenant_id, id, legal_entity_id, balance_id, source_type, source_line_id, source_document_id, reserved, status, lines, stage)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)`,
+		tenantID, id, rule.LegalEntityID, balanceID, req.DocumentType, l.LineID, req.DocumentID, amount, domain.StatusOpen, string(hist), stage)
 	return id, err
 }
 
@@ -530,10 +546,13 @@ func (s *Postgres) RelieveEncumbrance(ctx context.Context, key, hash string, in 
 		if _, err := tx.Exec(ctx, `select 1 from budget_control_balance where tenant_id = $1 and id = $2 for update`, p.TenantID, balanceID); err != nil {
 			return 0, nil, err
 		}
-		var reservedText, relievedText, releasedText string
-		if err := tx.QueryRow(ctx, `select reserved::text, relieved::text, released::text from encumbrance where tenant_id = $1 and id = $2 for update`,
-			p.TenantID, in.EncumbranceID).Scan(&reservedText, &relievedText, &releasedText); err != nil {
+		var reservedText, relievedText, releasedText, stage string
+		if err := tx.QueryRow(ctx, `select reserved::text, relieved::text, released::text, stage from encumbrance where tenant_id = $1 and id = $2 for update`,
+			p.TenantID, in.EncumbranceID).Scan(&reservedText, &relievedText, &releasedText, &stage); err != nil {
 			return 0, nil, err
+		}
+		if stage == domain.StagePre {
+			return 0, nil, httpx.NewProblem(http.StatusConflict, CodeLinePre, "the line is a pre-encumbrance of a requisition: an invoice cannot relieve it until the purchase order converts it")
 		}
 		reserved, relieved, released := parseDec(reservedText), parseDec(relievedText), parseDec(releasedText)
 		// A released remainder is back in available funds, so an invoice
@@ -587,9 +606,9 @@ func (s *Postgres) ReleaseEncumbrance(ctx context.Context, key, hash string, in 
 		if _, err := tx.Exec(ctx, `select 1 from budget_control_balance where tenant_id = $1 and id = $2 for update`, p.TenantID, balanceID); err != nil {
 			return 0, nil, err
 		}
-		var reservedText, relievedText, releasedText string
-		if err := tx.QueryRow(ctx, `select reserved::text, relieved::text, released::text from encumbrance where tenant_id = $1 and id = $2 for update`,
-			p.TenantID, in.EncumbranceID).Scan(&reservedText, &relievedText, &releasedText); err != nil {
+		var reservedText, relievedText, releasedText, stage string
+		if err := tx.QueryRow(ctx, `select reserved::text, relieved::text, released::text, stage from encumbrance where tenant_id = $1 and id = $2 for update`,
+			p.TenantID, in.EncumbranceID).Scan(&reservedText, &relievedText, &releasedText, &stage); err != nil {
 			return 0, nil, err
 		}
 		reserved, relieved, released := parseDec(reservedText), parseDec(relievedText), parseDec(releasedText)
@@ -607,7 +626,7 @@ func (s *Postgres) ReleaseEncumbrance(ctx context.Context, key, hash string, in 
 			p.TenantID, in.EncumbranceID, total, status, string(hist)); err != nil {
 			return 0, nil, err
 		}
-		if _, err := tx.Exec(ctx, `update budget_control_balance set encumbrances = encumbrances - $3, version = version + 1 where tenant_id = $1 and id = $2`,
+		if _, err := tx.Exec(ctx, `update budget_control_balance set `+stageColumn(stage)+` = `+stageColumn(stage)+` - $3, version = version + 1 where tenant_id = $1 and id = $2`,
 			p.TenantID, balanceID, amount); err != nil {
 			return 0, nil, err
 		}
@@ -682,4 +701,88 @@ func postEntry(ctx context.Context, tx pgx.Tx, tenantID string, rule Rule, entry
 		return RegisterEntry{}, fmt.Errorf("enqueue register posted: %w", err)
 	}
 	return entry, nil
+}
+
+// CodeLinePre is raised when a pre-encumbrance is used as an encumbrance (a PO check or an invoice relief on a
+// requisition line) before the purchase order converts it; CodeNotPre when a line to convert is not one.
+const (
+	CodeLinePre      = "BUD-0070"
+	CodeNotPre       = "BUD-0071"
+	CodeConvertTaken = "BUD-0072"
+)
+
+// stageColumn is the balance column a stage reserves in. Only these constants reach the SQL text.
+func stageColumn(stage string) string {
+	if stage == domain.StagePre {
+		return "pre_encumbrances"
+	}
+	return "encumbrances"
+}
+
+// ConvertRequest turns a requisition's pre-encumbrance into the encumbrance of a purchase order line.
+type ConvertRequest struct {
+	EncumbranceID       string
+	PurchaseOrderID     string
+	PurchaseOrderLineID string
+}
+
+// ConvertResponse reports the amount that moved from pre-encumbrances to encumbrances.
+type ConvertResponse struct {
+	EncumbranceID       string          `json:"encumbranceId"`
+	PurchaseOrderID     string          `json:"purchaseOrderId"`
+	PurchaseOrderLineID string          `json:"purchaseOrderLineId"`
+	Converted           decimal.Decimal `json:"converted"`
+	Status              string          `json:"status"`
+}
+
+// ConvertPreEncumbrance moves the open amount of a requisition's pre-encumbrance into encumbrances and re-keys the
+// line to the purchase order line, so the PO's own budget check revises it (a price variance is the difference)
+// instead of reserving twice. The balance and the encumbrance move together (FR-38.5).
+func (s *Postgres) ConvertPreEncumbrance(ctx context.Context, key, hash string, in ConvertRequest) (int, []byte, error) {
+	p, _ := tenant.FromContext(ctx)
+	return s.run(ctx, key, hash, func(ctx context.Context, tx pgx.Tx) (int, any, error) {
+		var balanceID string
+		err := tx.QueryRow(ctx, `select balance_id::text from encumbrance where tenant_id = $1 and id = $2`, p.TenantID, in.EncumbranceID).Scan(&balanceID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil, httpx.NewProblem(http.StatusNotFound, CodeEncumbranceNotFound, "encumbrance not found")
+		}
+		if err != nil {
+			return 0, nil, err
+		}
+		if _, err := tx.Exec(ctx, `select 1 from budget_control_balance where tenant_id = $1 and id = $2 for update`, p.TenantID, balanceID); err != nil {
+			return 0, nil, err
+		}
+		var reservedText, relievedText, releasedText, stage string
+		if err := tx.QueryRow(ctx, `select reserved::text, relieved::text, released::text, stage from encumbrance where tenant_id = $1 and id = $2 for update`,
+			p.TenantID, in.EncumbranceID).Scan(&reservedText, &relievedText, &releasedText, &stage); err != nil {
+			return 0, nil, err
+		}
+		if stage != domain.StagePre {
+			return 0, nil, httpx.NewProblem(http.StatusConflict, CodeNotPre, "the line is not a pre-encumbrance: it was converted already or never came from a requisition")
+		}
+		reserved, relieved, released := parseDec(reservedText), parseDec(relievedText), parseDec(releasedText)
+		if released.Sign() > 0 {
+			return 0, nil, httpx.NewProblem(http.StatusConflict, CodeLineReleased, "the pre-encumbrance was released; a closed line cannot become an encumbrance")
+		}
+		amount := reserved.Sub(relieved)
+		hist, err := json.Marshal([]historyEntry{{Type: "Convert", Amount: amount.String(), DocumentID: in.PurchaseOrderID, At: now()}})
+		if err != nil {
+			return 0, nil, err
+		}
+		if _, err := tx.Exec(ctx, `update encumbrance set stage = 'encumbrance', source_type = 'PurchaseOrder', source_document_id = $3, source_line_id = $4,
+			converted_at = now(), lines = lines || $5::jsonb where tenant_id = $1 and id = $2`,
+			p.TenantID, in.EncumbranceID, in.PurchaseOrderID, in.PurchaseOrderLineID, string(hist)); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return 0, nil, httpx.NewProblem(http.StatusConflict, CodeConvertTaken, "the purchase order line already carries a reservation")
+			}
+			return 0, nil, err
+		}
+		if _, err := tx.Exec(ctx, `update budget_control_balance set pre_encumbrances = pre_encumbrances - $3, encumbrances = encumbrances + $3, version = version + 1
+			where tenant_id = $1 and id = $2`, p.TenantID, balanceID, amount); err != nil {
+			return 0, nil, err
+		}
+		return http.StatusOK, ConvertResponse{EncumbranceID: in.EncumbranceID, PurchaseOrderID: in.PurchaseOrderID, PurchaseOrderLineID: in.PurchaseOrderLineID,
+			Converted: amount, Status: domain.EncumbranceStatus(reserved, relieved, released)}, nil
+	})
 }

@@ -153,3 +153,58 @@
 .depth5 {
   padding-inline-start: calc(var(--space-12) + var(--space-8));
 }
+
+/* Plan grid: account and cost center rows by month. */
+.gridScroll {
+  overflow-x: auto;
+  max-inline-size: 100%;
+}
+
+.planGrid {
+  border-collapse: collapse;
+  inline-size: 100%;
+  font-size: var(--font-size-sm, 0.875rem);
+}
+
+.planGrid th,
+.planGrid td {
+  padding: var(--space-1) var(--space-2);
+  border-block-end: 1px solid var(--color-border, #d0d5dd);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.planGrid th.num,
+.planGrid td.num {
+  text-align: end;
+}
+
+.cell {
+  inline-size: 6.5rem;
+  padding: var(--space-1) var(--space-2);
+  text-align: end;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: inherit;
+  color: inherit;
+  background: var(--color-surface, transparent);
+  border: 1px solid var(--color-border, #d0d5dd);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.cell[aria-invalid="true"] {
+  border-color: var(--color-danger, #b42318);
+}
+
+.weights {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border, #d0d5dd);
+  border-radius: var(--radius-md, 6px);
+}
+
+.weights label {
+  display: grid;
+  gap: var(--space-1);
+}
