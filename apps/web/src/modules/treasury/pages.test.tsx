@@ -57,11 +57,11 @@ describe("bank accounts list", () => {
     expect(screen.getByRole("heading", { name: "Choose a legal entity" })).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
 
-    fill("Legal entity id", "nope");
+    fill("Legal entity", "nope");
     fireEvent.click(screen.getByRole("button", { name: "Show accounts" }));
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
 
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fireEvent.click(screen.getByRole("button", { name: "Show accounts" }));
     const table = await findTable({ name: "Bank accounts" });
     await waitFor(() => expect(table).toHaveTextContent("OPS-01"));
@@ -324,7 +324,7 @@ describe("cash forecast", () => {
     };
     const { container } = renderAt("/treasury/cash-forecast");
     expect(screen.getByRole("heading", { name: "Choose a legal entity" })).toBeInTheDocument();
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fireEvent.change(screen.getByLabelText("Buckets"), { target: { value: "weekly" } });
     fill("As of", "2026-10-20");
     fireEvent.click(screen.getByRole("button", { name: "Show forecast" }));

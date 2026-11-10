@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useSearchParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
@@ -164,11 +165,10 @@ export function CashForecastPage() {
       />
       <Card>
         <form className={styles.toolbar} onSubmit={apply} noValidate>
-          <FormField id="cf-entity" label="Legal entity id" error={filterErrors.legalEntityId}>
+          <FormField id="cf-entity" label="Legal entity" error={filterErrors.legalEntityId}>
             {(c) => (
-              <Input
+              <EntityLookup entity="legalEntity"
                 {...c}
-                className={styles.mono}
                 value={filters.legalEntityId}
                 onChange={(e) => setFilters((p) => ({ ...p, legalEntityId: e.target.value }))}
                 invalid={Boolean(filterErrors.legalEntityId)}

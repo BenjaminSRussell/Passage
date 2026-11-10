@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { CONTRACT_STATUSES, listContracts, METHODS, type ContractStatus, type RecognitionMethod, type RevenueContractSummary } from "./api/client";
 import { CONTRACT_STATUS_LABELS, METHOD_LABELS, UUID } from "./format";
 import { MoreRows } from "./MoreRows";
@@ -73,8 +74,8 @@ export function RevenueContractsPage() {
             </Select>
           )}
         </FormField>
-        <FormField id="rc-customer" label="Customer id" optional error={customerInvalid ? "Enter a full customer id (a UUID) to filter." : undefined}>
-          {(c) => <Input {...c} className={styles.mono} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={customerInvalid} />}
+        <FormField id="rc-customer" label="Customer" optional error={customerInvalid ? "Enter a full customer id (a UUID) to filter." : undefined}>
+          {(c) => <EntityLookup entity="customer" {...c} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={customerInvalid} />}
         </FormField>
       </div>
       {state.error ? (

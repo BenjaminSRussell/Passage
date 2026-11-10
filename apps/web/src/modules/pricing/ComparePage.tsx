@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { comparePrices, describeProblem, listProcedures, type CompareResponse, type LineComparison, type Problem, type Procedure } from "./api/client";
 import { DAY, DECIMAL, today, UUID } from "./format";
@@ -138,8 +139,8 @@ export function ComparePage() {
       <PageHeader title="Compare procedure versions" description="Price one customer, date and product under two versions of a pricing procedure, such as a draft and the active version, against the active agreements." />
       <Card>
         <form className={styles.form} onSubmit={load} noValidate>
-          <FormField id="cmp-legal-entity" label="Legal entity id" error={idError}>
-            {(c) => <Input {...c} className={styles.mono} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={Boolean(idError)} />}
+          <FormField id="cmp-legal-entity" label="Legal entity" error={idError}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={Boolean(idError)} />}
           </FormField>
           <div className={styles.formActions}>
             <Button type="submit" variant="secondary" loading={loading}>

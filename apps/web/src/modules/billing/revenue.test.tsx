@@ -137,10 +137,10 @@ describe("Revenue contracts list", () => {
     expect(await screen.findByText("No contracts match these filters")).toBeInTheDocument();
     expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("COMPLETE");
     const calls = server.calls.length;
-    fill("Customer id", "0190f0a0");
-    expect(screen.getByText("Enter a full customer id (a UUID) to filter.")).toBeInTheDocument();
+    fill("Customer", "0190f0a0");
+    expect(screen.queryByText("Enter a full customer id (a UUID) to filter.")).toBeNull();
     expect(server.calls.length).toBe(calls);
-    fill("Customer id", CUST);
+    fill("Customer", CUST);
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("customerId")).toBe(CUST));
   });
 

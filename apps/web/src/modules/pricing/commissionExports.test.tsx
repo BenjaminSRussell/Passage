@@ -144,7 +144,7 @@ describe("Recording an export from the settlement page", () => {
   const rowsCsv = "target,rep_id,currency,amount,transactions,from,to\r\nAP,R1,USD,240.00,3,2027-03-01,2027-03-31\r\n";
 
   function preview() {
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("First invoice date"), { target: { value: "2027-03-01" } });
     fireEvent.change(screen.getByLabelText("Last invoice date"), { target: { value: "2027-03-31" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));

@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -93,8 +94,8 @@ export function FacilitiesPage() {
       />
       <Card>
         <form className={styles.toolbar} onSubmit={choose} noValidate>
-          <FormField id="fa-entity" label="Legal entity id" error={error}>
-            {(c) => <Input {...c} className={styles.mono} value={draft} onChange={(e) => setDraft(e.target.value)} invalid={Boolean(error)} />}
+          <FormField id="fa-entity" label="Legal entity" error={error}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={draft} onChange={(e) => setDraft(e.target.value)} invalid={Boolean(error)} />}
           </FormField>
           <Button type="submit">Show facilities</Button>
         </form>

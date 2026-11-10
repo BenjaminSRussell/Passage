@@ -115,15 +115,15 @@ describe("GR/IR open items", () => {
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("OPEN"));
   });
 
-  it("refuses a bad filter without calling the service", async () => {
+  it("does not turn typed text into a vendor filter", async () => {
     server.handler = () => json(200, page([item()]));
     renderAt("/ap-invoices/grir");
     await screen.findByText("RCV-00000001");
-    const calls = server.calls.length;
-    fireEvent.change(screen.getByLabelText("Vendor ID"), { target: { value: "nope" } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: "nope" } });
+    expect(screen.getByLabelText("Vendor")).toHaveAttribute("data-value", "");
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("Enter a vendor UUID.")).toBeInTheDocument();
-    expect(server.calls).toHaveLength(calls);
+    expect(screen.queryByText("Enter a vendor UUID.")).toBeNull();
+    expect([...(server.calls.at(-1)?.url.searchParams.keys() ?? [])].join(",")).not.toMatch(/vendor/i);
   });
 
   it("carries the selected items, with the receipt unit price, into the invoice form", async () => {

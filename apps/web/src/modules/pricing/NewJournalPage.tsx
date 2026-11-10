@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Textarea } from "../../shell/ui";
 import { createPriceJournal, describeProblem, newKey, type JournalLineInput, type Problem } from "./api/client";
@@ -111,9 +112,9 @@ export function NewJournalPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="pj-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
+          <FormField id="pj-legal-entity" label="Legal entity" error={errors.legalEntityId}>
             {(c) => (
-              <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
+              <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
             )}
           </FormField>
           <FormField id="pj-name" label="Journal name" error={errors.name}>

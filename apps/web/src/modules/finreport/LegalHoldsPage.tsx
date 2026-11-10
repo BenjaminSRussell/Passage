@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { holdsDuty } from "../../shell/dutyGate";
@@ -106,8 +107,8 @@ export function LegalHoldsPage() {
       {canHold ? (
         <Card title="Put a library on hold">
           <form className={styles.form} onSubmit={submit} noValidate aria-label="Put a library on hold">
-            <FormField id="fr-hold-entity" label="Legal entity id" error={errors.legalEntityId} hint="One hold can be in force for a legal entity.">
-              {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(e) => setValues({ ...values, legalEntityId: e.target.value })} />}
+            <FormField id="fr-hold-entity" label="Legal entity" error={errors.legalEntityId} hint="One hold can be in force for a legal entity.">
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(e) => setValues({ ...values, legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="fr-hold-reason" label="Reason" error={errors.reason} hint={`The matter, case or audit reference. At most ${MAX_HOLD_REASON} characters.`}>
               {(c) => <Input {...c} value={values.reason} invalid={Boolean(errors.reason)} onChange={(e) => setValues({ ...values, reason: e.target.value })} />}

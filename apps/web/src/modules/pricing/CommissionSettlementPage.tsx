@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import {
@@ -140,9 +141,9 @@ export function CommissionSettlementPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={preview} noValidate>
-          <FormField id="cs-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
+          <FormField id="cs-legal-entity" label="Legal entity" error={errors.legalEntityId}>
             {(c) => (
-              <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
+              <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
             )}
           </FormField>
           <FormField id="cs-from" label="First invoice date" error={errors.from}>

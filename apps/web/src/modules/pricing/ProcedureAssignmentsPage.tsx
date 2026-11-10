@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, Card, ConfirmDialog, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
@@ -130,8 +131,8 @@ export function ProcedureAssignmentsPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={load} noValidate>
-          <FormField id="pd-legal-entity" label="Legal entity id" error={idError}>
-            {(c) => <Input {...c} className={styles.mono} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={Boolean(idError)} />}
+          <FormField id="pd-legal-entity" label="Legal entity" error={idError}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={Boolean(idError)} />}
           </FormField>
           <div className={styles.formActions}>
             <Button type="submit" variant="secondary" loading={loading}>

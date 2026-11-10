@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { createProcedure, describeProblem, getProcedure, newKey, type ProcedureInput, type ProcedureStep, type Problem } from "./api/client";
@@ -76,8 +77,8 @@ export function NewProcedurePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="pp-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-            {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
+          <FormField id="pp-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
           <FormField id="pp-name" label="Procedure name" hint="For example AX_STANDARD or SAP_RVAA01." error={errors.name}>
             {(c) => <Input {...c} className={styles.mono} value={values.name} onChange={(e) => update({ name: e.target.value.toUpperCase() })} invalid={Boolean(errors.name)} />}
