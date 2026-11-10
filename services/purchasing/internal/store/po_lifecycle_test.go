@@ -229,6 +229,9 @@ func TestPurchaseOrderLifecycle_ReceivedFloorAndCancel(t *testing.T) {
 	if last.Type != purchasingevents.POCancelled || last.Data["prior_status"] != domain.POStatusConfirmed {
 		t.Fatalf("last event = %+v", last)
 	}
+	if last.Data["legal_entity_id"] != cur.LegalEntityID {
+		t.Fatalf("po.cancelled legal_entity_id = %v, want %s", last.Data["legal_entity_id"], cur.LegalEntityID)
+	}
 	if lines, _ := last.Data["lines"].([]any); len(lines) != 1 || lines[0].(map[string]any)["remaining_qty"] != "100" {
 		t.Fatalf("po.cancelled lines = %+v", last.Data["lines"])
 	}

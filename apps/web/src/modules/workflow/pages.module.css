@@ -75,3 +75,19 @@
 .template:last-child {
   border-block-end: 0;
 }
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.filter {
+  max-inline-size: 20rem;
+}
+
+.actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

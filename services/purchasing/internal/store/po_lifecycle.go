@@ -366,7 +366,7 @@ func confirmPending(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 func cancelOrder(ctx context.Context, tx pgx.Tx, cur PurchaseOrder) error {
 	received, invoiced := decimal.Zero, decimal.Zero
 	var open []PurchaseOrderLine
-	data := purchasingevents.POCancelledData{POID: cur.ID, Number: cur.Number, VersionNo: cur.VersionNo,
+	data := purchasingevents.POCancelledData{POID: cur.ID, Number: cur.Number, LegalEntityID: cur.LegalEntityID, VersionNo: cur.VersionNo,
 		PriorStatus: cur.ApprovalStatus, Lines: []purchasingevents.POCancelledLine{}}
 	for _, l := range cur.Lines {
 		if l.Status == domain.POLineCancelled {
@@ -721,7 +721,10 @@ func markConfirmed(ctx context.Context, tx pgx.Tx, poID string, no int) error {
 	_, err := tx.Exec(ctx, `update purchase_order_version set confirmed_at = now(), confirmed_by = $4
 		where tenant_id = $1 and purchase_order_id = $2 and version_no = $3 and confirmed_at is null`,
 		p.TenantID, poID, no, userOrNil(p.UserID))
-	return err
+	if err != nil {
+		return err
+	}
+	return supersedeAcks(ctx, tx, poID, no)
 }
 
 func deleteVersion(ctx context.Context, tx pgx.Tx, poID string, no int) error {

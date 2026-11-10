@@ -1,0 +1,59 @@
+openapi: 3.1.0
+info:
+  title: Passage global search
+  version: 0.1.0
+  description: >
+    One ranked list of records the caller may open, across parties, products and
+    purchase orders. A type is searched only when the caller holds its source
+    service's read duty (party.read, product.read,
+    procurement.purchase-order.inquire); a named type the caller may not read is
+    dropped without comment. Purchase orders are visible only for the caller's
+    legal entities. An exact number ranks first, then a number prefix, then
+    trigram similarity of the number, title and subtitle. Errors are RFC 7807
+    problems.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env: { default: dev }
+paths:
+  /v1/search:
+    get:
+      operationId: searchRecords
+      summary: Search records by number or name
+      x-passage-duty: party.read
+      x-passage-duty-alternatives: [product.read, procurement.purchase-order.inquire]
+      parameters:
+        - { name: q, in: query, required: true, description: Two to 100 characters after trimming., schema: { type: string, minLength: 2, maxLength: 100 } }
+        - { name: types, in: query, description: Comma separated record types; all readable types when empty., schema: { type: string, examples: ["party,product"] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        "200":
+          description: Matches, best first. Empty when nothing matches.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Results" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+components:
+  responses:
+    Problem:
+      description: RFC 7807 problem.
+      content: { application/problem+json: { schema: { type: object } } }
+  schemas:
+    Results:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [type, id, number, title, link]
+            properties:
+              type: { type: string, enum: [party, product, purchase_order] }
+              id: { type: string, format: uuid }
+              legalEntityId: { type: string, format: uuid, description: Set for purchase orders. }
+              number: { type: string }
+              title: { type: string }
+              subtitle: { type: string }
+              status: { type: string }
+              link: { type: string, description: Web path that opens the record. }

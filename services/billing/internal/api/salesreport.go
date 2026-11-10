@@ -12,7 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 )
 
-const salesReportStatuses = "PENDING, REPORTED or PARKED"
+const reportStatuses = "PENDING, REPORTED or PARKED"
 
 type SalesReports interface {
 	ListSalesReports(ctx context.Context, status string, limit int) ([]store.SalesReport, error)
@@ -38,7 +38,7 @@ func (a *API) listSalesReports(w http.ResponseWriter, r *http.Request) {
 	}
 	status := r.URL.Query().Get("status")
 	if status != "" && status != store.SalesReportPending && status != store.SalesReportReported && status != store.SalesReportParked {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", fmt.Sprintf("status must be %s", salesReportStatuses)))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", fmt.Sprintf("status must be %s", reportStatuses)))
 		return
 	}
 	items, err := a.salesReports.ListSalesReports(r.Context(), status, maxListLimit)
