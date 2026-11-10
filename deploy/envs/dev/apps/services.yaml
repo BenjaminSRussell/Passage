@@ -73,6 +73,7 @@ spec:
           - { name: scheduling, path: services/scheduling/charts/scheduling, namespace: hello-ledger }
           - { name: search, path: services/search/charts/search, namespace: hello-ledger }
           - { name: shopfloor, path: services/shopfloor/charts/shopfloor, namespace: hello-ledger }
+          - { name: supplier-portal, path: services/supplier-portal-ts/charts/supplier-portal, namespace: hello-ledger }
           - { name: tax, path: services/tax/charts/tax, namespace: hello-ledger }
           - { name: transport, path: services/transport/charts/transport, namespace: hello-ledger }
           - { name: treasury, path: services/treasury/charts/treasury, namespace: hello-ledger }
