@@ -90,6 +90,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return err
 		}
 		a.WithLedger(ledger, st, profiles)
+		glProfiles = profiles
 	}
 	allocations, err := revrec.FromEnv(getenv)
 	if err != nil {

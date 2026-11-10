@@ -30,27 +30,27 @@ func env(m map[string]string) func(string) string { return func(k string) string
 
 func TestAutoBook_RunsEveryTenantAndEntityUnderAScopedPrincipalAndSurvivesFailures(t *testing.T) {
 	tenantA, tenantB, leA, leB := ids.New(), ids.New(), ids.New(), ids.New()
-	profiles := map[string]store.GLProfile{leA: {}, leB: {}}
+	profiles := map[string]store.GLProfile{leA: {TenantID: tenantA}, leB: {TenantID: tenantB}}
 	books := &recordingBooks{fails: map[string]error{tenantA + leA: errors.New("ledger down")}}
 	w, err := newAutoBook(env(map[string]string{"BILLING_GL_AUTOBOOK_TENANT_IDS": tenantA + "," + tenantB + "," + tenantA}), profiles, books)
 	if err != nil || w == nil {
 		t.Fatalf("newAutoBook: %v %v", w, err)
 	}
 	w.once(context.Background())
-	if len(books.runs) != 4 {
-		t.Fatalf("%d runs, want tenants x entities = 4 (a failing run must not stop the rest)", len(books.runs))
+	if len(books.runs) != 2 {
+		t.Fatalf("%d runs, want one per tenant and its own entity (a failing run must not stop the rest)", len(books.runs))
 	}
+	own := map[string]string{tenantA: leA, tenantB: leB}
 	for _, p := range books.runs {
-		if p.LegalEntityID == "" || p.UserID != autoBookActor || p.TenantID == "" {
-			t.Errorf("principal %+v is not scoped to one tenant and legal entity", p)
+		if p.LegalEntityID != own[p.TenantID] || p.UserID != autoBookActor {
+			t.Errorf("principal %+v is not scoped to its tenant's own legal entity", p)
 		}
 	}
 }
 
 func TestAutoBook_Config(t *testing.T) {
-	le := ids.New()
-	profiles := map[string]store.GLProfile{le: {}}
-	good := ids.New()
+	le, good := ids.New(), ids.New()
+	profiles := map[string]store.GLProfile{le: {TenantID: good}}
 	if w, err := newAutoBook(env(nil), profiles, nil); w != nil || err != nil {
 		t.Errorf("unset tenants: %v %v, want disabled", w, err)
 	}
@@ -68,6 +68,9 @@ func TestAutoBook_Config(t *testing.T) {
 	if _, err := newAutoBook(env(map[string]string{"BILLING_GL_AUTOBOOK_TENANT_IDS": good}), nil, nil); err == nil {
 		t.Error("auto-book without GL profiles accepted")
 	}
+	if _, err := newAutoBook(env(map[string]string{"BILLING_GL_AUTOBOOK_TENANT_IDS": ids.New()}), profiles, nil); err == nil {
+		t.Error("a tenant no profile names accepted")
+	}
 	w, err := newAutoBook(env(map[string]string{"BILLING_GL_AUTOBOOK_TENANT_IDS": good, "BILLING_GL_AUTOBOOK_INTERVAL": "30s"}), profiles, nil)
 	if err != nil || w.interval != 30*time.Second {
 		t.Errorf("interval: %v %v", w, err)
@@ -76,7 +79,7 @@ func TestAutoBook_Config(t *testing.T) {
 
 func TestAutoBook_LoopRunsImmediatelyAndStopsWithItsContext(t *testing.T) {
 	books := &recordingBooks{}
-	w := &autoBook{interval: time.Hour, tenants: []string{ids.New()}, entities: []string{ids.New()}, books: books}
+	w := &autoBook{interval: time.Hour, entities: map[string][]string{ids.New(): {ids.New()}}, books: books}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { w.loop(ctx); close(done) }()

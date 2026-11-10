@@ -36,6 +36,7 @@ const (
 	CodeGLRunInProgress       = "BIL-0209"
 
 	defaultGLBatch = 200
+	autoBookPages  = 10
 )
 
 type GLBooks interface {
@@ -58,7 +59,8 @@ func (a *API) WithAllocations(reader revrec.Reader) *API {
 	return a
 }
 
-// ParseGLProfiles reads BILLING_GL_PROFILES: a JSON array holding, per legal entity, the ledger and the accounts of the invoice journal.
+// ParseGLProfiles reads BILLING_GL_PROFILES: a JSON array holding, per legal entity, the ledger and the accounts of the invoice journal
+// and, for the auto-book worker, the optional tenantId the entity belongs to.
 // The deferred revenue and contract liability account is 2400, the account revrec recognizes from; the contract asset account
 // is contractAssetAccount, 1250 when omitted, and must differ from 2400 and the receivable.
 func ParseGLProfiles(raw string) (map[string]store.GLProfile, error) {
@@ -79,6 +81,13 @@ func ParseGLProfiles(raw string) (map[string]store.GLProfile, error) {
 		}
 		if slices.Contains(append([]string{store.DeferredGL, p.ReceivableAccount, p.TaxAccount, p.ChargeAccount}, p.DeferredRevenueAccounts...), p.ContractAssetAccount) {
 			return nil, fmt.Errorf("BILLING_GL_PROFILES entry for %s: contractAssetAccount %s must be an account of its own", le, p.ContractAssetAccount)
+		}
+		if p.TenantID != "" {
+			tid, tidOK := ids.Canonical(p.TenantID)
+			if !tidOK {
+				return nil, fmt.Errorf("BILLING_GL_PROFILES entry for %s: tenantId must be a UUID", le)
+			}
+			p.TenantID = tid
 		}
 		p.LegalEntityID, p.LedgerID = le, ledger
 		if _, dup := out[le]; dup {
@@ -417,16 +426,24 @@ type glRun struct {
 
 // AutoBook is the posting run the auto-book worker drives for one legal entity under a principal scoped to it: the same run as
 // POST /v1/billing/gl-postings, with the same lock, backoff and ledger key per document, so a retry never books a document twice.
+// It continues while due documents remain beyond a page, at most autoBookPages pages per call, and counts what a run that
+// failed midway had already booked.
 func (a *API) AutoBook(ctx context.Context, legalEntityID string) (booked, failed int, err error) {
 	if !a.glConfigured() {
 		return 0, 0, errGLNotConfigured()
 	}
-	run, err := a.runGL(ctx, legalEntityID, false)
-	var problem *httpx.Problem
-	if errors.As(err, &problem) && problem.Code == CodeGLRunInProgress {
-		return 0, 0, nil
+	for range autoBookPages {
+		run, rerr := a.runGL(ctx, legalEntityID, false)
+		booked, failed = booked+len(run.items), failed+len(run.failed)
+		var problem *httpx.Problem
+		if errors.As(rerr, &problem) && problem.Code == CodeGLRunInProgress {
+			return booked, failed, nil
+		}
+		if rerr != nil || !run.more || run.halted != "" {
+			return booked, failed, rerr
+		}
 	}
-	return len(run.items), len(run.failed), err
+	return booked, failed, nil
 }
 
 func (a *API) runGL(ctx context.Context, le string, retryParked bool) (glRun, error) {
@@ -532,7 +549,7 @@ func (a *API) runGL(ctx context.Context, le string, retryParked bool) (glRun, er
 			}
 			p := httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, "the general ledger did not answer")
 			p.Errors = map[string]string{"booked": strings.Join(bookedIDs(items), ",")}
-			return glRun{}, p
+			return glRun{items: items, failed: failed}, p
 		}
 		if newly, err := a.glBooks.MarkGLBooked(ctx, d.ID, entryID, shares); err != nil {
 			return glRun{}, err

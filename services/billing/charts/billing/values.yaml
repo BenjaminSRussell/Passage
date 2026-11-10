@@ -28,7 +28,7 @@ serviceIdentity:
 ledgerUrl: ""
 glProfiles: []
 # With tenantIds set (and ledgerUrl), a worker books the journal of posted invoices and credit notes of every
-# legal entity in glProfiles for those tenants each interval; unset, bookings wait for POST /v1/billing/gl-postings.
+# legal entity in glProfiles whose profile has that tenantId, each interval; unset, bookings wait for POST /v1/billing/gl-postings.
 autoBook:
   tenantIds: []
   interval: 1m

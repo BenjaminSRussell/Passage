@@ -174,7 +174,7 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
   profile's ledger is checked against its entity at each call. `invoice.posted` carries `intercompany=false` until wave 40.
 - Auto-book (#29): with `BILLING_GL_AUTOBOOK_TENANT_IDS` (chart `autoBook.tenantIds`) set, a worker in every replica runs the same
   posting run as `gl-postings` each `BILLING_GL_AUTOBOOK_INTERVAL` (default 1m, at least 5s; chart `autoBook.interval`) for each
-  legal entity of `BILLING_GL_PROFILES`, under a system principal scoped to that tenant and entity, so a posted invoice or credit
+  legal entity of `BILLING_GL_PROFILES` whose profile names that tenant (`tenantId`, optional otherwise; startup fails for a listed tenant no profile names), under a system principal scoped to that tenant and entity, so a posted invoice or credit
   note books without an API request. Idempotency is the run's: ledger key `billing-invoice-<id>` / `billing-credit-note-<id>`, the
   held booking an unanswered call leaves, `journal_posting_id` set once, and the per-entity advisory lock (a replica that finds the
   run held skips the tick). Refusals, backoff and parking apply as for the API call. Unset, nothing books until the API is called.

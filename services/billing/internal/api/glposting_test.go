@@ -910,3 +910,36 @@ func TestAutoBook_NotConfiguredAndUnmappedEntityAreErrors(t *testing.T) {
 		t.Error("auto-book for an entity without a profile must fail")
 	}
 }
+
+func TestAutoBook_ContinuesPastAPageAndCountsWhatAFailedRunBooked(t *testing.T) {
+	g := newGLRig(t, true)
+	g.api.glBatch = 1
+	g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	g.invoice(t, gridLine{"20.00", "4000", "", ""})
+	if booked, _, err := g.autoBook(t); err != nil || booked != 2 {
+		t.Fatalf("booked %d (err %v) with a page of 1, want both documents in one call", booked, err)
+	}
+	g.api.glBatch = defaultGLBatch
+	g.invoice(t, gridLine{"30.00", "4000", "", ""})
+	g.invoice(t, gridLine{"40.00", "4000", "", ""})
+	third := g.invoice(t, gridLine{"50.00", "4000", "", ""})
+	g.ledger.refuse[third] = &ledgerclient.Error{Op: "post", Status: http.StatusServiceUnavailable}
+	if booked, _, err := g.autoBook(t); err == nil || booked != 2 {
+		t.Errorf("outage midway: booked %d, err %v; want the 2 already booked reported with the error", booked, err)
+	}
+}
+
+func TestParseGLProfiles_TenantIDIsOptionalAndMustBeAUUID(t *testing.T) {
+	entry := func(tenantField string) string {
+		return `[{"legalEntityId":"` + leID + `","ledgerId":"` + ids.New() + `","receivableAccount":"1200","taxAccount":"2300","chargeAccount":"4800","deferredRevenueAccounts":["4100"]` + tenantField + `}]`
+	}
+	if got, err := ParseGLProfiles(entry(``)); err != nil || got[leID].TenantID != "" {
+		t.Errorf("no tenantId: %+v %v", got, err)
+	}
+	if got, err := ParseGLProfiles(entry(`,"tenantId":"` + testkit.TenantID(1) + `"`)); err != nil || got[leID].TenantID != testkit.TenantID(1) {
+		t.Errorf("tenantId: %+v %v", got, err)
+	}
+	if _, err := ParseGLProfiles(entry(`,"tenantId":"acme"`)); err == nil {
+		t.Error("a tenantId that is not a UUID was accepted")
+	}
+}

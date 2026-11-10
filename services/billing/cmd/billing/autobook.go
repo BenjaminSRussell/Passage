@@ -28,14 +28,13 @@ type autoBooker interface {
 }
 
 // autoBook books the invoice journal of posted invoices and credit notes without an API request: per configured tenant and per
-// legal entity of the GL profiles it runs the same posting run as POST /v1/billing/gl-postings, under a principal scoped to that
+// legal entity of the GL profiles that name that tenant (tenantId) it runs the same posting run as POST /v1/billing/gl-postings, under a principal scoped to that
 // legal entity. A document the ledger refuses or revrec cannot allocate keeps its backoff and parking on the invoice, a run
 // another replica holds is skipped, and the ledger key derives from the document id, so a tick that repeats a lost call never
 // books a document twice.
 type autoBook struct {
 	interval time.Duration
-	tenants  []string
-	entities []string
+	entities map[string][]string
 	books    autoBooker
 }
 
@@ -66,12 +65,19 @@ func newAutoBook(getenv func(string) string, profiles map[string]store.GLProfile
 		}
 		interval = d
 	}
-	entities := make([]string, 0, len(profiles))
-	for le := range profiles {
-		entities = append(entities, le)
+	entities := map[string][]string{}
+	for le, p := range profiles {
+		if slices.Contains(tenants, p.TenantID) {
+			entities[p.TenantID] = append(entities[p.TenantID], le)
+		}
 	}
-	slices.Sort(entities)
-	return &autoBook{interval: interval, tenants: tenants, entities: entities, books: books}, nil
+	for _, id := range tenants {
+		if len(entities[id]) == 0 {
+			return nil, fmt.Errorf("BILLING_GL_AUTOBOOK_TENANT_IDS names tenant %s, but no BILLING_GL_PROFILES entry has that tenantId", id)
+		}
+		slices.Sort(entities[id])
+	}
+	return &autoBook{interval: interval, entities: entities, books: books}, nil
 }
 
 func (b *autoBook) loop(ctx context.Context) {
@@ -89,8 +95,8 @@ func (b *autoBook) loop(ctx context.Context) {
 }
 
 func (b *autoBook) once(ctx context.Context) {
-	for _, tenantID := range b.tenants {
-		for _, le := range b.entities {
+	for tenantID, entities := range b.entities {
+		for _, le := range entities {
 			runCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{TenantID: tenantID, LegalEntityID: le, UserID: autoBookActor}), autoBookTimeout)
 			runCtx = context.WithValue(runCtx, middleware.RequestIDKey, "autobook-"+ids.New())
 			booked, failed, err := b.books.AutoBook(runCtx, le)
