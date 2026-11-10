@@ -1,4 +1,14 @@
-import { ActivityFailure, condition, continueAsNew, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler } from "@temporalio/workflow";
+import {
+  ActivityFailure,
+  ApplicationFailure,
+  condition,
+  continueAsNew,
+  defineQuery,
+  defineSignal,
+  metricMeter,
+  proxyActivities,
+  setHandler,
+} from "@temporalio/workflow";
 import type { BudgetPlanActivities } from "./budgetPlanActivities.js";
 
 export interface BudgetPlanInput {
@@ -11,6 +21,7 @@ export interface BudgetPlanInput {
 }
 
 export const REFUSED_DECISIONS_BEFORE_RESTART = 100;
+export const DROPPED_DECISIONS_KEPT = 50;
 
 export type BudgetPlanStage = "review" | "approve";
 
@@ -52,6 +63,14 @@ export type BudgetPlanDecision =
     }
   | { decision: "reject"; reason: string; actor: string; scope: string[] };
 
+export interface BudgetPlanDroppedDecision {
+  decision: BudgetPlanDecision["decision"];
+  stage?: BudgetPlanStage;
+  orgUnitId?: string;
+  actor: string;
+  failure: string;
+}
+
 export interface BudgetPlanState {
   planId: string;
   tenantId: string;
@@ -60,13 +79,17 @@ export interface BudgetPlanState {
   requester: string;
   status: "awaiting_review" | "awaiting_approval" | "approved" | "rejected";
   refusedDecisions: number;
+  droppedDecisions: BudgetPlanDroppedDecision[];
   approvedScenarioId?: string;
   registerEntryId?: string;
   decidedBy?: string;
 }
 
-export const budgetPlanDecisionSignal = defineSignal<[decision: BudgetPlanDecision]>("budget-plan-decision");
-export const budgetPlanStateQuery = defineQuery<BudgetPlanState>("budget-plan-state");
+export const budgetPlanDecisionSignal = defineSignal<
+  [decision: BudgetPlanDecision]
+>("budget-plan-decision");
+export const budgetPlanStateQuery =
+  defineQuery<BudgetPlanState>("budget-plan-state");
 
 const activities = proxyActivities<BudgetPlanActivities>({
   startToCloseTimeout: "1 minute",
@@ -79,16 +102,34 @@ const activities = proxyActivities<BudgetPlanActivities>({
 });
 
 /** One run per submission: a plan sent back and submitted again is a new workflow, and a signal for the old round finds none. */
-export function budgetPlanWorkflowId(planId: string, submission: number): string {
+export function budgetPlanWorkflowId(
+  planId: string,
+  submission: number,
+): string {
   return `budget-plan:${planId}:${submission}`;
 }
 
 export function validateBudgetPlanInput(input: BudgetPlanInput): void {
-  if (!input.tenantId || !input.legalEntityId || !input.planId || !input.requester) {
-    throw new TypeError("tenantId, legalEntityId, planId and requester are required");
+  if (
+    !input.tenantId ||
+    !input.legalEntityId ||
+    !input.planId ||
+    !input.requester
+  ) {
+    throw new TypeError(
+      "tenantId, legalEntityId, planId and requester are required",
+    );
   }
-  if (!Number.isInteger(input.submission) || input.submission < 1) throw new TypeError("submission must be a positive integer");
+  if (!Number.isInteger(input.submission) || input.submission < 1)
+    throw new TypeError("submission must be a positive integer");
 }
+
+const RANK = {
+  awaiting_review: 0,
+  awaiting_approval: 1,
+  approved: 2,
+  rejected: 2,
+} as const;
 
 const STATUS = {
   Submitted: "awaiting_review",
@@ -103,7 +144,9 @@ const STATUS = {
  * duties, submission), so a refused decision is counted and the workflow keeps waiting. It ends when budgeting reports the
  * plan Approved (the approved scenario is then the budget register) or back in Draft after a rejection.
  */
-export async function budgetPlanWorkflow(input: BudgetPlanInput): Promise<BudgetPlanState> {
+export async function budgetPlanWorkflow(
+  input: BudgetPlanInput,
+): Promise<BudgetPlanState> {
   validateBudgetPlanInput(input);
 
   const state: BudgetPlanState = {
@@ -114,10 +157,14 @@ export async function budgetPlanWorkflow(input: BudgetPlanInput): Promise<Budget
     requester: input.requester,
     status: input.status ?? "awaiting_review",
     refusedDecisions: 0,
+    droppedDecisions: [],
   };
   const decisions: BudgetPlanDecision[] = [];
   setHandler(budgetPlanStateQuery, () => ({ ...state }));
-  setHandler(budgetPlanDecisionSignal, (decision) => void decisions.push(decision));
+  setHandler(
+    budgetPlanDecisionSignal,
+    (decision) => void decisions.push(decision),
+  );
 
   const ref = (actor: string, scope: string[]): BudgetPlanRef => ({
     tenantId: input.tenantId,
@@ -142,21 +189,56 @@ export async function budgetPlanWorkflow(input: BudgetPlanInput): Promise<Budget
               ...ref(decision.actor, decision.scope),
               stage: decision.stage,
               orgUnitId: decision.orgUnitId,
-              ...(decision.scenarioId ? { scenarioId: decision.scenarioId } : {}),
+              ...(decision.scenarioId
+                ? { scenarioId: decision.scenarioId }
+                : {}),
             });
-      state.status = STATUS[plan.status];
-      state.decidedBy = decision.actor;
-      if (plan.approvedScenarioId && plan.status === "Approved") state.approvedScenarioId = plan.approvedScenarioId;
-      if (plan.registerEntryId) state.registerEntryId = plan.registerEntryId;
+      const next = STATUS[plan.status];
+      if (decision.decision === "reject" || RANK[next] >= RANK[state.status]) {
+        state.status = next;
+        state.decidedBy = decision.actor;
+        if (plan.approvedScenarioId && plan.status === "Approved")
+          state.approvedScenarioId = plan.approvedScenarioId;
+        if (plan.registerEntryId) state.registerEntryId = plan.registerEntryId;
+      }
       if (state.status === "approved" || state.status === "rejected") {
-        metricMeter.createCounter("passage_budget_plan_decided", "1", "Budget plan submissions that ended").add(1, { outcome: state.status });
+        metricMeter
+          .createCounter(
+            "passage_budget_plan_decided",
+            "1",
+            "Budget plan submissions that ended",
+          )
+          .add(1, { outcome: state.status });
         return { ...state };
       }
     } catch (error) {
       if (!(error instanceof ActivityFailure)) throw error;
-      state.refusedDecisions += 1;
-      if (state.refusedDecisions >= REFUSED_DECISIONS_BEFORE_RESTART && decisions.length === 0) {
-        return continueAsNew<typeof budgetPlanWorkflow>({ ...input, status: state.status });
+      if (
+        error.cause instanceof ApplicationFailure &&
+        error.cause.type === "ServiceCallRejected"
+      ) {
+        state.refusedDecisions += 1;
+      } else {
+        state.droppedDecisions = [
+          ...state.droppedDecisions,
+          {
+            decision: decision.decision,
+            ...(decision.decision === "sign-off"
+              ? { stage: decision.stage, orgUnitId: decision.orgUnitId }
+              : {}),
+            actor: decision.actor,
+            failure: error.cause?.message ?? error.message,
+          },
+        ].slice(-DROPPED_DECISIONS_KEPT);
+      }
+      if (
+        state.refusedDecisions >= REFUSED_DECISIONS_BEFORE_RESTART &&
+        decisions.length === 0
+      ) {
+        return continueAsNew<typeof budgetPlanWorkflow>({
+          ...input,
+          status: state.status,
+        });
       }
     }
   }

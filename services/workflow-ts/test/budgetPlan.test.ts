@@ -1,10 +1,23 @@
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { bundleWorkflowCode, Worker, type WorkflowBundle } from "@temporalio/worker";
+import {
+  bundleWorkflowCode,
+  Worker,
+  type WorkflowBundle,
+} from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
-import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy, type Client } from "@temporalio/client";
+import {
+  WorkflowExecutionAlreadyStartedError,
+  WorkflowIdReusePolicy,
+  type Client,
+} from "@temporalio/client";
 import { createBudgetPlanActivities } from "../src/budgetPlanActivities.js";
-import { handlePlanSubmitted, planSubmittedSource, planSubmittedType, toBudgetPlanInput } from "../src/budgetPlanTriggers.js";
+import {
+  handlePlanSubmitted,
+  planSubmittedSource,
+  planSubmittedType,
+  toBudgetPlanInput,
+} from "../src/budgetPlanTriggers.js";
 import { createServiceTokenSigner } from "../src/serviceToken.js";
 import {
   budgetPlanDecisionSignal,
@@ -16,7 +29,14 @@ import {
   type BudgetPlanDecision,
   type BudgetPlanInput,
 } from "../src/workflows.js";
-import { FakeBudgeting, PLAN_ID, SCENARIO_ID, UNIT_A, UNIT_APPROVE, UNIT_B } from "./fakeBudgeting.js";
+import {
+  FakeBudgeting,
+  PLAN_ID,
+  SCENARIO_ID,
+  UNIT_A,
+  UNIT_APPROVE,
+  UNIT_B,
+} from "./fakeBudgeting.js";
 
 const TENANT = "00000000-0000-0000-0000-000000000001";
 const ENTITY = "00000000-0000-0000-0000-0000000000a1";
@@ -33,7 +53,12 @@ type Handle = {
   signal: (...args: any[]) => Promise<void>;
   query: (...args: any[]) => Promise<any>;
 };
-const review = (handle: Handle, actor: string, orgUnitId: string, scope = [ENTITY]) =>
+const review = (
+  handle: Handle,
+  actor: string,
+  orgUnitId: string,
+  scope = [ENTITY],
+) =>
   handle.signal(budgetPlanDecisionSignal, {
     decision: "sign-off",
     stage: "review",
@@ -60,7 +85,8 @@ const reject = (handle: Handle, actor: string, reason = "too high") =>
 
 async function untilRefused(handle: Handle, count: number): Promise<void> {
   for (let i = 0; i < 200; i += 1) {
-    if ((await handle.query(budgetPlanStateQuery)).refusedDecisions >= count) return;
+    if ((await handle.query(budgetPlanStateQuery)).refusedDecisions >= count)
+      return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`the workflow did not refuse ${count} decisions`);
@@ -78,7 +104,9 @@ describe("budget plan approval workflow", () => {
   beforeAll(async () => {
     environment = await TestWorkflowEnvironment.createTimeSkipping();
     workflowBundle = await bundleWorkflowCode({
-      workflowsPath: fileURLToPath(new URL("../src/workflows.ts", import.meta.url)),
+      workflowsPath: fileURLToPath(
+        new URL("../src/workflows.ts", import.meta.url),
+      ),
     });
   }, 120_000);
 
@@ -86,7 +114,11 @@ describe("budget plan approval workflow", () => {
     await environment?.teardown();
   });
 
-  async function run(fake: FakeBudgeting, drive: (handle: Awaited<ReturnType<typeof start>>) => Promise<void>, override: Partial<BudgetPlanInput> = {}) {
+  async function run(
+    fake: FakeBudgeting,
+    drive: (handle: Awaited<ReturnType<typeof start>>) => Promise<void>,
+    override: Partial<BudgetPlanInput> = {},
+  ) {
     sequence += 1;
     const taskQueue = `budget-plan-${sequence}`;
     const worker = await Worker.create({
@@ -113,6 +145,29 @@ describe("budget plan approval workflow", () => {
     });
   }
 
+  it("records a decision that budgeting never answered as dropped, not as refused", async () => {
+    const fake = new FakeBudgeting();
+    fake.refuse("sign-off", 503, "BUD-9999");
+    const result = await run(fake, async (handle) => {
+      await review(handle, "rev-a", UNIT_A);
+      await reject(handle, "rev-a");
+    });
+    expect(result).toMatchObject({
+      refusedDecisions: 0,
+      status: "rejected",
+      droppedDecisions: [
+        {
+          decision: "sign-off",
+          stage: "review",
+          orgUnitId: UNIT_A,
+          actor: "rev-a",
+          failure: expect.any(String),
+        },
+      ],
+    });
+    expect(fake.calls["sign-off"]).toBeGreaterThan(1);
+  }, 60_000);
+
   it("carries the plan through review by every org unit and approval, and the approved scenario becomes the register", async () => {
     const fake = new FakeBudgeting();
     const result = await run(fake, async (handle) => {
@@ -131,7 +186,14 @@ describe("budget plan approval workflow", () => {
     expect(fake.plan.status).toBe("Approved");
     expect(fake.effects).toBe(1);
     expect(fake.calls).toEqual({ "sign-off": 3, reject: 0 });
-    expect(fake.tokens.map((claims) => [claims.act, claims.tid, claims.le, claims.duties])).toEqual([
+    expect(
+      fake.tokens.map((claims) => [
+        claims.act,
+        claims.tid,
+        claims.le,
+        claims.duties,
+      ]),
+    ).toEqual([
       ["rev-a", TENANT, ENTITY, ["budget.plan.workflow"]],
       ["rev-b", TENANT, ENTITY, ["budget.plan.workflow"]],
       ["boss", TENANT, ENTITY, ["budget.plan.workflow"]],
@@ -176,7 +238,9 @@ describe("budget plan approval workflow", () => {
     const result = await run(fake, async (handle) => {
       await approve(handle, "boss");
       await untilRefused(handle, 1);
-      expect((await handle.query(budgetPlanStateQuery)).status).toBe("awaiting_review");
+      expect((await handle.query(budgetPlanStateQuery)).status).toBe(
+        "awaiting_review",
+      );
       await review(handle, "rev-a", UNIT_A);
       await review(handle, "rev-b", UNIT_B);
       await approve(handle, "boss");
@@ -202,7 +266,9 @@ describe("budget plan approval workflow", () => {
   it("never mints a token for a legal entity outside the decider's scope, so nothing reaches budgeting", async () => {
     const fake = new FakeBudgeting();
     const result = await run(fake, async (handle) => {
-      await review(handle, "rev-a", UNIT_A, ["00000000-0000-0000-0000-0000000000ff"]);
+      await review(handle, "rev-a", UNIT_A, [
+        "00000000-0000-0000-0000-0000000000ff",
+      ]);
       await untilRefused(handle, 1);
       expect(fake.calls["sign-off"]).toBe(0);
       await review(handle, "rev-a", UNIT_A);
@@ -252,13 +318,20 @@ describe("budget plan approval workflow", () => {
     const result = await run(fake, async (handle) => {
       await review(handle, "rev-a", UNIT_A);
       await review(handle, "rev-b", UNIT_B);
-      for (let i = 0; i < REFUSED_DECISIONS_BEFORE_RESTART; i += 1) await review(handle, "mallory", UNIT_A);
+      for (let i = 0; i < REFUSED_DECISIONS_BEFORE_RESTART; i += 1)
+        await review(handle, "mallory", UNIT_A);
       for (let i = 0; i < 400; i += 1) {
         const state = await handle.query(budgetPlanStateQuery);
-        if (state.refusedDecisions === 0 && fake.calls["sign-off"] >= 2 + REFUSED_DECISIONS_BEFORE_RESTART) break;
+        if (
+          state.refusedDecisions === 0 &&
+          fake.calls["sign-off"] >= 2 + REFUSED_DECISIONS_BEFORE_RESTART
+        )
+          break;
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      expect((await handle.query(budgetPlanStateQuery)).status).toBe("awaiting_approval");
+      expect((await handle.query(budgetPlanStateQuery)).status).toBe(
+        "awaiting_approval",
+      );
       await approve(handle, "boss");
     });
     expect(result).toMatchObject({ status: "approved", refusedDecisions: 0 });
@@ -280,12 +353,34 @@ describe("budget plan approval workflow", () => {
       requester: "pat",
       status: "awaiting_review",
       refusedDecisions: 0,
+      droppedDecisions: [],
     });
   }, 60_000);
 
+  it("does not move the status backwards when a replayed sign-off returns an older snapshot", async () => {
+    const fake = new FakeBudgeting();
+    let seen: unknown;
+    const result = await run(fake, async (handle) => {
+      await review(handle, "rev-a", UNIT_A);
+      await review(handle, "rev-b", UNIT_B);
+      await review(handle, "rev-a", UNIT_A);
+      await approve(handle, "mallory");
+      await untilRefused(handle, 1);
+      seen = (await handle.query(budgetPlanStateQuery)).status;
+      await approve(handle, "boss");
+    });
+    expect(seen).toBe("awaiting_approval");
+    expect(fake.calls["sign-off"]).toBe(5);
+    expect(result).toMatchObject({ status: "approved", refusedDecisions: 1 });
+  }, 60_000);
+
   it("refuses to start without the tenant, plan or requester, or with no submission", () => {
-    expect(() => validateBudgetPlanInput({ ...input, requester: "" })).toThrow(/required/);
-    expect(() => validateBudgetPlanInput({ ...input, submission: 0 })).toThrow(/submission/);
+    expect(() => validateBudgetPlanInput({ ...input, requester: "" })).toThrow(
+      /required/,
+    );
+    expect(() => validateBudgetPlanInput({ ...input, submission: 0 })).toThrow(
+      /submission/,
+    );
     expect(() => validateBudgetPlanInput(input)).not.toThrow();
   });
 });
@@ -305,8 +400,13 @@ describe("plan.submitted trigger", () => {
 
   it("starts one workflow per submission and takes the requester from the event", async () => {
     const start = vi.fn().mockResolvedValue({});
-    const client = { workflow: { start } } as unknown as Pick<Client, "workflow">;
-    expect(await handlePlanSubmitted(client, "passage-approvals", event)).toEqual({ workflowId: `budget-plan:${PLAN_ID}:2`, started: true });
+    const client = { workflow: { start } } as unknown as Pick<
+      Client,
+      "workflow"
+    >;
+    expect(
+      await handlePlanSubmitted(client, "passage-approvals", event),
+    ).toEqual({ workflowId: `budget-plan:${PLAN_ID}:2`, started: true });
     expect(start).toHaveBeenCalledWith(budgetPlanWorkflow, {
       workflowId: `budget-plan:${PLAN_ID}:2`,
       taskQueue: "passage-approvals",
@@ -324,15 +424,28 @@ describe("plan.submitted trigger", () => {
   });
 
   it("reports a redelivered event as already started", async () => {
-    const start = vi.fn().mockRejectedValue(new WorkflowExecutionAlreadyStartedError("started", "id", "budgetPlanWorkflow"));
-    const client = { workflow: { start } } as unknown as Pick<Client, "workflow">;
+    const start = vi
+      .fn()
+      .mockRejectedValue(
+        new WorkflowExecutionAlreadyStartedError(
+          "started",
+          "id",
+          "budgetPlanWorkflow",
+        ),
+      );
+    const client = { workflow: { start } } as unknown as Pick<
+      Client,
+      "workflow"
+    >;
     expect(await handlePlanSubmitted(client, "q", event)).toMatchObject({
       started: false,
     });
   });
 
   it("refuses an event from another source or of another type", () => {
-    expect(() => toBudgetPlanInput({ ...event, source: "/passage/other" })).toThrow(/only from/);
+    expect(() =>
+      toBudgetPlanInput({ ...event, source: "/passage/other" }),
+    ).toThrow(/only from/);
     expect(() =>
       toBudgetPlanInput({
         ...event,
