@@ -7,6 +7,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -49,6 +50,8 @@ const (
 	codeBlocked      = "MOB-REPLAY-BLOCKED"
 	codeStale        = "MOB-VERSION-CONFLICT"
 	codeStep         = "MOB-STEP"
+	codeInProgress   = "MOB-IN-PROGRESS"
+	codeSessionStale = "MOB-SESSION-STALE"
 	codeReuse        = "idempotency_key_reuse"
 	codeConflict     = "MOB-0107"
 	codeGraph        = "MOB-0113"
@@ -64,6 +67,7 @@ const (
 type API struct {
 	st    *store.Store
 	wh    warehouse.Caller
+	read  func(ctx context.Context, workID string) (warehouse.Outcome, error)
 	run   replay.Runner
 	idle  time.Duration
 	now   func() time.Time
@@ -77,11 +81,19 @@ type counters struct {
 
 // New returns the API over st and the warehouse client wh, which is guarded:
 // an operation the calling user lacks the duty for is refused with a 403
-// outcome before anything is sent. idle is the device
+// outcome before anything is sent. A wh that is also a warehouse.WorkReader
+// serves the session re-lock's own work read, which needs no duty of the user
+// because its body never reaches them. idle is the device
 // session idle timeout after which a session is STALE.
 func New(st *store.Store, wh warehouse.Caller, idle time.Duration) *API {
-	wh = warehouse.Guard(wh)
-	return &API{st: st, wh: wh, run: replay.Runner{Ledger: st, Warehouse: wh}, idle: idle, now: time.Now, hub: newHub()}
+	guarded := warehouse.Guard(wh)
+	read := func(ctx context.Context, workID string) (warehouse.Outcome, error) {
+		return guarded.Do(ctx, "get-work", "", map[string]string{"workId": workID})
+	}
+	if reader, ok := wh.(warehouse.WorkReader); ok {
+		read = reader.ReadWork
+	}
+	return &API{st: st, wh: guarded, read: read, run: replay.Runner{Ledger: st, Warehouse: guarded}, idle: idle, now: time.Now, hub: newHub()}
 }
 
 // WithClock replaces the wall clock, for tests.
@@ -206,6 +218,11 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeSessionEnded, "the session has ended; sign in again"))
 	case errors.Is(err, store.ErrNotOwner):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeNotOwner, "the session belongs to another user"))
+	case errors.Is(err, store.ErrInProgress):
+		w.Header().Set("Retry-After", "5")
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeInProgress, "a request with this Idempotency-Key is still running; retry shortly"))
+	case errors.Is(err, store.ErrSessionStale):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeSessionStale, "the session was idle past its timeout; send a heartbeat to resume it, then retry"))
 	default:
 		httpx.Fail(w, r, err)
 	}

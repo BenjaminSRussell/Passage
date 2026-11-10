@@ -1,7 +1,7 @@
 // Package replay applies a device's queued offline transactions to the
 // warehouse in seq order, exactly once (BR-32.3, BR-32.4). A batch is recorded
 // first, then the device's pending transactions are applied one by one; the
-// first conflict or rejection stops the run and leaves the rest PENDING. Each
+// first conflict stops the run and leaves the rest PENDING. Each
 // transaction reaches the warehouse with its own key as Idempotency-Key, so a
 // crash or a repeated replay never repeats an effect there.
 package replay
@@ -23,13 +23,15 @@ import (
 )
 
 const (
-	CodeGap       = "MOB-0108"
-	CodeSkew      = "MOB-0114"
-	CodeUnmapped  = "MOB-0118"
-	MaxBatch      = 500
-	StatusGap     = "GAP"
-	StatusReused  = "KEY_REUSED"
-	defaultReason = "the target changed since the device captured it"
+	CodeGap        = "MOB-0108"
+	CodeSkew       = "MOB-0114"
+	CodeUnmapped   = "MOB-0118"
+	CodeNotOwner   = "MOB-NOT-OWNER"
+	MaxBatch       = 500
+	StatusGap      = "GAP"
+	StatusReused   = "KEY_REUSED"
+	StatusNotOwner = "NOT_OWNER"
+	defaultReason  = "the target changed since the device captured it"
 )
 
 var ErrBatchTooLarge = errors.New("replay: batch is too large")
@@ -61,6 +63,7 @@ type Runner struct {
 }
 
 type Item struct {
+	UserID     string
 	Seq        int64
 	Command    string
 	Payload    json.RawMessage
@@ -90,6 +93,7 @@ func (r Runner) Run(ctx context.Context, deviceID, sessionID string, items []Ite
 	if session.SkewBlocked(skew) {
 		return nil, &SkewError{Skew: skew}
 	}
+	caller := callerID(ctx)
 	items = slices.Clone(items)
 	slices.SortFunc(items, func(a, b Item) int {
 		switch {
@@ -103,6 +107,10 @@ func (r Runner) Run(ctx context.Context, deviceID, sessionID string, items []Ite
 	results := make([]Result, 0, len(items))
 	for _, it := range items {
 		key := store.OfflineKey(deviceID, it.Seq)
+		if it.UserID != "" && it.UserID != caller {
+			results = append(results, Result{IdempotencyKey: key, Seq: it.Seq, Status: StatusNotOwner, Code: CodeNotOwner, Reason: "the transaction was queued by another user; keep the queue and sign in as that user"})
+			return r.finish(ctx, deviceID, items, results)
+		}
 		in := store.OfflineIn{DeviceID: deviceID, SessionID: sessionID, Seq: it.Seq, Command: it.Command, Payload: it.Payload, CapturedAt: it.CapturedAt.Add(skew), Hash: hash(it)}
 		_, err := r.Ledger.Record(ctx, in)
 		if errors.Is(err, store.ErrConflict) {
@@ -112,6 +120,9 @@ func (r Runner) Run(ctx context.Context, deviceID, sessionID string, items []Ite
 		switch {
 		case errors.As(err, &gap):
 			results = append(results, Result{IdempotencyKey: key, Seq: it.Seq, Status: StatusGap, Code: CodeGap, Reason: gap.Error()})
+			return r.finish(ctx, deviceID, items, results)
+		case errors.Is(err, store.ErrNotOwner):
+			results = append(results, Result{IdempotencyKey: key, Seq: it.Seq, Status: StatusNotOwner, Code: CodeNotOwner, Reason: "the key was recorded for another user"})
 			return r.finish(ctx, deviceID, items, results)
 		case errors.Is(err, store.ErrIdempotencyReuse):
 			results = append(results, Result{IdempotencyKey: key, Seq: it.Seq, Status: StatusReused, Reason: "the key was recorded with another command or payload"})
@@ -145,11 +156,13 @@ func (r Runner) finish(ctx context.Context, deviceID string, items []Item, rejec
 }
 
 // Drain applies the device's pending transactions in seq order until none is
-// ready, one conflicts or is rejected, or the warehouse cannot be reached.
+// ready, one conflicts, the next was queued by another user, or the warehouse
+// cannot be reached. A rejected transaction is closed and does not stop it.
 func (r Runner) Drain(ctx context.Context, deviceID string) error {
+	caller := callerID(ctx)
 	for range MaxBatch * 4 {
 		next, err := r.Ledger.NextPending(ctx, deviceID)
-		if err != nil || next == nil {
+		if err != nil || next == nil || next.UserID != caller {
 			return err
 		}
 		status, reason, err := r.apply(ctx, *next)
@@ -159,7 +172,7 @@ func (r Runner) Drain(ctx context.Context, deviceID string) error {
 		if _, err := r.Ledger.Settle(ctx, next.IdempotencyKey, status, reason); err != nil {
 			return err
 		}
-		if status != store.TxApplied {
+		if status == store.TxConflict {
 			return nil
 		}
 	}
@@ -170,10 +183,6 @@ func (r Runner) apply(ctx context.Context, t store.OfflineTx) (status, reason st
 	op, params, mapErr := Map(t.Command, t.Payload)
 	if mapErr != nil {
 		return store.TxRejected, CodeUnmapped + ": " + mapErr.Error(), nil
-	}
-	if p, ok := tenant.FromContext(ctx); ok {
-		p.UserID = t.UserID
-		ctx = tenant.With(ctx, p)
 	}
 	out, err := r.Warehouse.Do(ctx, op, t.IdempotencyKey, params)
 	if err != nil {
@@ -190,6 +199,11 @@ func (r Runner) apply(ctx context.Context, t store.OfflineTx) (status, reason st
 		return store.TxConflict, reason, nil
 	}
 	return store.TxRejected, fmt.Sprintf("%s: %s", out.Code, out.Detail), nil
+}
+
+func callerID(ctx context.Context) string {
+	p, _ := tenant.FromContext(ctx)
+	return p.UserID
 }
 
 func hash(it Item) string {

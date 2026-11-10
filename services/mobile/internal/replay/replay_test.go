@@ -182,17 +182,17 @@ func TestAC326ConflictParksAndBlocksUntilSupervisorResolves(t *testing.T) {
 	}
 }
 
-func TestRejectedTransactionStopsTheRunWithItsReason(t *testing.T) {
+func TestRejectedTransactionIsClosedAndTheRestStillApply(t *testing.T) {
 	r, st, fake, ctx := setup(t)
 	fake.rejects[store.OfflineKey("dev-rej", 2)] = 422
 	res, err := r.Run(ctx, "dev-rej", "", batch(3))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res[1].Status != store.TxRejected || res[1].Reason != "WMS-0001: not allowed" || res[2].Status != "PENDING" {
+	if res[1].Status != store.TxRejected || res[1].Reason != "WMS-0001: not allowed" || res[2].Status != store.TxApplied {
 		t.Fatalf("results: %+v", res)
 	}
-	if got := statuses(t, st, ctx, "dev-rej", 3); got[0] != store.TxApplied || got[1] != store.TxRejected {
+	if got := statuses(t, st, ctx, "dev-rej", 3); got[0] != store.TxApplied || got[1] != store.TxRejected || got[2] != store.TxApplied {
 		t.Fatalf("stored: %v", got)
 	}
 	if queue, _ := st.ListConflicts(ctx, time.Time{}, "", 10); len(queue) != 0 {
@@ -248,7 +248,7 @@ func TestClockSkewBlocksReplayWithMOB0114(t *testing.T) {
 	}
 	behind := now.Add(-6 * time.Minute)
 	sessions, _ := st.ListSessions(ctx, "ACTIVE", "", 5)
-	if _, _, err := st.Heartbeat(ctx, sessions[0].SessionID, now, &behind); err != nil {
+	if _, _, err := st.Heartbeat(ctx, sessions[0].SessionID, now, &behind, 30*time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	var skew *SkewError
@@ -345,6 +345,59 @@ func TestReplayRefusesAnOperationTheCallerLacksTheDutyFor(t *testing.T) {
 	}
 	if len(fake.calls) != 0 {
 		t.Fatalf("the warehouse was called: %v", fake.calls)
+	}
+}
+
+func TestOneCommandWithoutItsDutyIsRejectedAndTheRestApply(t *testing.T) {
+	r, st, fake, ctx := setup(t)
+	r.Warehouse = warehouse.Guard(fake)
+	receive := Item{Seq: 2, Command: "ReceiveLine", CapturedAt: time.Now(), Payload: json.RawMessage(`{"receiptId":"r-1","lineNo":1,"qty":"2"}`)}
+	res, err := r.Run(ctx, "dev-mixed", "", []Item{confirm(1, 1), receive, confirm(3, 3)})
+	if err != nil || len(res) != 3 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res[0].Status != store.TxApplied || res[1].Status != store.TxRejected || !strings.Contains(res[1].Reason, warehouse.CodeMissingDuty) || res[2].Status != store.TxApplied {
+		t.Fatalf("only the command without its duty is rejected: %+v", res)
+	}
+	if got := statuses(t, st, ctx, "dev-mixed", 3); got[0] != store.TxApplied || got[1] != store.TxRejected || got[2] != store.TxApplied || len(fake.calls) != 2 {
+		t.Fatalf("stored %v, warehouse calls %v", got, fake.calls)
+	}
+}
+
+func asUser(ctx context.Context, user string) context.Context {
+	p, _ := tenant.FromContext(ctx)
+	p.UserID = user
+	return tenant.With(ctx, p)
+}
+
+func TestAnotherUsersQueuedWorkIsNeverAppliedUnderTheCallersIdentity(t *testing.T) {
+	r, st, fake, ctx := setup(t)
+	alice, bob := asUser(ctx, "alice"), asUser(ctx, "bob")
+
+	tagged := confirm(1, 1)
+	tagged.UserID = "alice"
+	res, err := r.Run(bob, "dev-own", "", []Item{tagged})
+	if err != nil || len(res) != 1 || res[0].Status != StatusNotOwner || res[0].Code != CodeNotOwner || len(fake.calls) != 0 {
+		t.Fatalf("an entry tagged with another user is refused: %+v %v calls=%v", res, err, fake.calls)
+	}
+	if got := statuses(t, st, ctx, "dev-own", 1); got[0] != "ABSENT" {
+		t.Fatalf("a refused entry is not recorded: %v", got)
+	}
+
+	fake.failEvery = 1
+	if _, err := r.Run(alice, "dev-held", "", []Item{confirm(1, 1)}); err == nil {
+		t.Fatal("the outage must be reported")
+	}
+	fake.failEvery, fake.calls = 0, nil
+	res, err = r.Run(bob, "dev-held", "", []Item{confirm(1, 1)})
+	if err != nil || len(res) != 1 || res[0].Status != StatusNotOwner {
+		t.Fatalf("bob resending alice's key is refused: %+v %v", res, err)
+	}
+	if err := r.Drain(bob, "dev-held"); err != nil || len(fake.calls) != 0 {
+		t.Fatalf("bob's drain must not apply alice's pending entry: %v %v", err, fake.calls)
+	}
+	if err := r.Drain(alice, "dev-held"); err != nil || len(fake.calls) != 1 || fake.calls[0].user != "alice" {
+		t.Fatalf("alice's own drain applies it as alice: %v %v", err, fake.calls)
 	}
 }
 

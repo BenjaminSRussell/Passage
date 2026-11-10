@@ -33,6 +33,24 @@ const (
 type runDoc struct {
 	Seed map[string]string `json:"seed,omitempty"`
 	Run  *flows.State      `json:"run,omitempty"`
+	Last *lastCommand      `json:"last,omitempty"`
+}
+
+// lastCommand is the answer to the last keyed command, saved in the same
+// transaction as its effect, so a retry after the key's own record was lost
+// gets that answer instead of a wrong-step conflict.
+type lastCommand struct {
+	Key     string          `json:"key"`
+	Command string          `json:"command"`
+	Work    json.RawMessage `json:"work,omitempty"`
+	Run     *runResponse    `json:"run,omitempty"`
+}
+
+func (d runDoc) answered(key, command string) *lastCommand {
+	if d.Last != nil && d.Last.Key == key && d.Last.Command == command {
+		return d.Last
+	}
+	return nil
 }
 
 func docOf(s store.Session) runDoc {
@@ -58,9 +76,11 @@ type notice struct {
 }
 
 type sessionResponse struct {
-	Session store.Session `json:"session"`
-	Resumed bool          `json:"resumed"`
-	Notice  *notice       `json:"notice,omitempty"`
+	Session  store.Session `json:"session"`
+	Resumed  bool          `json:"resumed"`
+	Relocked bool          `json:"relocked"`
+	Reason   string        `json:"reason,omitempty"`
+	Notice   *notice       `json:"notice,omitempty"`
 }
 
 func (a *API) startSession(w http.ResponseWriter, r *http.Request) {
@@ -81,18 +101,20 @@ func (a *API) startSession(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	s, resumed, err := a.st.StartSession(r.Context(), store.StartInput{DeviceID: req.DeviceID, WarehouseID: req.WarehouseID, MenuKey: req.MenuKey, Now: a.now(), Idle: a.idle})
+	now := a.now()
+	s, resumed, err := a.st.StartSession(r.Context(), store.StartInput{DeviceID: req.DeviceID, WarehouseID: req.WarehouseID, MenuKey: req.MenuKey, Now: now, Idle: a.idle})
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	if resumed && session.StateAt(s.View(), a.now(), a.idle) != session.Active {
-		if s, err = a.resumeStale(r.Context(), s, a.now()); err != nil {
+	out := sessionResponse{Session: s, Resumed: resumed}
+	if resumed && s.Lapsed(now, a.idle) {
+		if out.Session, out.Relocked, out.Reason, err = a.resumeStale(r.Context(), s, now); err != nil {
 			fail(w, r, err)
 			return
 		}
 	}
-	out := sessionResponse{Session: s, Resumed: resumed}
+	s = out.Session
 	status := http.StatusCreated
 	if resumed {
 		status = http.StatusOK
@@ -116,8 +138,8 @@ type heartbeatResponse struct {
 	Reason   string        `json:"reason,omitempty"`
 }
 
-// heartbeat records liveness and the device clock. A STALE session that comes
-// back keeps its work only if the warehouse still has it OPEN or ASSIGNED and
+// heartbeat records liveness and the device clock. A session idle past the
+// timeout, swept or not, that comes back keeps its work only if the warehouse still has it OPEN or ASSIGNED and
 // no other ACTIVE session holds it; otherwise the session lets it go (BR-32.6).
 func (a *API) heartbeat(w http.ResponseWriter, r *http.Request) {
 	var req heartbeatRequest
@@ -126,7 +148,7 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, id, now := r.Context(), chi.URLParam(r, "id"), a.now()
-	s, wasStale, err := a.st.Heartbeat(ctx, id, now, req.DeviceTime)
+	s, wasStale, err := a.st.Heartbeat(ctx, id, now, req.DeviceTime, a.idle)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -141,54 +163,65 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// resumeStale brings a STALE session of the caller back on a new login: the
+// resumeStale brings a lapsed session of the caller back on a new login: the
 // heartbeat that the device would have sent, then the same work re-lock.
-func (a *API) resumeStale(ctx context.Context, s store.Session, now time.Time) (store.Session, error) {
-	beaten, _, err := a.st.Heartbeat(ctx, s.SessionID, now, nil)
+func (a *API) resumeStale(ctx context.Context, s store.Session, now time.Time) (store.Session, bool, string, error) {
+	beaten, _, err := a.st.Heartbeat(ctx, s.SessionID, now, nil, a.idle)
 	if err != nil || beaten.CurrentWorkID == "" {
-		return beaten, err
+		return beaten, false, "", err
 	}
-	out, _, _, err := a.relockOrRelease(ctx, beaten, now)
-	return out, err
+	return a.relockOrRelease(ctx, beaten, now)
 }
 
-// relockOrRelease keeps the session's work only if it can be re-locked; when
-// it cannot, the work and the run seeded from it are cleared together.
+type relockOutcome int
+
+const (
+	workRelocked relockOutcome = iota
+	workUnconfirmed
+	workReleased
+)
+
+// relockOrRelease lets go of the session's work, and the run seeded from it,
+// only when the warehouse confirms the work is gone or held by someone else;
+// when it cannot confirm, the session keeps both.
 func (a *API) relockOrRelease(ctx context.Context, s store.Session, now time.Time) (store.Session, bool, string, error) {
-	relocked, reason := a.relock(ctx, s, now)
-	if relocked {
-		return s, true, reason, nil
+	outcome, reason := a.relock(ctx, s, now)
+	if outcome != workReleased {
+		return s, outcome == workRelocked, reason, nil
 	}
 	doc := docOf(s)
 	doc.Seed, doc.Run = nil, nil
-	saved, err := a.st.SaveRun(ctx, s.SessionID, s.Version, doc.raw(), "", now)
+	saved, err := a.st.SaveRun(ctx, s.SessionID, s.Version, doc.raw(), "", now, a.idle)
 	return saved, false, reason, err
 }
 
-func (a *API) relock(ctx context.Context, s store.Session, now time.Time) (bool, string) {
-	out, err := a.wh.Do(ctx, "get-work", "", map[string]string{"workId": s.CurrentWorkID})
-	if err != nil {
-		return false, "the warehouse could not confirm the work"
-	}
-	if out.Status == http.StatusForbidden {
-		return false, "you may not view the work, so it cannot be confirmed"
-	}
-	if !out.OK() {
-		return false, "the work no longer exists"
+func (a *API) relock(ctx context.Context, s store.Session, now time.Time) (relockOutcome, string) {
+	const unconfirmed = "the warehouse could not confirm the work"
+	out, err := a.read(ctx, s.CurrentWorkID)
+	switch {
+	case err != nil:
+		return workUnconfirmed, unconfirmed
+	case out.Status == http.StatusNotFound || out.Status == http.StatusGone:
+		return workReleased, "the work no longer exists"
+	case !out.OK():
+		return workUnconfirmed, unconfirmed
 	}
 	work, ok := warehouse.WorkFrom(out.Body)
 	if !ok {
-		return false, "the work no longer exists"
+		return workUnconfirmed, unconfirmed
 	}
 	holders, err := a.st.SessionsForWork(ctx, s.CurrentWorkID)
 	if err != nil {
-		return false, "the work lock could not be checked"
+		return workUnconfirmed, "the work lock could not be checked"
 	}
 	views := make([]session.View, len(holders))
 	for i, h := range holders {
 		views[i] = h.View()
 	}
-	return session.Resumed(s.View(), s.CurrentWorkID, session.WorkStatus(work.Status), views, now, a.idle)
+	if relocked, reason := session.Resumed(s.View(), s.CurrentWorkID, session.WorkStatus(work.Status), views, now, a.idle); !relocked {
+		return workReleased, reason
+	}
+	return workRelocked, "re-locked"
 }
 
 type endRequest struct {
@@ -288,6 +321,9 @@ func (a *API) applyAssign(ctx context.Context, id, key string) (assignResponse, 
 	if err != nil {
 		return assignResponse{}, err
 	}
+	if last := docOf(s).answered(key, "assign"); last != nil {
+		return assignResponse{Work: last.Work, Session: s}, nil
+	}
 	out, err := a.wh.Do(ctx, "assign", key, map[string]string{"warehouseId": s.WarehouseID})
 	if err != nil {
 		return assignResponse{}, transportError{err}
@@ -299,18 +335,19 @@ func (a *API) applyAssign(ctx context.Context, id, key string) (assignResponse, 
 	if !found {
 		return assignResponse{Work: json.RawMessage("null"), Session: s}, nil
 	}
-	doc := docOf(s)
-	doc.Seed, doc.Run = work.Values(), nil
-	saved, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), work.ID, a.now())
-	if err != nil {
-		return assignResponse{}, err
-	}
 	var wrapped struct {
 		Work json.RawMessage `json:"work"`
 	}
 	raw := out.Body
 	if json.Unmarshal(out.Body, &wrapped) == nil && len(wrapped.Work) > 0 {
 		raw = wrapped.Work
+	}
+	doc := docOf(s)
+	doc.Seed, doc.Run = work.Values(), nil
+	doc.Last = &lastCommand{Key: key, Command: "assign", Work: raw}
+	saved, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), work.ID, a.now(), a.idle)
+	if err != nil {
+		return assignResponse{}, err
 	}
 	return assignResponse{Work: raw, Session: saved}, nil
 }
@@ -390,7 +427,7 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 	doc := docOf(s)
 	state := flows.Start(f.Code, f.Version, f.Draft(), doc.Seed)
 	doc.Run = &state
-	if _, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), s.CurrentWorkID, a.now()); err != nil {
+	if _, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), s.CurrentWorkID, a.now(), a.idle); err != nil {
 		fail(w, r, err)
 		return
 	}
@@ -434,6 +471,9 @@ func (a *API) applyStep(ctx context.Context, id, step, key string, req submitReq
 		return runResponse{}, err
 	}
 	doc := docOf(s)
+	if last := doc.answered(key, step); last != nil && last.Run != nil {
+		return *last.Run, nil
+	}
 	if doc.Run == nil {
 		return runResponse{}, httpx.NewProblem(http.StatusConflict, codeStep, "the session has no flow run in progress")
 	}
@@ -468,11 +508,12 @@ func (a *API) applyStep(ctx context.Context, id, step, key string, req submitReq
 			return runResponse{}, stepProblem(err)
 		}
 	}
-	doc.Run = &next
-	if _, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), workID, a.now()); err != nil {
+	result := viewOf(draft, next)
+	doc.Run, doc.Last = &next, &lastCommand{Key: key, Command: step, Run: &result}
+	if _, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), workID, a.now(), a.idle); err != nil {
 		return runResponse{}, err
 	}
-	return viewOf(draft, next), nil
+	return result, nil
 }
 
 func stepProblem(err error) error {

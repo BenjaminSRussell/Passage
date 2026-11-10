@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/replay"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/store"
-	"github.com/BenjaminSRussell/passage/services/mobile/internal/warehouse"
 )
 
 type replayItem struct {
@@ -24,6 +22,7 @@ type replayItem struct {
 	Command        string          `json:"command"`
 	Payload        json.RawMessage `json:"payload"`
 	CapturedAt     time.Time       `json:"capturedAt"`
+	UserID         string          `json:"userId"`
 }
 
 type replayRequest struct {
@@ -62,13 +61,13 @@ func (a *API) replay(w http.ResponseWriter, r *http.Request) {
 			fields[headerKey] = "must equal idempotencyKey"
 		}
 		deviceID = dev
-		items = append(items, replay.Item{Seq: seq, Command: req.Command, Payload: req.Payload, CapturedAt: req.CapturedAt})
+		items = append(items, replay.Item{UserID: req.UserID, Seq: seq, Command: req.Command, Payload: req.Payload, CapturedAt: req.CapturedAt})
 	} else {
 		for i, t := range req.Transactions {
 			if t.Seq < 1 {
 				fields["transactions."+strconv.Itoa(i)+".seq"] = "must be at least 1"
 			}
-			items = append(items, replay.Item{Seq: t.Seq, Command: t.Command, Payload: t.Payload, CapturedAt: t.CapturedAt})
+			items = append(items, replay.Item{UserID: t.UserID, Seq: t.Seq, Command: t.Command, Payload: t.Payload, CapturedAt: t.CapturedAt})
 		}
 	}
 	if deviceID == "" || strings.Contains(deviceID, ":") {
@@ -87,10 +86,6 @@ func (a *API) replay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := missingDuty(ctx, items); err != nil {
-		fail(w, r, err)
-		return
-	}
 	own, err := a.st.SessionOnDevice(ctx, deviceID, req.SessionID)
 	if errors.Is(err, store.ErrNotFound) {
 		fail(w, r, httpx.NewProblem(http.StatusForbidden, codeNotOwner, "the caller has no open session on this device"))
@@ -122,22 +117,6 @@ func (a *API) replay(w http.ResponseWriter, r *http.Request) {
 	a.answerSingle(w, r, results)
 }
 
-// missingDuty refuses a batch holding a command whose warehouse operation the
-// caller lacks the duty for, before anything is recorded.
-func missingDuty(ctx context.Context, items []replay.Item) error {
-	p, _ := tenant.FromContext(ctx)
-	for _, it := range items {
-		op, _, err := replay.Map(it.Command, it.Payload)
-		if err != nil {
-			continue
-		}
-		if duty, known := warehouse.DutyFor(op); known && !p.HasDuty(duty) {
-			return httpx.NewProblem(http.StatusForbidden, warehouse.CodeMissingDuty, "missing duty "+duty)
-		}
-	}
-	return nil
-}
-
 func replayFailure(err error) error {
 	var wh replay.WarehouseError
 	switch {
@@ -165,6 +144,8 @@ func (a *API) answerSingle(w http.ResponseWriter, r *http.Request, results []rep
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusTooManyRequests, codeBlocked, "waiting behind an earlier transaction that is not applied yet"))
 	case replay.StatusGap:
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, replay.CodeGap, res.Reason))
+	case replay.StatusNotOwner:
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, replay.CodeNotOwner, res.Reason))
 	case replay.StatusReused:
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeReuse, res.Reason))
 	default:

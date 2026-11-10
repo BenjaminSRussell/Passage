@@ -10,7 +10,9 @@ info:
     user. Commands that list the Idempotency-Key parameter (kept 24 hours):
     a repeat returns the first answer with Idempotent-Replayed: true, a repeat
     with another request is 422 idempotency_key_reuse; a failed attempt stores
-    nothing and can be retried with the same key. Heartbeat, end, start run and
+    nothing and can be retried with the same key. A repeat sent while the
+    first is still running is 409 MOB-IN-PROGRESS with Retry-After; a key left
+    running by a crash can be retried after 60 seconds. Heartbeat, end, start run and
     replay need no key (replay is exactly-once per device_id:seq). A warehouse
     operation needs the user's own duty, not only the service's: 403 AUTH-0003
     when it is missing. Errors are RFC 7807 problems with a
@@ -61,11 +63,15 @@ paths:
       operationId: heartbeat
       summary: Record liveness and the device clock; resume a STALE session
       description: >
-        A STALE session that comes back keeps its work only if the warehouse
-        still has it OPEN or ASSIGNED and no other ACTIVE session holds it
-        (BR-32.6); otherwise relocked is false and the session lets go of the work
-        and of the run seeded with it. Starting a session again as the same user
-        does the same re-lock for a STALE session. deviceTime
+        A session idle past the timeout, whether the sweep marked it STALE or
+        not, keeps its work on coming back only if the warehouse still has it
+        OPEN or ASSIGNED and no other ACTIVE session holds it (BR-32.6);
+        otherwise relocked is false and the session lets go of the work and of
+        the run seeded with it. When the warehouse cannot confirm the work,
+        relocked is false, reason says so and the session keeps both. Starting a
+        session again as the same user does the same re-lock and reports
+        relocked and reason in its response. The re-lock reads the work as the
+        service and needs no inquiry duty of the user. deviceTime
         records the clock skew used by replay (MOB-0114 above 300 s).
       x-passage-duty: warehouse.work.execute
       parameters: [{ $ref: "#/components/parameters/Id" }]
@@ -103,6 +109,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
         "200": { description: The work (null when nothing is assignable) and the session. }
+        "409": { description: MOB-SESSION-STALE (idle past the timeout; heartbeat first) or MOB-IN-PROGRESS., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "503": { $ref: "#/components/responses/Problem" }
   /v1/mobile/sessions/{id}/runs:
     post:
@@ -126,6 +133,8 @@ paths:
         by Idempotency-Key, and advances only when the call succeeds; a warehouse
         409 is passed through. The call needs the user's duty for the operation
         (403 AUTH-0003 otherwise). A repeat of the key returns the first answer.
+        A session idle past the timeout is 409 MOB-SESSION-STALE until it sends
+        a heartbeat, which re-checks its work lock.
       x-passage-duty: warehouse.work.execute
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -136,6 +145,7 @@ paths:
       responses:
         "200": { description: The run and its next step. }
         "403": { $ref: "#/components/responses/Problem" }
+        "409": { description: MOB-STEP, MOB-SESSION-STALE or MOB-IN-PROGRESS., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { $ref: "#/components/responses/Problem" }
   /v1/mobile/menus/{id}:
     get:
@@ -225,15 +235,21 @@ paths:
         Batch form (deviceId, transactions) answers 200 with a status per
         transaction. The caller must have an open session on the device:
         sessionId names it, or it is the caller's only open session there; no
-        such session is 403 MOB-NOT-OWNER, and a command whose warehouse
-        operation needs a duty the caller lacks is 403 AUTH-0003, with nothing
-        recorded. Single form (idempotencyKey = "deviceId:seq", the browser
+        such session is 403 MOB-NOT-OWNER. A command whose warehouse
+        operation needs a duty the caller lacks is REJECTED on its own with
+        AUTH-0003 in its reason and the rest of the batch still applies. An entry
+        may carry userId, the user who queued it on the device; one that is not
+        the caller, or whose key another user recorded, is refused as NOT_OWNER
+        (MOB-NOT-OWNER) without being recorded or applied, and nothing after it
+        in the request is processed. A transaction queued by another user is
+        never applied under the caller's identity. Single form (idempotencyKey = "deviceId:seq", the browser
         device) answers 200 APPLIED, 409 MOB-0107 CONFLICT, 422 REJECTED, MOB-0108
         (sequence gap) or idempotency_key_reuse, 429 while it waits behind an
         earlier transaction that is not applied, and 503 when the warehouse is
         unreachable or the device clock is more than 300 s off (MOB-0114); the
-        device keeps those PENDING. The first conflict or rejection stops the
-        run and an unresolved conflict blocks the device's later transactions.
+        device keeps those PENDING (a NOT_OWNER entry is 403 MOB-NOT-OWNER and
+        the device keeps its queue). A rejection closes that transaction only;
+        an unresolved conflict blocks the device's later transactions.
         Each transaction reaches the warehouse as the user who queued it with its
         key as Idempotency-Key.
       x-passage-duty: warehouse.work.execute
@@ -318,6 +334,8 @@ components:
       properties:
         session: { type: object }
         resumed: { type: boolean }
+        relocked: { type: boolean, description: "On a resumed idle session, whether its work was re-locked." }
+        reason: { type: string, description: "Why the work was released, or could not be confirmed." }
         notice: { type: object, properties: { code: { type: string }, message: { type: string } } }
     Heartbeat:
       type: object
@@ -361,6 +379,7 @@ components:
         command: { type: string, enum: [ConfirmWorkLine, ReceiveLine, ReportException] }
         payload: { type: object }
         capturedAt: { type: string, format: date-time }
+        userId: { type: string, description: "The user who queued the entry on the device; must be the caller." }
         deviceId: { type: string }
         sessionId: { type: string }
         transactions:

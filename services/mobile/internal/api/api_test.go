@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/replay"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/store"
@@ -26,7 +27,6 @@ import (
 
 const (
 	dutyReceive = "warehouse.receipt.register"
-	dutyInquiry = "warehouse.inquiry.view"
 	siteA       = "5e5510a0-0000-4000-8000-0000000000a1"
 	workOne     = `{"work":{"id":"w-1","status":"ASSIGNED","version":2,"lines":[{"lineNo":1,"itemId":"BOLT","qty":"5","status":"OPEN"}]}}`
 )
@@ -37,6 +37,14 @@ type fakeWH struct {
 	respond   map[string]warehouse.Outcome
 	conflicts map[string]bool
 	during    func(op string)
+	readErr   error
+}
+
+func (f *fakeWH) ReadWork(ctx context.Context, workID string) (warehouse.Outcome, error) {
+	if f.readErr != nil {
+		return warehouse.Outcome{}, f.readErr
+	}
+	return f.Do(ctx, "get-work", "", map[string]string{"workId": workID})
 }
 
 func (f *fakeWH) Do(_ context.Context, op, key string, p map[string]string) (warehouse.Outcome, error) {
@@ -126,7 +134,7 @@ func expect(t *testing.T, rec *httptest.ResponseRecorder, status int, code strin
 }
 
 func (h *harness) startSession(user, device string) *httptest.ResponseRecorder {
-	return h.do(req{method: "POST", path: "/v1/mobile/sessions", duties: dutyExecute + "," + dutyInquiry, user: user, body: `{"deviceId":"` + device + `","warehouseId":"` + siteA + `"}`})
+	return h.do(req{method: "POST", path: "/v1/mobile/sessions", duties: dutyExecute, user: user, body: `{"deviceId":"` + device + `","warehouseId":"` + siteA + `"}`})
 }
 
 func TestRoutesRequireTheirDutyAndATenant(t *testing.T) {
@@ -197,7 +205,7 @@ func TestStaleSessionResumeKeepsWorkOnlyWhileWarehouseStillHasIt(t *testing.T) {
 				t.Fatalf("sweep: %s", rec.Body)
 			}
 			h.wh.respond["get-work"] = warehouse.Outcome{Status: 200, Body: json.RawMessage(strings.Replace(workOne, "ASSIGNED", tc.status, 1))}
-			rec := h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":heartbeat", duties: dutyExecute + "," + dutyInquiry})
+			rec := h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":heartbeat", duties: dutyExecute})
 			got := decode[heartbeatResponse](t, rec)
 			if rec.Code != 200 || !got.Resumed || got.Relocked != tc.relocked || (got.Session.CurrentWorkID == "w-1") != tc.relocked {
 				t.Fatalf("heartbeat: %d %+v", rec.Code, got)
@@ -437,14 +445,55 @@ func TestAWarehouseCallNeedsTheUsersOwnDutyOnTheReplayPath(t *testing.T) {
 	h := newHarness(t)
 	h.startSession("alice", "dev-rr")
 	body := `{"idempotencyKey":"dev-rr:1","command":"ReceiveLine","capturedAt":"2026-03-02T07:00:00Z","payload":{"receiptId":"r-1","lineNo":1,"qty":"3"}}`
-	expect(t, h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, key: "dev-rr:1", body: body}), http.StatusForbidden, "AUTH-0003")
-	if len(h.wh.calls) != 0 {
-		t.Fatalf("warehouse called: %v", h.wh.calls)
+	rejected := h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, key: "dev-rr:1", body: body})
+	expect(t, rejected, http.StatusUnprocessableEntity, "MOB-REJECTED")
+	if len(h.wh.calls) != 0 || !strings.Contains(decode[httpx.Problem](t, rejected).Detail, "AUTH-0003") {
+		t.Fatalf("warehouse called: %v; %s", h.wh.calls, rejected.Body)
 	}
-	if _, err := h.api.st.GetOffline(tenantCtx(), "dev-rr:1"); err == nil {
-		t.Fatal("a refused transaction must not be recorded")
+	if tx, err := h.api.st.GetOffline(tenantCtx(), "dev-rr:1"); err != nil || tx.Status != store.TxRejected {
+		t.Fatalf("the transaction is closed as REJECTED with its reason: %+v %v", tx, err)
 	}
-	expect(t, h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute + "," + dutyReceive, key: "dev-rr:1", body: body}), http.StatusOK, "")
+}
+
+func TestOneCommandWithoutItsDutyDoesNotBlockTheRestOfTheBatch(t *testing.T) {
+	h := newHarness(t)
+	h.startSession("alice", "dev-mx")
+	batch := `{"deviceId":"dev-mx","transactions":[` +
+		`{"seq":1,"command":"ConfirmWorkLine","capturedAt":"2026-03-02T07:00:00Z","payload":{"workId":"w","lineNo":1,"qty":"1"}},` +
+		`{"seq":2,"command":"ReceiveLine","capturedAt":"2026-03-02T07:00:01Z","payload":{"receiptId":"r-1","lineNo":1,"qty":"2"}},` +
+		`{"seq":3,"command":"ConfirmWorkLine","capturedAt":"2026-03-02T07:00:02Z","payload":{"workId":"w","lineNo":2,"qty":"1"}}]}`
+	rec := h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, body: batch})
+	res := decode[struct {
+		Results []struct {
+			Seq            int64
+			Status, Reason string
+		}
+	}](t, rec)
+	if rec.Code != 200 || len(res.Results) != 3 || res.Results[0].Status != store.TxApplied || res.Results[1].Status != store.TxRejected ||
+		!strings.Contains(res.Results[1].Reason, "AUTH-0003") || res.Results[2].Status != store.TxApplied {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if !reflect.DeepEqual(h.wh.calls, []string{"confirm", "confirm"}) {
+		t.Fatalf("the receive never reached the warehouse: %v", h.wh.calls)
+	}
+}
+
+func TestReplayRefusesAnEntryQueuedByAnotherUserPerTransaction(t *testing.T) {
+	h := newHarness(t)
+	h.startSession("bob", "dev-tk")
+	entry := func(user string) string {
+		return `{"deviceId":"dev-tk","transactions":[{"seq":1,"userId":"` + user + `","command":"ConfirmWorkLine","capturedAt":"2026-03-02T07:00:00Z","payload":{"workId":"w","lineNo":1,"qty":"1"}}]}`
+	}
+	rec := h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, user: "bob", body: entry("alice")})
+	res := decode[struct {
+		Results []struct{ Status, Code string }
+	}](t, rec)
+	if rec.Code != 200 || len(res.Results) != 1 || res.Results[0].Status != "NOT_OWNER" || res.Results[0].Code != "MOB-NOT-OWNER" || len(h.wh.calls) != 0 {
+		t.Fatalf("%d %s calls=%v", rec.Code, rec.Body, h.wh.calls)
+	}
+	single := `{"idempotencyKey":"dev-tk:1","userId":"alice","command":"ConfirmWorkLine","capturedAt":"2026-03-02T07:00:00Z","payload":{"workId":"w","lineNo":1,"qty":"1"}}`
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, user: "bob", body: single}), http.StatusForbidden, codeNotOwner)
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, user: "bob", body: entry("bob")}), http.StatusOK, "")
 }
 
 func tenantCtx() context.Context { return testkit.Ctx(testkit.TenantID(1), dutyExecute) }
@@ -536,6 +585,124 @@ func TestResumingAStaleSessionByLoginRelocksOrReleasesItsWork(t *testing.T) {
 		if !taken && docOf(resumed.Session).Run == nil {
 			t.Fatalf("a run on work that was re-locked is kept: %s", resumed.Session.State)
 		}
+	}
+}
+
+func (h *harness) assigned(user, device string) string {
+	id := decode[sessionResponse](h.t, h.startSession(user, device)).Session.SessionID
+	expect(h.t, h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":assign-work", duties: dutyExecute, user: user, key: "as-" + device}), http.StatusOK, "")
+	return id
+}
+
+func (h *harness) heartbeat(id, user string) heartbeatResponse {
+	rec := h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":heartbeat", duties: dutyExecute, user: user})
+	expect(h.t, rec, http.StatusOK, "")
+	return decode[heartbeatResponse](h.t, rec)
+}
+
+func TestAnIdleSessionLosesItsWorkToAnotherPickerWithoutAnySweep(t *testing.T) {
+	h := newHarness(t)
+	h.wh.respond["get-work"] = warehouse.Outcome{Status: 200, Body: json.RawMessage(workOne)}
+	alice := h.assigned("alice", "dev-n1")
+	h.now = h.now.Add(31 * time.Minute)
+	carol := h.assigned("carol", "dev-n2")
+	got := h.heartbeat(alice, "alice")
+	if !got.Resumed || got.Relocked || got.Session.CurrentWorkID != "" || got.Reason == "" {
+		t.Fatalf("alice idle for 31 minutes with no sweep must not keep work carol now holds: %+v", got)
+	}
+	held, _ := h.api.st.SessionsForWork(testkit.Ctx(testkit.TenantID(1), dutyExecute), "w-1")
+	if len(held) != 1 || held[0].SessionID != carol {
+		t.Fatalf("only carol holds w-1: %+v", held)
+	}
+}
+
+func TestStaleResumeNeedsOnlyTheExecuteDutyAndKeepsWorkItCannotConfirmGone(t *testing.T) {
+	h := newHarness(t)
+	h.wh.respond["get-work"] = warehouse.Outcome{Status: 200, Body: json.RawMessage(workOne)}
+	id := h.assigned("alice", "dev-x1")
+	h.now = h.now.Add(31 * time.Minute)
+	if got := h.heartbeat(id, "alice"); !got.Relocked || got.Session.CurrentWorkID != "w-1" {
+		t.Fatalf("a picker with only warehouse.work.execute keeps assigned work on resume: %+v", got)
+	}
+
+	h.now = h.now.Add(31 * time.Minute)
+	h.wh.readErr = errors.New("connection reset")
+	got := h.heartbeat(id, "alice")
+	if got.Relocked || got.Session.CurrentWorkID != "w-1" || docOf(got.Session).Seed == nil || got.Reason == "" {
+		t.Fatalf("an unreachable warehouse neither confirms nor releases: %+v", got)
+	}
+
+	h.now = h.now.Add(31 * time.Minute)
+	h.wh.readErr = nil
+	h.wh.respond["get-work"] = warehouse.Outcome{Status: 404, Code: "WMS-0404"}
+	if got := h.heartbeat(id, "alice"); got.Relocked || got.Session.CurrentWorkID != "" {
+		t.Fatalf("work the warehouse says is gone is released: %+v", got)
+	}
+}
+
+func TestLoginResumeReportsWhetherTheWorkWasKept(t *testing.T) {
+	h := newHarness(t)
+	h.wh.respond["get-work"] = warehouse.Outcome{Status: 200, Body: json.RawMessage(strings.Replace(workOne, "ASSIGNED", "COMPLETED", 1))}
+	h.assigned("alice", "dev-l1")
+	h.now = h.now.Add(31 * time.Minute)
+	resumed := decode[sessionResponse](t, h.startSession("alice", "dev-l1"))
+	if !resumed.Resumed || resumed.Relocked || resumed.Reason == "" || resumed.Session.CurrentWorkID != "" {
+		t.Fatalf("the device must be told the work was released: %+v", resumed)
+	}
+}
+
+func TestAStepOnASessionIdlePastTheTimeoutIsRefusedUntilItBeats(t *testing.T) {
+	for name, sweep := range map[string]bool{"swept": true, "not swept": false} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			expect(t, h.do(req{method: "POST", path: "/v1/mobile/flows:install-core", duties: dutyAdmin, key: "core"}), http.StatusOK, "")
+			h.wh.respond["get-work"] = warehouse.Outcome{Status: 200, Body: json.RawMessage(workOne)}
+			id := h.assigned("alice", "dev-st")
+			h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs", duties: dutyExecute, body: `{"flowCode":"PICK"}`})
+			submit := func(key string) *httptest.ResponseRecorder {
+				return h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs/current/steps/scan_location:submit", duties: dutyExecute, key: key, body: `{"value":"A-01-02"}`})
+			}
+			h.now = h.now.Add(31 * time.Minute)
+			if sweep {
+				expect(t, h.do(req{method: "POST", path: "/v1/mobile/sessions:sweep", duties: dutySupervise, user: "sup"}), http.StatusOK, "")
+			}
+			expect(t, submit("st-1"), http.StatusConflict, codeSessionStale)
+			if got := h.heartbeat(id, "alice"); !got.Relocked {
+				t.Fatalf("heartbeat: %+v", got)
+			}
+			expect(t, submit("st-1"), http.StatusOK, "")
+		})
+	}
+}
+
+func TestAStepRetriedAfterItsKeyRecordWasLostGetsTheSameAnswer(t *testing.T) {
+	h := newHarness(t)
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/flows:install-core", duties: dutyAdmin, key: "core"}), http.StatusOK, "")
+	id := h.assigned("alice", "dev-lk")
+	h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs", duties: dutyExecute, body: `{"flowCode":"PICK"}`})
+	ctx := testkit.Ctx(testkit.TenantID(1), dutyExecute)
+	p, _ := tenant.FromContext(ctx)
+	p.UserID = "alice"
+	ctx = tenant.With(ctx, p)
+	first, err := h.api.applyStep(ctx, id, "scan_location", "lost-1", submitRequest{Value: "A-01-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := h.api.applyStep(ctx, id, "scan_location", "lost-1", submitRequest{Value: "A-01-02"})
+	if err != nil || !reflect.DeepEqual(again, first) {
+		t.Fatalf("the retry must repeat the first answer, not 409 wrong step: %+v %v", again, err)
+	}
+	if _, err := h.api.applyStep(ctx, id, "scan_location", "other-key", submitRequest{Value: "A-01-02"}); err == nil {
+		t.Fatal("a different key on the spent step is still a wrong step")
+	}
+	firstAssign, err := h.api.applyAssign(ctx, id, "lost-as")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want, got any
+	againAssign, err := h.api.applyAssign(ctx, id, "lost-as")
+	if err != nil || json.Unmarshal(firstAssign.Work, &want) != nil || json.Unmarshal(againAssign.Work, &got) != nil || !reflect.DeepEqual(got, want) || len(h.wh.calls) != 2 {
+		t.Fatalf("assign retry: %+v %v calls=%v", againAssign, err, h.wh.calls)
 	}
 }
 
