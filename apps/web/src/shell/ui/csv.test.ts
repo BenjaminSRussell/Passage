@@ -14,6 +14,8 @@ describe("csv", () => {
     expect(csvCell("-2+3")).toBe("'-2+3");
     expect(csvCell("@cmd")).toBe("'@cmd");
     expect(csvCell("\t=1")).toBe("'\t=1");
+    expect(csvCell("\tvalue")).toBe("'\tvalue");
+    expect(csvCell("\rvalue")).toBe("\"'\rvalue\"");
     expect(csvCell('=HYPERLINK("http://x","y")')).toBe(`"'=HYPERLINK(""http://x"",""y"")"`);
   });
 

@@ -64,7 +64,7 @@ func (s *Store) ListCaptures(ctx context.Context, f store.CaptureFilter) (out []
 	principal, _ := tenant.FromContext(ctx)
 	err = s.with(ctx, func(t *tenantData) error {
 		for _, c := range t.captures {
-			if !tenant.InLegalEntityScope(principal, c.LegalEntityID) || (f.Status != "" && c.Status != f.Status) || skipForCursor(c.CreatedAt, c.ID, f.CursorCreatedAt, f.CursorID) || t.captureIsPosted(c) {
+			if !tenant.InLegalEntityScope(principal, c.LegalEntityID) || (f.Status != "" && c.Status != f.Status) || (f.VendorID != "" && c.VendorID != f.VendorID) || skipForCursor(c.CreatedAt, c.ID, f.CursorCreatedAt, f.CursorID) || t.captureIsPosted(c) {
 				continue
 			}
 			out = append(out, cloneCapture(c))

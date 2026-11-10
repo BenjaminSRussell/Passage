@@ -172,11 +172,29 @@ const (
 // leakproof). Anything else is a name and also matches by trigram similarity;
 // pg_trgm's operators are not leakproof, so that arm is filtered, not indexed.
 func plan(text string) (sql string, arg string) {
-	numberShaped := strings.ContainsFunc(text, unicode.IsDigit) && !strings.ContainsFunc(text, unicode.IsSpace)
+	// A digit and no space looks like a number, unless it holds a word ("7-eleven"): that is a name and matches as one.
+	numberShaped := strings.ContainsFunc(text, unicode.IsDigit) && !strings.ContainsFunc(text, unicode.IsSpace) && !hasWord(text)
 	if utf8.RuneCountInString(text) < minFuzzyRunes || numberShaped {
 		return prefixSQL, text + prefixCeiling
 	}
 	return fuzzySQL, "%" + likeEscaper.Replace(text) + "%"
+}
+
+// maxNumberLetters is the longest run of letters a number carries (a prefix such as "INV" or "PO"); a longer run is a word.
+const maxNumberLetters = 3
+
+func hasWord(text string) bool {
+	run := 0
+	for _, r := range text {
+		if unicode.IsLetter(r) {
+			if run++; run > maxNumberLetters {
+				return true
+			}
+		} else {
+			run = 0
+		}
+	}
+	return false
 }
 
 const (

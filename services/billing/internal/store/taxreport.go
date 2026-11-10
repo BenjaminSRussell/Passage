@@ -116,6 +116,50 @@ func queueTaxReport(ctx context.Context, tx pgx.Tx, id string) error {
 	return nil
 }
 
+// TaxBackfill is one pass of BackfillTaxReports: the booked documents looked at, the reports queued and the cursor for the next pass
+// (empty when none are left).
+type TaxBackfill struct {
+	Scanned int    `json:"scanned"`
+	Queued  int    `json:"queued"`
+	Next    string `json:"next,omitempty"`
+}
+
+// BackfillTaxReports queues the report of up to limit documents that were booked to the GL before reports existed (or while no tax
+// service was configured) and have none, in id order after the cursor. A document without tax queues nothing and is skipped by the
+// cursor, so passing Next back walks every booked document once. queueTaxReport is unique per (document, kind), so a repeated pass
+// is a no-op.
+func (s *Postgres) BackfillTaxReports(ctx context.Context, after string, limit int) (TaxBackfill, error) {
+	var out TaxBackfill
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select i.id::text from invoice i
+			where i.journal_posting_id is not null and ($1 = '' or i.id > $1::uuid)
+			  and not exists (select 1 from tax_transaction_report r where r.invoice_id = i.id)
+			order by i.id limit $2`, after, limit)
+		if err != nil {
+			return err
+		}
+		idsToQueue, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, id := range idsToQueue {
+			if err := queueTaxReport(ctx, tx, id); err != nil {
+				return err
+			}
+			out.Scanned++
+			out.Next = id
+		}
+		if err := tx.QueryRow(ctx, `select count(*) from tax_transaction_report r where r.invoice_id = any($1::uuid[])`, idsToQueue).Scan(&out.Queued); err != nil {
+			return err
+		}
+		if len(idsToQueue) < limit {
+			out.Next = ""
+		}
+		return nil
+	})
+	return out, err
+}
+
 // TaxReportSystemContext is the principal the reporter reads and writes the reports of one tenant under: no user, every legal
 // entity of the tenant.
 func TaxReportSystemContext(ctx context.Context, tenantID string) context.Context {

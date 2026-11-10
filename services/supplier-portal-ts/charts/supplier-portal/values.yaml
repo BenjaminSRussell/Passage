@@ -1,0 +1,32 @@
+image: { repository: ghcr.io/benjaminsrussell/passage-supplier-portal, digest: "", tag: "", pullPolicy: IfNotPresent }
+# One replica: sessions and the rate limiter are in memory (NOT-IMPLEMENTED.md). A second replica would not know the first one's sessions.
+replicaCount: 1
+oidc:
+  # The Keycloak realm URL, e.g. https://keycloak.<env>.passage.dev/realms/passage. Required.
+  issuer: ""
+  clientId: passage-portal-supplier
+  # The redirect URI registered on the client: https://supplier.<env>.passage.dev/bff/callback
+  redirectUri: ""
+  # Secret holding the client secret under the key "client-secret". Created outside Git.
+  clientSecretName: supplier-portal-oidc
+# The origin the app is served from, e.g. https://supplier.<env>.passage.dev. Required.
+appOrigin: ""
+# Owning services, as in-cluster URLs.
+upstreams:
+  purchasing: http://purchasing.purchasing.svc:8080
+  receiving: http://receiving.receiving.svc:8080
+  party: http://party.party.svc:8080
+# Secret holding this service's Ed25519 seed under the key "signing-key". Its public key is added to
+# PASSAGE_SERVICE_PUBLIC_KEYS of purchasing, receiving and party as supplier-portal=...
+serviceSigningSecretName: supplier-portal-signing
+resources:
+  requests: { cpu: 25m, memory: 96Mi }
+  limits: { cpu: 500m, memory: 256Mi }
+networkPolicy:
+  enabled: true
+  dnsNamespace: kube-system
+  # The edge (Envoy) namespace, the only caller.
+  edgeNamespace: envoy-gateway-system
+  upstreamNamespaces: [purchasing, receiving, party]
+  # Keycloak is reached on 443.
+  identityProviderCidr: 0.0.0.0/0

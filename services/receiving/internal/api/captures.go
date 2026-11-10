@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -115,6 +116,12 @@ func (a *API) createInvoiceCapture(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	vendor := vendorFrom(r.Context())
+	if found && vendor != "" && !strings.EqualFold(known.VendorID, vendor) {
+		// The same document reached us before, from someone else; say nothing about whose.
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, "RCV-CAP-004", "this document was already submitted"))
+		return
+	}
 	if found {
 		httpx.JSON(w, http.StatusOK, toCaptureBody(known))
 		return
@@ -134,13 +141,17 @@ func (a *API) createInvoiceCapture(w http.ResponseWriter, r *http.Request) {
 	}
 	saved, created, err := a.store.CreateCapture(r.Context(), store.Capture{
 		ID: ids.New(), LegalEntityID: req.LegalEntityID, Source: req.Format, Status: status, DocumentSHA256: hexDigest,
-		Reasons: reasons, CreatedBy: p.UserID, Invoice: extracted,
+		Reasons: reasons, CreatedBy: p.UserID, Invoice: extracted, VendorID: vendor,
 	})
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	if !created {
+		if vendor != "" && !strings.EqualFold(saved.VendorID, vendor) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, "RCV-CAP-004", "this document was already submitted"))
+			return
+		}
 		httpx.JSON(w, http.StatusOK, toCaptureBody(saved))
 		return
 	}
@@ -163,6 +174,9 @@ func (a *API) getInvoiceCapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := a.store.GetCapture(r.Context(), id)
+	if err == nil && vendorFrom(r.Context()) != "" && !strings.EqualFold(c.VendorID, vendorFrom(r.Context())) {
+		err = store.ErrCaptureNotFound
+	}
 	if err == nil {
 		err = inScope(p, c.LegalEntityID)
 	}
@@ -186,6 +200,7 @@ func (a *API) listInvoiceCaptures(w http.ResponseWriter, r *http.Request) {
 	q := query{values: r.URL.Query(), fields: map[string]string{}}
 	f := store.CaptureFilter{Status: q.values.Get("status"), Limit: q.limit()}
 	f.CursorCreatedAt, f.CursorID = q.cursor()
+	f.VendorID = vendorFrom(r.Context())
 	if f.Status != "" && f.Status != domain.CaptureCaptured && f.Status != domain.CaptureNeedsReview {
 		q.fields["status"] = "must be CAPTURED or NEEDS_REVIEW"
 	}

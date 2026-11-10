@@ -68,15 +68,23 @@ route("GET", "/api/v1/party/parties:search", ({ query }) => ({
 
 // Products resolve by id or by item number, since some areas use readable item numbers as product ids.
 const ITEM_GROUPS = [
-  { id: "finished", name: "Finished pumps" },
-  { id: "subassembly", name: "Subassemblies" },
-  { id: "component", name: "Purchased components" },
-  { id: "raw", name: "Raw materials" },
+  { id: "finished", code: "FINISHED", name: "Finished pumps" },
+  { id: "subassembly", code: "SUBASSEMBLY", name: "Subassemblies" },
+  { id: "component", code: "COMPONENT", name: "Purchased components" },
+  { id: "raw", code: "RAW", name: "Raw materials" },
 ];
 function product(i: Item) {
   return { id: i.id, productNumber: i.number, name: i.name, baseUom: i.unit, itemGroupId: i.kind, batchTracked: i.kind === "raw", serialTracked: i.kind === "finished", catchWeight: false };
 }
 route("GET", "/api/v1/product/setup/item-groups", () => ({ items: ITEM_GROUPS }));
+route("POST", "/api/v1/product/setup/item-groups", ({ body }) => {
+  const input = (body ?? {}) as { code?: string; name?: string };
+  const code = (input.code ?? "").toUpperCase();
+  if (ITEM_GROUPS.some((g) => g.code === code)) return reply.problem(409, "PRD-NUM-FORMAT", "item group code already exists");
+  const group = { id: code.toLowerCase(), code, name: input.name ?? code };
+  ITEM_GROUPS.push(group);
+  return reply.created(group);
+});
 route("GET", "/api/v1/product/products/{id}", ({ params }) => {
   const i = ITEMS.find((it) => it.id === params.id || it.number === params.id);
   return i ? product(i) : reply.problem(404, "PRD-0404", "No product with that id");
@@ -85,6 +93,9 @@ route("GET", "/api/v1/product/products/{id}", ({ params }) => {
 const workers = WORKERS.map((w) => ({ id: w.id, personnelNumber: w.number, legalName: w.name, preferredName: w.name, status: "active" }));
 route("GET", "/api/v1/hr/workers", ({ query }) => ({ items: limit(workers.filter((w) => matches(query.get("q"), w.legalName, w.personnelNumber)), query) }));
 route("GET", "/api/v1/hr/workers/{id}", ({ params }) => workers.find((w) => w.id === params.id) ?? reply.problem(404, "HR-0404", "No worker with that id"));
+
+// UX telemetry: the demo accepts events and drops them, so nothing is stored or sent anywhere.
+route("POST", "/api/v1/analytics/ux-events", () => reply.accepted({ accepted: 0, dropped: 0 }));
 
 // My work: a short, believable inbox that points into the demo tour.
 const inbox: InboxPage = {

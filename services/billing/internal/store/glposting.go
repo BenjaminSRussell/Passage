@@ -40,6 +40,9 @@ type GLProfile struct {
 	ChargeAccount           string   `json:"chargeAccount"`
 	DeferredRevenueAccounts []string `json:"deferredRevenueAccounts"`
 	ContractAssetAccount    string   `json:"contractAssetAccount,omitempty"`
+	// TaxAccounts maps a tax code to the account its tax is booked to, so each code has its own tax account, as the ledger
+	// configuration of the tax service maps code and direction to accounts. A code not listed goes to TaxAccount.
+	TaxAccounts map[string]string `json:"taxAccounts,omitempty"`
 }
 
 type GLShare struct {
@@ -59,6 +62,8 @@ type GLLine struct {
 	No        int
 	Account   string
 	Net       decimal.Decimal
+	Tax       decimal.Decimal
+	TaxCode   string
 	OrderID   string
 	ProductID string
 	Original  *GLOriginal
@@ -157,7 +162,7 @@ func (s *Postgres) DueGLDocuments(ctx context.Context, legalEntityID string, now
 				}
 			}
 			for _, l := range lines {
-				gl := GLLine{No: l.No, Account: l.RevenueAccount, Net: l.Net, OrderID: l.Source.OrderID, ProductID: l.Source.ProductID}
+				gl := GLLine{No: l.No, Account: l.RevenueAccount, Net: l.Net, Tax: l.Tax, TaxCode: l.TaxCode, OrderID: l.Source.OrderID, ProductID: l.Source.ProductID}
 				if i := slices.IndexFunc(originalLines, func(o Line) bool { return o.No == l.OriginalLineNo }); d.CreditNote && i >= 0 {
 					// A credit note line has no source of its own: it moves the contract of its original line.
 					gl.OrderID, gl.ProductID = originalLines[i].Source.OrderID, originalLines[i].Source.ProductID

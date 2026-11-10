@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { UserMenu } from "./auth/account";
 import { copy } from "./copy";
 import type { PageMeta } from "./pageMeta";
+import { HelpButton } from "./help/HelpPanel";
 import { ContextPicker } from "./lookup/workContext";
 import styles from "./Shell.module.css";
 import { Button, Icon } from "./ui";
@@ -52,6 +53,7 @@ export function TopBar({ page, titleRef, menuRef, drawerOpen, compact, showConte
       </h1>
       <div className={styles.topbarActions}>
         {showContext ? <ContextPicker /> : null}
+        <HelpButton />
         <Button variant="ghost" size="sm" aria-pressed={compact} className={styles.compactToggle} onClick={onToggleCompact}>
           {copy.buttons.compactView}
         </Button>

@@ -1,5 +1,5 @@
 const BOM = "\uFEFF";
-const FORMULA_START = /^[\s'"]*[=+\-@]/;
+const FORMULA_START = /^([\t\r]|[\s'"]*[=+\-@])/;
 const PLAIN_NUMBER = /^[+-]?\d+(\.\d+)?$/;
 const NEEDS_QUOTES = /[",\r\n]/;
 

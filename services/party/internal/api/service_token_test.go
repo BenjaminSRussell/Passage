@@ -65,14 +65,14 @@ func TestServiceToken_ReceivingReadsAVendorButCannotRevealBankAccounts(t *testin
 	}
 }
 
-func TestServiceToken_PayablesRevealsButCannotReadOrWrite(t *testing.T) {
+func TestServiceToken_PayablesRevealsAndLooksUpAVendor(t *testing.T) {
 	r := newPartyRig(t)
 	if rec := r.call(t, vendorLookupPath+"/bank-accounts:reveal", mintFor(t, r.payables, "party")); rec.Code != http.StatusOK {
 		t.Fatalf("signed payables reveal: %d %s", rec.Code, rec.Body)
 	}
-	// payables also holds party.import.read (opening-item import, #565), which reads a vendor by id and nothing wider.
+	// payables holds party.vendor.lookup, which reads a vendor by id and nothing wider.
 	if rec := r.call(t, vendorLookupPath, mintFor(t, r.payables, "party")); rec.Code != http.StatusOK {
-		t.Fatalf("payables holds import.read, vendor lookup = %d", rec.Code)
+		t.Fatalf("payables holds the vendor lookup duty, vendor read = %d", rec.Code)
 	}
 	if rec := r.call(t, vendorLookupPath+"/bank-accounts", mintFor(t, r.payables, "party")); rec.Code != http.StatusForbidden {
 		t.Fatalf("payables holds no party.read, bank-account list = %d", rec.Code)

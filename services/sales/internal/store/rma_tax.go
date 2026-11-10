@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/sales/internal/domain"
 )
@@ -158,4 +159,126 @@ func (s *Postgres) creditInvoiceLines(ctx context.Context, returnOrderID string)
 	}
 	var out []ARInvoiceLine
 	return out, json.Unmarshal([]byte(*raw), &out)
+}
+
+// legacyCreditLines works out the invoice lines of a credit stored before migration 0048, which kept none: the lines
+// with tax come from the tax rows the credit stored, and what those leave of the returned quantity of a product is
+// placed on its untaxed invoice lines in order. The result is stored, so every repeat sends the same lines.
+func (s *Postgres) legacyCreditLines(ctx context.Context, o ReturnOrder) ([]ARInvoiceLine, error) {
+	invoice, err := s.readTaxBasis(ctx, o)
+	if err != nil || len(invoice.Lines) == 0 {
+		return nil, err
+	}
+	p, _ := tenant.FromContext(ctx)
+	byLine := map[int]decimal.Decimal{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select invoice_line_no, qty::text from return_order_tax where tenant_id = $1 and return_order_id = $2`, p.TenantID, o.ID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var no int
+			var qty string
+			if err := rows.Scan(&no, &qty); err != nil {
+				return err
+			}
+			byLine[no] = byLine[no].Add(decOrZero(&qty))
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	plan, err := planCredit(o)
+	if err != nil {
+		return nil, err
+	}
+	left := map[string]decimal.Decimal{}
+	for i, idx := range plan.lines {
+		left[o.Lines[idx].ProductID] = left[o.Lines[idx].ProductID].Add(plan.qty[i])
+	}
+	for _, l := range invoice.Lines {
+		left[l.ProductID] = left[l.ProductID].Sub(byLine[l.LineNo])
+	}
+	for _, l := range invoice.Lines {
+		if l.TaxCode != "" || !left[l.ProductID].IsPositive() {
+			continue
+		}
+		take := decimal.Min(left[l.ProductID], l.Qty.Sub(l.CreditedQty))
+		if take.IsPositive() {
+			byLine[l.LineNo] = byLine[l.LineNo].Add(take)
+			left[l.ProductID] = left[l.ProductID].Sub(take)
+		}
+	}
+	var out []ARInvoiceLine
+	for _, l := range invoice.Lines {
+		if q := byLine[l.LineNo]; q.IsPositive() {
+			out = append(out, ARInvoiceLine{LineNo: l.LineNo, Qty: q})
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	raw, _ := json.Marshal(out)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update return_order set credit_invoice_lines = $3::jsonb where tenant_id = $1 and id = $2 and credit_invoice_lines is null`, p.TenantID, o.ID, string(raw))
+		return err
+	})
+	return out, err
+}
+
+// repriceMixed values a returned product that is billed at more than one unit price at the invoice lines the return is
+// allocated to, line by line, the way billing values the lines it reserves; the order's own unit price is the invoice's
+// average, which billing's reservation can fall short of (#557). Products on a single price keep the order's price.
+func repriceMixed(o ReturnOrder, invoice Invoice, plan creditPlan, alloc []ARInvoiceLine) (ReturnOrder, bool) {
+	if len(alloc) == 0 || len(plan.lines) == 0 {
+		return o, false
+	}
+	exp := money.MinorUnits(o.Currency)
+	byNo := map[int]InvoiceLine{}
+	for _, l := range invoice.Lines {
+		byNo[l.LineNo] = l
+	}
+	type segment struct{ qty, value decimal.Decimal }
+	segments := map[string][]segment{}
+	mixed := map[string]bool{}
+	unit := map[string]decimal.Decimal{}
+	for _, a := range alloc {
+		l, ok := byNo[a.LineNo]
+		if !ok || !l.Qty.IsPositive() {
+			continue
+		}
+		perUnit := l.Net.Div(l.Qty)
+		if first, seen := unit[l.ProductID]; seen && !first.Equal(perUnit) {
+			mixed[l.ProductID] = true
+		}
+		unit[l.ProductID] = perUnit
+		segments[l.ProductID] = append(segments[l.ProductID], segment{qty: a.Qty, value: l.Net.Mul(a.Qty).Div(l.Qty)})
+	}
+	if len(mixed) == 0 {
+		return o, false
+	}
+	out := o
+	out.Lines = append([]ReturnLine(nil), o.Lines...)
+	for i, idx := range plan.lines {
+		product := out.Lines[idx].ProductID
+		if !mixed[product] {
+			continue
+		}
+		need, value := plan.qty[i], decimal.Zero
+		segs := segments[product]
+		for need.IsPositive() && len(segs) > 0 {
+			take := decimal.Min(need, segs[0].qty)
+			value = value.Add(segs[0].value.Mul(take).Div(segs[0].qty).RoundBank(exp))
+			segs[0].qty = segs[0].qty.Sub(take)
+			need = need.Sub(take)
+			if !segs[0].qty.IsPositive() {
+				segs = segs[1:]
+			}
+		}
+		segments[product] = segs
+		out.Lines[idx].UnitPrice = value.Div(plan.qty[i])
+	}
+	return out, true
 }

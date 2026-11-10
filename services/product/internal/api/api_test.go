@@ -658,7 +658,7 @@ func TestProductItemGroupAndTrackingFlagsCreateReadPatchAndListGroups(t *testing
 	stored.ID = body.ID
 	f.products[body.ID] = stored
 	read := do(r, http.MethodGet, "/v1/product/products/"+body.ID, "", "product.read")
-	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"BatchTracked":true`) {
+	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"batchTracked":true`) {
 		t.Fatalf("read %d %s", read.Code, read.Body.String())
 	}
 	patch := httptest.NewRequest(http.MethodPatch, "/v1/product/products/"+body.ID, strings.NewReader(`{"serialTracked":true,"batchTracked":false}`))
@@ -668,7 +668,7 @@ func TestProductItemGroupAndTrackingFlagsCreateReadPatchAndListGroups(t *testing
 	patch.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, patch)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"SerialTracked":true`) || !strings.Contains(rec.Body.String(), `"BatchTracked":false`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"serialTracked":true`) || !strings.Contains(rec.Body.String(), `"batchTracked":false`) {
 		t.Fatalf("patch %d %s", rec.Code, rec.Body.String())
 	}
 	for name, payload := range map[string]string{

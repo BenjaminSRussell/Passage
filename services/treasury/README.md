@@ -205,6 +205,7 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0521` | 409 | the match was created from a bank transaction and cannot be unmatched |
 | `TRS-0522` | 409 | an earlier attempt to post the line went unanswered and the ledger then refused it; a person must check the ledger and abandon the transaction |
 | `TRS-0523` | 409 | the line has no pending or held bank transaction to abandon |
+| `TRS-0524` | 403 | the person who started the bank transaction cannot abandon it |
 | `conflict_version` | 412 | `If-Match` does not match the current ETag |
 | `precondition_required` | 428 | `If-Match` is required on every custom method |
 | `AUTH-0003` | 403 | missing duty, including `treasury.facility.override` when `overrideLimit` is set; or a legal-entity-scoped caller creating a bank account, forecast entry, facility or loan for another legal entity |

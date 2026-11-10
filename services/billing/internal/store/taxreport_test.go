@@ -221,3 +221,38 @@ func TestTaxReport_LegalEntityIsolationListAndRetry(t *testing.T) {
 		t.Errorf("retrying a reported report = %v, want a conflict", err)
 	}
 }
+
+// A document booked before reports existed has none; the backfill queues it once and a repeat pass finds nothing.
+func TestTaxReport_BackfillQueuesBookedDocumentsWithoutAReport(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	ctx := context.Background()
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	proposal, err := s.CreateProposal(tctx, newProposal(t, ids.New()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := s.PostProposal(tctx, proposal.ID, time.Date(2027, 3, 12, 0, 0, 0, 0, time.UTC), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done, err := s.MarkGLBooked(tctx, posted.ID, ids.New(), nil); err != nil || !done {
+		t.Fatalf("MarkGLBooked = %v, %v", done, err)
+	}
+	if _, err := admin.Exec(ctx, `delete from tax_transaction_report`); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.BackfillTaxReports(tctx, "", 10)
+	if err != nil || first.Scanned != 1 || first.Queued != 1 || first.Next != "" {
+		t.Fatalf("first pass = %+v, %v", first, err)
+	}
+	if body := storedTaxBody(t, admin, posted.ID); len(body.Transactions) != 1 || body.Transactions[0].Amount != "19.00" {
+		t.Fatalf("backfilled body = %+v", body)
+	}
+	if again, err := s.BackfillTaxReports(tctx, "", 10); err != nil || again.Scanned != 0 || again.Queued != 0 {
+		t.Fatalf("repeat pass = %+v, %v", again, err)
+	}
+}

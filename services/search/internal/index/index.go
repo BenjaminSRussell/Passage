@@ -172,8 +172,8 @@ func removeMergedParties(ctx context.Context, s Applier, evt events.Event) error
 	if err := decode(evt, partySource, &d); err != nil {
 		return err
 	}
-	if !ids.Valid(d.SurvivorPartyID) || d.Survivor.PartyNumber == "" {
-		return eventing.Permanent(fmt.Errorf("%s needs survivorPartyId and survivor.partyNumber", evt.Type))
+	if d.SurvivorPartyID != "" && !ids.Valid(d.SurvivorPartyID) {
+		return eventing.Permanent(fmt.Errorf("%s names survivor %q, not an id", evt.Type, d.SurvivorPartyID))
 	}
 	if len(d.MergedPartyIDs) == 0 || len(d.MergedPartyIDs) > maxMergedPartiesLen {
 		return eventing.Permanent(fmt.Errorf("%s names %d merged parties", evt.Type, len(d.MergedPartyIDs)))
@@ -185,6 +185,10 @@ func removeMergedParties(ctx context.Context, s Applier, evt events.Event) error
 		if err := apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: id, Status: statusMerged, Removed: true}); err != nil {
 			return err
 		}
+	}
+	// A merge without the survivor's data still takes the losers out; the survivor is indexed by its own party events.
+	if d.SurvivorPartyID == "" || d.Survivor.PartyNumber == "" {
+		return nil
 	}
 	return apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: d.SurvivorPartyID, Number: d.Survivor.PartyNumber, Title: d.Survivor.Name,
 		Subtitle: d.Survivor.PartyType, Status: d.Survivor.Status, Version: d.Survivor.Version})

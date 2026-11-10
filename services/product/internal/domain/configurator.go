@@ -7,59 +7,59 @@ import (
 
 // CfgAttribute is one discrete domain on a configuration model.
 type CfgAttribute struct {
-	Name   string
-	Domain []string
+	Name   string   `json:"name"`
+	Domain []string `json:"domain"`
 }
 
 // CfgConstraint is one named restriction. Kind is eq, neq, lt, gt, in, implies, alldifferent, sum, table.
 type CfgConstraint struct {
-	Name     string
-	Kind     string
-	Left     string
-	Right    string
-	Values   []string
-	Implies  *CfgConstraint
-	Attrs    []string
-	SumEq    int
-	Table    [][]string
-	TableRef string
+	Name     string         `json:"name"`
+	Kind     string         `json:"kind"`
+	Left     string         `json:"left"`
+	Right    string         `json:"right"`
+	Values   []string       `json:"values"`
+	Implies  *CfgConstraint `json:"implies"`
+	Attrs    []string       `json:"attrs"`
+	SumEq    int            `json:"sumEq"`
+	Table    [][]string     `json:"table"`
+	TableRef string         `json:"tableRef"`
 }
 
 // CfgModel is a versioned constraint model (FR-8.8).
 type CfgModel struct {
-	ID          string
-	MasterID    string
-	Version     int
-	Status      string
-	Attrs       []CfgAttribute
-	Constraints []CfgConstraint
-	Defaults    map[string]string
+	ID          string            `json:"id"`
+	MasterID    string            `json:"masterId"`
+	Version     int               `json:"version"`
+	Status      string            `json:"status"`
+	Attrs       []CfgAttribute    `json:"attrs"`
+	Constraints []CfgConstraint   `json:"constraints"`
+	Defaults    map[string]string `json:"defaults"`
 }
 
 // CfgResult is a solve outcome.
 type CfgResult struct {
-	Feasible    bool
-	Assignment  map[string]string
-	IIS         []string
-	ProductHint string
+	Feasible    bool              `json:"feasible"`
+	Assignment  map[string]string `json:"assignment"`
+	IIS         []string          `json:"iis"`
+	ProductHint string            `json:"productHint"`
 }
 
 // DecisionTable is a named allowed-combination table (FR-8.18).
 type DecisionTable struct {
-	Name    string
-	Columns []string
-	Rows    [][]string
+	Name    string     `json:"name"`
+	Columns []string   `json:"columns"`
+	Rows    [][]string `json:"rows"`
 }
 
 // SavedConfiguration is a reusable solve (FR-8.19).
 type SavedConfiguration struct {
-	Name       string
-	ModelID    string
-	Version    int
-	Scope      string
-	PartyID    string
-	Selections map[string]string
-	Status     string
+	Name       string            `json:"name"`
+	ModelID    string            `json:"modelId"`
+	Version    int               `json:"version"`
+	Scope      string            `json:"scope"`
+	PartyID    string            `json:"partyId"`
+	Selections map[string]string `json:"selections"`
+	Status     string            `json:"status"`
 }
 
 func attrIndex(model CfgModel) map[string]CfgAttribute {

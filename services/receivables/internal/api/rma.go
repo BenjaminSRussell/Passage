@@ -158,6 +158,11 @@ func legalEntityScoped(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+type rmaBackfillRequest struct {
+	InvoiceID    string                 `json:"invoiceId"`
+	InvoiceLines []store.RMAInvoiceLine `json:"invoiceLines"`
+}
+
 type rmaRetryRequest struct {
 	PostingDate string `json:"postingDate"`
 }
@@ -168,11 +173,34 @@ func (a *API) rmaCreditAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, action, found := strings.Cut(chi.URLParam(r, "ref"), ":")
-	if !found || !ids.Valid(id) || action != "retry" {
+	if !found || !ids.Valid(id) || (action != "retry" && action != "cancel" && action != "backfill-reservation") {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeRMACreditNotFound, "RMA credit not found"))
 		return
 	}
 	if !require(w, r, dutyPayment) || !legalEntityScoped(w, r) {
+		return
+	}
+	switch action {
+	case "cancel":
+		out, err := a.store.CancelRMACredit(r.Context(), id)
+		if err != nil {
+			a.fail("cancel rma credit", w, r, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, out)
+		return
+	case "backfill-reservation":
+		var body rmaBackfillRequest
+		if err := httpx.Decode(r, &body); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		out, err := a.store.BackfillRMAReservation(r.Context(), id, body.InvoiceID, body.InvoiceLines)
+		if err != nil {
+			a.fail("backfill rma reservation", w, r, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, out)
 		return
 	}
 	var req rmaRetryRequest

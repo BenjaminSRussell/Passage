@@ -18,7 +18,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateProduct' } } }
       responses:
-        '201': { description: Product created. }
+        '201': { description: Product created., content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
         '400': { description: 'Validation failed; for an import, id is not a hyphenated RFC 9562 UUID of version 1 to 8 (errors.id).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { description: 'AUTH-0003: id supplied without duty product.import.write.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: 'Product number already exists (errors.existingId carries the existing product id) or, for an import, the supplied id is taken (PRD-ID-TAKEN).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -33,7 +33,7 @@ paths:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { name: cursor, in: query, schema: { type: string }, description: 'The nextCursor of the previous page.' }
       responses:
-        '200': { description: 'Products and masters: {items, nextCursor?}.' }
+        '200': { description: 'Products and masters: {items, nextCursor?}.', content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Product' } }, nextCursor: { type: string } } } } } }
         '400': { description: Invalid limit or cursor., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/products/{id}:
     get:
@@ -44,7 +44,7 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
-        '200': { description: Product with variant summary. }
+        '200': { description: Product with variant summary., content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
         '404': { description: Product not found., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     patch:
       operationId: updateProduct
@@ -58,7 +58,7 @@ paths:
         required: true
         content: { application/json: { schema: { type: object, additionalProperties: false, properties: { name: { type: string }, description: { type: string }, searchName: { type: string }, lifecycleState: { type: string, enum: [draft, active, phase_out, obsolete] }, itemGroupId: { type: string }, batchTracked: { type: boolean }, serialTracked: { type: boolean }, catchWeight: { type: boolean } } } } }
       responses:
-        '200': { description: Updated product with its new version. }
+        '200': { description: Updated product with its new version., content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
         '400': { description: 'Invalid field value, or itemGroupId is not an item group of the tenant (errors.itemGroupId).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: Product not found., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PRD-LC-ILLEGAL (transition outside BR-8.1), PRD-ATTR-REQUIRED / PRD-ATTR-RANGE (activation with missing or invalid required attributes) or PRD-SVC-TRACKED (a service with a tracking flag); nothing is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -354,6 +354,32 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
 components:
   schemas:
+    Product:
+      type: object
+      description: 'A product as the service returns it. Every key is camelCase, like the request bodies (#558); empty optional values come back as empty strings or null.'
+      required: [id, productNumber, subtype, productType, name, baseUom, lifecycleState, batchTracked, serialTracked, catchWeight, version]
+      properties:
+        id: { type: string, format: uuid }
+        productNumber: { type: string }
+        subtype: { type: string, enum: [product, master, variant] }
+        masterId: { type: string }
+        productType: { type: string, enum: [item, service] }
+        name: { type: string }
+        description: { type: string }
+        searchName: { type: string }
+        baseUom: { type: string }
+        dimensionGroupId: { type: string }
+        storageDimensionGroupId: { type: string }
+        trackingDimensionGroupId: { type: string }
+        itemGroupId: { type: string }
+        batchTracked: { type: boolean }
+        serialTracked: { type: boolean }
+        catchWeight: { type: boolean }
+        lifecycleState: { type: string }
+        dimensionValues: { type: object, nullable: true, additionalProperties: { type: string } }
+        variantHash: { type: string }
+        service: { type: object, nullable: true }
+        version: { type: integer }
     CreateProduct:
       type: object
       additionalProperties: false

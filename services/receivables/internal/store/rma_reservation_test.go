@@ -155,6 +155,72 @@ func TestPostRMACredit_LedgerRefusalReleasesAndRetryReReservesTheSameKey(t *test
 	}
 }
 
+// An abandoned RMA gives its room back, and the RMA can be credited again (#557).
+func TestCancelRMACredit_ReleasesTheRoomAndFreesTheRMAForACorrectedResend(t *testing.T) {
+	s, gl, bill := reservedSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := reservedIn(inv.DocumentNumber)
+	gl.err = &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: "period_closed"}
+	_, _ = s.PostRMACredit(ctx, in)
+	row, _ := storedCredit(t, s, ctx, in.RMAID)
+	if !row.parked {
+		t.Fatalf("setup: %+v", row)
+	}
+	view, err := s.CancelRMACredit(ctx, row.id)
+	if err != nil || view.Status != "CANCELLED" {
+		t.Fatalf("cancel: %+v %v", view, err)
+	}
+	if _, found := storedCredit(t, s, ctx, in.RMAID); found || reservationStatus(t, bill, in) != "RELEASED" {
+		t.Fatalf("the credit must be gone and its room released: status %q", reservationStatus(t, bill, in))
+	}
+	gl.err = nil
+	in.InvoiceLines = []RMAInvoiceLine{{LineNo: 1, Qty: amt("2")}}
+	if _, err := s.PostRMACredit(ctx, in); err != nil {
+		t.Fatalf("resend after cancel: %v", err)
+	}
+	if _, err := s.CancelRMACredit(ctx, row.id); problemCode(err) != CodeRMACreditNotFound {
+		t.Fatalf("cancelling twice: %v", err)
+	}
+	posted, _ := storedCredit(t, s, ctx, in.RMAID)
+	if _, err := s.CancelRMACredit(ctx, posted.id); problemCode(err) != CodeRMACreditState {
+		t.Fatalf("a posted credit is not cancelled: %v", err)
+	}
+}
+
+// A credit stored before billing reservations existed takes its reservation from the lines the operator names.
+func TestBackfillRMAReservation_ReservesAndCommitsAPostedCreditWithoutOne(t *testing.T) {
+	s, _, bill := reservedSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	in := reservedIn(inv.DocumentNumber)
+	if _, err := s.PostRMACredit(ctx, in); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	row, _ := storedCredit(t, s, ctx, in.RMAID)
+	if _, err := s.BackfillRMAReservation(ctx, row.id, billingInvoiceID, in.InvoiceLines); problemCode(err) != CodeRMACreditState {
+		t.Fatalf("a credit that already holds one: %v", err)
+	}
+	legacy := rmaIn(inv.DocumentNumber)
+	legacy.RMAID, legacy.RMANumber = "00000000-0000-0000-0000-0000000000a9", "RMA-LEGACY-1"
+	s.WithReservations(nil)
+	if _, err := s.PostRMACredit(ctx, legacy); err != nil {
+		t.Fatalf("legacy post: %v", err)
+	}
+	s.WithReservations(bill)
+	old, _ := storedCredit(t, s, ctx, legacy.RMAID)
+	view, err := s.BackfillRMAReservation(ctx, old.id, billingInvoiceID, []RMAInvoiceLine{{LineNo: 1, Qty: amt("1")}})
+	if err != nil || !view.ReservationCommitted || view.ReservationID == "" {
+		t.Fatalf("backfill: %+v %v", view, err)
+	}
+	if r, _ := bill.Reservation(keyOf(legacy)); r.Status != "CONSUMED" {
+		t.Fatalf("billing must count the old credit: %+v", r)
+	}
+	if after, _ := storedCredit(t, s, ctx, legacy.RMAID); len(after.lines) != 1 || !after.committed {
+		t.Fatalf("stored: %+v", after)
+	}
+}
+
 func TestRetryRMACredit_RefusedWhenTheRoomIsGoneAndStaysParked(t *testing.T) {
 	s, gl, bill := reservedSetup(t)
 	ctx := tenantCtx(1)

@@ -28,15 +28,18 @@ const (
 // PlanCreditItem). SourceType is INVOICE or CREDIT_NOTE, Number the document number its items are numbered from, OriginalID the
 // invoice a credit note credits.
 type BillingDocument struct {
-	SourceType    string
-	ID            string
-	Number        string
-	OriginalID    string
-	LegalEntityID string
-	CustomerID    string
-	Currency      string
-	DocumentDate  string
-	Items         []domain.PlannedItem
+	SourceType string
+	ID         string
+	Number     string
+	OriginalID string
+	// OriginalNumber is the credited invoice's number, the fallback for an invoice loaded by the opening-item import,
+	// which has no billing document id.
+	OriginalNumber string
+	LegalEntityID  string
+	CustomerID     string
+	Currency       string
+	DocumentDate   string
+	Items          []domain.PlannedItem
 }
 
 // ErrOriginalInvoiceNotFound is a credit note whose invoice has no open items in its legal entity (yet). The caller retries,
@@ -64,7 +67,9 @@ func (s *Postgres) ApplyBillingDocument(ctx context.Context, d BillingDocument) 
 		if d.OriginalID != "" {
 			var customer, currency string
 			err := tx.QueryRow(ctx, `select customer_id::text, currency from open_item
-				where source_type = 'INVOICE' and source_doc_id = $1 limit 1`, d.OriginalID).Scan(&customer, &currency)
+				where source_type = 'INVOICE' and (source_doc_id = $1 or ($2 <> '' and source_doc_id is null and legal_entity_id = $3
+				  and (document_number = $2 or document_number like $4 escape '\')))
+				order by (source_doc_id is null) limit 1`, d.OriginalID, d.OriginalNumber, d.LegalEntityID, likeEscaper.Replace(d.OriginalNumber)+"/%").Scan(&customer, &currency)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrOriginalInvoiceNotFound
 			}
@@ -170,8 +175,8 @@ func lockInvoiceItems(ctx context.Context, tx pgx.Tx, tenantID string, in RMACre
 	}
 	rows, err := tx.Query(ctx, `select `+openItemColumns+` from open_item
 		where tenant_id = $1 and legal_entity_id = $2 and source_type = 'INVOICE'
-		and (source_doc_id = nullif($3, '')::uuid or (source_doc_id is null and document_number = $4))
-		order by installment_no nulls first, document_number for update`, tenantID, in.LegalEntityID, billingID, in.InvoiceNumber)
+		and (source_doc_id = nullif($3, '')::uuid or document_number = $4 or (source_doc_id is not null and document_number like $5 escape '\'))
+		order by installment_no nulls first, document_number for update`, tenantID, in.LegalEntityID, billingID, in.InvoiceNumber, likeEscaper.Replace(in.InvoiceNumber)+"/%")
 	if err != nil {
 		return OpenItem{}, nil, decimal.Zero, err
 	}

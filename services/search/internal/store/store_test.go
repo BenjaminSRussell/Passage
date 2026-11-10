@@ -173,6 +173,19 @@ func TestSearchFindsNamesBySubstringAndTypo(t *testing.T) {
 	}
 }
 
+func TestSearchFindsANameThatHoldsADigit(t *testing.T) {
+	st := setup(t)
+	ctx := asScope(testkit.TenantID(1), entityA)
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: ids.New(), Number: "P-9", Title: "Quick 7-Eleven Stores", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"7-eleven", "eleven", "p-9"} {
+		if hits, err := st.Search(ctx, Query{Text: q, Types: []string{TypeParty}, Limit: 5}); err != nil || len(hits) != 1 {
+			t.Errorf("search %q: %+v err %v", q, hits, err)
+		}
+	}
+}
+
 func TestSearchTreatsLikeCharactersAsText(t *testing.T) {
 	st := setup(t)
 	ctx := asScope(testkit.TenantID(1), entityA)

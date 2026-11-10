@@ -155,7 +155,7 @@ func TestMigrationLoaderReadsBackAProductByID(t *testing.T) {
 		t.Fatalf("create = %d %s", rec.Code, rec.Body)
 	}
 	rec := migrationCall(t, f, le, http.MethodGet, "/v1/product/products/"+pid, "")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ProductNumber":"P-61"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"productNumber":"P-61"`) {
 		t.Fatalf("read = %d %s", rec.Code, rec.Body)
 	}
 }

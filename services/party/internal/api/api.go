@@ -31,6 +31,8 @@ const (
 	// dutyImportRead lets the migration loader read back what it loaded (parties, customer and vendor roles) for
 	// reconciliation. It carries no pii.read, so a date of birth stays masked.
 	dutyImportRead = "party.import.read"
+	// dutyVendorLookup is the one read a vendor-checking service (payables) needs: a vendor role by id, nothing else.
+	dutyVendorLookup = "party.vendor.lookup"
 	codeInvalid    = "PTY-0001"
 )
 
@@ -48,6 +50,7 @@ type API struct {
 	credit    store.CreditStore
 	vendors   store.VendorStore
 	customers store.CustomerStore
+	suppliers store.SupplierStore
 	merges    MergeStore
 	search    store.SearchStore
 	sequence  Sequencer
@@ -114,6 +117,9 @@ func (a *API) Register(r chi.Router) {
 	}
 	if a.customers != nil {
 		a.registerCustomers(r)
+	}
+	if a.suppliers != nil {
+		a.registerSuppliers(r)
 	}
 	if a.merges != nil {
 		a.registerMerge(r)

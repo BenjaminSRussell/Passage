@@ -14,11 +14,18 @@ type fakeTaxReports struct {
 	listed  string
 	retried string
 	err     error
+
+	backfilled string
 }
 
 func (f *fakeTaxReports) ListTaxReports(_ context.Context, status string, _ int) ([]store.TaxReport, error) {
 	f.listed = status
 	return []store.TaxReport{{ID: "r1", Status: store.TaxReportParked}}, nil
+}
+
+func (f *fakeTaxReports) BackfillTaxReports(_ context.Context, after string, _ int) (store.TaxBackfill, error) {
+	f.backfilled = after
+	return store.TaxBackfill{Scanned: 2, Queued: 1}, f.err
 }
 
 func (f *fakeTaxReports) RetryTaxReport(_ context.Context, id string) (store.TaxReport, error) {
@@ -62,5 +69,22 @@ func TestTaxReports_OperatorListAndRetry(t *testing.T) {
 	bare := setup(t, newFakeStore(), &fakeTax{perLine: "19.00"})
 	if rec := doAs(bare, http.MethodGet, "/v1/billing/tax-reports", "", "", dutyView, nil); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("without a store = %d, want 503", rec.Code)
+	}
+}
+
+// Documents booked before reports existed are queued by an operator under invoice post, a pass at a time.
+func TestTaxReports_OperatorBackfill(t *testing.T) {
+	fake := &fakeTaxReports{}
+	a, h := setupAPI(t, newFakeStore(), &fakeTax{perLine: "19.00"})
+	a.WithTaxReports(fake)
+	if rec := doAs(h, http.MethodPost, "/v1/billing/tax-reports:backfill", "", "", dutyView, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("backfill with the view duty = %d, want 403", rec.Code)
+	}
+	rec := doAs(h, http.MethodPost, "/v1/billing/tax-reports:backfill?after=018f0000-0000-7000-8000-0000000000aa", "", "", dutyPost, nil)
+	if rec.Code != http.StatusOK || fake.backfilled != "018f0000-0000-7000-8000-0000000000aa" || !strings.Contains(rec.Body.String(), `"queued":1`) {
+		t.Fatalf("backfill = %d %s (after %q)", rec.Code, rec.Body, fake.backfilled)
+	}
+	if rec := doAs(h, http.MethodPost, "/v1/billing/tax-reports:backfill?after=x", "", "", dutyPost, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad cursor = %d, want 400", rec.Code)
 	}
 }

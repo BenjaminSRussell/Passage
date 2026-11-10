@@ -203,6 +203,12 @@ func (a *API) createLineTransaction(w http.ResponseWriter, r *http.Request) {
 	done, err := a.recons.FinishLineTransaction(ctx, t.ID, entryID)
 	if err != nil {
 		logFailure(r, "finish line transaction after the ledger accepted it", err)
+		// A deliberate refusal (the transaction was abandoned meanwhile) is not "safe to repeat"; say what happened.
+		var refusal *httpx.Problem
+		if errors.As(err, &refusal) && refusal.Status == http.StatusConflict {
+			httpx.Fail(w, r, refusal)
+			return
+		}
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeLedgerDown, "The general ledger accepted the entry but the match could not be saved. Repeat the request, it is safe to repeat."))
 		return
 	}

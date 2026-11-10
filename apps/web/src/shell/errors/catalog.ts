@@ -10,6 +10,7 @@
  * tables (purchasing, receiving, payables, sales, inventory, ledger, party, tax and product).
  * A code without an entry falls back to the server's title or detail.
  */
+
 export interface ProblemCatalogEntry {
   /** What happened and why, in one or two plain sentences. */
   message: string;
@@ -157,6 +158,8 @@ const receiving: Record<string, ProblemCatalogEntry> = {
   "RCV-SVC-001": { message: "A receipt created by an accepted service entry sheet can't be corrected or cancelled.", action: "Correct the service entry sheet instead." },
   "RCV-CW-001": { message: "The catch weight is outside the allowed range for this quantity.", action: "Weigh the goods again and enter the actual weight." },
   "RCV-CW-002": { message: "A catch-weight line must be received in a weight unit.", action: "Change the unit to a weight unit." },
+  "RCV-CAP-004": { message: "This invoice document was already sent.", action: "Check your sent invoices before sending it again." },
+  "RCV-VND-001": { message: "This account isn't a supplier account.", action: "Sign in with a supplier account." },
   "RCV-CAP-001": { message: "The invoice document isn't in a format we can read.", action: "Upload the original e-invoice file." },
   "RCV-CAP-002": { message: "The invoice document couldn't be read.", action: "Upload a clearer copy, or enter the invoice by hand." },
   "INV-SER-001": { message: "A serial number is empty or has already been recorded.", action: "Enter a serial number that hasn't been used." },
@@ -634,6 +637,11 @@ const ledgerPostingGaps: Record<string, ProblemCatalogEntry> = {
 
 const party: Record<string, ProblemCatalogEntry> = {
   "PTY-0001": { message: "The tax registration number isn't valid for its country.", action: "Check the number and the country, then try again." },
+  "PTY-SUP-INVALID": { message: "Some of the details aren't valid.", action: "Check the highlighted fields, then try again." },
+  "PTY-SUP-NOT-FOUND": { message: "That request, document or supplier can't be found.", action: "Reload the list and try again." },
+  "PTY-SUP-SCOPE": { message: "This account isn't a supplier account.", action: "Sign in with a supplier account." },
+  "PTY-SUP-SOD": { message: "You invited this supplier, so someone else has to approve it.", action: "Ask a colleague to approve the onboarding." },
+  "PTY-SUP-STATE": { message: "The request has already moved on.", action: "Reload and check its current status." },
   "PTY-BANK-ENCRYPTION-UNAVAILABLE": { message: "Bank details can't be saved until the encryption keys are set up.", action: ASK_ADMIN },
   "PTY-BANK-INVALID": { message: "Some of the bank account details aren't valid.", action: "Check the account number, bank code and currency, then try again." },
   "PTY-CHANGE-DECIDED": { message: "Someone has already approved or rejected this change.", action: "Reload the page to see the decision." },
@@ -924,5 +932,6 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
 /** The catalog entry for a problem code, if there is one. */
 export function lookupProblem(code: string | undefined | null): ProblemCatalogEntry | undefined {
   if (!code) return undefined;
-  return Object.prototype.hasOwnProperty.call(problemCatalog, code) ? problemCatalog[code] : undefined;
+  if (!Object.prototype.hasOwnProperty.call(problemCatalog, code)) return undefined;
+  return problemCatalog[code];
 }
