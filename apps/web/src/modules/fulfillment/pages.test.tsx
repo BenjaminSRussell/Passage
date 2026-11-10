@@ -326,10 +326,38 @@ describe("packing slips", () => {
     expect(within(table).getByText("-125.00 USD")).toBeInTheDocument();
   });
 
-  it("shows the empty state", async () => {
+  it("shows the empty state with the next step", async () => {
     server.handler = () => json(200, { items: [] });
-    renderAt("/fulfillment/packing-slips");
+    const { container } = renderAt("/fulfillment/packing-slips");
     expect(await screen.findByText("No packing slips yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to shipments" })).toHaveAttribute("href", "/fulfillment/shipments");
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("filters by status on the service and says when nothing matches", async () => {
+    server.handler = (url) => json(200, { items: url.searchParams.get("status") === "INVOICED" ? [] : [slip] });
+    renderAt("/fulfillment/packing-slips");
+    const table = await findTable({ name: "Packing slips" });
+    expect(await within(table).findByText("PS-0000001")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "INVOICED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No packing slips match these filters")).toBeInTheDocument();
+    expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("INVOICED");
+  });
+
+  it("explains a failure with a retry, and no access without one", async () => {
+    server.handler = () => json(500, { code: "COM-0500", detail: "store unavailable" });
+    const { unmount } = renderAt("/fulfillment/packing-slips");
+    expect(await screen.findByText("Could not load packing slips")).toBeInTheDocument();
+    server.handler = () => json(200, { items: [slip] });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("PS-0000001")).toBeInTheDocument();
+    unmount();
+
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
+    renderAt("/fulfillment/packing-slips");
+    expect(await screen.findByText("You can't view packing slips")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
   it("shows the journal and cancels after confirmation (AC-28.2)", async () => {

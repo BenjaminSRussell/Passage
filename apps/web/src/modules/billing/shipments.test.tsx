@@ -272,7 +272,8 @@ describe("Invoices list and detail for shipments", () => {
     renderAt("/billing");
     expect(await screen.findByText("No invoices yet")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Type"), { target: { value: "CONSOLIDATED" } });
-    expect(await screen.findByText("No consolidated invoices")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No invoices match these filters")).toBeInTheDocument();
     expect(server.calls.at(-1)?.url.searchParams.get("type")).toBe("CONSOLIDATED");
     expect(screen.getByRole("link", { name: "Invoice shipments" })).toHaveAttribute("href", "/billing/proposals/new");
   });
