@@ -739,6 +739,8 @@
     "employee-vendor.maintain": {"permissions": [
       {"resource": "/v1/payables/employee-vendors/*", "methods": ["PUT"]}
     ]},
+    "opening-item.import": {"service_only": true, "permissions": [{"resource": "/v1/payables/opening-batches", "methods": ["POST"]}]},
+    "opening-item.import.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/opening-batches", "methods": ["GET"]}]},
     "vendor-block.manage": {"permissions": [
       {"resource": "/v1/payables/vendors/*:block", "methods": ["POST"]},
       {"resource": "/v1/payables/vendors/*:unblock", "methods": ["POST"]}
@@ -3584,6 +3586,7 @@
     },
     "migration-factory": {
       "receivables": ["receivables.import.write", "receivables.view"],
+      "payables": ["opening-item.import", "opening-item.import.read"],
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "integration-hub": {

@@ -65,6 +65,10 @@ The preview settles one credit against open invoices per PRD FR-19.2: priority o
 | AP-PRP-006 | 422 | unknown withholding code for the legal entity, or the tax service refused the calculation |
 | AP-RUN-017 | 422 | vendor bank details from party unusable: unknown vendor, no or several accounts in the currency, no holder or country |
 | AP-EMP-001 | 422 | the vendor of an employee-vendor registration is not in the party vendor master |
+| AP-OPN-001 | 422 | an opening batch has rows that cannot be imported (errors keyed `items[row].field`, rows from 1, including a vendor not in the party vendor master) |
+| AP-OPN-002 | 409 | the opening batch key was already imported with different content |
+| AP-OPN-003 | 422 | the opening batch items do not add up to the declared control totals |
+| AP-OPN-004 | 422 | an opening item reference was already imported by another batch |
 | AP-EMP-002 | 409 | the worker is already registered to another vendor (remapping is not supported) |
 | COM-0404 | 404 | open item or proposal not found (or outside the caller's tenant and legal entity) |
 | COM-0502 | 502 | fx service unavailable |
@@ -143,3 +147,5 @@ Each step locks the run row, so concurrent duplicates serialise; a step already 
 Metrics: `payables_payment_runs_total{outcome}` (started, replayed, completed, failed), `payables_payment_run_ledger_faults_total`, `payables_payment_file_reads_total` and `payables_payment_run_stuck_total`.
 
 Alert: page on `increase(payables_payment_run_stuck_total[5m]) > 0`. It counts a settle step that found an open item changed after the journal posted: the money is posted and nothing is settled, the run stays RUNNING and the structured error log `payment run stuck` carries the run id. Resolve by hand: inspect the named item, then either reverse the journal in the ledger (the run cannot do that yet) or settle the item against the run, and complete the run.
+
+Opening items (#49): `POST /v1/payables/opening-batches` (duty `opening-item.import`, service-only, granted to `migration-factory`) loads a cutover batch of open vendor items for one legal entity, all or nothing: per-row validation, vendors checked against the party vendor master, integer minor units, and a declared total per currency that must match. A batch is idempotent per `batchKey` (replay 200, other content 409) and an item per `reference` per legal entity (`ap_open_item.opening_batch_id`, `opening_reference`). Items are ordinary OPEN items, listed and payable in proposals, and post nothing to the ledger (the GL opening journal carries the AP control balance); no `openitem.created` event is emitted for them. `GET /v1/payables/opening-batches` (duty `opening-item.import.read`) reads back each batch's item count and totals from the stored items.
