@@ -69,7 +69,7 @@ describe("Forecast consensus (FR-22.9)", () => {
     expect(screen.getByRole("form", { name: "Forecast cell" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Submit for approval" }));
 
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Forecast model BASE is submitted for approval."));
+    await waitFor(() => expect(screen.getAllByRole("status").map((e) => e.textContent).join(" ")).toContain("Forecast model BASE is submitted for approval."));
     const [url, init] = posts(fetchMock)[0];
     expect(url).toBe("/api/v1/planning/forecasts/BASE:submit");
     expect((init?.headers as Record<string, string>)["If-Match"]).toBe('"3"');
@@ -86,7 +86,7 @@ describe("Forecast consensus (FR-22.9)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publish consensus" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent("Forecast model BASE is published: 2 item and site series over 6 periods, 2026-11-02 to 2027-04-30."),
+      expect(screen.getAllByRole("status").map((e) => e.textContent).join(" ")).toContain("Forecast model BASE is published: 2 item and site series over 6 periods, 2026-11-02 to 2027-04-30."),
     );
     expect((posts(fetchMock)[0][1]?.headers as Record<string, string>)["If-Match"]).toBe('"4"');
     expect(await screen.findByText(/Published on 2026-10-26 by bob/)).toBeInTheDocument();
@@ -99,7 +99,7 @@ describe("Forecast consensus (FR-22.9)", () => {
     forecastApi(submitted, (url) => (url.endsWith(":reject") ? { model: { ...draft, version: 5, decidedBy: "bob" } } : problem(500, "X", "unexpected")));
     renderAt("/planning/forecast");
     fireEvent.click(await screen.findByRole("button", { name: "Return to draft" }));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Forecast model BASE is back in draft"));
+    await waitFor(() => expect(screen.getAllByRole("status").map((e) => e.textContent).join(" ")).toContain("Forecast model BASE is back in draft"));
     expect(await screen.findByRole("form", { name: "Forecast cell" })).toBeInTheDocument();
   });
 

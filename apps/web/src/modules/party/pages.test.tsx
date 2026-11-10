@@ -83,7 +83,23 @@ describe("party search", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Find party" }));
     expect(await screen.findByText("Choose a party.")).toBeInTheDocument();
-    expect(api.calls).toHaveLength(0);
+    expect(api.calls.filter((call) => call.url.pathname.includes("/parties/"))).toHaveLength(0);
+  });
+
+  it("lists customers and vendors to browse and opens one", async () => {
+    api.handler = (call) =>
+      call.url.pathname.endsWith("/customers:search")
+        ? json(200, { items: [{ id: "role-1", partyId: PARTY, accountNumber: "C-1", name: "Northwind" }] })
+        : call.url.pathname.endsWith("/vendors:search")
+          ? json(200, { items: [{ id: "role-2", partyId: OTHER, accountNumber: "V-1", name: "Acme Supply" }] })
+          : undefined;
+    renderAt("/party");
+    expect(await screen.findByText("Northwind")).toBeInTheDocument();
+    expect(screen.getByText("Acme Supply")).toBeInTheDocument();
+    expect(screen.getByText("Customer")).toBeInTheDocument();
+    expect(screen.getByText("Vendor")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Acme Supply"));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/party/${OTHER}`));
   });
 
   it("shows a load failure and recovers on Try again", async () => {
@@ -141,7 +157,7 @@ describe("party detail", () => {
           );
     renderAt(`/party/${PARTY}`);
     expect(await screen.findByText("Merged party")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: OTHER })).toHaveAttribute("href", `/party/${OTHER}`);
+    expect(screen.getByRole("link", { name: "the surviving party" })).toHaveAttribute("href", `/party/${OTHER}`);
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
   });
 
@@ -151,7 +167,7 @@ describe("party detail", () => {
       return json(200, org(PARTY, "Northwind", { redirected: true, requestedId: OTHER }));
     };
     renderAt(`/party/${OTHER}`);
-    expect(await screen.findByText(/This id was merged/)).toBeInTheDocument();
+    expect(await screen.findByText(/This party was merged/)).toBeInTheDocument();
     expect(screen.getByText(/surviving party PTY-000001/)).toBeInTheDocument();
     noMergeControls();
   });

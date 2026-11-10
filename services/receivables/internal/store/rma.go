@@ -282,28 +282,33 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 		if billed, err = s.billedTax(ctx, in); err != nil {
 			return err
 		}
-		invoice, err := scanOpenItem(tx.QueryRow(ctx, `select `+openItemColumns+` from open_item
-			where tenant_id = $1 and legal_entity_id = $2 and document_number = $3 and source_type = 'INVOICE' for update`,
-			p.TenantID, in.LegalEntityID, in.InvoiceNumber))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRMAInvoice, "the original invoice is not an open item of this legal entity")
-		}
+		invoice, itemIDs, invoiceAmount, err := lockInvoiceItems(ctx, tx, p.TenantID, in)
 		if err != nil {
 			return err
 		}
-		// The invoice row lock above serializes RMA credits of one invoice, so this sum sees every earlier credit.
+		// A concurrent repeat of this RMA may have committed while we waited for the invoice lock: replay it here, not as a
+		// duplicate open item or an over-credit.
+		if row, err = loadRMACredit(ctx, tx, `legal_entity_id = $2 and rma_id = $3`, p.TenantID, in.LegalEntityID, in.RMAID); err == nil {
+			if row.requestHash != hash {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "this RMA was already credited with different amounts or references")
+			}
+			return nil
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		// The invoice row locks above serialize RMA credits of one invoice, so this sum sees every earlier credit.
 		var creditedText string
-		if err := tx.QueryRow(ctx, `select coalesce(sum(gross + tax), 0)::text from rma_credit where tenant_id = $1 and invoice_open_item_id = $2`,
-			p.TenantID, invoice.ID).Scan(&creditedText); err != nil {
+		if err := tx.QueryRow(ctx, `select coalesce(sum(gross + tax), 0)::text from rma_credit where tenant_id = $1 and invoice_open_item_id = any($2::uuid[])`,
+			p.TenantID, itemIDs).Scan(&creditedText); err != nil {
 			return err
 		}
 		credited := decimal.RequireFromString(creditedText)
-		if left, value := invoice.Amount.Sub(credited), in.Gross.Add(tax); value.GreaterThan(left) {
+		if left, value := invoiceAmount.Sub(credited), in.Gross.Add(tax); value.GreaterThan(left) {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRMAInvoice,
 				fmt.Sprintf("the return value %s exceeds what invoice %s still allows (amount %s, already returned by RMAs %s)",
-					value, invoice.DocumentNumber, invoice.Amount, credited))
+					value, in.InvoiceNumber, invoiceAmount, credited))
 		}
-		if err := checkTaxAgainstInvoice(ctx, tx, p.TenantID, invoice.ID, billed, in.TaxLines); err != nil {
+		if err := checkTaxAgainstInvoice(ctx, tx, p.TenantID, itemIDs, billed, in.TaxLines); err != nil {
 			return err
 		}
 		var taken bool

@@ -2,12 +2,14 @@ import { findAlert, findTable } from "../../test-utils";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { resetResourceCache } from "../mfg-shared/resources";
 import { initialValues, toInput, validateOrder, formKey } from "./CreateOrderPage";
 import production from "./module";
 import { json, logEntry, order, orderId, problem, summary } from "./testData";
 
+beforeEach(() => resetResourceCache());
 afterEach(() => vi.unstubAllGlobals());
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -370,8 +372,8 @@ describe("New production order form", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Create production order" }));
     expect(await screen.findByText("Enter a positive quantity with up to 6 decimals.")).toBeInTheDocument();
     expect(screen.getByLabelText("Product")).toHaveAttribute("aria-invalid", "true");
-    expect(within(screen.getByRole("group", { name: "Operation 1" })).getByText("Enter the resource id (a UUID).")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("group", { name: "Operation 1" })).getByText("Choose a resource.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
     expect(checkAxeAA(container)).toEqual([]);
   });
 
@@ -379,6 +381,9 @@ describe("New production order form", () => {
     const fetchMock = stubFetch((url, init) => {
       if (init?.method === "POST") {
         return json(order(), 201);
+      }
+      if (url.includes("/engineering/resources")) {
+        return json({ items: [{ id: uuid(5), code: "CNC-1", name: "CNC mill" }] });
       }
       if (url.endsWith("/status-log")) {
         return json({ items: [] });
@@ -395,13 +400,15 @@ describe("New production order form", () => {
     fill("Quantity", "100");
     fill("Site", v.siteId);
     fill("Warehouse", v.warehouseId);
+    await userEvent.click(screen.getByRole("button", { name: "Add component" }));
     const component = screen.getByRole("group", { name: "Component 1" });
     fill("Item", v.lines[0].itemId, component);
     fill("Quantity per unit", "3", component);
     await userEvent.selectOptions(within(component).getByLabelText("Flushing"), "finish");
     fill("Item group", "FG");
     const operation = screen.getByRole("group", { name: "Operation 1" });
-    fill("Resource", v.operations[0].resourceId, operation);
+    await within(operation).findByRole("option", { name: "CNC mill (CNC-1)" });
+    await userEvent.selectOptions(within(operation).getByLabelText("Resource"), v.operations[0].resourceId);
     fill("Run hours per unit", "0.5", operation);
     await userEvent.click(screen.getByRole("button", { name: "Add component" }));
     expect(screen.getByRole("group", { name: "Component 2" })).toBeInTheDocument();
@@ -409,7 +416,7 @@ describe("New production order form", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     await waitFor(() => expect(location.pathname).toBe(`/production/${orderId}`));
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls.find(([, i]) => i?.method === "POST")!;
     expect(url).toBe("/api/v1/production/orders");
     expect((init?.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/.+/);
     const body = JSON.parse(String(init?.body));
@@ -419,7 +426,11 @@ describe("New production order form", () => {
   });
 
   it("shows the service's refusal and its field errors", async () => {
-    stubFetch(() => problem(400, "COM-0001", "request failed validation", { "bom[0].itemId": "must be a UUID", legalEntityId: "must be the legal entity of the caller" }));
+    stubFetch((url) =>
+      url.includes("/engineering/resources")
+        ? json({ items: [{ id: uuid(5), code: "CNC-1", name: "CNC mill" }] })
+        : problem(400, "COM-0001", "request failed validation", { "bom[0].itemId": "must be a UUID", legalEntityId: "must be the legal entity of the caller" }),
+    );
     renderAt("/production/new");
     const v = filled();
     const set = (label: string, value: string, scope: HTMLElement = document.body) => fireEvent.change(within(scope).getByLabelText(label), { target: { value } });
@@ -427,9 +438,12 @@ describe("New production order form", () => {
     set("Quantity", "100");
     set("Site", v.siteId);
     set("Warehouse", v.warehouseId);
+    await userEvent.click(screen.getByRole("button", { name: "Add component" }));
     set("Item", v.lines[0].itemId, screen.getByRole("group", { name: "Component 1" }));
     set("Quantity per unit", "3", screen.getByRole("group", { name: "Component 1" }));
-    set("Resource", v.operations[0].resourceId, screen.getByRole("group", { name: "Operation 1" }));
+    const op = screen.getByRole("group", { name: "Operation 1" });
+    await within(op).findByRole("option", { name: "CNC mill (CNC-1)" });
+    await userEvent.selectOptions(within(op).getByLabelText("Resource"), v.operations[0].resourceId);
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     const alerts = await screen.findAllByRole("alert");
     const summaryAlert = alerts.find((a) => a.textContent?.includes("The order was not created"));

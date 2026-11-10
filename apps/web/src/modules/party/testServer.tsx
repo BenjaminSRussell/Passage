@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { PrincipalProvider } from "../../shell/principal";
+import { installLookupStub } from "../purchasing/lookupStub";
 import party from "./module";
 
 export type Reply = { status: number; body: unknown };
@@ -61,6 +62,7 @@ function Where() {
 }
 
 export function renderAt(path: string, duties: string[] = ["party.read", "party.write", "party.approve"]) {
+  installLookupStub();
   return render(
     <PrincipalProvider duties={duties}>
       <MemoryRouter initialEntries={[path]}>

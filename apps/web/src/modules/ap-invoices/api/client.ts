@@ -37,7 +37,25 @@ export type GrirPage = z.infer<typeof grirPageSchema>;
 export const INVOICE_STATUSES = ["POSTED", "AUDIT_BLOCKED", "AUDIT_REJECTED"] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
+export const MATCH_STATUSES = ["MATCHED", "PRICE_VARIANCE", "QTY_VARIANCE", "NO_RECEIPT", "WAITING_RECEIPT"] as const;
+export type MatchStatus = (typeof MATCH_STATUSES)[number];
+
+const matchSchema = z.object({
+  status: z.enum(MATCH_STATUSES),
+  withinTolerance: z.boolean(),
+  lines: z.array(
+    z.object({
+      lineNo: z.number().int(),
+      status: z.enum(MATCH_STATUSES),
+      receivedQty: z.string().optional(),
+      priceVariance: z.object({ amount: z.string(), currency: z.string() }),
+      currencyMismatch: z.boolean().optional(),
+    }),
+  ),
+});
+
 export const invoiceSchema = z.object({
+  match: matchSchema.optional(),
   status: z.enum(INVOICE_STATUSES),
   source: z.enum(["MANUAL", "ERS"]).optional(),
   auditReason: z.string().optional(),
@@ -71,6 +89,24 @@ export const invoiceSchema = z.object({
   ),
 });
 export type Invoice = z.infer<typeof invoiceSchema>;
+
+export const CAPTURE_STATUSES = ["CAPTURED", "NEEDS_REVIEW"] as const;
+export type CaptureStatus = (typeof CAPTURE_STATUSES)[number];
+export const REVIEW_REASONS = ["LOW_CONFIDENCE", "TOTAL_MISMATCH", "NO_VENDOR_TAX_ID"] as const;
+
+export const captureSchema = z.object({
+  id: z.string(),
+  legalEntityId: z.string(),
+  status: z.enum(CAPTURE_STATUSES),
+  reviewReasons: z.array(z.enum(REVIEW_REASONS)),
+  vendorTaxId: z.string(),
+  invoiceNumber: z.string(),
+  invoiceDate: z.string(),
+  currency: z.string(),
+  total: z.string(),
+  createdAt: z.string(),
+});
+export type Capture = z.infer<typeof captureSchema>;
 
 export interface InvoiceLineInput {
   receiptId: string;
@@ -140,4 +176,22 @@ export async function fetchInvoice(id: string, fetchImpl: FetchLike = defaultFet
 /** POST /invoices:post. The caller keeps one Idempotency-Key per intended invoice so a retry replays. */
 export async function postVendorInvoice(input: InvoiceInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<Invoice> {
   return request("POST", "/invoices:post", invoiceSchema, fetchImpl, { "Idempotency-Key": idempotencyKey }, input);
+}
+
+const capturePageSchema = z.object({ items: z.array(captureSchema), nextCursor: z.string().optional() });
+
+export interface CaptureQuery {
+  status?: CaptureStatus;
+  cursor?: string;
+  limit?: number;
+}
+
+/** GET /invoice-captures: captured vendor invoice documents newest first; none of them is posted yet. */
+export async function fetchCaptures(q: CaptureQuery = {}, fetchImpl: FetchLike = defaultFetch): Promise<z.infer<typeof capturePageSchema>> {
+  const params = new URLSearchParams();
+  if (q.status) params.set("status", q.status);
+  if (q.cursor) params.set("cursor", q.cursor);
+  if (q.limit) params.set("limit", String(q.limit));
+  const query = params.size > 0 ? `?${params}` : "";
+  return request("GET", `/invoice-captures${query}`, capturePageSchema, fetchImpl);
 }

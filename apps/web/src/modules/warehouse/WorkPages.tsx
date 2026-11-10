@@ -20,14 +20,26 @@ import {
   type WorkLineInput,
 } from "./api/client";
 import styles from "./pages.module.css";
-import { ChooseWarehouse, DECIMAL, Detail, INTEGER, LINE_STATUS_TONES, sentence, shortId, useWarehouse, UUID, WarehouseField, when, WORK_STATUS_TONES } from "./shared";
+import { ChooseWarehouse, DECIMAL, Detail, INTEGER, LINE_STATUS_TONES, Named, sentence, useLocationNames, useWarehouse, UUID, WarehouseField, when, WORK_STATUS_TONES } from "./shared";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
 
 const PAGE = 100;
 
 const workColumns: DataTableColumn<Work>[] = [
-  { key: "id", header: "Work", mono: true, render: (w) => shortId(w.id) },
+  {
+    key: "id",
+    header: "Items",
+    render: (w) =>
+      w.lines.length === 0 ? (
+        "—"
+      ) : (
+        <>
+          <Named entity="product" id={w.lines[0].itemId} fallback={w.lines[0].itemId} />
+          {w.lines.length > 1 ? ` + ${w.lines.length - 1} more` : ""}
+        </>
+      ),
+  },
   { key: "workType", header: "Type", render: (w) => sentence(w.workType) },
   { key: "status", header: "Status", render: (w) => <Badge tone={WORK_STATUS_TONES[w.status] ?? "neutral"}>{sentence(w.status)}</Badge> },
   { key: "priority", header: "Priority", align: "end" },
@@ -301,6 +313,7 @@ export function NewWorkPage() {
 
 function PlannedResult({ planned }: { planned: Planned }) {
   const { work, traces } = planned;
+  const locationName = useLocationNames(work.warehouseId);
   const blocked = work.status === "BLOCKED_NO_LOCATION";
   const rows = work.lines.map((l, i) => ({ line: l, trace: traces[i] }));
   return (
@@ -308,16 +321,16 @@ function PlannedResult({ planned }: { planned: Planned }) {
       <div className={styles.stack}>
         <p role="status" className={styles.summary}>
           <Badge tone={WORK_STATUS_TONES[work.status]}>{sentence(work.status)}</Badge>{" "}
-          {blocked ? "No directive could place every line (WMS-0101); the work waits until it is re-evaluated or cancelled." : `Work ${shortId(work.id)} is ready to assign.`}
+          {blocked ? "No directive could place every line (WMS-0101); the work waits until it is re-evaluated or cancelled." : "The work is ready to assign."}
         </p>
         <DataTable
           label="Planned lines"
           columns={[
             { key: "lineNo", header: "Line", align: "end", render: (r) => r.line.lineNo },
-            { key: "itemId", header: "Item", mono: true, render: (r) => r.line.itemId },
+            { key: "itemId", header: "Item", render: (r) => <Named entity="product" id={r.line.itemId} fallback={r.line.itemId} /> },
             { key: "qty", header: "Quantity", align: "end", render: (r) => r.line.qty },
-            { key: "location", header: "Location", mono: true, render: (r) => shortId(r.line.fromLocationId ?? r.line.toLocationId) },
-            { key: "directive", header: "Directive", mono: true, render: (r) => (r.trace?.blocked ? (r.trace.code ?? "WMS-0101") : shortId(r.trace?.directive)) },
+            { key: "location", header: "Location", mono: true, render: (r) => locationName(r.line.fromLocationId ?? r.line.toLocationId) },
+            { key: "directive", header: "Directive", mono: true, render: (r) => (r.trace?.blocked ? (r.trace.code ?? "WMS-0101") : (r.trace?.directive ?? "—")) },
             { key: "reason", header: "Last rule", render: (r) => r.trace?.trace.at(-1)?.reason ?? "No directive applies to this work type." },
           ]}
           rows={rows}
@@ -356,6 +369,7 @@ export function WorkDetailPage() {
 
   const keyFor = (action: string) => (keys.current[action] ??= newKey());
   const work = current ?? state.data;
+  const locationName = useLocationNames(work?.warehouseId);
 
   if (state.error && !current) {
     return (
@@ -429,11 +443,11 @@ export function WorkDetailPage() {
   const executable = EXECUTABLE.has(loaded.status);
   const lineColumns: DataTableColumn<WorkLine>[] = [
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "itemId", header: "Item", mono: true },
+    { key: "itemId", header: "Item", render: (l) => <Named entity="product" id={l.itemId} fallback={l.itemId} /> },
     { key: "direction", header: "Direction", render: (l) => (l.direction === "PUT" ? "Put-away" : "Pick") },
     { key: "qty", header: "Quantity", align: "end" },
     { key: "confirmedQty", header: "Confirmed", align: "end" },
-    { key: "location", header: "Location", mono: true, render: (l) => <span title={l.fromLocationId ?? l.toLocationId}>{shortId(l.fromLocationId ?? l.toLocationId)}</span> },
+    { key: "location", header: "Location", mono: true, render: (l) => locationName(l.fromLocationId ?? l.toLocationId) },
     { key: "status", header: "Status", render: (l) => <Badge tone={LINE_STATUS_TONES[l.status] ?? "neutral"}>{sentence(l.status)}</Badge> },
     { key: "reason", header: "Reason", render: (l) => l.reason || "—" },
     {
@@ -459,19 +473,19 @@ export function WorkDetailPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title={`Work ${shortId(loaded.id)}`} meta={<Badge tone={WORK_STATUS_TONES[loaded.status] ?? "neutral"}>{sentence(loaded.status)}</Badge>} />
+      <PageHeader title={`${sentence(loaded.workType)} work`} meta={<Badge tone={WORK_STATUS_TONES[loaded.status] ?? "neutral"}>{sentence(loaded.status)}</Badge>} />
       <Card>
         <dl className={styles.details}>
-          <Detail term="Work id" mono>
-            {loaded.id}
+          <Detail term="Warehouse">
+            <Named entity="warehouse" id={loaded.warehouseId} />
           </Detail>
           <Detail term="Type">{sentence(loaded.workType)}</Detail>
           <Detail term="Priority">{loaded.priority}</Detail>
           <Detail term="Assigned to">{loaded.assignedUser || "Nobody"}</Detail>
           <Detail term="Assigned at">{when(loaded.assignedAt)}</Detail>
           <Detail term="Created">{when(loaded.createdAt)}</Detail>
-          <Detail term="Parent work" mono>
-            {loaded.parentWorkId ? <Link to={`/warehouse/work/${loaded.parentWorkId}`}>{shortId(loaded.parentWorkId)}</Link> : "None"}
+          <Detail term="Parent work">
+            {loaded.parentWorkId ? <Link to={`/warehouse/work/${loaded.parentWorkId}`}>Open the parent work</Link> : "None"}
           </Detail>
           <Detail term="Version">{loaded.version}</Detail>
         </dl>
@@ -486,7 +500,7 @@ export function WorkDetailPage() {
             {notice.remainder ? (
               <>
                 {" "}
-                The remainder is work <Link to={`/warehouse/work/${notice.remainder.id}`}>{shortId(notice.remainder.id)}</Link>.
+                The remainder is <Link to={`/warehouse/work/${notice.remainder.id}`}>a new work</Link>.
               </>
             ) : null}
           </>

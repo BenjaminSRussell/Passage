@@ -52,7 +52,7 @@ describe("Short picks and backorders", () => {
     const table = await findTable({ name: "Short picks and backorders" });
     const row = (await within(table).findByText("SH-0000007")).closest("tr") as HTMLElement;
     const cells = Array.from(row.querySelectorAll("td, th")).map((cell) => cell.textContent);
-    expect(cells).toEqual(["SH-0000007", "Partially shipped", "0195f0a1", "0195f0a0", "100 EA", "90 EA", "10 EA", "0 EA", "Open", "Damaged", "2026-10-21 14:05 UTC"]);
+    expect(cells).toEqual(["SH-0000007", "Partially shipped", "Not available⋯Copy id", "Not available⋯Copy id", "100 EA", "90 EA", "10 EA", "0 EA", "Open", "Damaged", "2026-10-21 14:05 UTC"]);
     expect(within(row).getByRole("link", { name: "SH-0000007" })).toHaveAttribute("href", `/fulfillment/shipments/${SHIPMENT}`);
     const params = last(BACKORDERS);
     expect(params.get("limit")).toBe(String(BACKORDER_PAGE));
@@ -99,7 +99,7 @@ describe("Short picks and backorders", () => {
     const table = await findTable({ name: "Short picks and backorders" });
     const row = (await within(table).findByText("SH-0000007")).closest("tr") as HTMLElement;
     const cells = Array.from(row.querySelectorAll("td, th")).map((cell) => cell.textContent);
-    expect(cells).toEqual(["SH-0000007", "Shipped", "0195f0a1", "0195f0a0", "90 EA", "90 EA", "0 EA", "10 EA", "Closed", "—", "2026-10-21 14:05 UTC"]);
+    expect(cells).toEqual(["SH-0000007", "Shipped", "Not available⋯Copy id", "Not available⋯Copy id", "90 EA", "90 EA", "0 EA", "10 EA", "Closed", "—", "2026-10-21 14:05 UTC"]);
   });
 
   it("validates the filter before calling the service", async () => {

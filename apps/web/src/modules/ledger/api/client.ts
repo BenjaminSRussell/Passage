@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { apiFetch } from "../../../shell/api/http";
 
 /** Fetch-compatible function; injectable so tests need no server. */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
+const defaultFetch: FetchLike = (input, init) => apiFetch(input, init);
 
 export const violationSchema = z.object({
   code: z.string(),

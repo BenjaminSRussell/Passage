@@ -1,0 +1,190 @@
+// Shop floor service (/api/v1/shopfloor) for the demo: machines, the andon board and OEE.
+// Resources and sites carry the real ids of company.ts; the screens show their names.
+import type { Andon, Downtime, Job, Machine, OeeBucket, OeeTile } from "../../../modules/shopfloor/api/client";
+import { reply, route } from "../../backend";
+import { PLANT, resourceByCode } from "../../company";
+import { at, table, uid } from "../../store";
+
+const BASE = "/api/v1/shopfloor";
+const KIND_ANDON = 230;
+const KIND_DOWNTIME = 231;
+const KIND_MACHINE = 232;
+
+const MACHINES = [
+  { code: "M-101", resource: "MCH-01", cycle: 90, seed: 3 },
+  { code: "M-102", resource: "BAL-01", cycle: 60, seed: 7 },
+  { code: "M-103", resource: "ASM-01", cycle: 120, seed: 11 },
+  { code: "M-104", resource: "TST-01", cycle: 100, seed: 5 },
+  { code: "M-105", resource: "PNT-01", cycle: 110, seed: 13 },
+].map((m) => ({ ...m, resource: resourceByCode(m.resource).id, resourceCode: m.resource }));
+
+const machines: Machine[] = MACHINES.map((m, i) => ({
+  id: uid(KIND_MACHINE, i + 1),
+  machineId: m.code,
+  resourceId: m.resource,
+  siteId: PLANT.id,
+  idealCycleSeconds: String(m.cycle),
+  idleThresholdSeconds: 300,
+  lastSeq: 18000 + i * 731,
+  createdAt: at(-200),
+}));
+
+const downtimes: Downtime[] = [
+  { id: uid(KIND_DOWNTIME, 1), machineId: "M-102", resourceId: resourceByCode("BAL-01").id, startedAt: at(-0.06), endedAt: null, reasonCode: null, category: "unplanned", cause: "down", andonRaised: true },
+  { id: uid(KIND_DOWNTIME, 2), machineId: "M-105", resourceId: resourceByCode("PNT-01").id, startedAt: at(-0.04), endedAt: null, reasonCode: null, category: "unplanned", cause: "idle", andonRaised: true },
+];
+
+const andon = table<Andon>([
+  { id: uid(KIND_ANDON, 1), resourceId: resourceByCode("BAL-01").id, siteId: PLANT.id, kind: "downtime", severity: "error", downtimeId: downtimes[0].id, jobId: null, detail: "Balancer drive fault E-214 while balancing MO-24618", startedAt: at(-0.06) },
+  { id: uid(KIND_ANDON, 2), resourceId: resourceByCode("MCH-01").id, siteId: PLANT.id, kind: "scrap-rate", severity: "warning", downtimeId: null, jobId: null, detail: "Scrap 6.8 % over the last hour on volute housings, machined, 4 in (limit 5 %)", startedAt: at(-0.15) },
+  { id: uid(KIND_ANDON, 3), resourceId: resourceByCode("TST-01").id, siteId: PLANT.id, kind: "quality-fail", severity: "error", downtimeId: null, jobId: uid(233, 1), detail: "Hydrostatic test failed on MO-24611: seal weep at 450 psi, unit 24611-014", startedAt: at(-0.3) },
+  { id: uid(KIND_ANDON, 4), resourceId: resourceByCode("PNT-01").id, siteId: PLANT.id, kind: "downtime", severity: "warning", downtimeId: downtimes[1].id, jobId: null, detail: "Booth idle for 58 min: waiting for 2 in pump housings to coat", startedAt: at(-0.04) },
+]);
+
+route("GET", `${BASE}/machines`, () => ({ items: machines }));
+route("GET", `${BASE}/downtimes`, (req) => {
+  const open = req.query.get("open");
+  let rows = downtimes;
+  if (open === "true") rows = rows.filter((d) => d.endedAt === null);
+  if (open === "false") rows = rows.filter((d) => d.endedAt !== null || d.reasonCode === null);
+  return { items: rows };
+});
+route("GET", `${BASE}/andon`, () => ({ items: andon.all().sort((a, b) => b.startedAt.localeCompare(a.startedAt)) }));
+route("POST", `${BASE}/andon/{id}:clear`, (req) => {
+  const row = andon.get(req.params.id);
+  if (!row) return reply.problem(404, "SF-0162", "The alert is unknown or already cleared.");
+  andon.remove(row.id);
+  return reply.ok(row);
+});
+
+/** A repeatable pseudo-random number in [0, 1) so the OEE chart is stable between reloads. */
+function noise(a: number, b: number): number {
+  const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const HOUR = 3_600_000;
+const BUCKET_MINUTES = { "5m": 5, "15m": 15, "60m": 60 } as const;
+
+/**
+ * One machine's bucket. The plant runs three shifts (06:00 to 14:00, 14:00 to 22:00, 22:00 to 06:00 local), so every
+ * bucket of the day has planned time; the first quarter hour of a shift is lost to handover, the balancer stops for
+ * a drive fault when `faultFrom` falls in the bucket, and the others lose a few short stops.
+ */
+function bucketOf(m: (typeof MACHINES)[number], start: number, size: number, dayStart: number, faultFrom: number): OeeBucket {
+  const slot = Math.floor(start / (size * 60_000));
+  const n = noise(m.seed, slot);
+  const hourOfDay = (((start - dayStart) / HOUR) % 24 + 24) % 24;
+  const sinceShift = ((hourOfDay - 6 + 24) % 8) * 60;
+  const handover = sinceShift < 15 ? Math.min(size, 15 - sinceShift) * 0.8 : 0;
+  const faulted = m.resourceCode === "BAL-01" && start + size * 60_000 > faultFrom && start < faultFrom + HOUR;
+  const night = hourOfDay >= 22 || hourOfDay < 6;
+  const small = n < (night ? 0.18 : 0.12) ? size * (0.15 + n * 1.4) : 0;
+  const down = Math.min(size, faulted ? size : handover + small);
+  const run = size - down;
+  const availability = run / size;
+  const performance = Math.min(1, (night ? 0.82 : 0.87) + noise(slot, m.seed) * 0.12);
+  const quality = m.resourceCode === "MCH-01" ? 0.93 + noise(m.seed, slot + 9) * 0.05 : 0.975 + noise(m.seed, slot + 4) * 0.025;
+  const total = Math.floor(((run * 60) / m.cycle) * performance);
+  const good = Math.round(total * quality);
+  const q = total === 0 ? 1 : good / total;
+  return {
+    resourceId: m.resource,
+    bucketStart: new Date(start).toISOString(),
+    plannedMinutes: size.toFixed(3),
+    runMinutes: run.toFixed(3),
+    downMinutes: down.toFixed(3),
+    totalCount: total,
+    goodCount: good,
+    availability: availability.toFixed(4),
+    performance: performance.toFixed(4),
+    quality: q.toFixed(4),
+    oee: (availability * performance * q).toFixed(4),
+    overRate: false,
+    sourceEvents: 6 + Math.floor(n * 20),
+  };
+}
+
+/** When the balancer's drive fault stopped it: 90 minutes ago for today, mid-morning for another day. */
+const faultStart = (dayStart: number) => (Date.now() >= dayStart && Date.now() < dayStart + 24 * HOUR ? Date.now() - 1.5 * HOUR : dayStart + 8.5 * HOUR);
+
+route("GET", `${BASE}/oee/stream`, (req) => {
+  const m = MACHINES.find((x) => x.resource === req.query.get("resourceId"));
+  const size = BUCKET_MINUTES[(req.query.get("bucket") ?? "15m") as keyof typeof BUCKET_MINUTES] ?? 15;
+  if (!m) return reply.events([]);
+  const now = Date.now();
+  const start = Math.floor(now / (size * 60_000)) * size * 60_000;
+  // The count grows through the bucket, so the tile moves between pushes.
+  const share = Math.max(0.2, (now - start) / 60_000 / size);
+  const dayStart = Date.parse(`${new Date(now).toISOString().slice(0, 10)}T00:00:00Z`);
+  const full = bucketOf(m, start, size, dayStart, faultStart(dayStart));
+  const wobble = Math.floor(noise(m.seed, Math.floor(now / 4000)) * 3);
+  const bucket: OeeBucket = {
+    ...full,
+    plannedMinutes: (size * share).toFixed(3),
+    runMinutes: (Number(full.runMinutes) * share).toFixed(3),
+    downMinutes: (Number(full.downMinutes) * share).toFixed(3),
+    totalCount: Math.floor(full.totalCount * share) + wobble,
+    goodCount: Math.floor(full.goodCount * share) + wobble,
+  };
+  const tile: OeeTile = { resourceId: m.resource, bucketStart: new Date(start).toISOString(), bucketEnd: new Date(start + size * 60_000).toISOString(), computedAt: new Date(now).toISOString(), bucket };
+  return reply.events([{ event: "oee", data: tile }], 4000);
+});
+
+route("GET", `${BASE}/oee`, (req) => {
+  const ids = (req.query.get("resourceIds") ?? "").split(",").filter(Boolean);
+  const from = Date.parse(req.query.get("from") ?? "") || Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const to = Date.parse(req.query.get("to") ?? "") || from + 24 * HOUR;
+  const size = BUCKET_MINUTES[(req.query.get("bucket") ?? "15m") as keyof typeof BUCKET_MINUTES] ?? 15;
+  const items: OeeBucket[] = [];
+  const fault = faultStart(from);
+  for (const m of MACHINES.filter((x) => ids.includes(x.resource))) {
+    for (let t = from; t < to && t < from + 36 * HOUR; t += size * 60_000) items.push(bucketOf(m, t, size, from, fault));
+  }
+  return { items };
+});
+
+// The dispatch list: what the schedule released to each work center, with the checks the operator records.
+const JOB_SPECS = [
+  { n: 1, order: "MO-24611", op: 20, res: "TST-01", status: "started" as const, plan: 24, good: 10, scrap: 1, start: -0.4 },
+  { n: 2, order: "MO-24618", op: 20, res: "BAL-01", status: "started" as const, plan: 60, good: 24, scrap: 2, start: -1.2 },
+  { n: 3, order: "MO-24627", op: 10, res: "ASM-01", status: "released" as const, plan: 30, good: 0, scrap: 0, start: 0.1 },
+  { n: 4, order: "MO-24605", op: 10, res: "ASM-01", status: "released" as const, plan: 4, good: 0, scrap: 0, start: 0.8 },
+  { n: 5, order: "MO-24624", op: 10, res: "MCH-01", status: "released" as const, plan: 20, good: 0, scrap: 0, start: 0.2 },
+  { n: 6, order: "MO-24608", op: 40, res: "PCK-01", status: "finished" as const, plan: 40, good: 40, scrap: 0, start: -1.9 },
+];
+const jobs = table<Job>(
+  JOB_SPECS.map((j) => ({
+    id: uid(233, j.n),
+    orderRef: j.order,
+    operationRef: `${j.op}`,
+    resourceId: resourceByCode(j.res).id,
+    status: j.status,
+    plannedQuantity: j.plan.toFixed(4),
+    goodQuantity: j.good.toFixed(4),
+    scrapQuantity: j.scrap.toFixed(4),
+    sequenceStart: at(j.start),
+    checks:
+      j.res === "TST-01"
+        ? [
+            { code: "HYDRO", name: "Hydrostatic pressure hold, psi", kind: "numeric" as const, min: "450", max: "520", mandatory: true },
+            { code: "LEAK", name: "No visible leak at the seal", kind: "pass-fail" as const, mandatory: true },
+          ]
+        : [{ code: "VISUAL", name: "Visual check", kind: "pass-fail" as const, mandatory: false }],
+    results: j.res === "TST-01" ? [{ code: "HYDRO", value: "452", pass: true }, { code: "LEAK", value: "fail", pass: false }] : [],
+    finishedAt: j.status === "finished" ? at(j.start + 0.3) : null,
+    version: 1,
+    updatedAt: at(j.start + 0.1),
+  })),
+);
+route("GET", `${BASE}/jobs`, (req) => {
+  const resource = req.query.get("resourceId");
+  const status = req.query.get("status");
+  let rows = jobs.all();
+  if (resource) rows = rows.filter((j) => j.resourceId === resource);
+  rows = status ? rows.filter((j) => j.status === status) : rows.filter((j) => j.status !== "finished");
+  return { items: rows.sort((a, b) => a.sequenceStart.localeCompare(b.sequenceStart)).map((j) => ({ ...j, results: [] })) };
+});
+route("GET", `${BASE}/jobs/{id}/reopenings`, () => ({ items: [] }));
+route("GET", `${BASE}/jobs/{id}`, (req) => jobs.get(req.params.id) ?? reply.problem(404, "SF-0404", "Job not found."));
+

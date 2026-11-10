@@ -21,6 +21,7 @@ const (
 	eventSource      = "payables"
 	DueDateEvent     = "EVENT"
 	DueDateDefaulted = "DEFAULTED"
+	DueDateOpening   = "OPENING"
 	defaultLimit     = 100
 	maxLimit         = 500
 )
@@ -70,19 +71,22 @@ type OpenItem struct {
 	// PayeeWorkerID is the HR worker an expense reimbursement pays; VendorID is the vendor the
 	// employee-vendor register maps them to, or the worker id itself while no mapping exists.
 	PayeeWorkerID string `json:"payeeWorkerId,omitempty"`
+	// OpeningReference is the legacy item reference of an item loaded at cutover (dueDateSource OPENING); empty otherwise.
+	OpeningReference string `json:"openingReference,omitempty"`
 }
 
 type Filter struct {
-	LegalEntityID string
-	VendorID      string
-	DueFrom       string
-	DueOnOrBy     string
-	Currency      string
-	Status        string
-	OpenOnly      bool
-	HeldOnly      bool
-	AfterDue      string
-	AfterID       string
+	LegalEntityID    string
+	VendorID         string
+	DueFrom          string
+	DueOnOrBy        string
+	Currency         string
+	Status           string
+	OpenOnly         bool
+	HeldOnly         bool
+	SourceInvoiceIDs []string
+	AfterDue         string
+	AfterID          string
 }
 
 type Postgres struct {
@@ -98,7 +102,7 @@ func (s *Postgres) WithFieldCrypt(k *fieldcrypt.Keys) *Postgres {
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 const columns = `id, legal_entity_id, vendor_id, coalesce(vendor_group_id::text, ''), coalesce(vendor_group_code, ''), source_invoice_id, invoice_number, invoice_date::text, due_date::text, due_date_source, currency,
-	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold, coalesce(payment_hold_reason, ''), payee_unverified, coalesce(payee_worker_id::text, '')`
+	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold, coalesce(payment_hold_reason, ''), payee_unverified, coalesce(payee_worker_id::text, ''), coalesce(opening_reference, '')`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -106,7 +110,7 @@ func scan(row rowScanner) (OpenItem, error) {
 	var o OpenItem
 	var amount, open, discount string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.VendorID, &o.VendorGroupID, &o.VendorGroupCode, &o.SourceInvoiceID, &o.InvoiceNumber, &o.InvoiceDate, &o.DueDate, &o.DueDateSource,
-		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold, &o.PaymentHoldReason, &o.PayeeUnverified, &o.PayeeWorkerID); err != nil {
+		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold, &o.PaymentHoldReason, &o.PayeeUnverified, &o.PayeeWorkerID, &o.OpeningReference); err != nil {
 		return OpenItem{}, err
 	}
 	var err error
@@ -220,6 +224,36 @@ func nullable(s string) any {
 	return s
 }
 
+func nullableIDs(ids []string) any {
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
+func (s *Postgres) ProposalsOfItems(ctx context.Context, itemIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(itemIDs) == 0 {
+		return out, nil
+	}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select open_item_id::text, proposal_id::text from ap_payment_proposal_line where reserved and open_item_id = any($1::uuid[])`, itemIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var item, proposal string
+			if err := rows.Scan(&item, &proposal); err != nil {
+				return err
+			}
+			out[item] = proposal
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (s *Postgres) List(ctx context.Context, f Filter, limit int) ([]OpenItem, error) {
 	if limit <= 0 {
 		limit = defaultLimit
@@ -237,9 +271,10 @@ func (s *Postgres) List(ctx context.Context, f Filter, limit int) ([]OpenItem, e
 			and (not $7::bool or status not in ('SETTLED', 'REVERSED'))
 			and ($8::date is null or (due_date, id) > ($8::date, $9::uuid))
 			and (not $11::bool or payment_hold)
+			and ($12::uuid[] is null or source_invoice_id = any($12::uuid[]))
 			order by due_date, id limit $10`,
 			nullable(f.LegalEntityID), nullable(f.VendorID), nullable(f.DueFrom), nullable(f.DueOnOrBy), nullable(f.Currency), nullable(f.Status),
-			f.OpenOnly, nullable(f.AfterDue), nullable(f.AfterID), limit, f.HeldOnly)
+			f.OpenOnly, nullable(f.AfterDue), nullable(f.AfterID), limit, f.HeldOnly, nullableIDs(f.SourceInvoiceIDs))
 		if err != nil {
 			return err
 		}

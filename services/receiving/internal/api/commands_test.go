@@ -101,6 +101,8 @@ type receiptJSON struct {
 		Qty     string   `json:"qty"`
 		Serials []string `json:"serials"`
 		Amount  *string  `json:"amount"`
+		Batch   string   `json:"batch"`
+		Expiry  string   `json:"expiryDate"`
 	} `json:"lines"`
 }
 

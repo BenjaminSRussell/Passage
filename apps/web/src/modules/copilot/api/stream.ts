@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chatResponseSchema, type ChatRequest, type ChatResponse } from "./client";
+import { apiFetch } from "../../../shell/api/http";
 
 /**
  * Streaming client for POST /api/v1/copilot/chat when the server answers with
@@ -76,7 +77,7 @@ export function toStreamEvent(frame: SseFrame): StreamEvent | undefined {
  * when the connection closes before a terminal frame, so a truncated answer is
  * never shown as complete.
  */
-export async function* streamChat(req: ChatRequest, fetchFn: typeof fetch = fetch): AsyncGenerator<StreamEvent> {
+export async function* streamChat(req: ChatRequest, fetchFn: typeof fetch = apiFetch): AsyncGenerator<StreamEvent> {
   const res = await fetchFn("/api/v1/copilot/chat", {
     method: "POST",
     headers: { "content-type": "application/json", accept: "text/event-stream" },
@@ -134,7 +135,7 @@ function isEventStream(res: Response): boolean {
 export async function askCopilot(
   req: ChatRequest,
   onToken?: (text: string) => void,
-  fetchFn: typeof fetch = fetch,
+  fetchFn: typeof fetch = apiFetch,
 ): Promise<ChatResponse> {
   const res = await fetchFn("/api/v1/copilot/chat", {
     method: "POST",

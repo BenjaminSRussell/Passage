@@ -55,6 +55,14 @@ func AssertServiceNotStocked(p Product, model ItemModelGroup, storageGroupID, tr
 	return nil
 }
 
+// AssertServiceNotTracked rejects batch, serial or catch weight tracking on a service (BR-8.17).
+func AssertServiceNotTracked(p Product) error {
+	if p.ProductType == TypeService && (p.BatchTracked || p.SerialTracked || p.CatchWeight) {
+		return errf(CodeSvcTracked, "service products cannot be tracked by batch, serial number or catch weight")
+	}
+	return nil
+}
+
 // SearchName returns the typeahead key, falling back to name (BR-8.10).
 func SearchName(p Product) string {
 	if s := strings.TrimSpace(p.SearchName); s != "" {
@@ -92,5 +100,15 @@ func ApplyProductPatch(p *Product, patch ProductPatch) []string {
 	set("description", &p.Description, patch.Description)
 	set("searchName", &p.SearchName, patch.SearchName)
 	set("lifecycleState", &p.LifecycleState, patch.LifecycleState)
+	set("itemGroupId", &p.ItemGroupID, patch.ItemGroupID)
+	flag := func(name string, dst *bool, src *bool) {
+		if src != nil && *src != *dst {
+			*dst = *src
+			changed = append(changed, name)
+		}
+	}
+	flag("batchTracked", &p.BatchTracked, patch.BatchTracked)
+	flag("serialTracked", &p.SerialTracked, patch.SerialTracked)
+	flag("catchWeight", &p.CatchWeight, patch.CatchWeight)
 	return changed
 }

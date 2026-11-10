@@ -2,17 +2,18 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Card, DataTable, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { getEcoImpact, type EcoImpact, type EcoImpactProduct, type EcoLineChange } from "./api/client";
 import styles from "./pages.module.css";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const productColumns: DataTableColumn<EcoImpactProduct>[] = [
-  { key: "productId", header: "Product", mono: true },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} fallback={row.productId} /> },
   { key: "reason", header: "Why affected", render: (row) => (row.reason === "replaced" ? "Replaced" : `Uses it (level ${row.level})`) },
   { key: "topLevel", header: "Top level", render: (row) => (row.topLevel ? "Yes" : "No") },
-  { key: "siteIds", header: "Sites", render: (row) => (row.siteIds.length > 0 ? row.siteIds.join(", ") : "All sites") },
+  { key: "siteIds", header: "Sites", render: (row) => (row.siteIds.length > 0 ? row.siteIds.map((id, i) => <span key={id}>{i > 0 ? ", " : ""}<EntityName entity="site" id={id} fallback={id} /></span>) : "All sites") },
   { key: "versionIds", header: "Active versions", align: "end", render: (row) => row.versionIds.length },
 ];
 
 const changeColumns: DataTableColumn<EcoLineChange>[] = [
-  { key: "componentProductId", header: "Component", mono: true },
+  { key: "componentProductId", header: "Component", render: (row) => <EntityName entity="product" id={row.componentProductId} fallback={row.componentProductId} /> },
   { key: "change", header: "Change", render: (row) => <StatusPill status={row.change} /> },
   { key: "oldQuantity", header: "Old quantity", align: "end", render: (row) => row.oldQuantity ?? "None" },
   { key: "newQuantity", header: "New quantity", align: "end", render: (row) => row.newQuantity ?? "None" },

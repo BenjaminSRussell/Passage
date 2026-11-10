@@ -3,15 +3,17 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, listContainerTypes, listPackingRules, savePackingRule, type ContainerType, type PackingRule, type Problem } from "./api/client";
-import { compareDecimal, DECIMAL, shortId, UUID } from "./format";
+import { compareDecimal, DECIMAL, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { PlainName } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<PackingRule>[] = [
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => (row.customerId ? shortId(row.customerId) : "All customers") },
+  { key: "productId", header: "Product", render: (row) => <PlainName short entity="product" id={row.productId} /> },
+  { key: "customerId", header: "Customer", render: (row) => (row.customerId ? <EntityName entity="customer" id={row.customerId} /> : "All customers") },
   { key: "containerType", header: "Container type", mono: true },
   { key: "qtyPerContainer", header: "Per container", align: "end" },
   { key: "maxWeightKg", header: "Max kg", align: "end" },

@@ -202,3 +202,113 @@ func TestRun_SalesReporterNeedsASigningKeyAndAValidInterval(t *testing.T) {
 		t.Fatalf("a sub-second interval: err = %v", err)
 	}
 }
+
+func bookedTaxedInvoice(t *testing.T, st *store.Postgres, tenantID string) store.Invoice {
+	t.Helper()
+	day := time.Date(2027, 3, 10, 0, 0, 0, 0, time.UTC)
+	line := domain.Line{No: 1, Description: "Support", Qty: decimal.NewFromInt(1), UnitPrice: decimal.NewFromInt(100), RevenueAccount: "4000", TaxCode: "DE19"}
+	_, totals, err := domain.Compute("EUR", []domain.Line{line}, []decimal.Decimal{decimal.NewFromInt(19)}, decimal.Zero)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := store.Invoice{ID: ids.New(), LegalEntityID: ids.New(), CustomerID: ids.New(), InvoiceAccountID: ids.New(), Type: domain.TypeFreeText, Status: domain.StatusProposal,
+		Currency: "EUR", InvoiceDate: day, DueDate: day.AddDate(0, 0, 30), PaymentTermDays: 30, Totals: totals, IdempotencyKey: ids.New(), RequestHash: "h",
+		Lines: []store.Line{{Line: line, Net: decimal.NewFromInt(100), Tax: decimal.NewFromInt(19)}}}
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, UserID: "user-test", Duties: testkit.ScopeDuties("")})
+	if _, err := st.CreateProposal(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	posted, err := st.PostProposal(ctx, inv.ID, day.AddDate(0, 0, 2), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.MarkGLBooked(ctx, posted.ID, ids.New(), nil); err != nil {
+		t.Fatal(err)
+	}
+	return posted
+}
+
+func TestRun_TaxURLStartsTheTaxReporterAgainstTheConfiguredTaxService(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	var schema string
+	if err := admin.QueryRow(context.Background(), "select current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	tenantID := testkit.TenantID(1)
+	inv := bookedTaxedInvoice(t, store.New(app), tenantID)
+
+	seed := make([]byte, ed25519.SeedSize)
+	_, _ = rand.Read(seed)
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	verifier := tenant.NewServiceVerifier("tax", map[string]ed25519.PublicKey{"billing": pub})
+	type received struct {
+		path   string
+		body   map[string]any
+		claims tenant.ServiceClaims
+	}
+	got := make(chan received, 4)
+	taxService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, err := verifier.Verify(r.Header.Get(tenant.HeaderServiceToken))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		got <- received{path: r.URL.Path, body: body, claims: claims}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"recorded":1,"duplicates":0}`))
+	}))
+	defer taxService.Close()
+
+	getenv := runEnv(t, map[string]string{
+		"TAX_URL": taxService.URL, "BILLING_TAX_REPORT_INTERVAL": "1s", "PASSAGE_SERVICE_SIGNING_KEY": base64.StdEncoding.EncodeToString(seed),
+		"DATABASE_URL": os.Getenv("PASSAGE_TEST_APP_DATABASE_URL") + "&search_path=" + schema + ",public",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, getenv) }()
+	select {
+	case r := <-got:
+		txs, _ := r.body["transactions"].([]any)
+		if r.path != "/v1/tax/transactions" || len(txs) != 1 || r.claims.Tid != tenantID || r.claims.Le != inv.LegalEntityID || !slices.Equal(r.claims.Duties, []string{"tax.transaction.record"}) {
+			t.Errorf("tax received %+v", r)
+		}
+	case err := <-done:
+		t.Fatalf("run stopped before the reporter reached the tax service: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("the tax reporter never called the tax service")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var status string
+		if err := admin.QueryRow(context.Background(), `select status from tax_transaction_report where invoice_id = $1`, inv.ID).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status == store.TaxReportReported {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("report is %s after the tax service answered 201, want REPORTED", status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("run after cancel: %v", err)
+	}
+}
+
+func TestRun_TaxReporterNeedsASigningKeyAndAValidInterval(t *testing.T) {
+	err := run(context.Background(), runEnv(t, map[string]string{"TAX_URL": "http://tax.invalid", "PASSAGE_SERVICE_SIGNING_KEY": ""}))
+	if err == nil || !strings.Contains(err.Error(), "tax client") {
+		t.Fatalf("TAX_URL without a signing key: err = %v", err)
+	}
+	err = run(context.Background(), runEnv(t, map[string]string{"TAX_URL": "http://tax.invalid", "BILLING_TAX_REPORT_INTERVAL": "100ms"}))
+	if err == nil || !strings.Contains(err.Error(), "BILLING_TAX_REPORT_INTERVAL") {
+		t.Fatalf("a sub-second interval: err = %v", err)
+	}
+}

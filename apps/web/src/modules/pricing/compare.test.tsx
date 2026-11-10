@@ -10,6 +10,9 @@ import { json, pageViolations, renderAt, server, useFakeServer } from "./testSer
 useFakeServer();
 
 const LE = "0190f0a0-0000-7000-8000-000000000001";
+const CUST = "22222222-0000-4000-8000-000000000002";
+const CUST2 = "22222222-0000-4000-8000-000000000003";
+const BOLTID = "33333333-0000-4000-8000-000000000003";
 const VIEW = ["pricing.view"];
 const v2: Procedure = { id: "0190f0a0-0000-7000-8000-000000000d02", legalEntityId: LE, name: "AX_STANDARD", version: 2, status: "DRAFT", revision: 1, steps: referenceSteps() };
 const v1: Procedure = { ...v2, id: "0190f0a0-0000-7000-8000-000000000d01", version: 1, status: "ACTIVE" };
@@ -122,8 +125,8 @@ const item = (id: string, scope: PriceListItem["scope"], amount: string, extra: 
 });
 
 function ask() {
-  fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
-  fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "C1" } });
+  fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
+  fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUST } });
   fireEvent.click(screen.getByRole("button", { name: "Show price list" }));
 }
 
@@ -132,8 +135,8 @@ describe("Price list by customer", () => {
     const { container } = renderAt("/pricing/price-list", VIEW);
     expect(screen.getByText("No price list yet")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show price list" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
-    expect(screen.getByText("Enter the customer.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the legal entity.")).toBeInTheDocument();
+    expect(screen.getByText("Choose the customer.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
   });
@@ -148,7 +151,7 @@ describe("Price list by customer", () => {
     expect(within(table).getByText("All customers")).toBeInTheDocument();
     expect(within(table).getByText("90 USD")).toBeInTheDocument();
     const q = server.calls[0]!.url.searchParams;
-    expect(q.get("customerId")).toBe("C1");
+    expect(q.get("customerId")).toBe(CUST);
     expect(q.get("legalEntityId")).toBe(LE);
     expect(q.get("type")).toBe("PRICE");
     expect(q.has("customerGroupId")).toBe(false);
@@ -168,12 +171,12 @@ describe("Price list by customer", () => {
     expect(await screen.findByText("Only the first agreements are shown")).toBeInTheDocument();
     expect(screen.getByText(/1 of 2 agreements are shown/)).toBeInTheDocument();
     // The next page continues the shown list, not what the form says now.
-    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "C2" } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUST2 } });
     fireEvent.change(screen.getByLabelText(/^Product$/), { target: { value: "P9" } });
     fireEvent.click(screen.getByRole("button", { name: "Load the next page" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Load the next page" })).not.toBeInTheDocument());
     const next = server.calls.find((c) => c.url.searchParams.get("offset") === "1")!;
-    expect(next.url.searchParams.get("customerId")).toBe("C1");
+    expect(next.url.searchParams.get("customerId")).toBe(CUST);
     expect(next.url.searchParams.get("productId")).toBeNull();
     expect(next.url.searchParams.get("type")).toBe("PRICE");
     expect(screen.queryByText("Only the first agreements are shown")).not.toBeInTheDocument();
@@ -232,7 +235,7 @@ describe("Price list by customer", () => {
       return url.pathname.endsWith("/price-list") ? json(200, { items: [item("r1", "CUSTOMER", "85"), item("r3", "ALL", "100")] }) : undefined;
     };
     const { container } = renderAt("/pricing/price-list", VIEW);
-    fireEvent.change(screen.getByLabelText(/^Product$/), { target: { value: "P1" } });
+    fireEvent.change(screen.getByLabelText(/^Product$/), { target: { value: BOLTID } });
     fireEvent.change(screen.getByLabelText(/^Sales channel/), { target: { value: "WEB" } });
     ask();
     const net = await findTable({ name: "Net prices" });
@@ -243,7 +246,7 @@ describe("Price list by customer", () => {
     expect(within(list).getByText("1")).toBeInTheDocument();
     const q = server.calls[1]!.url.searchParams;
     expect(server.calls[1]!.url.pathname).toMatch(/\/price-list\/net-prices$/);
-    expect(q.get("productId")).toBe("P1");
+    expect(q.get("productId")).toBe(BOLTID);
     expect(q.has("productGroupId")).toBe(false);
     expect(q.get("salesChannel")).toBe("WEB");
     expect(q.has("type")).toBe(false);
@@ -291,7 +294,7 @@ describe("Price list by customer", () => {
     fireEvent.change(screen.getByLabelText(/^Currency/), { target: { value: "EUR" } });
     fireEvent.click(exportButton);
     expect(click).toHaveBeenCalled();
-    expect((click.mock.contexts[0] as HTMLAnchorElement).download).toMatch(/^price-list-C1-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect((click.mock.contexts[0] as HTMLAnchorElement).download).toMatch(/^price-list-\d{4}-\d{2}-\d{2}\.csv$/);
     const text = await created[0]!.text();
     expect(text.split("\r\n")[0]).toBe("Product,Unit,From quantity,List price USD,Net unit price USD,Line net USD,Winning price record,Error");
     expect(text).toContain("P1,EA,10,85,85,850,r1,");

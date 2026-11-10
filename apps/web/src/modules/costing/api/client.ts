@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // API client for the costing service (services/costing/api/openapi.yaml).
 // Browser calls use /api/v1/costing/... which the web-bff rewrites to the service.
 
@@ -163,15 +164,15 @@ function post<T>(path: string, body: unknown, fetchImpl: typeof fetch, headers: 
   return request<T>(path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }, fetchImpl);
 }
 
-export function previewSettlements(body: SettlePreviewRequest, fetchImpl: typeof fetch = fetch): Promise<SettlePreviewResponse> {
+export function previewSettlements(body: SettlePreviewRequest, fetchImpl: typeof fetch = apiFetch): Promise<SettlePreviewResponse> {
   return post("/api/v1/costing/settlements:preview", body, fetchImpl);
 }
 
-export function previewValuationLedgers(body: LedgersPreviewRequest, fetchImpl: typeof fetch = fetch): Promise<LedgersPreviewResponse> {
+export function previewValuationLedgers(body: LedgersPreviewRequest, fetchImpl: typeof fetch = apiFetch): Promise<LedgersPreviewResponse> {
   return post("/api/v1/costing/valuation-ledgers:preview", body, fetchImpl);
 }
 
-export function previewAging(body: AgingPreviewRequest, fetchImpl: typeof fetch = fetch): Promise<AgingPreviewResponse> {
+export function previewAging(body: AgingPreviewRequest, fetchImpl: typeof fetch = apiFetch): Promise<AgingPreviewResponse> {
   return post("/api/v1/costing/aging:preview", body, fetchImpl);
 }
 
@@ -286,26 +287,26 @@ function query(params: Record<string, string | undefined>): string {
   return s ? `?${s}` : "";
 }
 
-export function listVersions(filter: VersionFilter = {}, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Page<CostingVersion>> {
+export function listVersions(filter: VersionFilter = {}, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<Page<CostingVersion>> {
   const q = query({ legalEntityId: filter.legalEntityId, status: filter.status, type: filter.type, cursor: filter.cursor });
   return request(`${versionsPath}${q}`, { method: "GET", signal }, fetchImpl);
 }
 
-export function getVersion(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<CostingVersion> {
+export function getVersion(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<CostingVersion> {
   return request(versionPath(id), { method: "GET", signal }, fetchImpl);
 }
 
-export function listItemCosts(id: string, cursor?: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Page<ItemCostRow>> {
+export function listItemCosts(id: string, cursor?: string, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<Page<ItemCostRow>> {
   return request(`${versionPath(id)}/item-costs${query({ cursor })}`, { method: "GET", signal }, fetchImpl);
 }
 
 /** Creates a DRAFT version; the Idempotency-Key makes a retried submit safe. */
-export function createVersion(body: CreateVersionRequest, idempotencyKey: string, fetchImpl: typeof fetch = fetch): Promise<CostingVersion> {
+export function createVersion(body: CreateVersionRequest, idempotencyKey: string, fetchImpl: typeof fetch = apiFetch): Promise<CostingVersion> {
   return post(versionsPath, body, fetchImpl, { "Idempotency-Key": idempotencyKey });
 }
 
 /** Imports a CSV file (header productId,siteId,unitCost) into a DRAFT version, all or nothing. */
-export function importItemCostsCsv(id: string, csv: string, fetchImpl: typeof fetch = fetch): Promise<{ versionId: string; imported: number }> {
+export function importItemCostsCsv(id: string, csv: string, fetchImpl: typeof fetch = apiFetch): Promise<{ versionId: string; imported: number }> {
   return request(`${versionPath(id)}/item-costs:import`, { method: "POST", headers: { "content-type": "text/csv" }, body: csv }, fetchImpl);
 }
 
@@ -313,17 +314,17 @@ export function copyItemCosts(
   targetId: string,
   sourceVersionId: string,
   percentChange: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = apiFetch,
 ): Promise<{ versionId: string; copied: number }> {
   return post(`${versionPath(targetId)}/item-costs:copy`, { sourceVersionId, percentChange }, fetchImpl);
 }
 
-export function previewActivation(id: string, onHand: OnHandLine[], fetchImpl: typeof fetch = fetch): Promise<ActivationResponse> {
+export function previewActivation(id: string, onHand: OnHandLine[], fetchImpl: typeof fetch = apiFetch): Promise<ActivationResponse> {
   return post(`${versionPath(id)}:preview-activation`, { onHand }, fetchImpl);
 }
 
 /** Activates at the version the preview returned; a change since then is 412 conflict_version. */
-export function activateVersion(id: string, version: number, onHand: OnHandLine[], fetchImpl: typeof fetch = fetch): Promise<ActivationResponse> {
+export function activateVersion(id: string, version: number, onHand: OnHandLine[], fetchImpl: typeof fetch = apiFetch): Promise<ActivationResponse> {
   return post(`${versionPath(id)}:activate`, { onHand }, fetchImpl, { "If-Match": `"${version}"` });
 }
 
@@ -365,19 +366,19 @@ export interface ValuationCategory extends ValuationCategoryRequest {
   createdAt: string;
 }
 
-export function listValuationLedgers(legalEntityId = "", signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<{ items: ValuationLedger[] }> {
+export function listValuationLedgers(legalEntityId = "", signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<{ items: ValuationLedger[] }> {
   return request(`/api/v1/costing/valuation-ledgers${query({ legalEntityId })}`, { method: "GET", signal }, fetchImpl);
 }
 
-export function createValuationLedger(body: ValuationLedgerRequest, fetchImpl: typeof fetch = fetch): Promise<ValuationLedger> {
+export function createValuationLedger(body: ValuationLedgerRequest, fetchImpl: typeof fetch = apiFetch): Promise<ValuationLedger> {
   return post("/api/v1/costing/valuation-ledgers", body, fetchImpl);
 }
 
-export function listValuationCategories(signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<{ items: ValuationCategory[] }> {
+export function listValuationCategories(signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<{ items: ValuationCategory[] }> {
   return request("/api/v1/costing/valuation-categories", { method: "GET", signal }, fetchImpl);
 }
 
-export function createValuationCategory(body: ValuationCategoryRequest, fetchImpl: typeof fetch = fetch): Promise<ValuationCategory> {
+export function createValuationCategory(body: ValuationCategoryRequest, fetchImpl: typeof fetch = apiFetch): Promise<ValuationCategory> {
   return post("/api/v1/costing/valuation-categories", body, fetchImpl);
 }
 
@@ -442,28 +443,28 @@ export interface AgingSnapshot {
   createdAt: string;
 }
 
-export function listBucketSets(legalEntityId = "", signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<{ items: BucketSet[] }> {
+export function listBucketSets(legalEntityId = "", signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<{ items: BucketSet[] }> {
   return request(`/api/v1/costing/aging/bucket-sets${query({ legalEntityId })}`, { method: "GET", signal }, fetchImpl);
 }
 
-export function createBucketSet(body: { legalEntityId: string; name: string; bounds: number[] }, fetchImpl: typeof fetch = fetch): Promise<BucketSet> {
+export function createBucketSet(body: { legalEntityId: string; name: string; bounds: number[] }, fetchImpl: typeof fetch = apiFetch): Promise<BucketSet> {
   return post("/api/v1/costing/aging/bucket-sets", body, fetchImpl);
 }
 
 export function listAgingSnapshots(
   filter: { legalEntityId?: string; cursor?: string } = {},
   signal?: AbortSignal,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = apiFetch,
 ): Promise<Page<AgingSnapshot>> {
   return request(`/api/v1/costing/aging/snapshots${query({ legalEntityId: filter.legalEntityId, cursor: filter.cursor })}`, { method: "GET", signal }, fetchImpl);
 }
 
-export function getAgingSnapshot(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<AgingSnapshot> {
+export function getAgingSnapshot(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<AgingSnapshot> {
   return request(`/api/v1/costing/aging/snapshots/${encodeURIComponent(id)}`, { method: "GET", signal }, fetchImpl);
 }
 
 /** Stores a month-end snapshot; the Idempotency-Key makes a retried submit a replay, not a second snapshot. */
-export function createAgingSnapshot(body: SnapshotRequest, idempotencyKey: string, fetchImpl: typeof fetch = fetch): Promise<AgingSnapshot> {
+export function createAgingSnapshot(body: SnapshotRequest, idempotencyKey: string, fetchImpl: typeof fetch = apiFetch): Promise<AgingSnapshot> {
   return post("/api/v1/costing/aging/snapshots", body, fetchImpl, { "Idempotency-Key": idempotencyKey });
 }
 
@@ -563,7 +564,7 @@ export interface CostTransactionFilter {
 }
 
 /** The inventory value at a date, grouped by the given dimensions, for one valuation ledger. */
-export function getValueReport(params: ValueReportParams, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<ValueReport> {
+export function getValueReport(params: ValueReportParams, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<ValueReport> {
   const q = new URLSearchParams({ legalEntityId: params.legalEntityId, asOf: params.asOf, groupBy: params.groupBy.join(",") });
   if (params.valuationLedgerId) q.set("valuationLedgerId", params.valuationLedgerId);
   if (params.siteId) q.set("siteId", params.siteId);
@@ -571,12 +572,12 @@ export function getValueReport(params: ValueReportParams, signal?: AbortSignal, 
 }
 
 /** Compares the value report with ledger balances grouped the same way. It only reads. */
-export function tieOutValueReport(body: ValueReportParams & { glBalances: LedgerBalance[] }, fetchImpl: typeof fetch = fetch): Promise<TieOut> {
+export function tieOutValueReport(body: ValueReportParams & { glBalances: LedgerBalance[] }, fetchImpl: typeof fetch = apiFetch): Promise<TieOut> {
   return post("/api/v1/costing/value-report:tie-out", body, fetchImpl);
 }
 
 /** The cost transactions behind the report, newest financial date first. */
-export function listCostTransactions(filter: CostTransactionFilter, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Page<CostTransaction>> {
+export function listCostTransactions(filter: CostTransactionFilter, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<Page<CostTransaction>> {
   const q = query({
     legalEntityId: filter.legalEntityId,
     valuationLedgerId: filter.valuationLedgerId,
@@ -655,21 +656,21 @@ export interface AdjustmentFilter {
 const adjustmentsPath = "/api/v1/costing/adjustments";
 
 /** What the adjustment would post, without posting it. */
-export function previewAdjustment(body: AdjustmentRequest, fetchImpl: typeof fetch = fetch): Promise<Adjustment> {
+export function previewAdjustment(body: AdjustmentRequest, fetchImpl: typeof fetch = apiFetch): Promise<Adjustment> {
   return post(`${adjustmentsPath}:preview`, body, fetchImpl);
 }
 
 /** Posts an adjustment; the Idempotency-Key makes a retried submit a replay, not a second adjustment. */
-export function createAdjustment(body: AdjustmentRequest, idempotencyKey: string, fetchImpl: typeof fetch = fetch): Promise<Adjustment> {
+export function createAdjustment(body: AdjustmentRequest, idempotencyKey: string, fetchImpl: typeof fetch = apiFetch): Promise<Adjustment> {
   return post(adjustmentsPath, body, fetchImpl, { "Idempotency-Key": idempotencyKey });
 }
 
-export function listAdjustments(filter: AdjustmentFilter = {}, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Page<Adjustment>> {
+export function listAdjustments(filter: AdjustmentFilter = {}, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<Page<Adjustment>> {
   const q = query({ legalEntityId: filter.legalEntityId, kind: filter.kind || undefined, productId: filter.productId, cursor: filter.cursor });
   return request(`${adjustmentsPath}${q}`, { method: "GET", signal }, fetchImpl);
 }
 
-export function getAdjustment(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<Adjustment> {
+export function getAdjustment(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<Adjustment> {
   return request(`${adjustmentsPath}/${encodeURIComponent(id)}`, { method: "GET", signal }, fetchImpl);
 }
 
@@ -692,7 +693,7 @@ const reconciliationsPath = "/api/v1/costing/reconciliations";
 export function createReconciliation(
   body: ValueReportParams & { glBalances: LedgerBalance[] },
   idempotencyKey: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = apiFetch,
 ): Promise<ReconciliationRun> {
   return post(reconciliationsPath, body, fetchImpl, { "Idempotency-Key": idempotencyKey });
 }
@@ -700,11 +701,11 @@ export function createReconciliation(
 export function listReconciliations(
   filter: { legalEntityId?: string; cursor?: string } = {},
   signal?: AbortSignal,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = apiFetch,
 ): Promise<Page<ReconciliationRun>> {
   return request(`${reconciliationsPath}${query({ legalEntityId: filter.legalEntityId, cursor: filter.cursor })}`, { method: "GET", signal }, fetchImpl);
 }
 
-export function getReconciliation(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<ReconciliationRun> {
+export function getReconciliation(id: string, signal?: AbortSignal, fetchImpl: typeof fetch = apiFetch): Promise<ReconciliationRun> {
   return request(`${reconciliationsPath}/${encodeURIComponent(id)}`, { method: "GET", signal }, fetchImpl);
 }

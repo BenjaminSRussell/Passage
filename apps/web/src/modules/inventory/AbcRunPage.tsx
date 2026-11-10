@@ -1,15 +1,16 @@
 import { Link, useParams } from "react-router-dom";
 import { Badge, buttonClassName, Card, DataTable, EmptyState, PageHeader, Skeleton, type BadgeTone, type DataTableColumn } from "../../shell/ui";
 import { getAbcRun, type AbcClass, type AbcItem } from "./api/client";
-import { formatDateTime, shortId } from "./format";
+import { formatDateTime } from "./format";
 import { Detail, ProblemAlert } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const classTones: Record<AbcClass, BadgeTone> = { A: "success", B: "info", C: "neutral", N: "neutral" };
 
 const columns: DataTableColumn<AbcItem>[] = [
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "site", header: "Site", mono: true },
   { key: "value", header: "On-hand value", align: "end", mono: true },
   { key: "cumPct", header: "Cumulative %", align: "end", mono: true },

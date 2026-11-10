@@ -4,10 +4,13 @@ import type { GanttBar } from "./api/client";
 import { formatAmount, formatDateTime, shortId } from "./format";
 import { barPosition, changeoverSpan, draggedStart, groupByResource, orderTone, SNAP_MINUTES } from "./gantt";
 import styles from "./GanttView.module.css";
+import { orderLabel, useOrderRefs } from "../mfg-shared/orders";
 
 export interface GanttResource {
   id: string;
   code: string;
+  /** Shown as the row label when given; the code stays in the tooltip. */
+  name?: string;
 }
 
 /** Window lengths the axis has layout classes for. */
@@ -56,6 +59,8 @@ function dayLabel(ms: number): string {
  */
 export function GanttView({ bars, resources, from, days, selectedJobId, violations = {}, snapMinutes = SNAP_MINUTES, onSelect, onDrop }: GanttViewProps) {
   const [drag, setDrag] = useState<Drag | null>(null);
+  const refs = useOrderRefs(bars.map((b) => b.orderId));
+  const orderText = (id: string) => (refs[id] ? `${refs[id].orderNumber}${refs[id].product ? ` (${refs[id].product})` : ""}` : orderLabel(id, refs));
   const moved = useRef(false);
   const start = Date.parse(from);
   const to = new Date(start + days * DAY_MS).toISOString();
@@ -110,7 +115,9 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
         const rowBars = rows.get(res.id) ?? [];
         return (
           <div key={res.id} className={styles.row}>
-            <span className={styles.label}>{res.code}</span>
+            <span className={styles.label} title={res.name ? `${res.name} (${res.code})` : res.code}>
+              {res.name ?? res.code}
+            </span>
             <svg
               className={styles.track}
               viewBox={`0 0 ${VIEW_WIDTH} ${ROW_HEIGHT}`}
@@ -140,7 +147,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                       className={styles.cleanoutBar}
                     >
                       <title>
-                        {`Cleanout${bar.setupGroup ? ` after group ${bar.setupGroup}` : ""} following order ${bar.orderId.slice(0, 8)}${bar.cleaningSetId ? `, cleaning set ${bar.cleaningSetId}` : ""}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}, closed time`}
+                        {`Cleanout${bar.setupGroup ? ` after group ${bar.setupGroup}` : ""} following order ${orderText(bar.orderId)}${bar.cleaningSetId ? `, cleaning set ${bar.cleaningSetId}` : ""}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}, closed time`}
                       </title>
                     </rect>
                   );
@@ -165,7 +172,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                       onClick={() => onSelect?.(bar)}
                     >
                       <title>
-                        {`Held as secondary for order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}${primary ? ` running on ${primary}` : ""}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${bar.firmed ? ", firmed" : ""}${bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : ""}`}
+                        {`Held as secondary for order ${orderText(bar.orderId)} operation ${bar.operNumber}${primary ? ` running on ${primary}` : ""}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${bar.firmed ? ", firmed" : ""}${bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : ""}`}
                       </title>
                     </rect>
                   );
@@ -219,7 +226,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                     >
                       <title>
                         {violation ??
-                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${tools}${late}${bar.firmed ? ", firmed" : ""}${outside}${blocked}`}
+                          `Order ${orderText(bar.orderId)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${tools}${late}${bar.firmed ? ", firmed" : ""}${outside}${blocked}`}
                       </title>
                     </rect>
                     {changeoverPos ? (

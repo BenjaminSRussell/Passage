@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, DataTable, FormField, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
 import { listJobs, type Job, type JobStatus } from "./api/client";
 import { fixed, formatDateTime, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceName, ResourceSelect } from "../mfg-shared/resources";
 
 const STATUS: Record<JobStatus, { label: string; tone: BadgeTone }> = {
   released: { label: "Released", tone: "neutral" },
@@ -30,7 +31,7 @@ const columns: DataTableColumn<Job>[] = [
   { key: "sequenceStart", header: "Start", render: (row) => formatDateTime(row.sequenceStart) },
   { key: "orderRef", header: "Order", mono: true },
   { key: "operationRef", header: "Operation", mono: true },
-  { key: "resourceId", header: "Resource", mono: true },
+  { key: "resourceId", header: "Resource", render: (row) => <ResourceName id={row.resourceId} /> },
   { key: "plannedQuantity", header: "Planned", align: "end", mono: true, render: (row) => qty(row.plannedQuantity) },
   { key: "goodQuantity", header: "Good", align: "end", mono: true, render: (row) => qty(row.goodQuantity) },
   { key: "scrapQuantity", header: "Scrap", align: "end", mono: true, render: (row) => qty(row.scrapQuantity) },
@@ -76,7 +77,7 @@ export function JobsPage() {
     event.preventDefault();
     const value = resourceDraft.trim();
     if (value !== "" && !UUID.test(value)) {
-      setResourceError("Enter the resource id (a UUID), or leave it empty for every resource.");
+      setResourceError("Choose a resource, or leave it empty for every resource.");
       return;
     }
     setResourceError(null);
@@ -93,10 +94,8 @@ export function JobsPage() {
       />
       <div className={styles.toolbar}>
         <form className={styles.toolbar} onSubmit={applyResource} noValidate>
-          <FormField id="jobs-resource" label="Resource" hint="Resource id; empty shows every resource." error={resourceError ?? undefined}>
-            {(control) => (
-              <Input {...control} value={resourceDraft} invalid={Boolean(resourceError)} onChange={(event) => setResourceDraft(event.target.value)} />
-            )}
+          <FormField id="jobs-resource" label="Resource" hint="Empty shows every resource." error={resourceError ?? undefined}>
+            {(control) => <ResourceSelect {...control} emptyLabel="All resources" value={resourceDraft} onChange={setResourceDraft} />}
           </FormField>
           <Button type="submit">Show jobs</Button>
         </form>

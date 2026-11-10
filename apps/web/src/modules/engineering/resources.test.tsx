@@ -53,7 +53,7 @@ describe("ResourcesPage", () => {
     const fetchMock = stub(() => (++calls === 1 ? problem(422, "ENG-INVALID-QUERY", "groupId must be a UUID") : ok({ items: [resource("a")] })));
     renderInRouter(<ResourcesPage initial={{ groupId: "nope" }} />);
     expect(await findAlert()).toHaveTextContent("groupId must be a UUID");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?groupId=nope");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?groupId=nope", expect.anything());
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByText("RES-a");
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -64,10 +64,10 @@ describe("ResourcesPage", () => {
     renderInRouter(<ResourcesPage />);
     await screen.findByText("RES-a");
     fireEvent.change(screen.getByLabelText(/Type/), { target: { value: "tool" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?type=tool"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?type=tool", expect.anything()));
     fireEvent.change(screen.getByLabelText(/Capability/), { target: { value: "cap-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?type=tool&capabilityId=cap-1"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?type=tool&capabilityId=cap-1", expect.anything()));
   });
 
   it("appends the next page and hides Load more when nextCursor is absent", async () => {
@@ -76,7 +76,7 @@ describe("ResourcesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await screen.findByText("RES-b");
     expect(screen.getByText("RES-a")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?cursor=c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?cursor=c1", expect.anything());
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 });
@@ -152,7 +152,7 @@ describe("ResourceGroupsPage", () => {
     expect(await screen.findByText("No resource groups match")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Site/), { target: { value: "S2" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resource-groups?siteId=S2"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resource-groups?siteId=S2", expect.anything()));
   });
 });
 
@@ -167,7 +167,7 @@ describe("CapabilitiesPage", () => {
     expect(await screen.findByRole("link", { name: "CNC" })).toHaveAttribute("href", "/engineering/capabilities/c%2F1");
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await screen.findByRole("link", { name: "WELD" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities?cursor=c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities?cursor=c1", expect.anything());
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 
@@ -203,7 +203,7 @@ describe("CalendarDaysPage", () => {
     await waitFor(() => expect(table).not.toHaveAttribute("aria-busy"));
     expect(table).toHaveTextContent("Open06:00-14:00, 14:00-22:0016");
     expect(table).toHaveTextContent("2026-10-03Closed0");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/calendars/cal%2F1/days?from=2026-10-01&to=2026-10-31");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/calendars/cal%2F1/days?from=2026-10-01&to=2026-10-31", expect.anything());
   });
 
   it("refetches when the range changes", async () => {
@@ -211,9 +211,9 @@ describe("CalendarDaysPage", () => {
     renderInRouter(<CalendarDaysPage id="c1" initialRange={range} />);
     expect(await screen.findByText("No generated days in this range")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-11-15" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars/c1/days?from=2026-10-01&to=2026-11-15"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars/c1/days?from=2026-10-01&to=2026-11-15", expect.anything()));
     fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-10-10" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars/c1/days?from=2026-10-10&to=2026-11-15"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars/c1/days?from=2026-10-10&to=2026-11-15", expect.anything()));
   });
 
   it("shows the error with Retry", async () => {

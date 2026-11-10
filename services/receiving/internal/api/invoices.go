@@ -83,6 +83,7 @@ type invoiceBody struct {
 	RejectReason     string            `json:"rejectReason,omitempty"`
 	CreatedAt        string            `json:"createdAt"`
 	Lines            []invoiceLineBody `json:"lines"`
+	Match            *matchBody        `json:"match,omitempty"`
 }
 
 func stableID(parts ...string) string {

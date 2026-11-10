@@ -47,9 +47,9 @@ describe("engineering client BOM calls", () => {
   it("encodes list filters, reads one version and posts with an idempotency key", async () => {
     const fetchMock = stub({ ok: true, json: async () => ({ items: [] }) });
     await listBomVersions({ productId: "A B", siteId: "", status: "draft", asOf: "2026-06-01" }, "c9");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?productId=A+B&status=draft&asOf=2026-06-01&cursor=c9");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?productId=A+B&status=draft&asOf=2026-06-01&cursor=c9", expect.anything());
     await getBomVersion("x/y");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/x%2Fy");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/x%2Fy", expect.anything());
     await createBomVersion({ productId: "P", effectiveFrom: "2026-01-01", lines: [] }, "key-1");
     const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
     expect(init.method).toBe("POST");
@@ -61,21 +61,21 @@ describe("engineering client", () => {
   it("encodes filters and cursor and omits empty filters", async () => {
     const fetchMock = stub({ ok: true, json: async () => ({ items: [] }) });
     await listRouteVersions({ productId: "P 1", siteId: "", status: "active", asOf: "" }, "c1");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions?productId=P+1&status=active&cursor=c1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions?productId=P+1&status=active&cursor=c1", expect.anything());
     await listRouteVersions({});
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions", expect.anything());
   });
 
   it("requests a route version by encoded id", async () => {
     const fetchMock = stub({ ok: true, json: async () => ({}) });
     await getRouteVersion("a/b");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a%2Fb");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a%2Fb", expect.anything());
   });
 
   it("posts the activation to the encoded id and returns the version", async () => {
     const fetchMock = stub({ ok: true, json: async () => ({ id: "a/b", status: "active" }) });
     expect(await activateRouteVersion("a/b")).toEqual({ id: "a/b", status: "active" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a%2Fb:activate", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a%2Fb:activate", expect.objectContaining({ method: "POST" }));
   });
 
   it("surfaces the code and status of a refused activation", async () => {
@@ -115,33 +115,33 @@ describe("engineering client", () => {
   it("serialises resource filters and cursor and omits empty filters", async () => {
     const fetchMock = stub({ ok: true, json: async () => ({ items: [] }) });
     await listResources({ type: "machine", siteId: "", groupId: "g 1", capabilityId: "" }, "c1");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?type=machine&groupId=g+1&cursor=c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources?type=machine&groupId=g+1&cursor=c1", expect.anything());
     await listResources({});
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resources", expect.anything());
   });
 
   it("requests a resource by encoded id", async () => {
     const fetchMock = stub({ ok: true, json: async () => ({}) });
     await getResource("a/b?c");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/resources/a%2Fb%3Fc");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/resources/a%2Fb%3Fc", expect.anything());
   });
 
   it("serialises group and capability list queries", async () => {
     const fetchMock = stub({ ok: true, json: async () => ({ items: [] }) });
     await listResourceGroups({ siteId: "s1" }, "c2");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resource-groups?siteId=s1&cursor=c2");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resource-groups?siteId=s1&cursor=c2", expect.anything());
     await listResourceGroups({});
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resource-groups");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resource-groups", expect.anything());
     await listCapabilities("c3");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities?cursor=c3");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities?cursor=c3", expect.anything());
     await listCapabilities();
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities", expect.anything());
   });
 
   it("requests calendar days for an encoded id and range", async () => {
     const fetchMock = stub({ ok: true, json: async () => ({ items: [] }) });
     await getCalendarDays("c/1", "2026-10-01", "2026-10-31");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/calendars/c%2F1/days?from=2026-10-01&to=2026-10-31");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/calendars/c%2F1/days?from=2026-10-01&to=2026-10-31", expect.anything());
   });
 
   it("turns a problem response from every new call into an ApiError", async () => {
@@ -163,9 +163,9 @@ describe("engineering client", () => {
   it("calls the ECR endpoints with filters, an idempotency key and the action routes", async () => {
     const fetchMock = stub({ ok: true, status: 200, json: async () => ({ items: [] }) });
     await listEcrs({ state: "approved", productId: "BIKE" }, "c1");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs?state=approved&productId=BIKE&cursor=c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs?state=approved&productId=BIKE&cursor=c1", expect.anything());
     await getEcr("a/1");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs/a%2F1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/ecrs/a%2F1", expect.anything());
     await createEcr({ number: "E", title: "t", priority: "low", products: ["A"] }, "key-1");
     const [, create] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
     expect(new Headers(create?.headers).get("Idempotency-Key")).toBe("key-1");

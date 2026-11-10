@@ -1,0 +1,69 @@
+.tour {
+  margin-bottom: 24px;
+}
+
+.tourTitle {
+  margin: 0 0 4px;
+  font-size: var(--text-lg-size);
+  line-height: var(--text-lg-leading);
+}
+
+.tourIntro {
+  margin: 0 0 16px;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.tourAreas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px 24px;
+}
+
+.tourArea {
+  margin: 0 0 8px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs-size);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tourList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tourLink {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.tourLink:hover,
+.tourLink:focus-visible {
+  background: var(--color-bg-muted);
+}
+
+.tourLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-accent);
+  font-size: var(--text-md-size);
+  font-weight: var(--weight-medium);
+}
+
+.tourBlurb {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}

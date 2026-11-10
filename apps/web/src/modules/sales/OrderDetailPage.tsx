@@ -26,6 +26,7 @@ import { OrderSchedule } from "./OrderSchedule";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const ruleTone = { PASS: "success", WARN: "warning", FAIL: "danger" } as const;
 
@@ -147,9 +148,9 @@ export function OrderDetailPage() {
   const facts: [string, ReactNode][] = [
     ["Order", order.orderNumber],
     ["Type", sentence(order.orderType)],
-    ["Customer", order.customerId],
-    ["Invoice account", order.invoiceAccountId],
-    ["Legal entity", order.legalEntityId],
+    ["Customer", <EntityName entity="customer" id={order.customerId} />],
+    ["Invoice account", <EntityName entity="customer" id={order.invoiceAccountId} />],
+    ["Legal entity", <EntityName entity="legalEntity" id={order.legalEntityId} />],
     ["Requested ship date", order.requestedShipDate],
     ["Channel", order.externalRef ? `${order.channel} · ${order.externalRef}` : order.channel],
     ["Customer group", order.customerGroup ?? dash],
@@ -160,7 +161,7 @@ export function OrderDetailPage() {
 
   const lineColumns: DataTableColumn<OrderLine>[] = [
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "productId", header: "Product", mono: true },
+    { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
     { key: "quantity", header: "Quantity", align: "end", render: (l) => `${l.quantity} ${l.unit}` },
     { key: "unitPrice", header: "Unit price", align: "end" },
     { key: "discPct", header: "Discount %", align: "end" },
@@ -211,7 +212,7 @@ export function OrderDetailPage() {
 
   const overrideColumns: DataTableColumn<ListingOverride>[] = [
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "productId", header: "Product", mono: true },
+    { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
     { key: "decision", header: "Listing decision", render: (o) => sentence(o.decision) },
     { key: "reason", header: "Reason" },
     { key: "actor", header: "Accepted by" },
@@ -286,7 +287,7 @@ export function OrderDetailPage() {
           {facts.map(([term, value]) => (
             <div key={term} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
-              <dd className={term === "Order" || term.endsWith("account") || term === "Customer" || term === "Legal entity" ? `${styles.value} ${styles.mono}` : styles.value}>{value}</dd>
+              <dd className={term === "Order" ? `${styles.value} ${styles.mono}` : styles.value}>{value}</dd>
             </div>
           ))}
         </dl>

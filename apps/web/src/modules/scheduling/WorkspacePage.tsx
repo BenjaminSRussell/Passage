@@ -21,6 +21,8 @@ import { GANTT_DAYS, GanttView, type GanttDays } from "./GanttView";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { formatResource } from "../mfg-shared/resources";
+import { orderLabel, useOrderRefs } from "../mfg-shared/orders";
 
 interface Board {
   resources: Resource[];
@@ -82,7 +84,12 @@ export function WorkspacePage() {
   const resources = board.data?.resources ?? [];
   const bars = board.data?.bars ?? [];
   const jobs = jobsOf(bars);
-  const codeOf = (id: string) => resources.find((r) => r.id === id)?.code ?? shortId(id);
+  const codeOf = (id: string) => {
+    const r = resources.find((x) => x.id === id);
+    return r ? formatResource(r) : shortId(id);
+  };
+  const orderRefs = useOrderRefs([...bars.map((b) => b.orderId), ...(preview?.response.dependents ?? []).map((d) => d.orderId)]);
+  const num = (id: string) => orderLabel(id, orderRefs);
 
   /** A move or firm built on a stale picture is refused (SCHED-0154): drop it and show the current plan. */
   function failWith(error: unknown) {
@@ -172,9 +179,9 @@ export function WorkspacePage() {
   }
 
   const columns: DataTableColumn<GanttBar>[] = [
-    { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+    { key: "orderId", header: "Order", mono: true, render: (row) => num(row.orderId) },
     { key: "operNumber", header: "Operation", align: "end" },
-    { key: "resourceId", header: "Resource", mono: true, render: (row) => codeOf(row.resourceId) },
+    { key: "resourceId", header: "Resource", render: (row) => codeOf(row.resourceId) },
     { key: "start", header: "Start", render: (row) => formatDateTime(row.start) },
     { key: "end", header: "End", render: (row) => formatDateTime(row.end) },
     { key: "changeoverMinutes", header: "Changeover", align: "end", render: (row) => (row.changeoverMinutes > 0 ? formatMinutes(row.changeoverMinutes) : dash) },
@@ -211,7 +218,7 @@ export function WorkspacePage() {
       header: "Actions",
       render: (row) => (
         <div className={styles.actions}>
-          <Button size="sm" onClick={() => select(row)} aria-label={`Move order ${shortId(row.orderId)} operation ${row.operNumber}`}>
+          <Button size="sm" onClick={() => select(row)} aria-label={`Move order ${num(row.orderId)} operation ${row.operNumber}`}>
             Move
           </Button>
           <Button
@@ -219,7 +226,7 @@ export function WorkspacePage() {
             variant="ghost"
             loading={firming === row.jobId}
             onClick={() => toggleFirm(row)}
-            aria-label={`${row.firmed ? "Unfirm" : "Firm"} order ${shortId(row.orderId)} operation ${row.operNumber}`}
+            aria-label={`${row.firmed ? "Unfirm" : "Firm"} order ${num(row.orderId)} operation ${row.operNumber}`}
           >
             {row.firmed ? "Unfirm" : "Firm"}
           </Button>
@@ -327,7 +334,7 @@ export function WorkspacePage() {
           </p>
           {proposal ? (
             <div ref={formRef}>
-              <Card title={`Move order ${shortId(proposal.job.orderId)} operation ${proposal.job.operNumber}`}>
+              <Card title={`Move order ${num(proposal.job.orderId)} operation ${proposal.job.operNumber}`}>
                 <form className={styles.form} onSubmit={submitPreview} noValidate>
                   <FormField id="move-resource" label="Resource" hint="The service refuses resources that are not candidates of the operation.">
                     {(control) => (
@@ -341,7 +348,7 @@ export function WorkspacePage() {
                       >
                         {resources.map((r) => (
                           <option key={r.id} value={r.id}>
-                            {r.code}
+                            {formatResource(r)}
                           </option>
                         ))}
                       </Select>
@@ -437,7 +444,7 @@ export function WorkspacePage() {
                       <DataTable
                         label="Pegged orders that move"
                         columns={[
-                          { key: "orderId", header: "Order", mono: true, render: (d) => shortId(d.orderId) },
+                          { key: "orderId", header: "Order", mono: true, render: (d) => num(d.orderId) },
                           { key: "oldEnd", header: "Ended", render: (d) => formatDateTime(d.oldEnd) },
                           { key: "newStart", header: "Starts", render: (d) => formatDateTime(d.newStart) },
                           { key: "newEnd", header: "Ends", render: (d) => formatDateTime(d.newEnd) },
@@ -451,8 +458,15 @@ export function WorkspacePage() {
                     <DataTable
                       label="Affected operations"
                       columns={[
-                        { key: "operationId", header: "Operation", mono: true, render: (c) => shortId(c.operationId) },
-                        { key: "resourceId", header: "Resource", mono: true, render: (c) => codeOf(c.resourceId) },
+                        {
+                          key: "operationId",
+                          header: "Operation",
+                          render: (c) => {
+                            const job = jobs.find((j) => j.jobId === c.operationId);
+                            return job ? `${num(job.orderId)}, operation ${job.operNumber}` : "Operation";
+                          },
+                        },
+                        { key: "resourceId", header: "Resource", render: (c) => codeOf(c.resourceId) },
                         { key: "oldStart", header: "Was", render: (c) => formatDateTime(c.oldStart) },
                         { key: "newStart", header: "Becomes", render: (c) => formatDateTime(c.newStart) },
                         { key: "newEnd", header: "Ends", render: (c) => formatDateTime(c.newEnd) },

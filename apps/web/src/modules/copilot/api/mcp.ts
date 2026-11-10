@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { apiFetch } from "../../../shell/api/http";
 
 /**
  * Client for the MCP gateway's tool catalog (services/mcp-ts/api/openapi.yaml,
@@ -44,7 +45,7 @@ export class McpError extends Error {
 let nextId = 0;
 
 /** tools/list for the signed-in user. Throws McpError on HTTP or JSON-RPC errors. */
-export async function listTools(signal?: AbortSignal, fetchFn: typeof fetch = fetch): Promise<McpTool[]> {
+export async function listTools(signal?: AbortSignal, fetchFn: typeof fetch = apiFetch): Promise<McpTool[]> {
   nextId += 1;
   const res = await fetchFn(MCP_PATH, {
     method: "POST",

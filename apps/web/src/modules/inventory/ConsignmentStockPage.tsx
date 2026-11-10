@@ -2,8 +2,9 @@ import { useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listConsignmentStock, type ConsignmentStockItem } from "./api/client";
-import { dash, describeDimensions, shortId } from "./format";
+import { dash, describeDimensions } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -11,7 +12,7 @@ const STOCK_DIMENSIONS = ALL_DIMENSIONS.filter((name) => name !== "owner");
 
 const columns: DataTableColumn<ConsignmentStockItem>[] = [
   { key: "vendorId", header: "Vendor", mono: true },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, STOCK_DIMENSIONS) },
   { key: "qty", header: "Vendor-owned", align: "end", mono: true },
   {

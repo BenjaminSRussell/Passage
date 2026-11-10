@@ -4,6 +4,7 @@ import { OCM_MODES, describeProblem, listOCMProfiles, saveOCMProfile, type OCMMo
 import { ocmModeLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const decimalPattern = /^\d{1,12}(\.\d{1,4})?$/;
@@ -33,7 +34,7 @@ export function validateOCMProfile(p: OCMProfileInput): Record<string, string> {
 
 const columns: DataTableColumn<OCMProfile>[] = [
   { key: "itemGroup", header: "Item group" },
-  { key: "siteId", header: "Site", mono: true },
+  { key: "siteId", header: "Site", render: (row) => (row.siteId === "All" ? "All sites" : <EntityName entity="site" id={row.siteId} fallback={row.siteId} />) },
   { key: "mode", header: "Mode", render: (row) => ocmModeLabel[row.mode] },
   { key: "surchargeFixed", header: "Fixed surcharge", align: "end" },
   { key: "surchargePct", header: "Surcharge %", align: "end" },

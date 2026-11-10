@@ -20,7 +20,7 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/product`. T
 | Operation | Duty |
 |---|---|
 | `POST /v1/product/products` (optional `Idempotency-Key`) | `product.write` |
-| `GET /v1/product/products`, `GET /v1/product/products/{id}`, `GET /v1/product/products:search` | `product.read` |
+| `GET /v1/product/products`, `GET /v1/product/products/{id}`, `GET /v1/product/products:search`, `GET /v1/product/setup/item-groups` | `product.read` |
 | `POST /v1/product/products/{id}/variants:explode` (optional body `limit` 0-500 creates at most that many variants and reports `remaining`; repeat until it is 0) | `product.write` |
 | `GET /v1/product/released-products?after=&limit=` (keyset page of released product ids, `next` empty on the last page, limit 1-500) | `product.read` |
 | `GET /v1/product/products/{id}/variants:lookup` | `product.read` |
@@ -60,9 +60,18 @@ Wave 3 metadata and wave 4 Temporal/Kafka are not imported. Explosion runs in-pr
 | PRD-LC-BLOCKED / PRD-LC-WARN | 422 / 200 | process policy |
 | PRD-REL-SELF | 422 | self-relation |
 | PRD-SVC-STOCKED | 422 | storage/tracking or stocked model group on a service |
+| PRD-SVC-TRACKED | 422 | batch, serial or catch weight flag on a service |
 | PRD-GRPCHG-ONHAND | 200 (item) | group-change skipped because on-hand > 0 |
 
 Metrics: `product_created_total`, `product_exploded_total`, `product_released_total`, `product_failed_total`.
+
+## Unit, item group and tracking flags
+
+A product carries its `baseUom`, an optional `itemGroupId` (a group from `GET /v1/product/setup/item-groups`,
+400 on `errors.itemGroupId` when it is not the tenant's) and three flags, `batchTracked`, `serialTracked` and
+`catchWeight` (all default false). They are accepted by `POST` and `PATCH` (an empty `itemGroupId` clears it) and
+returned by every product read and search. The web app's purchase and sales order lines default their unit to the
+product's `baseUom`. A released product still names its own item group per legal entity.
 
 ## Migration loader (duty `product.import.write`)
 

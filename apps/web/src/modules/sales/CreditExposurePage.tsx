@@ -2,10 +2,13 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
 import { UTILIZATION_STATUSES, listCreditExposure, type CreditExposureFilter, type CreditExposureRow, type UtilizationStatus } from "./api/client";
-import { dash, money, sentence, shortId, UUID } from "./format";
+import { dash, money, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { PlainName } from "./OrderNumber";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const PERCENT_2 = /^\d+(\.\d{1,2})?$/;
 
@@ -19,8 +22,8 @@ const labels: Record<UtilizationStatus, string> = {
 };
 
 const columns: DataTableColumn<CreditExposureRow>[] = [
-  { key: "customerId", header: "Customer", mono: true },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (r) => shortId(r.legalEntityId) },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName entity="customer" id={row.customerId} /> },
+  { key: "legalEntityId", header: "Legal entity", render: (r) => <EntityName entity="legalEntity" id={r.legalEntityId} /> },
   { key: "limit", header: "Credit limit", align: "end", render: (r) => money(r.limit, r.currency) },
   { key: "limitType", header: "Limit type", render: (r) => sentence(r.limitType) },
   { key: "openAr", header: "Open AR", align: "end", render: (r) => money(r.exposure.openAr ?? "0", r.currency) },
@@ -72,10 +75,10 @@ export function CreditExposurePage() {
         }}
       >
         <FormField id="exposure-le" label="Legal entity" hint="Leave empty for every legal entity you can see." error={invalid.legalEntityId} optional>
-          {(control) => <Input {...control} className={styles.mono} value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid.legalEntityId)} />}
+          {(control) => <EntityLookup entity="legalEntity" {...control} prefill={false} placeholder="All legal entities" value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid.legalEntityId)} />}
         </FormField>
         <FormField id="exposure-customer" label="Customer" error={invalid.customerId} optional>
-          {(control) => <Input {...control} className={styles.mono} value={draft.customerId} onChange={(e) => setDraft({ ...draft, customerId: e.target.value })} invalid={Boolean(invalid.customerId)} />}
+          {(control) => <EntityLookup entity="customer" {...control} placeholder="All customers" value={draft.customerId} onChange={(e) => setDraft({ ...draft, customerId: e.target.value })} invalid={Boolean(invalid.customerId)} />}
         </FormField>
         <FormField id="exposure-status" label="Status" optional>
           {(control) => (

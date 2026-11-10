@@ -5,6 +5,7 @@ import { validTrackingId } from "./AsBuiltPanel";
 import { trackingLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** as-built: what went into a finished serial; where-used: which finished serial took a component serial. */
 export type Direction = "as-built" | "where-used";
@@ -17,7 +18,7 @@ export interface AsBuiltInquiryPageProps {
 const columns: DataTableColumn<AsBuiltRecord>[] = [
   { key: "orderNumber", header: "Order", mono: true },
   { key: "finishedSerialOrBatch", header: "Finished serial or batch", mono: true },
-  { key: "componentItemId", header: "Component", mono: true },
+  { key: "componentItemId", header: "Component", render: (row) => <EntityName entity="product" id={row.componentItemId} fallback={row.componentItemId} /> },
   { key: "tracking", header: "Tracking", render: (r) => trackingLabel[r.tracking] ?? r.tracking },
   { key: "componentSerialOrBatch", header: "Component serial or batch", mono: true },
   { key: "qty", header: "Quantity", align: "end" },

@@ -16,10 +16,11 @@ import {
   type Problem,
 } from "./api/client";
 import { strategyHelp } from "./BackorderRunPage";
-import { DECIMAL, formatDateTime, sentence, shortId, UUID } from "./format";
+import { DECIMAL, formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 type Errors = Record<string, string>;
 
@@ -98,7 +99,7 @@ export function RunStatusBadge({ status }: { status: BackorderRunStatus }) {
 
 const columns: DataTableColumn<BackorderRun>[] = [
   { key: "createdAt", header: "Planned", render: (r) => <Link to={`/sales/backorder-processing/${r.id}`}>{formatDateTime(r.createdAt)}</Link> },
-  { key: "productId", header: "Product", mono: true, render: (r) => shortId(r.productId) },
+  { key: "productId", header: "Product", render: (r) => <EntityName entity="product" id={r.productId} /> },
   { key: "strategy", header: "Strategy", render: (r) => sentence(r.strategy) },
   { key: "supply", header: "Supply", align: "end" },
   { key: "supplyDate", header: "Supply date", mono: true },

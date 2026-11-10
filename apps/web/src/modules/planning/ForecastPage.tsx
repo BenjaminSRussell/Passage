@@ -31,6 +31,8 @@ import { GenerateCard } from "./ForecastGenerate";
 import { describeError, PLAN_CODE, useLoad, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 export const DEFAULT_FORECAST_MODEL = "BASE";
 /** Rows the forecast endpoint returns at most (MaxPageSize in the service). */
@@ -189,11 +191,11 @@ function CellForm({ model, draft, setDraft, onSaved }: {
           {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Forecast cell">
-          <FormField id="cell-item" label="Item" hint="Item id (UUID)." error={errors.itemId}>
-            {(a11y) => <Input {...a11y} value={draft.itemId} onChange={(e) => set("itemId")(e.target.value)} />}
+          <FormField id="cell-item" label="Item" error={errors.itemId}>
+            {(a11y) => <EntityLookup {...a11y} entity="product" value={draft.itemId} onChange={(e) => set("itemId")(e.target.value)} />}
           </FormField>
-          <FormField id="cell-site" label="Site" hint="Site id (UUID)." error={errors.siteId}>
-            {(a11y) => <Input {...a11y} value={draft.siteId} onChange={(e) => set("siteId")(e.target.value)} />}
+          <FormField id="cell-site" label="Site" error={errors.siteId}>
+            {(a11y) => <EntityLookup {...a11y} entity="site" value={draft.siteId} onChange={(e) => set("siteId")(e.target.value)} />}
           </FormField>
           <FormField id="cell-start" label="Period start" error={errors.periodStart}>
             {(a11y) => <Input {...a11y} type="date" value={draft.periodStart} onChange={(e) => set("periodStart")(e.target.value)} />}
@@ -367,8 +369,8 @@ export function ForecastPage() {
   const writable = current?.status === "draft";
 
   const columns: DataTableColumn<ForecastLine>[] = [
-    { key: "itemId", header: "Item", mono: true },
-    { key: "siteId", header: "Site", mono: true },
+    { key: "itemId", header: "Item", render: (r) => <EntityName entity="product" id={r.itemId} fallback={r.itemId} /> },
+    { key: "siteId", header: "Site", render: (r) => <EntityName entity="site" id={r.siteId} fallback={r.siteId} /> },
     { key: "periodStart", header: "Period start" },
     { key: "periodEnd", header: "Period end" },
     { key: "source", header: "Source", render: (l) => <Badge tone={sourceTone[l.source]}>{l.source.charAt(0).toUpperCase() + l.source.slice(1)}</Badge> },

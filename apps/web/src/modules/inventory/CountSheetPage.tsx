@@ -16,6 +16,7 @@ import {
 } from "./api/client";
 import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, shortId, signed } from "./format";
 import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -178,7 +179,7 @@ export function CountSheetPage() {
   const hidden = sheet.lines.some((l) => l.expectedQty === null);
   const columns: DataTableColumn<CountLine>[] = [
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+    { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
     { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
     { key: "expectedQty", header: "Expected", align: "end", mono: true, render: (row) => row.expectedQty ?? "Hidden" },
     {

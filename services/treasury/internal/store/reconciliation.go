@@ -820,6 +820,13 @@ func (s *Postgres) Unmatch(ctx context.Context, id string, version int, reason s
 		if status != "matched" {
 			return httpx.NewProblem(http.StatusConflict, CodeMatchState, "the match is already unmatched")
 		}
+		var fromTransaction int
+		if err := tx.QueryRow(ctx, `select count(*) from bank_line_transaction where tenant_id = $1 and match_id = $2`, p.TenantID, id).Scan(&fromTransaction); err != nil {
+			return err
+		}
+		if fromTransaction > 0 {
+			return httpx.NewProblem(http.StatusConflict, CodeMatchFromTransaction, "this match belongs to a bank transaction created from the statement line; it cannot be unmatched, reverse the entry in the general ledger instead")
+		}
 		if _, err := tx.Exec(ctx, `update reconciliation_match set status = 'unmatched', unmatch_reason = $3, unmatched_by = $4, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`, p.TenantID, id, reason, createdBy(p)); err != nil {
 			return err

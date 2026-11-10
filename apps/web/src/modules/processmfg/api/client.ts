@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the processmfg service (services/processmfg/api/openapi.yaml).
 // Browser calls use /api/v1/production/..., which the web BFF routes to the
 // service. Decimals travel as strings so no quantity passes through a float.
@@ -204,7 +205,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }
