@@ -225,12 +225,33 @@ func (s *Postgres) ListInvoices(ctx context.Context, f InvoiceFilter) ([]Invoice
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		for i := range out {
-			if err := loadInvoiceLines(ctx, tx, tenantID, &out[i]); err != nil {
-				return err
-			}
-		}
-		return nil
+		return loadPageLines(ctx, tx, tenantID, out[:min(len(out), limit)])
 	})
 	return out, err
+}
+
+func loadPageLines(ctx context.Context, tx pgx.Tx, tenantID string, page []Invoice) error {
+	if len(page) == 0 {
+		return nil
+	}
+	index := make(map[string]int, len(page))
+	invoiceIDs := make([]string, len(page))
+	for i, inv := range page {
+		index[inv.ID], invoiceIDs[i] = i, inv.ID
+	}
+	rows, err := tx.Query(ctx, `SELECT invoice_id::text, receipt_id::text, receipt_line_no, qty, unit_price, amount, standard_cost, COALESCE(grir_cleared, 0), service
+		FROM receiving_vendor_invoice_line WHERE tenant_id = $1 AND invoice_id = ANY($2::uuid[]) ORDER BY invoice_id, line_no`, tenantID, invoiceIDs)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var invoiceID string
+		var l InvoiceLine
+		if err := rows.Scan(&invoiceID, &l.ReceiptID, &l.ReceiptLineNo, &l.Qty, &l.UnitPrice, &l.Amount, &l.StandardCost, &l.GrirCleared, &l.Service); err != nil {
+			return err
+		}
+		page[index[invoiceID]].Lines = append(page[index[invoiceID]].Lines, l)
+	}
+	return rows.Err()
 }

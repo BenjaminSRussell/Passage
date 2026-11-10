@@ -684,6 +684,14 @@ var cases = []struct {
 		if got := list(ctxOf(eight), store.InvoiceFilter{}); len(got) != 0 {
 			t.Fatalf("other legal entity sees %d invoices", len(got))
 		}
+		if got := list(ctxOf(eight), store.InvoiceFilter{PurchaseOrderID: poID}); len(got) != 0 {
+			t.Fatalf("other legal entity sees %d invoices by purchase order", len(got))
+		}
+		for _, inv := range page1[:2] {
+			if len(inv.Lines) != 1 {
+				t.Fatalf("invoice %s on the page has %d lines, want 1", inv.InvoiceNumber, len(inv.Lines))
+			}
+		}
 		if got := list(ctxOf(principal(2)), store.InvoiceFilter{}); len(got) != 0 {
 			t.Fatalf("other tenant sees %d invoices", len(got))
 		}
