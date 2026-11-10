@@ -13,7 +13,7 @@ export const routeHelp: readonly RouteHelp[] = [
     patterns: ["/purchasing"],
     title: "Purchasing",
     purpose: "Your starting point for buying: requests, orders and what is still on its way.",
-    howTo: ["Open Requisitions to ask for something.", "Open Purchase orders to buy from a vendor.", "Use Approvals to decide requests waiting for you."],
+    howTo: ["Open Requisitions to ask for something.", "Open Purchase orders to buy from a vendor.", "Use Requisition approvals to decide requests waiting for you."],
     guide: "buyer.md#raise-a-purchase-order",
   },
   {
@@ -356,7 +356,7 @@ export const routeHelp: readonly RouteHelp[] = [
     patterns: ["/sales/orders/:id/progress/new", "/sales/order-progress"],
     title: "Deliveries and invoices",
     purpose: "What fulfillment and billing reported against an order. Both are recorded automatically when a packing slip or invoice posts.",
-    howTo: ["Use Filter to find an order.", "Check the delivered and invoiced quantities.", "Select Cancel remainder to drop what has not shipped."],
+    howTo: ["Use Filter to find an order.", "Check the delivered and invoiced quantities.", "Open the order and use Cancel remainder to drop what has not shipped."],
     guide: "order-desk.md#invoice-it",
   },
   {
@@ -559,14 +559,14 @@ export const routeHelp: readonly RouteHelp[] = [
     patterns: ["/fulfillment/workbench"],
     title: "Picking workbench",
     purpose: "Group released shipments into pick waves. A shipment is never split across waves.",
-    howTo: ["Choose how to group.", "Select Preview waves.", "Select Create waves."],
+    howTo: ["Choose how to group.", "Select Preview waves.", "Select the Create N waves button, where N is the number of waves previewed."],
     guide: "order-desk.md#ship-it",
   },
   {
     patterns: ["/fulfillment/waves", "/fulfillment/waves/:id"],
     title: "Pick waves",
     purpose: "Waves created by the picking workbench. Open one to assign a picker, pick, print the pick list and close it.",
-    howTo: ["Select Picking workbench to make more waves.", "Open a wave.", "Confirm the open lines to record the picks."],
+    howTo: ["Select Picking workbench to make more waves.", "Open a wave.", "Select the Confirm N lines button, where N is the number of open lines, to record the picks."],
     guide: "order-desk.md#ship-it",
   },
   {
