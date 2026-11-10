@@ -128,6 +128,7 @@ paths:
       parameters:
         - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: vendor, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: held, in: query, required: false, description: "true keeps the unsettled items on payment hold. The duty payables.inbox.read (used by the batch service's My work inbox) reads this list only with held=true.", schema: { type: boolean } }
         - { name: due_from, in: query, required: false, description: Due date on or after., schema: { type: string, format: date } }
         - { name: due_to, in: query, required: false, description: Due date on or before., schema: { type: string, format: date } }
         - { name: currency, in: query, required: false, schema: { type: string, pattern: '^[A-Z]{3}$' } }

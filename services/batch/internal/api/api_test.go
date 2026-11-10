@@ -3,17 +3,21 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/api"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/batch/internal/inbox"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/schema"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/store"
 )
@@ -190,5 +194,72 @@ func TestStartRunPassesParamsToTheStoreAndRejectsUnknownFields(t *testing.T) {
 	}
 	if rec := do(r, http.MethodPost, "/v1/batch/jobs/explode/runs", body, "batch.read", true); rec.Code != http.StatusForbidden {
 		t.Fatalf("starting a run needs batch.write, got %d", rec.Code)
+	}
+}
+
+type staticSource struct {
+	items []inbox.Item
+	err   error
+}
+
+func (staticSource) Name() string { return "ledger" }
+func (staticSource) Duty() string { return "ledger.journal.approve" }
+func (s staticSource) Fetch(context.Context, tenant.Principal, string) (inbox.Fetched, error) {
+	return inbox.Fetched{Items: s.items}, s.err
+}
+
+func inboxRequest(r http.Handler, target, entities, duties string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-Legal-Entity", entities)
+	req.Header.Set("X-Passage-User", testkit.TenantID(8))
+	req.Header.Set("X-Passage-Duties", duties)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestInbox(t *testing.T) {
+	entity, other := testkit.TenantID(9), testkit.TenantID(10)
+	agg := &inbox.Aggregator{Sources: []inbox.Source{staticSource{items: []inbox.Item{{ID: "b1", Source: "ledger", CreatedAt: time.Now()}}}}}
+	r := httpx.NewRouter()
+	api.New(&fakeStore{}).WithInbox(agg).Register(r)
+	duties := "inbox.read,ledger.journal.approve"
+
+	rec := inboxRequest(r, "/v1/inbox", entity, duties)
+	var page inbox.Page
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &page) != nil || len(page.Items) != 1 || page.Items[0].ID != "b1" {
+		t.Fatalf("inbox %d %s", rec.Code, rec.Body.String())
+	}
+	cases := map[string]struct {
+		target, entities, duties string
+		want                     int
+	}{
+		"no inbox duty":                {"/v1/inbox", entity, "ledger.journal.approve", http.StatusForbidden},
+		"several entities, none named": {"/v1/inbox", entity + "," + other, duties, http.StatusBadRequest},
+		"entity outside the scope":     {"/v1/inbox?legalEntityId=" + testkit.TenantID(11), entity, duties, http.StatusForbidden},
+		"entity not a UUID":            {"/v1/inbox?legalEntityId=nope", entity, duties, http.StatusBadRequest},
+		"limit above the maximum":      {"/v1/inbox?limit=201", entity, duties, http.StatusBadRequest},
+		"cursor not from the inbox":    {"/v1/inbox?cursor=!!", entity, duties, http.StatusBadRequest},
+		"named entity in scope":        {"/v1/inbox?legalEntityId=" + other, entity + "," + other, duties, http.StatusOK},
+	}
+	for name, c := range cases {
+		if rec := inboxRequest(r, c.target, c.entities, c.duties); rec.Code != c.want {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestInboxStaysAvailableWhenASourceFails(t *testing.T) {
+	agg := &inbox.Aggregator{Sources: []inbox.Source{staticSource{err: errors.New("down")}}}
+	r := httpx.NewRouter()
+	api.New(&fakeStore{}).WithInbox(agg).Register(r)
+	rec := inboxRequest(r, "/v1/inbox", testkit.TenantID(9), "inbox.read,ledger.journal.approve")
+	var page inbox.Page
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &page) != nil || len(page.Unavailable) != 1 || page.Unavailable[0].Source != "ledger" || len(page.Items) != 0 {
+		t.Fatalf("inbox %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(newRouter(&fakeStore{}), http.MethodGet, "/v1/inbox", "", "inbox.read", true); rec.Code != http.StatusNotFound {
+		t.Fatalf("route without an aggregator: %d", rec.Code)
 	}
 }

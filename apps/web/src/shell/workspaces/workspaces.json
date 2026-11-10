@@ -13,6 +13,7 @@
     {"id": "ap-clerk", "label": "Accounts payable", "persona": "AP clerk", "description": "Enter vendor invoices, match them to receipts and pay vendors.", "entries": [
       "/ap-invoices/post",
       "/ap-invoices/grir",
+      "/ap-invoices",
       "/payables",
       "/ledger/open-items",
       "/ledger/clearings",

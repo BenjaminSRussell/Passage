@@ -99,7 +99,7 @@ func (s *rmaSweep) once(ctx context.Context) {
 			}
 			if res != (store.RMASweepResult{}) {
 				slog.Info("receivables RMA credit sweep finished", "tenantId", tenantID, "legalEntityId", le,
-					"posted", res.Posted, "failed", res.Failed, "parked", res.Parked)
+					"posted", res.Posted, "failed", res.Failed, "parked", res.Parked, "committed", res.Committed)
 			}
 		}
 	}

@@ -709,6 +709,7 @@
     "receiving.ap.inquire": {"permissions": [
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
     ]},
@@ -778,6 +779,7 @@
     ]},
     "party.read": {"permissions": [
       {"resource": "/v1/party/parties/*", "methods": ["GET"]},
+      {"resource": "/v1/party/pending-changes", "methods": ["GET"]},
       {"resource": "/v1/party/pending-changes/*", "methods": ["GET"]},
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["GET"]},
       {"resource": "/v1/party/parties/*/vendors", "methods": ["GET"]},
@@ -3410,6 +3412,11 @@
       {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
     ]},
+    "inbox.read": {"permissions": [{"resource": "/v1/inbox", "methods": ["GET"]}]},
+    "procurement.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}]},
+    "party.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/party/pending-changes", "methods": ["GET"]}]},
+    "ledger.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-batches", "methods": ["GET"]}]},
+    "payables.inbox.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
       {"resource": "/v1/workitems/*/actions", "methods": ["POST"]}
@@ -3449,7 +3456,11 @@
       "carrier-gateway": ["carrier.rate.quote", "carrier.tracking.read"]
     },
     "batch": {
-      "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
+      "product": ["product.variants.explode", "product.released.read", "product.jobs.write"],
+      "purchasing": ["procurement.inbox.read"],
+      "party": ["party.inbox.read"],
+      "ledger": ["ledger.inbox.read"],
+      "payables": ["payables.inbox.read"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
