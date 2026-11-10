@@ -2,6 +2,7 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { BankAccountDetailPage, BankAccountsPage, NewBankAccountPage } from "./BankAccounts";
 import { CashForecastPage } from "./CashForecast";
+import { CashPositionPage } from "./CashPosition";
 import { CheckDetailPage, ChecksPage, NewCheckPage } from "./Checks";
 import { FacilitiesPage, FacilityDetailPage, NewFacilityPage } from "./Facilities";
 import { LoanDetailPage, LoansPage, NewLoanPage } from "./Loans";
@@ -12,7 +13,7 @@ const treasury: PassageModule = {
   id: "treasury",
   title: "Treasury",
   description:
-    "House bank accounts and their lifecycle, camt.053, BAI2 and MT940 bank statement import, bank reconciliation with close and reopen, the cash flow forecast, checks, bank facilities with letters of credit and guarantees, and loan contracts.",
+    "House bank accounts and their lifecycle, camt.053, BAI2 and MT940 bank statement import, bank reconciliation with close and reopen, the cash position from intraday reports, the cash flow forecast, checks, bank facilities with letters of credit and guarantees, and loan contracts.",
   routes: [
     { path: "/treasury", element: createElement(BankAccountsPage), handle: { title: "Bank accounts" } },
     { path: "/treasury/bank-accounts/new", element: createElement(NewBankAccountPage), handle: { title: "New bank account" } },
@@ -22,6 +23,7 @@ const treasury: PassageModule = {
     { path: "/treasury/reconciliations", element: createElement(ReconciliationsPage), handle: { title: "Bank reconciliations" } },
     { path: "/treasury/reconciliations/new", element: createElement(NewReconciliationPage), handle: { title: "Open a reconciliation" } },
     { path: "/treasury/reconciliations/:id", element: createElement(ReconciliationDetailPage), handle: { title: "Bank reconciliation" } },
+    { path: "/treasury/cash-position", element: createElement(CashPositionPage), handle: { title: "Cash position" } },
     { path: "/treasury/cash-forecast", element: createElement(CashForecastPage), handle: { title: "Cash forecast" } },
     { path: "/treasury/checks", element: createElement(ChecksPage), handle: { title: "Checks" } },
     { path: "/treasury/checks/new", element: createElement(NewCheckPage), handle: { title: "Issue check" } },
@@ -37,6 +39,7 @@ const treasury: PassageModule = {
     { label: "Bank accounts", to: "/treasury", duty: "treasury.view" },
     { label: "Import statement", to: "/treasury/statements/import", duty: "treasury.statement.import" },
     { label: "Reconciliations", to: "/treasury/reconciliations", duty: "treasury.reconciliation.view" },
+    { label: "Cash position", to: "/treasury/cash-position", duty: "treasury.view" },
     { label: "Cash forecast", to: "/treasury/cash-forecast", duty: "treasury.view" },
     { label: "Checks", to: "/treasury/checks", duty: "treasury.view" },
     { label: "Facilities", to: "/treasury/facilities", duty: "treasury.view" },

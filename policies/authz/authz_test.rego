@@ -1636,6 +1636,13 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
 }
 
+test_treasury_cash_position_import_and_read_are_separate if {
+	allowed("treasury.statement.import", "POST", "/v1/treasury/intraday-reports/import")
+	not allowed("treasury.view", "POST", "/v1/treasury/intraday-reports/import")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-position")
+	not allowed("treasury.statement.import", "GET", "/v1/treasury/cash-position")
+}
+
 test_treasury_bank_reconciliation_duties_are_distinct if {
 	allowed("treasury.reconciliation.view", "GET", "/v1/treasury/bank-reconciliations")
 	allowed("treasury.reconciliation.view", "GET", "/v1/treasury/bank-reconciliations/r-1")

@@ -267,6 +267,66 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/intraday-reports/import:
+    post:
+      operationId: importIntradayReport
+      summary: Upload a camt.052 intraday account report (multipart). Same bytes replay with 200.
+      description: >-
+        A file must hold one report (one Rpt element); a parse error is TRS-0493. The report's account must be the bank
+        account's IBAN or its statementAccount (TRS-0409), in the account's currency (TRS-0408), and the account must be active
+        (TRS-0412). A report id imported before with other content is 409 TRS-0525. 503 TRS-0526 when the cash position is not
+        enabled. The kept balances are OPBD, ITBD, ITAV, CLAV, FWAV, PRCD and CLBD; entries are not stored (the day's camt.053 carries them).
+      x-passage-duty: treasury.statement.import
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [bankAccountId, file]
+              properties:
+                bankAccountId: {type: string, format: uuid}
+                file: {type: string, format: binary, description: "camt.052 XML; max 50 MB by default"}
+      responses:
+        "200":
+          description: Identical file already imported; the stored report is returned
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IntradayReport"}
+        "201":
+          description: Report and balances stored
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IntradayReport"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-position:
+    get:
+      operationId: getCashPosition
+      summary: Booked and available balance of every active bank account of a legal entity, with totals per currency (FR-36.8)
+      description: >-
+        Each account shows the freshest of its latest camt.052 report and its latest camt.053 statement: the report when it was
+        created after the statement's closing day ended, otherwise the statement (as of the end of its closing day). Booked is the
+        interim booked balance (ITBD, else the opening booked one); available is ITAV or CLAV and falls back to booked. A position
+        older than staleHours (24) is stale, and an account with no report and no statement has source none and zero balances.
+        Totals are per currency, never across currencies.
+      x-passage-duty: treasury.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Cash position
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashPosition"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
   /v1/treasury/cash-forecast:
     get:
       operationId: getCashForecast
@@ -1480,6 +1540,58 @@ components:
         closingBalance: {$ref: "#/components/schemas/Money"}
         lineCount: {type: integer, minimum: 0}
         createdAt: {type: string, format: date-time}
+    IntradayReport:
+      type: object
+      required: [id, bankAccountId, legalEntityId, reportId, format, currency, createdAtBank, importedAt, balances]
+      properties:
+        id: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        reportId: {type: string}
+        format: {type: string, description: "camt.052.001.xx"}
+        currency: {type: string}
+        createdAtBank: {type: string, format: date-time}
+        importedAt: {type: string, format: date-time}
+        balances:
+          type: array
+          items:
+            type: object
+            required: [code, amount, asOf]
+            properties:
+              code: {type: string, enum: [OPBD, ITBD, ITAV, CLAV, FWAV, PRCD, CLBD]}
+              amount: {type: string, description: "Signed decimal: credit balances positive"}
+              asOf: {type: string, format: date-time}
+    CashPosition:
+      type: object
+      required: [asOf, staleHours, accounts, totals]
+      properties:
+        asOf: {type: string, format: date-time}
+        staleHours: {type: integer}
+        accounts:
+          type: array
+          items:
+            type: object
+            required: [bankAccountId, accountCode, ibanMasked, account, currency, booked, available, source, stale]
+            properties:
+              bankAccountId: {type: string, format: uuid}
+              accountCode: {type: string}
+              ibanMasked: {type: string}
+              account: {type: string}
+              currency: {type: string}
+              booked: {type: string}
+              available: {type: string}
+              source: {type: string, enum: [camt.052, camt.053, none]}
+              asOf: {type: string, format: date-time}
+              stale: {type: boolean}
+        totals:
+          type: array
+          items:
+            type: object
+            required: [currency, booked, available]
+            properties:
+              currency: {type: string}
+              booked: {type: string}
+              available: {type: string}
     ImportedStatement:
       allOf:
         - $ref: "#/components/schemas/Statement"

@@ -599,3 +599,54 @@ export function createLineTransaction(id: string, lineNo: number, kind: Transact
 export function abandonLineTransaction(id: string, lineNo: number, reason: string): Promise<LineTransaction> {
   return lineAction<LineTransaction>(id, lineNo, "abandon", { reason });
 }
+
+// ---- Cash position (FR-36.8) ----
+
+export interface AccountPositionRow {
+  bankAccountId: string;
+  accountCode: string;
+  ibanMasked: string;
+  currency: string;
+  /** Signed decimal strings. */
+  booked: string;
+  available: string;
+  source: "camt.052" | "camt.053" | "none";
+  asOf?: string;
+  stale: boolean;
+}
+
+export interface CurrencyTotal {
+  currency: string;
+  booked: string;
+  available: string;
+}
+
+export interface CashPosition {
+  asOf: string;
+  staleHours: number;
+  accounts: AccountPositionRow[];
+  totals: CurrencyTotal[];
+}
+
+export interface IntradayReport {
+  id: string;
+  bankAccountId: string;
+  reportId: string;
+  currency: string;
+  createdAtBank: string;
+  balances: { code: string; amount: string; asOf: string }[];
+}
+
+/** GET /cash-position - the freshest booked and available balance of every active account of a legal entity. */
+export function getCashPosition(legalEntityId: string, signal?: AbortSignal): Promise<CashPosition> {
+  return send<CashPosition>(`/cash-position${query({ legalEntityId })}`, {}, signal);
+}
+
+/** POST /intraday-reports/import (multipart). The file hash makes a re-upload a replay (200). */
+export async function importIntradayReport(bankAccountId: string, file: Blob, fileName: string): Promise<{ report: IntradayReport; replayed: boolean }> {
+  const form = new FormData();
+  form.set("bankAccountId", bankAccountId);
+  form.set("file", file, fileName);
+  const res = await request("/intraday-reports/import", { method: "POST", body: form });
+  return { report: (await res.json()) as IntradayReport, replayed: res.status === 200 };
+}

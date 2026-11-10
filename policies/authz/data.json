@@ -3458,12 +3458,16 @@
       {"resource": "/v1/treasury/reconciliation-rules/*:deactivate", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-runs", "methods": ["POST"]}
     ]},
-    "treasury.statement.import": {"permissions": [{"resource": "/v1/treasury/statements/import", "methods": ["POST"]}]},
+    "treasury.statement.import": {"permissions": [
+      {"resource": "/v1/treasury/statements/import", "methods": ["POST"]},
+      {"resource": "/v1/treasury/intraday-reports/import", "methods": ["POST"]}
+    ]},
     "treasury.view": {"permissions": [
       {"resource": "/v1/treasury/bank-accounts", "methods": ["GET"]},
       {"resource": "/v1/treasury/bank-accounts/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/bank-accounts/*/statements", "methods": ["GET"]},
       {"resource": "/v1/treasury/cash-forecast", "methods": ["GET"]},
+      {"resource": "/v1/treasury/cash-position", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks", "methods": ["GET"]},
       {"resource": "/v1/treasury/checks/*", "methods": ["GET"]},
       {"resource": "/v1/treasury/ebics-subscribers/*", "methods": ["GET"]},

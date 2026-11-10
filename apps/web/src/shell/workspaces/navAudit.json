@@ -598,6 +598,7 @@
     {"to": "/treasury", "module": "treasury", "label": "Bank accounts", "area": "finance", "decision": "keep", "taskLabel": "Bank accounts"},
     {"to": "/treasury/statements/import", "module": "treasury", "label": "Import statement", "area": "finance", "decision": "keep", "taskLabel": "Import a bank statement"},
     {"to": "/treasury/reconciliations", "module": "treasury", "label": "Reconciliations", "area": "finance", "decision": "keep", "taskLabel": "Reconcile a bank statement"},
+    {"to": "/treasury/cash-position", "module": "treasury", "label": "Cash position", "area": "finance", "decision": "keep", "taskLabel": "See cash in each bank account"},
     {"to": "/treasury/cash-forecast", "module": "treasury", "label": "Cash forecast", "area": "finance", "decision": "keep", "taskLabel": "See upcoming cash needs"},
     {"to": "/treasury/checks", "module": "treasury", "label": "Checks", "area": "finance", "decision": "keep", "taskLabel": "Print and track checks"},
     {"to": "/treasury/facilities", "module": "treasury", "label": "Facilities", "area": "finance", "decision": "advanced"},

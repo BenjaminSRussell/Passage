@@ -34,6 +34,7 @@ describe("treasury module", () => {
       "/treasury/reconciliations",
       "/treasury/reconciliations/new",
       "/treasury/reconciliations/:id",
+      "/treasury/cash-position",
       "/treasury/cash-forecast",
       "/treasury/checks",
       "/treasury/checks/new",

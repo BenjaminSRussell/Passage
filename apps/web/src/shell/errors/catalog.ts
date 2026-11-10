@@ -912,6 +912,8 @@ const treasury: Record<string, ProblemCatalogEntry> = {
   "TRS-0517": { message: "A bank transaction from one of the lines is still being posted.", action: "Wait for it to finish, or give it up after checking the ledger, then close again." },
   "TRS-0518": { message: "The ledger refused the transaction.", action: "Check the bank account's ledger setup, then try again." },
   "TRS-0519": { message: "The ledger did not answer. The transaction may still be posted.", action: "Try the same action again; it will not post twice." },
+  "TRS-0525": { message: "A report with this id was already imported with other balances.", action: "Ask the bank for a new report; an imported report is never overwritten." },
+  "TRS-0526": { message: "The cash position is not turned on for this deployment.", action: "Ask an administrator to enable it." },
   "TRS-0520": { message: "You stated the book balance, so you can't close this period.", action: "Ask a colleague to close it." },
 };
 

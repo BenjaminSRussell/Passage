@@ -1,7 +1,7 @@
 // Treasury service (/api/v1/treasury) for the demo: house bank accounts, statements with their lines,
 // bank reconciliations (close, reopen, exclude, book a fee) and the cash forecast.
 // Typed against the module's own client types so shape drift fails `tsc`.
-import type { BankAccount, BankReconciliation, ForecastEntry, LineTransaction, Statement, StatementLine, TransactionKind } from "../../modules/treasury/api/client";
+import type { AccountPositionRow, BankAccount, BankReconciliation, ForecastEntry, LineTransaction, Statement, StatementLine, TransactionKind } from "../../modules/treasury/api/client";
 import { LEGAL_ENTITY } from "../company";
 import { reply, route } from "../backend";
 import { at, day, newId, table, uid } from "../store";
@@ -64,7 +64,7 @@ const currentLines: StatementLine[] = [
 
 const statements = table<Statement>([
   statement(STATEMENT_PRIOR, 9, day(-60), 185_000_00, day(-31), 185_000_00 + 31850_00 - 12400_00 - 35_00, priorLines.length),
-  statement(STATEMENT_CURRENT, 10, day(-30), 245_120_40, day(0), 245_120_40 + 24500_00 - 18640_00 - 31200_00 - 42_50 + 118_37 + 5000_00, currentLines.length),
+  statement(STATEMENT_CURRENT, 10, day(-30), 245_120_40, day(-1), 245_120_40 + 24500_00 - 18640_00 - 31200_00 - 42_50 + 118_37 + 5000_00, currentLines.length),
 ]);
 
 const lines = new Map<string, StatementLine[]>([
@@ -106,7 +106,7 @@ const recons = table<Recon>([
     statementId: STATEMENT_CURRENT,
     currency: "USD",
     periodFrom: day(-30),
-    periodTo: day(0),
+    periodTo: day(-1),
     state: "open",
     openingBalance: dec(245_120_40),
     closingBalance: dec(245_120_40 + 24500_00 - 18640_00 - 31200_00 - 42_50 + 118_37 + 5000_00),
@@ -277,6 +277,64 @@ route("POST", `${BASE}/bank-reconciliations/{id}/lines/{lineNo}:create-transacti
   recons.update(r.id, { bookBalance: dec(cents(r.bookBalance) + cents(amount)), version: r.version + 1 });
   const tx: LineTransaction = { id: newId(), reconciliationId: r.id, lineNo: Number(params.lineNo), kind, amount, currency: r.currency, postingDate: day(0), status: "posted", ledgerEntryId: newId(), version: 1 };
   return reply.created(tx);
+});
+
+// ---- Cash position (FR-36.8) ----
+// The freshest of the latest intraday report and the latest statement, the way the service picks it: a report
+// counts when it was created after the statement's closing day ended.
+
+interface DemoReport {
+  id: string;
+  bankAccountId: string;
+  reportId: string;
+  createdAt: string;
+  booked: number;
+  available: number;
+}
+
+const reports = table<DemoReport>([{ id: uid(369, 1), bankAccountId: OPERATING, reportId: "RPT-OPS-1400", createdAt: at(-0.12), booked: 251_940_12, available: 301_940_12 }]);
+
+const dayEnd = (date: string): number => new Date(`${date}T00:00:00Z`).getTime() + 86_400_000;
+
+route("GET", `${BASE}/cash-position`, ({ query }) => {
+  const now = Date.now();
+  const rows: AccountPositionRow[] = accounts
+    .all()
+    .filter((a) => a.legalEntityId === query.get("legalEntityId") && a.status === "active")
+    .map((a) => {
+      const st = statements
+        .all()
+        .filter((s) => s.bankAccountId === a.id)
+        .sort((x, y) => y.closingDate.localeCompare(x.closingDate))[0];
+      const rep = reports
+        .all()
+        .filter((r) => r.bankAccountId === a.id)
+        .sort((x, y) => y.createdAt.localeCompare(x.createdAt))[0];
+      const base = { bankAccountId: a.id, accountCode: a.accountCode, ibanMasked: a.ibanMasked, currency: a.currency };
+      if (rep && (!st || Date.parse(rep.createdAt) > dayEnd(st.closingDate))) {
+        return { ...base, booked: dec(rep.booked), available: dec(rep.available), source: "camt.052" as const, asOf: rep.createdAt, stale: now - Date.parse(rep.createdAt) > 86_400_000 };
+      }
+      if (st) {
+        return { ...base, booked: st.closingBalance, available: st.closingBalance, source: "camt.053" as const, asOf: new Date(dayEnd(st.closingDate)).toISOString(), stale: now - dayEnd(st.closingDate) > 86_400_000 };
+      }
+      return { ...base, booked: "0.00", available: "0.00", source: "none" as const, stale: true };
+    });
+  const totals = new Map<string, { booked: number; available: number }>();
+  for (const r of rows) {
+    const t = totals.get(r.currency) ?? { booked: 0, available: 0 };
+    totals.set(r.currency, { booked: t.booked + cents(r.booked), available: t.available + cents(r.available) });
+  }
+  return { asOf: at(0), staleHours: 24, accounts: rows, totals: [...totals.entries()].map(([currency, t]) => ({ currency, booked: dec(t.booked), available: dec(t.available) })) };
+});
+
+route("POST", `${BASE}/intraday-reports/import`, ({ body }) => {
+  const accountId = String((body as { bankAccountId?: string } | undefined)?.bankAccountId ?? "");
+  const account = accounts.get(accountId);
+  if (!account) return notFound("bank account");
+  if (account.status !== "active") return reply.problem(422, "TRS-0412", "reports can only be imported into an active bank account");
+  const reportId = `RPT-${account.accountCode}-${reports.all().length + 1}`;
+  const stored = reports.insert({ id: newId(), bankAccountId: accountId, reportId, createdAt: at(0), booked: 251_940_12, available: 301_940_12 });
+  return reply.created({ id: stored.id, bankAccountId: accountId, reportId, currency: account.currency, createdAtBank: stored.createdAt, balances: [] });
 });
 
 // ---- Cash forecast (FR-36.9) ----
