@@ -245,6 +245,7 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
   product: {
     noun: "product",
     cap: 10,
+    createHref: "/product/items/new",
     search: async (q, _scope, signal) =>
       present(
         items(

@@ -1,8 +1,11 @@
 import { findStatus, findTable } from "../../test-utils";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { WorkContextProvider } from "../../shell/lookup/workContext";
+import { WorkContext } from "../../shell/lookup/workContextState";
 import purchasing from "./module";
 
 const LE = "11111111-1111-4111-8111-111111111111";
@@ -35,19 +38,24 @@ function renderAt(path: string) {
     return null;
   }
   const view = render(
-    <MemoryRouter initialEntries={[path]}>
-      <Probe />
-      <Routes>
-        {purchasing.routes.map((r) => (
-          <Route key={r.path} path={r.path} element={r.element} />
-        ))}
-      </Routes>
-    </MemoryRouter>,
+    <WorkContextProvider identity="tester">
+      <MemoryRouter initialEntries={[path]}>
+        <Probe />
+        <Routes>
+          {purchasing.routes.map((r) => (
+            <Route key={r.path} path={r.path} element={r.element} />
+          ))}
+        </Routes>
+      </MemoryRouter>
+    </WorkContextProvider>,
   );
   return { router, ...view };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+});
 
 // Shell-level rules (one h1, nav, main, skip link) belong to the shell, which
 // these page tests do not mount; everything else must pass.
@@ -135,6 +143,87 @@ describe("new requisition", () => {
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
     expect(screen.getByText("Enter a product id, or a description and a category.")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("warns on tab close only once the form has unsaved lines", async () => {
+    stubFetch(() => json({}));
+    renderAt("/purchasing/requisitions/new");
+    const description = await screen.findByLabelText("Description");
+    const clean = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
+    fireEvent.change(description, { target: { value: "Laptop" } });
+    const dirty = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirty);
+    expect(dirty.defaultPrevented).toBe(true);
+  });
+
+  it("is not dirty just because the working legal entity was filled in", async () => {
+    window.localStorage.setItem("passage.workContext.tester", JSON.stringify({ legalEntityId: LE, siteId: "" }));
+    stubFetch(() => json({ id: LE, name: "Acme", code: "ACME" }));
+    renderAt("/purchasing/requisitions/new");
+    const description = await screen.findByLabelText("Description");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const untouched = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(untouched);
+    expect(untouched.defaultPrevented).toBe(false);
+    fireEvent.change(description, { target: { value: "Laptop" } });
+    const edited = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(edited);
+    expect(edited.defaultPrevented).toBe(true);
+  });
+
+  it("is not dirty when the working legal entity arrives after the form is open", async () => {
+    stubFetch(() => json({ id: LE, name: "Acme", code: "ACME" }));
+    let choose: (id: string) => void = () => undefined;
+    function Late() {
+      const [legalEntityId, setLegalEntityId] = useState("");
+      choose = setLegalEntityId;
+      return (
+        <WorkContext.Provider value={{ identity: "late", legalEntityId, siteId: "", setLegalEntityId, setSiteId: () => undefined }}>
+          <MemoryRouter initialEntries={["/purchasing/requisitions/new"]}>
+            <Routes>
+              {purchasing.routes.map((r) => (
+                <Route key={r.path} path={r.path} element={r.element} />
+              ))}
+            </Routes>
+          </MemoryRouter>
+        </WorkContext.Provider>
+      );
+    }
+    render(<Late />);
+    const description = await screen.findByLabelText("Description");
+    act(() => choose(LE));
+    await waitFor(() => expect(screen.getByLabelText("Legal entity")).not.toHaveValue(""));
+    const untouched = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(untouched);
+    expect(untouched.defaultPrevented).toBe(false);
+    fireEvent.change(description, { target: { value: "Laptop" } });
+    const edited = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(edited);
+    expect(edited.defaultPrevented).toBe(true);
+  });
+
+  it("opens More options and focuses the operating unit when it is invalid, and sends it when valid", async () => {
+    const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(requisition, 201) : json(requisition, 200, { ETag: '"1"' })));
+    const { container } = renderAt("/purchasing/requisitions/new");
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Laptop" } });
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "IT" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
+    const details = container.querySelector("details")!;
+    expect(details.open).toBe(false);
+    fireEvent.change(screen.getByLabelText("Operating unit id"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
+    await waitFor(() => expect(screen.getByLabelText("Operating unit id")).toHaveFocus());
+    expect(details.open).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("requisitions"), expect.objectContaining({ method: "POST" }));
+
+    fireEvent.change(screen.getByLabelText("Operating unit id"), { target: { value: VENDOR } });
+    fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit)?.method === "POST")).toBe(true));
+    const post = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "POST")!;
+    expect(JSON.parse(String((post[1] as RequestInit).body)).operatingUnitId).toBe(VENDOR);
   });
 
   it("posts the lines with an Idempotency-Key and opens the new requisition with its warnings", async () => {

@@ -107,6 +107,7 @@ segregation_denials := [
 	["platform.release.view", "POST", "/v1/platform/releases"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
+	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],
 	["party.write", "GET", "/v1/party/vendors:search"],
 	["party.vendor-bank.write", "GET", "/v1/party/customers:search"],
 ]
@@ -141,6 +142,7 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/ers-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoices/i1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],
@@ -608,6 +610,31 @@ test_credit_reservation_routes_are_service_only if {
 		not allowed(duty, "POST", "/v1/billing/credit-reservations/r1:commit")
 		not allowed(duty, "POST", "/v1/billing/credit-reservations/r1:release")
 	}
+}
+
+test_billing_sales_report_holds_only_the_service_only_invoice_duty if {
+	data.service_principals["billing-sales-report"] == ["sales.order.record-invoice"]
+	data.duties["sales.order.record-invoice"].service_only
+	"sales.order.record-invoice" in data.service_grants.billing.sales
+	not "sales.order.record-invoice" in data.service_grants.fulfillment.sales
+	allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:record-progress")
+	not allowed("sales.order.record-invoice", "PATCH", "/v1/sales/orders/o1")
+	not allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:confirm")
+	not allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:cancel")
+	not allowed("sales.order.record-invoice", "GET", "/v1/sales/order-progress")
+	not allowed("sales.order.read", "POST", "/v1/sales/orders/o1:record-progress")
+	not allowed("billing.invoice.post", "POST", "/v1/sales/orders/o1:record-progress")
+}
+
+test_billing_sales_report_operator_routes_split_view_and_post if {
+	allowed("billing.invoice.view", "GET", "/v1/billing/sales-reports")
+	allowed("billing.invoice.post", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.post", "GET", "/v1/billing/sales-reports")
+	not allowed("billing.invoice.maintain", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.maintain", "GET", "/v1/billing/sales-reports")
+	not allowed("billing.invoice.post", "POST", "/v1/billing/sales-reports/r1:post")
+	not allowed("sales.order.record-invoice", "POST", "/v1/billing/sales-reports/r1:retry")
 }
 
 test_edi_source_read_duties_open_only_their_get_routes if {
@@ -1933,4 +1960,45 @@ test_processmfg_service_grant_reads_features_only if {
 	not allowed("identity.feature.view", "GET", "/v1/authz/assignments")
 	not allowed("identity.feature.view", "POST", "/v1/identity/users")
 	not "identity.feature.maintain" in data.service_grants.processmfg.identity
+}
+
+inbox_routes := {
+	"procurement.inbox.read": "/v1/procurement/requisition-approvals",
+	"party.inbox.read": "/v1/party/pending-changes",
+	"ledger.inbox.read": "/v1/ledger/journal-batches",
+	"payables.inbox.read": "/v1/payables/open-items",
+}
+
+test_inbox_read_duties_are_service_only if {
+	every duty, _ in inbox_routes {
+		data.duties[duty].service_only == true
+	}
+}
+
+test_batch_grants_exactly_the_inbox_and_product_duties if {
+	data.service_grants.batch == {
+		"product": ["product.variants.explode", "product.released.read", "product.jobs.write"],
+		"purchasing": ["procurement.inbox.read"],
+		"party": ["party.inbox.read"],
+		"ledger": ["ledger.inbox.read"],
+		"payables": ["payables.inbox.read"],
+	}
+}
+
+test_inbox_read_duties_reach_only_their_list_route if {
+	every duty, route in inbox_routes {
+		allowed(duty, "GET", route)
+		not allowed(duty, "GET", concat("/", [route, "item-1"]))
+		not allowed(duty, "POST", route)
+		not allowed(duty, "POST", concat("/", [route, "item-1"]))
+		not allowed(duty, "GET", "/v1/inbox")
+	}
+}
+
+test_inbox_read_reaches_only_the_inbox if {
+	allowed("inbox.read", "GET", "/v1/inbox")
+	not allowed("inbox.read", "POST", "/v1/inbox")
+	not allowed("inbox.read", "GET", "/v1/inbox/item-1")
+	not allowed("inbox.read", "GET", "/v1/ledger/journal-batches")
+	not allowed("ledger.journal.read", "GET", "/v1/inbox")
 }

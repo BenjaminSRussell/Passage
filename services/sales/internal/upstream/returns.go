@@ -268,8 +268,12 @@ func (r *Returns) PostRMACredit(ctx context.Context, in store.ARCredit) (store.C
 	for _, t := range in.TaxLines {
 		taxLines = append(taxLines, map[string]string{"code": t.Code, "amount": t.Amount.StringFixed(2)})
 	}
+	invoiceLines := make([]map[string]any, 0, len(in.InvoiceLines))
+	for _, l := range in.InvoiceLines {
+		invoiceLines = append(invoiceLines, map[string]any{"lineNo": l.LineNo, "qty": l.Qty.String()})
+	}
 	body := map[string]any{"rmaId": in.RMAID, "rmaNumber": in.RMANumber, "legalEntityId": in.LegalEntityID, "invoiceNumber": in.InvoiceNumber, "invoiceId": in.InvoiceID,
-		"postingDate": in.PostingDate, "gross": in.Gross.StringFixed(2), "restocking": in.Restocking.StringFixed(2), "net": in.Net.StringFixed(2), "taxLines": taxLines}
+		"postingDate": in.PostingDate, "gross": in.Gross.StringFixed(2), "restocking": in.Restocking.StringFixed(2), "net": in.Net.StringFixed(2), "taxLines": taxLines, "invoiceLines": invoiceLines}
 	var out struct {
 		OpenItemID       string `json:"openItemId"`
 		DocumentNumber   string `json:"documentNumber"`

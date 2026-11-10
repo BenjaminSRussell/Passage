@@ -81,6 +81,9 @@ type PackFact struct {
 	// for a run started without a load object. The load must have run to completion for the pack to
 	// count (S11-b): see ReceivablesLoadOpen.
 	ReceivablesLoad string
+	// GLPosted is true for a gl_balances run whose company has an opening journal posted to the
+	// general ledger in every currency it holds a balance in.
+	GLPosted bool
 }
 
 // NoReceivablesLoadNote starts the note on a met packs_reconciled item for an open_items run started
@@ -105,6 +108,9 @@ func ReceivablesLoadOpen(pf PackFact) string {
 // are. A whole pack can be staged (NotPosted); an open_items run is staged only for its payables
 // lines, while its receivables lines that went through the receivables import count as loaded.
 func NotPostedRun(pf PackFact) string {
+	if pf.Pack == PackGLBalances && pf.GLPosted {
+		return ""
+	}
 	if why := NotPosted(pf.Pack); why != "" {
 		return why
 	}
