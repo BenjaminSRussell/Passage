@@ -86,7 +86,8 @@ export function compareValues(a: unknown, b: unknown): number {
   return collator.compare(left, right);
 }
 
-export function sortRows<T>(rows: T[], sort: ListSort | null, valueOf: (row: T, key: string) => unknown): T[] {
+/** groupOf puts rows of one group together first (for example one currency), so amounts are only compared within a group. */
+export function sortRows<T>(rows: T[], sort: ListSort | null, valueOf: (row: T, key: string) => unknown, groupOf?: (row: T) => unknown): T[] {
   if (!sort) {
     return rows;
   }
@@ -96,6 +97,12 @@ export function sortRows<T>(rows: T[], sort: ListSort | null, valueOf: (row: T, 
     .sort((x, y) => {
       const a = valueOf(x.row, sort.key);
       const b = valueOf(y.row, sort.key);
+      if (groupOf) {
+        const byGroup = compareValues(groupOf(x.row), groupOf(y.row));
+        if (byGroup !== 0) {
+          return byGroup;
+        }
+      }
       const aEmpty = a === null || a === undefined || a === "";
       const bEmpty = b === null || b === undefined || b === "";
       if (aEmpty || bEmpty) {
@@ -178,14 +185,16 @@ export interface ColumnShape {
 
 export const defaultVisible = (columns: ColumnShape[]) => columns.filter((c) => !c.defaultHidden).map((c) => c.key);
 
-export function reconcileView(view: SavedView, columns: ColumnShape[], filterKeys: string[]): { query: ListQuery; visible: string[] } {
+/** defs lets a saved choice for a select filter be dropped once its option no longer exists. */
+export function reconcileView(view: SavedView, columns: ColumnShape[], filterKeys: string[], defs: ListFilterDef[] = []): { query: ListQuery; visible: string[] } {
   const keys = new Set(columns.map((c) => c.key));
   const known = new Set(view.known);
   const kept = view.visible.filter((k) => keys.has(k));
   const added = columns.filter((c) => !known.has(c.key) && !c.defaultHidden).map((c) => c.key);
   const visible = [...kept, ...added];
   const allowed = new Set(filterKeys);
-  const filters = Object.fromEntries(Object.entries(view.query.filters).filter(([k]) => allowed.has(k)));
+  const choices = new Map(defs.flatMap((d) => (d.kind === "select" ? [[d.key, new Set(d.options.map((o) => o.value))] as const] : [])));
+  const filters = Object.fromEntries(Object.entries(view.query.filters).filter(([k, v]) => allowed.has(k) && (choices.get(k)?.has(v) ?? true)));
   const sort = view.query.sort && keys.has(view.query.sort.key) ? view.query.sort : null;
   return { query: { filters, sort }, visible: visible.length > 0 ? visible : defaultVisible(columns) };
 }

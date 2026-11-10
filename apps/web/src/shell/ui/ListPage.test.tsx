@@ -440,6 +440,17 @@ describe("ListPage saved views", () => {
     expect(screen.getByRole("group", { name: "Views" })).toHaveFocus();
   });
 
+  it("restores a deleted view, and its place as the default, with Undo", async () => {
+    const { user, storage } = await setUp();
+    await saveAs(user, "Temp");
+    await user.click(screen.getByRole("button", { name: "Make Temp the default" }));
+    await user.click(screen.getByRole("button", { name: "Delete Temp" }));
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByText("Restored view Temp")).toBeInTheDocument();
+    expect(JSON.parse(storage.data[viewStoreKey("ada", "invoices")])).toMatchObject({ views: [{ name: "Temp" }], defaultId: expect.any(String) });
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
   it("asks for a name and keeps views per person and per list", async () => {
     const { user, storage } = await setUp();
     await user.click(screen.getByRole("button", { name: "Views" }));

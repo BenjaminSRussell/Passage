@@ -396,6 +396,18 @@ describe("purchase orders", () => {
     expect(urls[urls.length - 1]).not.toContain("cursor=");
   });
 
+  it("keeps the loaded rows when Load more fails", async () => {
+    const summary = (id: string, number: string) => ({
+      id, number, legalEntityId: LE, vendorId: VENDOR, currency: "USD", approvalStatus: "DRAFT", documentStatus: "OPEN", total: "10.00", lineCount: 1, rowVersion: 1, createdAt: "2026-10-26T10:00:00Z",
+    });
+    stubFetch((url) => (url.includes("cursor=next") ? json({ code: "COM-0503", detail: "down" }, 503) : json({ items: [summary("a", "PO-A")], nextCursor: "next" })));
+    renderAt("/purchasing/purchase-orders");
+    expect(await screen.findByText("PO-A")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more purchase orders" }));
+    expect(await screen.findByText("Could not load purchase orders")).toBeInTheDocument();
+    expect(screen.getByText("PO-A")).toBeInTheDocument();
+  });
+
   it("creates an order with a trade-agreement-priced line and a charge", async () => {
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(purchaseOrder, 201) : json(purchaseOrder)));
     const { router } = renderAt("/purchasing/purchase-orders/new");

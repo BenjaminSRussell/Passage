@@ -129,6 +129,11 @@ export async function listItemGroups(signal?: AbortSignal): Promise<ItemGroup[]>
   return (body.items ?? []).map((row) => ({ id: str(row, "id"), code: str(row, "code"), name: str(row, "name") }));
 }
 
+export async function createItemGroup(input: { code: string; name: string }): Promise<ItemGroup> {
+  const row = await send<Raw>("/setup/item-groups", { method: "POST", body: JSON.stringify(input) });
+  return { id: str(row, "id"), code: str(row, "code"), name: str(row, "name") };
+}
+
 export async function createProduct(input: NewProduct, key: string): Promise<Product> {
   const body = { ...input, description: input.description || undefined };
   return toProduct(await send<Raw>("/products", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key } }));

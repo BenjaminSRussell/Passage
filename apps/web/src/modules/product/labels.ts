@@ -1,6 +1,7 @@
 import type { Lifecycle, ProductType, Subtype, TrackingFlags } from "./api/client";
 
 export const DUTY_WRITE = "product.write";
+export const DUTY_SETUP = "product.setup.write";
 
 export const lifecycleLabel: Record<Lifecycle, string> = {
   draft: "Draft",

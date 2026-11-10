@@ -397,3 +397,33 @@ describe("edit product", () => {
     expect(await screen.findByText("must not be empty")).toBeInTheDocument();
   });
 });
+
+describe("item groups", () => {
+  it("lists the groups and adds one for someone who sets products up", async () => {
+    let created = false;
+    handler = (call) => {
+      if (isGroups(call) && call.method === "POST") {
+        created = true;
+        return json(201, { id: "0195f0a0-0000-7000-8000-0000000000cc", code: "FIN", name: "Finished goods" });
+      }
+      return isGroups(call) ? json(200, created ? { items: [...groupList.items, { id: "x", code: "FIN", name: "Finished goods" }] } : groupList) : undefined;
+    };
+    const { container } = renderAt("/product/setup/item-groups", ["product.read", "product.setup.write"]);
+    expect(await screen.findByText("Raw material")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add item group" }));
+    expect(await screen.findByText("Enter a code for the item group.")).toBeInTheDocument();
+    type("Code", " fin ");
+    type("Name", "Finished goods");
+    fireEvent.click(screen.getByRole("button", { name: "Add item group" }));
+    expect(await screen.findByText("Finished goods")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ code: "FIN", name: "Finished goods" });
+    expect(violations(container)).toEqual([]);
+  });
+
+  it("shows the list without the form to someone who may not set up", async () => {
+    handler = (call) => (isGroups(call) ? json(200, groupList) : undefined);
+    renderAt("/product/setup/item-groups", ["product.read"]);
+    expect(await screen.findByText("Raw material")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add item group" })).toBeNull();
+  });
+});

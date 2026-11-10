@@ -137,7 +137,8 @@ function usePurchaseOrderRows(query: ListQuery): ListData<PurchaseOrderSummary> 
     [status, vendorId, cursor],
   );
   return {
-    rows: page.error ? [] : current.rows,
+    // A failed Load more keeps the rows already loaded; only a failed first page has none to show.
+    rows: page.error && cursor === undefined ? [] : current.rows,
     loading: (cursor === undefined && page.loading) || (!current.ready && !page.error),
     loadingMore: cursor !== undefined && page.loading,
     error: page.error ?? undefined,

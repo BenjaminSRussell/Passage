@@ -4,7 +4,7 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Badge, Button, Card, DataTable, EmptyState, Input, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { listProducts, ProductApiError, type Product } from "./api/client";
-import { DUTY_WRITE, productTypeLabel, subtypeLabel, trackingFlags, trackingLabel } from "./labels";
+import { DUTY_SETUP, DUTY_WRITE, productTypeLabel, subtypeLabel, trackingFlags, trackingLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProductProblem } from "./ProductProblem";
 import { useItemGroups, useProduct } from "./useProduct";
@@ -13,7 +13,9 @@ const PAGE_SIZE = 50;
 
 export function ProductHome() {
   const navigate = useNavigate();
-  const canWrite = holdsDuty(usePrincipalDuties(), DUTY_WRITE);
+  const duties = usePrincipalDuties();
+  const canWrite = holdsDuty(duties, DUTY_WRITE);
+  const canSetUp = holdsDuty(duties, DUTY_SETUP);
   return (
     <>
       <PageHeader
@@ -28,6 +30,7 @@ export function ProductHome() {
           action={
             <>
               <Button onClick={() => navigate("/product/items")}>Open the catalog</Button>
+              {canSetUp ? <Button onClick={() => navigate("/product/setup/item-groups")}>Set up item groups</Button> : null}
               {canWrite ? (
                 <Button variant="primary" onClick={() => navigate("/product/items/new")}>
                   New product
