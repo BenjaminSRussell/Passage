@@ -107,6 +107,7 @@ segregation_denials := [
 	["platform.release.view", "POST", "/v1/platform/releases"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
+	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],
 	["party.write", "GET", "/v1/party/vendors:search"],
 	["party.vendor-bank.write", "GET", "/v1/party/customers:search"],
 ]

@@ -14,6 +14,7 @@ const VENDOR = "11111111-1111-4111-8111-111111111111";
 const ENTITY = "22222222-2222-4222-8222-222222222222";
 const INVOICE = "33333333-3333-4333-8333-333333333333";
 const RECEIPT = "0190a000-0000-7000-8000-000000000010";
+const LEDGER = "0190a000-0000-7000-8000-000000000030";
 const ORDER = "0190a000-0000-7000-8000-000000000020";
 
 function invoice(patch: Partial<Invoice> = {}): Invoice {
@@ -30,7 +31,7 @@ function invoice(patch: Partial<Invoice> = {}): Invoice {
     ledgerId: ENTITY,
     fiscalPeriodId: ENTITY,
     total: "15.00",
-    ledgerEntryId: "je-9",
+    ledgerEntryId: LEDGER,
     createdAt: "2026-10-26T10:00:00Z",
     lines: [{ lineNo: 1, receiptId: RECEIPT, receiptLineNo: 1, qty: "6", unitPrice: "2.5", amount: "15.00", standardCost: false }],
     ...patch,
@@ -103,6 +104,21 @@ describe("vendor invoice list", () => {
     expect(invoiceCalls().at(-1)?.url.searchParams.has("vendorId")).toBe(false);
   });
 
+  it("says nothing matches when filters are active and clears them", async () => {
+    api((url) => (url.searchParams.get("status") === "AUDIT_REJECTED" ? { items: [] } : { items: [invoice()] }));
+    renderAt("/ap-invoices");
+    await screen.findByRole("link", { name: "INV-1" });
+
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "AUDIT_REJECTED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No vendor invoices match these filters")).toBeInTheDocument();
+    expect(screen.queryByText("No vendor invoices")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByRole("link", { name: "INV-1" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Status")).toHaveValue("");
+  });
+
   it("shows a loading state before the first page arrives", () => {
     api(() => ({ items: [] }));
     renderAt("/ap-invoices");
@@ -146,7 +162,7 @@ describe("vendor invoice detail", () => {
     expect(await screen.findByRole("link", { name: "RCV-00000007" })).toHaveAttribute("href", `/receiving/receipts/${RECEIPT}`);
     expect(await screen.findByRole("link", { name: "View the purchase order" })).toHaveAttribute("href", `/purchasing/purchase-orders/${ORDER}`);
     expect(screen.getByText("Acme Supply (V-100)")).toBeInTheDocument();
-    expect(screen.getByText("je-9")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Journal entry 0190a000" })).toHaveAttribute("href", `/ledger/entries/${LEDGER}`);
     expect(screen.getByText("Posted")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Invoice lines" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -157,6 +173,27 @@ describe("vendor invoice detail", () => {
     renderAt(`/ap-invoices/${INVOICE}`);
     expect(await screen.findByRole("heading", { name: "Invoice INV-1" })).toBeInTheDocument();
     expect(server.calls.filter((c) => c.url.pathname.startsWith("/api/v1/receiving/invoices"))).toHaveLength(1);
+  });
+
+  it("shows references as plain text, with no receipt fetch, when the user cannot open those pages", async () => {
+    api(() => ({ items: [invoice()] }));
+    renderAt(`/ap-invoices/${INVOICE}`, ["receiving.ap.inquire"]);
+
+    expect(await screen.findByText("Receipt 0190a000")).toBeInTheDocument();
+    expect(screen.getByText("Journal entry 0190a000")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Receipt|Journal entry|purchase order/i })).toBeNull();
+    expect(server.calls.some((c) => c.url.pathname.startsWith("/api/v1/receiving/receipts"))).toBe(false);
+  });
+
+  it("keeps the receipt text plain when the receipt fetch is refused", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/receiving/invoices") return json(200, { items: [invoice()] });
+      if (url.pathname === `/api/v1/receiving/invoices/${INVOICE}`) return json(200, invoice());
+      return json(403, { code: "AUTH-0003", detail: "missing duty" });
+    };
+    renderAt(`/ap-invoices/${INVOICE}`);
+    expect(await screen.findByRole("heading", { name: "Invoice INV-1" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Receipt 0190a000" })).toBeInTheDocument();
   });
 
   it("explains a hold and says no ledger entry exists yet", async () => {
@@ -171,7 +208,8 @@ describe("vendor invoice detail", () => {
     api(() => ({ items: [invoice({ status: "AUDIT_REJECTED", rejectReason: "Duplicate of INV-0", rejectedBy: "ana", rejectedAt: "2026-10-28T09:00:00Z" })] }));
     renderAt(`/ap-invoices/${INVOICE}`);
     expect(await screen.findByText(/Duplicate of INV-0/)).toBeInTheDocument();
-    expect(screen.getByText(/Rejected by ana on 2026-10-28/)).toBeInTheDocument();
+    expect(screen.getByText(/Rejected by another user on 2026-10-28/)).toBeInTheDocument();
+    expect(screen.queryByText(/ana/)).toBeNull();
   });
 
   it("shows a loading state", () => {

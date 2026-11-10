@@ -2,12 +2,14 @@ import { useQuery, useQueries } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ProblemMessage } from "../../shell/errors";
+import { holdsDuty } from "../../shell/dutyGate";
 import { EntityName } from "../../shell/lookup/EntityName";
+import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
 import { fetchReceipt, type Receipt } from "../receiving/api/client";
 import { ApiError, fetchInvoice, type Invoice } from "./api/client";
-import { invoiceStatusLabel, invoiceStatusTone } from "./parts";
+import { invoiceStatusLabel, invoiceStatusTone, UUID } from "./parts";
 
 type InvoiceLine = Invoice["lines"][number];
 
@@ -21,6 +23,15 @@ function Detail({ term, children }: { term: string; children: ReactNode }) {
 }
 
 const when = (stamp?: string) => (stamp ? stamp.slice(0, 10) : "");
+const shortRef = (id: string) => id.slice(0, 8);
+
+const RECEIPT_DUTY = "receiving.receipt.maintain";
+const ORDER_DUTY = "procurement.purchase-order.inquire";
+const LEDGER_DUTY = "ledger.journal.read";
+
+function Reference({ to, allowed, children }: { to: string; allowed: boolean; children: ReactNode }) {
+  return allowed ? <Link to={to}>{children}</Link> : <span>{children}</span>;
+}
 
 function HoldNotice({ invoice }: { invoice: Invoice }) {
   if (invoice.status === "AUDIT_BLOCKED") {
@@ -34,30 +45,39 @@ function HoldNotice({ invoice }: { invoice: Invoice }) {
     return (
       <Alert tone="danger" title="Rejected after audit">
         {invoice.rejectReason ? `${invoice.rejectReason}. ` : ""}
-        {invoice.rejectedBy ? `Rejected by ${invoice.rejectedBy} on ${when(invoice.rejectedAt)}.` : ""}
+        {invoice.rejectedBy ? `Rejected by another user on ${when(invoice.rejectedAt)}.` : ""}
       </Alert>
     );
   }
   return invoice.releasedBy ? (
     <Alert tone="success" title="Released from audit hold">
-      Released by {invoice.releasedBy} on {when(invoice.releasedAt)}.
+      Released by another user on {when(invoice.releasedAt)}.
     </Alert>
   ) : null;
 }
 
 export function InvoiceDetailPage() {
   const { id = "" } = useParams();
+  const duties = usePrincipalDuties();
+  const canReceipt = holdsDuty(duties, RECEIPT_DUTY);
+  const canOrder = holdsDuty(duties, ORDER_DUTY);
+  const canLedger = holdsDuty(duties, LEDGER_DUTY);
   const result = useQuery({ queryKey: ["ap-invoices", "invoice", id], queryFn: () => fetchInvoice(id) });
   const invoice = result.data;
   const receiptIds = [...new Set(invoice?.lines.map((l) => l.receiptId) ?? [])];
-  const receipts = useQueries({ queries: receiptIds.map((receiptId) => ({ queryKey: ["receiving", "receipt", receiptId], queryFn: () => fetchReceipt(receiptId) })) });
+  const receipts = useQueries({ queries: receiptIds.map((receiptId) => ({ queryKey: ["receiving", "receipt", receiptId], queryFn: () => fetchReceipt(receiptId), enabled: canReceipt })) });
   const receiptById = new Map<string, Receipt>(receipts.flatMap((r) => (r.data ? [[r.data.id, r.data] as [string, Receipt]] : [])));
   const orderIds = [...new Set([...receiptById.values()].map((r) => r.purchaseOrderId))];
 
-  const receiptLabel = (receiptId: string) => receiptById.get(receiptId)?.receiptNumber ?? "Receipt";
+  const receiptLabel = (receiptId: string) => receiptById.get(receiptId)?.receiptNumber ?? `Receipt ${shortRef(receiptId)}`;
   const columns: DataTableColumn<InvoiceLine>[] = [
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "receiptId", header: "Receipt", render: (l) => <Link to={`/receiving/receipts/${encodeURIComponent(l.receiptId)}`}>{receiptLabel(l.receiptId)}</Link> },
+    { key: "receiptId", header: "Receipt", render: (l) => (
+        <Reference to={`/receiving/receipts/${encodeURIComponent(l.receiptId)}`} allowed={canReceipt}>
+          {receiptLabel(l.receiptId)}
+        </Reference>
+      ),
+    },
     { key: "receiptLineNo", header: "Receipt line", align: "end" },
     { key: "qty", header: "Quantity", align: "end" },
     { key: "unitPrice", header: "Unit price", align: "end" },
@@ -112,10 +132,20 @@ export function InvoiceDetailPage() {
               <Detail term="Posting date">{invoice.postingDate}</Detail>
               <Detail term="Total">{`${invoice.total} ${invoice.currency}`}</Detail>
               <Detail term="Entered">{invoice.source === "ERS" ? "Self-billed by us" : "By hand"}</Detail>
-              <Detail term="Ledger entry">{invoice.ledgerEntryId || "None yet; it is created when the invoice is released"}</Detail>
+              <Detail term="Ledger entry">
+                {invoice.ledgerEntryId ? (
+                  <Reference to={`/ledger/entries/${encodeURIComponent(invoice.ledgerEntryId)}`} allowed={canLedger && UUID.test(invoice.ledgerEntryId)}>
+                    {`Journal entry ${shortRef(invoice.ledgerEntryId)}`}
+                  </Reference>
+                ) : (
+                  "None yet; it is created when the invoice is released"
+                )}
+              </Detail>
               {orderIds.map((orderId) => (
                 <Detail key={orderId} term="Purchase order">
-                  <Link to={`/purchasing/purchase-orders/${encodeURIComponent(orderId)}`}>View the purchase order</Link>
+                  <Reference to={`/purchasing/purchase-orders/${encodeURIComponent(orderId)}`} allowed={canOrder}>
+                    {canOrder ? "View the purchase order" : `Purchase order ${shortRef(orderId)}`}
+                  </Reference>
                 </Detail>
               ))}
             </dl>

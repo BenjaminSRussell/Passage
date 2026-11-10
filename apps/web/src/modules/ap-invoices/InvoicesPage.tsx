@@ -35,6 +35,13 @@ export function InvoicesPage() {
   const items = result.data?.pages.flatMap((p) => p.items) ?? [];
   const forbidden = result.error instanceof ApiError && result.error.status === 403;
 
+  const filtered = applied.vendorId !== "" || applied.status !== "";
+  const clearFilters = () => {
+    const none: Filters = { vendorId: "", status: "" };
+    setDraft(none);
+    setApplied(none);
+  };
+
   function apply(event: FormEvent) {
     event.preventDefault();
     setApplied(draft);
@@ -44,7 +51,7 @@ export function InvoicesPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Vendor invoices"
-        description="Every vendor invoice that has been entered, with whether it is posted or held for audit."
+        description="Vendor invoices that have been posted, held for audit or rejected after audit."
         actions={
           <Link className={buttonClassName("primary")} to="/ap-invoices/post">
             Post vendor invoice
@@ -80,12 +87,16 @@ export function InvoicesPage() {
         </Alert>
       ) : !result.isPending && items.length === 0 ? (
         <EmptyState
-          title="No vendor invoices"
-          description="Invoices appear here once they are posted against goods you have received."
+          title={filtered ? "No vendor invoices match these filters" : "No vendor invoices"}
+          description={filtered ? "Try a different vendor or status." : "Invoices appear here once they are posted against goods you have received."}
           action={
-            <Link className={buttonClassName("primary")} to="/ap-invoices/grir">
-              See goods waiting for an invoice
-            </Link>
+            filtered ? (
+              <Button onClick={clearFilters}>Clear filters</Button>
+            ) : (
+              <Link className={buttonClassName("primary")} to="/ap-invoices/grir">
+                See goods waiting for an invoice
+              </Link>
+            )
           }
         />
       ) : (
