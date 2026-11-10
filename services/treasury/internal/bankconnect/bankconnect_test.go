@@ -212,7 +212,9 @@ func TestCheckURL_Table(t *testing.T) {
 		wantFail bool
 	}{
 		{"https://bank.example.com/ebics", false, false},
-		{"https://203.0.113.9/ebics", false, false},
+		{"https://93.184.216.34/ebics", false, false},
+		{"https://[2606:2800:220:1::1]/ebics", false, false},
+		{"https://203.0.113.9/ebics", false, true},
 		{"http://bank.example.com/ebics", false, true},
 		{"http://bank.example.com/ebics", true, true},
 		{"http://localhost:8080", false, true},
@@ -244,6 +246,40 @@ func TestCheckURL_Table(t *testing.T) {
 		AllowLoopback(false)
 		if (err != nil) != c.wantFail {
 			t.Errorf("CheckURL(%q) dev=%t: err = %v, want failure %t", c.url, c.dev, err, c.wantFail)
+		}
+	}
+}
+
+func TestGuardDial_AllowlistsGlobalUnicastOnly(t *testing.T) {
+	cases := []struct {
+		addr    string
+		blocked bool
+	}{
+		{"93.184.216.34:443", false}, {"[2606:2800:220:1::1]:443", false}, {"[::ffff:93.184.216.34]:443", false},
+		{"0.1.2.3:443", true}, {"10.0.0.1:443", true}, {"100.64.0.1:443", true}, {"127.0.0.1:443", true},
+		{"169.254.169.254:443", true}, {"172.16.0.1:443", true}, {"192.0.0.9:443", true}, {"192.0.2.1:443", true},
+		{"192.168.0.1:443", true}, {"198.18.0.1:443", true}, {"198.51.100.1:443", true}, {"203.0.113.1:443", true},
+		{"224.0.0.1:443", true}, {"240.0.0.1:443", true}, {"255.255.255.255:443", true},
+		{"[::]:443", true}, {"[::1]:443", true}, {"[::7f00:1]:443", true}, {"[fc00::1]:443", true}, {"[fd12::1]:443", true},
+		{"[fe80::1]:443", true}, {"[2001:db8::1]:443", true}, {"[ff02::1]:443", true},
+		{"[::ffff:127.0.0.1]:443", true}, {"[::ffff:10.0.0.1]:443", true},
+		{"[64:ff9b::7f00:1]:443", true}, {"[64:ff9b::a00:1]:443", true}, {"[64:ff9b:1::7f00:1]:443", true}, {"[64:ff9b:1::a00:1]:443", true},
+		{"[2002:7f00:1::]:443", true}, {"[2002:a00:1::]:443", true},
+		{"bank.example.com:443", true},
+	}
+	for _, c := range cases {
+		if err := guardDial("tcp", c.addr, nil); (err != nil) != c.blocked {
+			t.Errorf("guardDial(%s) = %v, blocked want %t", c.addr, err, c.blocked)
+		}
+	}
+	AllowLoopback(true)
+	defer AllowLoopback(false)
+	if guardDial("tcp", "127.0.0.1:443", nil) != nil || guardDial("tcp", "[::1]:443", nil) != nil {
+		t.Error("loopback must pass in dev")
+	}
+	for _, a := range []string{"[64:ff9b::7f00:1]:443", "[2002:7f00:1::]:443", "10.0.0.1:443"} {
+		if guardDial("tcp", a, nil) == nil {
+			t.Errorf("%s must stay blocked in dev", a)
 		}
 	}
 }
