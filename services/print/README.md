@@ -55,8 +55,10 @@ from this pod; nothing connects inbound to the cluster.
   an IPP device (`ErrWrongDocumentFormat`). No job carries PCL yet, so `PCL_6` devices are
   never offered a job; see NOT-IMPLEMENTED.md.
 - **Business documents as PDF** (`POST /print/v1/documents:render`, duty `print.document.render`,
-  issue #530; `internal/domain/document.go`): the caller sends a purchase order, customer invoice
-  or packing slip as data and gets an A4 PDF back. Nothing is stored and no printer is used. The
+  issue #530; `internal/domain/document.go`): the caller sends a purchase order, customer invoice,
+  packing slip or remittance advice (`REMITTANCE_ADVICE`, sent by the payables payment run page,
+  #528: the vendor as counterparty, one line per invoice the payment settled with the discount,
+  tax withheld and amount paid, and the total paid) as data and gets an A4 PDF back. Nothing is stored and no printer is used. The
   layout: the legal entity's name and address with the title and document number; the
   counterparty (`counterparty`: the vendor, or the customer as bill-to or ship-to) with its
   address, up to two `additionalParties` (deliver to, ship from) and the header fields; the line

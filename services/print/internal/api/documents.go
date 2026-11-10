@@ -12,7 +12,8 @@ import (
 const dutyRenderDocument = "print.document.render"
 
 // renderDocument serves POST /print/v1/documents:render (issue #530). The caller sends a
-// purchase order, customer invoice or packing slip as data; the answer is the PDF. Nothing
+// purchase order, customer invoice, packing slip or remittance advice (#528) as data; the
+// answer is the PDF. Nothing
 // is stored and no printer is involved, so the call needs no idempotency key and repeating
 // it returns the same bytes. X-Passage-Document-Pages carries the page count, and
 // X-Passage-Unprintable-Characters, when present, the number of characters the document

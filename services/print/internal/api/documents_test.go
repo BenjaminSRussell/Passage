@@ -50,6 +50,25 @@ func TestRenderDocument_AcceptsUnicodeAndCountsWhatTheFontsLack(t *testing.T) {
 	}
 }
 
+// The remittance advice exactly as the payables payment run page sends it (#528).
+const remittanceDoc = `{"documentType":"REMITTANCE_ADVICE","number":"E2E-1","legalEntity":{"name":"Cedar Ridge Pumps","address":[]},` +
+	`"counterparty":{"label":"Vendor","name":"Contoso Ltd (V-1)","address":[]},` +
+	`"fields":[{"label":"Payment date","value":"2026-11-20"},{"label":"Payment method","value":"ACH credit"},{"label":"Currency","value":"USD"}],` +
+	`"columns":[{"header":"Invoice"},{"header":"Invoice date"},{"header":"Amount open","align":"R"},{"header":"Discount","align":"R"},{"header":"Tax withheld","align":"R"},{"header":"Paid","align":"R"}],` +
+	`"lines":[["INV-1001","2026-09-01","600.10","20.00","12.00","568.10"],["INV-1002","2026-09-03","400.00","0.00","0.00","400.00"]],` +
+	`"totals":[{"label":"Discount taken","value":"20.00"},{"label":"Tax withheld","value":"12.00"},{"label":"Total paid USD","value":"968.10"}]}`
+
+func TestRenderDocument_RendersARemittanceAdvice(t *testing.T) {
+	h := router(newMemStore(), &fakeSender{})
+	rec := call(t, h, http.MethodPost, "/print/v1/documents:render", remittanceDoc, "print.document.render", "")
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Body.String(), "%PDF-") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String()[:min(200, rec.Body.Len())])
+	}
+	if rec.Header().Get("X-Passage-Document-Pages") != "1" {
+		t.Fatalf("pages = %q", rec.Header().Get("X-Passage-Document-Pages"))
+	}
+}
+
 func TestRenderDocument_TooManyLinesHasItsOwnCode(t *testing.T) {
 	h := router(newMemStore(), &fakeSender{})
 	lines := strings.TrimSuffix(strings.Repeat(`["Casting","4"],`, 501), ",")

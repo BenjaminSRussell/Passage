@@ -77,6 +77,28 @@ func multiPagePackingSlip() DocumentRequest {
 	return d
 }
 
+// remittanceAdvice is one payment of a payment run as the payables page sends it (#528):
+// the vendor, the invoices the payment settled with discount and tax withheld, and the
+// totals. The request has the same shape as apps/web/src/modules/payables/remittanceDocument.ts.
+func remittanceAdvice() DocumentRequest {
+	return DocumentRequest{
+		DocumentType: DocRemittanceAdvice,
+		Number:       "E2E-20261120-0001",
+		LegalEntity:  DocParty{Name: "Cedar Ridge Pumps, Inc.", Address: []string{"400 Industrial Way", "Cedar Rapids, IA 52404", "US"}},
+		Counterparty: &DocParty{Label: "Vendor", Name: "Ironbridge Foundry (V-20004)"},
+		Fields:       []DocField{{Label: "Payment date", Value: "2026-11-20"}, {Label: "Payment method", Value: "ACH credit"}, {Label: "Currency", Value: "USD"}},
+		Columns: []DocColumn{
+			{Header: "Invoice"}, {Header: "Invoice date"}, {Header: "Amount open", Align: "R"},
+			{Header: "Discount", Align: "R"}, {Header: "Tax withheld", Align: "R"}, {Header: "Paid", Align: "R"},
+		},
+		Lines: [][]string{
+			{"INV-1001", "2026-09-01", "600.10", "20.00", "12.00", "568.10"},
+			{"INV-1002", "2026-09-03", "400.00", "0.00", "0.00", "400.00"},
+		},
+		Totals: []DocField{{Label: "Discount taken", Value: "20.00"}, {Label: "Tax withheld", Value: "12.00"}, {Label: "Total paid USD", Value: "968.10"}},
+	}
+}
+
 // dumpPDF writes a rendered document to DOCUMENT_PDF_DIR, when set, to look at.
 func dumpPDF(t *testing.T, name string, pdf []byte) {
 	if dir := os.Getenv("DOCUMENT_PDF_DIR"); dir != "" {
@@ -109,6 +131,7 @@ func TestRenderDocument_MatchesGoldenAndIsDeterministic(t *testing.T) {
 		"purchase-order.pdf":       sampleDocument(DocPurchaseOrder),
 		"invoice-unicode.pdf":      unicodeInvoice(),
 		"packing-slip-3-pages.pdf": multiPagePackingSlip(),
+		"remittance-advice.pdf":    remittanceAdvice(),
 	}
 	for name, d := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -593,7 +616,7 @@ func TestRenderDocument_KeepsAllTextInsideThePage(t *testing.T) {
 	}
 	rapid.Check(t, func(t *rapid.T) {
 		d := DocumentRequest{
-			DocumentType: rapid.SampledFrom([]string{DocPurchaseOrder, DocCustomerInvoice, DocPackingSlip}).Draw(t, "type"),
+			DocumentType: rapid.SampledFrom([]string{DocPurchaseOrder, DocCustomerInvoice, DocPackingSlip, DocRemittanceAdvice}).Draw(t, "type"),
 			Number:       name(t, "number"),
 			LegalEntity:  party(t, "entity"),
 			Fields:       fields(t, "fields"),
