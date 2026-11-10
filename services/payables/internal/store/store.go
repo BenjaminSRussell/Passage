@@ -78,6 +78,7 @@ type Filter struct {
 	Currency      string
 	Status        string
 	OpenOnly      bool
+	HeldOnly      bool
 	AfterDue      string
 	AfterID       string
 }
@@ -233,9 +234,10 @@ func (s *Postgres) List(ctx context.Context, f Filter, limit int) ([]OpenItem, e
 			and ($6::text is null or status = $6::text)
 			and (not $7::bool or status not in ('SETTLED', 'REVERSED'))
 			and ($8::date is null or (due_date, id) > ($8::date, $9::uuid))
+			and (not $11::bool or payment_hold)
 			order by due_date, id limit $10`,
 			nullable(f.LegalEntityID), nullable(f.VendorID), nullable(f.DueFrom), nullable(f.DueOnOrBy), nullable(f.Currency), nullable(f.Status),
-			f.OpenOnly, nullable(f.AfterDue), nullable(f.AfterID), limit)
+			f.OpenOnly, nullable(f.AfterDue), nullable(f.AfterID), limit, f.HeldOnly)
 		if err != nil {
 			return err
 		}

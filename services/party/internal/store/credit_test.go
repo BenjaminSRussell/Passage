@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -332,6 +333,35 @@ func TestCreditLimit_DecisionReasonLimitCountsCharacters(t *testing.T) {
 	decided, err := s.DecidePendingChange(asUser(1, "", approver), res.Pending.ID, false, strings.Repeat("é", 500))
 	if err != nil || decided.Reason == nil || *decided.Reason != strings.Repeat("é", 500) {
 		t.Fatalf("500 Unicode characters: %+v, %v", decided, err)
+	}
+}
+
+func TestCreditLimit_ListPendingChangesPagesNewestFirstAndIsScoped(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	customerID := customerWithLimit(t, app, "50000.00")
+	res, err := s.RequestCreditLimit(asUser(1, legalEntityA, requester), customerID, "60000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListPendingChanges(asUser(1, legalEntityA, approver), 10, time.Time{}, "")
+	if err != nil || len(got) != 1 || got[0].ID != res.Pending.ID {
+		t.Fatalf("list = %+v, %v", got, err)
+	}
+	if past, err := s.ListPendingChanges(asUser(1, legalEntityA, approver), 10, got[0].RequestedAt, got[0].ID); err != nil || len(past) != 0 {
+		t.Fatalf("after the only change = %+v, %v", past, err)
+	}
+	if other, err := s.ListPendingChanges(asUser(1, legalEntityB, approver), 10, time.Time{}, ""); err != nil || len(other) != 0 {
+		t.Fatalf("other legal entity = %+v, %v", other, err)
+	}
+	if other, err := s.ListPendingChanges(asUser(2, "", approver), 10, time.Time{}, ""); err != nil || len(other) != 0 {
+		t.Fatalf("other tenant = %+v, %v", other, err)
+	}
+	if _, err := s.DecidePendingChange(asUser(1, legalEntityA, approver), res.Pending.ID, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if decided, err := s.ListPendingChanges(asUser(1, legalEntityA, approver), 10, time.Time{}, ""); err != nil || len(decided) != 0 {
+		t.Fatalf("a decided change is still listed: %+v, %v", decided, err)
 	}
 }
 

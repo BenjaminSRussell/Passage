@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/api"
+	"github.com/BenjaminSRussell/passage/services/batch/internal/inbox"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/jobs"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/notifyout"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/store"
@@ -69,6 +70,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	aggregator, err := loadInbox(getenv)
+	if err != nil {
+		return err
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -79,7 +84,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	a := api.New(store.New(pool)).WithInbox(aggregator)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -176,6 +181,35 @@ func (c *dispatchConfig) dispatcher(pool *pgxpool.Pool) *jobs.Dispatcher {
 		MaxAttempts: c.maxAttempts,
 		RetryAfter:  c.retryAfter,
 	}
+}
+
+func loadInbox(getenv func(string) string) (*inbox.Aggregator, error) {
+	endpoints := inbox.Endpoints{
+		PurchasingURL: getenv("PURCHASING_URL"), PartyURL: getenv("PARTY_URL"),
+		LedgerURL: getenv("LEDGER_URL"), PayablesURL: getenv("PAYABLES_URL"),
+	}
+	var signer *tenant.ServiceSigner
+	if endpoints != (inbox.Endpoints{}) {
+		if getenv(tenant.EnvServiceName) != serviceName {
+			return nil, fmt.Errorf("the inbox source URLs require %s=%s", tenant.EnvServiceName, serviceName)
+		}
+		var err error
+		if signer, err = tenant.ServiceSignerFromEnv(getenv); err != nil {
+			return nil, err
+		}
+		if signer == nil {
+			return nil, fmt.Errorf("the inbox source URLs require %s or %s", tenant.EnvServiceSigningKey, tenant.EnvServiceSigningFile)
+		}
+	}
+	timeout, err := durationEnv(getenv, "INBOX_SOURCE_TIMEOUT", inbox.DefaultSourceTimeout)
+	if err != nil {
+		return nil, err
+	}
+	concurrency, err := intEnv(getenv, "INBOX_CONCURRENCY", inbox.DefaultConcurrency)
+	if err != nil {
+		return nil, err
+	}
+	return &inbox.Aggregator{Sources: inbox.NewSources(endpoints, signer, timeout), SourceTimeout: timeout, Concurrency: concurrency}, nil
 }
 
 func durationEnv(getenv func(string) string, key string, fallback time.Duration) (time.Duration, error) {

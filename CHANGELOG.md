@@ -10,6 +10,11 @@ release may change public APIs.
 
 ### Added
 
+- batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
+  approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
+  source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners
+  gain the matching read paths: party `GET /v1/party/pending-changes`, payables `held=true` on `GET /v1/payables/open-items`, and
+  the narrow duties `procurement.inbox.read`, `ledger.inbox.read`, `party.inbox.read` and `payables.inbox.read`.
 - Billing: posted invoices and credit notes book their GL journal without an API request. An auto-book worker (`BILLING_GL_AUTOBOOK_TENANT_IDS`, `BILLING_GL_AUTOBOOK_INTERVAL`; chart `autoBook`) runs the `gl-postings` run per tenant and legal entity, idempotent per document and safe to retry after a lost ledger answer; the `outbox-billing` Debezium connector (CDC migrations 0012-0013, `debezium-cdc-billing` secret, `passage.billing.invoice` ACL) publishes billing's events, with a deploy test that checks the route against the AsyncAPI channel and ACLs (#29).
 
 ### Fixed
