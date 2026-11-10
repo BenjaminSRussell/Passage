@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -114,8 +115,18 @@ func (f *fakeStore) GetSavedConfiguration(_ context.Context, id, productID strin
 	c.BelongsToProduct = c.MasterID == productID
 	return c, nil
 }
-func (f *fakeStore) ListProducts(context.Context, int) ([]domain.Product, error) {
-	return f.created, nil
+func (f *fakeStore) ListProducts(_ context.Context, q, after string, limit int) ([]domain.Product, error) {
+	var out []domain.Product
+	for _, p := range f.created {
+		if p.ProductNumber > after && strings.Contains(strings.ToLower(p.ProductNumber+" "+p.Name), strings.ToLower(q)) {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ProductNumber < out[j].ProductNumber })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 func (f *fakeStore) ListReleasedIDs(_ context.Context, after string, limit int) ([]string, error) {
 	var out []string
@@ -520,6 +531,43 @@ func TestListReleasedPagesByKeyset(t *testing.T) {
 	}
 	if denied := do(r, http.MethodGet, "/v1/product/released-products", "", "product.write"); denied.Code != http.StatusForbidden {
 		t.Fatalf("missing read duty %d", denied.Code)
+	}
+}
+
+func TestListProductsPagesByKeysetAndFiltersByText(t *testing.T) {
+	f := newFake()
+	r := newRouter(f)
+	for _, n := range []string{"A1", "A2", "B1"} {
+		body := fmt.Sprintf(`{"productNumber":%q,"name":"Item %s","baseUom":"EA"}`, n, n)
+		if rec := do(r, http.MethodPost, "/v1/product/products", body, "product.write"); rec.Code != http.StatusCreated {
+			t.Fatalf("create %s = %d", n, rec.Code)
+		}
+	}
+	var page struct {
+		Items      []struct{ ProductNumber string }
+		NextCursor string
+	}
+	rec := do(r, http.MethodGet, "/v1/product/products?limit=2", "", "product.read")
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || len(page.Items) != 2 || page.NextCursor == "" {
+		t.Fatalf("first page %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(r, http.MethodGet, "/v1/product/products?limit=2&cursor="+page.NextCursor, "", "product.read")
+	page.Items = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || len(page.Items) != 1 || page.Items[0].ProductNumber != "B1" {
+		t.Fatalf("last page %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "nextCursor") {
+		t.Fatalf("last page must not carry a cursor: %s", rec.Body.String())
+	}
+	rec = do(r, http.MethodGet, "/v1/product/products?q=a2", "", "product.read")
+	page.Items = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || len(page.Items) != 1 || page.Items[0].ProductNumber != "A2" {
+		t.Fatalf("search %d %s", rec.Code, rec.Body.String())
+	}
+	for _, query := range []string{"limit=0", "limit=101", "limit=x", "cursor=***"} {
+		if bad := do(r, http.MethodGet, "/v1/product/products?"+query, "", "product.read"); bad.Code != http.StatusBadRequest {
+			t.Fatalf("%s = %d", query, bad.Code)
+		}
 	}
 }
 

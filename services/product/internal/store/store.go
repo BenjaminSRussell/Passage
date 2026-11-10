@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -35,7 +36,7 @@ type Store interface {
 	GetProduct(ctx context.Context, id string) (domain.Product, error)
 	UpdateProduct(ctx context.Context, id string, patch domain.ProductPatch, version int) (domain.Product, error)
 	GetSavedConfiguration(ctx context.Context, id, productID string) (domain.ConfigurationRef, error)
-	ListProducts(ctx context.Context, limit int) ([]domain.Product, error)
+	ListProducts(ctx context.Context, q, after string, limit int) ([]domain.Product, error)
 	ExplodeVariants(ctx context.Context, masterID string, selected map[string][]string, limit int) (domain.ExplosionResult, error)
 	ListReleasedIDs(ctx context.Context, after string, limit int) ([]string, error)
 	LookupVariant(ctx context.Context, masterID string, values map[string]string) (domain.Product, error)
@@ -375,17 +376,21 @@ func (s *Postgres) GetSavedConfiguration(ctx context.Context, id, productID stri
 	return out, err
 }
 
-func (s *Postgres) ListProducts(ctx context.Context, limit int) ([]domain.Product, error) {
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+
+func (s *Postgres) ListProducts(ctx context.Context, q, after string, limit int) ([]domain.Product, error) {
 	p, err := principal(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > MaxPage {
 		limit = 100
 	}
+	like := "%" + likeEscaper.Replace(strings.TrimSpace(q)) + "%"
 	var out []domain.Product
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+productSelect+` from product where tenant_id=$1 and subtype <> 'variant' order by product_number limit $2`, p.TenantID, limit)
+		rows, err := tx.Query(ctx, `select `+productSelect+` from product where tenant_id=$1 and subtype <> 'variant' and product_number > $2
+			and (product_number ilike $3 or search_name ilike $3 or name ilike $3) order by product_number limit $4`, p.TenantID, after, like, limit)
 		if err != nil {
 			return err
 		}
