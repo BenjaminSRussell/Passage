@@ -121,7 +121,8 @@ paths:
     post:
       operationId: createPrintJob
       summary: Render a built-in template and print it on the first reachable ZPL device of the queue
-      description: A job that no device accepts is recorded as FAILED with lastError MOB-0111 (unreachable), MOB-0112 (empty queue) or PRN-0007 (the label does not fit the media of any device in the queue) and returned with 201. Each ZPL label is sized at dispatch for the device that prints it (FR-32.13): the layout is scaled from 203 dpi to the device's dpi and ^PW/^LL are set from its media size; on 2X1_IN and 3X1_IN devices LP_LABEL, LOCATION_LABEL and ITEM_LABEL print a compact 1 in layout. A label whose fields or bar code width (with quiet zones) do not fit a device's media is not sent to it, and the next device in the queue is tried without retries. A documentType with no matching routing rule is refused with 422 MOB-0112 before anything is stored. A repeated key returns the stored job with Idempotent-Replayed true and prints nothing. reprintOf reuses the stored ZPL. ITEM_LABEL and GS1_CARTON_LABEL compose their GS1-128 element string (AI 00, 01, 10, 17, 21, 400, 420) from the data fields; a bad check digit, date, length or set-82 character is refused with 400 PRN-0001 before anything is stored.
+      description: >-
+        A job that no device accepts is recorded as FAILED with lastError MOB-0111 (unreachable), MOB-0112 (empty queue) or PRN-0007 (the label does not fit the media of any device in the queue) and returned with 201. Each ZPL label is sized at dispatch for the device that prints it (FR-32.13): the layout is scaled from 203 dpi to the device's dpi and ^PW/^LL are set from its media size; on 2X1_IN and 3X1_IN devices LP_LABEL, LOCATION_LABEL and ITEM_LABEL print a compact 1 in layout. A label whose fields or bar code width (with quiet zones) do not fit a device's media is not sent to it, and the next device in the queue is tried without retries. A documentType with no matching routing rule is refused with 422 MOB-0112 before anything is stored. A repeated key returns the stored job with Idempotent-Replayed true and prints nothing. reprintOf reuses the stored ZPL. ITEM_LABEL and GS1_CARTON_LABEL compose their GS1-128 element string (AI 00, 01, 10, 17, 21, 400, 420) from the data fields; a bad check digit, date, length or set-82 character is refused with 400 PRN-0001 before anything is stored.
       x-passage-duty: print.job.submit
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -149,7 +150,20 @@ paths:
     post:
       operationId: renderBusinessDocument
       summary: Render a purchase order, customer invoice or packing slip as a PDF (issue #530)
-      description: The caller sends the document as data (legal entity name and address, document number, counterparty, header fields, a table and totals). The answer is an A4 PDF. The output is deterministic, so the same request returns the same bytes. Text is limited to Latin-1. Nothing is stored and no printer is used. A document that cannot be rendered is refused with PRN-0008 and a detail that names the field.
+      description: >-
+        The caller sends the document as data (legal entity name and address, document number, the counterparty with its
+        address, up to two additional parties such as a delivery address, header fields, a table and totals). The answer is
+        an A4 PDF: the letterhead, the parties and header fields, the line table (right-aligned columns keep their width,
+        left-aligned columns wrap; a row is never split across pages and each page repeats the table header), the totals
+        block, the notes, and "Page n of m" on every page. The output is deterministic, so the same request returns the same
+        bytes. Text is Unicode and is put in NFC. The PDF embeds subsets of the Go Regular and Go Bold fonts (Identity-H
+        with a ToUnicode map, so text can be selected and searched), which cover Latin with its extended letters, Greek and
+        Cyrillic. A character the fonts lack (Chinese, Japanese, Korean, Arabic, Hebrew, emoji and others) prints as the
+        replacement character U+FFFD, the original text is kept as ActualText, and X-Passage-Unprintable-Characters counts
+        them; the document is still rendered. Nothing is stored and no printer is used. A document that cannot be rendered
+        is refused with 422 PRN-0008 and a detail that names the field (an empty required value, a text over its length
+        limit, a control character, a line with the wrong number of cells), or with 422 PRN-0009 when it has more than 500
+        lines. Fields added since the first release are optional, so earlier callers are unaffected.
       x-passage-duty: print.document.render
       requestBody:
         required: true
@@ -159,6 +173,9 @@ paths:
       responses:
         '200':
           description: The PDF
+          headers:
+            X-Passage-Document-Pages: { description: The number of pages., schema: { type: integer, minimum: 1 } }
+            X-Passage-Unprintable-Characters: { description: 'Present only when the document has characters the fonts lack: how many were printed as U+FFFD.', schema: { type: integer, minimum: 1 } }
           content:
             application/pdf:
               schema: { type: string, format: binary }
@@ -248,24 +265,32 @@ components:
       type: object
       required: [name]
       properties:
-        label: { type: string, description: 'For example Vendor, Bill to, Ship to.' }
-        name: { type: string }
-        address: { type: array, items: { type: string } }
+        label: { type: string, maxLength: 200, description: 'For example Vendor, Bill to, Ship to. The counterparty defaults to Vendor on a purchase order, Bill to on an invoice and Ship to on a packing slip.' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        address: { type: array, maxItems: 8, items: { type: string, maxLength: 200 }, description: One entry per printed line. }
     DocumentField:
       type: object
       required: [label, value]
       properties:
-        label: { type: string }
-        value: { type: string }
+        label: { type: string, minLength: 1, maxLength: 200 }
+        value: { type: string, maxLength: 200 }
     DocumentRequest:
       type: object
       required: [documentType, number, legalEntity, columns, lines]
+      description: Text is Unicode. Control characters are refused; only table cells and notes may hold line breaks.
       properties:
         documentType: { type: string, enum: [PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP] }
-        number: { type: string }
+        number: { type: string, minLength: 1, maxLength: 200 }
         legalEntity: { $ref: '#/components/schemas/DocumentParty' }
-        counterparty: { $ref: '#/components/schemas/DocumentParty' }
-        fields: { type: array, items: { $ref: '#/components/schemas/DocumentField' } }
+        counterparty:
+          allOf: [{ $ref: '#/components/schemas/DocumentParty' }]
+          description: The vendor of a purchase order, or the customer of an invoice or packing slip, with its address.
+        additionalParties:
+          type: array
+          maxItems: 2
+          items: { $ref: '#/components/schemas/DocumentParty' }
+          description: Further parties printed beside the counterparty, each with its label, for example Deliver to or Ship from.
+        fields: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/DocumentField' } }
         columns:
           type: array
           minItems: 1
@@ -274,11 +299,19 @@ components:
             type: object
             required: [header]
             properties:
-              header: { type: string }
-              align: { type: string, enum: [L, R] }
-        lines: { type: array, maxItems: 500, items: { type: array, items: { type: string } } }
-        totals: { type: array, items: { $ref: '#/components/schemas/DocumentField' } }
-        notes: { type: string }
+              header: { type: string, minLength: 1, maxLength: 200 }
+              align: { type: string, enum: [L, R], description: 'L (default) wraps long text; R is for numbers and keeps the column as wide as its widest value.' }
+        lines:
+          type: array
+          maxItems: 500
+          description: One array per line with one cell per column. More than 500 lines is refused with PRN-0009.
+          items: { type: array, items: { type: string, maxLength: 500 } }
+        totals:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/DocumentField' }
+          description: Printed at the right below the table; the last entry is the grand total, in bold under a rule.
+        notes: { type: string, maxLength: 2000 }
     PrinterRequest:
       type: object
       required: [code, name, deviceType, dpi, host, queueCode, failoverRank]

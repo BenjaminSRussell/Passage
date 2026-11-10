@@ -54,6 +54,42 @@ from this pod; nothing connects inbound to the cluster.
   `0x00FF`. A PDF payload never goes to a raw TCP device and a non-PDF payload never goes to
   an IPP device (`ErrWrongDocumentFormat`). No job carries PCL yet, so `PCL_6` devices are
   never offered a job; see NOT-IMPLEMENTED.md.
+- **Business documents as PDF** (`POST /print/v1/documents:render`, duty `print.document.render`,
+  issue #530; `internal/domain/document.go`): the caller sends a purchase order, customer invoice
+  or packing slip as data and gets an A4 PDF back. Nothing is stored and no printer is used. The
+  layout: the legal entity's name and address with the title and document number; the
+  counterparty (`counterparty`: the vendor, or the customer as bill-to or ship-to) with its
+  address, up to two `additionalParties` (deliver to, ship from) and the header fields; the line
+  table; the totals block at the right with the last total in bold under a rule; the notes.
+  Columns with `align: R` (numbers) are right-aligned and keep the width of their widest value;
+  the other columns share the rest and wrap long text at spaces (a word wider than its column is
+  broken). A row is never split: a row that does not fit goes to the next page, which repeats a
+  short running header and the table header. Every page ends with "Page n of m". The response
+  carries the page count in `X-Passage-Document-Pages`.
+  - **Text** is Unicode. It is put in NFC, every kind of space (no-break, narrow no-break, thin)
+    and the tab print as a plain space, and invisible format characters (soft hyphen, zero-width
+    space, byte order mark) are dropped. The PDF embeds subsets of two fonts, Go Regular and Go
+    Bold (`internal/domain/docfont.go`), as Type0 fonts with a CIDFontType2 descendant,
+    Identity-H encoding and a ToUnicode CMap, so the text can be selected, copied and searched.
+    The fonts cover Latin with its extended letters (Polish, Czech, Slovak, Hungarian, Romanian,
+    Turkish, the Nordic and Baltic languages and so on), Greek and the Cyrillic of the Slavic
+    languages, and the signs €, £ and ¥.
+  - **Limitation**: the fonts have no Chinese, Japanese, Korean, Arabic, Hebrew, Thai, Armenian,
+    Georgian or Vietnamese letters, not the extended Cyrillic letters of Kazakh and similar
+    alphabets, no emoji, no combining accents that do not compose into one
+    letter, and not the currency signs ₹, ₽, ₺, ₩ and ₪. Such a character does not fail the
+    document: it prints as the replacement character (U+FFFD, a question mark in a diamond), the
+    original text is kept in the PDF as ActualText so copying and searching still find it, and
+    the response counts the characters in `X-Passage-Unprintable-Characters` so the caller can
+    tell the user. Text also runs left to right only. Covering those scripts needs a font that
+    has them (see NOT-IMPLEMENTED.md).
+  - **Deterministic**: no dates, no random ids, no compressed streams, a subset tag derived from
+    the glyphs used and a fixed object order. The same request gives the same bytes, which the
+    golden files in `testdata/golden` pin.
+  - **Limits** (a breach is refused with PRN-0008 naming the field): names, labels, values and
+    address lines 200 characters, a table cell 500, the notes 2000, 8 address lines per party, 20
+    header fields, 20 totals, 8 columns. More than 500 lines is refused with PRN-0009. Fields and
+    limits added after the first release are optional or wider, so earlier callers keep working.
 - **Reprints**: `reprintOf` reuses the stored ZPL or PDF and records the source job.
 - **Job log** (`GET /print/v1/jobs?status=&queueCode=&printerCode=&limit=`): newest first (§6.32.14).
 - **Printer status** (`GET /print/v1/printers/status`): per printer, the state from its last job
@@ -107,7 +143,15 @@ compares the LP label with `testdata/golden/lp-label.zpl`; the item label is com
 for byte in `gs1label_test.go`. Transport tests decode the IPP request independently against
 an `httptest` server and send PCL 6 to a local TCP listener. `migrations/rls_test.go` is the
 static RLS check: every table has `tenant_id`, ENABLE and FORCE row-level security and the
-`passage.tenant_id` policy. API tests use an in-memory store. Store tests (`internal/store`) run against Postgres through
+`passage.tenant_id` policy. API tests use an in-memory store.
+The document renderer has three golden PDFs in `testdata/golden`: `purchase-order.pdf`,
+`invoice-unicode.pdf` (Polish, Czech, Greek and Cyrillic names, a wrapped description, an
+additional party, and CJK text the fonts lack) and `packing-slip-3-pages.pdf` (page breaks with
+repeated headers). `UPDATE_GOLDEN=1 go test ./internal/domain` rewrites them after an intended
+layout change, and `DOCUMENT_PDF_DIR=<dir>` also writes each rendered PDF there to look at. Further
+tests check the PDF structure (xref offsets, stream lengths, the embedded font programs parse),
+and a rapid property test lays out random documents and checks that every piece of text stays
+between the margins and above the footer and that every page is numbered. Store tests (`internal/store`) run against Postgres through
 `platform/go/testkit` and are skipped without `PASSAGE_TEST_DATABASE_URL`; the RLS test also
 needs `PASSAGE_TEST_APP_DATABASE_URL` (a role without BYPASSRLS).
 
@@ -122,6 +166,8 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a role without BYPASSRLS).
 | PRN-0005 | 404 | Print job not found |
 | PRN-0006 | 409 | The queue already has a printer at this failover rank |
 | PRN-0007 | 201 (job FAILED) | The label does not fit the media of any device in the queue |
+| PRN-0008 | 422 | A business document cannot be rendered; the detail names the field |
+| PRN-0009 | 422 | A business document has more than 500 lines |
 | MOB-0111 | 201 (job FAILED) | Printer unreachable after the attempts |
 | MOB-0112 | 422 / 201 (job FAILED) | No routing rule matches the document, or the queue has no devices |
 | idempotency_key_reuse | 422 | Same Idempotency-Key with a different request body |
@@ -130,4 +176,12 @@ Problem responses are RFC 9457 with `type` `https://passage.dev/problems/<code>`
 
 ## Dependencies
 
-Only the platform kernel (`platform/go`) and its transitive dependencies (chi, pgx/v5).
+The platform kernel (`platform/go`) and its transitive dependencies (chi, pgx/v5), plus two
+`golang.org/x` modules for the document renderer: `golang.org/x/image` for the Go Regular and Go
+Bold font data and the `sfnt` parser (character to glyph lookup), and `golang.org/x/text` for
+Unicode normalization. Both are compiled in; nothing is fetched at run time.
+
+The Go fonts are by Bigelow & Holmes and are distributed under a BSD-style 3-clause licence,
+the same terms as the Go project's software. The licence text is in
+`third_party/go-fonts-LICENSE` and is copied into the container image at `/licenses`, because
+the binary and every PDF it renders contain (subsets of) the fonts.
