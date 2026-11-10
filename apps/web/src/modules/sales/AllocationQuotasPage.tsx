@@ -15,6 +15,7 @@ import { DECIMAL, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -62,7 +63,7 @@ function usedShare(q: AllocationQuota): string {
 
 const columns: DataTableColumn<AllocationQuota>[] = [
   { key: "productId", header: "Product", mono: true, render: (q) => <Link to={`/sales/allocation-quotas/${q.id}`}>{shortId(q.productId)}</Link> },
-  { key: "customerId", header: "Customer", mono: true, render: (q) => (q.customerId ? shortId(q.customerId) : "Every customer") },
+  { key: "customerId", header: "Customer", render: (q) => (q.customerId ? <EntityName entity="customer" id={q.customerId} /> : "Every customer") },
   { key: "period", header: "Period", render: (q) => `${q.periodStart} to ${q.periodEnd}` },
   { key: "quotaQty", header: "Quota", align: "end" },
   { key: "consumedQty", header: "Consumed", align: "end" },

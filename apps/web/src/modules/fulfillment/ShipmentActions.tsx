@@ -21,12 +21,12 @@ import {
   type ShipmentLine,
   type ShortPickReason,
 } from "./api/client";
-import { compareDecimal, COUNTRY, CURRENCY, DECIMAL, multiplyDecimal, pickCeiling, resolveTolerance, shortId, SHORT_PICK_REASONS, subtractDecimal, sumDecimals, today } from "./format";
+import { compareDecimal, COUNTRY, CURRENCY, DECIMAL, multiplyDecimal, pickCeiling, resolveTolerance, SHORT_PICK_REASONS, subtractDecimal, sumDecimals, today } from "./format";
 import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 
-function lineLabel(line: ShipmentLine): string {
-  return `Line ${shortId(line.orderLineId)} (${line.unit})`;
+function lineLabel(shipment: { lines: ShipmentLine[] }, line: ShipmentLine): string {
+  return `Line ${shipment.lines.findIndex((x) => x.id === line.id) + 1} (${line.unit})`;
 }
 
 /**
@@ -110,7 +110,7 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
           <div key={l.id} className={styles.form}>
             <FormField
               id={`pick-${l.id}`}
-              label={`${lineLabel(l)} picked`}
+              label={`${lineLabel(shipment, l)} picked`}
               hint={remainder ? `Planned ${l.qtyPlanned}, shipped ${l.qtyShipped}` : `Planned ${l.qtyPlanned}`}
               error={errors[l.id]}
             >
@@ -128,7 +128,7 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
               )}
             </FormField>
             {isShort(l) ? (
-              <FormField id={`pick-reason-${l.id}`} label={`${lineLabel(l)} short pick reason`} optional>
+              <FormField id={`pick-reason-${l.id}`} label={`${lineLabel(shipment, l)} short pick reason`} optional>
                 {(control) => (
                   <Select
                     {...control}
@@ -222,7 +222,7 @@ export function AutoPackForm({ shipment, onDone }: { shipment: Shipment; onDone(
           Fills containers from the packing rules of each product, most specific rule first, and closes each one with an SSCC. Give a unit weight to also respect the rule&apos;s max weight.
         </p>
         {open.map((l) => (
-          <FormField key={l.id} id={`autopack-${l.id}`} label={`${lineLabel(l)} unit weight (kg)`} hint={`To pack: ${subtractDecimal(l.qtyPicked, l.qtyPacked)}`} error={errors[l.id]} optional>
+          <FormField key={l.id} id={`autopack-${l.id}`} label={`${lineLabel(shipment, l)} unit weight (kg)`} hint={`To pack: ${subtractDecimal(l.qtyPicked, l.qtyPacked)}`} error={errors[l.id]} optional>
             {(control) => (
               <Input
                 {...control}
@@ -316,7 +316,7 @@ export function PackForm({ shipment, onDone }: { shipment: Shipment; onDone(next
           )}
         </FormField>
         {open.map((l) => (
-          <FormField key={l.id} id={`pack-${l.id}`} label={`${lineLabel(l)} to pack`} hint={`Picked, not packed: ${remaining(l)}`} error={errors[l.id]}>
+          <FormField key={l.id} id={`pack-${l.id}`} label={`${lineLabel(shipment, l)} to pack`} hint={`Picked, not packed: ${remaining(l)}`} error={errors[l.id]}>
             {(control) => (
               <Input
                 {...control}
@@ -502,7 +502,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
         </FormField>
         {open.map((l) => (
           <fieldset key={l.id} className={styles.valueGroup}>
-            <legend className={styles.legend}>{`${lineLabel(l)}: ship ${toShip(l)}`}</legend>
+            <legend className={styles.legend}>{`${lineLabel(shipment, l)}: ship ${toShip(l)}`}</legend>
             <FormField id={`post-${l.id}-cost`} label="Unit cost" error={errors[`${l.id}-cost`]}>
               {(control) => <Input {...control} inputMode="decimal" value={costs[l.id]?.unitCost ?? ""} invalid={Boolean(errors[`${l.id}-cost`])} onChange={(event) => setCost(l.id, { unitCost: event.target.value })} />}
             </FormField>

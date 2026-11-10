@@ -2,14 +2,16 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listCreditProfiles, type CreditProfile } from "./api/client";
-import { dash, money, sentence, shortId, UUID } from "./format";
+import { dash, money, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { PlainName } from "./OrderNumber";
 
 const columns: DataTableColumn<CreditProfile>[] = [
-  { key: "customerId", header: "Customer", mono: true },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => shortId(row.legalEntityId) },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName entity="customer" id={row.customerId} /> },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
   { key: "limit", header: "Credit limit", align: "end", render: (row) => money(row.limit, row.currency) },
   { key: "limitType", header: "Limit type", render: (row) => sentence(row.limitType) },
   { key: "openAr", header: "Open AR", align: "end", render: (row) => money(row.exposure.openAr ?? "0", row.currency) },

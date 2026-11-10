@@ -10,6 +10,7 @@ import styles from "./pages.module.css";
 import { CLAIM_STATUS_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
 
@@ -34,7 +35,7 @@ export function contractClaimTotals(rows: { amount: string; currency: string }[]
 const columns: DataTableColumn<ContractClaim>[] = [
   { key: "number", header: "Claim", mono: true },
   { key: "contractKind", header: "Type", render: (c) => <Badge tone={c.contractKind === "ROYALTY" ? "info" : "neutral"}>{KIND_LABELS[c.contractKind]}</Badge> },
-  { key: "vendorId", header: "Vendor", mono: true },
+  { key: "vendorId", header: "Vendor", render: (row) => <EntityName entity="vendor" id={row.vendorId} /> },
   { key: "periodId", header: "Period", mono: true },
   { key: "amount", header: "Amount", mono: true, align: "end", render: (c) => `${c.amount} ${c.currency}` },
   { key: "status", header: "Status", render: (c) => <ClaimStatusBadge status={c.status} /> },

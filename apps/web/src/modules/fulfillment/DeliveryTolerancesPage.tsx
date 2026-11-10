@@ -4,18 +4,20 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, listDeliveryTolerances, saveDeliveryTolerance, type DeliveryTolerance, type Problem } from "./api/client";
-import { dash, formatDateTime, PERCENT, shortId, UUID } from "./format";
+import { dash, formatDateTime, PERCENT, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { PlainName } from "../sales/OrderNumber";
 
 /** Saving a tolerance needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
 const DUTY_SAVE = "fulfillment.packing-rule.maintain";
 
 const columns: DataTableColumn<DeliveryTolerance>[] = [
-  { key: "productId", header: "Product", mono: true, render: (row) => (row.productId ? shortId(row.productId) : "All products") },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => (row.customerId ? shortId(row.customerId) : "All customers") },
+  { key: "productId", header: "Product", render: (row) => (row.productId ? <PlainName short entity="product" id={row.productId} /> : "All products") },
+  { key: "customerId", header: "Customer", render: (row) => (row.customerId ? <EntityName entity="customer" id={row.customerId} /> : "All customers") },
   { key: "overdeliveryPct", header: "Over-delivery %", align: "end" },
   { key: "updatedAt", header: "Saved", render: (row) => (row.updatedAt ? formatDateTime(row.updatedAt) : dash) },
 ];

@@ -8,6 +8,8 @@ import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer }
 useFakeServer();
 
 const LE = "0190f0a0-0000-7000-8000-000000000001";
+const CUST = "22222222-0000-4000-8000-000000000002";
+const BOLTID = "33333333-0000-4000-8000-000000000003";
 const ADMIN = ["pricing.view", "pricing.admin"];
 
 const std: Procedure = { id: "0190f0a0-0000-7000-8000-000000000d01", legalEntityId: LE, name: "AX_STANDARD", version: 2, status: "ACTIVE", revision: 1, steps: referenceSteps() };
@@ -239,9 +241,9 @@ describe("Price simulation under a procedure", () => {
   it("sends the channel and procedure, names the version and shows why a member lost", async () => {
     server.handler = (url, init) => (init.method === "POST" && url.pathname.endsWith("/resolve") ? json(200, priced) : undefined);
     renderAt("/pricing/simulate");
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "C1" } });
-    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "BOLT" } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUST } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: BOLTID } });
     fireEvent.change(screen.getByLabelText(/^Sales channel/), { target: { value: "WEB" } });
     fireEvent.change(screen.getByLabelText("Procedure"), { target: { value: "AX_STANDARD" } });
     fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
@@ -257,9 +259,9 @@ describe("Price simulation under a procedure", () => {
     const { procedure: _drop, ...plain } = priced;
     server.handler = () => json(200, plain);
     renderAt("/pricing/simulate");
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "C1" } });
-    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "BOLT" } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUST } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: BOLTID } });
     fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
     expect(await screen.findByRole("list", { name: "Simulation totals" })).toHaveTextContent("Procedure Reference order");
   });
