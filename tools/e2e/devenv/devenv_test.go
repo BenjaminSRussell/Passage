@@ -96,7 +96,10 @@ func TestRenderRealmKeepsProductionMappersAndAddsSeededUsers(t *testing.T) {
 	var realm struct {
 		SSLRequired string `json:"sslRequired"`
 		BrowserFlow string `json:"browserFlow"`
-		Clients     []struct {
+		Flows       []struct {
+			Alias string `json:"alias"`
+		} `json:"authenticationFlows"`
+		Clients []struct {
 			ClientID     string   `json:"clientId"`
 			RedirectURIs []string `json:"redirectUris"`
 			WebOrigins   []string `json:"webOrigins"`
@@ -106,6 +109,7 @@ func TestRenderRealmKeepsProductionMappersAndAddsSeededUsers(t *testing.T) {
 			} `json:"protocolMappers"`
 		} `json:"clients"`
 		Users []struct {
+			ID          string              `json:"id"`
 			Username    string              `json:"username"`
 			Attributes  map[string][]string `json:"attributes"`
 			Credentials []struct {
@@ -116,8 +120,15 @@ func TestRenderRealmKeepsProductionMappersAndAddsSeededUsers(t *testing.T) {
 	if err := json.Unmarshal(out, &realm); err != nil {
 		t.Fatal(err)
 	}
-	if realm.SSLRequired != "none" || realm.BrowserFlow != "browser" {
+	if realm.SSLRequired != "none" || realm.BrowserFlow != "passage-browser-dev" {
 		t.Errorf("dev realm sslRequired=%q browserFlow=%q", realm.SSLRequired, realm.BrowserFlow)
+	}
+	flowDefined := false
+	for _, f := range realm.Flows {
+		flowDefined = flowDefined || f.Alias == realm.BrowserFlow
+	}
+	if !flowDefined {
+		t.Errorf("browserFlow %q is not defined by the rendered realm", realm.BrowserFlow)
 	}
 	claims := map[string]bool{}
 	for _, c := range realm.Clients {
@@ -153,6 +164,45 @@ func TestRenderRealmKeepsProductionMappersAndAddsSeededUsers(t *testing.T) {
 	}
 	if bytes.Contains(base, []byte("localhost:5173")) {
 		t.Error("the production export must not carry the dev redirect")
+	}
+}
+
+func TestRenderedUserIDsAreTheAssignmentKeys(t *testing.T) {
+	seed := loadSeed(t)
+	assignments, err := RenderAssignments(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Assignments map[string]map[string][]string `json:"assignments"`
+	}
+	if err := json.Unmarshal(assignments, &doc); err != nil {
+		t.Fatal(err)
+	}
+	base, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "keycloak", "realm-passage.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := RenderRealm(base, seed, "http://localhost:5173")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var realm struct {
+		Users []struct {
+			ID       string `json:"id"`
+			Username string `json:"username"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(out, &realm); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range realm.Users {
+		if _, seeded := seed.User(u.Username); !seeded {
+			continue
+		}
+		if _, ok := doc.Assignments[seed.TenantID][u.ID]; !ok {
+			t.Errorf("rendered user %s has id %q, which is not an assignments key", u.Username, u.ID)
+		}
 	}
 }
 

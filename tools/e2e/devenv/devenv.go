@@ -13,6 +13,7 @@ const (
 	WebClientID = "passage-web"
 	RealmName   = "passage"
 	devRPID     = "localhost"
+	devFlow     = "passage-browser-dev"
 )
 
 type User struct {
@@ -95,7 +96,9 @@ func RenderRealm(base []byte, s Seed, webOrigin string) ([]byte, error) {
 		return nil, err
 	}
 	realm["sslRequired"] = "none"
-	realm["browserFlow"] = "browser"
+	realm["browserFlow"] = devFlow
+	flows, _ := realm["authenticationFlows"].([]any)
+	realm["authenticationFlows"] = append(flows, devBrowserFlows()...)
 	realm["bruteForceProtected"] = false
 	realm["webAuthnPolicyRpId"] = devRPID
 	realm["webAuthnPolicyPasswordlessRpId"] = devRPID
@@ -112,7 +115,7 @@ func RenderRealm(base []byte, s Seed, webOrigin string) ([]byte, error) {
 	users, _ := realm["users"].([]any)
 	for _, u := range s.Users {
 		users = append(users, map[string]any{
-			"username": u.Username, "email": u.Email, "firstName": u.FirstName, "lastName": u.LastName,
+			"id": u.Sub, "username": u.Username, "email": u.Email, "firstName": u.FirstName, "lastName": u.LastName,
 			"enabled": true, "emailVerified": true, "requiredActions": []string{},
 			"credentials": []map[string]any{{"type": "password", "value": u.Password, "temporary": false}},
 			"attributes": map[string][]string{
@@ -122,6 +125,32 @@ func RenderRealm(base []byte, s Seed, webOrigin string) ([]byte, error) {
 	}
 	realm["users"] = users
 	return json.MarshalIndent(realm, "", "  ")
+}
+
+// devBrowserFlows is the production browser flow minus the second factor. The export defines only custom flows, so
+// Keycloak creates no built-in "browser" flow on import and the dev realm must bring its own.
+func devBrowserFlows() []any {
+	execution := func(requirement string, priority int, extra map[string]any) map[string]any {
+		e := map[string]any{"requirement": requirement, "priority": priority, "userSetupAllowed": false, "autheticatorFlow": false}
+		for k, v := range extra {
+			e[k] = v
+		}
+		return e
+	}
+	flow := func(alias string, topLevel bool, executions ...any) map[string]any {
+		return map[string]any{
+			"alias": alias, "description": "Dev browser login: password only", "providerId": "basic-flow",
+			"topLevel": topLevel, "builtIn": false, "authenticationExecutions": executions,
+		}
+	}
+	forms := devFlow + " forms"
+	return []any{
+		flow(devFlow, true,
+			execution("ALTERNATIVE", 10, map[string]any{"authenticator": "auth-cookie"}),
+			execution("ALTERNATIVE", 30, map[string]any{"autheticatorFlow": true, "flowAlias": forms}),
+		),
+		flow(forms, false, execution("REQUIRED", 10, map[string]any{"authenticator": "auth-username-password-form"})),
+	}
 }
 
 func pointWebClient(realm map[string]any, webOrigin string) error {
