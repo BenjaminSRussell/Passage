@@ -19,6 +19,15 @@ release may change public APIs.
 
 ### Added
 
+- SAF-T structural validation for the tax extract (#13): `saft.Build` accepts Customers, Suppliers and
+  GeneralLedgerEntries and checks them in Go (required elements, balanced transactions, control totals, party
+  references) because the official OECD XSD cannot be fetched automatically; the test XSD subset covers the sections.
+- `GET /v1/tax/saft?ledger_id=` exports the ledger's journals as GeneralLedgerEntries (#13): new
+  `ledgerclient.JournalLines`, the `tax` service grant gains `ledger.entry.lookup` and `ledger.ledger.lookup`, and the ledger
+  must belong to the caller's legal entity. Customers and Suppliers stay unfilled (no party reference on ledger lines).
+  The extract now carries GeneralLedgerAccounts from the chart, AmountStructure amounts and the OECD Transaction elements,
+  needs a currency equal to the ledger's (422 TAX-0011), maps unusable ledger data to 502 TAX-0012, and the `tax` grant also
+  gains `ledger.account.lookup`.
 - Postgres backups and tenant-scoped point-in-time restore (#48, P3a): the multi-region chart renders a
   barman-cloud `ObjectStore` (per-region bucket, 30 d retention), continuous WAL archiving from the CNPG cluster, a
   daily `ScheduledBackup` and `PassageBackupStale` / `PassageWalArchiveFailing` alerts; `tools/tenant-restore`

@@ -3446,7 +3446,7 @@
       "ledger": ["ledger.entry.lookup", "ledger.ledger.lookup"]
     },
     "tax": {
-      "ledger": ["ledger.balance.read"]
+      "ledger": ["ledger.balance.read", "ledger.entry.lookup", "ledger.ledger.lookup", "ledger.account.lookup"]
     },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
