@@ -48,14 +48,14 @@ describe("BomVersionsPage", () => {
     render(<BomVersionsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await screen.findByText("BIKE-b");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?cursor=c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?cursor=c1", expect.anything());
     fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "draft" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?status=draft"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?status=draft", expect.anything()));
     fireEvent.change(screen.getByLabelText(/Product/), { target: { value: "BIKE" } });
     fireEvent.change(screen.getByLabelText(/Effective on/), { target: { value: "2026-06-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?productId=BIKE&status=draft&asOf=2026-06-01"),
+      expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?productId=BIKE&status=draft&asOf=2026-06-01", expect.anything()),
     );
   });
 
