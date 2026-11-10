@@ -10,4 +10,5 @@ import "./documents";
 import "./tax";
 import "./ledger";
 import "./importSetup";
+import "./finance";
 import "./shell";

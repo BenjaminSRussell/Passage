@@ -34,16 +34,16 @@ export const ME = person(1, "jordan.avery", USER.name, "Controller", ["ledger.jo
 
 export const PEOPLE: Person[] = [
   ME,
-  person(2, "marcus.lee", "Marcus Lee", "Chief financial officer", ["ledger.journal.approve", "reporting.statement.view", "assets.capex-request.approve", "budget.plan.approve"], 1400),
-  person(3, "ana.ortiz", "Ana Ortiz", "Senior accountant, payables and treasury", ["ledger.journal.write", "ledger.journal.post", "payables.payment.approve", "payables.vendor-invoice.post", "treasury.reconciliation.maintain"], 1100),
-  person(4, "dana.kim", "Dana Kim", "Plant controller, Cedar Rapids", ["ledger.journal.write", "ledger.journal.approve", "assets.asset.maintain", "assets.asset.depreciate", "costing.standard-cost.maintain"], 820),
-  person(5, "dana.whitfield", "Dana Whitfield", "Sales operations manager", ["sales.order.maintain", "sales.credit-hold.release", "receivables.customer.maintain"], 760),
-  person(6, "kevin.brandt", "Kevin Brandt", "Purchasing manager", ["purchasing.purchase-order.approve", "purchasing.purchase-order.maintain", "party.vendor.maintain"], 1020),
-  person(7, "maya.chen", "Maya Chen", "Accounts receivable specialist", ["receivables.payment.apply", "receivables.customer.maintain", "billing.invoice.post"], 410),
+  person(2, "marcus.lee", "Marcus Lee", "Chief financial officer", ["ledger.journal.approve", "reporting.statement.view", "assets.capex-request.approve", "budget.plan.decide"], 1400),
+  person(3, "ana.ortiz", "Ana Ortiz", "Senior accountant, payables and treasury", ["ledger.journal.write", "ledger.journal.post", "payment-proposal.approve", "receiving.vendor-invoice.post", "treasury.reconciliation.close"], 1100),
+  person(4, "dana.kim", "Dana Kim", "Plant controller, Cedar Rapids", ["ledger.journal.write", "ledger.journal.approve", "assets.asset.maintain", "assets.asset.depreciate", "costing.version.write"], 820),
+  person(5, "dana.whitfield", "Dana Whitfield", "Sales operations manager", ["sales.order.approve", "sales.credit.release", "receivables.collection.maintain"], 760),
+  person(6, "kevin.brandt", "Kevin Brandt", "Purchasing manager", ["procurement.requisition.approve", "procurement.purchase-order.maintain", "party.vendor.maintain", "payment-proposal.approve"], 1020),
+  person(7, "maya.chen", "Maya Chen", "Accounts receivable specialist", ["receivables.payment.post", "receivables.collection.maintain", "billing.invoice.post"], 410),
   person(8, "tom.becker", "Tom Becker", "IT systems administrator", ["identity.user.maintain", "identity.security-role.maintain", "identity.legal-entity.maintain"], 1300),
-  person(9, "rita.alvarez", "Rita Alvarez", "HR and payroll lead", ["hr.worker.maintain", "payroll.run.post"], 640),
-  person(10, "omar.siddiqui", "Omar Siddiqui", "Warehouse supervisor, Dallas", ["inventory.count.post", "warehouse.work.maintain"], 380),
-  person(11, "brian.kessler", "Brian Kessler", "Former cost accountant", ["costing.standard-cost.maintain"], 1500, "deprovisioned"),
+  person(9, "rita.alvarez", "Rita Alvarez", "HR and payroll lead", ["hr.worker.maintain", "payroll.run.post", "hr.compensation.admin"], 640),
+  person(10, "omar.siddiqui", "Omar Siddiqui", "Warehouse supervisor, Dallas", ["inventory.journal.post", "warehouse.work.supervise"], 380),
+  person(11, "brian.kessler", "Brian Kessler", "Former cost accountant", ["costing.version.write"], 1500, "deprovisioned"),
 ];
 
 export const byUsername = (username: string): Person => {
