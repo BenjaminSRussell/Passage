@@ -5,6 +5,7 @@ import { CODE, JOB_STATUSES, listJobs, type JobStatus, type PrintJob } from "./a
 import { dash, describeJobContent, formatDateTime, JobStatusBadge } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<PrintJob>[] = [
   { key: "createdAt", header: "Created", render: (row) => formatDateTime(row.createdAt) },
@@ -64,7 +65,7 @@ export function PrintJobsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load print jobs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

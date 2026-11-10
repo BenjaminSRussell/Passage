@@ -5,6 +5,7 @@ import { describeProblem, registerCarrierInvoice, type InvoiceSource, type Line,
 import { ChargeLinesEditor, cleanLines, validateLines } from "./ChargeLinesEditor";
 import { CURRENCY, DATE, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   carrierId: string;
@@ -122,7 +123,7 @@ export function NewCarrierInvoicePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not register the invoice" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

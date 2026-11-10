@@ -115,7 +115,7 @@ describe("dispatch list", () => {
   it("shows the service error with a retry", async () => {
     handler = () => json(503, { code: "COM-0503", detail: "database unavailable" });
     renderAt("/shopfloor/jobs");
-    expect(await screen.findByText(/database unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/database unavailable/)).toBeInTheDocument();
     handler = () => json(200, { items: [] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No open jobs")).toBeInTheDocument();
@@ -211,13 +211,13 @@ describe("job detail", () => {
   it("shows a load failure with a retry, and a save failure without losing the form", async () => {
     handler = () => json(404, { code: "SF-0121", detail: "job not found" });
     renderAt(`/shopfloor/jobs/${JOB}`);
-    expect(await screen.findByText(/job not found \(SF-0121\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/job not found/)).toBeInTheDocument();
     handler = (_url, init) => (init.method === "POST" ? json(422, { code: "SF-0122", detail: "job MO-1 OP-10 is finished" }) : json(200, job()));
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByRole("heading", { name: "Job MO-1 OP-10" });
     fill("Good quantity", "2");
     fireEvent.click(screen.getByRole("button", { name: "Save report" }));
-    expect(await screen.findByText(/is finished \(SF-0122\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/is finished/)).toBeInTheDocument();
     expect(screen.getByLabelText("Good quantity")).toHaveValue("2");
   });
 });
@@ -278,7 +278,7 @@ describe("reopening a finished job", () => {
     await screen.findByText("Never reopened");
     fill("Reason", "Rework pass");
     fireEvent.click(screen.getByRole("button", { name: "Reopen job" }));
-    expect(await screen.findByText(/missing duty shopfloor.job.reopen \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty shopfloor.job.reopen/)).toBeInTheDocument();
     expect(screen.getByLabelText("Reason")).toHaveValue("Rework pass");
   });
 
@@ -293,10 +293,10 @@ describe("reopening a finished job", () => {
       return json(200, finishedJob());
     };
     renderAt(`/shopfloor/jobs/${JOB}`, SUPERVISOR);
-    expect(await screen.findByText(/database down \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/database down/)).toBeInTheDocument();
     fill("Reason", "Late count");
     fireEvent.click(screen.getByRole("button", { name: "Reopen job" }));
-    expect(await screen.findByText(/changed by someone else \(SF-0143\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/changed by someone else/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Late count of 12 pieces")).toBeInTheDocument();
   });

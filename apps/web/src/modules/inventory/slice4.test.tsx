@@ -140,7 +140,7 @@ describe("Count tags", () => {
     second.unmount();
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty inventory.read" });
     renderAt(`/inventory/count-plans/${PLAN_ID}/tags`);
-    expect(await findAlert()).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty inventory.read");
   });
 
   it("generates tags with an idempotency key", async () => {
@@ -195,7 +195,7 @@ describe("Count tags", () => {
     fireEvent.change(screen.getByLabelText("Counted quantity"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: "S1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save count" }));
-    expect(await findAlert()).toHaveTextContent("tag TAG-000003 has already been used (INV-TAG-001)");
+    expect(await findAlert()).toHaveTextContent("tag TAG-000003 has already been used");
     fireEvent.click(screen.getByRole("button", { name: "Void TAG-000003" }));
     expect(await screen.findByText("TAG-000003 voided.")).toBeInTheDocument();
     const voided = sent("POST").find((c) => c.url.pathname.endsWith(":void"));
@@ -230,7 +230,7 @@ describe("Count tags", () => {
     fireEvent.click(screen.getByRole("button", { name: "Transfer to count sheet" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Supervisor approval required");
-    expect(alert).toHaveTextContent("(INV-TAG-006)");
+    expect(alert).toHaveTextContent("INV-TAG-006");
   });
 
   it("is reached from the count plan list", async () => {
@@ -301,6 +301,6 @@ describe("Journal reversal", () => {
     renderAt(`/inventory/journals/${JOURNAL_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Reverse journal" }));
     fireEvent.click(screen.getByRole("button", { name: "Create reversal" }));
-    expect(await findAlert()).toHaveTextContent("only a POSTED journal can be reversed; this one is DRAFT (INV-JNL-004)");
+    expect(await findAlert()).toHaveTextContent("only a POSTED journal can be reversed; this one is DRAFT");
   });
 });

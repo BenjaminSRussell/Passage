@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
 import { describeProblem, REVEAL_REASON_MIN, revealPII, type PIIView, type Problem } from "./api/client";
 import { dash } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /**
  * Masked national ID and bank account with an audited reveal (FR-42.1,
@@ -76,7 +77,7 @@ export function PiiCard({ workerId, masked }: { workerId: string; masked: PIIVie
         )}
         {failure ? (
           <Alert tone="danger" title="Could not reveal personal data" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
       </div>

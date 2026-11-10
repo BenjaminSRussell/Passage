@@ -64,6 +64,14 @@ func Reason(err error) string {
 // batch). Key names the movement; inventory treats a repeat of the key it
 // receives as a replay, never a second claim. ClaimAll sends Key with an
 // attempt suffix, so each attempt of a movement owns its claim.
+//
+// Ref names the document line the movement issues units for (SalesLineRef,
+// ProductionItemRef). Inventory tallies the claims of every kind together;
+// claims that share a ref are successive steps of the same units (a pick of
+// an order line, then the ship of what was picked) and count once, as the
+// largest per-kind total of the ref, so a later step moves the units an
+// earlier step of the ref took as far as they go. A claim without a ref
+// counts in full.
 type Claim struct {
 	LegalEntityID string
 	ProductID     string
@@ -72,6 +80,63 @@ type Claim struct {
 	Kind          Kind
 	Qty           decimal.Decimal
 	Key           string
+	Ref           string
+}
+
+// RefAttribute is the warehouse work-line attribute that carries the ref of
+// the document line a pick serves, set by whoever creates the work.
+const RefAttribute = "issueRef"
+
+// SalesLineRef is the ref of a sales order line: fulfillment's packing-slip
+// post claims under it, a warehouse pick for the line carries it, and
+// inventory's booking of the line's DELIVERED report settles it.
+func SalesLineRef(orderLineID string) string { return "SALES_LINE:" + strings.ToLower(orderLineID) }
+
+// ProductionItemRef is the ref of an item a production order consumes: its
+// consumption claims under it and a warehouse pick of the item for the order
+// carries it.
+func ProductionItemRef(orderID, itemID string) string {
+	return "PRODUCTION_ORDER:" + strings.ToLower(orderID) + ":" + strings.ToLower(itemID)
+}
+
+// CanonicalRef reports whether ref is exactly what SalesLineRef or
+// ProductionItemRef forms: a ref in any other spelling (upper case, another
+// prefix) would never match the claims taken under the canonical one.
+func CanonicalRef(ref string) bool {
+	canonical := func(id string) bool { c, ok := ids.Canonical(id); return ok && c == id }
+	switch kind, rest, _ := strings.Cut(ref, ":"); kind {
+	case "SALES_LINE":
+		return canonical(rest)
+	case "PRODUCTION_ORDER":
+		order, item, ok := strings.Cut(rest, ":")
+		return ok && canonical(order) && canonical(item)
+	}
+	return false
+}
+
+// Outstanding is what claims stand for together under the rule above: every
+// claim without a ref in full, and per ref the largest per-kind total.
+func Outstanding(claims []Claim) decimal.Decimal {
+	total := decimal.Zero
+	perRef := map[string]map[Kind]decimal.Decimal{}
+	for _, c := range claims {
+		if c.Ref == "" {
+			total = total.Add(c.Qty)
+			continue
+		}
+		if perRef[c.Ref] == nil {
+			perRef[c.Ref] = map[Kind]decimal.Decimal{}
+		}
+		perRef[c.Ref][c.Kind] = perRef[c.Ref][c.Kind].Add(c.Qty)
+	}
+	for _, kinds := range perRef {
+		most := decimal.Zero
+		for _, q := range kinds {
+			most = decimal.Max(most, q)
+		}
+		total = total.Add(most)
+	}
+	return total
 }
 
 // Claimer takes and withdraws claims. A nil Claimer means INVENTORY_URL is
@@ -91,8 +156,8 @@ type Claimer interface {
 // that starts while the failed attempt is still withdrawing) therefore never
 // share a claim: if they did, the attempt that fails would withdraw the claim
 // the attempt that commits relies on, and its quantity would leave the tally.
-// A claim whose withdrawal is lost stays and only makes later movements of its
-// kind stricter.
+// A claim whose withdrawal is lost stays and only makes later movements of the
+// product in that warehouse stricter.
 func ClaimAll(ctx context.Context, c Claimer, claims []Claim) (undo func(), err error) {
 	attempt := ids.New()
 	merged := make([]Claim, 0, len(claims))
@@ -168,7 +233,7 @@ func (c *Client) Claim(ctx context.Context, cl Claim) error {
 		return ErrNotProduct
 	}
 	status, body, err := c.post(ctx, claimsPath, cl, map[string]string{"legalEntityId": cl.LegalEntityID, "productId": cl.ProductID,
-		"warehouse": cl.Warehouse, "batch": cl.Batch, "kind": string(cl.Kind), "qty": cl.Qty.String()})
+		"warehouse": cl.Warehouse, "batch": cl.Batch, "kind": string(cl.Kind), "qty": cl.Qty.String(), "issueRef": cl.Ref})
 	if err != nil {
 		return err
 	}
@@ -186,7 +251,7 @@ func (c *Client) Claim(ctx context.Context, cl Claim) error {
 }
 
 // Release withdraws a claim whose movement did not commit. It is best effort:
-// a claim that stays only makes later movements of the same kind stricter.
+// a claim that stays only makes later movements stricter.
 func (c *Client) Release(ctx context.Context, cl Claim) {
 	status, _, err := c.post(ctx, releasePath, cl, struct{}{})
 	if err != nil || status != http.StatusNoContent {

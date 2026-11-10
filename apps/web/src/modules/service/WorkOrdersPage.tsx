@@ -18,6 +18,7 @@ import {
 import { DECIMAL, duration, money, sentence, shortId, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<WorkOrder>[] = [
   { key: "number", header: "Work order", mono: true },
@@ -214,7 +215,7 @@ export function NewWorkOrderPage() {
       />
       {caseError ? (
         <Alert tone="danger" title="Could not load the case" live="alert">
-          {caseError.message} ({caseError.code})
+          <ProblemMessage problem={caseError} />
         </Alert>
       ) : null}
       <Card>
@@ -274,7 +275,7 @@ export function NewWorkOrderPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the work order" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

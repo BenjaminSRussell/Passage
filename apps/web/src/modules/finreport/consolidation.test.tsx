@@ -145,6 +145,6 @@ describe("consolidated run pages", () => {
     fireEvent.change(screen.getByLabelText("Currency type"), { target: { value: "rpt" } });
     fireEvent.change(screen.getByLabelText("Consolidate by entity"), { target: { value: `${A}\n${C}` } });
     fireEvent.click(screen.getByRole("button", { name: "Run statement" }));
-    expect(await screen.findByText(/no reporting data visible to the caller \(REPORT-0031\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/no reporting data visible to the caller/)).toBeInTheDocument();
   });
 });

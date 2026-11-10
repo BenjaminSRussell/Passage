@@ -134,7 +134,7 @@ describe("bindings list", () => {
   it("shows a failed load and loads again on retry", async () => {
     routes((url) => (url.pathname.endsWith("/entity-bindings") ? json(500, { code: "COM-0500", detail: "internal error" }) : undefined));
     renderAt("/migration/bindings");
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
     routes();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Entity bindings" })).toBeInTheDocument();
@@ -266,7 +266,7 @@ describe("binding detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit source" }));
     fireEvent.change(screen.getByLabelText(/^Table or view/), { target: { value: "VendTable" } });
     fireEvent.click(screen.getByRole("button", { name: "Save source" }));
-    expect(await screen.findByText(/current version is 2 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/current version is 2/)).toBeInTheDocument();
     const patch = calls.find((c) => c.method === "PATCH");
     expect(patch?.body).toMatchObject({ version: 1, source: { schema: "dbo", table: "VendTable" }, keyFields: ["ACCOUNTNUM"], cursorField: "MODIFIEDDATETIME", cursorType: "timestamp" });
   });
@@ -293,7 +293,7 @@ describe("binding detail", () => {
     expect(screen.queryByRole("button", { name: "Preview rows" })).not.toBeInTheDocument();
     routes((url) => (url.pathname.includes("/entity-bindings/") ? json(404, { code: "AUTH-0404", detail: "entity binding not found" }) : undefined));
     renderAt("/migration/bindings/0195f0a0-0000-7000-8000-0000000000ff");
-    expect(await screen.findByText(/entity binding not found \(AUTH-0404\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/entity binding not found/)).toBeInTheDocument();
   });
 });
 

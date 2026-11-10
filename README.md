@@ -104,5 +104,6 @@ make test-go
 - [docs/architecture.md](docs/architecture.md): how it fits together
 - [docs/engineering/CONVENTIONS.md](docs/engineering/CONVENTIONS.md): coding rules for services
 - [apps/web/docs/design-system.md](apps/web/docs/design-system.md): UI design system
+- [apps/web/docs/ux-writing.md](apps/web/docs/ux-writing.md): UX writing style guide for the web app (see [apps/web/README.md](apps/web/README.md))
 - `services/<name>/NOT-IMPLEMENTED.md`: what each service still lacks
 - [roadmap/README.md](roadmap/README.md) and the [project board](https://github.com/users/BenjaminSRussell/projects/5): the 50-wave plan, one issue per wave. To change it, edit `roadmap/waves.json`, then run `python3 scripts/build_roadmap.py --github`.

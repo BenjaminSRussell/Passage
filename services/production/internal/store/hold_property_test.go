@@ -214,3 +214,27 @@ func TestHoldProperty_ConsumeNeverMovesHeldUntilUsageDecision(t *testing.T) {
 		}
 	})
 }
+
+// Consumption claims under the order item's ref: a warehouse pick of the item
+// for the order carries the same ref, so consuming what was picked counts
+// once, while consumption of another item's ref or with none adds up.
+func TestStore_ConsumeClaimsUnderTheOrderItemsRef(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(95))
+	holds := &issueclaim.Fake{}
+	s.WithHolds(holds)
+	item := ids.New()
+	st := consumeOrder(t, s, ctx, item)
+	holds.Set(item, d("100"), d("80"))
+	pick := issueclaim.Claim{LegalEntityID: ids.New(), ProductID: item, Warehouse: "W", Kind: issueclaim.Pick, Qty: d("20"),
+		Ref: issueclaim.ProductionItemRef(st.orderID, item), Key: "pick-" + ids.New()}
+	if err := holds.Claim(ctx, pick); err != nil {
+		t.Fatalf("warehouse pick of the free 20 for the order: %v", err)
+	}
+	st.mustPost(st.mustJournal(issue("10", "20")).ID)
+	if got := holds.Outstanding(item); !got.Equal(d("20")) {
+		t.Fatalf("pick and consumption of one order item stand for %s, want 20", got)
+	}
+	_, err := st.post(st.mustJournal(issue("10", "1")).ID, nil)
+	expectProblem(t, err, http.StatusUnprocessableEntity, CodeQualityHold)
+}

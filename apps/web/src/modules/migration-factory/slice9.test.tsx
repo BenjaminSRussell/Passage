@@ -191,7 +191,7 @@ describe("validateOnhandRun", () => {
       cutoff: "The cutoff can't be after the legacy freeze (MIG-1501).",
       items: "List the item master the lines are checked against.",
       glRunId: "Enter the id of a gl_balances run, or leave it blank.",
-      inventoryAccount: "Enter the inventory GL account to compare (BR-49.3).",
+      inventoryAccount: "Enter the inventory GL account to compare.",
       quarantineMaxPct: "Enter a percentage from 0 to 10.",
       lines: 'Line 1: quantity "0" must be a decimal above zero such as 12.5.',
     });
@@ -267,7 +267,7 @@ describe("Load on-hand stock page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run onhand" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could not load the stock");
-    expect(alert).toHaveTextContent(/already has opening stock.*\(MIG-0001\)/);
+    expect(alert).toHaveTextContent(/already has opening stock/);
     expect(screen.getByRole("button", { name: "Run onhand" })).toBeInTheDocument();
   });
 });

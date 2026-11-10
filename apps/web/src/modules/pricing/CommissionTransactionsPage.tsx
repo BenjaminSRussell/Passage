@@ -5,6 +5,7 @@ import { listCommissionTransactions, listSalesGroups, type CommissionFilter, typ
 import { sumDecimals } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const FILTERS = ["salesGroupId", "repId", "period", "customerId", "invoiceLineId"] as const;
@@ -108,7 +109,7 @@ export function CommissionTransactionsPage() {
       </form>
       {txns.error ? (
         <Alert tone="danger" title="Could not load the commission transactions" live="alert" action={<Button size="sm" onClick={txns.reload}>Try again</Button>}>
-          {txns.error.message} ({txns.error.code})
+          <ProblemMessage problem={txns.error} />
         </Alert>
       ) : (
         <>

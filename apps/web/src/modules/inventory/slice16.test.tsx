@@ -127,7 +127,8 @@ describe("Holds list", () => {
       init.method === "POST" ? json(422, { code: "INV-HLD-004", detail: "release quantity must be between 0 and the held 6" }) : json(200, { items: [hold()] });
     const first = renderAt("/inventory/holds");
     fireEvent.click(await screen.findByRole("button", { name: /Release hold/ }));
-    expect(await screen.findByText(/INV-HLD-004|release quantity must be between/)).toBeInTheDocument();
+    expect(await screen.findByText(/release quantity must be between/)).toBeInTheDocument();
+    expect(screen.getByText("INV-HLD-004")).toBeInTheDocument();
     expect(sent("GET")).toHaveLength(1);
     first.unmount();
     handler = () => json(200, { items: Array.from({ length: 200 }, (_, i) => hold({ id: `h-${i}` })) });

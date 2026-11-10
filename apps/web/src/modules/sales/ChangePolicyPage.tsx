@@ -7,6 +7,7 @@ import { DUTY_ORDER_APPROVE } from "./ChangeRequestDetailPage";
 import { formatDateTime, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_APPROVERS = 20;
 
@@ -59,7 +60,7 @@ function PolicyForm({ scope, canSave }: { scope: Scope; canSave: boolean }) {
   if (state.error) {
     return (
       <Alert tone="danger" title="Could not load the change approval setting" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   }
@@ -119,7 +120,7 @@ function PolicyForm({ scope, canSave }: { scope: Scope; canSave: boolean }) {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.code === "SLS-0006" ? "Someone else changed this setting" : "Could not save the setting"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div className={styles.actions}>

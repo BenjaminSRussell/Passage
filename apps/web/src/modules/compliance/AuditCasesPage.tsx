@@ -19,6 +19,7 @@ import {
 } from "./api/client";
 import { formatDateTime, sentence } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const categoryLabel: Record<CaseCategory, string> = {
   DUPLICATE_PAYMENT: "Duplicate payment",
@@ -211,7 +212,7 @@ export function AuditCasesPage() {
         </form>
       </Card>
       <Alert tone="danger" title={groupFailure ? "The violations could not be grouped" : undefined} live="alert">
-        {groupFailure ? `${groupFailure.message} (${groupFailure.code})` : null}
+        {groupFailure ? <ProblemMessage problem={groupFailure} /> : null}
       </Alert>
       <Alert tone="info" live="status">
         {drafts ? (caseCount === 0 ? "No new cases: every violation already belongs to a case." : `${caseCount} ${caseCount === 1 ? "case" : "cases"} to open.`) : null}
@@ -286,7 +287,7 @@ export function AuditCasesPage() {
         </form>
       </Card>
       <Alert tone="danger" title={moveFailure ? "The action is not allowed" : undefined} live="alert">
-        {moveFailure ? `${moveFailure.message} (${moveFailure.code})` : null}
+        {moveFailure ? <ProblemMessage problem={moveFailure} /> : null}
       </Alert>
       {moved ? (
         <Card title="Case after the action">

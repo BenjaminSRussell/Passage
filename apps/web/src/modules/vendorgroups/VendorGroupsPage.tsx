@@ -3,6 +3,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { createVendorGroup, listVendorGroups, PartyApiError, type VendorGroup } from "./api/client";
 import styles from "../../shell/pageLayout.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const CODE = /^[A-Z0-9_-]{1,10}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,7 +39,7 @@ export function VendorGroupsPage() {
   const client = useQueryClient();
   const [draft, setDraft] = useState<VendorGroupDraft>(emptyDraft);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const key = useRef(crypto.randomUUID());
 
   const groups = useQuery({ queryKey: ["party", "vendor-groups"], queryFn: () => listVendorGroups() });
@@ -53,7 +54,7 @@ export function VendorGroupsPage() {
     },
     onError: (error) => {
       if (error instanceof PartyApiError && Object.keys(error.fields).length > 0) setErrors(error.fields);
-      setFailure(error instanceof PartyApiError ? `${error.message} (${error.code})` : (error as Error).message);
+      setFailure(error);
     },
   });
 
@@ -82,7 +83,7 @@ export function VendorGroupsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not add the vendor group" live="alert">
-                {failure}
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

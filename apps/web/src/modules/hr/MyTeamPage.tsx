@@ -13,6 +13,7 @@ import { listMyTeam } from "./api/selfService";
 import { dash, workerTypeLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Worker>[] = [
   { key: "personnelNumber", header: "Personnel number", mono: true },
@@ -80,7 +81,7 @@ export function MyTeamPage() {
             </Button>
           }
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -103,7 +104,7 @@ export function MyTeamPage() {
           title="Could not load more of your team"
           live="alert"
         >
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {!state.error && !state.loading && cursor ? (

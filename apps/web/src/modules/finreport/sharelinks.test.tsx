@@ -96,7 +96,7 @@ describe("ShareLinks on the library file page", () => {
   it("offers a retry when the links cannot be loaded", async () => {
     server.handler = (url, init) => (url.pathname.endsWith("/share-links") ? problem(500, "COM-0500", "links are down") : links([])(url, init));
     renderAt(`/finreport/library/${LIB}`, [DUTY]);
-    expect(await findAlert()).toHaveTextContent("links are down (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("links are down");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -137,7 +137,7 @@ describe("ShareLinks on the library file page", () => {
     renderAt(`/finreport/library/${LIB}`, [DUTY]);
     const form = await screen.findByRole("form", { name: "Create a share link" });
     fireEvent.click(within(form).getByRole("button", { name: "Create link" }));
-    expect(await findAlert()).toHaveTextContent("past its retention date (REPORT-0053)");
+    expect(await findAlert()).toHaveTextContent("past its retention date");
     expect(screen.queryByText("Copy the link now")).toBeNull();
   });
 

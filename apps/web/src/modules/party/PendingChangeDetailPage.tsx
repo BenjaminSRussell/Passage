@@ -8,6 +8,7 @@ import { displayOrDash, DUTY_APPROVE, formatDateTime, pendingFieldLabel } from "
 import styles from "./pages.module.css";
 import { Entry, problemText, ProblemAlert } from "./parts";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const REASON_MAX = 500;
 
@@ -118,7 +119,7 @@ function PendingChangeDetail({ id }: { id: string }) {
       <div role="status" ref={outcomeRef} tabIndex={-1}>
         {outcome?.tone === "danger" ? (
           <Alert tone="danger" title="The decision failed">
-            {problemText(outcome.problem)}
+            <ProblemMessage problem={outcome.problem} message={problemText(outcome.problem)} />
           </Alert>
         ) : null}
         {outcome?.tone === "success" ? <Alert tone="success">{outcome.text}</Alert> : null}

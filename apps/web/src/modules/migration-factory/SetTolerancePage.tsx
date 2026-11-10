@@ -5,6 +5,7 @@ import { describeProblem, listTolerances, newKey, putTolerance, type Problem, ty
 import { ANY_TOTAL, TOLERANCE_PACKS, TOLERANCE_TOTALS, type Pack } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ToleranceValues {
   pack: Pack;
@@ -125,7 +126,7 @@ export function SetTolerancePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not set the tolerance" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

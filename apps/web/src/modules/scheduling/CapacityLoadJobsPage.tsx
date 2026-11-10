@@ -4,6 +4,7 @@ import { fetchLoadJobs, getResource, type LoadJob, type LoadJobs, type Resource 
 import { dash, formatDateTime, formatMinutes, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_RANGE_MS = 93 * 86_400_000;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
@@ -83,7 +84,7 @@ export function CapacityLoadJobsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the jobs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

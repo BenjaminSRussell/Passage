@@ -18,6 +18,7 @@ import {
 import { DEFINITION_CODE, SUBJECT_LABELS } from "./format";
 import { formatRules, parseMembers, parseRules } from "./hierarchyText";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export function blankHierarchy(): Hierarchy {
   return {
@@ -209,7 +210,7 @@ export function HierarchyEditorPage() {
           live="alert"
           action={missing ? undefined : <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>}
         >
-          {loadError.message} ({loadError.code})
+          <ProblemMessage problem={loadError} />
         </Alert>
         <Link to="/finreport/hierarchies">Back to derived hierarchies</Link>
       </div>
@@ -420,7 +421,7 @@ export function HierarchyEditorPage() {
             ) : undefined
           }
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
 

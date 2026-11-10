@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Select, Skeleton } from "../../shell/ui
 import { assignWorkerSetup, describeProblem, listPayAgreements, listTimeProfiles, newKey, type PayAgreement, type Problem, type TimeProfile, type Worker } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DEFAULT_OPTION = "";
 
@@ -51,7 +52,7 @@ export function WorkerPaySetup({ worker, onSaved }: { worker: Worker; onSaved():
     return (
       <Card title="Pay setup">
         <Alert tone="danger" title="Could not load profiles and agreements" live="alert" action={<Button size="sm" onClick={options.reload}>Try again</Button>}>
-          {options.error.message} ({options.error.code})
+          <ProblemMessage problem={options.error} />
         </Alert>
       </Card>
     );

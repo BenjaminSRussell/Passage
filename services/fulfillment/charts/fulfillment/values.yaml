@@ -29,9 +29,16 @@ inventoryUrl: ""
 # Needs serviceIdentity.signingKeySecret; carrier-gateway must list fulfillment's public key.
 carrierGatewayUrl: ""
 
+# Sales (#496): each posted packing slip is reported to POST /v1/sales/orders/{id}:record-progress
+# by a reporter in every API replica (leased, so each report is sent by one replica at a time).
+# Empty queues the reports (PENDING) without sending them; they go out once this is set.
+# Needs serviceIdentity.signingKeySecret; sales must list fulfillment's public key.
+salesUrl: ""
+salesReportInterval: "30s"      # SALES_REPORT_INTERVAL, how often due reports are looked for
+
 # Callers (edi reads shipments) present a signed service token verified against these
 # keys, formatted name=base64-public-key and comma separated. signingKeySecret is
-# required with inventoryUrl or carrierGatewayUrl so fulfillment can read held quantity.
+# required with inventoryUrl, carrierGatewayUrl or salesUrl (fulfillment signs those calls).
 serviceIdentity:
   publicKeys: ""
   signingKeySecret: ""

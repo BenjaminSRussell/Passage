@@ -25,6 +25,7 @@ import styles from "./pages.module.css";
 import { PiiCard } from "./PiiCard";
 import { SkillsCard } from "./SkillsCard";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const employmentColumns: DataTableColumn<Employment>[] = [
   { key: "legalEntityId", header: "Legal entity", mono: true },
@@ -70,7 +71,7 @@ function AsOfCard({ workerId }: { workerId: string }) {
           <Alert tone="warning">Enter the date as YYYY-MM-DD.</Alert>
         ) : state.error ? (
           <Alert tone="danger" title="Could not load the as-of view" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : state.loading || !state.data ? (
           <div aria-busy="true">
@@ -129,7 +130,7 @@ export function WorkerDetailPage() {
           </Card>
         ) : (
           <Alert tone="danger" title="Could not load the worker" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>

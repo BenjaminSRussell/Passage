@@ -130,7 +130,7 @@ describe("operating units page", () => {
     await user.type(screen.getByLabelText("Code"), "D2");
     await user.type(screen.getByLabelText("Name"), "Other");
     await user.click(screen.getByRole("button", { name: "Add operating unit" }));
-    expect(await screen.findByText(/entity inactive \(ORG-OU-LEGAL-ENTITY-INVALID\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/entity inactive/)).toBeInTheDocument();
   });
 
   it("deactivates after confirmation and sends the row version", async () => {
@@ -311,6 +311,6 @@ describe("warehouses page", () => {
   it("reports a failed site lookup beside the form", async () => {
     serve({ ...entities, "GET /sites": () => problem("ORG-X-BOOM", 500, "sites down"), "GET /warehouses": () => json({ items: [] }) });
     renderPage("/org/warehouses", WarehousesPage, SITE_WRITER);
-    expect(await screen.findByText(/sites down \(ORG-X-BOOM\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/sites down/)).toBeInTheDocument();
   });
 });

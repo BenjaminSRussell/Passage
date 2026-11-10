@@ -7,6 +7,7 @@ import { Detail } from "./ContractDetail";
 import { contractLink, KIND_LABELS } from "./contractFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One broker or royalty claim (FR-26.16, FR-26.17): its amount, and approval for AP (VendorRebateClaimApprove). */
 export function ContractClaimDetailPage() {
@@ -22,7 +23,7 @@ export function ContractClaimDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Claim" />
         <Alert tone="danger" title="Could not load the claim" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -79,7 +80,7 @@ export function ContractClaimDetailPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not approve the claim" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Claim">

@@ -154,7 +154,7 @@ describe("Blocking dispositions", () => {
     const table = await findTable({ name: "Blockings" });
     fireEvent.click(await within(table).findByRole("button", { name: "Scrap blocking 6b6b6b6b" }));
     fireEvent.click(await screen.findByRole("button", { name: "Scrap stock" }));
-    expect(await findAlert()).toHaveTextContent("inventory.blocking.scrap duty (INV-BLK-008)");
+    expect(await findAlert()).toHaveTextContent("inventory.blocking.scrap duty");
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(within(screen.getByRole("table", { name: "Blockings" })).getByRole("button", { name: "Scrap blocking 6b6b6b6b" })).toBeInTheDocument();
   });

@@ -4,6 +4,7 @@ import { scheduleResults, type GroupStat, type QuestionStat, type Stats } from "
 import styles from "./pages.module.css";
 import { BackLink, CheckField, LoadFailure, problemText } from "./parts";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const questionColumns: DataTableColumn<QuestionStat>[] = [
   { key: "code", header: "Question", mono: true },
@@ -72,7 +73,7 @@ export function ScheduleResultsPage() {
       <div className={styles.stack}>
         {header}
         <Alert tone="warning" title="You can't see these results" live="alert">
-          {problemText(error)}
+          <ProblemMessage problem={error} message={problemText(error)} />
         </Alert>
       </div>
     );
@@ -91,7 +92,7 @@ export function ScheduleResultsPage() {
             </Button>
           }
         >
-          {problemText(error)}
+          <ProblemMessage problem={error} message={problemText(error)} />
         </Alert>
       </div>
     );

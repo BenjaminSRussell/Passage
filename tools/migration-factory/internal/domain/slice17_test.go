@@ -239,7 +239,7 @@ func TestReplay_ValidateOrderAndTrialBalance(t *testing.T) {
 	if order[0].DocumentID != "GJ-3" || order[1].DocumentID != "GJ-1" || order[2].DocumentID != "GJ-2" {
 		t.Fatalf("order %s %s %s", order[0].DocumentID, order[1].DocumentID, order[2].DocumentID)
 	}
-	tb := TBLines(TrialBalanceFromDocuments(docs), "2026-03", "legacy")
+	tb := TBLines(TrialBalanceFromDocuments(docs), "2026-03", "legacy", nil)
 	if len(tb) != 4 || tb[0].Key != "1100|USD|2026-03" || !tb[0].Legacy.Equal(d("105")) {
 		t.Fatalf("tb %+v", tb)
 	}

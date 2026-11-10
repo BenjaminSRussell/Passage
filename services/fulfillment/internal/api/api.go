@@ -92,6 +92,7 @@ func (a *API) Routes(r chi.Router) {
 	a.routesInquiry(r)
 	a.routesException(r)
 	a.routesTracking(r)
+	a.routesSalesReport(r)
 }
 
 // ---- request and response DTOs -------------------------------------------

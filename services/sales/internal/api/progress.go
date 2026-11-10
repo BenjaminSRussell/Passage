@@ -36,10 +36,13 @@ const (
 	maxTrackingValue   = 60
 )
 
-// progressLineRequest is the quantity a report covers on one order line.
+// progressLineRequest is the quantity a report covers on one order line,
+// named by its lineNo or by its lineId (the id order.confirmed carries, which
+// is how fulfillment knows the line, #496), never both.
 // ActualWeight is the catch-weight of a DELIVERED report (FR-24.7).
 type progressLineRequest struct {
-	LineNo       int                       `json:"lineNo"`
+	LineNo       int                       `json:"lineNo,omitempty"`
+	LineID       string                    `json:"lineId,omitempty"`
 	Quantity     string                    `json:"quantity"`
 	ActualWeight *string                   `json:"actualWeight,omitempty"`
 	Tracking     []progressTrackingRequest `json:"tracking,omitempty"`
@@ -93,13 +96,23 @@ func (a *API) recordProgress(w http.ResponseWriter, r *http.Request) {
 			fields["lines"] = fmt.Sprintf("must have 1 to %d lines", maxLines)
 		}
 		in := store.NewProgress{OrderID: id, Kind: req.Kind, SourceRef: req.SourceRef}
-		seen := map[int]bool{}
+		seen := map[string]bool{}
 		for i, l := range req.Lines {
 			name := fmt.Sprintf("lines[%d]", i)
-			if l.LineNo < 1 || seen[l.LineNo] {
+			l.LineID = strings.ToLower(strings.TrimSpace(l.LineID))
+			ref := fmt.Sprintf("no:%d", l.LineNo)
+			switch {
+			case l.LineID != "" && l.LineNo != 0:
+				fields[name+".lineNo"] = "name the line by lineNo or by lineId, not both"
+			case l.LineID != "":
+				ref = "id:" + l.LineID
+				if !ids.Valid(l.LineID) || seen[ref] {
+					fields[name+".lineId"] = "must be an order line id, once per report"
+				}
+			case l.LineNo < 1 || seen[ref]:
 				fields[name+".lineNo"] = "must be a line number, once per report"
 			}
-			seen[l.LineNo] = true
+			seen[ref] = true
 			q, err := decimal.NewFromString(l.Quantity)
 			if err != nil || !q.IsPositive() || q.Exponent() < -quantityPlaces {
 				fields[name+".quantity"] = fmt.Sprintf("must be a positive decimal with at most %d places", quantityPlaces)
@@ -117,7 +130,7 @@ func (a *API) recordProgress(w http.ResponseWriter, r *http.Request) {
 				fields[name+".final"] = "applies only to a DELIVERED report"
 			}
 			tracking := progressTracking(fields, name, req.Kind, q, actual, l.Tracking)
-			in.Lines = append(in.Lines, store.ProgressLineInput{LineNo: l.LineNo, Quantity: q, ActualWeight: actual, Tracking: tracking, Final: l.Final})
+			in.Lines = append(in.Lines, store.ProgressLineInput{LineNo: l.LineNo, LineID: l.LineID, Quantity: q, ActualWeight: actual, Tracking: tracking, Final: l.Final})
 		}
 		if len(fields) > 0 {
 			validationFailed(w, r, fields)
@@ -253,6 +266,7 @@ func canonicalProgress(in store.NewProgress) any {
 	}
 	type line struct {
 		LineNo       int     `json:"lineNo"`
+		LineID       string  `json:"lineId,omitempty"`
 		Quantity     string  `json:"quantity"`
 		ActualWeight *string `json:"actualWeight,omitempty"`
 		Tracking     []entry `json:"tracking,omitempty"`
@@ -260,7 +274,7 @@ func canonicalProgress(in store.NewProgress) any {
 	}
 	lines := make([]line, 0, len(in.Lines))
 	for _, l := range in.Lines {
-		item := line{LineNo: l.LineNo, Quantity: l.Quantity.String(), Final: l.Final}
+		item := line{LineNo: l.LineNo, LineID: l.LineID, Quantity: l.Quantity.String(), Final: l.Final}
 		if l.ActualWeight != nil {
 			s := l.ActualWeight.String()
 			item.ActualWeight = &s
@@ -276,7 +290,13 @@ func canonicalProgress(in store.NewProgress) any {
 		}
 		lines = append(lines, item)
 	}
-	sort.Slice(lines, func(i, j int) bool { return lines[i].LineNo < lines[j].LineNo })
+	// A line named by id has lineNo 0 here; ids order those lines among themselves.
+	sort.Slice(lines, func(i, j int) bool {
+		if lines[i].LineNo != lines[j].LineNo {
+			return lines[i].LineNo < lines[j].LineNo
+		}
+		return lines[i].LineID < lines[j].LineID
+	})
 	return struct {
 		Kind      string `json:"kind"`
 		SourceRef string `json:"sourceRef"`

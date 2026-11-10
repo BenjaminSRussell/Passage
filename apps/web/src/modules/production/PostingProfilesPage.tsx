@@ -10,6 +10,7 @@ import {
   type Problem,
 } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -180,7 +181,7 @@ export function PostingProfilesPage() {
       </Alert>
       {state.error ? (
         <Alert tone="danger" title="Could not load posting profiles" live="alert">
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -197,7 +198,7 @@ export function PostingProfilesPage() {
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Posting profile">
           {failure ? (
             <Alert tone="danger" live="alert" title="The profile was not saved">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <div className={styles.fields}>

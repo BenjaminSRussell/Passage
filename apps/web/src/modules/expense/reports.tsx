@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -37,6 +37,7 @@ import {
 } from "./api/client";
 import { CURRENCY, DAY, DECIMAL, splitProblem, today } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 type Failure = Pick<Problem, "code" | "message">;
@@ -159,7 +160,7 @@ export function ReportsPage() {
             </Button>
           }
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <DataTable
@@ -266,7 +267,7 @@ export function NewReportPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The report was not created" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -366,7 +367,7 @@ export function ReportDetailPage() {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [actionFailure, setActionFailure] = useState<{ title: string; message: string; details: string[] } | null>(null);
+  const [actionFailure, setActionFailure] = useState<{ title: string; message: ReactNode; details: string[] } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const lineKey = useRef(newIdempotencyKey());
   // One submit key per report version, so a retry replays and a changed report is a new submit.
@@ -424,7 +425,7 @@ export function ReportDetailPage() {
       setNotice(`Line ${target.lineNo} removed.`);
     } catch (err) {
       const p = describeProblem(err);
-      setActionFailure({ title: "The line was not removed", message: `${p.message} (${p.code})`, details: [] });
+      setActionFailure({ title: "The line was not removed", message: <ProblemMessage problem={p} />, details: [] });
       if (p.code === "EXP-REP-004") load();
     } finally {
       setRemoving(null);
@@ -445,7 +446,7 @@ export function ReportDetailPage() {
       const details = refusalMessages(report, p.fields);
       setActionFailure({
         title: "The report was not submitted",
-        message: details.length > 0 ? "Fix these lines, for example by removing a line and adding it again with its receipt or justification." : `${p.message} (${p.code})`,
+        message: details.length > 0 ? "Fix these lines, for example by removing a line and adding it again with its receipt or justification." : <ProblemMessage problem={p} />,
         details,
       });
       if (p.code === "EXP-REP-004") load();
@@ -468,7 +469,7 @@ export function ReportDetailPage() {
     }
     return (
       <Alert tone="danger" title="The report could not be loaded" live="alert" action={<Button size="sm" onClick={load}>Try again</Button>}>
-        {loadFailure.message} ({loadFailure.code})
+        <ProblemMessage problem={loadFailure} />
       </Alert>
     );
   }
@@ -614,7 +615,7 @@ export function ReportDetailPage() {
             {lineFailure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="The line was not added" live="alert">
-                  {lineFailure.message} ({lineFailure.code})
+                  <ProblemMessage problem={lineFailure} />
                 </Alert>
               </div>
             ) : null}

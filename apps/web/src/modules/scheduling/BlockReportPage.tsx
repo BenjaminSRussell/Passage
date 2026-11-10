@@ -5,6 +5,7 @@ import { fetchBlockReport, listResources, type BlockReport, type BlockUsage } fr
 import { dash, dayStart, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_DAYS = 62;
 const DAY_MS = 86_400_000;
@@ -98,7 +99,7 @@ export function BlockReportPage() {
       )}
       {rangeProblem ? null : state.error ? (
         <Alert tone="danger" title="Could not load block utilization" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

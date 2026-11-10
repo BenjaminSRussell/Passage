@@ -18,6 +18,7 @@ import {
 import { dash, formatDateTime, QUANTITY, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Duty that records batch attribute values, which a derivation does; enforced by the service (FR-24.15). */
 export const DERIVE_DUTY = "production.batch-attribute.write";
@@ -134,7 +135,7 @@ export function DeriveStoredPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not derive the attributes" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -211,7 +212,7 @@ export function DerivationMonitorPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the derivations" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

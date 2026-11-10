@@ -129,7 +129,7 @@ describe("new realignment", () => {
     fireEvent.change(screen.getByLabelText("Old and new values"), { target: { value: "COLOR: A > B" } });
     server.handler = () => json(422, { code: "LEDGER_REALIGNMENT_INVALID", detail: "COLOR is not a dimension attribute of the ledger" });
     fireEvent.click(screen.getByRole("button", { name: "Simulate realignment" }));
-    expect(await screen.findByText(/COLOR is not a dimension attribute of the ledger \(LEDGER_REALIGNMENT_INVALID\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/COLOR is not a dimension attribute of the ledger/)).toBeInTheDocument();
   });
 
   it("asks to open the page from the list when no ledger is chosen", () => {
@@ -186,7 +186,7 @@ describe("realignment run", () => {
     expect(screen.getByLabelText("Reason code")).toHaveValue("REORG");
     server.handler = () => json(422, { code: "LEDGER_REALIGNMENT_PERIOD_CLOSED", detail: "period 2026-01 is closed" });
     fireEvent.click(screen.getByRole("button", { name: "Reverse realignment" }));
-    expect(await screen.findByText(/period 2026-01 is closed \(LEDGER_REALIGNMENT_PERIOD_CLOSED\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/period 2026-01 is closed/)).toBeInTheDocument();
     expect(server.calls.find((c) => c.url.pathname.endsWith(":reverse"))!.body).toEqual({ reasonCode: "REORG" });
   });
 

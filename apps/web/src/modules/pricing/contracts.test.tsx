@@ -149,7 +149,7 @@ describe("Broker contracts", () => {
       return fail ? json(500, { code: "COM-0001", detail: "database down" }) : json(200, { items: [broker] });
     };
     renderAt("/pricing/brokers");
-    expect(await findAlert()).toHaveTextContent("database down (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("database down");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Agent Smith")).toBeInTheDocument();
@@ -269,13 +269,13 @@ describe("Broker contracts", () => {
     fill("Period", "2027-03");
     fireEvent.click(screen.getByRole("button", { name: "Preview claim" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create claim for 150 USD" }));
-    expect(await findAlert()).toHaveTextContent("the accruals of 2027-03 are fully claimed (PRC-0015)");
+    expect(await findAlert()).toHaveTextContent("the accruals of 2027-03 are fully claimed");
   });
 
   it("shows an error when the contract does not exist", async () => {
     server.handler = () => json(404, { code: "PRC-0058", detail: "no broker contract" });
     renderAt(`/pricing/brokers/${BK}`);
-    expect(await findAlert()).toHaveTextContent("no broker contract (PRC-0058)");
+    expect(await findAlert()).toHaveTextContent("no broker contract");
   });
 });
 
@@ -383,7 +383,7 @@ describe("Royalty agreements", () => {
     await screen.findByRole("heading", { name: "Brand licence" });
     fill("Period", "2027-Q1");
     fireEvent.click(screen.getByRole("button", { name: "Close period" }));
-    expect(await findAlert()).toHaveTextContent("is not a MONTH period inside the agreement's validity (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("is not a MONTH period inside the agreement's validity");
   });
 });
 
@@ -419,7 +419,7 @@ describe("Broker and royalty claims inquiry", () => {
   it("shows the loading failure", async () => {
     server.handler = () => json(500, { code: "COM-0001", detail: "database down" });
     renderAt("/pricing/contract-claims");
-    expect(await findAlert()).toHaveTextContent("database down (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("database down");
   });
 });
 
@@ -450,7 +450,7 @@ describe("Broker and royalty claim approval", () => {
     renderAt(`/pricing/contract-claims/${CL}`);
     await screen.findByRole("heading", { name: "Claim BC-000001" });
     fireEvent.click(screen.getByRole("button", { name: "Approve claim" }));
-    expect(await findAlert()).toHaveTextContent("cannot approve it (PRC-0046)");
+    expect(await findAlert()).toHaveTextContent("cannot approve it");
   });
 
   it("offers no approval for an approved claim and explains an over-accrual", async () => {
@@ -463,6 +463,6 @@ describe("Broker and royalty claim approval", () => {
   it("shows an error when the claim does not exist", async () => {
     server.handler = () => json(404, { code: "PRC-0044", detail: "no broker or royalty claim" });
     renderAt(`/pricing/contract-claims/${CL}`);
-    expect(await findAlert()).toHaveTextContent("no broker or royalty claim (PRC-0044)");
+    expect(await findAlert()).toHaveTextContent("no broker or royalty claim");
   });
 });

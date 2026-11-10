@@ -153,7 +153,7 @@ describe("charge code create", () => {
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "FREIGHT" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Freight" } });
     fireEvent.click(screen.getByRole("button", { name: "Save charge code" }));
-    expect(await screen.findByText(/already has a charge code.*PRC-CHG-001/)).toBeInTheDocument();
+    expect(await screen.findByText(/already has a charge code/)).toBeInTheDocument();
   });
 });
 
@@ -190,7 +190,7 @@ describe("charge code detail", () => {
     await screen.findByRole("heading", { name: "Charge code FREIGHT" });
     expect(await screen.findByText("No auto charges")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByText(/Someone else changed this charge code.*PRC-CHG-002/)).toBeInTheDocument();
+    expect(await screen.findByText(/Someone else changed this charge code/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reload charge code" }));
     expect(await screen.findByDisplayValue("Someone's name")).toBeInTheDocument();
     expect(screen.queryByText(/PRC-CHG-002/)).toBeNull();
@@ -330,7 +330,7 @@ describe("auto charges", () => {
     expect((call[1] as RequestInit).headers).toMatchObject({ "If-Match": '"1"' });
     expect(JSON.parse((call[1] as RequestInit).body as string)).toMatchObject({ status: "INACTIVE", validTo: "2026-12-31", accountCode: "VENDOR" });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByText(/Someone else changed this auto charge.*PRC-CHG-003/)).toBeInTheDocument();
+    expect(await screen.findByText(/Someone else changed this auto charge/)).toBeInTheDocument();
   });
 });
 

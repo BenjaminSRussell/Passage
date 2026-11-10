@@ -5,6 +5,7 @@ import { describeProblem, runAbc, type Problem } from "./api/client";
 import { DECIMAL, UUID } from "./format";
 import { fieldErrorsOf } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface AbcValues {
   legalEntityId: string;
@@ -106,7 +107,7 @@ export function NewAbcRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not run the classification" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

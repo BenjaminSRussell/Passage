@@ -23,6 +23,7 @@ import styles from "./pages.module.css";
 import { SecretReveal } from "./NewWebhookSubscriptionPage";
 import { ProblemAlert } from "./parts";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** A sales.order.confirmed sample (services/sales/events/asyncapi.yaml), edited as JSON like the map tester takes raw X12. */
 export const SAMPLE_EVENT = {
@@ -284,7 +285,7 @@ export function SyncSubscriptionPage() {
       <div className={styles.stack}>
         <PageHeader title="Subscription" />
         <Alert tone="danger" title="Could not load the subscription" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

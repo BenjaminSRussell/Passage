@@ -38,6 +38,7 @@ import { LoadMore } from "./LoadMore";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 export const DUTY_BINDING_WRITE = "migration.connection.write";
 
@@ -159,7 +160,7 @@ export function BindingsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load bindings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -241,7 +242,7 @@ export function NewBindingPage() {
       )}
       {profiles.error ? (
         <Alert tone="danger" title="Could not load connections" live="alert" action={<Button size="sm" onClick={profiles.reload}>Try again</Button>}>
-          {profiles.error.message} ({profiles.error.code})
+          <ProblemMessage problem={profiles.error} />
         </Alert>
       ) : null}
       {profiles.data && profiles.data.items.length === 0 ? (
@@ -283,7 +284,7 @@ export function NewBindingPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the binding" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -335,7 +336,7 @@ export function BindingDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Entity binding" />
         <Alert tone="danger" title="Could not load this binding" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/bindings">
           Back to bindings
@@ -385,12 +386,12 @@ export function BindingDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not change the binding" live="alert" action={<Button size="sm" onClick={state.reload}>Reload</Button>}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {profile.error ? (
         <Alert tone="danger" title="Could not load the connection" live="alert" action={<Button size="sm" onClick={profile.reload}>Try again</Button>}>
-          {profile.error.message} ({profile.error.code})
+          <ProblemMessage problem={profile.error} />
         </Alert>
       ) : null}
       <SourceCard binding={binding} kind={kind} canEdit={canWrite && kind !== null} onSaved={state.set} />
@@ -468,7 +469,7 @@ function SourceCard({ binding, kind, canEdit, onSaved }: { binding: EntityBindin
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the binding" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

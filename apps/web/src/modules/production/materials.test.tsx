@@ -154,7 +154,7 @@ describe("material requirements page (4.21.14)", () => {
     const table = await findTable({ name: "Components" });
     await waitFor(() => expect(within(table).getByText(item)).toBeInTheDocument());
     await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
-    expect(await screen.findByText("database unavailable (COM-0503)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Components" })).getByText(item)).toBeInTheDocument();
   });
 
@@ -200,6 +200,6 @@ describe("material requirements page (4.21.14)", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(500, "COM-0500", "database unavailable"));
     renderAt(page);
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
   });
 });

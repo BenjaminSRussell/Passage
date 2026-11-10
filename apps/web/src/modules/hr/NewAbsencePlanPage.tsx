@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { validDecimal, validPlanYearStart } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   code: string;
@@ -202,7 +203,7 @@ export function NewAbsencePlanPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the plan" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

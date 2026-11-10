@@ -14,6 +14,7 @@ import { amount, dash, isCount, isCurrency, isDecimal, isNonZero, isSignedDecima
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type HeadKey = "currency" | "periodEnd";
 type RuleKey = "code" | "type" | "order" | "sourceAccount" | "targetAccount" | "threshold" | "termMonths";
@@ -178,7 +179,7 @@ export function ReclassificationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The dry run failed" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -212,7 +213,7 @@ export function ReclassificationPage() {
             icon="workflow"
             headingLevel={3}
             title="No dry run yet"
-            description="The form holds acceptance example AC-40.13 with an overdrawn group cash balance. Run it, or enter your own rules."
+            description="The form is filled in with an example that has an overdrawn group cash balance. Run it, or enter your own rules."
           />
         </Card>
       )}

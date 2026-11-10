@@ -6,6 +6,7 @@ import { ShipmentStatusBadge } from "./badges";
 import { formatDate, formatDateTime, SHIPMENT_STATUS_LABELS, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ShipmentSummary>[] = [
   { key: "shipmentNumber", header: "Shipment", mono: true },
@@ -51,7 +52,7 @@ export function ShipmentsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load shipments" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

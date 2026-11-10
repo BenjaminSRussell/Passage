@@ -6,6 +6,7 @@ import { PROCEDURE_NAME } from "./campaignFormat";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { cleanSteps, ProcedureStepsEditor, referenceSteps, validateSteps } from "./ProcedureStepsEditor";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -86,7 +87,7 @@ export function NewProcedurePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the procedure" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

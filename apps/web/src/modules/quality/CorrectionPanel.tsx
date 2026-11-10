@@ -15,6 +15,7 @@ import {
 } from "./api/client";
 import { CORRECTION_STATUS_LABELS, formatDate, formatDateTime } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface ChangeProps {
   ncr: Nonconformance;
@@ -47,7 +48,7 @@ function Failure({ failure, title }: { failure: Problem | null; title: string })
   return (
     <div className={styles.formActions}>
       <Alert tone="danger" title={stale ? "Someone else changed this nonconformance" : title} live="alert">
-        {stale ? "Reload the page to see the latest version, then try again." : `${failure.message} (${failure.code})`}
+        {stale ? "Reload the page to see the latest version, then try again." : <ProblemMessage problem={failure} />}
       </Alert>
     </div>
   );

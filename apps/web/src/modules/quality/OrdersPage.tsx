@@ -5,6 +5,7 @@ import { listOrders, type Order, type OrderStatus } from "./api/client";
 import { formatDateTime, ORDER_STATUSES, qty, shortId, STATUS_LABELS, TRIGGER_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
   const s = STATUS_LABELS[status] ?? { label: status, tone: "neutral" as const };
@@ -84,7 +85,7 @@ export function OrdersPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load quality orders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

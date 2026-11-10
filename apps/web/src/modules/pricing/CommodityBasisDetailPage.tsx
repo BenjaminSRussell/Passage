@@ -13,6 +13,7 @@ import {
 import { DAY, DECIMAL } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Detail({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -50,7 +51,7 @@ export function CommodityBasisDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Cost basis type" />
         <Alert tone="danger" title="Could not load the cost basis type" live="alert" action={<Button size="sm" onClick={basis.reload}>Try again</Button>}>
-          {basis.error.message} ({basis.error.code})
+          <ProblemMessage problem={basis.error} />
         </Alert>
       </div>
     );
@@ -144,7 +145,7 @@ export function CommodityBasisDetailPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not record the quote" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -158,7 +159,7 @@ export function CommodityBasisDetailPage() {
       <Card title="Index quotes">
         {quotes.error ? (
           <Alert tone="danger" title="Could not load the index quotes" live="alert" action={<Button size="sm" onClick={quotes.reload}>Try again</Button>}>
-            {quotes.error.message} ({quotes.error.code})
+            <ProblemMessage problem={quotes.error} />
           </Alert>
         ) : (
           <DataTable

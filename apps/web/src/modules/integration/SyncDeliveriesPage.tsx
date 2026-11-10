@@ -7,6 +7,7 @@ import { dash, formatDateTime, UUID } from "./format";
 import styles from "./pages.module.css";
 import { DeliveryPill, formatUnix } from "./syncFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Delivery>[] = [
   { key: "eventType", header: "Event", mono: true },
@@ -87,7 +88,7 @@ export function SyncDeliveriesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load deliveries" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>
@@ -101,7 +102,7 @@ export function SyncDeliveriesPage() {
           />
           {moreError ? (
             <Alert tone="danger" title="Could not load more" live="alert">
-              {moreError.message} ({moreError.code})
+              <ProblemMessage problem={moreError} />
             </Alert>
           ) : null}
           {next !== null && !state.loading ? (

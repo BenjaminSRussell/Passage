@@ -36,6 +36,7 @@ import { dash, DECIMAL, describeDimensions, formatDateTime, isIsoDate, sentence,
 import { ImportLinesForm } from "./ImportLines";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const lineColumns: DataTableColumn<JournalLine>[] = [
   { key: "lineNo", header: "Line", align: "end" },
@@ -252,7 +253,7 @@ function AddLineForm({ journal, onAdded }: { journal: Journal; onAdded(updated: 
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not add the line" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -304,7 +305,7 @@ function ReverseForm({ journal, onCancel }: { journal: Journal; onCancel(): void
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="The journal was not reversed" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -373,7 +374,7 @@ function CopyForm({ journal, onCancel }: { journal: Journal; onCancel(): void })
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="The journal was not copied" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -477,7 +478,7 @@ export function JournalDetailPage() {
     }
     return (
       <Alert tone="danger" title="Could not load the journal" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   }
@@ -532,7 +533,7 @@ export function JournalDetailPage() {
           live="alert"
           action={failure.problem.code === "conflict_version" ? <Button size="sm" onClick={state.reload}>Reload journal</Button> : undefined}
         >
-          {failure.problem.message} ({failure.problem.code})
+          <ProblemMessage problem={failure.problem} />
         </Alert>
       ) : null}
       {journal.status === "SUBMITTED" ? (

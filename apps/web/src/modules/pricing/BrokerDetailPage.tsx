@@ -8,6 +8,7 @@ import { Detail } from "./ContractDetail";
 import { describeBrokerRate, describeBrokerScope, RATE_KIND_LABELS } from "./contractFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One broker contract (FR-26.16): its terms, accruals, period claims, and closing it. */
 export function BrokerDetailPage() {
@@ -23,7 +24,7 @@ export function BrokerDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Broker contract" />
         <Alert tone="danger" title="Could not load the contract" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -73,7 +74,7 @@ export function BrokerDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not close the contract" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {changed && changed.status === "CLOSED" ? (

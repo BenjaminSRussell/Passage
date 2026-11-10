@@ -137,7 +137,7 @@ describe("Rebate statement", () => {
     fireEvent.change(await screen.findByLabelText(/^Statement period/), { target: { value: "2027-Q2" } });
     fireEvent.click(screen.getByRole("button", { name: "Show statement" }));
     expect(await screen.findByText("Could not load the statement")).toBeInTheDocument();
-    expect(await findAlert()).toHaveTextContent("(COM-0500)");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
     rebateServer(() => json(200, statement));
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("INV-1/1")).toBeInTheDocument();
@@ -206,6 +206,6 @@ describe("Price journal audit extract", () => {
     renderAt(`/pricing/journals/${J1}`);
     fireEvent.click(await screen.findByRole("button", { name: "Download audit extract" }));
     expect(await screen.findByText("Could not download the audit extract")).toBeInTheDocument();
-    expect(await findAlert()).toHaveTextContent("(PRC-0064)");
+    expect(await findAlert()).toHaveTextContent("PRC-0064");
   });
 });

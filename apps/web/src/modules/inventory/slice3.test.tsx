@@ -124,7 +124,7 @@ describe("Transfer orders", () => {
     first.unmount();
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty inventory.read" });
     renderAt("/inventory/transfer-orders");
-    expect(await findAlert()).toHaveTextContent("missing duty inventory.read (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty inventory.read");
   });
 });
 
@@ -266,7 +266,7 @@ describe("Transfer order detail", () => {
     const first = renderAt(`/inventory/transfer-orders/${ORDER_ID}`);
     fireEvent.change(await screen.findByLabelText("Line 1: received EA"), { target: { value: "120" } });
     fireEvent.click(screen.getByRole("button", { name: "Book receipt" }));
-    expect(await findAlert()).toHaveTextContent("plus tolerance 0 % (INV-TRF-002)");
+    expect(await findAlert()).toHaveTextContent("plus tolerance 0 %");
     first.unmount();
     calls = [];
     handler = (_url, init) => (init.method === "POST" ? json(200, order({ status: "CANCELLED", version: 2 })) : json(200, order()));

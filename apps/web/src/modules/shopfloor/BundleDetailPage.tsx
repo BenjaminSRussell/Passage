@@ -4,6 +4,7 @@ import { getWorker, listBundle, type Registration, type Worker } from "./api/cli
 import { dash, fixed, formatDateTime, formatHours, formatOffset, sumDecimals, REGISTRATION_FLAG_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Bundle {
   rows: Registration[];
@@ -67,7 +68,7 @@ export function BundleDetailPage() {
       <div className={styles.stack}>
         {header(null)}
         <Alert tone="danger" title="Could not load the bundle" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
