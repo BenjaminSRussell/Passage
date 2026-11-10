@@ -68,7 +68,7 @@ describe("open supply", () => {
   it("explains a load error", async () => {
     stubFetch(() => problem(503, "COM-0503", "unavailable"));
     renderAt("/purchasing/open-supply");
-    expect(await screen.findByText(/unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/unavailable/)).toBeInTheDocument();
   });
 
   it("pages with the cursor", async () => {

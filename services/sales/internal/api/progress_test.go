@@ -125,6 +125,37 @@ func TestRecordProgressFinal(t *testing.T) {
 	}
 }
 
+// TestRecordProgressByLineID checks that a line may be named by its id (as
+// fulfillment does, #496) instead of its number: the id reaches the store in
+// lower case, ids order the hash like numbers do, and a line named by both,
+// by a bad id or by the same id twice is refused.
+func TestRecordProgressByLineID(t *testing.T) {
+	id, a, b := ids.New(), ids.New(), ids.New()
+	path := orders + "/" + id + ":record-progress"
+	h := map[string]string{idempotencyKey: "k1"}
+	s := &progressStore{created: true}
+	body := `{"kind":"DELIVERED","sourceRef":"PS-1","lines":[{"lineId":"` + strings.ToUpper(a) + `","quantity":"2"},{"lineId":"` + b + `","quantity":"1"}]}`
+	rec := serveBody(t, s, http.MethodPost, path, body, principal(dutyRecordDelivery), h)
+	if rec.Code != http.StatusCreated || len(s.got.Lines) != 2 || s.got.Lines[0].LineID != a || s.got.Lines[0].LineNo != 0 || s.got.Lines[1].LineID != b {
+		t.Fatalf("by id: %d %s %+v", rec.Code, rec.Body, s.got.Lines)
+	}
+	hash := s.got.RequestHash
+	swapped := `{"kind":"DELIVERED","sourceRef":"PS-1","lines":[{"lineId":"` + b + `","quantity":"1"},{"lineId":"` + a + `","quantity":"2.0"}]}`
+	if rec := serveBody(t, s, http.MethodPost, path, swapped, principal(dutyRecordDelivery), h); rec.Code != http.StatusCreated || s.got.RequestHash != hash {
+		t.Fatalf("reordered lines by id must hash alike: %d", rec.Code)
+	}
+	for name, bad := range map[string]string{
+		"both":      `{"kind":"DELIVERED","sourceRef":"PS-1","lines":[{"lineNo":1,"lineId":"` + a + `","quantity":"1"}]}`,
+		"not an id": `{"kind":"DELIVERED","sourceRef":"PS-1","lines":[{"lineId":"line-1","quantity":"1"}]}`,
+		"twice":     `{"kind":"DELIVERED","sourceRef":"PS-1","lines":[{"lineId":"` + a + `","quantity":"1"},{"lineId":"` + a + `","quantity":"1"}]}`,
+		"neither":   `{"kind":"DELIVERED","sourceRef":"PS-1","lines":[{"quantity":"1"}]}`,
+	} {
+		if rec := serveBody(t, s, http.MethodPost, path, bad, principal(dutyRecordDelivery), h); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestListProgress(t *testing.T) {
 	s := &progressStore{}
 	order := ids.New()

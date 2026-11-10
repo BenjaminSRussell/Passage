@@ -6,6 +6,7 @@ import { ACK_LABELS, formatDateTime } from "./format";
 import { AckPill } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<InterchangeSummary>[] = [
   { key: "controlNumber", header: "ISA13", mono: true },
@@ -85,7 +86,7 @@ export function InterchangesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load interchanges" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

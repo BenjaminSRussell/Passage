@@ -28,7 +28,7 @@ shard_for() {
 modules=()
 while IFS= read -r dir; do
   modules+=("$dir")
-done < <(find platform/go services tools/rlscheck tools/e2e -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; | sort)
+done < <(find platform/go services tools/rlscheck tools/tenant-restore tools/e2e -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; | sort)
 
 matched=0
 failed=0

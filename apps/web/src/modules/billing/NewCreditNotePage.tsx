@@ -5,6 +5,7 @@ import { BillingApiError, createCreditNote, describeProblem, getInvoice, newKey,
 import { DAY, DECIMAL, invoiceName, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 export type CreditScope = "WHOLE" | "LINES";
@@ -178,7 +179,7 @@ function CreditForm({ original }: { original: Invoice }) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title={failure.code === "BIL-0005" ? "The credit exceeds what the invoice still allows" : "Could not save the credit note"} live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -217,7 +218,7 @@ export function NewCreditNotePage() {
       <div className={styles.stack}>
         <PageHeader title={title} />
         <Alert tone="danger" title="Could not load the invoice to credit" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

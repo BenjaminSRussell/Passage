@@ -5,6 +5,7 @@ import { describeProblem, disposeAsset, getAsset, newKey, type Book, type Dispos
 import { DATE, DECIMAL, money, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface DisposalValues {
   kind: "sale" | "scrap";
@@ -73,7 +74,7 @@ export function DisposePage() {
       <div className={styles.stack}>
         <PageHeader title="Dispose of asset" />
         <Alert tone="danger" title="Could not load the asset" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -169,7 +170,7 @@ export function DisposePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0006" ? "The asset changed since you opened it" : "Could not post the disposal"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

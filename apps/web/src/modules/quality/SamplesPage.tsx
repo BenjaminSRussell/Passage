@@ -5,6 +5,7 @@ import { describeProblem, listSamples, newKey, registerSample, type NewSample, t
 import { DECIMAL, dash, formatDate, pickFields, qty, SAMPLE_KIND_LABELS, SAMPLE_KINDS, SAMPLE_STATUS_LABELS, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function SampleStatusBadge({ status }: { status: SampleStatus }) {
   const s = SAMPLE_STATUS_LABELS[status] ?? { label: status, tone: "neutral" as const };
@@ -69,7 +70,7 @@ export function SamplesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the samples" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -198,7 +199,7 @@ export function SamplesPanel({ order }: { order: OrderView }) {
       <div className={styles.stack}>
         {state.error ? (
           <Alert tone="danger" title="Could not load the samples" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <DataTable
@@ -255,7 +256,7 @@ export function SamplesPanel({ order }: { order: OrderView }) {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not register the sample" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

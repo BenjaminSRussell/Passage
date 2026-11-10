@@ -90,7 +90,7 @@ describe("release runs", () => {
     renderAt("/purchasing/releases/new");
     fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
     fireEvent.click(screen.getByRole("button", { name: "Release lines" }));
-    expect(await screen.findByText(/outside the caller's scope \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/outside the caller's scope/)).toBeInTheDocument();
   });
 
   it("shows a run with its orders and the lines it left in the queue", async () => {

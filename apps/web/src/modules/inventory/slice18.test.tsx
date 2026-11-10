@@ -147,7 +147,7 @@ describe("Closing and cancelling consignment orders", () => {
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Close order" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The order was not closed");
-    expect(alert).toHaveTextContent("(conflict_version)");
+    expect(alert).toHaveTextContent("conflict_version");
   });
 
   it("sends one close when the confirmation is clicked twice", async () => {
@@ -169,7 +169,7 @@ describe("Closing and cancelling consignment orders", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Book receipt" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The receipt was not booked");
-    expect(alert).toHaveTextContent("(INV-CNS-003)");
+    expect(alert).toHaveTextContent("INV-CNS-003");
     expect(sent("POST")[0].url.pathname).toBe(`/api/v1/inventory/consignment-orders/${ORDER_ID}:receive`);
   });
 

@@ -89,3 +89,34 @@
 .notice > :not(:empty) {
   margin-block-start: var(--space-4);
 }
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-inline-size: 28rem;
+  margin-block-end: var(--space-4);
+}
+
+.areaSection {
+  margin-block-end: var(--space-6);
+}
+
+.areaTitle {
+  margin-block-end: var(--space-2);
+  font-size: var(--text-lg-size);
+  line-height: var(--text-lg-leading);
+}
+
+.moduleHint {
+  margin-inline-start: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs-size);
+}
+
+.advanced summary {
+  cursor: pointer;
+  padding-block: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+}

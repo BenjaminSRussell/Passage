@@ -5,6 +5,7 @@ import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createEdgeNode, describeProblem, DUTY_EDGE_CONFIGURE, newKey, type EdgePlatform, type EdgeRing, type NewEdgeNode, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   name: string;
@@ -121,7 +122,7 @@ export function NewEdgeNodePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not register the edge node" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

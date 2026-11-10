@@ -35,6 +35,7 @@ import {
   WarehouseField,
 } from "./shared";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PAGE = 100;
 
@@ -97,7 +98,7 @@ export function LocationsPage() {
         <ChooseWarehouse />
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the locations" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>
@@ -111,7 +112,7 @@ export function LocationsPage() {
           />
           {moreError ? (
             <Alert tone="danger" title="Could not load more locations" live="alert">
-              {moreError.message} ({moreError.code})
+              <ProblemMessage problem={moreError} />
             </Alert>
           ) : null}
           {next && !state.loading ? (
@@ -407,7 +408,7 @@ export function DirectivesPage() {
         <ChooseWarehouse />
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the directives" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -588,7 +589,7 @@ export function NewDirectivePage() {
           </div>
           <div className={styles.formActions}>
             <Alert tone="danger" title={failure ? "The directive was not created" : undefined} live="alert">
-              {failure ? `${failure.message} (${failure.code})` : null}
+              {failure ? <ProblemMessage problem={failure} /> : null}
             </Alert>
           </div>
         </form>

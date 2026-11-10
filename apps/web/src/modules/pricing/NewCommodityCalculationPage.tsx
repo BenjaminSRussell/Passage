@@ -14,6 +14,7 @@ import {
 import { CUSTOMER_KIND_LABELS, MARGIN_LABELS } from "./commodityFormat";
 import { DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -184,7 +185,7 @@ export function NewCommodityCalculationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the calculation" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

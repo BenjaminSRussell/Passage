@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -34,6 +35,9 @@ type issueClaimRequest struct {
 	Batch         string `json:"batch"`
 	Kind          string `json:"kind"`
 	Qty           string `json:"qty"`
+	// IssueRef names the document line the movement issues units for;
+	// claims sharing it are successive steps of the same units.
+	IssueRef string `json:"issueRef"`
 }
 
 func (a *API) claimIssue(w http.ResponseWriter, r *http.Request) {
@@ -65,13 +69,16 @@ func (a *API) claimIssue(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !qty.IsPositive() {
 		fields["qty"] = "must be a positive decimal number"
 	}
+	if req.IssueRef != "" && !issueclaim.CanonicalRef(req.IssueRef) {
+		fields["issueRef"] = "must be SALES_LINE:<order line id> or PRODUCTION_ORDER:<order id>:<item id>, ids in lower case"
+	}
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {
 		fieldProblem(w, r, fields)
 		return
 	}
 	replayed, err := a.store.ClaimIssue(r.Context(), store.IssueClaimInput{IdempotencyKey: key, LegalEntityID: req.LegalEntityID,
-		ProductID: req.ProductID, Warehouse: req.Warehouse, Batch: req.Batch, Kind: req.Kind, Qty: qty})
+		ProductID: req.ProductID, Warehouse: req.Warehouse, Batch: req.Batch, Kind: req.Kind, Qty: qty, IssueRef: req.IssueRef})
 	if err != nil {
 		a.failed(w, r, "claim issue", err)
 		return

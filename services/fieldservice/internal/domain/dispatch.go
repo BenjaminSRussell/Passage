@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -141,6 +142,25 @@ func CheckAssignment(t Technician, j Job, start time.Time, others []Slot) []Viol
 		add(CodeDspDailyLoad, "the day would hold %d booked minutes with buffers, over the technician's %d", load, t.MaxDailyMinutes+overtime)
 	}
 	return out
+}
+
+// Travel between two coordinates for the optimizer's matrix: the great-circle distance
+// times RoadFactor, driven at TravelKmh, rounded up to whole minutes. A road routing
+// engine replaces it later.
+const (
+	RoadFactor = 1.3
+	TravelKmh  = 40.0
+
+	earthRadiusKm = 6371.0
+)
+
+// TravelMinutes is the assumed driving time between two points.
+func TravelMinutes(lat1, lon1, lat2, lon2 float64) int {
+	rad := math.Pi / 180
+	dLat, dLon := (lat2-lat1)*rad, (lon2-lon1)*rad
+	h := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	km := 2 * earthRadiusKm * math.Asin(math.Min(1, math.Sqrt(h)))
+	return int(math.Ceil(km * RoadFactor / TravelKmh * 60))
 }
 
 func isoWeekday(t time.Time) int {

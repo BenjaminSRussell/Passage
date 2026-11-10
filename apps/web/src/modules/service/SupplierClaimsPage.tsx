@@ -18,6 +18,7 @@ import { ClaimStatusBadge } from "./badges";
 import { dash, DATE, DECIMAL, money, sentence, shortId, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<SupplierClaim>[] = [
   { key: "number", header: "Claim", mono: true },
@@ -277,7 +278,7 @@ export function NewSupplierClaimPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the claim" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

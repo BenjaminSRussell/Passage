@@ -5,6 +5,7 @@ import { checkReceipt, describeProblem, listReceiptChecks, newKey, type NewRecei
 import { DECIMAL, dash, formatDateTime, pickFields, qty, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ReceiptCheck>[] = [
   { key: "receiptLineId", header: "Receipt line", mono: true, render: (row) => shortId(row.receiptLineId) },
@@ -94,7 +95,7 @@ export function ReceivingChecksPage() {
           </form>
           {state.error ? (
             <Alert tone="danger" title="Could not load the receipt checks" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-              {state.error.message} ({state.error.code})
+              <ProblemMessage problem={state.error} />
             </Alert>
           ) : (
             <DataTable
@@ -172,7 +173,7 @@ function ReceiptCheckForm({ onChecked }: { onChecked(): void }) {
           <div className={styles.formActions}>
             {failure ? (
               <Alert tone="danger" title="Could not check the receipt" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
             {result ? (

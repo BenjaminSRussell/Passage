@@ -62,7 +62,7 @@ describe("personnel actions, jobs and compensation plans", () => {
 
     api.handler = routes({ [key]: problem(500, "COM-0500", "boom") });
     const second = renderAt(path);
-    expect((await findAlert()).textContent).toContain("boom (COM-0500)");
+    expect((await findAlert()).textContent).toContain("boom");
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(pageViolations(second.container)).toEqual([]);
   });
@@ -77,7 +77,8 @@ describe("personnel actions, jobs and compensation plans", () => {
     renderAt(`/hr/jobs/${id(99)}`);
     const alert = await findAlert();
     expect(alert.textContent).toContain("You can't view this job");
-    expect(alert.textContent).toContain("You don't have access to do this. missing duty hr.org.inquire (AUTH-0003)");
+    expect(alert.textContent).toContain("You don't have the duty or the legal-entity access this action needs.");
+    expect(alert.textContent).toContain("missing duty hr.org.inquire");
   });
 
   it("filters actions by status through the URL", async () => {
@@ -116,7 +117,7 @@ describe("personnel actions, jobs and compensation plans", () => {
     fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
     const alert = await findAlert();
     expect(alert.textContent).toContain("conflicts with the current state");
-    expect(alert.textContent).toContain("(HCM-ACT-STATE)");
+    expect(alert.textContent).toContain("HCM-ACT-STATE");
   });
 
   it("does not offer withdrawal for an applied action and says why a failed one failed", async () => {
@@ -179,7 +180,8 @@ describe("personnel actions, jobs and compensation plans", () => {
     fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "usd" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit action" }));
     const alert = await findAlert();
-    expect(alert.textContent).toContain("You don't have access to do this. setting compensation needs the hr.compensation.admin duty (AUTH-0003)");
+    expect(alert.textContent).toContain("You don't have the duty or the legal-entity access this action needs.");
+    expect(alert.textContent).toContain("setting compensation needs the hr.compensation.admin duty");
     expect(api.posts("/actions")[0]?.body).toMatchObject({ details: { compPlanId: PLAN, amount: "95000", currency: "USD" } });
   });
 

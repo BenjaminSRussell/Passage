@@ -7,6 +7,7 @@ import { loadModules } from "./modules/registry";
 import { Shell } from "./shell/Shell";
 import { AuthRoot } from "./shell/auth/AuthRoot";
 import { bootstrapAuth } from "./shell/auth/auth";
+import { AllFeaturesPage } from "./shell/pages/AllFeaturesPage";
 import { HomePage } from "./shell/pages/HomePage";
 import { NotesPage } from "./shell/pages/NotesPage";
 import { NotFoundPage } from "./shell/pages/NotFoundPage";
@@ -23,8 +24,9 @@ function App({ duties }: { duties?: readonly string[] }) {
           path: "/",
           element: <Shell modules={modules} duties={duties} />,
           children: [
-            { index: true, element: <HomePage modules={modules} /> },
+            { index: true, element: <HomePage /> },
             { path: "notes", element: <NotesPage /> },
+            { path: "features", element: <AllFeaturesPage /> },
             ...modules.flatMap((m) => m.routes),
             { path: "*", element: <NotFoundPage /> },
           ],

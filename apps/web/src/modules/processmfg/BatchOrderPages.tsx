@@ -34,6 +34,7 @@ import { formatDateTime, LINE_TYPE_LABELS, QUANTITY, shortId } from "./format";
 import { AllocationCard, OrderLifecycle } from "./OrderLifecycle";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
   planned: "Planned",
@@ -94,7 +95,7 @@ export function BatchOrdersPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load batch orders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -155,7 +156,7 @@ export function NewBatchOrderPage() {
       <PageHeader title="New batch order" description="The order takes a snapshot of the formula and scales its lines to the batch size." />
       {formulas.error ? (
         <Alert tone="danger" title="Could not load formulas" live="alert" action={<Button size="sm" onClick={formulas.reload}>Try again</Button>}>
-          {formulas.error.message} ({formulas.error.code})
+          <ProblemMessage problem={formulas.error} />
         </Alert>
       ) : null}
       <Card>
@@ -197,7 +198,7 @@ export function NewBatchOrderPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the batch order" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -242,7 +243,7 @@ export function BatchOrderDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Batch order" />
         <Alert tone="danger" title="Could not load the batch order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -350,7 +351,7 @@ export function BatchOrderDetailPage() {
                   ) : undefined
                 }
               >
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
           </div>

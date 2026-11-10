@@ -5,6 +5,7 @@ import { describeProblem, getCleanoutCounter, newKey, resetCleanoutCounter, type
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const MOVED = "SCHED-0148";
 
@@ -58,7 +59,7 @@ export function CleanoutCounterDetailPage() {
           <EmptyState title="Resource not found" description="No resource has this id." />
         ) : (
           <Alert tone="danger" title="Could not load the cleanout counter" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>
@@ -125,7 +126,7 @@ export function CleanoutCounterDetailPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === MOVED ? "The counter moved" : "Could not reset the counter"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

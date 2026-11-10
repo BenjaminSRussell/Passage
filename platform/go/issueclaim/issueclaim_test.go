@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -56,7 +57,7 @@ func newClient(t *testing.T, handler http.HandlerFunc) *issueclaim.Client {
 }
 
 func claim(key string, qty int64) issueclaim.Claim {
-	return issueclaim.Claim{LegalEntityID: entityID, ProductID: itemID, Warehouse: "WH-1", Batch: "B1", Kind: issueclaim.Pick, Qty: d(qty), Key: key}
+	return issueclaim.Claim{LegalEntityID: entityID, ProductID: itemID, Warehouse: "WH-1", Batch: "B1", Kind: issueclaim.Pick, Qty: d(qty), Key: key, Ref: issueclaim.SalesLineRef(itemID)}
 }
 
 func TestClientClaim_SendsTheSignedClaimAndMapsTheAnswer(t *testing.T) {
@@ -73,7 +74,7 @@ func TestClientClaim_SendsTheSignedClaimAndMapsTheAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	if path != "/v1/inventory/issue-claims" || key != "k1" || body["productId"] != itemID || body["warehouse"] != "WH-1" || body["batch"] != "B1" ||
-		body["kind"] != "PICK" || body["qty"] != "2" || body["legalEntityId"] != entityID {
+		body["kind"] != "PICK" || body["qty"] != "2" || body["legalEntityId"] != entityID || body["issueRef"] != "SALES_LINE:"+itemID {
 		t.Fatalf("request %s %s %v", path, key, body)
 	}
 	status, code = http.StatusUnprocessableEntity, "QUALITY_HOLD"
@@ -185,5 +186,104 @@ func TestClaimAll_EachAttemptOwnsItsClaim(t *testing.T) {
 	}
 	if _, err := issueclaim.ClaimAll(context.Background(), f, []issueclaim.Claim{movement, movement}); !errors.Is(err, issueclaim.ErrHeld) {
 		t.Fatalf("2+2 more against the 2 left free: %v", err)
+	}
+}
+
+// Claims of every kind are tallied together; claims that share a ref are
+// successive steps of the same units and count once.
+func TestOutstanding_KindsAddUpAndARefCountsOnce(t *testing.T) {
+	line := issueclaim.SalesLineRef(ids.New())
+	mk := func(kind issueclaim.Kind, qty int64, ref string) issueclaim.Claim {
+		return issueclaim.Claim{Kind: kind, Qty: d(qty), Ref: ref}
+	}
+	for name, tc := range map[string]struct {
+		claims []issueclaim.Claim
+		want   int64
+	}{
+		"consume and ship without a ref add up":   {[]issueclaim.Claim{mk(issueclaim.Consume, 2, ""), mk(issueclaim.Ship, 2, "")}, 4},
+		"pick then ship of one line count once":   {[]issueclaim.Claim{mk(issueclaim.Pick, 2, line), mk(issueclaim.Ship, 2, line)}, 2},
+		"a ship beyond the pick counts the ship":  {[]issueclaim.Claim{mk(issueclaim.Pick, 2, line), mk(issueclaim.Ship, 3, line)}, 3},
+		"picked and not yet shipped still counts": {[]issueclaim.Claim{mk(issueclaim.Pick, 3, line), mk(issueclaim.Ship, 1, line)}, 3},
+		"two picks of one line add up":            {[]issueclaim.Claim{mk(issueclaim.Pick, 2, line), mk(issueclaim.Pick, 2, line)}, 4},
+		"other lines add up": {[]issueclaim.Claim{mk(issueclaim.Pick, 2, line), mk(issueclaim.Ship, 2, issueclaim.SalesLineRef(ids.New())),
+			mk(issueclaim.Consume, 1, issueclaim.ProductionItemRef(ids.New(), ids.New()))}, 5},
+	} {
+		if got := issueclaim.Outstanding(tc.claims); !got.Equal(d(tc.want)) {
+			t.Errorf("%s: %s, want %d", name, got, tc.want)
+		}
+	}
+}
+
+func TestFake_ConsumeAndShipOfOneFreeQuantityCannotBothPass(t *testing.T) {
+	f := &issueclaim.Fake{}
+	product := ids.New()
+	f.Set(product, d(10), d(8))
+	mk := func(key string, kind issueclaim.Kind, ref string) issueclaim.Claim {
+		return issueclaim.Claim{LegalEntityID: entityID, ProductID: product, Warehouse: "W", Kind: kind, Qty: d(2), Key: key, Ref: ref}
+	}
+	ctx := context.Background()
+	if err := f.Claim(ctx, mk("consume", issueclaim.Consume, "")); err != nil {
+		t.Fatalf("consume of the free 2: %v", err)
+	}
+	if err := f.Claim(ctx, mk("ship", issueclaim.Ship, "")); !errors.Is(err, issueclaim.ErrHeld) {
+		t.Fatalf("ship of the same free 2: %v, want held", err)
+	}
+	f.Release(ctx, mk("consume", issueclaim.Consume, ""))
+	line := issueclaim.SalesLineRef(ids.New())
+	if err := f.Claim(ctx, mk("pick", issueclaim.Pick, line)); err != nil {
+		t.Fatalf("pick of the free 2: %v", err)
+	}
+	if err := f.Claim(ctx, mk("ship-picked", issueclaim.Ship, line)); err != nil {
+		t.Fatalf("ship of what the line picked: %v", err)
+	}
+	if !f.Outstanding(product).Equal(d(2)) {
+		t.Fatalf("pick and ship of one line stand for %s, want 2", f.Outstanding(product))
+	}
+}
+
+// A hold placed after a pick covers the staged units too: their ship waits for
+// the usage decision.
+func TestFake_AHoldAfterThePickStopsTheShipOfWhatWasPicked(t *testing.T) {
+	f := &issueclaim.Fake{}
+	product := ids.New()
+	line := issueclaim.SalesLineRef(ids.New())
+	f.Set(product, d(10), d(0))
+	mk := func(key string, kind issueclaim.Kind) issueclaim.Claim {
+		return issueclaim.Claim{LegalEntityID: entityID, ProductID: product, Warehouse: "W", Kind: kind, Qty: d(4), Key: key, Ref: line}
+	}
+	ctx := context.Background()
+	if err := f.Claim(ctx, mk("pick", issueclaim.Pick)); err != nil {
+		t.Fatal(err)
+	}
+	f.Set(product, d(10), d(10))
+	if err := f.Claim(ctx, mk("ship", issueclaim.Ship)); !errors.Is(err, issueclaim.ErrHeld) {
+		t.Fatalf("ship of staged units under a whole-lot hold: %v, want held", err)
+	}
+	f.Set(product, d(10), d(0))
+	if err := f.Claim(ctx, mk("ship-after", issueclaim.Ship)); err != nil {
+		t.Fatalf("ship after the usage decision: %v", err)
+	}
+}
+
+func TestCanonicalRef(t *testing.T) {
+	id := "0190f0a0-0000-7000-8000-0000000000a1"
+	plain := "0190f0a000007000800000000000" + "00a1"
+	for ref, want := range map[string]bool{
+		"SALES_LINE:" + id:                     true,
+		"PRODUCTION_ORDER:" + id + ":" + id:    true,
+		"SALES_LINE:" + plain:                  false,
+		"SALES_LINE:{" + id + "}":              false,
+		"SALES_LINE:urn:uuid:" + id:            false,
+		"SALES_LINE:" + strings.ToUpper(id):    false,
+		"SALES_LINE:":                          false,
+		"PRODUCTION_ORDER:" + id:               false,
+		"PRODUCTION_ORDER:" + id + ":" + plain: false,
+		"PRODUCTION_ORDER:" + id + ":x":        false,
+		"OTHER:" + id:                          false,
+		"":                                     false,
+	} {
+		if got := issueclaim.CanonicalRef(ref); got != want {
+			t.Errorf("CanonicalRef(%q) = %v, want %v", ref, got, want)
+		}
 	}
 }

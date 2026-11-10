@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-GO_MODULES := $(shell find platform/go services tools/rlscheck tools/e2e -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
+GO_MODULES := $(shell find platform/go services tools/rlscheck tools/tenant-restore tools/e2e -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 TS_PACKAGES := $(shell find apps services -maxdepth 2 -name package.json -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 PY_PACKAGES := $(shell find services -maxdepth 2 -name pyproject.toml -exec dirname {} \; 2>/dev/null)
 

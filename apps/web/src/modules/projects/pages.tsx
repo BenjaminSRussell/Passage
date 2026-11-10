@@ -32,6 +32,7 @@ import {
 import { dash, stageLabel, stageTone, typeLabel } from "./labels";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The largest page the service returns; tiles show "100+" beyond it. */
 const TILE_LIMIT = 100;
@@ -77,7 +78,7 @@ export function ProjectsHome() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load projects" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : state.loading || !state.data ? (
         <div className={styles.stack} aria-busy="true">
@@ -197,7 +198,7 @@ export function ProjectsListPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load projects" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -216,7 +217,7 @@ export function ProjectsListPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more projects" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !state.error ? (
@@ -272,7 +273,7 @@ export function ProjectDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Project" />
         <Alert tone="danger" title="Could not load the project" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -369,7 +370,7 @@ export function ProjectDetailPage() {
           live="alert"
           action={stale ? <Button size="sm" onClick={reload}>Reload project</Button> : undefined}
         >
-          {stale ? "Reload to see the latest version, then try again." : `${failure.message} (${failure.code})`}
+          {stale ? "Reload to see the latest version, then try again." : <ProblemMessage problem={failure} />}
         </Alert>
       ) : null}
       <Card title="Header">

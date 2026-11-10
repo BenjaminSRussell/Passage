@@ -6,6 +6,7 @@ import { StatusBadge } from "./badges";
 import { DATE, dash, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The service accepts at most 5000 scans per session, each 1 to 64 characters. */
 export const MAX_SCANS = 5000;
@@ -62,7 +63,7 @@ export function CountSessionsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load count sessions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -77,7 +78,7 @@ export function CountSessionsPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more sessions" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !state.error ? (
@@ -194,7 +195,7 @@ export function NewCountSessionPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not record the count" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -230,7 +231,7 @@ export function CountSessionDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Count session" />
         <Alert tone="danger" title="Could not load the count session" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/assets/count-sessions">
           Back to count sessions

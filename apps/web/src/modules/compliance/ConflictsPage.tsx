@@ -5,6 +5,7 @@ import { CONFLICT_STATES, listConflicts, SEVERITIES, type Conflict, type Conflic
 import { ageDays, dash, daysUntil, formatDateTime, sentence, severityTone, shortId, stateTone, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** "Maint, Pay" for the roles that grant each side of a conflict. */
 export function rolesText(c: Pick<Conflict, "rolesA" | "rolesB">): string {
@@ -103,7 +104,7 @@ export function ConflictsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load conflicts" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

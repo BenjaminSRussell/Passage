@@ -148,6 +148,6 @@ describe("production KPIs page (4.21.14)", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(500, "COM-0500", "database unavailable"));
     renderPage();
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
   });
 });

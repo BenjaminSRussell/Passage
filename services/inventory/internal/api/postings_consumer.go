@@ -19,6 +19,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
@@ -816,6 +817,9 @@ func bookDelivery(ctx context.Context, s PostingsStore, conv UnitConverter, neg 
 				Reference: postingReference(d.SourceRef), ProductID: product, Dims: e.dims,
 				Qty: e.qty.Neg(), EnteredQty: e.entered.Neg(), EnteredUnit: unit, Status: domain.StatusDeducted,
 				Currency: currency, CostPrice: cost, CWQty: e.cases, Date: date, IdempotencyKey: postingsKeyPrefix + "delivery:" + e.src, Negative: neg,
+				// The delivery settles the claims taken for the order line (a
+				// warehouse pick, the packing-slip post), which stood in for it.
+				IssueRef: issueclaim.SalesLineRef(l.LineID),
 			}
 			if e.src != lineSrc {
 				in.LineSourceID = lineSrc

@@ -5,6 +5,7 @@ import { checkInstall, describeProblem, getPack, validateTaxId, type Problem, ty
 import { sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const COUNTRY = /^[A-Za-z]{2}$/;
 const COUNT = /^\d+$/;
@@ -23,7 +24,7 @@ function OutcomeAlerts({ outcome }: { outcome: Outcome }) {
   return (
     <>
       <Alert tone="danger" live="alert">
-        {outcome?.tone === "danger" ? `${outcome.problem.message} (${outcome.problem.code})` : null}
+        {outcome?.tone === "danger" ? <ProblemMessage problem={outcome.problem} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {outcome?.tone === "success" ? outcome.text : null}
@@ -48,7 +49,7 @@ export function PackDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Country pack" />
         <Alert tone="danger" title="Could not load the country pack" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/compliance/packs">Back to country packs</Link>
       </div>

@@ -26,6 +26,7 @@ import { dash, formatDateTime, sentence, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<GenericCase>[] = [
   { key: "number", header: "Case", mono: true },
@@ -68,7 +69,7 @@ export function GenericCasesPage() {
       />
       {categories.error ? (
         <Alert tone="warning" title="Categories could not be loaded" live="alert">
-          {categories.error.message} ({categories.error.code})
+          <ProblemMessage problem={categories.error} />
         </Alert>
       ) : null}
       <div className={styles.toolbar}>
@@ -242,7 +243,7 @@ export function OpenGenericCasePage() {
       />
       {categories.error ? (
         <Alert tone="danger" title="Could not load the case categories" live="alert" action={<Button size="sm" onClick={categories.reload}>Try again</Button>}>
-          {categories.error.message} ({categories.error.code})
+          <ProblemMessage problem={categories.error} />
         </Alert>
       ) : null}
       {categories.data && usable.length === 0 ? (
@@ -331,7 +332,7 @@ export function OpenGenericCasePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "CASE-SEC-001" ? "You cannot open cases in this category" : "Could not open the case"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

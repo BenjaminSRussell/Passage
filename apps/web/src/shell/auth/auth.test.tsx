@@ -3,8 +3,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import admin from "../../modules/admin/module";
-import { HomePage } from "../pages/HomePage";
+import { visibleModules } from "../dutyGate";
+import { AllFeaturesPage } from "../pages/AllFeaturesPage";
 import { PrincipalProvider } from "../principal";
+import { WorkspaceNavProvider } from "../workspaces/WorkspaceNav";
+import { loadWorkspaceConfig, resolveNavEntries } from "../workspaces/model";
 import { AuthGate } from "./AuthGate";
 import { AuthRoot } from "./AuthRoot";
 import { bootstrapAuth, createAuth, installBearerFetch, type AuthEnv } from "./auth";
@@ -188,26 +191,34 @@ describe("bearer fetch", () => {
 });
 
 function adminNavAs(duties: readonly string[]) {
+  const config = loadWorkspaceConfig();
+  const entries = resolveNavEntries(visibleModules([admin], duties), config.areas);
   return render(
     <MemoryRouter>
       <PrincipalProvider duties={duties}>
-        <HomePage modules={[admin]} />
+        <WorkspaceNavProvider entries={entries} config={config}>
+          <AllFeaturesPage />
+        </WorkspaceNavProvider>
       </PrincipalProvider>
     </MemoryRouter>,
   );
 }
 
+function navLink(label: string) {
+  return { name: new RegExp(`^${label} — `) };
+}
+
 describe("admin navigation follows the token's duties", () => {
-  const gated = ["Audit", "Sequences", "Alerts", "Effective permissions", "Role assignments", "Legal entities", "Users", "Role catalogue"];
+  const gated = ["Audit log", "Sequences", "Alerts", "Check what a user can do", "Assign roles", "Company access", "Users", "Roles"];
 
   it("renders every duty-gated admin entry for an admin token", () => {
     adminNavAs(sessionFrom({ access_token: tokenFor("admin", ADMIN_DUTIES), expires_in: 300 }, 0).duties);
-    for (const label of gated) expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+    for (const label of gated) expect(screen.getByRole("link", navLink(label))).toBeInTheDocument();
   });
 
   it("renders no duty-gated admin entry for a clerk token", () => {
     adminNavAs(sessionFrom({ access_token: tokenFor("clerk", CLERK_DUTIES), expires_in: 300 }, 0).duties);
-    for (const label of gated) expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
+    for (const label of gated) expect(screen.queryByRole("link", navLink(label))).not.toBeInTheDocument();
   });
 });
 

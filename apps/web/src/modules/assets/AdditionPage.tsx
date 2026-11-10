@@ -5,6 +5,7 @@ import { ADDITION_TYPES, addAddition, describeProblem, getAsset, newKey, type Ad
 import { DATE, DECIMAL, isZero, money, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface AdditionValues {
   type: AdditionType;
@@ -72,7 +73,7 @@ export function NewAdditionPage() {
       <div className={styles.stack}>
         <PageHeader title="New addition" />
         <Alert tone="danger" title="Could not load the asset" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -189,7 +190,7 @@ export function NewAdditionPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0020" ? "The asset has 500 additions already" : "Could not record the addition"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

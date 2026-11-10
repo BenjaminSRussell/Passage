@@ -4,6 +4,7 @@ import { Alert, Button, Card, FormField, Input, PageHeader, Select } from "../..
 import { describeProblem, intakeSubjectRequest, newKey, PRIVACY_TYPES, REGULATIONS, type IntakeInput, type PrivacyRequestType, type Problem, type Regulation } from "./api/client";
 import { sentence } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface IntakeValues {
   type: PrivacyRequestType;
@@ -129,7 +130,7 @@ export function PrivacyRequestNewPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "The request was not recorded" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
     </div>
   );

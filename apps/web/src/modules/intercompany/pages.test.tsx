@@ -139,7 +139,7 @@ describe("intercompany journal page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview journal" }));
     await waitFor(() => expect(screen.getByText("The journal was not derived")).toBeInTheDocument());
     expect(screen.getByText("The journal was not derived").closest("[role=alert]")).toHaveTextContent(
-      "no IC accounting matrix entry for A to C (IC-0805)",
+      "no IC accounting matrix entry for A to C",
     );
     expect(screen.getByLabelText("Offset entity")).toHaveValue("C");
     expect(screen.queryByRole("table", { name: "Journal legs" })).not.toBeInTheDocument();
@@ -214,7 +214,7 @@ describe("intercompany reconciliation page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Classify pairs" }));
     await waitFor(() => expect(screen.getByText("The pairs were not classified")).toBeInTheDocument());
     expect(screen.getByText("The pairs were not classified").closest("[role=alert]")).toHaveTextContent(
-      "missing duty intercompany.reconcile (AUTH-0003)",
+      "missing duty intercompany.reconcile",
     );
     expect(screen.queryByRole("table", { name: "Reconciliation items" })).not.toBeInTheDocument();
   });

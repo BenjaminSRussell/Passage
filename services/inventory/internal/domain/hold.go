@@ -115,14 +115,46 @@ func CheckHoldRelease(h Hold, qty decimal.Decimal) error {
 	return nil
 }
 
+// IssueKinds are the movements a service claims. IssueBooked is not one of
+// them: it marks the part of an inventory issue that settles the claims of
+// its ref, and only inventory writes it.
 var IssueKinds = []string{"PICK", "SHIP", "CONSUME"}
 
-// CheckIssueClaim refuses a claim that would reach held stock: with any quantity
-// held, only physical - held - claimed is free to move. Without a hold the
-// stock is not this rule's to police.
-func CheckIssueClaim(qty, physical, held, claimed decimal.Decimal) error {
-	if !held.IsPositive() || !qty.GreaterThan(physical.Sub(held).Sub(claimed)) {
+const IssueBooked = "ISSUED"
+
+// MaxIssueRef bounds the document line a claim names.
+const MaxIssueRef = 255
+
+// CheckIssueClaim refuses a claim that would reach held stock. physical and
+// held are the scope's unrestricted stock, outstanding the claimed quantity
+// not yet booked as an issue with the claim counted (claims of one ref counted
+// once). With any quantity held, free stock (physical - held - outstanding)
+// may not be below zero after the claim, even when the claim takes nothing new:
+// the ship of units a pick of the same ref staged is refused while a hold
+// placed after the pick covers them, until the usage decision. Without a hold
+// the stock is not this rule's to police.
+func CheckIssueClaim(physical, held, outstanding decimal.Decimal) error {
+	if !held.IsPositive() || !physical.Sub(held).Sub(outstanding).IsNegative() {
 		return nil
 	}
-	return &Error{Code: CodeQualityHold, Detail: "the quantity is still on hold: " + held.String() + " held of " + physical.String() + " on hand, " + claimed.String() + " already claimed"}
+	return issueHeld(physical, held, outstanding)
+}
+
+// CheckIssueRoom is the rule for inventory's own issues, which book movements
+// rather than ask for them: with freeBefore what was free before the issue and
+// the other figures after it (the claims it settled no longer outstanding),
+// free stock may not go below zero, and an issue that finds it below zero
+// already (a hold placed over claimed stock) may not make it worse. The
+// booking of a delivery its claims already let out passes.
+func CheckIssueRoom(freeBefore, physical, held, outstanding decimal.Decimal) error {
+	free := physical.Sub(held).Sub(outstanding)
+	if !held.IsPositive() || !free.IsNegative() || !free.LessThan(freeBefore) {
+		return nil
+	}
+	return issueHeld(physical, held, outstanding)
+}
+
+func issueHeld(physical, held, outstanding decimal.Decimal) error {
+	return &Error{Code: CodeQualityHold, Detail: "the quantity is still on hold: " + held.String() + " held of " + physical.String() +
+		" on hand, " + outstanding.String() + " claimed and not yet issued"}
 }

@@ -88,7 +88,7 @@ describe("Process categories list", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [] }));
     renderAt("/shopfloor/process-categories");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No process categories")).toBeInTheDocument();
@@ -131,7 +131,7 @@ describe("Process categories list", () => {
     renderAt("/shopfloor/process-categories");
     const table = await findTable({ name: "Process categories" });
     fireEvent.click(await within(table).findByRole("button", { name: "Deactivate category pi-weigh" }));
-    expect(await screen.findByText(/changed by someone else \(SF-0143\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/changed by someone else/)).toBeInTheDocument();
   });
 });
 
@@ -202,7 +202,7 @@ describe("New process category", () => {
     fill("Characteristic 1 lower limit", "1");
     fireEvent.click(screen.getByRole("button", { name: "Create category" }));
     expect(await screen.findByText("must be a decimal number")).toBeInTheDocument();
-    expect(screen.getByText(/validation failed \(COM-0001\)/)).toBeInTheDocument();
+    expect(screen.getByText(/validation failed/)).toBeInTheDocument();
   });
 });
 
@@ -233,7 +233,7 @@ describe("Process category detail", () => {
   it("shows the load error and a refused save", async () => {
     handler = () => json(404, { code: "SF-0164", detail: "process category not found" });
     renderAt(`/shopfloor/process-categories/${WEIGH}`);
-    expect(await screen.findByText(/process category not found \(SF-0164\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/process category not found/)).toBeInTheDocument();
   });
 
   it("shows a stale version refusal", async () => {
@@ -244,7 +244,7 @@ describe("Process category detail", () => {
     renderAt(`/shopfloor/process-categories/${WEIGH}`);
     await screen.findByRole("heading", { name: "Process category pi-weigh" });
     fireEvent.click(screen.getByRole("button", { name: "Save category" }));
-    expect(await screen.findByText(/changed by someone else \(SF-0143\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/changed by someone else/)).toBeInTheDocument();
   });
 });
 

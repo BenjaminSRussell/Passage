@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, PageHeader, Select, Textarea } from "../../shell/ui";
 import { describeProblem, ENVIRONMENTS, receiveX12, type Environment, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /**
  * Record an X12 interchange a partner sent outside AS2/SFTP (for example by
@@ -70,7 +71,7 @@ export function ReceiveInterchangePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failureTitle} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

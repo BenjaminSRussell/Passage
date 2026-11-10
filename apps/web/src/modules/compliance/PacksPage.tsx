@@ -3,6 +3,7 @@ import { Alert, Button, DataTable, PageHeader, type DataTableColumn } from "../.
 import { listPacks, type Pack } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Pack>[] = [
   { key: "code", header: "Pack", mono: true },
@@ -26,7 +27,7 @@ export function PacksPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the country packs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

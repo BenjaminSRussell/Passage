@@ -13,6 +13,7 @@ import {
 } from "./api/address";
 import { describeProblem, type Problem } from "./api/client";
 import { EditAction, type EditErrors } from "./RowEdit";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface AddressValues {
   countryCode: string;
@@ -152,7 +153,7 @@ export function AddressAction({ subject, ownerType, ownerId, legalEntityId, addr
         </Button>
         {failure ? (
           <Alert tone="danger" title={`Could not load the address of ${subject}`} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
       </>

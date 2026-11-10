@@ -48,6 +48,7 @@ import {
 import { billingReasonLabel, dash, linePropertyLabel, proposalStatusLabel, proposalStatusTone, txnTypeLabel } from "./labels";
 import styles from "./pages.module.css";
 import { useLoad, useMore, type MoreState } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -91,7 +92,7 @@ function LoadFailure({ what, problem, retry }: { what: string; problem: Problem;
         </Button>
       }
     >
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }
@@ -102,7 +103,7 @@ function LoadMore<T>({ what, more }: { what: string; more: MoreState<T> }) {
     <>
       {more.error ? (
         <Alert tone="danger" title={`Could not load more ${what}`} live="alert">
-          {more.error.message} ({more.error.code})
+          <ProblemMessage problem={more.error} />
         </Alert>
       ) : null}
       {more.hasMore ? (
@@ -246,7 +247,7 @@ export function CategoriesPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "conflict_version" ? "Someone else changed this category" : "Could not save the category"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -471,7 +472,7 @@ export function TransactionsPage() {
       {why ? (
         why.problem ? (
           <Alert tone="danger" title="Could not check billing" live="alert">
-            {why.problem.message} ({why.problem.code})
+            <ProblemMessage problem={why.problem} />
           </Alert>
         ) : why.status ? (
           <Alert tone={why.status.billable ? "success" : "info"} title={`Line of ${why.txn.txnDate} (${why.txn.categoryId})`} live="status">
@@ -582,7 +583,7 @@ export function TransactionsPage() {
           </div>
           {failure ? (
             <Alert tone="danger" title={txnFailureTitle[failure.code] ?? "Could not record the transaction"} live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <div className={styles.actions}>
@@ -765,7 +766,7 @@ export function ProposalsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone={failure.code === "PROJ-PROP-002" ? "info" : "danger"} title={buildFailureTitle[failure.code] ?? "Could not build the proposal"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -905,7 +906,7 @@ export function ProposalDetailPage() {
             ) : undefined
           }
         >
-          {stale ? "Reload to see the latest version, then try again." : `${failure.message} (${failure.code})`}
+          {stale ? "Reload to see the latest version, then try again." : <ProblemMessage problem={failure} />}
         </Alert>
       ) : null}
       <Card title="Header">

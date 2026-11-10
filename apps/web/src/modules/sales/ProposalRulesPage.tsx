@@ -19,6 +19,7 @@ import { dash, sentence, shortId, UUID } from "./format";
 import { reasonBadge } from "./OrderProposals";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -132,7 +133,7 @@ function CheckCard() {
       </form>
       {failure ? (
         <Alert tone="danger" title="Could not check the proposals" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {result === null ? null : result.length === 0 ? (
@@ -229,7 +230,7 @@ export function ProposalRulesPage() {
       </form>
       {failure ? (
         <Alert tone="danger" title="Could not remove the rule" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Alert tone="success" live="status">
@@ -237,7 +238,7 @@ export function ProposalRulesPage() {
       </Alert>
       {state.error ? (
         <Alert tone="danger" title="Could not load product proposal rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -312,7 +313,7 @@ export function NewProposalRulePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0034" ? "This rule already exists" : "Could not save the rule"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, Select, type DataTabl
 import { generateStatisticalForecast, type ForecastModel, type GenerateForecastResult, type GenerateForecastWrite, type GenerateModel } from "./api/client";
 import { describeError, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const QTY = /^(?:0|[1-9]\d{0,11})(?:\.\d{1,6})?$/;
@@ -126,7 +127,7 @@ export function GenerateCard({ model, onDone }: { model: ForecastModel; onDone: 
       </p>
       <div className={styles.stack}>
         <Alert tone="danger" title={title} live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Statistical forecast">
           <FormField id="gen-item" label="Item" hint="Item id (UUID)." error={errors.itemId}>

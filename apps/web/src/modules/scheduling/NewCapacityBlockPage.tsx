@@ -6,6 +6,7 @@ import { clock, fromUtcInput, parseClock, WEEK_ORDER, WEEKDAYS } from "./format"
 import { CODE, DATE, mapFields, optionalWhole } from "./forms";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BlockValues {
   resourceId: string;
@@ -193,7 +194,7 @@ export function NewCapacityBlockPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New capacity block" description="A job may use a block only when every predicate holds for its attributes; other jobs use unblocked capacity (BR-23.15)." />
+      <PageHeader title="New capacity block" description="A job can use a block only when its attributes meet every condition of the block; other jobs use unblocked capacity." />
       <Card>
         <ResourceGate need="A block reserves time on one resource.">
           {(resources) => (
@@ -297,7 +298,7 @@ export function NewCapacityBlockPage() {
               {failure ? (
                 <div className={styles.formActions}>
                   <Alert tone="danger" title="Could not create the block" live="alert">
-                    {failure.message} ({failure.code})
+                    <ProblemMessage problem={failure} />
                   </Alert>
                 </div>
               ) : null}

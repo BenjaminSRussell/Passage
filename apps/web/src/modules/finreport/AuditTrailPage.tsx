@@ -16,6 +16,7 @@ import { httpUrl } from "./drill";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const AUDIT_KIND_LABELS: Record<AuditKind, string> = {
   posted: "Journal posted",
@@ -280,13 +281,13 @@ export function AuditTrailPage() {
       ) : null}
       {exportError ? (
         <Alert tone="danger" live="alert" title={exportError.code === "REPORT-0030" ? "Too many entries for one export" : "The export failed"}>
-          {exportError.message} ({exportError.code})
+          <ProblemMessage problem={exportError} />
         </Alert>
       ) : null}
 
       {first.error ? (
         <Alert tone="danger" title="Could not load the audit trail" live="alert" action={<Button size="sm" onClick={first.reload}>Try again</Button>}>
-          {first.error.message} ({first.error.code})
+          <ProblemMessage problem={first.error} />
         </Alert>
       ) : (
         <DataTable
@@ -311,7 +312,7 @@ export function AuditTrailPage() {
       ) : null}
       {moreError ? (
         <Alert tone="danger" live="alert" title="Could not load more entries">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
 

@@ -5,6 +5,7 @@ import { newKey, type Problem } from "./api/print";
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** MOB-0107 catalog text for one conflict (§6.32.18). */
 export function conflictMessage(c: Pick<OfflineConflict, "idempotencyKey" | "conflictReason">): string {
@@ -91,7 +92,7 @@ export function OfflineConflictsPage() {
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load offline conflicts" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -148,7 +149,7 @@ export function OfflineConflictsPage() {
             </FormField>
             {failure ? (
               <Alert tone="danger" title="The conflict was not resolved" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
             <div className={styles.toolbar}>

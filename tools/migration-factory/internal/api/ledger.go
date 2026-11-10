@@ -223,6 +223,23 @@ func toCompensationReport(rep store.CompensationReport) compensationReportDTO {
 	return out
 }
 
+// entityLedgers trims and checks the ledgers a request pins: each needs an entity and a ledger, and
+// its legal entity must be one the caller may act for.
+func entityLedgers(p tenant.Principal, in []store.EntityLedger) ([]store.EntityLedger, error) {
+	out := make([]store.EntityLedger, 0, len(in))
+	for _, l := range in {
+		l.Entity, l.LedgerID = strings.TrimSpace(l.Entity), strings.TrimSpace(l.LedgerID)
+		if l.Entity == "" || l.LedgerID == "" {
+			return nil, invalid("every ledger needs entity, legalEntityId and ledgerId")
+		}
+		if err := legalEntity(p, l.LegalEntityID); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
 type compensationRequest struct {
 	Ledgers     []store.EntityLedger `json:"ledgers"`
 	RetryParked bool                 `json:"retryParked,omitempty"`
@@ -250,19 +267,12 @@ func (s *Server) postCompensations(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	for i, l := range req.Ledgers {
-		l.Entity, l.LedgerID = strings.TrimSpace(l.Entity), strings.TrimSpace(l.LedgerID)
-		if l.Entity == "" || l.LedgerID == "" {
-			fail(w, r, invalid("every ledger needs entity, legalEntityId and ledgerId"))
-			return
-		}
-		if err := legalEntity(p, l.LegalEntityID); err != nil {
-			fail(w, r, err)
-			return
-		}
-		req.Ledgers[i] = l
+	ledgers, err := entityLedgers(p, req.Ledgers)
+	if err != nil {
+		fail(w, r, err)
+		return
 	}
-	rep, err := s.store.PostCompensations(r.Context(), s.ledger, store.CompensationRun{PlanID: id, Ledgers: req.Ledgers, RetryParked: req.RetryParked,
+	rep, err := s.store.PostCompensations(r.Context(), s.ledger, store.CompensationRun{PlanID: id, Ledgers: ledgers, RetryParked: req.RetryParked,
 		By: p.UserID, Now: s.now().UTC()})
 	if err != nil {
 		failLedger(w, r, err)

@@ -477,17 +477,21 @@ type ContractRoll struct {
 }
 
 // rollForward sums the deferred obligations of the entity's contracts in the
-// currency, or of the one contract when contractID is set.
+// currency, or of the one contract when contractID is set, with the credit-note
+// reversals of those contracts.
 func rollForward(ctx context.Context, tx pgx.Tx, legalEntityID, contractID, currency string, start, end time.Time) (domain.RollForward, error) {
 	from, to := start.Format(dateLayout), end.Format(dateLayout)
-	var raw [4]string
+	var raw [8]string
 	if err := tx.QueryRow(ctx, rollForwardAdditions, legalEntityID, currency, from, to, domain.DeferredMethods(), contractID).Scan(&raw[0], &raw[1]); err != nil {
 		return domain.RollForward{}, err
 	}
 	if err := tx.QueryRow(ctx, rollForwardRecognized, legalEntityID, currency, from, to, domain.DeferredMethods(), contractID).Scan(&raw[2], &raw[3]); err != nil {
 		return domain.RollForward{}, err
 	}
-	var v [4]decimal.Decimal
+	if err := tx.QueryRow(ctx, rollForwardCredits, legalEntityID, currency, from, to, contractID).Scan(&raw[4], &raw[5], &raw[6], &raw[7]); err != nil {
+		return domain.RollForward{}, err
+	}
+	var v [8]decimal.Decimal
 	for i, r := range raw {
 		d, err := decimal.NewFromString(r)
 		if err != nil {
@@ -495,7 +499,9 @@ func rollForward(ctx context.Context, tx pgx.Tx, legalEntityID, contractID, curr
 		}
 		v[i] = d
 	}
-	return domain.NewRollForward(v[0].Sub(v[2]), v[1], v[3]), nil
+	// Opening: allocated before the window, less recognized, plus reversed, less the credit notes' deferred amounts.
+	opening := v[0].Sub(v[2]).Add(v[6]).Sub(v[4])
+	return domain.NewRollForward(opening, v[1], v[3]).WithCredits(v[7], v[5].Neg()), nil
 }
 
 const rollForwardAdditions = `select coalesce(sum(o.allocated_amount) filter (where c.contract_date < $3::date), 0)::text,
@@ -512,6 +518,16 @@ join performance_obligation o on o.tenant_id = s.tenant_id and o.id = s.obligati
 join revenue_contract c on c.tenant_id = o.tenant_id and c.id = o.contract_id
 where c.legal_entity_id = $1::uuid and c.currency = $2 and o.method = any($5::text[]) and s.status = 'RECOGNIZED'
   and ($6 = '' or c.id = nullif($6, '')::uuid)`
+
+// rollForwardCredits sums the credit-note reversals: the deferred amounts billing debited to 2400 (adjustments) and the
+// recognized revenue reversed, before and within the window, by the credit note's posting date.
+const rollForwardCredits = `select coalesce(sum(r.deferred_amount) filter (where r.posting_date < $3::date), 0)::text,
+       coalesce(sum(r.deferred_amount) filter (where r.posting_date between $3::date and $4::date), 0)::text,
+       coalesce(sum(r.revenue_reversed) filter (where r.posting_date < $3::date), 0)::text,
+       coalesce(sum(r.revenue_reversed) filter (where r.posting_date between $3::date and $4::date), 0)::text
+from credit_note_reversal r
+join revenue_contract c on c.tenant_id = r.tenant_id and c.id = r.contract_id
+where c.legal_entity_id = $1::uuid and c.currency = $2 and ($5 = '' or c.id = nullif($5, '')::uuid)`
 
 type recognizedLine struct {
 	scheduleID   string

@@ -73,7 +73,7 @@ describe("Promotions", () => {
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/pricing/promotions");
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
   });
 });
 
@@ -166,7 +166,7 @@ describe("New promotion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save promotion" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The campaign is killed");
-    expect(alert).toHaveTextContent("(PRC-0069)");
+    expect(alert).toHaveTextContent("PRC-0069");
   });
 
   it("explains a closed fund", async () => {
@@ -182,7 +182,7 @@ describe("New promotion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save promotion" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The fund is closed");
-    expect(alert).toHaveTextContent("(PRC-0011)");
+    expect(alert).toHaveTextContent("PRC-0011");
   });
 });
 
@@ -216,7 +216,7 @@ describe("Promotion detail", () => {
   it("shows a load error with a retry", async () => {
     server.handler = () => json(404, { code: "PRC-0040", detail: `no promotion plan ${PROMO}` });
     renderAt(`/pricing/promotions/${PROMO}`);
-    expect(await findAlert()).toHaveTextContent("(PRC-0040)");
+    expect(await findAlert()).toHaveTextContent("PRC-0040");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

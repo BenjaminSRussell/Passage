@@ -22,6 +22,7 @@ import { compareDecimal, formatDateTime, TRACKING_LABELS } from "./format";
 import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const CANCELLABLE: Shipment["status"][] = ["OPEN", "RELEASED", "PICKING", "PICKED", "PACKED"];
 
@@ -230,7 +231,7 @@ export function TrackingCard({ shipment, onRecorded }: { shipment: Shipment; onR
       <div className={styles.stack}>
         {state.error ? (
           <Alert tone="danger" title="Could not load the tracking events" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <DataTable
@@ -369,7 +370,7 @@ export function LabelPanel({ sscc, label, onClose }: { sscc: string; label: stri
         </div>
       ) : (
         <Alert tone="danger" title="Could not load the label" live="alert">
-          {label.message} ({label.code})
+          <ProblemMessage problem={label} />
         </Alert>
       )}
     </Card>

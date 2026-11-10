@@ -24,6 +24,7 @@ import {
   statusLabel,
 } from "./processLabels";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ProcessMessage>[] = [
   { key: "receivedAt", header: "Received", render: (row) => formatDateTime(row.receivedAt) },
@@ -171,7 +172,7 @@ export function ProcessMessagesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load process messages" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>
@@ -189,7 +190,7 @@ export function ProcessMessagesPage() {
           />
           {extra?.error ? (
             <Alert tone="danger" title="Could not load more messages" live="alert">
-              {extra.error.message} ({extra.error.code})
+              <ProblemMessage problem={extra.error} />
             </Alert>
           ) : null}
           {!state.loading && cursor ? (

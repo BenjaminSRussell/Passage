@@ -112,7 +112,7 @@ describe("open order line release", () => {
     renderAt(`/migration-factory/runs/${RUN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Release record SL-2" }));
     fireEvent.click(screen.getByRole("button", { name: "Release record" }));
-    expect(await screen.findByText(/REFERENTIAL rule still fails: .* \(MIG-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/REFERENTIAL rule still fails: .*/)).toBeInTheDocument();
     expect(posts("/release")[0].body).toEqual({ version: 1 });
     expect(screen.getByLabelText("Item")).toBeInTheDocument();
   });

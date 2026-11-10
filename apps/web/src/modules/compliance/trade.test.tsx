@@ -127,7 +127,7 @@ describe("Screening hits", () => {
   it("shows a load failure with a retry", async () => {
     handler = () => problem(403, "AUTH-0003", "missing duty compliance.trade-screening.view");
     renderAt("/compliance/screening/hits");
-    expect((await findAlert()).textContent).toContain("missing duty compliance.trade-screening.view (AUTH-0003)");
+    expect((await findAlert()).textContent).toContain("missing duty compliance.trade-screening.view");
     handler = () => ({ status: 200, body: { items: [hit()] } });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Screening hits" })).toBeInTheDocument();
@@ -170,13 +170,13 @@ describe("Screening hit", () => {
     fireEvent.change(await screen.findByLabelText("Decision"), { target: { value: "CONFIRM" } });
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "same IMO number" } });
     fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
-    expect((await findAlert()).textContent).toContain("changed since you loaded it (TRD-1009)");
+    expect((await findAlert()).textContent).toContain("changed since you loaded it");
   });
 
   it("shows a missing hit", async () => {
     handler = () => problem(404, "TRD-1008", "no screening hit with that id");
     renderAt(`/compliance/screening/hits/${HIT}`);
-    expect((await findAlert()).textContent).toContain("no screening hit with that id (TRD-1008)");
+    expect((await findAlert()).textContent).toContain("no screening hit with that id");
     expect(screen.getByRole("link", { name: "Back to screening hits" })).toBeInTheDocument();
   });
 });
@@ -211,7 +211,7 @@ describe("Screening check", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "X" } });
     fireEvent.change(screen.getByLabelText("List entries"), { target: { value: "UN_SC | 1 | 1 | Y" } });
     fireEvent.click(screen.getByRole("button", { name: "Screen" }));
-    expect((await findAlert()).textContent).toContain("(TRD-1004)");
+    expect((await findAlert()).textContent).toContain("TRD-1004");
   });
 });
 
@@ -284,7 +284,7 @@ describe("Export license check", () => {
     handler = () => problem(403, "AUTH-0003", "missing duty compliance.trade-screening.decide: only a trade compliance officer can release an embargoed delivery");
     fireEvent.change(screen.getByLabelText(/^Embargo release license reference/), { target: { value: "OFAC-GL-25" } });
     fireEvent.click(screen.getByRole("button", { name: "Check delivery" }));
-    expect((await findAlert()).textContent).toContain("only a trade compliance officer can release an embargoed delivery (AUTH-0003)");
+    expect((await findAlert()).textContent).toContain("only a trade compliance officer can release an embargoed delivery");
     expect(calls[1].body).toMatchObject({ officerReleaseLicenseRef: "OFAC-GL-25" });
   });
 });

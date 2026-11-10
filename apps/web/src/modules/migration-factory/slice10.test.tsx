@@ -226,7 +226,7 @@ describe("Load bank balances page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run bank_balances" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could not load the balances");
-    expect(alert).toHaveTextContent(/already has an opening balance.*\(MIG-0001\)/);
+    expect(alert).toHaveTextContent(/already has an opening balance/);
     expect(screen.getByRole("button", { name: "Run bank_balances" })).toBeInTheDocument();
   });
 });

@@ -18,6 +18,7 @@ import { TARGET_LABELS } from "./CommissionSettlementPage";
 import styles from "./pages.module.css";
 import { describeTotals, ExportStatusBadge, saveCsv } from "./settlementFile";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DUTY_MAINTAIN = "pricing.commission.maintain";
 export const MAX_REASON = 500;
@@ -63,7 +64,7 @@ export function CommissionExportDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Commission export" />
         <Alert tone="danger" title="Could not load the export" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -136,7 +137,7 @@ export function CommissionExportDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title={failure.title} live="alert">
-          {failure.problem.message} ({failure.problem.code})
+          <ProblemMessage problem={failure.problem} />
         </Alert>
       ) : null}
       {record.status === "VOIDED" ? (

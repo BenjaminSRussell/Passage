@@ -5,6 +5,7 @@ import { listJobs, type Job, type JobStatus } from "./api/client";
 import { fixed, formatDateTime, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUS: Record<JobStatus, { label: string; tone: BadgeTone }> = {
   released: { label: "Released", tone: "neutral" },
@@ -114,7 +115,7 @@ export function JobsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the dispatch list" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

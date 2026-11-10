@@ -156,7 +156,7 @@ describe("course catalog", () => {
 
     handler = (url) => (url.pathname === "/api/v1/hr/courses" ? json(403, { code: "AUTH-0003", detail: "missing duty hr.learning.self" }) : undefined);
     renderAt("/hr/courses");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.learning.self (AUTH-0003)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.learning.self"));
     const before = gets("/api/v1/hr/courses").length;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(gets("/api/v1/hr/courses").length).toBeGreaterThan(before));
@@ -417,7 +417,7 @@ describe("course session", () => {
 
     fireEvent.change(screen.getByLabelText("Attendance for Ada"), { target: { value: "PASS" } });
     fireEvent.click(screen.getByRole("button", { name: "Record attendance" }));
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("different outcome recorded (HCM-CRS-STATE)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("different outcome recorded"));
 
     fireEvent.click(screen.getByRole("button", { name: "Record attendance" }));
     await waitFor(() => expect(statusTexts().join(" ")).toContain("Recorded 1 of 1 line; 1 passed"));

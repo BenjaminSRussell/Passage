@@ -130,7 +130,7 @@ describe("planned orders list (FR-22.10)", () => {
     cleanup();
     renderAt("/production/planned-intake");
     await user().click(await screen.findByRole("button", { name: "Load more planned orders" }));
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     expect(within(await findTable({ name: "Planned orders" })).getByText("12.5")).toBeInTheDocument();
   });
 
@@ -167,7 +167,7 @@ describe("planned orders list (FR-22.10)", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(500, "COM-0500", "database unavailable"));
     renderAt("/production/planned-intake");
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
   });
 });
 
@@ -209,7 +209,7 @@ describe("planned order detail (FR-22.10)", () => {
     await screen.findByRole("heading", { name: "Planned order of 40" });
     await userEvent.type(screen.getByLabelText("Reason"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Dismiss planned order" }));
-    expect(await screen.findByText("the planned order is already converted (PRODUCTION_INTAKE_NOT_OPEN)")).toBeInTheDocument();
+    expect(await screen.findByText("the planned order is already converted")).toBeInTheDocument();
     first.unmount();
 
     vi.unstubAllGlobals();

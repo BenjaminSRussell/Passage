@@ -1,6 +1,7 @@
 import { Alert, Button } from "../../shell/ui";
 import styles from "./pages.module.css";
 import type { PagedState } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The "Load more" control under a paged list, with the error of a failed page. */
 export function MoreRows({ state, noun }: { state: PagedState<unknown>; noun: string }) {
@@ -8,7 +9,7 @@ export function MoreRows({ state, noun }: { state: PagedState<unknown>; noun: st
     <>
       {state.moreError ? (
         <Alert tone="danger" title={`Could not load more ${noun}`} live="alert" action={<Button size="sm" onClick={state.loadMore}>Try again</Button>}>
-          {state.moreError.message} ({state.moreError.code})
+          <ProblemMessage problem={state.moreError} />
         </Alert>
       ) : null}
       {state.hasMore && !state.moreError ? (

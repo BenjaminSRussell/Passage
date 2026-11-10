@@ -164,16 +164,59 @@ availability under random place, whole-lot, release, release-by-source and issue
 leave physical below held returns `QUALITY_HOLD` before `INV-NEG-001` (`CheckNegative`, `TestCheckNegative_HeldQuantityIsQualityHold`),
 even when negative stock is allowed. Warehouse pick, fulfillment packing-slip post and production consume claim their quantity
 through `POST /v1/inventory/issue-claims` (duty `inventory.issue.claim`, service only; migration 0032, `inventory_issue_claim`;
-`:release` withdraws a claim whose movement failed). The claim locks the product's on-hand rows, sums physical and held over the
-unrestricted (not BLOCKED or QUARANTINE) rows of the warehouse, subtracts the claims of the same kind (PICK, SHIP,
-CONSUME) already taken, and refuses with 422 `QUALITY_HOLD` when a hold exists and the quantity exceeds what is left
-(`TestIssueClaim_*`). A claim that names a batch is checked over the warehouse and within its batch, so a batch with no hold
-cannot reach another batch's held stock (`TestIssueClaim_ABatchWithoutAHoldCannotReachAnotherBatchsHeldStock`). The client
+`:release` withdraws a claim whose movement failed). The claim locks the product's on-hand rows, then the warehouse's issue
+scope (an advisory lock), sums physical and held over the unrestricted (not BLOCKED or QUARANTINE) rows of the warehouse and
+refuses with 422 `QUALITY_HOLD` when a hold exists and the claims outstanding with it would leave less than nothing free
+(`TestIssueClaim_*`). #33 (migrations 0038 and 0039, `issue_ref` and `ISSUED` rows): claims of every kind count together,
+because inventory books none of these movements as journals and physical does not fall. The optional `issueRef` names the
+document line the units are issued for (`SALES_LINE:<order line id>`, `PRODUCTION_ORDER:<order id>:<item id>`, formed by
+`platform/go/issueclaim`), and claims that share it are successive steps of the same units. A ref counts as the largest
+per-kind total of its claims, so a pick and the ship of what it picked count once
+(`TestIssueClaim_APickAndTheShipOfWhatItPickedCountOnce`). Claims without a ref count in full, so a consume of 2 and a ship of
+2 of a free 2 no longer both pass. Inventory's own issues are weighed against the same outstanding claims under the same
+scope lock: journal postings other than counts (a count records what is there and may find claimed units gone),
+`transactions:apply` and status steps, transfer shipments and blockings (`guardClaimedStock`,
+`TestIssueClaim_InventoryIssuesCannotReachHeldStockBehindClaims`,
+`TestIssueClaim_ConcurrentClaimsAndJournalIssuesTakeOnlyTheFreeQuantity`). An issue booked for a ref (the postings consumer's
+DELIVERED booking of a sales order line) writes an `ISSUED` row that settles the ref's claims, up to what the ref still had
+outstanding. Stock issued through inventory and claimed before is therefore counted once
+(`TestIssueClaim_TheDeliveryBookingSettlesTheClaimsOfItsLine`), and an issue nobody claimed never absorbs a later claim of
+the same line (`TestIssueClaim_AnIssueWithoutAClaimDoesNotAbsorbALaterClaimOfItsLine`). A claim may not leave free stock below
+zero while anything is held, even when it takes nothing new, so a hold placed after a pick stops the ship of the staged units
+until the usage decision. Inventory's issues may not lower free stock that is already below zero, but the booking of a
+delivery its claims let out passes (`TestIssueClaim_AHoldPlacedAfterThePickStopsTheShipOfWhatWasPicked`). The property test
+`TestHoldProperty_MixedMovementsNeverReachHeldStock` interleaves picks, ships, consumptions (with and without refs, some
+withdrawn), journal issues and receipts, settling delivery bookings, and holds placed and released. It checks after every
+step that the store matches the model (physical, held, outstanding), that available + held = on hand, that no movement
+reaches held stock, and that no free stock is refused. A claim that names a batch is checked over the warehouse and within its
+batch, so a batch with no hold cannot reach another batch's held stock
+(`TestIssueClaim_ABatchWithoutAHoldCannotReachAnotherBatchsHeldStock`); batchless claims count against every batch. The client
 (`platform/go/issueclaim`) sends each movement's key with an attempt id, so a failed double submit withdraws only its own claim
-(`TestClaimAll_EachAttemptOwnsItsClaim`, fulfillment `TestPostPackingSlip_FailedDoubleSubmitKeepsTheCommittedClaim`); a claim
-whose withdrawal is lost (crash between claim and commit) stays and only makes later movements of its kind stricter. The three kinds are tallied apart: inventory books none of these movements as journals, so physical does not
-fall, and a unit picked and then shipped must not count twice; claims of different kinds are therefore not bounded by one
-another. Not built: a hold on a whole lot
+(`TestClaimAll_EachAttemptOwnsItsClaim`, fulfillment `TestPostPackingSlip_FailedDoubleSubmitKeepsTheCommittedClaim`). A claim
+whose withdrawal is lost (crash between claim and commit) stays and only makes later movements stricter. Which claims an issue settles
+(settlement keys start `issued:`, which `ClaimIssue` refuses in a
+caller key, `TestIssueClaim_AKeyInTheSettlementNamespaceIsRefused`): only an issue that names a ref settles anything, and
+it settles only the claims of that ref (the postings consumer's DELIVERED booking of a sales order line, ref `SALES_LINE:<line id>`),
+drawing on the quantity it moved once, net of what left the warehouse, and never more than the ref still has outstanding. Claims
+without a ref and claims of another ref are never settled by an issue (`TestIssueClaim_ADeliveryNeverSettlesAnotherLinesRefLessPick`:
+a delivery with no claim of its own cannot move held stock a ref-less pick stands for). A warehouse pick for an order line carries
+the line's ref (`orderLineId` on the work line, set by the web work form), so for one ref the pick and the ship are the same units:
+outstanding is the larger of the two kinds minus what was issued, and a delivery lowers it by at most the delivered quantity across
+both (`TestIssueClaim_APickLinkedToItsLineIsSettledWithTheShipByTheDelivery`, `..._APartialDeliveryLeavesTheRestOfTheLinesPickAndShipOutstanding`,
+`..._AnotherLinesDeliveryLeavesThisLinesPickAlone`, `TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims`). A pick
+with no source document (ad hoc) stays ref-less and is released explicitly (`POST /v1/inventory/issue-claims:release`): the warehouse
+has no step after COMPLETED where the units are handed on (no shipment or load object), and releasing at completion would let
+repeated picks add up to held stock again, so it does not. Journals, status steps and `transactions:apply` registrations (which take
+no `issueRef`: the field is refused) settle nothing, so a scrap or an adjustment lowers free stock by what it takes and never releases
+another order's claim (`TestIssueClaim_UnlinkedIssuesAndInScopeMovesSettleNothing`, and the property test, whose model never settles
+a ref-less claim and which checks that an issue with no free stock passes only when its own ref had the quantity open). A ref the
+claim API accepts is exactly `SALES_LINE:<lower-case uuid>` or `PRODUCTION_ORDER:<uuid>:<uuid>` (`issueclaim.CanonicalRef`). Known
+limits: production does not yet book its consumption in inventory at all (no call in `services/production` posts one), so its `CONSUME`
+claims stay outstanding until released; a `SHIP` or `CONSUME` claim without a ref is never settled; fulfillment has no code that creates
+warehouse work (the wave release in warehouse has no route), so only work created through `POST /v1/warehouse/work` with `orderLineId`
+is linked. A hold is placed against the row's physical stock and does not
+subtract outstanding claims. A hold placed over stock already claimed may therefore cover units that have left. It then
+stops every further claim and every issue that settles nothing until the usage decision, so it is stricter, not a leak. Not built: a hold on a whole lot
 does not follow later receipts into the lot, holds are not shown on the web on-hand page, and holds do not freeze count sheets.
 
 PSG-1615 (wave 16 slice 15) adds partial shipments and a planned receipt date on transfer orders (FR-16.15, BR-16.13). `POST

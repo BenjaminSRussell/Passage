@@ -90,6 +90,7 @@ jobs:
       PGPASSWORD: postgres
       PASSAGE_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
       PASSAGE_TEST_APP_DATABASE_URL: postgres://passage_app:passage_app@localhost:5432/postgres?sslmode=disable
+      PASSAGE_TEST_RESTORE_DATABASE_URL: postgres://postgres:postgres@localhost:5432/passage_restore?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -170,7 +171,7 @@ jobs:
       matrix:
         # excluded until clean: services/close engineering fx migration org party payables tax,
         # tools/connectors.
-        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/numbering, services/platform-health, services/product, services/receiving, tools/importexport, tools/rlscheck, tools/e2e]
+        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/numbering, services/platform-health, services/product, services/receiving, tools/importexport, tools/rlscheck, tools/tenant-restore, tools/e2e]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -265,7 +266,7 @@ jobs:
             ortools: true
             extras: dev
           - package: dispatch-py
-            ortools: false
+            ortools: true
             extras: dev
           - package: routing-py
             ortools: true
