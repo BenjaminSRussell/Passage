@@ -49,8 +49,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	var vault *bankconnect.Vault
 	if vaultCfg.Enabled() {
-		vault := bankconnect.NewVault(vaultCfg)
+		vault = bankconnect.NewVault(vaultCfg)
 		defer func() {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -70,8 +71,12 @@ func run() error {
 			return err
 		}
 	}
-	a, err := api.New(store.New(pool)).WithMaxFileMB(maxMB)
+	pg := store.New(pool)
+	a, err := api.New(pg).WithMaxFileMB(maxMB)
 	if err != nil {
+		return err
+	}
+	if err := wireEBICS(ctx, a, pg, vault, vaultCfg); err != nil {
 		return err
 	}
 

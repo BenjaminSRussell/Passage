@@ -405,6 +405,34 @@ func (s *Store) ListReceipts(ctx context.Context, f store.ReceiptFilter) (out []
 	return out, err
 }
 
+func (s *Store) ListInvoices(ctx context.Context, f store.InvoiceFilter) (out []store.Invoice, err error) {
+	limit := pageLimit(f.Limit)
+	principal, _ := tenant.FromContext(ctx)
+	err = s.with(ctx, func(t *tenantData) error {
+		for _, inv := range t.invoiceDocs {
+			if !tenant.InLegalEntityScope(principal, inv.LegalEntityID) || (f.VendorID != "" && inv.VendorID != f.VendorID) || (f.Status != "" && inv.Status != f.Status) ||
+				skipForCursor(inv.CreatedAt, inv.ID, f.CursorCreatedAt, f.CursorID) {
+				continue
+			}
+			if (f.ReceiptID != "" || f.PurchaseOrderID != "") && !slices.ContainsFunc(inv.Lines, func(l store.InvoiceLine) bool {
+				r, ok := t.receipts[l.ReceiptID]
+				return ok && tenant.InLegalEntityScope(principal, r.LegalEntityID) && (f.ReceiptID == "" || l.ReceiptID == f.ReceiptID) &&
+					(f.PurchaseOrderID == "" || r.PurchaseOrderID == f.PurchaseOrderID)
+			}) {
+				continue
+			}
+			inv.Lines = slices.Clone(inv.Lines)
+			out = append(out, inv)
+		}
+		slices.SortFunc(out, func(a, b store.Invoice) int {
+			return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(b.ID, a.ID))
+		})
+		out = out[:min(len(out), limit+1)]
+		return nil
+	})
+	return out, err
+}
+
 func (s *Store) ListGrir(ctx context.Context, f store.GrirFilter) (page store.GrirPage, err error) {
 	limit := pageLimit(f.Limit)
 	err = s.with(ctx, func(t *tenantData) error {
