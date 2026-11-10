@@ -19,6 +19,7 @@ release may change public APIs.
 
 ### Added
 
+- Mobile warehouse execution service (`services/mobile`, wave 32, #32): device sessions with idle timeout, takeover and resume, role- and site-based menus with SSE publish notice, versioned server-driven flows and step runner calling the warehouse work API (new `mobile` service grant), GS1-128/DataMatrix scan parsing, idempotent offline replay with conflict parking and a supervisor resolve queue, chart, migrations with forced RLS, authz routes, OpenAPI and AsyncAPI.
 - Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
   seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new
   `services/identity/cmd/devgateway` (JWT verification, OPA enforcement, identity headers from claims) and the web

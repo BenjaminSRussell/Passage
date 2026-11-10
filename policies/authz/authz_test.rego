@@ -1751,6 +1751,27 @@ test_production_order_end_check if {
 	not allowed("production.order.read", "POST", "/v1/production/orders/o-1/end-check")
 }
 
+test_mobile_service_routes if {
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1:heartbeat")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1/runs/current/steps/scan_item:submit")
+	allowed("warehouse.work.execute", "GET", "/v1/mobile/menus/default")
+	allowed("warehouse.work.execute", "POST", "/v1/mobile/offline:replay")
+	not allowed("warehouse.work.execute", "GET", "/v1/mobile/sessions")
+	not allowed("warehouse.work.execute", "POST", "/v1/mobile/sessions/s-1:force-signout")
+	not allowed("warehouse.work.execute", "POST", "/v1/mobile/flows")
+	allowed("warehouse.work.supervise", "GET", "/v1/mobile/sessions")
+	allowed("warehouse.work.supervise", "POST", "/v1/mobile/sessions/s-1:force-signout")
+	not allowed("warehouse.work.supervise", "POST", "/v1/mobile/offline:replay")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/flows/f-1:publish")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/flows:install-core")
+	allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/menus")
+	not allowed("warehouse.mobile-flow.admin", "POST", "/v1/mobile/offline/conflicts/dev-1:3:resolve")
+	allowed("warehouse.offline-conflict.resolve", "GET", "/v1/mobile/offline/conflicts")
+	allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/offline/conflicts/dev-1:3:resolve")
+	not allowed("warehouse.offline-conflict.resolve", "POST", "/v1/mobile/flows")
+}
+
 # Issue #495: the dev seed (deploy/local/seed.json) holds an admin and a clerk; admin routes are the admin's alone.
 dev_seed_assignments := {"tenant-1": {
 	"admin": [

@@ -1802,7 +1802,13 @@
     ]},
     "warehouse.mobile-flow.admin": {"permissions": [
       {"resource": "/api/v1/mobile/flows", "methods": ["POST"]},
-      {"resource": "/api/v1/mobile/flows/*:publish", "methods": ["POST"]}
+      {"resource": "/api/v1/mobile/flows/*:publish", "methods": ["POST"]},
+      {"resource": "/v1/mobile/flows", "methods": ["GET", "POST"]},
+      {"resource": "/v1/mobile/flows:install-core", "methods": ["POST"]},
+      {"resource": "/v1/mobile/flows/*", "methods": ["GET"]},
+      {"resource": "/v1/mobile/flows/*:publish", "methods": ["POST"]},
+      {"resource": "/v1/mobile/menus", "methods": ["GET", "POST"]},
+      {"resource": "/v1/mobile/devices", "methods": ["GET", "POST"]}
     ]},
     "print.job.submit": {"permissions": [
       {"resource": "/print/v1/jobs", "methods": ["GET", "POST"]},
@@ -1818,7 +1824,9 @@
     ]},
     "warehouse.offline-conflict.resolve": {"permissions": [
       {"resource": "/api/v1/mobile/offline/conflicts", "methods": ["GET"]},
-      {"resource": "/api/v1/mobile/offline/conflicts/*:resolve", "methods": ["POST"]}
+      {"resource": "/api/v1/mobile/offline/conflicts/*:resolve", "methods": ["POST"]},
+      {"resource": "/v1/mobile/offline/conflicts", "methods": ["GET"]},
+      {"resource": "/v1/mobile/offline/conflicts/**:resolve", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.pack": {"permissions": [
       {"resource": "/v1/fulfillment/shipments/*/containers", "methods": ["POST"]},
@@ -3340,9 +3348,24 @@
     "warehouse.work.execute": {"permissions": [
       {"resource": "/v1/warehouse/work/*/lines/*:confirm", "methods": ["POST"]},
       {"resource": "/v1/warehouse/work/*:exception", "methods": ["POST"]},
-      {"resource": "/v1/warehouse/work:assign", "methods": ["POST"]}
+      {"resource": "/v1/warehouse/work:assign", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:heartbeat", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:end", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:assign-work", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*/runs", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*/runs/current/steps/*:submit", "methods": ["POST"]},
+      {"resource": "/v1/mobile/menus/*", "methods": ["GET"]},
+      {"resource": "/v1/mobile/scan:parse", "methods": ["POST"]},
+      {"resource": "/v1/mobile/offline:replay", "methods": ["POST"]},
+      {"resource": "/v1/mobile/events", "methods": ["GET"]}
     ]},
-    "warehouse.work.supervise": {"permissions": [{"resource": "/v1/warehouse/work", "methods": ["POST"]}]},
+    "warehouse.work.supervise": {"permissions": [
+      {"resource": "/v1/warehouse/work", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions", "methods": ["GET"]},
+      {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
+      {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
+    ]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
       {"resource": "/v1/workitems/*/actions", "methods": ["POST"]}
@@ -3483,6 +3506,9 @@
     },
     "warehouse": {
       "inventory": ["inventory.issue.claim"]
+    },
+    "mobile": {
+      "warehouse": ["warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register"]
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],
