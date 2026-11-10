@@ -157,7 +157,7 @@ export function LagPanel() {
             const stale = gate !== undefined && (r.lagSeconds ?? 0) > gate;
             return (
             <li key={r.ledgerId} className={styles.lagItem}>
-              <span className={styles.mono}>Ledger {r.ledgerId}</span>
+              <span className={styles.mono} title={r.ledgerId}>Ledger {r.ledgerId.slice(0, 8)}</span>
               <span>
                 As of sequence <span className={styles.mono}>{r.postingSequence}</span>
                 {r.entriesApplied !== undefined ? <>, {r.entriesApplied} {r.entriesApplied === 1 ? "entry" : "entries"} applied</> : null}, updated <time dateTime={r.updatedAt}>{r.updatedAt}</time>

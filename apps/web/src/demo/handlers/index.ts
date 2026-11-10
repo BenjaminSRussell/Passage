@@ -14,3 +14,4 @@ import "./finance";
 import "./shell";
 import "./fx";
 import "./print";
+import "./analytics";
