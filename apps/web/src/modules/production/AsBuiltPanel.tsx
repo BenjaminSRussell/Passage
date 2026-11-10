@@ -15,6 +15,8 @@ import {
 import { trackingLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { useNames } from "../mfg-shared/names";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
 
@@ -75,6 +77,7 @@ export interface AsBuiltPanelProps {
  */
 export function AsBuiltPanel({ order }: AsBuiltPanelProps) {
   const components = Array.from(new Map(order.lines.map((l) => [l.itemId, l])).values());
+  const names = useNames("product", components.map((l) => l.itemId));
   const editable = order.status === "Started" || order.status === "ReportedAsFinished";
   const [records, setRecords] = useState<{ rows: AsBuiltRecord[]; loading: boolean; error: Problem | null }>({ rows: [], loading: true, error: null });
   const [draft, setDraft] = useState<AsBuiltDraft>(() => emptyAsBuilt(components[0]?.itemId));
@@ -144,7 +147,7 @@ export function AsBuiltPanel({ order }: AsBuiltPanelProps) {
 
   const columns: DataTableColumn<AsBuiltRecord>[] = [
     { key: "finishedSerialOrBatch", header: "Finished serial or batch", mono: true },
-    { key: "componentItemId", header: "Component", mono: true },
+    { key: "componentItemId", header: "Component", render: (r) => <EntityName entity="product" id={r.componentItemId} fallback={r.componentItemId} /> },
     { key: "tracking", header: "Tracking", render: (r) => trackingLabel[r.tracking] ?? r.tracking },
     { key: "componentSerialOrBatch", header: "Component serial or batch", mono: true },
     { key: "qty", header: "Quantity", align: "end" },
@@ -224,7 +227,7 @@ export function AsBuiltPanel({ order }: AsBuiltPanelProps) {
                   <Select {...control} value={draft.componentItemId} onChange={(e) => set({ componentItemId: e.target.value })}>
                     {components.map((l) => (
                       <option key={l.itemId} value={l.itemId}>
-                        {l.lineNo} · {l.itemId}
+                        {l.lineNo} · {names[l.itemId] ?? l.itemId}
                       </option>
                     ))}
                   </Select>

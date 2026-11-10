@@ -26,7 +26,7 @@ export function CapacityLoadPage() {
       period === "week" ? fetchCapacityLoad(from, count, [], signal) : fetchDailyLoad(from, count, [], signal),
       listResources(signal),
     ]);
-    return { rows, codes: Object.fromEntries(resources.map((r) => [r.id, r.code])) };
+    return { rows, codes: Object.fromEntries(resources.map((r) => [r.id, `${r.name} (${r.code})`])) };
   }, `${from}|${period}|${count}`);
 
   function changePeriod(next: LoadPeriod) {
@@ -36,7 +36,7 @@ export function CapacityLoadPage() {
 
   const codes = state.data?.codes ?? {};
   const columns: DataTableColumn<LoadItem>[] = [
-    { key: "resourceId", header: "Resource", mono: true, render: (row) => codes[row.resourceId] ?? shortId(row.resourceId) },
+    { key: "resourceId", header: "Resource", render: (row) => codes[row.resourceId] ?? shortId(row.resourceId) },
     { key: "periodStart", header: period === "week" ? "Week of" : "Day", mono: true, render: (row) => start(row) },
     { key: "openMinutes", header: "Open h", align: "end", render: (row) => hours(row.openMinutes) },
     { key: "bookedMinutes", header: "Booked h", align: "end", render: (row) => hours(row.bookedMinutes) },

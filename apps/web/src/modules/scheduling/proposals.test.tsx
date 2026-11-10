@@ -110,12 +110,12 @@ describe("CampaignProposalsPage", () => {
   it("asks for the default 14-day window from today and lists each proposal with its orders", async () => {
     handler = standard([proposal]);
     const { container } = renderAt("/scheduling/campaign-proposals");
-    expect(await screen.findByRole("heading", { name: "WHITE on MIX-1" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "WHITE on Mixing vessel (MIX-1)" })).toBeInTheDocument();
     const req = calls.find((c) => c.url.pathname.endsWith("/campaign-proposals"));
     expect(req?.url.searchParams.get("windowDays")).toBe("14");
     expect(req?.url.searchParams.get("from")).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00Z$/);
     expect(req?.url.searchParams.has("resourceId")).toBe(false);
-    const table = screen.getByRole("table", { name: "Orders proposed for WHITE on MIX-1" });
+    const table = screen.getByRole("table", { name: "Orders proposed for WHITE on Mixing vessel (MIX-1)" });
     expect(within(table).getByText("b1000000")).toBeInTheDocument();
     expect(within(table).getByText("Firmed")).toBeInTheDocument();
     expect(within(table).getByText("1 h 30 min")).toBeInTheDocument();
@@ -159,13 +159,13 @@ describe("CampaignProposalsPage", () => {
     expect(alert).toHaveTextContent("validation_failed");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("heading", { name: "WHITE on MIX-1" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "WHITE on Mixing vessel (MIX-1)" })).toBeInTheDocument();
   });
 
   it("does not create a campaign until every order has a quantity", async () => {
     handler = standard([proposal]);
     renderAt("/scheduling/campaign-proposals");
-    await screen.findByRole("heading", { name: "WHITE on MIX-1" });
+    await screen.findByRole("heading", { name: "WHITE on Mixing vessel (MIX-1)" });
     fireEvent.change(screen.getByLabelText("Quantity for order b1000000"), { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
     expect(await screen.findByText("Enter a quantity for every order.")).toBeInTheDocument();
@@ -184,7 +184,7 @@ describe("CampaignProposalsPage", () => {
       return standard([proposal])(url, init);
     };
     renderAt("/scheduling/campaign-proposals");
-    await screen.findByRole("heading", { name: "WHITE on MIX-1" });
+    await screen.findByRole("heading", { name: "WHITE on Mixing vessel (MIX-1)" });
     fireEvent.change(screen.getByLabelText("Quantity for order b1000000"), { target: { value: "100" } });
     fireEvent.change(screen.getByLabelText("Quantity for order c1000000"), { target: { value: "200" } });
     fireEvent.change(screen.getByLabelText("Sequence rule"), { target: { value: "manual" } });
@@ -207,7 +207,7 @@ describe("CampaignProposalsPage", () => {
     let reply: Reply = { status: 409, body: { code: "SCHED-0114", detail: "an order already belongs to a campaign" } };
     handler = (url, init) => (init.method === "POST" ? reply : standard([proposal])(url, init));
     renderAt("/scheduling/campaign-proposals");
-    await screen.findByRole("heading", { name: "WHITE on MIX-1" });
+    await screen.findByRole("heading", { name: "WHITE on Mixing vessel (MIX-1)" });
     fireEvent.change(screen.getByLabelText("Quantity for order b1000000"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Quantity for order c1000000"), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
