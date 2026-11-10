@@ -242,6 +242,7 @@ export function EntityLookup({
           aria-required={aria["aria-required"]}
           aria-invalid={aria["aria-invalid"]}
           autoComplete="off"
+          data-value={value}
           invalid={invalid}
           disabled={disabled}
           placeholder={placeholder ?? `Search ${def.noun}s by name or number`}

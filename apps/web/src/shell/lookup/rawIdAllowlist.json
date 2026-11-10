@@ -2,7 +2,6 @@
   "entries": {
     "modules/admin/security/EffectivePermissionsPage.tsx": {
       "labels": [
-        "Legal entity id",
         "User id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
@@ -30,18 +29,6 @@
     "modules/analytics/SchedulesPage.tsx": {
       "labels": [
         "Report id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/ap-invoices/GrirPage.tsx": {
-      "labels": [
-        "Vendor ID"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/billing/RevenueContractsPage.tsx": {
-      "labels": [
-        "Customer id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
@@ -75,12 +62,6 @@
       ],
       "reason": "The ledger service has no list route to search yet."
     },
-    "modules/eam/AssetCare.tsx": {
-      "labels": [
-        "Vendor party id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/eam/WorkOrderCare.tsx": {
       "labels": [
         "Production resource id"
@@ -108,98 +89,11 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/finreport/LegalHoldsPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/finreport/VerificationsPage.tsx": {
       "labels": [
         "Ledger id"
       ],
       "reason": "The ledger service has no list route to search yet."
-    },
-    "modules/fulfillment/BackordersPage.tsx": {
-      "labels": [
-        "Warehouse id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/DeliveredNotInvoicedPage.tsx": {
-      "labels": [
-        "Customer id",
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/DeliveryTolerancesPage.tsx": {
-      "labels": [
-        "Customer id",
-        "Product id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/LegalEntitySettingsPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/OperationRulesPage.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Warehouse id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/PackagingFeesPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/PackingRulesPage.tsx": {
-      "labels": [
-        "Customer id",
-        "Product id",
-        "Product id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/ProductPackagingPage.tsx": {
-      "labels": [
-        "Product id",
-        "Product id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/ReleaseRulesPage.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Warehouse id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/ReturnableAgingPage.tsx": {
-      "labels": [
-        "Customer id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/ReturnableMovementsPage.tsx": {
-      "labels": [
-        "Customer id",
-        "Customer id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/ReturnablePackagingPage.tsx": {
-      "labels": [
-        "Customer id",
-        "Customer id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/fulfillment/ShipmentActions.tsx": {
       "labels": [
@@ -207,36 +101,9 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/fulfillment/SsccRegisterPage.tsx": {
-      "labels": [
-        "Customer id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/fulfillment/WarehouseSettingsPage.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Warehouse id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/hr/ChecklistsPage.tsx": {
       "labels": [
-        "Legal entity id",
-        "Owner's worker id",
         "Template id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/hr/CompCyclesPage.tsx": {
-      "labels": [
-        "Manager's worker id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/hr/MyQuestionnairesPage.tsx": {
-      "labels": [
-        "Your worker id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
@@ -246,54 +113,22 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/hr/OshaPage.tsx": {
-      "labels": [
-        "Site id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/hr/QuestionnairesPage.tsx": {
       "labels": [
         "Schedule id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/hr/WorksheetPage.tsx": {
-      "labels": [
-        "Worker id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/inventory/TransferEditForm.tsx": {
-      "labels": [
-        "Add a line: product id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/lean/FlowPages.tsx": {
       "labels": [
         "Output location id",
-        "Site id",
         "Value stream id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/lean/RulePages.tsx": {
-      "labels": [
-        "Item id",
-        "Site id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/lean/WorkCellBoardPage.tsx": {
       "labels": [
         "Work cell id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/ledger/DescriptionTemplateFormPage.tsx": {
-      "labels": [
-        "Legal entity id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
@@ -321,14 +156,6 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/migration/ProjectPages.tsx": {
-      "labels": [
-        "Source legal entity id",
-        "Target legal entity id",
-        "Target legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/migration/XrefPages.tsx": {
       "labels": [
         "Passage id"
@@ -338,13 +165,6 @@
     "modules/org/TeamWrites.tsx": {
       "labels": [
         "Member id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/party/DuplicatesPage.tsx": {
-      "labels": [
-        "First party id",
-        "Second party id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
@@ -365,101 +185,20 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/party/SearchPage.tsx": {
-      "labels": [
-        "Party id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/CommissionSettlementPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/ComparePage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/ContractClaimsPage.tsx": {
-      "labels": [
-        "Vendor id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/ImportJournalPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/NewJournalPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/NewProcedurePage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/pricing/NewSalesGroupPage.tsx": {
       "labels": [
-        "Legal entity id",
         "Rep id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/ParametersPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/ProcedureAssignmentsPage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/VendorClaimsPage.tsx": {
-      "labels": [
-        "Vendor id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/pricing/WorkspacePage.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/processmfg/BatchRecordPages.tsx": {
-      "labels": [
-        "Item id",
-        "Item id",
-        "Item id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/processmfg/CustomerRequirementPages.tsx": {
       "labels": [
-        "Customer group id",
-        "Customer id",
-        "Customer id",
-        "Item id",
-        "Item id",
-        "Item id"
+        "Customer group id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/processmfg/DerivationPages.tsx": {
       "labels": [
-        "Item id",
         "Receiver batch id",
         "Receiver batch id"
       ],
@@ -467,23 +206,13 @@
     },
     "modules/processmfg/EbrPages.tsx": {
       "labels": [
-        "Batch id",
-        "Item id",
-        "Item id"
+        "Batch id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/processmfg/FormulaPages.tsx": {
       "labels": [
-        "Item id",
         "Product item id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/processmfg/InheritanceRulePages.tsx": {
-      "labels": [
-        "Item id",
-        "Item id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
@@ -491,18 +220,6 @@
       "labels": [
         "Batch id",
         "Rework formula id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/processmfg/StoredMergePage.tsx": {
-      "labels": [
-        "Item id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/processmfg/StoredPickingPage.tsx": {
-      "labels": [
-        "Item id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
@@ -524,116 +241,28 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/purchasing/AgreementPages.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Product id",
-        "Vendor id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/CatalogImportPages.tsx": {
-      "labels": [
-        "Vendor id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/CatalogPages.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Product id",
-        "Vendor id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/CategoryPages.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Legal entity id",
-        "Vendor id",
-        "Worker id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/purchasing/ChargePages.tsx": {
       "labels": [
         "Credit account id",
-        "Debit account id",
-        "Legal entity id",
-        "Legal entity id",
-        "Vendor id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/OpenSupplyPage.tsx": {
-      "labels": [
-        "Product id",
-        "Site id",
-        "Warehouse id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/PolicyPages.tsx": {
-      "labels": [
-        "Legal entity id"
+        "Debit account id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/purchasing/PurchaseOrderPages.tsx": {
       "labels": [
-        "Agreement line id",
-        "Deliver to site id",
-        "Deliver to warehouse id",
-        "Legal entity id",
-        "Product id",
-        "Vendor id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/ReleasePages.tsx": {
-      "labels": [
-        "Legal entity id"
+        "Agreement line id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/purchasing/RequisitionPages.tsx": {
       "labels": [
-        "Deliver to warehouse id",
-        "Deliver to warehouse id",
-        "Legal entity id",
-        "Operating unit id",
-        "Preferred vendor id",
-        "Product id",
-        "Site id",
-        "Site id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/RfqPages.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Product id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/RfqTypePages.tsx": {
-      "labels": [
-        "Legal entity id"
+        "Operating unit id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/purchasing/ServicePages.tsx": {
       "labels": [
-        "Contract agreement line id",
-        "Legal entity id",
-        "Service product id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/SigningPages.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Worker id"
+        "Contract agreement line id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
@@ -650,12 +279,6 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/quality/ItemCompliancePage.tsx": {
-      "labels": [
-        "Item id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/quality/ResultsEntry.tsx": {
       "labels": [
         "Outcome id"
@@ -664,7 +287,6 @@
     },
     "modules/quality/SpcPage.tsx": {
       "labels": [
-        "Item id",
         "Test id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
@@ -711,15 +333,8 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/transport/GatePage.tsx": {
-      "labels": [
-        "Site id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/transport/NewGoodsInTransitPage.tsx": {
       "labels": [
-        "Destination site id",
         "Voyage id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
@@ -754,33 +369,9 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/treasury/BankAccounts.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/treasury/CashForecast.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/treasury/Checks.tsx": {
       "labels": [
         "Bank account id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/treasury/Facilities.tsx": {
-      "labels": [
-        "Legal entity id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/treasury/Loans.tsx": {
-      "labels": [
-        "Legal entity id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
@@ -793,12 +384,6 @@
     "modules/vendorgroups/VendorGroupsPage.tsx": {
       "labels": [
         "Existing group ID"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/warehouse/shared.tsx": {
-      "labels": [
-        "Warehouse id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     }
