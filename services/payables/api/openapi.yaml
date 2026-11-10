@@ -696,6 +696,7 @@ components:
         status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
         version: { type: integer }
         paymentHold: { type: boolean }
+        paymentHoldReason: { type: string, description: Why the item is on payment hold; absent when it is not held or no reason was given. }
         payeeUnverified: { type: boolean, description: "True for an expense reimbursement whose worker the employee-vendor register does not map yet (vendorId is the worker id); with bank bindings on it is left out of proposals until the worker is registered." }
         payeeWorkerId: { type: string, format: uuid, description: "The worker an expense reimbursement pays, once vendorId is the vendor the employee-vendor register maps them to." }
         valuation:
