@@ -26,6 +26,7 @@ import (
 const (
 	dutyJournalWrite   = "ledger.journal.write"
 	dutyJournalApprove = "ledger.journal.approve"
+	dutyInboxRead      = "ledger.inbox.read"
 	maxJournalNameName = 60
 )
 
@@ -44,7 +45,7 @@ func (a *API) registerBatches(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/journal-names", a.listJournalNames)
 	r.With(authz.RequireDuty(dutyRead)).Get("/journal-names/{code}", a.getJournalName)
 	r.With(authz.RequireDuty(dutySetupWrite)).Put("/journal-names/{code}", a.putJournalName)
-	r.With(authz.RequireDuty(dutyRead)).Get("/journal-batches", a.listBatches)
+	r.With(authz.RequireAnyDuty(dutyRead, dutyInboxRead)).Get("/journal-batches", a.listBatches)
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post("/journal-batches", a.createBatch)
 	r.With(authz.RequireDuty(dutyRead)).Get("/journal-batches/{id}", a.getBatch)
 	r.With(authz.RequireDuty(dutyJournalWrite)).Patch("/journal-batches/{id}", a.patchBatch)
