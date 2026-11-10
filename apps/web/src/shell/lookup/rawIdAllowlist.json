@@ -246,51 +246,16 @@
     },
     "modules/inventory/CountVariancePage.tsx": {
       "labels": [
-        "Legal entity id",
         "Plan id",
         "Sheet id"
       ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/inventory/DimensionCombinationsPage.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Product id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
-    "modules/inventory/NegativeOnHandPage.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Product id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
+      "reason": "Legal entity is a lookup. Count plans and count sheets have no search route or lookup adapter yet."
     },
     "modules/inventory/StatusChangesPage.tsx": {
       "labels": [
         "Transaction id"
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/inventory/TrackingTracePage.tsx": {
-      "labels": [
-        "Product id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
-    "modules/inventory/TransactionsPage.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Product id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
-    },
-    "modules/inventory/TransferLinesPage.tsx": {
-      "labels": [
-        "Legal entity id",
-        "Product id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
     },
     "modules/lean/FlowPages.tsx": {
       "labels": [
@@ -751,12 +716,6 @@
         "Existing group ID"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/warehouse/pages.tsx": {
-      "labels": [
-        "Warehouse id"
-      ],
-      "reason": "An EntityLookup adapter exists for this entity, but the page tests type free text into the field; conversion is a follow-up for #500."
     }
   }
 }

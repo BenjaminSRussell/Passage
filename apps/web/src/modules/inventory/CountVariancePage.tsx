@@ -7,6 +7,7 @@ import { ALL_DIMENSIONS, ProblemAlert, stateTones } from "./parts";
 import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const columns: DataTableColumn<CountVarianceLine>[] = [
   { key: "sheetNumber", header: "Count sheet", mono: true, render: (row) => <Link to={`/inventory/count-sheets/${row.sheetId}`}>{row.sheetNumber}</Link> },
@@ -103,9 +104,7 @@ export function CountVariancePage() {
           <FormField id="variance-counter" label="Counter" optional>
             {(control) => <Input {...control} value={draft.counter} onChange={set("counter")} placeholder="User id of the counter" />}
           </FormField>
-          <FormField id="variance-entity" label="Legal entity" optional error={errors.legalEntityId}>
-            {(control) => <Input {...control} value={draft.legalEntityId} onChange={set("legalEntityId")} placeholder="Legal entity id" invalid={Boolean(errors.legalEntityId)} />}
-          </FormField>
+          <LookupFormField id="variance-entity" label="Legal entity" entity="legalEntity" optional prefill={false} value={draft.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setDraft({ ...draft, legalEntityId })} />
           <FormField id="variance-from" label="Counted from" optional>
             {(control) => <Input {...control} type="date" value={draft.from} onChange={set("from")} />}
           </FormField>
