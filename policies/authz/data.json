@@ -948,13 +948,19 @@
       {"resource": "/v1/receivables/payments", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:apply", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:match", "methods": ["POST"]},
+      {"resource": "/v1/receivables/remittance-advices", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:backfill-reservation", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:retry", "methods": ["POST"]},
-      {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]}
+      {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]},
+      {"resource": "/v1/receivables/gl-journals/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/receivables/gl-journals:sweep", "methods": ["POST"]}
     ]},
     "receivables.payment.refund": {"permissions": [{"resource": "/v1/receivables/down-payments/*:release", "methods": ["POST"]}]},
-    "receivables.payment.settle": {"permissions": [{"resource": "/v1/receivables/down-payments/*:clear", "methods": ["POST"]}]},
+    "receivables.payment.settle": {"permissions": [
+      {"resource": "/v1/receivables/credit-settlements", "methods": ["POST"]},
+      {"resource": "/v1/receivables/down-payments/*:clear", "methods": ["POST"]}
+    ]},
     "receivables.view": {"permissions": [
       {"resource": "/v1/receivables/aging", "methods": ["GET"]},
       {"resource": "/v1/receivables/aging-snapshots", "methods": ["GET"]},
@@ -980,6 +986,8 @@
       {"resource": "/v1/receivables/payments/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/promises", "methods": ["GET"]},
       {"resource": "/v1/receivables/rma-credits", "methods": ["GET"]},
+      {"resource": "/v1/receivables/gl-journals", "methods": ["GET"]},
+      {"resource": "/v1/receivables/gl-reconciliation", "methods": ["GET"]},
       {"resource": "/v1/receivables/statements", "methods": ["GET"]},
       {"resource": "/v1/receivables/worklist", "methods": ["GET"]}
     ]},
@@ -2069,9 +2077,11 @@
       {"resource": "/v1/billing/free-text-invoices", "methods": ["POST"]},
       {"resource": "/v1/billing/proposals", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions/*/usage", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions/*:bill", "methods": ["POST"]},
       {"resource": "/v1/billing/subscriptions/*:cancel", "methods": ["POST"]},
-      {"resource": "/v1/billing/subscriptions/*:change-plan", "methods": ["POST"]}
+      {"resource": "/v1/billing/subscriptions/*:change-plan", "methods": ["POST"]},
+      {"resource": "/v1/billing/subscriptions:bill-due", "methods": ["POST"]}
     ]},
     "billing.invoice.post": {"permissions": [
       {"resource": "/v1/billing/gl-postings", "methods": ["POST"]},
@@ -3114,9 +3124,11 @@
     ]},
     "revrec.maintain": {"permissions": [
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
-      {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]}
+      {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]},
+      {"resource": "/v1/revrec/recognition-templates/*", "methods": ["PUT"]}
     ]},
     "revrec.creditnote.reverse": {"flag": true, "permissions": []},
+    "revrec.contract.from-invoice": {"flag": true, "permissions": []},
     "receivables.openitem.from-billing": {"flag": true, "permissions": []},
     "revrec.post": {"permissions": [
       {"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]},
@@ -3127,6 +3139,7 @@
       {"resource": "/v1/revrec/contracts", "methods": ["GET"]},
       {"resource": "/v1/revrec/contracts/*", "methods": ["GET"]},
       {"resource": "/v1/revrec/recognition-runs", "methods": ["GET"]},
+      {"resource": "/v1/revrec/recognition-templates", "methods": ["GET"]},
       {"resource": "/v1/revrec/roll-forward", "methods": ["GET"]},
       {"resource": "/v1/revrec/gl-reconciliation", "methods": ["GET"]}
     ]},
@@ -3785,7 +3798,7 @@
     "production-shopfloor": ["production.jobcard.shopfloor"],
     "receiving-erasure": ["compliance.legal-hold.check"],
     "receivables-billing": ["receivables.openitem.from-billing"],
-    "revrec-creditnotes": ["revrec.creditnote.reverse"],
+    "revrec-creditnotes": ["revrec.creditnote.reverse", "revrec.contract.from-invoice"],
     "receiving-ers": ["receiving.vendor-invoice.post"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
     "scheduling-order-import": ["scheduling.order.import"],

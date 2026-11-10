@@ -220,6 +220,10 @@ func asOfBalances(ctx context.Context, tx pgx.Tx, legalEntityID, asOf string) ([
 	rows, err := tx.Query(ctx, `select oi.customer_id::text, oi.currency, sum(oi.amount
 			- coalesce((select sum(st.settled_amount + st.cash_discount_taken + st.write_off_amount) from settlement st
 				where st.tenant_id = oi.tenant_id and st.open_item_id = oi.id and st.settled_at::date <= $2::date), 0)
+			- coalesce((select sum(cs.amount) from credit_settlement cs
+				where cs.tenant_id = oi.tenant_id and cs.debit_item_id = oi.id and cs.settled_at::date <= $2::date), 0)
+			+ coalesce((select sum(cs.amount) from credit_settlement cs
+				where cs.tenant_id = oi.tenant_id and cs.credit_item_id = oi.id and cs.settled_at::date <= $2::date), 0)
 			- coalesce((select sum(cl.amount) from down_payment_clearing cl
 				where cl.tenant_id = oi.tenant_id and cl.open_item_id = oi.id and cl.cleared_at::date <= $2::date), 0)
 			- coalesce((select coalesce(sum(dd.amount) filter (where dd.parent_id is null), 0)

@@ -45,6 +45,8 @@ type Store interface {
 	ListRuns(ctx context.Context, legalEntityID string, limit int) ([]store.Run, error)
 	RollForward(ctx context.Context, legalEntityID, currency string, start, end time.Time) (domain.RollForward, error)
 	ContractRollForward(ctx context.Context, contractID string, start, end time.Time) (store.ContractRoll, error)
+	PutTemplate(ctx context.Context, t store.Template) (store.Template, error)
+	ListTemplates(ctx context.Context) ([]store.Template, error)
 }
 
 type contractObligationDTO struct {

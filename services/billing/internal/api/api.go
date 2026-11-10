@@ -149,6 +149,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:change-plan", a.changePlan)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:cancel", a.cancelSubscription)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:bill", a.billSubscription)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}/usage", a.recordUsage)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions:bill-due", a.billDue)
 }
 
 // Metrics serves the counters in the Prometheus text format on the admin port.

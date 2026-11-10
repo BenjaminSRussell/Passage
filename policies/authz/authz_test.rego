@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "revrec.contract.from-invoice", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -2259,6 +2259,34 @@ test_rma_credit_operator_routes_belong_to_the_payment_duty if {
 	allowed("receivables.payment.post", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
 	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:cancel")
 	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
+}
+
+test_remittance_advice_belongs_to_the_payment_post_duty if {
+	allowed("receivables.payment.post", "POST", "/v1/receivables/remittance-advices")
+	not allowed("receivables.view", "POST", "/v1/receivables/remittance-advices")
+	not allowed("receivables.payment-file.import", "POST", "/v1/receivables/remittance-advices")
+}
+
+test_credit_settlement_belongs_to_the_settle_duty if {
+	allowed("receivables.payment.settle", "POST", "/v1/receivables/credit-settlements")
+	not allowed("receivables.payment.post", "POST", "/v1/receivables/credit-settlements")
+	not allowed("receivables.view", "POST", "/v1/receivables/credit-settlements")
+}
+
+test_subscription_usage_and_due_job_belong_to_invoice_maintain if {
+	allowed("billing.invoice.maintain", "POST", "/v1/billing/subscriptions/s1/usage")
+	allowed("billing.invoice.maintain", "POST", "/v1/billing/subscriptions:bill-due")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/subscriptions/s1/usage")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/subscriptions:bill-due")
+}
+
+test_gl_journal_routes_split_between_view_and_payment_duties if {
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals/j1:retry")
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:sweep")
+	allowed("receivables.view", "GET", "/v1/receivables/gl-journals")
+	allowed("receivables.view", "GET", "/v1/receivables/gl-reconciliation")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:sweep")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals/j1:retry")
 }
 
 test_asn_duties_do_not_cross if {

@@ -210,6 +210,13 @@ type Store interface {
 	BackfillRMAReservation(ctx context.Context, id, invoiceID string, lines []RMAInvoiceLine) (RMACreditView, error)
 	ListRMACredits(ctx context.Context, f RMACreditFilter) ([]RMACreditView, error)
 	SweepRMACredits(ctx context.Context, now time.Time, limit int) (RMASweepResult, error)
+	ApplyRemittanceAdvice(ctx context.Context, legalEntityID string, lines []domain.AdviceLine) (AdviceResult, error)
+	AutoApplyPayments(ctx context.Context, paymentIDs []string) (AutoApplyResult, error)
+	SettleCredit(ctx context.Context, req CreditSettlementRequest, idempotencyKey string) (CreditSettlementResult, error)
+	ListGLJournals(ctx context.Context, f GLJournalFilter) ([]GLJournalView, error)
+	PostDueJournals(ctx context.Context, now time.Time, limit int) (JournalSweepResult, error)
+	RetryGLJournal(ctx context.Context, id, postingDate string) (GLJournalView, error)
+	GLReconcile(ctx context.Context, legalEntityID, currency, asOf string) (GLReconciliation, error)
 	Ping(ctx context.Context) error
 }
 
@@ -218,6 +225,7 @@ type Postgres struct {
 	pool        *pgxpool.Pool
 	ledger      ledgerclient.Ledger
 	rmaLedgers  map[string]string
+	glLedgers   map[string]string
 	taxAccounts map[string]map[string]string
 	tax         taxclient.Recorder
 	billing     billingclient.Reader
@@ -438,6 +446,9 @@ func (s *Postgres) CreatePayment(ctx context.Context, in Payment, idempotencyKey
 		if err != nil {
 			return err
 		}
+		if err := receiptJournal(ctx, tx, p.TenantID, out); err != nil {
+			return err
+		}
 		return enqueue(ctx, tx, "payment", out.ID, rcvevents.PaymentReceived, p.TenantID, rcvevents.PaymentReceivedData{
 			PaymentID: out.ID, LegalEntityID: out.LegalEntityID, CustomerID: out.CustomerID, Source: out.Source,
 			Amount: out.Amount, Currency: out.Currency, Remittance: toEventRemittance(out.Remittance),
@@ -642,6 +653,9 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 			return err
 		}
 		out.Payment = pay
+		if err := applyJournal(ctx, tx, p.TenantID, pay, allocs); err != nil {
+			return err
+		}
 		// Learn the payer's account and name for the customer it paid (R4, R5).
 		if err := learnPayer(ctx, tx, p.TenantID, pay.LegalEntityID, pay.CustomerID, pay.PayerAccountHash, pay.PayerName); err != nil {
 			return err
