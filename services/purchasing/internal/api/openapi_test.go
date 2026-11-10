@@ -62,6 +62,7 @@ var customMethods = map[string][]string{
 	"/v1/procurement/signing-limit-requests/{id}": {"approve", "reject"},
 	"/v1/procurement/signing-limits/{id}":         {"recertify"},
 	"/v1/procurement/inbound-changes/{id}":        {"acknowledge", "retry"},
+	"/v1/procurement/acknowledgements/{id}":       {"approve", "decline"},
 }
 
 func TestOpenAPI_MatchesRegisteredRoutes(t *testing.T) {
