@@ -462,3 +462,140 @@ export function getLoan(id: string, signal?: AbortSignal): Promise<Loan> {
 export function createLoan(input: LoanInput, key: string = newKey()): Promise<Loan> {
   return send<Loan>("/loans", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
 }
+
+// ---- Bank reconciliation (FR-36.5) ----
+
+export const RECON_STATES = ["open", "closed", "reopened"] as const;
+export type ReconState = (typeof RECON_STATES)[number];
+
+export interface ReconSummary {
+  lines: number;
+  matchedCount: number;
+  matchedTotal: string;
+  excludedCount: number;
+  excludedTotal: string;
+  unmatchedCount: number;
+  unmatchedTotal: string;
+}
+
+export interface BankReconciliation {
+  id: string;
+  legalEntityId: string;
+  bankAccountId: string;
+  statementId: string;
+  currency: string;
+  periodFrom: string;
+  periodTo: string;
+  state: ReconState;
+  openingBalance: string;
+  closingBalance: string;
+  bookBalance: string;
+  outstandingAmount: string;
+  bookBalanceSource?: "stated";
+  bookBalanceStatedBy?: string;
+  bookBalanceStatedAt?: string;
+  /** closing - (book + outstanding + excluded lines); zero to close. */
+  difference: string;
+  summary: ReconSummary;
+  closedBy?: string;
+  closedAt?: string;
+  reopenedBy?: string;
+  reopenedAt?: string;
+  reopenReason?: string;
+  version: number;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ReconPage {
+  items: BankReconciliation[];
+  nextCursor?: string;
+}
+
+export interface ReconQuery {
+  legalEntityId?: string;
+  bankAccountId?: string;
+  state?: ReconState;
+  periodFrom?: string;
+  periodTo?: string;
+  cursor?: string;
+}
+
+export const TRANSACTION_KINDS = ["bank_fee", "interest", "unknown_receipt"] as const;
+export type TransactionKind = (typeof TRANSACTION_KINDS)[number];
+
+export interface LineTransaction {
+  id: string;
+  reconciliationId: string;
+  lineNo: number;
+  kind: TransactionKind;
+  amount: string;
+  currency: string;
+  postingDate: string;
+  status: "pending" | "posted" | "refused" | "conflict" | "abandoned";
+  ledgerEntryId?: string;
+  matchId?: string;
+  version: number;
+}
+
+export function listBankReconciliations(q: ReconQuery, signal?: AbortSignal): Promise<ReconPage> {
+  return send<ReconPage>(`/bank-reconciliations${query({ ...q, limit: 100 })}`, {}, signal);
+}
+
+export function getBankReconciliation(id: string, signal?: AbortSignal): Promise<BankReconciliation> {
+  return send<BankReconciliation>(`/bank-reconciliations/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export interface OpenReconInput {
+  statementId: string;
+  bookBalance: string;
+  outstandingAmount?: string;
+}
+
+export function createBankReconciliation(input: OpenReconInput, key: string = newKey()): Promise<BankReconciliation> {
+  return send<BankReconciliation>("/bank-reconciliations", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+function reconAction(id: string, action: string, version: number, body?: unknown): Promise<BankReconciliation> {
+  return send<BankReconciliation>(`/bank-reconciliations/${encodeURIComponent(id)}:${action}`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+export function setReconBalances(id: string, version: number, bookBalance: string, outstandingAmount: string): Promise<BankReconciliation> {
+  return reconAction(id, "set-balances", version, { bookBalance, outstandingAmount });
+}
+
+export function closeBankReconciliation(id: string, version: number): Promise<BankReconciliation> {
+  return reconAction(id, "close", version);
+}
+
+export function reopenBankReconciliation(id: string, version: number, reason: string): Promise<BankReconciliation> {
+  return reconAction(id, "reopen", version, { reason });
+}
+
+function lineAction<T>(id: string, lineNo: number, action: string, body?: unknown): Promise<T> {
+  return send<T>(`/bank-reconciliations/${encodeURIComponent(id)}/lines/${lineNo}:${action}`, {
+    method: "POST",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+export function excludeStatementLine(id: string, lineNo: number, reason: string): Promise<StatementLine> {
+  return lineAction<StatementLine>(id, lineNo, "exclude", { reason });
+}
+
+export function includeStatementLine(id: string, lineNo: number): Promise<StatementLine> {
+  return lineAction<StatementLine>(id, lineNo, "include");
+}
+
+export function createLineTransaction(id: string, lineNo: number, kind: TransactionKind): Promise<LineTransaction> {
+  return lineAction<LineTransaction>(id, lineNo, "create-transaction", { kind });
+}
+
+export function abandonLineTransaction(id: string, lineNo: number, reason: string): Promise<LineTransaction> {
+  return lineAction<LineTransaction>(id, lineNo, "abandon", { reason });
+}
