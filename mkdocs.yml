@@ -1,0 +1,166 @@
+# Docs site published to GitHub Pages by .github/workflows/pages.yml.
+# Build locally: pip install -r docs/requirements.txt && mkdocs serve
+site_name: Passage
+site_description: An open-architecture ERP rebuilt from the ground up to replace Dynamics AX/D365 and SAP, in 50 waves.
+site_url: https://benjaminsrussell.github.io/Passage/
+repo_url: https://github.com/BenjaminSRussell/Passage
+repo_name: BenjaminSRussell/Passage
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+# Tooling, generated inputs and the 50 MB PDF stay in the repo, not on the site.
+# PRD-full.md is served as the pre-rendered PRD-full.html instead (4 MB of markdown is too heavy to render as one page).
+exclude_docs: |
+  ops/tools/
+  __pycache__/
+  *.py
+  *.pyc
+  *.json
+  PRD-full.md
+  PRD-full.pdf
+  requirements.txt
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: { icon: material/brightness-7, name: Switch to dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: { icon: material/brightness-4, name: Switch to light mode }
+
+plugins:
+  - search
+
+markdown_extensions:
+  - tables
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc: { permalink: true }
+  - pymdownx.details
+  - pymdownx.highlight: { anchor_linenums: true }
+  - pymdownx.superfences:
+      custom_fences:
+        - { name: mermaid, class: mermaid, format: !!python/name:pymdownx.superfences.fence_code_format }
+
+# Many docs link to repo paths outside docs/ (roadmap/, services/, apps/). Those resolve on GitHub,
+# not on the site, so report them quietly rather than failing the build.
+validation:
+  omitted_files: info
+  absolute_links: info
+  unrecognized_links: info
+  links:
+    not_found: info
+    anchors: info
+
+nav:
+  - Home: index.md
+  - PRD:
+      - Overview: PRD.md
+      - Full PRD (single page): PRD-full.html
+      - The 10x thesis: prd/part-00-thesis.md
+      - Phase 0 - Foundation: prd/phase-0-foundation.md
+      - Phase 1 - Master data: prd/phase-1-master-data.md
+      - Phase 2 - Financial core: prd/phase-2-financial-core.md
+      - Phase 3 - Procure to pay: prd/phase-3-procure-to-pay.md
+      - Phase 4 - Manufacturing: prd/phase-4-manufacturing.md
+      - Phase 5 - Order to cash: prd/phase-5-order-to-cash.md
+      - Phase 6 - Logistics: prd/phase-6-logistics.md
+      - Phase 7 - Treasury and controlling: prd/phase-7-treasury-controlling.md
+      - Phase 8 - Projects, people, service: prd/phase-8-projects-people-service.md
+      - Phase 9 - Intelligence and go-live: prd/phase-9-intelligence-golive.md
+      - Appendices: prd/appendices.md
+      - Coverage vs Dynamics AX: prd/coverage-ax.md
+      - Coverage vs SAP: prd/coverage-sap.md
+      - Part template: prd/TEMPLATE.md
+  - Architecture:
+      - Architecture: architecture.md
+      - Requirements for architecture: requirements-for-architecture.md
+      - Architecture review (r4): architecture-review-r4.md
+      - Compiled spine: architecture.compiled/spine.md
+      - Components:
+          - architecture.compiled/components/agents.md
+          - architecture.compiled/components/analytics.md
+          - architecture.compiled/components/deployment-cicd.md
+          - architecture.compiled/components/device-bff.md
+          - architecture.compiled/components/edge-identity.md
+          - architecture.compiled/components/eventing-backbone.md
+          - architecture.compiled/components/integration.md
+          - architecture.compiled/components/inventory.md
+          - architecture.compiled/components/ledger.md
+          - architecture.compiled/components/manufacturing.md
+          - architecture.compiled/components/migration-framework.md
+          - architecture.compiled/components/party.md
+          - architecture.compiled/components/platform-kernel.md
+          - architecture.compiled/components/platform.md
+          - architecture.compiled/components/portal-bff.md
+          - architecture.compiled/components/procurement.md
+          - architecture.compiled/components/product.md
+          - architecture.compiled/components/projects.md
+          - architecture.compiled/components/pwa-apps.md
+          - architecture.compiled/components/sales.md
+          - architecture.compiled/components/testing-reconciliation.md
+          - architecture.compiled/components/treasury.md
+          - architecture.compiled/components/warehouse.md
+          - architecture.compiled/components/web-bff.md
+          - architecture.compiled/components/web-shell.md
+          - architecture.compiled/components/workforce.md
+      - ADRs:
+          - adr/0001-platform-stack.md
+          - adr/0002-frepple-comparison.md
+      - Engineering conventions: engineering/CONVENTIONS.md
+  - Operations:
+      - ops/README.md
+      - Administrator guide: ops/administrator-guide.md
+      - Tenant administrator guide: ops/tenant-administrator-guide.md
+      - Implementer guide: ops/implementer-guide.md
+      - Tenant provisioning: ops/tenant-provisioning.md
+      - Go-live checklist: ops/go-live-checklist.md
+      - Upgrade strategy: ops/upgrade-strategy.md
+      - Capacity model: ops/capacity-model.md
+      - Cost model: ops/cost-model.md
+      - Training curriculum: ops/training-curriculum.md
+      - Release notes template: ops/release-notes-template.md
+      - Not implemented yet: ops/NOT-IMPLEMENTED.md
+      - Functional guides:
+          - ops/functional-guides/phase-1-master-data.md
+          - ops/functional-guides/phase-2-financial-core.md
+          - ops/functional-guides/phase-3-procure-to-pay.md
+          - ops/functional-guides/phase-4-manufacturing.md
+          - ops/functional-guides/phase-5-order-to-cash.md
+          - ops/functional-guides/phase-6-logistics.md
+          - ops/functional-guides/phase-7-treasury-controlling.md
+          - ops/functional-guides/phase-8-projects-people-service.md
+      - Runbooks:
+          - ops/runbooks/availability-burn.md
+          - ops/runbooks/backup-drill-failure.md
+          - ops/runbooks/cache-stampede.md
+          - ops/runbooks/certificate-expiry.md
+          - ops/runbooks/cost-meter-drift.md
+          - ops/runbooks/expand-contract-violation.md
+          - ops/runbooks/failback.md
+          - ops/runbooks/failover.md
+          - ops/runbooks/gameday.md
+          - ops/runbooks/kafka-broker-replacement.md
+          - ops/runbooks/latency-p95.md
+          - ops/runbooks/ledger-hash-chain-break.md
+          - ops/runbooks/license-expiry.md
+          - ops/runbooks/mirrormaker-lag.md
+          - ops/runbooks/object-store-replication-lag.md
+          - ops/runbooks/postgres-primary-loss.md
+          - ops/runbooks/postgres-replication-lag.md
+          - ops/runbooks/release-rollback.md
+          - ops/runbooks/replication-slot-bloat.md
+          - ops/runbooks/slo-burn.md
+          - ops/runbooks/temporal-replication-lag.md
+      - Local delivery: runbooks/delivery/deploy-local.md
