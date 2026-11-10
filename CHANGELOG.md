@@ -11,6 +11,8 @@ release may change public APIs.
 ### Added
 
 - purchasing: a vendor can accept, reject or propose line changes (quantity, delivery date, price) to the latest version of a confirmed PO, and the buyer approves (next PO version) or declines; vendor-scoped reads take the vendor only from a verified principal, with `procurement.vendor-portal.*` duties that are service-only (#511, subtask 1)
+- Web: payables module with vendor open items (filters, paging, hold and release), payment proposals (list, create, detail with totals and held items, approve and cancel with a confirm step and segregation-of-duties messages); payables open items now return `paymentHoldReason` (#528).
+- Billing reports INVOICED to the sales order (#29): posting an invoice that bills order lines queues one report per (invoice, order) in the post transaction (`sales_invoice_report`, migration 0014), and a leased reporter (`SALES_URL`, `BILLING_SALES_REPORT_INTERVAL`; chart `salesUrl`, `salesReportInterval`) sends it to sales' `:record-progress` as `service:billing-sales-report` with only `sales.order.record-invoice` (now `service_only`), key `billing-invoice:{invoiceId}:{orderId}`, retrying with backoff and parking a refused report with its reason; credit notes are not reported (sales has no reversal of an invoice). `SLS-0058`/`SLS-0059` answers are retried as "not yet" until the delivery report arrives; `GET /v1/billing/sales-reports` and `POST /v1/billing/sales-reports/{id}:retry` list and re-queue parked reports, the counter `billing_sales_reports_parked_total` counts them, and a batch is sized to fit the lease. The web record form now says deliveries and invoices are recorded automatically.
 - batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
   approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
   source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners
@@ -20,6 +22,7 @@ release may change public APIs.
 
 ### Fixed
 
+- Receivables: an RMA credit now reserves its invoice lines in billing (`credit-reservations`, key `rma-credit:{legalEntity}:{rmaId}`) before it is stored, commits the reservation once the credit posts and releases it when the credit is parked, so an RMA credit and a billing credit note can no longer credit the same invoice line past what was invoiced; sales sends the invoice lines the returned products fall on, split across invoice lines like the tax reversal (#513). Deploy sales before receivables: with `BILLING_URL` set, receivables refuses a credit without `invoiceLines`.
 - Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).
 - Review fixes on the batch-2 lane: the integration hub gains `GET /v1/hub/coexistence` and `POST /v1/hub/coexistence:retry-parked`
   so parked coexistence rows can be seen and retried (`hub.delivery.read`, `hub.subscription.write`); a replayed revrec
@@ -29,6 +32,12 @@ release may change public APIs.
   revrec README states that booked credit notes show as a reconciliation difference until its consumer is enabled.
 
 ### Added
+
+- Per-tenant feature enablement (#504): `platform/go/features` holds the feature catalog (module, plain-language name, dependencies) and industry templates (Distribution, Manufacturing, Process manufacturing, Services) as data; identity gains `GET`/`PUT /v1/tenant/features` (tenant administrator only to change, audited, `IDN-FEATURE-DEPENDENCY` when a change would break a dependency, everything on by default) with migration 0012 and duties `identity.feature.view` and `identity.feature.maintain`; a `features.Require` middleware answers a disabled feature with a plain-words `FEAT-0001` problem, fails open and caches 30 s, and is wired in processmfg when `IDENTITY_URL` is set. Also fixes the `warehouse.offline-conflict.resolve` glob in `data.json` that identity's catalogue loader rejected.
+- Web form standard (#505): `FormSection` (More options / Advanced), `FormField required`, shared field help in `copy.fieldHelp`, `FormErrorSummary` that focuses the first problem, and `useUnsavedChanges` (dialog on in-app navigation, warning on tab close); applied to Record payment and New requisition; documented in `apps/web/docs/forms.md`.
+- Product: the web product pages run on the product service instead of built-in sample data: search by number or name with
+  keyset paging, product detail, and create and edit forms with field checks and plain-language errors (#529). `GET
+  /v1/product/products` gains `q`, `limit` (1 to 100, default 50) and `cursor`, and answers `nextCursor` when more follow.
 
 - Web: vendor invoice list (`/ap-invoices`, status and vendor filters, load more) and invoice detail (`/ap-invoices/:id`: lines, hold or rejection reason, ledger entry, links to the receipts and purchase orders) (#533); the detail reads `GET /v1/receiving/invoices/{id}`.
 - Migration factory: `POST /api/v1/migration/runs/{id}/opening-journal` posts the migrated GL balances of a gl_balances run to a legal entity's ledger through the ledger's posting API, one balanced journal per currency, refused whole with the difference named (MIG-1540) when a currency does not balance, idempotent by a fixed key per company, legal entity and currency (`gl_opening_posting`, migration 0024); `GET` lists what was posted, and a fully posted gl_balances pack no longer needs a go/no-go waiver (49-1, #49).

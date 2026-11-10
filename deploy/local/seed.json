@@ -13,6 +13,7 @@
       "duties": [
         "audit.read",
         "identity.effective-permission.view",
+        "identity.feature.view",
         "identity.legal-entity.maintain",
         "identity.security-role.maintain",
         "identity.user.maintain",
@@ -41,6 +42,7 @@
       "lastName": "Clerk",
       "tier": "standard",
       "duties": [
+        "identity.feature.view",
         "ledger.journal.read",
         "party.read",
         "procurement.purchase-order.inquire",

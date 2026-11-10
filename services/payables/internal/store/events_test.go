@@ -120,6 +120,14 @@ func TestHoldAndVendorBlock_EmitAuditedEventsOnlyOnChange(t *testing.T) {
 			}); err != nil || reason != "bank query" || by != "hana" {
 				t.Fatalf("stored reason=%q by=%q err=%v", reason, by, err)
 			}
+			if got, err := s.Get(ctx, item.ID); err != nil || !got.PaymentHold || got.PaymentHoldReason != "bank query" {
+				t.Fatalf("read back hold=%v reason=%q err=%v", got.PaymentHold, got.PaymentHoldReason, err)
+			}
+		}
+		if i == 2 {
+			if got, err := s.Get(ctx, item.ID); err != nil || got.PaymentHold || got.PaymentHoldReason != "" {
+				t.Fatalf("released item hold=%v reason=%q err=%v", got.PaymentHold, got.PaymentHoldReason, err)
+			}
 		}
 	}
 	held, released := outboxPayloads(t, s, ctx, OpenItemHeldType), outboxPayloads(t, s, ctx, OpenItemReleasedType)
