@@ -44,9 +44,13 @@ type PurchaseOrder struct {
 	// AutoChargeCodes are the charge codes auto charges have added to the PO (FR-17.9). An edit with
 	// applyAutoCharges does not add them again, so a charge the buyer removed stays removed. On a
 	// write it holds the codes to add to the stored set; the set never shrinks.
-	AutoChargeCodes []string  `json:"autoChargeCodes,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	AutoChargeCodes []string `json:"autoChargeCodes,omitempty"`
+	// PendingAcknowledgement is set on a read of one PO while a vendor proposal waits for the buyer
+	// (PendingAcknowledgementID, for the approve and decline routes); it is not stored.
+	PendingAcknowledgement   bool      `json:"pendingAcknowledgement,omitempty"`
+	PendingAcknowledgementID string    `json:"pendingAcknowledgementId,omitempty"`
+	CreatedAt                time.Time `json:"createdAt"`
+	UpdatedAt                time.Time `json:"updatedAt"`
 	// Warnings are computed on create (PRC-AGR-004) and not stored.
 	Warnings []Warning `json:"warnings,omitempty"`
 }
@@ -241,7 +245,13 @@ func (s *Postgres) GetPurchaseOrder(ctx context.Context, id string) (PurchaseOrd
 	var out PurchaseOrder
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		var err error
-		out, err = loadPurchaseOrder(ctx, tx, id)
+		if out, err = loadPurchaseOrder(ctx, tx, id); err != nil {
+			return err
+		}
+		p, _ := tenant.FromContext(ctx)
+		err = tx.QueryRow(ctx, `select coalesce((select id::text from purchase_order_ack where tenant_id = $1 and purchase_order_id = $2
+			and outcome = 'CHANGES_PROPOSED' and decision is null), '')`, p.TenantID, id).Scan(&out.PendingAcknowledgementID)
+		out.PendingAcknowledgement = out.PendingAcknowledgementID != ""
 		return err
 	})
 	return out, err

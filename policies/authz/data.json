@@ -586,7 +586,17 @@
       {"resource": "/v1/procurement/inquiries/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases/*", "methods": ["GET"]},
-      {"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}
+      {"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]},
+      {"resource": "/v1/procurement/acknowledgements", "methods": ["GET"]},
+      {"resource": "/v1/procurement/acknowledgements/awaiting", "methods": ["GET"]},
+      {"resource": "/v1/procurement/purchase-orders/*/acknowledgements", "methods": ["GET"]}
+    ]},
+    "procurement.vendor-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/procurement/vendor/purchase-orders", "methods": ["GET"]},
+      {"resource": "/v1/procurement/vendor/purchase-orders/*", "methods": ["GET"]}
+    ]},
+    "procurement.vendor-portal.acknowledge": {"service_only": true, "permissions": [
+      {"resource": "/v1/procurement/vendor/purchase-orders/*/acknowledgements", "methods": ["POST"]}
     ]},
     "purchasing.inbound.apply": {"flag": true, "permissions": []},
     "procurement.purchase-order.confirm": {"permissions": [
@@ -594,6 +604,8 @@
       {"resource": "/v1/procurement/purchase-orders/*:reject", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders/*:confirm", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders:reprice", "methods": ["POST"]},
+      {"resource": "/v1/procurement/acknowledgements/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/procurement/acknowledgements/*:decline", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/drop-ships/*:confirm", "methods": ["POST"]}
     ]},
     "procurement.trade-agreement.maintain": {"permissions": [
