@@ -1,13 +1,18 @@
 package api
 
 import (
+	"encoding/base64"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
 )
@@ -15,6 +20,10 @@ import (
 const (
 	dutyApprove     = "party.approve"
 	dutyPolicyWrite = "party.approval-policy.write"
+	dutyInboxRead   = "party.inbox.read"
+
+	defaultChangePage = 50
+	maxChangePage     = 200
 )
 
 type creditLimitRequest struct {
@@ -36,6 +45,7 @@ func (a *API) WithCredit(credit store.CreditStore) *API {
 
 func (a *API) registerCredit(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/customers/{id}/credit-limit", a.setCreditLimit)
+	r.With(authz.RequireAnyDuty(dutyRead, dutyInboxRead)).Get("/v1/party/pending-changes", a.listPendingChanges)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/pending-changes/{id}", a.getPendingChange)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/legal-entities/{id}/protected-fields", a.getProtectedFields)
 	r.With(authz.RequireDuty(dutyPolicyWrite)).Put("/v1/party/legal-entities/{id}/protected-fields", a.setProtectedFields)
@@ -82,6 +92,53 @@ func (a *API) setProtectedFields(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, protectedFields{Fields: fields})
+}
+
+type pendingChangePage struct {
+	Items      []domain.PendingChange `json:"items"`
+	NextCursor string                 `json:"nextCursor,omitempty"`
+}
+
+func (a *API) listPendingChanges(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	limit := defaultChangePage
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxChangePage {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "limit must be a number from 1 to "+strconv.Itoa(maxChangePage)))
+			return
+		}
+		limit = n
+	}
+	afterAt, afterID, ok := decodeChangeCursor(r.URL.Query().Get("cursor"))
+	if !ok {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor must be the nextCursor of the previous page"))
+		return
+	}
+	changes, err := a.credit.ListPendingChanges(r.Context(), limit+1, afterAt, afterID)
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	page := pendingChangePage{Items: changes}
+	if len(changes) > limit {
+		page.Items = changes[:limit]
+		last := page.Items[limit-1]
+		page.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(last.RequestedAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID))
+	}
+	httpx.JSON(w, http.StatusOK, page)
+}
+
+func decodeChangeCursor(cursor string) (time.Time, string, bool) {
+	if cursor == "" {
+		return time.Time{}, "", true
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	at, id, found := strings.Cut(string(raw), "|")
+	when, perr := time.Parse(time.RFC3339Nano, at)
+	return when, id, err == nil && found && perr == nil && ids.Valid(id)
 }
 
 func (a *API) getPendingChange(w http.ResponseWriter, r *http.Request) {

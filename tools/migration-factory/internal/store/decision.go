@@ -22,18 +22,21 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 	for i, p := range plan.Packs {
 		packs[i] = string(p)
 	}
-	rows, err := tx.Query(ctx, `select distinct on (pack, source_company) pack, source_company, run_id::text, status, created_at, payables_staged, receivables_load from pack_run
+	rows, err := tx.Query(ctx, `select distinct on (pack, source_company) pack, source_company, run_id::text, status, created_at, payables_staged, receivables_load, source_system
+		from pack_run
 		where tenant_id = current_setting('passage.tenant_id', true)::uuid and pack = any($1) and source_company = any($2)
 		order by pack, source_company, created_at desc, run_id desc`, packs, plan.Entities)
 	if err != nil {
 		return f, err
 	}
+	var pending []int
+	var systems []string
 	for rows.Next() {
 		var pf domain.PackFact
-		var pack, status string
+		var pack, status, system string
 		var payables *int
 		var recv *string
-		if err := rows.Scan(&pack, &pf.Company, &pf.RunID, &status, &pf.CreatedAt, &payables, &recv); err != nil {
+		if err := rows.Scan(&pack, &pf.Company, &pf.RunID, &status, &pf.CreatedAt, &payables, &recv, &system); err != nil {
 			rows.Close()
 			return f, err
 		}
@@ -43,11 +46,20 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 		if recv != nil {
 			pf.ReceivablesLoad = *recv
 		}
+		if pf.Pack == domain.PackGLBalances {
+			pending = append(pending, len(f.Packs))
+			systems = append(systems, system)
+		}
 		f.Packs = append(f.Packs, pf)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return f, err
+	}
+	for n, i := range pending {
+		if f.Packs[i].GLPosted, err = openingPosted(ctx, tx, systems[n], f.Packs[i].Company); err != nil {
+			return f, err
+		}
 	}
 	rows, err = tx.Query(ctx, `select parallel_run_id::text, period, source_system, state, unexplained_count from parallel_run
 		where tenant_id = current_setting('passage.tenant_id', true)::uuid and period = $1 order by source_system`, plan.ParallelPeriod())

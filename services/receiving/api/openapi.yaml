@@ -277,6 +277,25 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoices/{id}:
+    get:
+      operationId: getInvoice
+      summary: Read one vendor invoice
+      x-passage-duty: receiving.ap.inquire
+      description: The invoice with its lines and the ledger entry id (empty while held for audit), in the same shape as an item of GET /v1/receiving/invoices. An invoice outside the caller's tenant or legal entities answers 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The invoice.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-005' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/invoices:post:
     post:
       operationId: postVendorInvoice

@@ -1,8 +1,8 @@
 {{- if and .Values.notify.enabled (not .Values.notify.smtp.enabled) (not .Values.notify.webhook.enabled) }}
 {{- fail "notify.enabled requires notify.smtp.enabled or notify.webhook.enabled" }}
 {{- end }}
-{{- if and .Values.productUrl (not .Values.serviceIdentity.signingKeySecret) }}
-{{- fail "productUrl requires serviceIdentity.signingKeySecret" }}
+{{- if and (or .Values.productUrl .Values.inbox.purchasingUrl .Values.inbox.partyUrl .Values.inbox.ledgerUrl .Values.inbox.payablesUrl) (not .Values.serviceIdentity.signingKeySecret) }}
+{{- fail "productUrl and the inbox.*Url values require serviceIdentity.signingKeySecret" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -52,15 +52,27 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: PASSAGE_SERVICE_NAME
               value: batch
-            {{- if .Values.productUrl }}
-            - name: PRODUCT_URL
-              value: {{ .Values.productUrl | quote }}
+            {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key
             {{- if .Values.serviceIdentity.keyId }}
             - name: PASSAGE_SERVICE_KEY_ID
               value: {{ .Values.serviceIdentity.keyId | quote }}
             {{- end }}
+            {{- end }}
+            {{- range $env, $url := dict "PURCHASING_URL" .Values.inbox.purchasingUrl "PARTY_URL" .Values.inbox.partyUrl "LEDGER_URL" .Values.inbox.ledgerUrl "PAYABLES_URL" .Values.inbox.payablesUrl }}
+            {{- if $url }}
+            - name: {{ $env }}
+              value: {{ $url | quote }}
+            {{- end }}
+            {{- end }}
+            - name: INBOX_SOURCE_TIMEOUT
+              value: {{ .Values.inbox.sourceTimeout | quote }}
+            - name: INBOX_CONCURRENCY
+              value: {{ .Values.inbox.concurrency | quote }}
+            {{- if .Values.productUrl }}
+            - name: PRODUCT_URL
+              value: {{ .Values.productUrl | quote }}
             - name: DISPATCH_INTERVAL
               value: {{ .Values.dispatcher.interval | quote }}
             - name: DISPATCH_CONCURRENCY

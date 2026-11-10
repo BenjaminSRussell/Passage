@@ -2521,7 +2521,7 @@ paths:
       x-passage-duty: procurement.requisition.approve
       summary: The approver's inbox - IN_REVIEW requisitions with the role that decides next (BR-17.1; duty procurement.requisition.approve or procurement.purchase-order.inquire)
       description: >-
-        Newest first. The caller's own requisitions are left out because they cannot decide on them. The role is the next
+        Newest first. The caller's own requisitions are left out because they cannot decide on them. The batch service's My work inbox reads this list with the narrow duty procurement.inbox.read. The role is the next
         level of the requisition's approverChain; it is a role, not a person, until the wave 4 workflow resolves approvers.
       parameters:
         - { name: legalEntityId, in: query, required: false, description: Only requisitions of this legal entity (must be inside the caller's scope), schema: { type: string, format: uuid } }

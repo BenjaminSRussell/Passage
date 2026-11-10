@@ -251,6 +251,26 @@ func TestSetPaymentHold_RefusesSettledItems(t *testing.T) {
 	}
 }
 
+func TestList_HeldOnlyReturnsUnsettledHeldItems(t *testing.T) {
+	s := setup(t)
+	ctx := ctxAs(1, leA, "hana")
+	held := seed(t, s, ctx, leA, vendor1, 1, "2027-03-01", "USD", "100.00")
+	seed(t, s, ctx, leA, vendor1, 2, "2027-03-02", "USD", "200.00")
+	if _, err := s.SetPaymentHold(ctx, held.ID, true, "dispute"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.List(ctx, Filter{LegalEntityID: leA, HeldOnly: true, OpenOnly: true}, 10)
+	if err != nil || len(got) != 1 || got[0].ID != held.ID {
+		t.Fatalf("held items = %v err=%v, want only %s", got, err, held.ID)
+	}
+	if _, err := s.SetPaymentHold(ctx, held.ID, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.List(ctx, Filter{LegalEntityID: leA, HeldOnly: true, OpenOnly: true}, 10); err != nil || len(got) != 0 {
+		t.Fatalf("a released item still listed as held: %v err=%v", got, err)
+	}
+}
+
 func TestVendorBlock_IsPerLegalEntity(t *testing.T) {
 	s := setup(t)
 	ctx := ctxAs(1, "", "bo")
