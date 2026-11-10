@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -78,7 +77,10 @@ func (a *API) advance(ctx context.Context, o store.Optimization) (store.Optimiza
 		case run.Status == optimizer.Failed:
 			reason := "the dispatch service failed the run"
 			if run.Error != nil {
-				reason = strings.TrimSpace(run.Error.Code + " " + run.Error.Detail)
+				reason = run.Error.Code
+				if run.Error.Detail != "" {
+					reason += ": " + run.Error.Detail
+				}
 			}
 			return a.failed(ctx, o, errors.New(reason), now)
 		case now.Sub(o.UpdatedAt) > optimizerRunDeadline:

@@ -220,6 +220,9 @@ func buildRequest(date, zone string, limitSeconds int, techs []Technician, open,
 			continue
 		}
 		start, end := minute(*h.AssignedStart), minute(*h.AssignedEnd)
+		if start < 0 && end <= c.tech.ShiftStart {
+			continue
+		}
 		s := stop{lat: c.lat, lon: c.lon, assigned: optimizer.Assignment{WorkOrderID: h.ID, TechnicianID: c.tech.ID, Start: start, End: end, Sequence: len(c.route) + 1}}
 		if h.Latitude != nil && h.Longitude != nil {
 			s.lat, s.lon = *h.Latitude, *h.Longitude
@@ -392,7 +395,7 @@ func optimizationInputs(ctx context.Context, tx pgx.Tx, tid string, in OptimizeI
 	}
 	held, err := orderRows(ctx, tx, `select `+workOrderColumns+` from service_work_order where tenant_id = $1 and legal_entity_id = $2
 		and technician_id = any($3::uuid[]) and `+busyStatuses+` and assigned_start < $5 and assigned_end > $4
-		order by technician_id::text, assigned_start, id limit $6`,
+		order by technician_id::text collate "C", assigned_start, id limit $6`,
 		tid, in.LegalEntityID, techIDs, from, to, maxHeldOrders+1)
 	if err != nil {
 		return nil, nil, nil, nil, err

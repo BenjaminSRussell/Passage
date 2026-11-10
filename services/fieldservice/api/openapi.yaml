@@ -944,7 +944,9 @@ paths:
         A work order that no technician can reach within a day's travel, and a technician with nothing to
         reach, are skipped as TOO_FAR (a wrong coordinate shows up here rather than failing the run). The
         technician's visits on the day in any territory are held where they are; a technician whose held
-        visits do not fit the snapshot limit is skipped as OVER_LIMIT.
+        visits do not fit the snapshot limit is skipped as OVER_LIMIT, as is every technician after it by id (the
+        cut-off can skip a technician who holds no visits). A visit from the night before that ended before the
+        shift starts is ignored.
         A failed call is retried by :sync after min(3600, 60 * 2^attempts) seconds and the optimization is
         PARKED after five failures or a refusal that cannot change. Nothing to place is SVC-DSP-016; a
         service without DISPATCH_URL or signing key is SVC-DSP-017.

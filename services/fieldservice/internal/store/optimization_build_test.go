@@ -211,3 +211,45 @@ func TestBuildRequest_HeldVisitFarFromTheTechnicianCannotBeReached(t *testing.T)
 		t.Fatalf("skipped %+v %v", skipped, err)
 	}
 }
+
+func TestBuildRequest_VisitFromThePreviousNightDoesNotDropTheTechnician(t *testing.T) {
+	loc, _ := time.LoadLocation("America/Chicago")
+	ana := techAt("ANA", ref(41.88), ref(-87.63))
+	ana.ShiftEndMinute, ana.OvertimeAllowed = 1440, true
+	start := time.Date(2026, 10, 26, 23, 30, 0, 0, loc)
+	overnight := heldBy(ana, 41.9, -87.65, start, start.Add(time.Hour))
+
+	req, skipped, err := buildRequest("2026-10-27", "America/Chicago", 10, []Technician{ana}, []plannedOrder{orderAt(ref(41.9), ref(-87.65), 60)}, []plannedOrder{overnight})
+	if err != nil || len(skipped) != 0 || len(req.Technicians) != 1 || len(req.Pinned) != 0 || len(req.WorkOrders) != 1 {
+		t.Fatalf("skipped %+v technicians %+v pinned %+v work orders %d err %v", skipped, req.Technicians, req.Pinned, len(req.WorkOrders), err)
+	}
+}
+
+func TestBuildRequest_VisitRunningIntoTheShiftIsStaleOnlyPastTheShiftStart(t *testing.T) {
+	loc, _ := time.LoadLocation("America/Chicago")
+	start := time.Date(2026, 10, 26, 23, 30, 0, 0, loc)
+	for _, tc := range []struct {
+		name  string
+		end   time.Time
+		stale bool
+	}{
+		{"ends at the shift start", time.Date(2026, 10, 27, 8, 0, 0, 0, loc), false},
+		{"runs a minute into the shift", time.Date(2026, 10, 27, 8, 1, 0, 0, loc), true},
+	} {
+		ana := techAt("ANA", ref(41.88), ref(-87.63))
+		overnight := heldBy(ana, 41.9, -87.65, start, tc.end)
+		req, skipped, err := buildRequest("2026-10-27", "America/Chicago", 10, []Technician{ana}, []plannedOrder{orderAt(ref(41.9), ref(-87.65), 60)}, []plannedOrder{overnight})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !tc.stale {
+			if len(skipped) != 0 || len(req.Technicians) != 1 || len(req.Pinned) != 0 {
+				t.Fatalf("%s: skipped %+v technicians %d pinned %d", tc.name, skipped, len(req.Technicians), len(req.Pinned))
+			}
+			continue
+		}
+		if got := skippedReasons(skipped); !maps.Equal(got, map[string]string{ana.ID: "HELD_VISIT_STALE", overnight.ID: "HELD_VISIT_STALE"}) || len(req.Technicians) != 0 {
+			t.Fatalf("%s: skipped %v technicians %d", tc.name, got, len(req.Technicians))
+		}
+	}
+}

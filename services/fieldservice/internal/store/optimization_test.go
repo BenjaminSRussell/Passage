@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -292,5 +293,88 @@ func TestStore_OptimizationPinsTheTechniciansVisitsInOtherTerritories(t *testing
 	}
 	if o.Pinned != 1 || o.WorkOrders != 1 || len(req.Pinned) != 1 || req.Pinned[0].WorkOrderID != away.ID || req.Pinned[0].Start != 600 {
 		t.Fatalf("optimization %+v pinned %+v", o, req.Pinned)
+	}
+}
+
+func (d dispatchFixture) toMidnight(t *testing.T, code string, shiftStart int) Technician {
+	t.Helper()
+	tech, _, err := d.s.CreateTechnician(d.ctx, Technician{Code: code, Name: "Tech " + code, LegalEntityID: d.le, TerritoryIDs: []string{d.territory},
+		Skills: []string{"HVAC"}, TimeZone: optZone, ShiftDays: []int{1, 2, 3, 4, 5}, ShiftStartMinute: shiftStart, ShiftEndMinute: 1440, OvertimeAllowed: true,
+		MaxDailyMinutes: 480, Active: true, HomeLatitude: ref(41.88), HomeLongitude: ref(-87.63)}, "key-"+code, "hash-"+code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tech
+}
+
+func TestStore_OptimizationIgnoresVisitsThatEndBeforeTheDayStartsWorking(t *testing.T) {
+	d := newDispatch(t, 27)
+	endsAtMidnight, crossesMidnight := d.toMidnight(t, "MID", 480), d.toMidnight(t, "OVR", 480)
+	d.assign(t, d.located(t, 60, 41.881, -87.631, nil), endsAtMidnight, d.at(26, 23, 0))
+	d.assign(t, d.located(t, 60, 41.881, -87.631, nil), crossesMidnight, d.at(26, 23, 30))
+	d.located(t, 60, 41.9, -87.65, nil)
+
+	next := func(key string) (Optimization, optimizer.Request) {
+		o, _, err := d.s.RequestOptimization(d.ctx, OptimizeInput{LegalEntityID: d.le, TerritoryID: d.territory, Date: "2026-10-27", TimeZone: optZone, TimeLimit: 10},
+			time.Now(), key, "hash-"+key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := d.s.OptimizationRequest(d.ctx, o.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o, req
+	}
+	o, req := next("tuesday")
+	if o.Technicians != 2 || o.Pinned != 0 || o.WorkOrders != 1 || len(o.Skipped) != 0 || len(req.Pinned) != 0 {
+		t.Fatalf("optimization %+v", o)
+	}
+}
+
+func TestStore_OptimizationCutsTheHeldVisitsOffByTechnicianPosition(t *testing.T) {
+	d := newDispatch(t, 28)
+	first, later := d.toMidnight(t, "ONE", 0), d.toMidnight(t, "TWO", 0)
+	if first.ID > later.ID {
+		first, later = later, first
+	}
+	d.located(t, 60, 41.9, -87.65, nil)
+	visits := make([]WorkOrder, maxHeldOrders+1)
+	for i := range visits {
+		visits[i] = d.located(t, 1, 41.88, -87.63, nil)
+	}
+	err := dbx.WithTenantTx(d.ctx, d.s.pool, func(tx pgx.Tx) error {
+		for i, v := range visits {
+			holder, slot := first, i
+			if i >= 150 {
+				holder, slot = later, i-150
+			}
+			start := d.at(26, 0, 5+6*slot).UTC()
+			if _, err := tx.Exec(context.Background(), `update service_work_order set status = 'SCHEDULED', technician_id = $3, assigned_start = $4, assigned_end = $5
+				where tenant_id = $1 and id = $2`, tenantOf(d.ctx), v.ID, holder.ID, start, start.Add(time.Minute)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	o := d.request(t, "over-limit")
+	req, err := d.s.OptimizationRequest(d.ctx, o.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := skippedReasons(o.Skipped); !maps.Equal(got, map[string]string{later.ID: "OVER_LIMIT"}) {
+		t.Fatalf("skipped %+v", o.Skipped)
+	}
+	if len(req.Technicians) != 1 || req.Technicians[0].ID != first.ID || len(req.Pinned) != 150 || o.Pinned != 150 {
+		t.Fatalf("technicians %+v pinned %d", req.Technicians, len(req.Pinned))
+	}
+	for _, p := range req.Pinned {
+		if p.TechnicianID != first.ID {
+			t.Fatalf("a visit of the skipped technician was sent: %+v", p)
+		}
 	}
 }
