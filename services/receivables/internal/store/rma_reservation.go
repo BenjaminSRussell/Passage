@@ -223,7 +223,7 @@ func (s *Postgres) claimPost(ctx context.Context, tenantID string, row rmaCredit
 	claimed := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `update rma_credit set post_lease_until = $3 where tenant_id = $1 and id = $2 and status = 'PENDING' and not gl_parked
-			and (post_lease_until is null or post_lease_until <= $4)`, tenantID, row.id, now.Add(postLease), now)
+			and (post_lease_until is null or post_lease_until <= $4)`, tenantID, row.id, leaseEnd(now), now)
 		if err != nil {
 			return err
 		}
@@ -244,10 +244,14 @@ func (s *Postgres) claimPost(ctx context.Context, tenantID string, row rmaCredit
 	return fresh, false, httpx.NewProblem(http.StatusConflict, CodeIdempotencyBusy, "another attempt is posting this credit; retry")
 }
 
-func (s *Postgres) releasePostLease(ctx context.Context, tenantID, id string) {
+// leaseEnd is when a lease taken at now ends, at the microsecond the database keeps, so the holder can find its own lease.
+func leaseEnd(now time.Time) time.Time { return now.Add(postLease).Truncate(time.Microsecond) }
+
+// releasePostLease clears the lease the caller took at now; a lease another attempt took since is left alone.
+func (s *Postgres) releasePostLease(ctx context.Context, tenantID, id string, now time.Time) {
 	detached := context.WithoutCancel(ctx)
 	if err := dbx.WithTenantTx(detached, s.pool, func(tx pgx.Tx) error {
-		_, e := tx.Exec(detached, `update rma_credit set post_lease_until = null where tenant_id = $1 and id = $2`, tenantID, id)
+		_, e := tx.Exec(detached, `update rma_credit set post_lease_until = null where tenant_id = $1 and id = $2 and post_lease_until = $3`, tenantID, id, leaseEnd(now))
 		return e
 	}); err != nil {
 		slog.ErrorContext(ctx, "rma credit post lease not released; it expires by itself", "err", err, "correlationId", middleware.GetReqID(ctx))

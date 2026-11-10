@@ -2129,6 +2129,13 @@ test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
 	not allowed("receivables.openitem.from-billing", "POST", "/v1/receivables/open-items")
 }
 
+test_rma_credit_operator_routes_belong_to_the_payment_duty if {
+	allowed("receivables.payment.post", "POST", "/v1/receivables/rma-credits/c1:cancel")
+	allowed("receivables.payment.post", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
+	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:cancel")
+	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
+}
+
 test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")

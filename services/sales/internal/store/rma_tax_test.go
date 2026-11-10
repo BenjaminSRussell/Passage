@@ -260,6 +260,46 @@ func TestRMA_TwoReturnLinesOfOneProductAreOneInvoiceAllocation(t *testing.T) {
 	}
 }
 
+// A product sold at two prices on one invoice is valued at the invoice lines the return is allocated to, so the credit
+// does not exceed what billing's reservation of those lines holds (#557).
+func TestRMA_AProductSoldAtTwoPricesIsCreditedAtTheLinesItIsAllocatedTo(t *testing.T) {
+	e := newTaxEnv(t)
+	e.src.invoice.Lines = []InvoiceLine{
+		{LineNo: 1, ProductID: e.product, OrderLineID: ids.New(), Qty: d(2), Net: dec("100.00")},
+		{LineNo: 2, ProductID: e.product, OrderLineID: ids.New(), Qty: d(2), Net: dec("300.00")},
+	}
+	credited := e.creditOnly(t, 3, 0)
+	if !credited.Gross.Equal(dec("250.00")) {
+		t.Fatalf("2 units at 50.00 and 1 at 150.00: %+v", credited)
+	}
+	if got := invoiceLinesSent(t, e); len(got) != 2 || got[1] != "2" || got[2] != "1" {
+		t.Fatalf("lines sent: %v", got)
+	}
+}
+
+// A credit stored before the invoice lines were kept sends its lines again when sales repeats the credit.
+func TestRMA_CreditStoredBeforeInvoiceLinesWereKeptWorksItsLinesOutOnRepeat(t *testing.T) {
+	e := newTaxEnv(t)
+	e.ar.failNext = true
+	in := e.creditOnlyUntilCredit(t, 3, 0)
+	if _, err := e.s.CreditReturnOrder(e.ctx, in.ID, in.Version, "ar-clerk", e.now); err == nil {
+		t.Fatal("receivables is down")
+	}
+	if _, err := e.pool.Exec(e.ctx, `update return_order set credit_invoice_lines = null where id = $1`, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	stuck, err := e.s.GetReturnOrder(e.ctx, in.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.CreditReturnOrder(e.ctx, stuck.ID, stuck.Version, "ar-clerk", e.now); err != nil {
+		t.Fatalf("repeat: %v", err)
+	}
+	if got := invoiceLinesSent(t, e); len(got) != 1 || got[1] != "3" {
+		t.Fatalf("lines worked out on the repeat: %v", got)
+	}
+}
+
 func TestRMA_AnEarlierReturnsUntaxedQuantityMovesTheNextToTheNextInvoiceLine(t *testing.T) {
 	e := newTaxEnv(t)
 	e.src.invoice.Lines = []InvoiceLine{

@@ -364,7 +364,7 @@ func (s *Postgres) postRMAJournal(ctx context.Context, tenantID string, row rmaC
 	if err != nil || !claimed {
 		return row, err
 	}
-	defer s.releasePostLease(ctx, tenantID, row.id)
+	defer s.releasePostLease(ctx, tenantID, row.id, now)
 	row, err = s.ensureReserved(ctx, tenantID, row, now)
 	if err != nil {
 		return row, err

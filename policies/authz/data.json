@@ -858,6 +858,8 @@
       {"resource": "/v1/receivables/payments", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:apply", "methods": ["POST"]},
       {"resource": "/v1/receivables/payments/*:match", "methods": ["POST"]},
+      {"resource": "/v1/receivables/rma-credits/*:backfill-reservation", "methods": ["POST"]},
+      {"resource": "/v1/receivables/rma-credits/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits/*:retry", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]}
     ]},

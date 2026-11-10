@@ -803,6 +803,11 @@ func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int
 	if err != nil {
 		return ReturnOrder{}, err
 	}
+	if len(invoiceLines) == 0 {
+		if invoiceLines, err = s.legacyCreditLines(ctx, current); err != nil {
+			return ReturnOrder{}, err
+		}
+	}
 	note, err := s.ar.PostRMACredit(ctx, ARCredit{RMAID: current.ID, RMANumber: current.RMANumber, LegalEntityID: current.LegalEntityID,
 		InvoiceNumber: current.OriginalInvoiceNo, InvoiceID: current.OriginalInvoiceID, PostingDate: *current.CreditPostingDate, IdempotencyKey: "rma-credit-" + current.ID,
 		Gross: current.Gross, Restocking: current.Restocking, Net: current.Net, TaxLines: taxLines, InvoiceLines: invoiceLines})
@@ -826,6 +831,19 @@ func (s *Postgres) storeCredit(now time.Time, invoice Invoice) func(context.Cont
 		if err != nil {
 			return err
 		}
+		var creditLines []ARInvoiceLine
+		var tax decimal.Decimal
+		if tax, creditLines, err = storeReversedTax(ctx, tx, tenantID, *o, invoice, plan); err != nil {
+			return err
+		}
+		// A product billed at two prices is valued at the invoice lines it is allocated to, as billing values them.
+		if repriced, changed := repriceMixed(*o, invoice, plan, creditLines); changed {
+			*o = repriced
+			if plan, err = planCredit(*o); err != nil {
+				return err
+			}
+		}
+		o.Tax = tax
 		for i, idx := range plan.lines {
 			l := &o.Lines[idx]
 			l.RestockingAmount = plan.charges[i]
@@ -836,10 +854,6 @@ func (s *Postgres) storeCredit(now time.Time, invoice Invoice) func(context.Cont
 		}
 		date := now.UTC().Format(dayLayout)
 		o.Gross, o.Restocking, o.Net = plan.total.Gross, plan.total.Restocking, plan.total.Net
-		var creditLines []ARInvoiceLine
-		if o.Tax, creditLines, err = storeReversedTax(ctx, tx, tenantID, *o, invoice, plan); err != nil {
-			return err
-		}
 		stored := ""
 		if len(creditLines) > 0 {
 			raw, _ := json.Marshal(creditLines)

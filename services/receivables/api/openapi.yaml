@@ -1504,6 +1504,74 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/rma-credits/{id}:cancel:
+    post:
+      operationId: cancelRMACredit
+      summary: Cancel a PENDING RMA credit and release its invoice room
+      description: |
+        Drops a credit that was never posted, releases the room billing holds for it (reservations do
+        not expire on their own) and frees its RMA to be credited again, for example with corrected
+        amounts. Only a parked credit (the ledger refused it) or one never tried can be cancelled; a
+        credit whose last ledger answer was lost may be booked, so it is 409 AR-RMA-STATE and is
+        retried instead. A POSTED credit is 409 AR-RMA-STATE: reverse it with a billing credit note.
+        The answer shows the credit with status CANCELLED.
+      x-passage-duty: receivables.payment.post
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Credit cancelled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RMACreditView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/rma-credits/{id}:backfill-reservation:
+    post:
+      operationId: backfillRMAReservation
+      summary: Give an RMA credit posted before billing reservations a reservation
+      description: |
+        For a POSTED credit that holds no reservation: reserves the named invoice lines in billing
+        under the credit's key and commits the reservation at once, so billing counts the credit
+        against the invoice's limit. The lines are the invoice lines the credit returned (sales works
+        them out for a credit it stored earlier). 409 AR-RMA-STATE when the credit is not POSTED or
+        already holds a reservation; 422 when billing has no room or holds less than the credit.
+      x-passage-duty: receivables.payment.post
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [invoiceId, invoiceLines]
+              properties:
+                invoiceId: { type: string, format: uuid }
+                invoiceLines:
+                  type: array
+                  items:
+                    type: object
+                    required: [lineNo, qty]
+                    properties:
+                      lineNo: { type: integer, minimum: 1 }
+                      qty: { type: string }
+      responses:
+        "200":
+          description: Reservation taken and committed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RMACreditView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
