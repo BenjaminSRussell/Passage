@@ -1885,9 +1885,9 @@ test_mobile_service_routes if {
 dev_seed_assignments := {"tenant-1": {
 	"admin": [
 		"audit.read", "numbering.read", "numbering.sequence.maintain", "numbering.write",
-		"identity.user.maintain", "identity.security-role.maintain",
+		"identity.user.maintain", "identity.security-role.maintain", "identity.feature.view",
 	],
-	"clerk": ["receiving.receipt.maintain", "ledger.journal.read", "party.read"],
+	"clerk": ["receiving.receipt.maintain", "ledger.journal.read", "party.read", "identity.feature.view"],
 }}
 
 dev_seed_decision(user, action, resource) := decision if {
@@ -1922,6 +1922,44 @@ test_dev_seed_clerk_keeps_its_own_routes if {
 
 test_dev_seed_unknown_user_is_denied_everything if {
 	not dev_seed_decision("stranger", "GET", "/v1/ledger/journal-lines").allow
+}
+
+test_tenant_features_view_reads_only if {
+	allowed("identity.feature.view", "GET", "/v1/tenant/features")
+	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.view", "POST", "/v1/tenant/features")
+}
+
+test_tenant_features_maintain_reads_and_replaces if {
+	allowed("identity.feature.maintain", "GET", "/v1/tenant/features")
+	allowed("identity.feature.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "DELETE", "/v1/tenant/features")
+}
+
+test_tenant_features_are_not_reachable_through_other_identity_duties if {
+	not allowed("identity.tenant.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.legal-entity.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.security-role.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "GET", "/v1/tenants")
+	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/features/extra")
+}
+
+test_dev_seed_every_user_reads_features_but_cannot_change_them if {
+	dev_seed_decision("admin", "GET", "/v1/tenant/features").allow
+	dev_seed_decision("clerk", "GET", "/v1/tenant/features").allow
+	not dev_seed_decision("admin", "PUT", "/v1/tenant/features").allow
+	not dev_seed_decision("clerk", "PUT", "/v1/tenant/features").allow
+}
+
+test_processmfg_service_grant_reads_features_only if {
+	data.service_grants.processmfg == {"identity": ["identity.feature.view"]}
+	allowed("identity.feature.view", "GET", "/v1/tenant/features")
+	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.view", "GET", "/v1/tenants")
+	not allowed("identity.feature.view", "GET", "/v1/legal-entities")
+	not allowed("identity.feature.view", "GET", "/v1/authz/assignments")
+	not allowed("identity.feature.view", "POST", "/v1/identity/users")
+	not "identity.feature.maintain" in data.service_grants.processmfg.identity
 }
 
 inbox_routes := {

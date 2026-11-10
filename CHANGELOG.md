@@ -32,6 +32,7 @@ release may change public APIs.
 
 ### Added
 
+- Per-tenant feature enablement (#504): `platform/go/features` holds the feature catalog (module, plain-language name, dependencies) and industry templates (Distribution, Manufacturing, Process manufacturing, Services) as data; identity gains `GET`/`PUT /v1/tenant/features` (tenant administrator only to change, audited, `IDN-FEATURE-DEPENDENCY` when a change would break a dependency, everything on by default) with migration 0012 and duties `identity.feature.view` and `identity.feature.maintain`; a `features.Require` middleware answers a disabled feature with a plain-words `FEAT-0001` problem, fails open and caches 30 s, and is wired in processmfg when `IDENTITY_URL` is set. Also fixes the `warehouse.offline-conflict.resolve` glob in `data.json` that identity's catalogue loader rejected.
 - Web form standard (#505): `FormSection` (More options / Advanced), `FormField required`, shared field help in `copy.fieldHelp`, `FormErrorSummary` that focuses the first problem, and `useUnsavedChanges` (dialog on in-app navigation, warning on tab close); applied to Record payment and New requisition; documented in `apps/web/docs/forms.md`.
 - Product: the web product pages run on the product service instead of built-in sample data: search by number or name with
   keyset paging, product detail, and create and edit forms with field checks and plain-language errors (#529). `GET

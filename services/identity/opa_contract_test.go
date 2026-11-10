@@ -417,6 +417,8 @@ var dynamicDutyArguments = map[string]string{
 	"identity/effective_api.go role":                        "role names validated against the seeded catalogue",
 	"identity/role_assignments_api.go req.Role":             "role names validated against the seeded catalogue",
 	"intercompany/internal/api/api.go rt.duty":              "route table of duty constants",
+	"mobile/internal/store/menus.go m.Role":                 "a menu's role is a duty name an administrator enters; it filters which menus a user is offered and guards no route",
+	"mobile/internal/warehouse/client.go duty":              "checkDuty receives the duty constants of the closed route table in the same file",
 	"org/internal/api/translation.go o.writeDuty":           "translationOwners table of duty constants",
 	"pricing/internal/api/fund.go duty":                     "anyDuty loops over caller-listed duty constants",
 	"productcost/internal/api/api.go rt.duty":               "route table of duty constants",
