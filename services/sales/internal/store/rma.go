@@ -92,6 +92,12 @@ type ARCredit struct {
 	RMAID, RMANumber, LegalEntityID, InvoiceNumber, InvoiceID, PostingDate, IdempotencyKey string
 	Gross, Restocking, Net                                                                 decimal.Decimal
 	TaxLines                                                                               []ARTaxLine
+	InvoiceLines                                                                           []ARInvoiceLine
+}
+
+type ARInvoiceLine struct {
+	LineNo int
+	Qty    decimal.Decimal
 }
 
 type ARTaxLine struct {
@@ -794,7 +800,7 @@ func (s *Postgres) CreditReturnOrder(ctx context.Context, id string, version int
 	}
 	note, err := s.ar.PostRMACredit(ctx, ARCredit{RMAID: current.ID, RMANumber: current.RMANumber, LegalEntityID: current.LegalEntityID,
 		InvoiceNumber: current.OriginalInvoiceNo, InvoiceID: current.OriginalInvoiceID, PostingDate: *current.CreditPostingDate, IdempotencyKey: "rma-credit-" + current.ID,
-		Gross: current.Gross, Restocking: current.Restocking, Net: current.Net, TaxLines: taxLines})
+		Gross: current.Gross, Restocking: current.Restocking, Net: current.Net, TaxLines: taxLines, InvoiceLines: creditedInvoiceLines(current)})
 	if err != nil {
 		return ReturnOrder{}, upstreamProblem(ctx, "receivables", err)
 	}
@@ -841,6 +847,24 @@ type creditPlan struct {
 	lines   []int
 	charges []decimal.Decimal
 	qty     []decimal.Decimal
+}
+
+func creditedInvoiceLines(o ReturnOrder) []ARInvoiceLine {
+	var out []ARInvoiceLine
+	at := map[int]int{}
+	for _, l := range o.Lines {
+		qty := domain.CreditQuantity(l.CreditOnly, l.QuantityExpected, l.QuantityReceived, l.QuantityAccepted)
+		if !qty.IsPositive() {
+			continue
+		}
+		if i, ok := at[l.LineNo]; ok {
+			out[i].Qty = out[i].Qty.Add(qty)
+			continue
+		}
+		at[l.LineNo] = len(out)
+		out = append(out, ARInvoiceLine{LineNo: l.LineNo, Qty: qty})
+	}
+	return out
 }
 
 func planCredit(o ReturnOrder) (creditPlan, error) {

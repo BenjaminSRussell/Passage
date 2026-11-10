@@ -169,7 +169,8 @@ func TestRMA_ReturnToStockCreditsInventoryAndAR(t *testing.T) {
 	}
 	c := e.ar.credits
 	if len(c) != 1 || !c[0].Gross.Equal(d(400)) || !c[0].Restocking.Equal(d(60)) || !c[0].Net.Equal(d(340)) || c[0].InvoiceNumber != "INV-2027-0000042" ||
-		c[0].PostingDate != "2027-03-01" || c[0].RMAID != rma.ID || c[0].LegalEntityID != e.le {
+		c[0].PostingDate != "2027-03-01" || c[0].RMAID != rma.ID || c[0].LegalEntityID != e.le ||
+		len(c[0].InvoiceLines) != 1 || c[0].InvoiceLines[0].LineNo != disp.Lines[0].LineNo || !c[0].InvoiceLines[0].Qty.Equal(d(4)) {
 		t.Fatalf("AR credit sent: %+v", c)
 	}
 	postings := domain.CreditNoteAmounts{Gross: credited.Gross, Restocking: credited.Restocking, Net: credited.Net}.Postings()
