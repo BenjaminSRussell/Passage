@@ -67,6 +67,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 				return fmt.Errorf("migrate: %w", err)
 			}
 		}
+		if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+			return err
+		}
 		lock, err := lockTimeout(getenv("WMS_LOCK_TIMEOUT_MIN"))
 		if err != nil {
 			return err
