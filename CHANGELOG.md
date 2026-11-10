@@ -19,6 +19,13 @@ release may change public APIs.
 
 ### Added
 
+- Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
+  seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new
+  `services/identity/cmd/devgateway` (JWT verification, OPA enforcement, identity headers from claims) and the web
+  app. The web app signs in through Keycloak with the authorization-code flow and PKCE when `PASSAGE_OIDC_ISSUER` is
+  set and sends the bearer token on `/api/` calls. `tools/e2e` runs vendor, purchase order, receipt, invoice and
+  ledger entry against the real service binaries, directly and through the gateway with a real OPA, and checks that
+  a non-admin gets 403 on admin routes. `roadmap/waves.json` records which waves a test verifies end to end.
 - Dispatch optimization (#45): passage-dispatch solves a day with CP-SAT (greedy fallback on timeout or infeasible model) behind `POST /v1/dispatch/runs` and `GET /v1/dispatch/runs/{id}`, honoring skills, shifts, windows, due times, pinned visits and overtime. Fieldservice `POST /v1/service/dispatch/optimizations` snapshots a territory-day's open work orders, technicians and held visits, calls it over a duty-scoped service token (new fieldservice to dispatch grant in `platform/go/tenant` and `policies/authz/data.json`), backs off and parks failures, and `:accept` writes the plan back through the assignment path (migration 0011, codes `SVC-DSP-014` to `017`, `DISPATCH_URL`). The technician mobile app and a deployment chart for dispatch are still open.
 - EDI: an inbound 850 or ORDERS becomes a sales order (#35 P4a). Partner item cross-references (BP, VP, UP or EN to product,
   site and warehouse) and partner sales defaults under `edi.admin` with legal-entity RLS (migration 0010);

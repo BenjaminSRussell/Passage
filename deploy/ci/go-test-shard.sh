@@ -12,7 +12,7 @@ shard_for() {
   local pkg=$1
   case $pkg in
     github.com/BenjaminSRussell/passage/services/pricing/internal/store) echo pricing-store ;;
-    github.com/BenjaminSRussell/passage/services/identity|github.com/BenjaminSRussell/passage/services/identity/*) echo identity ;;
+    github.com/BenjaminSRussell/passage/services/identity|github.com/BenjaminSRussell/passage/services/identity/*|github.com/BenjaminSRussell/passage/tools/e2e|github.com/BenjaminSRussell/passage/tools/e2e/*) echo identity ;;
     github.com/BenjaminSRussell/passage/services/inventory/internal/store) echo inventory-store ;;
     github.com/BenjaminSRussell/passage/services/ledger/internal/store) echo ledger-store ;;
     github.com/BenjaminSRussell/passage/services/org/internal/store) echo org-store ;;
@@ -28,7 +28,7 @@ shard_for() {
 modules=()
 while IFS= read -r dir; do
   modules+=("$dir")
-done < <(find platform/go services tools/rlscheck tools/tenant-restore -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; | sort)
+done < <(find platform/go services tools/rlscheck tools/tenant-restore tools/e2e -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; | sort)
 
 matched=0
 failed=0

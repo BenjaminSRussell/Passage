@@ -17,6 +17,11 @@ export default defineConfig(({ mode, command }) => {
     plugins: [react(), ...(command === "serve" && env.PASSAGE_MOBILE_STUB === "1" ? [mobileDevStub()] : [])],
     define: {
       __PASSAGE_REMOTES__: JSON.stringify(federationRemotes),
+      __PASSAGE_OIDC__: JSON.stringify(
+        command === "serve" && mode !== "test" && env.PASSAGE_OIDC_ISSUER
+          ? { issuer: env.PASSAGE_OIDC_ISSUER, clientId: env.PASSAGE_OIDC_CLIENT_ID ?? "passage-web" }
+          : null,
+      ),
       __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" && mode !== "test" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
       __PASSAGE_DEV_SHOW_ALL_NAV__: JSON.stringify(command === "serve" && mode !== "test" && env.PASSAGE_DEV_SHOW_ALL_NAV === "1"),
     },

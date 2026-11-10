@@ -83,6 +83,10 @@ Customer, vendor and contact workspaces usable for data entry; import of a legac
 - [VIES VAT validation](https://ec.europa.eu/taxation_customs/vies/)
 - [Record linkage / Fellegi-Sunter (Splink)](https://moj-analytical-services.github.io/splink/)
 
+**Partly verified end to end by**
+
+- `tools/e2e/flow_test.go`
+
 **Depends on:** wave 6
 
 ---
