@@ -688,6 +688,7 @@
       {"resource": "/v1/receiving/ers-vendors/*", "methods": ["PUT"]}
     ]},
     "receiving.receipt.maintain": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/receiving/arrivals", "methods": ["POST"]},
       {"resource": "/v1/receiving/receipts", "methods": ["GET", "POST"]},
       {"resource": "/v1/receiving/receipts/*", "methods": ["GET"]},
@@ -736,6 +737,7 @@
       {"resource": "/v1/receiving/related-documents", "methods": ["GET"]}
     ]},
     "receiving.ap.inquire": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices/*", "methods": ["GET"]},
@@ -1917,6 +1919,7 @@
       {"resource": "/v1/fulfillment/manifests/*:cancel", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.view": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/backorders", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/sales-delivery-reports", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/container-types", "methods": ["GET"]},
@@ -1987,6 +1990,7 @@
       {"resource": "/v1/billing/tax-reports/*:retry", "methods": ["POST"]}
     ]},
     "billing.invoice.view": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*/trace", "methods": ["GET"]},
@@ -3089,6 +3093,7 @@
       {"resource": "/v1/sales/orders/*/holds/*:release", "methods": ["POST"]}
     ]},
     "sales.order.read": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements/*", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements/*/schedule-releases", "methods": ["GET"]},

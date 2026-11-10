@@ -1086,7 +1086,7 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order, no
 		lines = append(lines, line)
 	}
 	data := salesevents.OrderConfirmedData{
-		OrderID: o.ID, CustomerID: o.CustomerID, OrderType: o.OrderType, Currency: o.Currency, Lines: lines, NetTotal: o.NetTotal.String(), Version: confirmed.Version}
+		OrderID: o.ID, OrderNumber: o.OrderNumber, LegalEntityID: o.LegalEntityID, CustomerID: o.CustomerID, OrderType: o.OrderType, Currency: o.Currency, Lines: lines, NetTotal: o.NetTotal.String(), Version: confirmed.Version}
 	if confirmed.isOneTime() {
 		// The buyer's name, address and tax id stay in sales (sealed); the
 		// event marks the order and gives the country only.

@@ -3,7 +3,7 @@ const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platfo
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
 export const copy = {
-  nav: { home: "Home", general: "General", allFeatures: "All features", myWork: "My work" },
+  nav: { home: "Home", general: "General", allFeatures: "All features", myWork: "My work", glossary: "Glossary" },
   workspaces: {
     switcherLabel: "Workspace",
     chooseSummary: "Choose my workspaces",
@@ -48,6 +48,8 @@ export const copy = {
     oneResult: "1 result",
     results: (count: number) => `${count} results`,
     opened: (label: string) => `Opened ${label}`,
+    favouriteAdded: (number: string) => `${number} added to favourites`,
+    favouriteRemoved: (number: string) => `${number} removed from favourites`,
     workspaceSwitched: (label: string) => `Workspace changed to ${label}`,
   },
   forms: {
@@ -123,8 +125,14 @@ export const copy = {
   palette: {
     title: "Search",
     inputLabel: "Find a page",
-    placeholder: "Search pages and workspaces",
-    help: "Use the up and down arrows to move through results, then press Enter to open a page.",
+    placeholder: "Search pages, documents and partners",
+    help: "Type a document number or a name. Use the up and down arrows to move through results, then press Enter to open one. Press Alt and F to favourite a record.",
+    favourites: "Favourite records",
+    recent: "Recent records",
+    favouriteState: "Favourite",
+    favourite: (number: string) => `Favourite ${number}`,
+    unfavourite: (number: string) => `Remove ${number} from favourites`,
+    recordsUnavailable: "Documents and partners can't be searched right now. Pages still work.",
     noResults: (query: string) => `No pages match “${query}”.`,
     noResultsHint: "Try a workspace name, like Admin or Tax.",
     listLabel: "Pages",

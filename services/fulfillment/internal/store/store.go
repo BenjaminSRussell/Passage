@@ -1608,7 +1608,7 @@ func slipLineData(lines []PackingSlipLine) []fulevents.SlipLine {
 
 func slipPostedData(slip PackingSlip, sh Shipment, returnables []returnableCount) fulevents.PackingSlipPostedData {
 	return fulevents.PackingSlipPostedData{
-		PackingSlipID: slip.ID, PackingSlipNumber: slip.Number, ShipmentID: sh.ID, OrderID: sh.OrderID, CustomerID: sh.CustomerID,
+		PackingSlipID: slip.ID, PackingSlipNumber: slip.Number, ShipmentID: sh.ID, OrderID: sh.OrderID, CustomerID: sh.CustomerID, LegalEntityID: sh.LegalEntityID,
 		PostingDate: slip.PostingDate.Format("2006-01-02"), Currency: slip.Currency, TotalCost: slip.TotalCost.String(),
 		Lines: slipLineData(slip.Lines), Journal: journalData(slip.Journal),
 		PackagingFees: feeData(slip.PackagingFees), PackagingFeeBillable: slip.PackagingFeeBillable, Returnables: returnableData(returnables, 1),
