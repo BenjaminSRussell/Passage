@@ -919,6 +919,11 @@
       {"resource": "/v1/analytics/metrics", "methods": ["GET"]},
       {"resource": "/v1/analytics/query", "methods": ["POST"]}
     ]},
+    "analytics.ux.record": {"permissions": [{"resource": "/v1/analytics/ux-events", "methods": ["POST"]}]},
+    "analytics.ux.view": {"permissions": [
+      {"resource": "/v1/analytics/ux-funnels", "methods": ["GET"]},
+      {"resource": "/v1/analytics/ux-signals", "methods": ["GET"]}
+    ]},
     "analytics.archive.admin": {"permissions": [
       {"resource": "/v1/archive/partitions", "methods": ["GET"]},
       {"resource": "/v1/archive/partitions/*", "methods": ["GET"]},
