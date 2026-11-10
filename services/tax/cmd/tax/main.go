@@ -59,7 +59,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(pool, map[string]domain.TaxProvider{}, providerTimeout(getenv)).WithStore(store.New(pool))
+	st := store.New(pool)
+	a := api.New(pool, map[string]domain.TaxProvider{}, providerTimeout(getenv)).WithStore(st).WithConfigStore(st)
 	gl, err := ledgerclient.FromEnv(getenv, "tax")
 	if err != nil {
 		return fmt.Errorf("ledger client: %w", err)

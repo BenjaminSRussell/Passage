@@ -86,6 +86,9 @@ func Day(s string) Date {
 }
 
 func (d *Date) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		return nil
+	}
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
 		return fmt.Errorf("date must be a JSON string")
@@ -98,7 +101,13 @@ func (d *Date) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (d Date) MarshalJSON() ([]byte, error) { return json.Marshal(d.Format(dateLayout)) }
+// MarshalJSON writes an unset date as null, so an open-ended rate reads as "no end date".
+func (d Date) MarshalJSON() ([]byte, error) {
+	if d.IsZero() {
+		return []byte("null"), nil
+	}
+	return json.Marshal(d.Format(dateLayout))
+}
 
 type Rate struct {
 	ValidFrom  Date `json:"valid_from"`

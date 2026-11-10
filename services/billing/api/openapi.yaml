@@ -922,6 +922,83 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/billing/subscriptions/{id}/usage:
+    post:
+      operationId: recordSubscriptionUsage
+      summary: Record a metered quantity against a subscription (FR-29.10).
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      description: >
+        The quantity is invoiced once, as a usage line of the SUBSCRIPTION invoice of the billing period that is billed next with
+        a period end on or after `usageDate`: the usage of a meter at one unit price is added up into one line (quantity times
+        unit price, taxed like the plan lines). `externalId` is the meter reading's own id; a repeat with the same values is
+        a replay (200, Idempotent-Replayed) and other values under it are refused (422 BIL-0130). A usage date before the
+        subscription started, after its last service day, or inside an already invoiced period is refused (422 BIL-0131).
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [externalId, meterCode, usageDate, quantity, unitPrice]
+              properties:
+                externalId: { type: string, minLength: 1, maxLength: 100 }
+                meterCode: { type: string, minLength: 1, maxLength: 50 }
+                usageDate: { type: string, format: date }
+                quantity: { type: string, description: "Decimal greater than 0, at most 6 fraction digits." }
+                unitPrice: { type: string, description: "Decimal of 0 or more, at most 6 fraction digits." }
+      responses:
+        "200": { description: The usage record already stored., content: { application/json: { schema: { $ref: "#/components/schemas/SubscriptionUsage" } } } }
+        "201": { description: Usage recorded., content: { application/json: { schema: { $ref: "#/components/schemas/SubscriptionUsage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/billing/subscriptions:bill-due:
+    post:
+      operationId: billDueSubscriptions
+      summary: Invoice every billing period due on a date for the subscriptions of a legal entity (the daily job).
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      description: >
+        For each subscription whose next period (the one after the period billed last, or the start month) opens on or before
+        `asOf` (default today), creates the SUBSCRIPTION invoice proposal of the period dated its first day, as `:bill` does,
+        and goes on to the next due period, at most 12 per subscription and run, with the usage not yet invoiced. A period is
+        invoiced once, so a repeat bills nothing again. A subscription that cannot be billed is counted in `failed` and the
+        run goes on. The proposals are posted from the billing workspace. The in-process job
+        (`BILLING_SUBSCRIPTION_JOB_TENANT_IDS`, every `BILLING_SUBSCRIPTION_JOB_INTERVAL`, default 1h) runs the same pass.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                asOf: { type: string, format: date }
+                limit: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: What the run did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [considered, billed, failed, invoiceIds]
+                properties:
+                  considered: { type: integer }
+                  billed: { type: integer }
+                  failed: { type: integer }
+                  invoiceIds: { type: array, items: { type: string, format: uuid } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     IdempotencyKey:
@@ -964,6 +1041,18 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    SubscriptionUsage:
+      type: object
+      required: [id, subscriptionId, externalId, meterCode, usageDate, quantity, unitPrice]
+      properties:
+        id: { type: string, format: uuid }
+        subscriptionId: { type: string, format: uuid }
+        externalId: { type: string }
+        meterCode: { type: string }
+        usageDate: { type: string, format: date }
+        quantity: { type: string }
+        unitPrice: { type: string }
+        invoiceId: { type: string, format: uuid, description: Set once the usage is on an invoice proposal. }
     SalesReport:
       type: object
       required: [id, legalEntityId, invoiceId, sourceRef, orderId, status, attempts, createdAt]

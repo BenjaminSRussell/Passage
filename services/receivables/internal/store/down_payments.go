@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -215,6 +216,13 @@ func (s *Postgres) ReceiveDownPayment(ctx context.Context, id string, version in
 		if out, err = loadDownPayment(ctx, tx, id); err != nil {
 			return err
 		}
+		date := today()
+		if out.ReceivedDate != nil {
+			date = *out.ReceivedDate
+		}
+		if err := downPaymentJournal(ctx, tx, p.TenantID, out, "receipt", date, domain.ReceiptPostings(out.Kind, out.Amount)); err != nil {
+			return err
+		}
 		return enqueue(ctx, tx, "downpayment", out.ID, rcvevents.DownPaymentReceived, p.TenantID,
 			downPaymentEvent(out, out.Amount, nil, domain.ReceiptPostings(out.Kind, out.Amount)))
 	})
@@ -297,6 +305,9 @@ func (s *Postgres) ClearDownPayment(ctx context.Context, id string, version int,
 		if out, err = loadDownPayment(ctx, tx, id); err != nil {
 			return err
 		}
+		if err := downPaymentJournal(ctx, tx, p.TenantID, out, "clear:"+item.ID+":"+fmt.Sprint(out.Version), today(), domain.ClearingPostings(out.Kind, clearing)); err != nil {
+			return err
+		}
 		return enqueue(ctx, tx, "downpayment", out.ID, rcvevents.DownPaymentCleared, p.TenantID,
 			downPaymentEvent(out, clearing, &item.ID, domain.ClearingPostings(out.Kind, clearing)))
 	})
@@ -321,6 +332,9 @@ func (s *Postgres) ReleaseDownPayment(ctx context.Context, id string, version in
 			return err
 		}
 		if out, err = loadDownPayment(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := downPaymentJournal(ctx, tx, p.TenantID, out, "release", today(), domain.ReleasePostings(out.Kind, cur.Remaining)); err != nil {
 			return err
 		}
 		return enqueue(ctx, tx, "downpayment", out.ID, rcvevents.DownPaymentReleased, p.TenantID,

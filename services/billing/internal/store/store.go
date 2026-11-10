@@ -702,7 +702,7 @@ func postedLines(currency string, in []Line) []billingevents.InvoicePostedLine {
 	for i, l := range in {
 		lines[i] = billingevents.InvoicePostedLine{LineNo: l.No, Description: l.Description, Qty: l.Qty.String(),
 			Net: l.Net.StringFixed(exp), Tax: l.Tax.StringFixed(exp), TaxCode: l.TaxCode, RevenueAccount: l.RevenueAccount,
-			OrderLineID: l.Source.OrderLineID, Product: l.Source.ProductID, PackingSlipLineID: l.Source.PackingSlipLineID}
+			OrderID: l.Source.OrderID, OrderLineID: l.Source.OrderLineID, Product: l.Source.ProductID, PackingSlipLineID: l.Source.PackingSlipLineID}
 	}
 	return lines
 }

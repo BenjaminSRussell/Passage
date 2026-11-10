@@ -26,6 +26,12 @@ type rmaSweeper interface {
 	SweepRMACredits(ctx context.Context, now time.Time, limit int) (store.RMASweepResult, error)
 }
 
+// journalSweeper is the optional second pass: the ledger journals receivables owes (30-2). The store implements it.
+type journalSweeper interface {
+	GLJournalLegalEntities(ctx context.Context) ([]string, error)
+	PostDueJournals(ctx context.Context, now time.Time, limit int) (store.JournalSweepResult, error)
+}
+
 // rmaSweep posts the PENDING RMA credits the request path left behind (a ledger outage, a lost answer, a crash after
 // the PENDING commit). Per tenant it lists the legal entities with due credits under an all-scope read principal, then
 // sweeps each under a principal scoped to that legal entity, which the ledger post's service token needs.
@@ -79,6 +85,42 @@ func (s *rmaSweep) loop(ctx context.Context) {
 }
 
 func (s *rmaSweep) once(ctx context.Context) {
+	s.rmaPass(ctx)
+	s.journalPass(ctx)
+}
+
+// journalPass posts the journals owed to the ledger, per tenant and legal entity like the RMA pass.
+func (s *rmaSweep) journalPass(ctx context.Context) {
+	js, ok := s.store.(journalSweeper)
+	if !ok {
+		return
+	}
+	for _, tenantID := range s.tenants {
+		listCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{
+			TenantID: tenantID, UserID: rmaSweepActor, Duties: map[string]struct{}{tenant.DutyAllScope: {}},
+		}), rmaSweepTimeout)
+		entities, err := js.GLJournalLegalEntities(listCtx)
+		cancel()
+		if err != nil {
+			slog.Error("receivables journal sweep failed", "tenantId", tenantID, "err", err)
+			continue
+		}
+		for _, le := range entities {
+			runCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{TenantID: tenantID, LegalEntityID: le, UserID: rmaSweepActor}), rmaSweepTimeout)
+			res, err := js.PostDueJournals(runCtx, time.Now().UTC(), store.MaxJournalSweepBatch)
+			cancel()
+			if err != nil {
+				slog.Error("receivables journal sweep failed", "tenantId", tenantID, "legalEntityId", le, "err", err)
+				continue
+			}
+			if res != (store.JournalSweepResult{}) {
+				slog.Info("receivables journal sweep finished", "tenantId", tenantID, "legalEntityId", le, "posted", res.Posted, "failed", res.Failed, "parked", res.Parked)
+			}
+		}
+	}
+}
+
+func (s *rmaSweep) rmaPass(ctx context.Context) {
 	for _, tenantID := range s.tenants {
 		listCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{
 			TenantID: tenantID, UserID: rmaSweepActor, Duties: map[string]struct{}{tenant.DutyAllScope: {}},

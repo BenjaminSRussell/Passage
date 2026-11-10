@@ -65,9 +65,16 @@ func (s *Store) RecordTransactions(ctx context.Context, txns []domain.Txn) (int,
 	inserted := 0
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		for _, t := range txns {
-			tag, err := tx.Exec(ctx, `insert into tax_transaction (tenant_id, id, legal_entity_id, code, direction, tax_date, amount)
-				values ($1, $2, $3, $4, $5, $6, $7) on conflict (tenant_id, legal_entity_id, id) do nothing`,
-				p.TenantID, t.ID, p.LegalEntityID, t.Code, t.Direction, t.TaxDate.Time, t.Amount.Decimal)
+			var base any
+			if t.Base != nil {
+				base = t.Base.Decimal
+			}
+			tag, err := tx.Exec(ctx, `insert into tax_transaction (tenant_id, id, legal_entity_id, code, direction, tax_date, amount,
+					base_amount, counterparty_country, counterparty_vat_id, supply_kind)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9, ''), nullif($10, ''), nullif($11, ''))
+				on conflict (tenant_id, legal_entity_id, id) do nothing`,
+				p.TenantID, t.ID, p.LegalEntityID, t.Code, t.Direction, t.TaxDate.Time, t.Amount.Decimal,
+				base, t.CounterpartyCountry, t.CounterpartyVATID, t.SupplyKind)
 			if err != nil {
 				return fmt.Errorf("record tax transaction %s: %w", t.ID, err)
 			}
@@ -77,8 +84,11 @@ func (s *Store) RecordTransactions(ctx context.Context, txns []domain.Txn) (int,
 			}
 			var identical bool
 			if err := tx.QueryRow(ctx, `select exists (select 1 from tax_transaction where tenant_id = $1 and legal_entity_id = $2 and id = $3
-				and code = $4 and direction = $5 and tax_date = $6 and amount = $7)`,
-				p.TenantID, p.LegalEntityID, t.ID, t.Code, t.Direction, t.TaxDate.Time, t.Amount.Decimal).Scan(&identical); err != nil {
+				and code = $4 and direction = $5 and tax_date = $6 and amount = $7
+				and base_amount is not distinct from $8 and counterparty_country is not distinct from nullif($9, '')
+				and counterparty_vat_id is not distinct from nullif($10, '') and supply_kind is not distinct from nullif($11, ''))`,
+				p.TenantID, p.LegalEntityID, t.ID, t.Code, t.Direction, t.TaxDate.Time, t.Amount.Decimal,
+				base, t.CounterpartyCountry, t.CounterpartyVATID, t.SupplyKind).Scan(&identical); err != nil {
 				return fmt.Errorf("compare tax transaction %s: %w", t.ID, err)
 			}
 			if !identical {

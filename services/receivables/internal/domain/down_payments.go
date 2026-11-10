@@ -29,6 +29,11 @@ const (
 const (
 	AccountBank            = "1000"
 	AccountReceivable      = "1200"
+	AccountUnappliedCash   = "1205"
+	AccountCashDiscount    = "4100"
+	AccountWriteOff        = "6100"
+	AccountDunningFee      = "4300"
+	AccountInterestIncome  = "4310"
 	AccountSalesReturns    = "4000"
 	AccountRestocking      = "4200"
 	AccountDownPayment     = "2190"

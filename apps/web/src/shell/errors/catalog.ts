@@ -432,6 +432,9 @@ const billing: Record<string, ProblemCatalogEntry> = {
   "BIL-0107": { message: "The effective date falls in a period that is already invoiced.", action: "Choose a later effective date." },
   "BIL-0108": { message: "The subscription is cancelled.", action: "Create a new subscription instead." },
   "BIL-0109": { message: "Subscriptions aren't available in this deployment.", action: ASK_ADMIN },
+  "BIL-0130": { message: "A usage record with this reading id already exists with different values.", action: "Send the reading with a new id, or the original values." },
+  "BIL-0131": { message: "This usage can't be added to the subscription.", action: "Check the usage date. It must fall between the start of the subscription and its last service day, in a period that isn't invoiced yet." },
+  "BIL-0132": { message: "Another request invoiced some of this usage a moment ago.", action: "Try again." },
   "BIL-0110": { message: "We couldn't find that sales report.", action: "Go back to the list and open it again." },
   "BIL-0111": { message: "Only a report that was set aside can be sent again, and this one isn't.", action: "Check the report's status in the list." },
   "BIL-0112": { message: "Sales reports aren't turned on for your organization.", action: ASK_ADMIN },
@@ -692,6 +695,7 @@ const tax: Record<string, ProblemCatalogEntry> = {
   "TAX-0009": { message: "There is no unsettled tax in this period.", action: "Choose a different period." },
   "TAX-0011": { message: "The currency doesn't match the ledger's accounting currency.", action: "Use the ledger's accounting currency." },
   "TAX-0012": { message: "The ledger data can't be turned into a valid tax audit file.", action: TRY_LATER },
+  "TAX-0013": { message: "This tax setup item is still used by something else, so it can't be deleted.", action: "Remove it from the jurisdictions, tax groups or return boxes that use it, then try again." },
 };
 
 const product: Record<string, ProblemCatalogEntry> = {
@@ -853,6 +857,13 @@ const p2pMore: Record<string, ProblemCatalogEntry> = {
   "AR-PAYMENT-STATE": { message: "This payment can't be changed in its current status.", action: "Reload the payment to see its current status." },
   "AR-PROMISE-EXISTS": { message: "This open item already has a promise to pay that hasn't been broken.", action: "Update the existing promise, or wait until it is broken." },
   "AR-PROMISE-STATE": { message: "This promise to pay can't be changed in its current status.", action: "Reload the open item to see the promise as it is now." },
+  "AR-ADVICE-MALFORMED": { message: "The remittance advice file couldn't be read.", action: "Check the row or segment named in the details, or upload the original file from the customer." },
+  "AR-GL-UNAVAILABLE": { message: "The general ledger isn't available or isn't set up for this legal entity.", action: "Try again in a few minutes. If it keeps happening, contact support with the details below." },
+  "AR-JOURNAL-NOT-FOUND": { message: "We couldn't find that ledger journal. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
+  "AR-JOURNAL-STATE": { message: "This ledger journal is already posted.", action: "Reload the list to see its current status." },
+  "AR-SETTLE-INVALID": { message: "The credit and the invoices don't add up to a settlement.", action: "Check the amounts, customer and currency, then try again. The debits can't total more than the credit holds." },
+  "AR-SETTLE-NOT-CREDIT": { message: "This open item isn't an open credit.", action: "Choose a credit note or an unapplied credit that still has an open amount." },
+  "AR-SETTLE-NOT-DEBIT": { message: "One of the items to settle isn't an open invoice.", action: "Choose invoices that still have an open amount." },
   "AR-RMA-CREDIT": { message: "The credit amounts or tax lines don't add up.", action: "Check the credit lines and tax, then try again." },
   "AR-RMA-GL": { message: "Billing couldn't hold the invoice amount for this credit, so it wasn't posted.", action: "Try again in a few minutes. If it keeps happening, contact support with the details below." },
   "AR-RMA-INVOICE": { message: "The original invoice isn't an open item of this legal entity.", action: "Check the invoice on the return, then try again." },

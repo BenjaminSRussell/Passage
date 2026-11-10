@@ -70,6 +70,11 @@ type transactionInput struct {
 	Direction string      `json:"direction"`
 	TaxDate   domain.Date `json:"tax_date"`
 	Amount    domain.Dec  `json:"amount"`
+
+	BaseAmount          *domain.Dec `json:"base_amount"`
+	CounterpartyCountry string      `json:"counterparty_country"`
+	CounterpartyVATID   string      `json:"counterparty_vat_id"`
+	SupplyKind          string      `json:"supply_kind"`
 }
 
 type transactionsRequest struct {
@@ -92,8 +97,15 @@ func (req transactionsRequest) txns() ([]domain.Txn, error) {
 			return nil, invalid(field+".direction", "direction must be %q, %q or %q", domain.DirOutput, domain.DirInput, domain.DirUse)
 		case t.TaxDate.IsZero():
 			return nil, invalid(field+".tax_date", "tax_date is required")
+		case t.CounterpartyCountry != "" && !domain.ValidCountry(t.CounterpartyCountry):
+			return nil, invalid(field+".counterparty_country", "counterparty_country must be a 2-letter ISO 3166 code in capitals")
+		case len(t.CounterpartyVATID) > 20:
+			return nil, invalid(field+".counterparty_vat_id", "counterparty_vat_id is at most 20 characters")
+		case t.SupplyKind != "" && t.SupplyKind != domain.SupplyGoods && t.SupplyKind != domain.SupplyServices && t.SupplyKind != domain.SupplyTriangular:
+			return nil, invalid(field+".supply_kind", "supply_kind must be %q, %q or %q", domain.SupplyGoods, domain.SupplyServices, domain.SupplyTriangular)
 		}
-		out[i] = domain.Txn{ID: t.ID, Code: t.Code, Direction: t.Direction, TaxDate: t.TaxDate, Amount: t.Amount}
+		out[i] = domain.Txn{ID: t.ID, Code: t.Code, Direction: t.Direction, TaxDate: t.TaxDate, Amount: t.Amount,
+			Base: t.BaseAmount, CounterpartyCountry: t.CounterpartyCountry, CounterpartyVATID: t.CounterpartyVATID, SupplyKind: t.SupplyKind}
 	}
 	return out, nil
 }
