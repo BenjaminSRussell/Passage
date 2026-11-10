@@ -5,6 +5,7 @@ import { describeProblem, getNetwork, listResources, newKey, updateNetwork, type
 import { dash, formatMinutes, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Partial<Record<"name" | "activeTo" | "form", string>>;
 
@@ -108,7 +109,7 @@ function EditForm({ initial, onReload, onSaved }: { initial: Network; onReload: 
             </Alert>
           ) : (
             <Alert tone="danger" title="Could not save the network" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           )}
         </div>
@@ -141,7 +142,7 @@ export function NetworkDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Resource network" />
         <Alert tone="danger" title="Could not load the network" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

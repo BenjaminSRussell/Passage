@@ -3,9 +3,10 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { newKey, postVendorInvoice, type Invoice, type InvoiceInput } from "./api/client";
-import { describeFailure, fieldErrors } from "../../shell/api/http";
+import { fieldErrors } from "../../shell/api/http";
 import { DECIMAL, UUID, type InvoiceNavState } from "./parts";
 import styles from "../../shell/pageLayout.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_LINES = 500;
 
@@ -96,7 +97,7 @@ export function PostInvoicePage() {
   const key = useRef(newKey());
   const [values, setValues] = useState<InvoiceDraft>(() => initialDraft(location.state as InvoiceNavState | null));
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [posted, setPosted] = useState<Invoice | null>(null);
 
@@ -117,7 +118,7 @@ export function PostInvoicePage() {
       await queryClient.invalidateQueries({ queryKey: ["ap-invoices", "grir"] });
     } catch (error) {
       setErrors(fieldErrors(error));
-      setFailure(describeFailure(error));
+      setFailure(error);
     } finally {
       setBusy(false);
     }
@@ -205,7 +206,7 @@ export function PostInvoicePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not post the invoice" live="alert">
-                {failure}
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

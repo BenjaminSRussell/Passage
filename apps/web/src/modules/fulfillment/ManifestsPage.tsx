@@ -8,6 +8,7 @@ import { dash, formatDate, formatDateTime, shortId, today } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DUTY_SHIP = "fulfillment.warehouse.ship";
 /** Carrier codes are lowercase letters, digits and hyphens (the label's provider). */
@@ -192,7 +193,7 @@ export function ManifestsPage() {
       </div>
       {manifests.error ? (
         <Alert tone="danger" title="Could not load the manifests" live="alert" action={<Button size="sm" onClick={manifests.reload}>Try again</Button>}>
-          {manifests.error.message} ({manifests.error.code})
+          <ProblemMessage problem={manifests.error} />
         </Alert>
       ) : (
         <DataTable
@@ -212,7 +213,7 @@ export function ManifestsPage() {
       <Card title="Parcels on no manifest">
         {candidates.error ? (
           <Alert tone="danger" title="Could not load the unmanifested parcels" live="alert" action={<Button size="sm" onClick={candidates.reload}>Try again</Button>}>
-            {candidates.error.message} ({candidates.error.code})
+            <ProblemMessage problem={candidates.error} />
           </Alert>
         ) : (
           <DataTable

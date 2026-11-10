@@ -17,6 +17,7 @@ import { dash, formatDateTime, MESSAGE_LABELS, UUID } from "./format";
 import { MessagePill } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PAGE_SIZE = 50;
 
@@ -146,7 +147,7 @@ export function MessagesPage() {
       </div>
       {first.error ? (
         <Alert tone="danger" title="Could not load messages" live="alert" action={<Button size="sm" onClick={first.reload}>Try again</Button>}>
-          {first.error.message} ({first.error.code})
+          <ProblemMessage problem={first.error} />
         </Alert>
       ) : (
         <>
@@ -172,7 +173,7 @@ export function MessagesPage() {
           />
           {more.error ? (
             <Alert tone="danger" title="Could not load more messages" live="alert">
-              {more.error.message} ({more.error.code})
+              <ProblemMessage problem={more.error} />
             </Alert>
           ) : null}
           {cursor && !first.loading ? (

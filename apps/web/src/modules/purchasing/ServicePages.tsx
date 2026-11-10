@@ -27,6 +27,7 @@ import {
 import { MAX_DEPTH, MAX_NODES, draftFromOutline, newOutlineRow, toOutlineInput, type OutlineDraftRow } from "./outline";
 import { Details, LoadError, ShortId, StatusBadge, currencyPattern, dash, decimalPattern, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -350,7 +351,7 @@ export function ServiceSpecPage() {
         actions={back}
       />
       <Alert tone="danger" live="alert">
-        {failure ? (stale ? `Someone else changed this order. Reload the page and try again. (${failure.code})` : `${failure.message} (${failure.code})`) : null}
+        {failure ? (stale ? <ProblemMessage problem={failure} message="Someone else changed this order. Reload the page and try again." /> : <ProblemMessage problem={failure} />) : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice}
@@ -437,7 +438,7 @@ export function ServiceSpecPage() {
               ) : null}
               {check?.failure ? (
                 <Alert tone="danger" live="alert">
-                  {check.failure.message} ({check.failure.code})
+                  <ProblemMessage problem={check.failure} />
                 </Alert>
               ) : null}
             </form>
@@ -716,7 +717,7 @@ export function ModelServiceSpecCreatePage() {
           <OutlineEditor idPrefix="msr" rows={rows} onChange={setRows} errors={errors} />
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -828,8 +829,8 @@ export function ModelServiceSpecDetailPage() {
           >
             {failure
               ? stale
-                ? `Someone else changed this model since you opened it. Reload to see their change, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else changed this model since you opened it. Reload to see their change, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">

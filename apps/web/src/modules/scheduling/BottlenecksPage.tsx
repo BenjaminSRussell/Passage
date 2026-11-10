@@ -5,6 +5,7 @@ import { describeProblem, listBottlenecks, refreshCapacityLoad, type BottleneckE
 import { dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUS_OPTIONS: { value: BottleneckStatus; label: string }[] = [
   { value: "open", label: "Open" },
@@ -93,7 +94,7 @@ export function BottlenecksPage() {
       </div>
       {failure ? (
         <Alert tone="danger" title="Could not rebuild the weekly load" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {rebuilt ? (
@@ -103,7 +104,7 @@ export function BottlenecksPage() {
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load bottlenecks" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

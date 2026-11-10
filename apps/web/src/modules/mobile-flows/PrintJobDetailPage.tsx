@@ -5,6 +5,7 @@ import { describeProblem, getJob, newKey, reprintJob, type Problem } from "./api
 import { dash, describeJobContent, describeJobError, formatDateTime, JobStatusBadge } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One print job, its outcome, and "print again" (BR-32.8: a new job with reprintOf). */
 export function PrintJobDetailPage() {
@@ -41,7 +42,7 @@ export function PrintJobDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Print job" actions={back} />
         <Alert tone="danger" title="Could not load the print job" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -89,7 +90,7 @@ export function PrintJobDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not print again" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {job.status === "FAILED" ? (

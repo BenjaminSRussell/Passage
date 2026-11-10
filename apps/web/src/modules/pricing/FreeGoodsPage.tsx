@@ -5,6 +5,7 @@ import { describeOffer, describeProduct, describeWho, FREE_GOODS_STATES, freeGoo
 import { today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function columns(day: string): DataTableColumn<FreeGoodsRule>[] {
   return [
@@ -43,7 +44,7 @@ export function FreeGoodsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the free goods rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

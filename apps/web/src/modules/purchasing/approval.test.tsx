@@ -161,7 +161,7 @@ describe("requisition decisions", () => {
     });
     renderAt(`/purchasing/requisitions/${REQ_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(await screen.findByText(/above your approval limit \(PRC-SL-002\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/above your approval limit/)).toBeInTheDocument();
 
     vi.unstubAllGlobals();
     stubFetch((_url, init) => (init.method === "POST" ? problem(409, "PRC-VERSION-CONFLICT", "requisition is at version 5, not 4") : json(requisition())));

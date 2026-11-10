@@ -195,6 +195,6 @@ describe("Run reconciliation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run reconciliation" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not run the reconciliation");
-    expect(alert).toHaveTextContent("(AUTH-0002)");
+    expect(alert).toHaveTextContent("AUTH-0002");
   });
 });

@@ -6,6 +6,7 @@ import { today } from "./format";
 import { CODE, DATE, mapFields, optionalWhole, wholeNumber, WEEK_MINUTES } from "./forms";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface EdgeValues {
   from: string;
@@ -195,7 +196,7 @@ export function NewNetworkPage() {
               {failure ? (
                 <div className={styles.formActions}>
                   <Alert tone="danger" title="Could not create the network" live="alert">
-                    {failure.message} ({failure.code})
+                    <ProblemMessage problem={failure} />
                   </Alert>
                 </div>
               ) : null}

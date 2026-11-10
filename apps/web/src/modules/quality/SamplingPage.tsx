@@ -4,6 +4,7 @@ import { describeProblem, sizeSample, type Problem, type SampleDraw } from "./ap
 import { DECIMAL, qty } from "./format";
 import styles from "./pages.module.css";
 import { emptyPlan, planFieldErrors, PlanFields, validatePlan, type PlanErrors, type PlanValues } from "./PlanFields";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Sampling calculator (FR-33.2, BR-33.1): sizes a sample for a lot without writing anything. */
 export function SamplingPage() {
@@ -54,7 +55,7 @@ export function SamplingPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not size the sample" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

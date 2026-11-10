@@ -5,6 +5,7 @@ import { createFreightBill, describeProblem, newKey, type Line, type NewFreightB
 import { ChargeLinesEditor, cleanLines, validateLines } from "./ChargeLinesEditor";
 import { CURRENCY, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   loadId: string;
@@ -83,7 +84,7 @@ export function NewFreightBillPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the freight bill" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

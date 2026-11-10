@@ -13,6 +13,7 @@ import { formatDateTime } from "./format";
 import { mapFields, wholeNumber } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ParametersValues {
   defaultMode: string;
@@ -204,7 +205,7 @@ export function ParametersPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the parameters" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.data ? (
         <div aria-busy="true">

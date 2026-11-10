@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, StatusBadge, dash, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const SOURCES: InboundSource[] = ["PLANNING_MESSAGE", "DROPSHIP_CLOSED", "DROPSHIP_CANCELLED"];
 const STATUSES: InboundStatus[] = ["APPLIED", "REFUSED", "IGNORED"];
@@ -329,7 +330,7 @@ export function InboundChangeDetailPage() {
               ) : undefined
             }
           >
-            {failure ? `${failure.message} (${failure.code})` : null}
+            {failure ? <ProblemMessage problem={failure} /> : null}
           </Alert>
           {waiting ? (
             <Card title="Settle this change">

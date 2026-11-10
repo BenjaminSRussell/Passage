@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { describeProblem, rateShipment, type Problem, type Quote, type RateRequest, type RateResponse } from "./api/client";
 import { AMOUNT, DATE, fixed, money, shortId, statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   shipmentId: string;
@@ -160,7 +161,7 @@ export function RateShopPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "Rate shop failed" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       {busy ? <DataTable label="Rate options" columns={columns} rows={[]} getRowKey={quoteKey} loading /> : null}
       {!busy && result ? (

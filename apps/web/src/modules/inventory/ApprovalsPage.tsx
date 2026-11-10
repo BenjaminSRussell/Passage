@@ -5,6 +5,7 @@ import { describeProblem, listJournals, moveJournal, type JournalPage, type Jour
 import { formatDateTime, shortId, typeLabels } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Step = "approve" | "reject";
 
@@ -101,12 +102,12 @@ export function ApprovalsPage() {
           live="alert"
           action={failure.problem.code === "conflict_version" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}
         >
-          {failure.problem.message} ({failure.problem.code})
+          <ProblemMessage problem={failure.problem} />
         </Alert>
       ) : null}
       {error ? (
         <Alert tone="danger" title="Could not load the approvals" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {error.message} ({error.code})
+          <ProblemMessage problem={error} />
         </Alert>
       ) : null}
       {state.error ? null : (

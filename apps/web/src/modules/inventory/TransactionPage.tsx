@@ -17,6 +17,7 @@ import { dash, describeDimensions, formatDateTime, sentence, shortId, today } fr
 import { ALL_DIMENSIONS, Detail, money, ProblemAlert } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const commandLabels: Record<string, string> = {
   CREATE: "Registered",
@@ -109,7 +110,7 @@ function MovesCard({ txn, onMoved }: { txn: TransactionDetail; onMoved(change: S
       )}
       {failure ? (
         <Alert tone="danger" title="The status was not changed" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </Card>

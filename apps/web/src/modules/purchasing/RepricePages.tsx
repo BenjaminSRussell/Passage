@@ -29,6 +29,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, StatusBadge, money, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 // Subsequent price change (FR-17.22, BR-17.18): move confirmed order lines priced
 // from a trade agreement to the price row that wins now, as the next order version.
@@ -235,8 +236,8 @@ export function RepricePage() {
       >
         {failure
           ? failure.code === "PRC-PO-009"
-            ? `The order changed after this preview. Preview again before applying. (${failure.code})`
-            : `${failure.message} (${failure.code})`
+            ? <ProblemMessage problem={failure} message="The order changed after this preview. Preview again before applying." />
+            : <ProblemMessage problem={failure} />
           : null}
       </Alert>
       {preview.error ? <LoadError what="the price change preview" error={preview.error} onRetry={preview.reload} /> : null}
@@ -423,7 +424,7 @@ export function RepriceRunPage() {
         </form>
       </Card>
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       {result?.applied ? (
         <Alert tone={failed > 0 ? "warning" : "success"} live="status" title="Price changes applied">

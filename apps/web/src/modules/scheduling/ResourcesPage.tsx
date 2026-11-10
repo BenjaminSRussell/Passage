@@ -4,6 +4,7 @@ import { listResources, type Resource } from "./api/client";
 import { dash, describeShifts } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Resource>[] = [
   { key: "code", header: "Code", mono: true },
@@ -32,7 +33,7 @@ export function ResourcesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load resources" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

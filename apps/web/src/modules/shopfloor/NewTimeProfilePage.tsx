@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Textarea } from "../../shell/ui";
 import { createTimeProfile, DAY_TYPES, describeProblem, newKey, type BreakWindow, type DayType, type NewTimeProfile, type Problem, type ProfileDay } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const LABEL: Record<DayType, string> = { weekday: "Weekday", saturday: "Saturday", sunday: "Sunday" };
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -210,7 +211,7 @@ export function NewTimeProfilePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the time profile" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

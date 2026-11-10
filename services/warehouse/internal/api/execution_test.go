@@ -317,6 +317,22 @@ func TestPersistedRoutes_PassTheCommand(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &planned); err != nil || planned.Work.ID != workID || planned.Traces == nil {
 		t.Fatalf("planned body %s", rec.Body)
 	}
+	line := ids.New()
+	rec = call(h, req{method: "POST", path: "/v1/warehouse/work", duties: dutyWorkSupervise, key: "k2b",
+		body: `{"warehouseId":"` + wh + `","workType":"SALES_PICK","lines":[{"itemId":"BOLT","direction":"PICK","qty":"10","orderLineId":"` + strings.ToUpper(line) + `"}]}`})
+	if rec.Code != 201 || fake.plan.Lines[0].Attributes["issueRef"] != "SALES_LINE:"+line {
+		t.Fatalf("pick for an order line: %d %s %+v", rec.Code, rec.Body, fake.plan.Lines)
+	}
+	for name, ln := range map[string]string{"a put": `"direction":"PUT","orderLineId":"` + line + `"`, "not an id": `"direction":"PICK","orderLineId":"x"`,
+		"no hyphens":     `"direction":"PICK","orderLineId":"` + strings.ReplaceAll(line, "-", "") + `"`,
+		"both":           `"direction":"PICK","orderLineId":"` + line + `","attributes":{"issueRef":"SALES_LINE:` + line + `"}`,
+		"upper-case ref": `"direction":"PICK","attributes":{"issueRef":"SALES_LINE:` + strings.ToUpper(line) + `"}`} {
+		rec = call(h, req{method: "POST", path: "/v1/warehouse/work", duties: dutyWorkSupervise, key: "k2c",
+			body: `{"warehouseId":"` + wh + `","workType":"SALES_PICK","lines":[{"itemId":"BOLT","qty":"1",` + ln + `}]}`})
+		if rec.Code != 400 {
+			t.Fatalf("%s: %d %s, want 400", name, rec.Code, rec.Body)
+		}
+	}
 
 	fake.replayed = false
 	call(h, req{method: "POST", path: "/v1/warehouse/work/" + workID + ":exception", duties: dutyWorkExecute + "," + dutyWorkSupervise, key: "k3",

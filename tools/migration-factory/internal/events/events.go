@@ -2,7 +2,11 @@
 // payload of each (PRD 9.49.5). events/asyncapi.yaml documents the same contract.
 package events
 
-import "github.com/BenjaminSRussell/passage/platform/events"
+import (
+	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/events"
+)
 
 // Source is the CloudEvents source of every event this service emits.
 const Source = "passage/migration-factory"
@@ -22,11 +26,14 @@ var (
 	CutoverDecisionRecorded = events.Type("cutover", "decision", "recorded", 1)
 	// ToleranceConfigured is written when a control-total tolerance is set or changed (FR-49.2).
 	ToleranceConfigured = events.Type("migration", "tolerance", "configured", 1)
+	// CoexistenceChanged is written when an entity kind's coexistence flag flips (FR-49.7): a cutover
+	// to Passage suspends the legacy adapter's flow for it, a flip back to LEGACY resumes it.
+	CoexistenceChanged = events.Type("migration", "coexistence", "changed", 1)
 )
 
 // All lists every event type the service publishes.
 func All() []string {
-	return []string{PackReconciled, PackLoaded, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack, CutoverDecisionRecorded, ToleranceConfigured}
+	return []string{PackReconciled, PackLoaded, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack, CutoverDecisionRecorded, ToleranceConfigured, CoexistenceChanged}
 }
 
 // PackReconciledData is the payload of dev.passage.migration.pack.reconciled.v1.
@@ -85,13 +92,40 @@ type CutoverStepCompletedData struct {
 
 // CutoverPlanRolledBackData is the payload of dev.passage.cutover.plan.rolledback.v1. The
 // re-keying line counts tell the legacy side how much to re-key; the files themselves are read
-// from GET /cutover/plans/{id}/rekeying/{file}.
+// from GET /cutover/plans/{id}/rekeying/{file}. CoexistenceResumed lists the entity kinds the
+// rollback handed back to the legacy system, so the integration hub resumes their coexistence
+// adapters (AC-49.7); PackRunsRolledBack counts the pack runs moved to ROLLED_BACK (BR-49.1).
 type CutoverPlanRolledBackData struct {
-	PlanID             string   `json:"plan_id"`
-	Approvers          []string `json:"approvers"`
-	ExecutedBy         string   `json:"executed_by"`
-	RekeyJournalLines  int      `json:"rekey_journal_lines"`
-	RekeyDocumentLines int      `json:"rekey_document_lines"`
+	PlanID             string             `json:"plan_id"`
+	Approvers          []string           `json:"approvers"`
+	ExecutedBy         string             `json:"executed_by"`
+	RekeyJournalLines  int                `json:"rekey_journal_lines"`
+	RekeyDocumentLines int                `json:"rekey_document_lines"`
+	PackRunsRolledBack int                `json:"pack_runs_rolled_back"`
+	CoexistenceResumed []CoexistenceEntry `json:"coexistence_resumed"`
+}
+
+// CoexistenceEntry is one entity kind's coexistence flag in an event: the legacy (system, company),
+// the kind, its mode and the flag version, which orders the changes of one kind.
+type CoexistenceEntry struct {
+	SourceSystem  string `json:"source_system"`
+	SourceCompany string `json:"source_company"`
+	Entity        string `json:"entity"`
+	Mode          string `json:"mode"`
+	Version       int    `json:"version"`
+}
+
+// CoexistenceChangedData is the payload of dev.passage.migration.coexistence.changed.v1. PlanID is
+// set when a cutover rollback flipped the flag back.
+type CoexistenceChangedData struct {
+	SourceSystem  string     `json:"source_system"`
+	SourceCompany string     `json:"source_company"`
+	Entity        string     `json:"entity"`
+	Mode          string     `json:"mode"`
+	Version       int        `json:"version"`
+	CutoverAt     *time.Time `json:"cutover_at"`
+	ChangedBy     string     `json:"changed_by"`
+	PlanID        string     `json:"plan_id,omitempty"`
 }
 
 // CutoverDecisionRecordedData is the payload of dev.passage.cutover.decision.recorded.v1.

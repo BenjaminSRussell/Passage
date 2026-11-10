@@ -21,6 +21,7 @@ import {
 } from "./api/client";
 import { dash, describeCondition, describeFiring, triggerEventLabel, triggerFieldLabel, triggerFunctionLabel, triggerOperatorLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const decimalPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -307,12 +308,12 @@ export function TriggerPointsPanel({ order, onOpenOrder }: TriggerPointsPanelPro
         ) : null}
         {failure ? (
           <Alert tone="danger" live="alert" title="The trigger point change was refused">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {points.error ? (
           <Alert tone="danger" title="Could not load the trigger points">
-            {points.error.message} ({points.error.code})
+            <ProblemMessage problem={points.error} />
           </Alert>
         ) : (
           <>

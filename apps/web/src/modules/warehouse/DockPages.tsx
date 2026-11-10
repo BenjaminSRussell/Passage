@@ -17,6 +17,7 @@ import {
 import styles from "./pages.module.css";
 import { ChooseWarehouse, sentence, useWarehouse, UUID, WarehouseField } from "./shared";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -108,7 +109,7 @@ export function DockSchedulePage() {
         <>
           {schedule.error ? (
             <Alert tone="danger" title="Could not load the schedule" live="alert" action={<Button size="sm" onClick={schedule.reload}>Try again</Button>}>
-              {schedule.error.message} ({schedule.error.code})
+              <ProblemMessage problem={schedule.error} />
             </Alert>
           ) : (
             <DataTable
@@ -161,7 +162,7 @@ function DoorsCard({ warehouseId, doors, loading, error, onChange }: { warehouse
       <div className={styles.stack}>
         {error ? (
           <Alert tone="danger" title="Could not load the doors" live="alert" action={<Button size="sm" onClick={onChange}>Try again</Button>}>
-            {error.message} ({error.code})
+            <ProblemMessage problem={error} />
           </Alert>
         ) : (
           <DataTable

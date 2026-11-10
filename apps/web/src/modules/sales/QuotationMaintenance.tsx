@@ -5,6 +5,7 @@ import { DECIMAL, today } from "./format";
 import { validateLines, type LineValues } from "./lines";
 import { LinesEditor } from "./LinesEditor";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const REASON_MAX = 200;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -166,7 +167,7 @@ export function QuotationMaintenance({ quotation, etag, onDone, onConflict }: Pr
           {failure.status === 412
             ? "Someone else changed this quotation; it has been reloaded and your changes are kept. Check them and save again. "
             : null}
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Change the quotation">

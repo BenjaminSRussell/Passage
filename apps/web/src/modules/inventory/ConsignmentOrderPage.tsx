@@ -8,6 +8,7 @@ import { DECIMAL, describeDimensions, formatDateTime, sentence, shortId, today }
 import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The line's own dimensions; site, warehouse and owner are on the order. */
 const LINE_ONLY = ALL_DIMENSIONS.filter((name) => name !== "site" && name !== "warehouse" && name !== "owner");
@@ -241,7 +242,7 @@ export function ConsignmentOrderPage() {
           live="alert"
           action={failure.problem.code === "conflict_version" ? <Button size="sm" onClick={state.reload}>Reload order</Button> : undefined}
         >
-          {failure.problem.message} ({failure.problem.code})
+          <ProblemMessage problem={failure.problem} />
         </Alert>
       ) : null}
       <Card title="Details">

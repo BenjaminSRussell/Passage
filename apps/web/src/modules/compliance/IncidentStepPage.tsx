@@ -19,6 +19,7 @@ import {
 import { regimeLabel } from "./BreachClocksPage";
 import { formatDateTime, sentence } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface StepValues {
   severity: IncidentSeverity;
@@ -208,7 +209,7 @@ export function IncidentStepPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "The step is not allowed" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {result ? `The incident can move to ${sentence(result.status).toLowerCase()}.${result.pageOnCall ? " Sev-1: page the on-call responder." : ""}` : null}

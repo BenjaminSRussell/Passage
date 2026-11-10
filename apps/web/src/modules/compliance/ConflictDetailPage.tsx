@@ -17,6 +17,7 @@ import { rolesText } from "./ConflictsPage";
 import { dash, dateIn, formatDateTime, sentence, severityTone, stateTone } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -72,7 +73,7 @@ export function ConflictDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="SoD conflict" />
         <Alert tone="danger" title="Could not load the conflict" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/compliance/sod/conflicts">Back to conflicts</Link>
       </div>
@@ -165,7 +166,7 @@ export function ConflictDetailPage() {
         </dl>
       </Card>
       <Alert tone="danger" title={failure ? "Could not save" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {done}

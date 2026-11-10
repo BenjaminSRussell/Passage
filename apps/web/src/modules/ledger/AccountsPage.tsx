@@ -1,13 +1,14 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
-import { exportAccountsCsv, fetchAccounts, LedgerApiError, type Account } from "./api/client";
+import { exportAccountsCsv, fetchAccounts, type Account } from "./api/client";
 import { CHART_CODE, DUTY_ACCOUNT_WRITE, typeLabel } from "./accountCommon";
 import { ExportButton } from "./ExportButton";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Account>[] = [
   { key: "accountNumber", header: "Account", mono: true },
@@ -22,8 +23,8 @@ const columns: DataTableColumn<Account>[] = [
   { key: "suspendedFrom", header: "Suspended from", render: (a) => a.suspendedFrom ?? "" },
 ];
 
-function errorText(error: unknown): string {
-  return error instanceof LedgerApiError ? `${error.message} (${error.code})` : error instanceof Error ? error.message : "The request failed.";
+function errorText(error: unknown): ReactNode {
+  return <ProblemMessage problem={error} fallback="The request failed." />;
 }
 
 /** The chart of accounts: accounts of one chart by number, with a CSV export and the account form. */

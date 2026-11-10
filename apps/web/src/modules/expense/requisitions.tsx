@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -35,6 +35,7 @@ import {
 import { CURRENCY, DAY, DECIMAL, splitProblem } from "./format";
 import { amount, useActionKeys, usePaged, useRecord, UUID, type Failure } from "./persisted";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -103,7 +104,7 @@ export function RequisitionsPage() {
       </Card>
       {list.failure ? (
         <Alert tone="danger" title="The travel requisitions could not be loaded" live="alert" action={<Button size="sm" onClick={list.retry}>Try again</Button>}>
-          {list.failure.message} ({list.failure.code})
+          <ProblemMessage problem={list.failure} />
         </Alert>
       ) : null}
       <DataTable
@@ -304,7 +305,7 @@ export function NewRequisitionPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The requisition was not created" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -339,7 +340,7 @@ export function RequisitionDetailPage() {
   const { record: rq, setRecord, failure: loadFailure, reload } = useRecord(() => getRequisition(id), id);
   const keyFor = useActionKeys();
   const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   async function act(action: string, run: (version: number) => Promise<TravelRequisition>, done: string) {
@@ -352,7 +353,7 @@ export function RequisitionDetailPage() {
       setNotice(done);
     } catch (err) {
       const p = describeProblem(err);
-      setFailure(`${p.message} (${p.code})`);
+      setFailure(<ProblemMessage problem={p} />);
       if (p.code === "EXP-TR-005") reload();
     } finally {
       setBusy(null);
@@ -377,7 +378,7 @@ export function RequisitionDetailPage() {
     }
     return (
       <Alert tone="danger" title="The travel requisition could not be loaded" live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-        {loadFailure.message} ({loadFailure.code})
+        <ProblemMessage problem={loadFailure} />
       </Alert>
     );
   }

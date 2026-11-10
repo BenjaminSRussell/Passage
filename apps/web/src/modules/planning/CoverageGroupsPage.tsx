@@ -27,6 +27,7 @@ import {
 } from "./api/client";
 import { describeError, PLAN_CODE, useLoad, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIST = "/planning/coverage-groups";
 
@@ -134,7 +135,7 @@ export function CoverageGroupsPage() {
         }
       />
       <Alert tone="danger" title={state.error ? "Could not load coverage groups" : undefined} live="alert">
-        {state.error ? `${state.error.message} (${state.error.code})` : null}
+        {state.error ? <ProblemMessage problem={state.error} /> : null}
       </Alert>
       {state.data && !state.data.some((g) => g.code === DEFAULT_GROUP) ? (
         <Alert tone="info" title="No default coverage group">
@@ -220,7 +221,7 @@ function CoverageGroupForm({ group, onSaved, onReload }: FormProps) {
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
       </div>
       {creating ? (
@@ -331,7 +332,7 @@ export function CoverageGroupPage() {
         }
       />
       <Alert tone="danger" title={state.error ? `Could not load coverage group ${code}` : undefined} live="alert">
-        {state.error ? `${state.error.message} (${state.error.code})` : null}
+        {state.error ? <ProblemMessage problem={state.error} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {saved ? `Saved. Version ${saved.version}.` : null}

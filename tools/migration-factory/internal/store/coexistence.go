@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	mfevents "github.com/BenjaminSRussell/passage/tools/migration-factory/internal/events"
 )
 
 // CoexistChange sets one entity kind's coexistence mode as the signed-in user By, against the
@@ -114,18 +115,59 @@ func (s *Postgres) SetCoexistence(ctx context.Context, idem Idem, c CoexistChang
 			if err := f.SetMode(c.Mode, c.By, c.Now); err != nil {
 				return domain.CoexistFlag{}, err
 			}
-			if _, err := tx.Exec(ctx, `insert into coexistence_entity (tenant_id, source_system, source_company, entity, mode, cutover_at, version, changed_by, changed_at)
-				values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8)
-				on conflict (tenant_id, source_system, source_company, entity) do update
-				set mode = excluded.mode, cutover_at = excluded.cutover_at, version = excluded.version, changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
-				string(f.SourceSystem), f.Company, f.Entity, string(f.Mode), f.CutoverAt, f.Version, f.ChangedBy, f.ChangedAt); err != nil {
-				return domain.CoexistFlag{}, fmt.Errorf("upsert coexistence_entity: %w", err)
+			if err := saveFlag(ctx, tx, f, ""); err != nil {
+				return domain.CoexistFlag{}, err
 			}
 			return f, nil
 		})
 		return err
 	})
 	return out, replayed, err
+}
+
+// saveFlag writes a changed flag and dev.passage.migration.coexistence.changed.v1 in the caller's
+// transaction; planID names the rollback that flipped it back, if any.
+func saveFlag(ctx context.Context, tx pgx.Tx, f domain.CoexistFlag, planID string) error {
+	if _, err := tx.Exec(ctx, `insert into coexistence_entity (tenant_id, source_system, source_company, entity, mode, cutover_at, version, changed_by, changed_at)
+		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8)
+		on conflict (tenant_id, source_system, source_company, entity) do update
+		set mode = excluded.mode, cutover_at = excluded.cutover_at, version = excluded.version, changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
+		string(f.SourceSystem), f.Company, f.Entity, string(f.Mode), f.CutoverAt, f.Version, f.ChangedBy, f.ChangedAt); err != nil {
+		return fmt.Errorf("upsert coexistence_entity: %w", err)
+	}
+	if err := enqueue(ctx, tx, mfevents.CoexistenceChanged, "coexistence_entity", string(f.SourceSystem)+"/"+f.Company+"/"+f.Entity, mfevents.CoexistenceChangedData{
+		SourceSystem: string(f.SourceSystem), SourceCompany: f.Company, Entity: f.Entity, Mode: string(f.Mode), Version: f.Version,
+		CutoverAt: f.CutoverAt, ChangedBy: f.ChangedBy, PlanID: planID,
+	}); err != nil {
+		return fmt.Errorf("enqueue coexistence.changed: %w", err)
+	}
+	return nil
+}
+
+// resumeLegacy flips every entity kind of the plan's legacy companies that Passage masters back to
+// LEGACY, as the rollback's executing approver, under the flags' row locks (FR-49.7, AC-49.7: the
+// rollback restores legacy coexistence). A plan names its legacy companies, not their system, so a
+// company is handed back in every system it is cut over in. It returns the flags it changed.
+func resumeLegacy(ctx context.Context, tx pgx.Tx, plan domain.Plan, by string, now time.Time) ([]domain.CoexistFlag, error) {
+	rows, err := tx.Query(ctx, `select `+flagColumns+` from coexistence_entity
+		where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_company = any($1) and mode = 'PASSAGE'
+		order by source_system, source_company, entity for update`, plan.Entities)
+	if err != nil {
+		return nil, fmt.Errorf("read coexistence_entity: %w", err)
+	}
+	flags, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (domain.CoexistFlag, error) { return scanFlag(r) })
+	if err != nil {
+		return nil, fmt.Errorf("read coexistence_entity: %w", err)
+	}
+	for i := range flags {
+		if err := flags[i].SetMode(domain.CoexistLegacy, by, now); err != nil {
+			return nil, err
+		}
+		if err := saveFlag(ctx, tx, flags[i], plan.PlanID); err != nil {
+			return nil, err
+		}
+	}
+	return flags, nil
 }
 
 // KnownXrefs returns the Passage ids legacy_xref holds for legacy ids of one source table, keyed

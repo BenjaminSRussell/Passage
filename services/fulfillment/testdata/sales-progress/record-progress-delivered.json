@@ -1,0 +1,35 @@
+{
+  "kind": "DELIVERED",
+  "sourceRef": "PS-0000042",
+  "lines": [
+    {
+      "lineId": "5a1c0000-0000-4000-8000-000000000001",
+      "quantity": "3",
+      "tracking": [
+        {"serial": "SN-1", "quantity": "1"},
+        {"serial": "SN-2", "quantity": "1"},
+        {"batch": "LOT-S", "serial": "SN-3", "quantity": "1"}
+      ]
+    },
+    {
+      "lineId": "5a1c0000-0000-4000-8000-000000000002",
+      "quantity": "10",
+      "tracking": [
+        {"batch": "LOT-1", "quantity": "8"},
+        {"batch": "LOT-2", "quantity": "2"}
+      ]
+    },
+    {
+      "lineId": "5a1c0000-0000-4000-8000-000000000003",
+      "quantity": "5",
+      "actualWeight": "51.5",
+      "tracking": [
+        {"batch": "LOT-CW", "quantity": "5", "actualWeight": "51.5"}
+      ]
+    },
+    {
+      "lineId": "5a1c0000-0000-4000-8000-000000000004",
+      "quantity": "6.5"
+    }
+  ]
+}

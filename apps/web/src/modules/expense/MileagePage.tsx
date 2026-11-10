@@ -3,6 +3,7 @@ import { Alert, Button, Card, EmptyState, FormField, Input, PageHeader, Select, 
 import { computeMileage, describeProblem, type MileageResult, type Problem } from "./api/client";
 import { DECIMAL, splitProblem } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 type Unit = "mile" | "km";
@@ -82,7 +83,7 @@ export function MileagePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not work out the mileage" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

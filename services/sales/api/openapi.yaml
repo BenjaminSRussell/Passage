@@ -4698,9 +4698,10 @@ components:
           maxItems: 2000
           items:
             type: object
-            required: [lineNo, quantity]
+            required: [quantity]
             properties:
-              lineNo: {type: integer, minimum: 1, description: once per report}
+              lineNo: {type: integer, minimum: 1, description: "the order line, once per report; exactly one of lineNo and lineId"}
+              lineId: {type: string, format: uuid, description: "the order line by its id (line_id of order.confirmed, which is how fulfillment knows it, #496) instead of lineNo; 404 SLS-0109 for an id not on the order, 400 for a line named twice. Counts in the request hash as sent"}
               quantity: {$ref: "#/components/schemas/Money", description: "what this report covers (positive, at most 6 places), not the cumulative quantity"}
               actualWeight: {$ref: "#/components/schemas/WeightQuantity", description: "DELIVERED only, catch-weight lines only: actual weight of the quantity cases this report delivers (a whole number of cases; FR-24.7). Added to the line total; BR-24.5 SLS-0061 when outside min/max × the cases reported, SLS-0063 when the line is not catch-weight, the report is not DELIVERED or the cases are not whole"}
               tracking:

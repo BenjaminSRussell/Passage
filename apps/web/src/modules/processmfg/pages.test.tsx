@@ -153,7 +153,7 @@ describe("formulas", () => {
       return fail ? json(503, { code: "COM-0500", detail: "service unavailable" }) : json(200, { items: [] });
     };
     renderAt("/processmfg/formulas");
-    expect(await findAlert()).toHaveTextContent("service unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("service unavailable");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No formulas yet")).toBeInTheDocument();
@@ -297,7 +297,7 @@ describe("batch orders", () => {
     renderAt(`/processmfg/batch-orders/${ORDER}`);
     fireEvent.change(await screen.findByLabelText("New batch size (kg)"), { target: { value: "3000" } });
     fireEvent.click(screen.getByRole("button", { name: "Rescale batch" }));
-    expect(await screen.findByText("batch order BO-000001 is at version 2, not 1 (PMF-0104)")).toBeInTheDocument();
+    expect(await screen.findByText("batch order BO-000001 is at version 2, not 1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload order" })).toBeInTheDocument();
   });
 
@@ -313,7 +313,7 @@ describe("batch orders", () => {
   it("shows a not-found order as an error", async () => {
     handler = () => json(404, { code: "PMF-0102", detail: "batch order not found" });
     renderAt(`/processmfg/batch-orders/${ORDER}`);
-    expect(await findAlert()).toHaveTextContent("batch order not found (PMF-0102)");
+    expect(await findAlert()).toHaveTextContent("batch order not found");
   });
 });
 
@@ -333,7 +333,7 @@ describe("calculators", () => {
     handler = () => json(422, { code: "PMF-0002", detail: "compensating line would become negative (-25.000000)" });
     renderAt("/processmfg/potency");
     fireEvent.click(screen.getByRole("button", { name: "Calculate consumption" }));
-    expect(await findAlert()).toHaveTextContent("compensating line would become negative (-25.000000) (PMF-0002)");
+    expect(await findAlert()).toHaveTextContent("compensating line would become negative (-25.000000)");
     expect(screen.queryByRole("list", { name: "Consumption" })).toBeNull();
   });
 
@@ -417,7 +417,7 @@ describe("batch rules (slice 2)", () => {
     handler = () => json(422, { code: "PMF-0006", detail: "merge refused: attribute grade differs (A vs B)" });
     fireEvent.click(screen.getByLabelText("Grade may differ (merge override)"));
     fireEvent.click(screen.getByRole("button", { name: "Preview merge" }));
-    expect(await findAlert()).toHaveTextContent("merge refused: attribute grade differs (A vs B) (PMF-0006)");
+    expect(await findAlert()).toHaveTextContent("merge refused: attribute grade differs (A vs B)");
     expect((calls[1].body as { mergeOverride: string[] }).mergeOverride).toEqual(["grade"]);
   });
 
@@ -447,7 +447,7 @@ describe("batch rules (slice 2)", () => {
     renderAt("/processmfg/batch-requirements");
     fireEvent.click(screen.getByLabelText("Same batch"));
     fireEvent.click(screen.getByRole("button", { name: "Check batches" }));
-    expect(await findAlert()).toHaveTextContent("no single batch can supply 500 (largest 100) (PMF-0008)");
+    expect(await findAlert()).toHaveTextContent("no single batch can supply 500 (largest 100)");
     expect(calls[0].body).toMatchObject({ requirements: [{ level: 3, sellableDays: 60, sameBatch: true }] });
   });
 
@@ -485,7 +485,7 @@ describe("batch rules (slice 2)", () => {
     handler = () => json(422, { code: "PMF-0014", detail: "batch record cannot be approved: 1 exceptions without disposition and signature" });
     const { container } = renderAt("/processmfg/batch-record-check");
     fireEvent.click(screen.getByRole("button", { name: "Check approval" }));
-    expect(await findAlert()).toHaveTextContent("(PMF-0014)");
+    expect(await findAlert()).toHaveTextContent("PMF-0014");
     handler = () => json(200, { approvable: true, exceptions: 1 });
     fireEvent.change(screen.getByLabelText("Disposition"), { target: { value: "accepted" } });
     fireEvent.change(screen.getByLabelText("Signature"), { target: { value: "SIG-1" } });
@@ -537,7 +537,7 @@ describe("batch attributes, picking and rework (slice 3)", () => {
     fireEvent.change(screen.getByLabelText("Name", { selector: "#attr-1-name" }), { target: { value: "grade" } });
     fireEvent.change(screen.getByLabelText("Recorded value", { selector: "#attr-1-value" }), { target: { value: "Z" } });
     fireEvent.click(screen.getByRole("button", { name: "Check values" }));
-    expect(await findAlert()).toHaveTextContent('attribute "grade" value "Z" is not one of its options (COM-0001)');
+    expect(await findAlert()).toHaveTextContent('attribute "grade" value "Z" is not one of its options');
   });
 
   it("proposes batches and lists the expired and on-hold ones with their codes (AC-24.4, AC-24.10)", async () => {
@@ -640,7 +640,7 @@ describe("batch attributes, picking and rework (slice 3)", () => {
     fireEvent.click(screen.getByLabelText("Require a quality order"));
     fireEvent.change(screen.getByLabelText("Quantity to rework"), { target: { value: "600" } });
     fireEvent.click(screen.getByRole("button", { name: "Plan rework" }));
-    expect(await findAlert()).toHaveTextContent("rework quantity must be positive and at most the batch quantity 500 (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("rework quantity must be positive and at most the batch quantity 500");
     expect(calls[0].body).toMatchObject({ reworkQty: "600", params: { requireQualityOrder: false, outputDisposition: "available" } });
   });
 });

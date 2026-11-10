@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input, PageHeader, Skeleton } from "../../shell/ui";
 import { fetchSplittingRule, putSplittingRule, type SplittingRule, type SplittingRuleInput } from "./api/client";
@@ -80,7 +80,7 @@ function SplittingForm({ ledgerId, ruleId, initial, existing }: { ledgerId: stri
   const queryClient = useQueryClient();
   const [values, setValues] = useState(initial);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState(false);
   const update = (patch: Partial<SplittingDraft>) => setValues((prev) => ({ ...prev, ...patch }));
 

@@ -79,7 +79,7 @@ describe("my goals", () => {
 
     api.handler = routes({ "GET /api/v1/hr/me/goals": problem(500, "COM-0500", "boom") });
     renderAt("/hr/my/goals");
-    expect((await findAlert()).textContent).toContain("boom (COM-0500)");
+    expect((await findAlert()).textContent).toContain("boom");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -289,6 +289,6 @@ describe("job skill requirements and gap report", () => {
   it("shows an error with a retry when the gap report fails", async () => {
     api.handler = routes({ ...base, [`GET /api/v1/hr/jobs/${JOB}/skill-gaps`]: problem(500, "COM-0500", "boom") });
     renderAt(`/hr/jobs/${JOB}`);
-    expect((await findAlert()).textContent).toContain("boom (COM-0500)");
+    expect((await findAlert()).textContent).toContain("boom");
   });
 });

@@ -138,7 +138,7 @@ describe("Pack runs", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [run] }));
     renderAt("/migration-factory");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("AX 2012 USMF")).toBeInTheDocument();
@@ -171,7 +171,7 @@ describe("Pack run detail", () => {
   it("shows a not-found run as an error", async () => {
     handler = () => json(404, { code: "MIG-0003", detail: "not found for this tenant" });
     renderAt(`/migration-factory/runs/${RUN}`);
-    expect(await screen.findByText(/not found for this tenant \(MIG-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/not found for this tenant/)).toBeInTheDocument();
   });
 });
 
@@ -233,7 +233,7 @@ describe("Start pack run", () => {
     fireEvent.change(screen.getByLabelText("Parties in master data"), { target: { value: "V001" } });
     fireEvent.change(screen.getByLabelText("Open items"), { target: { value: "OI-1,V001,2100,USD,1\nOI-2,V9,2100,USD,1" } });
     fireEvent.click(screen.getByRole("button", { name: "Run open_items" }));
-    expect(await screen.findByText(/MIG-1504 .* \(MIG-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/MIG-1504 .*/)).toBeInTheDocument();
   });
 });
 

@@ -5,6 +5,7 @@ import { describeProblem, listSkills, type Problem, type Skill } from "./api/cli
 import { dayOf } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Skill>[] = [
   { key: "code", header: "Code", mono: true },
@@ -58,7 +59,7 @@ export function SkillsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load skills" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -72,7 +73,7 @@ export function SkillsPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more skills" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {!state.error && !state.loading && cursor ? (

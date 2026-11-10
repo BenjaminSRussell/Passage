@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { createMachine, describeProblem, IDLE_THRESHOLD, newKey, type NewMachine, type Problem } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   machineId: string;
@@ -100,7 +101,7 @@ export function NewMachinePage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {field("machineId", "Machine code", "As the edge connector reports it, e.g. M-101.", false, { maxLength: 64 })}
-          {field("resourceId", "Resource id", "The work center resource (wave 23) this machine runs.")}
+          {field("resourceId", "Resource id", "The work center resource this machine runs.")}
           {field("siteId", "Site id", "Andon alerts can be filtered by site.", true)}
           {field("idealCycleSeconds", "Ideal cycle time (seconds)", "Seconds per unit at rated speed; sets OEE performance.", false, { inputMode: "decimal" })}
           {field(
@@ -113,7 +114,7 @@ export function NewMachinePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not register the machine" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

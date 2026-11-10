@@ -175,7 +175,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const outside = bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : "";
                 // BR-23.15: a booked job in time a capacity block now keeps from it is dotted, not outlined as a violation.
                 const breach = bar.blockBreach && !bar.outsideCapacity;
-                const blocked = breach ? ", inside a capacity block it does not match (BR-23.15)" : "";
+                const blocked = breach ? ", inside a capacity block it does not match" : "";
                 const dragging = drag?.bar.jobId === bar.jobId;
                 const shift = dragging && drag.trackPx > 0 ? (drag.dx / drag.trackPx) * VIEW_WIDTH : 0;
                 const late = bar.lateMinutes > 0 ? `, late by ${bar.lateMinutes} min` : "";

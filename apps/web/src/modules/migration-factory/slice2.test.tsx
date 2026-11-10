@@ -108,7 +108,7 @@ describe("Quarantine release", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Release record OI-BAD" }));
     fireEvent.change(screen.getByLabelText("Parties added to master data"), { target: { value: "V999, V998" } });
     fireEvent.click(screen.getByRole("button", { name: "Release record" }));
-    expect(await screen.findByText(/REFERENTIAL rule still fails: .* \(MIG-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/REFERENTIAL rule still fails: .*/)).toBeInTheDocument();
     expect(posts("/release")[0].body).toEqual({ parties: ["V999", "V998"], version: 1 });
   });
 
@@ -201,7 +201,7 @@ describe("Project beginning balances", () => {
   it("shows a project the run does not cover as an error", async () => {
     handler = () => json(404, { code: "MIG-0003", detail: "run does not cover project PRJ-X" });
     renderAt(`/migration-factory/runs/${RUN}/projects/PRJ-X`);
-    expect(await screen.findByText(/does not cover project PRJ-X \(MIG-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/does not cover project PRJ-X/)).toBeInTheDocument();
   });
 
   const values: ProjectRunValues = {
@@ -318,7 +318,7 @@ describe("Parallel runs", () => {
     unmount();
     handler = () => json(503, { code: "COM-0503", detail: "Service unavailable" });
     renderAt("/migration-factory/parallel-runs");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
   });
 
   it("explains a variance, then signs off after confirmation", async () => {
@@ -364,7 +364,7 @@ describe("Parallel runs", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Explain variance TB USMF|1100|USD" }));
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "timing" } });
     fireEvent.click(screen.getByRole("button", { name: "Save reason" }));
-    expect(await screen.findByText(/Another reviewer must explain and sign off this run\. \(MIG-0008\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Another reviewer must explain and sign off this run\./)).toBeInTheDocument();
   });
 
   const values: ParallelRunValues = {
@@ -403,7 +403,7 @@ describe("Parallel runs", () => {
     fireEvent.change(screen.getByLabelText("Passage tuples"), { target: { value: values.passage } });
     reply = json(409, { code: "MIG-0009", detail: "a parallel run for this period and source system already exists with different input" });
     fireEvent.click(screen.getByRole("button", { name: "Diff period" }));
-    expect(await screen.findByText(/open the existing run from the list\. \(MIG-0009\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/open the existing run from the list\./)).toBeInTheDocument();
     reply = json(201, review);
     fireEvent.click(screen.getByRole("button", { name: "Diff period" }));
     expect(await screen.findByRole("heading", { name: "Parallel run 2026-11" })).toBeInTheDocument();
@@ -449,6 +449,6 @@ describe("Legacy reference", () => {
     expect(calls[0].url.searchParams.get("company")).toBe("DEMF");
     handler = () => json(422, { code: "MIG-0001", detail: "table and id are required with system" });
     fireEvent.click(screen.getByRole("button", { name: "Look up" }));
-    expect(await screen.findByText(/table and id are required with system \(MIG-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/table and id are required with system/)).toBeInTheDocument();
   });
 });

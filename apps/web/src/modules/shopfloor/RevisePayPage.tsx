@@ -4,6 +4,7 @@ import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Inpu
 import { describeProblem, MAX_PAY_RANGE_DAYS, newKey, revisePay, type PayRevision, type Problem, type RevisedDay } from "./api/client";
 import { addDays, browserZone, daysBetween, describeLines, formatPayTotal, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface Values {
   from: string;
@@ -110,7 +111,7 @@ export function RevisePayPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not revise the pay" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

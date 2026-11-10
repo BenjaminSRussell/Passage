@@ -9,6 +9,7 @@ import { describeRoyaltyProduct, describeRoyaltyTiers, ROYALTY_BASIS_LABELS } fr
 import styles from "./pages.module.css";
 import { PERIOD_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One royalty agreement (FR-26.17): its terms, accruals, period close with the minimum royalty, claims, and closing it. */
 export function RoyaltyDetailPage() {
@@ -24,7 +25,7 @@ export function RoyaltyDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Royalty agreement" />
         <Alert tone="danger" title="Could not load the agreement" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -74,7 +75,7 @@ export function RoyaltyDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not close the agreement" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {changed && changed.status === "CLOSED" ? (

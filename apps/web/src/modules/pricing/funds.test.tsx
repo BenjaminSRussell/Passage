@@ -63,7 +63,7 @@ describe("Trade funds", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view or pricing.fund.maintain" });
     renderAt("/pricing/funds");
-    expect(await findAlert()).toHaveTextContent("(AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("AUTH-0003");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -152,7 +152,7 @@ describe("Trade fund detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Record usage" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Over the period budget");
-    expect(alert).toHaveTextContent("budget exceeded by 100.00 (PRC-0012)");
+    expect(alert).toHaveTextContent("budget exceeded by 100.00");
   });
 
   it("revises the budget at the loaded version", async () => {
@@ -199,11 +199,11 @@ describe("Trade fund detail", () => {
     const first = renderAt(`/pricing/funds/${FUND}`);
     await screen.findByRole("heading", { name: "Spring TPM" });
     fireEvent.click(screen.getByRole("button", { name: "Close fund" }));
-    expect(await findAlert()).toHaveTextContent("fund version does not match (conflict_version)");
+    expect(await findAlert()).toHaveTextContent("fund version does not match");
     first.unmount();
     server.handler = () => json(404, { code: "PRC-0039", detail: `no trade fund ${FUND}` });
     renderAt(`/pricing/funds/${FUND}`);
-    expect(await findAlert()).toHaveTextContent("(PRC-0039)");
+    expect(await findAlert()).toHaveTextContent("PRC-0039");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { describeProblem, listExpiringCertifications, type ExpiringCertification
 import { dash, DATE, todayIso } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The reminder lead times of BR-42.8, widest first. */
 const WINDOWS = ["60", "30", "7"];
@@ -97,7 +98,7 @@ export function ExpiringCertificationsPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load expiring certifications" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -111,7 +112,7 @@ export function ExpiringCertificationsPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more certificates" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {!state.error && !state.loading && cursor ? (

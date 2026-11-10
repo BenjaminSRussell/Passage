@@ -128,7 +128,7 @@ describe("outbound mappings list", () => {
   it("shows a failed load and loads again on retry", async () => {
     routes((url) => (url.pathname.endsWith("/outbound-mappings") ? json(500, { code: "COM-0500", detail: "internal error" }) : undefined));
     renderAt("/migration/outbound");
-    expect(await screen.findByText(/internal error \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/internal error/)).toBeInTheDocument();
     routes();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Outbound mappings" })).toBeInTheDocument();
@@ -172,7 +172,7 @@ describe("new outbound mapping", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Orders" } });
     fireEvent.change(screen.getByLabelText("Source system"), { target: { value: "ax2012" } });
     fireEvent.click(screen.getByRole("button", { name: "Create mapping" }));
-    expect(await screen.findByText(/already exists \(MIG-OUTBOUND-NAME-EXISTS\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already exists/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Sample event"), { target: { value: "{nope" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview body" }));
     expect(await screen.findByText(/sample event is not valid JSON/)).toBeInTheDocument();
@@ -235,7 +235,7 @@ describe("outbound mapping detail", () => {
     renderAt(`/migration/outbound/${ID}`);
     await screen.findByRole("heading", { name: "Orders to Acme" });
     fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
-    expect(await screen.findByText(/current version is 3 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/current version is 3/)).toBeInTheDocument();
   });
 
   it("is read-only without the write duty and reports a missing mapping", async () => {
@@ -247,6 +247,6 @@ describe("outbound mapping detail", () => {
     first.unmount();
     routes((url) => (url.pathname.includes("/outbound-mappings/") ? json(404, { code: "MIG-OUTBOUND-NOT-FOUND", detail: "outbound mapping not found" }) : undefined));
     renderAt(`/migration/outbound/${ID}`);
-    expect(await screen.findByText(/outbound mapping not found \(MIG-OUTBOUND-NOT-FOUND\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/outbound mapping not found/)).toBeInTheDocument();
   });
 });

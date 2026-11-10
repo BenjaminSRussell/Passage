@@ -36,6 +36,7 @@ import { FirmCard, isFirmable, rangeIds, useShiftHeld } from "./Firming";
 import { PLAN_CODE, useLoad, usePlanCode, withPlan, type LoadError } from "./hooks";
 import { MaintainOrderCard } from "./MaintainOrder";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export { DEFAULT_PLAN_CODE } from "./hooks";
 
@@ -109,7 +110,7 @@ export function summarize(orders: PlannedOrder[], messages: Message[]) {
 export function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   return (
     <Alert tone="danger" title={error ? `Could not load ${what}` : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }

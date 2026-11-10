@@ -114,7 +114,7 @@ describe("dividends page", () => {
     renderAt("/consolidation/dividends");
     fireEvent.click(screen.getByRole("button", { name: "Preview E6" }));
     await waitFor(() => expect(screen.getByText("The dividend was not eliminated")).toBeInTheDocument());
-    expect(screen.getByText("The dividend was not eliminated").closest("[role=alert]")).toHaveTextContent("rule E6 unbalanced by 1.00 (CNS-0903)");
+    expect(screen.getByText("The dividend was not eliminated").closest("[role=alert]")).toHaveTextContent("rule E6 unbalanced by 1.00");
     expect(screen.queryByRole("table", { name: "E6 entries" })).not.toBeInTheDocument();
   });
 });
@@ -187,7 +187,7 @@ describe("reclassification page", () => {
     renderAt("/consolidation/reclassification");
     fireEvent.click(screen.getByRole("button", { name: "Run dry run" }));
     await waitFor(() => expect(screen.getByText("The dry run failed")).toBeInTheDocument());
-    expect(screen.getByText("The dry run failed").closest("[role=alert]")).toHaveTextContent("(COM-0001)");
+    expect(screen.getByText("The dry run failed").closest("[role=alert]")).toHaveTextContent("COM-0001");
   });
 });
 
@@ -228,7 +228,7 @@ describe("top-side group journals page", () => {
       ],
     });
     expect(screen.getByRole("list", { name: "Journal check" })).toHaveTextContent("Approval Required");
-    expect(screen.getByText("Approval required before posting").parentElement).toHaveTextContent("(CNS-0909)");
+    expect(screen.getByText("Approval required before posting").parentElement).toHaveTextContent("CNS-0909");
     expect(bodyRows(screen.getByRole("table", { name: "Posting periods" })).map(cells)).toEqual([["2026-11"], ["2026-12"], ["2027-01"]]);
     expect(pageViolations(container)).toEqual([]);
   });
@@ -239,7 +239,7 @@ describe("top-side group journals page", () => {
     fireEvent.change(screen.getByLabelText("Credit", { selector: "#gj-line-1-credit" }), { target: { value: "119000.00" } });
     fireEvent.click(screen.getByRole("button", { name: "Check journal" }));
     await waitFor(() => expect(screen.getByText("The journal was not accepted")).toBeInTheDocument());
-    expect(screen.getByText("The journal was not accepted").closest("[role=alert]")).toHaveTextContent("(CNS-0903)");
+    expect(screen.getByText("The journal was not accepted").closest("[role=alert]")).toHaveTextContent("CNS-0903");
     expect(screen.queryByRole("table", { name: "Posting periods" })).not.toBeInTheDocument();
   });
 

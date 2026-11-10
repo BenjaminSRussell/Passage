@@ -7,6 +7,7 @@ import { formatDateTime } from "./domain";
 import styles from "./pages.module.css";
 import { DUTY_PROJECT_WRITE } from "./ProjectPages";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Bounds of mig.recurring.min_interval_min; the service enforces the same ones. */
 export const MIN_INTERVAL_FLOOR = 15;
@@ -31,7 +32,7 @@ export function SettingsPage() {
       <div className={styles.stack}>
         <PageHeader title="Migration settings" />
         <Alert tone="danger" title="Could not load the settings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -99,7 +100,7 @@ function IntervalCard({ settings, canEdit, onSaved, onStale }: { settings: Migra
                 live="alert"
                 action={failure.code === "MIG-VERSION-CONFLICT" ? <Button size="sm" onClick={() => { setText(null); onStale(); }}>Reload</Button> : undefined}
               >
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

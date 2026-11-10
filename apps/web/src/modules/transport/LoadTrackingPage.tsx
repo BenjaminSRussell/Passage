@@ -4,6 +4,7 @@ import { getLoadTracking, type StopState, type TrackingEvent } from "./api/clien
 import { dash, formatDateTime, stateTone, statusLabel, trackingCodeLabels } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const stopColumns: DataTableColumn<StopState>[] = [
   { key: "stopNo", header: "Stop", align: "end" },
@@ -56,7 +57,7 @@ export function LoadTrackingPage() {
       <div className={styles.stack}>
         {header}
         <Alert tone="danger" title="Could not load the timeline" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/tracking">Back to tracking</Link>
       </div>

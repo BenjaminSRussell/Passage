@@ -5,6 +5,7 @@ import { listExceptions, type ExceptionStatus, type WarehouseException } from ".
 import { EXCEPTION_KIND_LABELS, formatDateTime, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export function ExceptionStatusBadge({ status }: { status: ExceptionStatus }) {
   return status === "OPEN" ? <Badge tone="warning">Open</Badge> : <Badge tone="neutral">Resolved</Badge>;
@@ -51,7 +52,7 @@ export function ExceptionsPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load the exceptions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

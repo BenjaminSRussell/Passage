@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Textarea, type BadgeTone, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, simulateDirectives, type Compliance, type Direction, type Problem, type SimulateRequest, type SimulateResponse, type TraceStep } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DECIMAL = /^\d+(\.\d+)?$/;
@@ -398,7 +399,7 @@ export function DirectiveSimulatorPage({ initial = exampleDraft }: { initial?: S
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The simulation failed" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

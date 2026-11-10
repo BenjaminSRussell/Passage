@@ -34,7 +34,7 @@ function ResetForm({ id, hasDifference, onReset }: { id: string; hasDifference: 
   const [reasonCode, setReasonCode] = useState("");
   const [comment, setComment] = useState("");
   const [errors, setErrors] = useState<{ reasonCode?: string; comment?: string }>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState(false);
   const attempt = useRef<{ signature: string; key: string }>({ signature: "", key: "" });
 

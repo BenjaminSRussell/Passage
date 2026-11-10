@@ -147,7 +147,7 @@ describe("skill catalog", () => {
 
     handler = (url) => (url.pathname === "/api/v1/hr/skills" ? json(403, { code: "AUTH-0003", detail: "missing duty hr.worker.inquire" }) : undefined);
     renderAt("/hr/skills");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.worker.inquire (AUTH-0003)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.worker.inquire"));
     const before = gets("/api/v1/hr/skills").length;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(gets("/api/v1/hr/skills").length).toBeGreaterThan(before));
@@ -323,7 +323,7 @@ describe("worker skills and certifications", () => {
       url.pathname === `/api/v1/hr/workers/${ADA}/skills` && init.method !== "POST" ? json(503, { code: "COM-0500", detail: "HR is down" }) : undefined,
     );
     renderAt(`/hr/workers/${ADA}`);
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("HR is down (COM-0500)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("HR is down"));
     expect(screen.getByText("Could not load the skill profile")).toBeInTheDocument();
   });
 });
@@ -420,7 +420,7 @@ describe("skill search", () => {
 
     handler = (url) => (url.pathname === "/api/v1/hr/skills/search" ? json(403, { code: "AUTH-0003", detail: "missing duty hr.org.inquire" }) : undefined);
     renderAt("/hr/skills/search?skills=WELDING&asOf=2026-06-01");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.org.inquire (AUTH-0003)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.org.inquire"));
   });
 });
 
@@ -465,6 +465,6 @@ describe("expiring certifications", () => {
 
     handler = (url) => (url.pathname === "/api/v1/hr/certifications/expiring" ? json(503, { code: "COM-0500", detail: "HR is down" }) : undefined);
     renderAt("/hr/certifications/expiring");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("HR is down (COM-0500)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("HR is down"));
   });
 });

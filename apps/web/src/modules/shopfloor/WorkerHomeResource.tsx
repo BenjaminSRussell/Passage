@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Select, Skeleton } from "../../shell/ui
 import { assignWorkerResource, describeProblem, listJobs, listMachines, newKey, type Job, type Machine, type Problem, type Worker } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const NONE = "";
 
@@ -51,7 +52,7 @@ export function WorkerHomeResource({ worker, onSaved }: { worker: Worker; onSave
     return (
       <Card title="Home resource">
         <Alert tone="danger" title="Could not load the resources" live="alert" action={<Button size="sm" onClick={machines.reload}>Try again</Button>}>
-          {machines.error.message} ({machines.error.code})
+          <ProblemMessage problem={machines.error} />
         </Alert>
       </Card>
     );

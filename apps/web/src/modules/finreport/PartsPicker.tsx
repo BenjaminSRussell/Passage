@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Card, FormField, Select } from "../../shell/ui";
 import { describeProblem, getRowSet, listColumnSets, listColumnTemplates, listRowSets, type ColumnSet, type DefinitionColumn, type DefinitionRow, type Problem, type RowSet } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Parts {
   rowSets: RowSet[];
@@ -37,7 +38,7 @@ export function PartsPicker({ onRows, onColumns }: { onRows: (rows: DefinitionRo
   if (error) {
     return (
       <Alert tone="warning" title="Row sets and column sets could not be loaded" live="alert" action={<Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>}>
-        {error.message} ({error.code})
+        <ProblemMessage problem={error} />
       </Alert>
     );
   }

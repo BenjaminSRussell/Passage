@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, EmptyState, Skeleton } from "../../shel
 import { listResources, type Resource } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Props {
   /** Why the form needs a resource, shown when there is none. */
@@ -17,7 +18,7 @@ export function ResourceGate({ need, children }: Props) {
   if (resources.error) {
     return (
       <Alert tone="danger" title="Could not load resources" live="alert" action={<Button size="sm" onClick={resources.reload}>Try again</Button>}>
-        {resources.error.message} ({resources.error.code})
+        <ProblemMessage problem={resources.error} />
       </Alert>
     );
   }

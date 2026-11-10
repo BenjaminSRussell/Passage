@@ -4,6 +4,7 @@ import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeade
 import { describeProblem, lookupXref, type Problem, type Xref } from "./api/client";
 import { formatDateTime, SOURCE_LABELS, SOURCE_SYSTEMS, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const TABLES = ["open_items", "open_items.receivable", "open_items.payable", "gl_balances", "onhand", "open_orders.sales", "open_orders.purchase", "project_wip", "bank_balances"] as const;
 
@@ -95,7 +96,7 @@ export function XrefLookupPage() {
       </Card>
       {failure ? (
         <Alert tone="danger" title="Could not look up the legacy id" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {busy || (results && results.length > 0) ? (

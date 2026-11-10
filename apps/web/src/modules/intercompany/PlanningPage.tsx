@@ -5,6 +5,7 @@ import { isCount, isDate, isPositive } from "./format";
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type MemberKey = "entityId" | "sequence";
 type EdgeKey = "buyer" | "supplier" | "leadTimeDays";
@@ -185,7 +186,7 @@ export function PlanningPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The planning group was not sequenced" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -225,7 +226,7 @@ export function PlanningPage() {
             icon="workflow"
             headingLevel={3}
             title="No run order yet"
-            description="The form holds acceptance example AC-40.16. Sequence it, or enter your own planning group."
+            description="The form is filled in with an example. Sequence it, or enter your own planning group."
           />
         </Card>
       )}

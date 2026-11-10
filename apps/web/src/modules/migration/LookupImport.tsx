@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Select, Textarea } from "../../shell/ui
 import { describeProblem, importLookupEntries, type LookupImportMode, type LookupTable, type Problem } from "./api/client";
 import { checkImportText, IMPORT_HINTS, importOutcome, MAX_IMPORT_BYTES } from "./lookupDomain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Load entries from a spreadsheet export into the next version of the table. */
 export function LookupImportCard({ table, current, onImported, onReload }: { table: LookupTable; current: number; onImported: (table: LookupTable) => void; onReload: () => void }) {
@@ -84,7 +85,7 @@ export function LookupImportCard({ table, current, onImported, onReload }: { tab
                 ) : undefined
               }
             >
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
