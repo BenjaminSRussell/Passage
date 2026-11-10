@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -183,9 +184,9 @@ export function NewBatchPage() {
       <PageHeader title="Register batch" description="Creates the quality record of a batch. Attributes and disposition are recorded on the batch afterwards." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="batch-item" label="Item id" error={errors.itemId}>
+          <FormField id="batch-item" label="Item" error={errors.itemId}>
             {(c) => (
-              <Input {...c} value={itemId} onChange={(e) => { setItemId(e.target.value); key.current = newKey(); }} invalid={Boolean(errors.itemId)} />
+              <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => { setItemId(e.target.value); key.current = newKey(); }} invalid={Boolean(errors.itemId)} />
             )}
           </FormField>
           <FormField id="batch-number" label="Batch number" error={errors.batchNumber}>
@@ -627,8 +628,8 @@ export function AttributeDefinitionsPage() {
     <div className={styles.stack}>
       <PageHeader title="Batch attribute definitions" description="The attributes an item's batches carry, with limits for numbers and options for enums." />
       <div className={styles.toolbar}>
-        <FormField id="definition-filter" label="Item id" hint="Leave empty for every item." error={filterValid ? undefined : "Enter the item id as a UUID."}>
-          {(c) => <Input {...c} value={filter} onChange={(e) => setFilter(e.target.value)} invalid={!filterValid} />}
+        <FormField id="definition-filter" label="Item" hint="Leave empty for every item." error={filterValid ? undefined : "Enter the item id as a UUID."}>
+          {(c) => <EntityLookup entity="product" {...c} value={filter} onChange={(e) => setFilter(e.target.value)} invalid={!filterValid} />}
         </FormField>
       </div>
       {state.error ? (
@@ -645,8 +646,8 @@ export function AttributeDefinitionsPage() {
       )}
       <Card title="Define an attribute">
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="def-item" label="Item id" error={errors.itemId}>
-            {(c) => <Input {...c} value={form.itemId} onChange={(e) => edit({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
+          <FormField id="def-item" label="Item" error={errors.itemId}>
+            {(c) => <EntityLookup entity="product" {...c} value={form.itemId} onChange={(e) => edit({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
           </FormField>
           <FormField id="def-name" label="Name" error={errors.name}>
             {(c) => <Input {...c} value={form.name} onChange={(e) => edit({ name: e.target.value })} invalid={Boolean(errors.name)} />}

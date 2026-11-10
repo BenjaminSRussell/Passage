@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Button, DataTable, FormField, Input, PageHeader, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, DataTable, FormField, PageHeader, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { getParty, type Party } from "./api/client";
 import { isUuid, partyTypeLabel } from "./format";
 import styles from "./pages.module.css";
@@ -61,13 +62,11 @@ export function SearchPage() {
         description="Look up an organization or person by id, then open it to see vendor roles. Name search is not on this API yet."
       />
       <form className={styles.toolbar} onSubmit={search} role="search" aria-label="Find a party">
-        <FormField id="party-search" label="Party id" hint="The party's UUID." error={error || undefined}>
+        <FormField id="party-search" label="Party" hint="The party's UUID." error={error || undefined}>
           {(control) => (
-            <Input
+            <EntityLookup entity="party"
               {...control}
               value={draft}
-              className={styles.mono}
-              maxLength={36}
               placeholder="00000000-0000-4000-8000-000000000000"
               onChange={(event) => setDraft(event.target.value)}
               invalid={Boolean(error)}

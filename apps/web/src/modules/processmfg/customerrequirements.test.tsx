@@ -96,18 +96,18 @@ describe("customer batch requirement list (slice 14)", () => {
     expect(within(table).getByText("potency 40 to 60")).toBeInTheDocument();
     expect(within(table).getByText("Retired")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Define requirement" })).toHaveAttribute("href", "/processmfg/customer-requirements/new");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("itemId") === ITEM)).toBe(true));
     await waitFor(() => expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]));
   });
 
-  it("shows the empty state, hides the define link without the duty and flags a bad filter", async () => {
+  it("shows the empty state, hides the define link without the duty and ignores a typed item that is not an id", async () => {
     handler = () => ({ status: 200, body: { items: [] } });
     renderAt("/processmfg/customer-requirements", ["production.batch-order.read"]);
     expect(await screen.findByText("No customer batch requirements yet")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Define requirement" })).toBeNull();
-    fill("Item id", "nope");
-    expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
+    fill("Item", "nope");
+    expect(screen.queryByText("Enter the item id as a UUID.")).toBeNull();
     expect(calls.every((c) => c.url.searchParams.get("itemId") !== "nope")).toBe(true);
   });
 
@@ -127,7 +127,7 @@ describe("define a customer batch requirement (slice 14)", () => {
       return undefined;
     };
     renderAt("/processmfg/customer-requirements/new");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fill("Customer id", CUSTOMER);
     fill("Sellable days", "60");
     fill("Attribute", "potency");
@@ -158,7 +158,7 @@ describe("define a customer batch requirement (slice 14)", () => {
     expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
     expect(screen.getByText("Enter the customer id as a UUID.")).toBeInTheDocument();
     expect(screen.getByText("Set the sellable days, an attribute range or the same-batch flag.")).toBeInTheDocument();
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fill("Customer id", CUSTOMER);
     fill("Sellable days", "4000");
     fill("Attribute", "potency");
@@ -173,7 +173,7 @@ describe("define a customer batch requirement (slice 14)", () => {
   it("shows a refusal from the service", async () => {
     handler = () => ({ status: 400, body: { code: "COM-0001", detail: "request failed validation" } });
     renderAt("/processmfg/customer-requirements/new");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fill("Customer id", CUSTOMER);
     fill("Sellable days", "30");
     fireEvent.click(screen.getByRole("button", { name: "Define requirement" }));
@@ -252,9 +252,9 @@ describe("check stored batches against requirements (slice 14, AC-24.14)", () =>
       return undefined;
     };
     const { container } = renderAt("/processmfg/requirement-check-stored");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     await findTable({ name: "Batches of the item" });
-    fill("Customer id", CUSTOMER);
+    fill("Customer", CUSTOMER);
     fill("Ship date", "2027-01-01");
     fill("Line quantity", "80");
     fill("On hand of batch L-45", "50");
@@ -289,7 +289,7 @@ describe("check stored batches against requirements (slice 14, AC-24.14)", () =>
     expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
     expect(screen.getByText("Enter the ship date as yyyy-mm-dd.")).toBeInTheDocument();
     expect(screen.getByText("Enter the line quantity above zero.")).toBeInTheDocument();
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     expect(await screen.findByText("No batches registered for this item")).toBeInTheDocument();
     fill("Ship date", "2027-01-01");
     fill("Line quantity", "1");
@@ -306,7 +306,7 @@ describe("check stored batches against requirements (slice 14, AC-24.14)", () =>
           ? { status: 200, body: { items: [batch(NEW, "L-90")] } }
           : undefined;
     renderAt("/processmfg/requirement-check-stored");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     await findTable({ name: "Batches of the item" });
     fill("Ship date", "2027-01-01");
     fill("Line quantity", "150");
@@ -318,7 +318,7 @@ describe("check stored batches against requirements (slice 14, AC-24.14)", () =>
   it("shows a load failure with a retry", async () => {
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/requirement-check-stored");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });

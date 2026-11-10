@@ -178,11 +178,11 @@ describe("item compliance", () => {
   it("refuses a malformed item id, then opens the item", async () => {
     handler = () => json(404, { code: "QM-0164", detail: "no composition is recorded for this item" });
     renderAt("/quality/compliance/items");
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: "widget" } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: "widget" } });
     fireEvent.click(screen.getByRole("button", { name: "Open item" }));
     expect(await screen.findByText("Enter the item id (a UUID).")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     fireEvent.click(screen.getByRole("button", { name: "Open item" }));
     expect(await screen.findByText("No composition declared yet")).toBeInTheDocument();
   });
@@ -354,7 +354,7 @@ describe("SPC charts", () => {
     };
     const { container } = renderAt("/quality/spc");
     await screen.findByRole("option", { name: "STAB-LT v1" });
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Test group"), { target: { value: GROUP } });
     fireEvent.change(screen.getByLabelText("Test"), { target: { value: TEST } });
     fireEvent.click(screen.getByRole("button", { name: "Show chart" }));

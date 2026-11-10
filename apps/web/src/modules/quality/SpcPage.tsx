@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { getSpc, listTestGroups, type SpcLimits, type SpcResult, type Violation } from "./api/client";
@@ -193,8 +194,8 @@ export function SpcPage() {
       />
       <Card>
         <form className={styles.toolbar} onSubmit={show} noValidate aria-label="Choose a chart">
-          <FormField id="spc-item" label="Item id" error={errors.item}>
-            {(control) => <Input {...control} className={styles.mono} value={item} invalid={Boolean(errors.item)} onChange={(event) => setItem(event.target.value)} />}
+          <FormField id="spc-item" label="Item" error={errors.item}>
+            {(control) => <EntityLookup entity="product" {...control} value={item} invalid={Boolean(errors.item)} onChange={(event) => setItem(event.target.value)} />}
           </FormField>
           <FormField id="spc-group" label="Test group" optional hint={groups.error ? "Test groups could not be loaded." : undefined}>
             {(control) => (

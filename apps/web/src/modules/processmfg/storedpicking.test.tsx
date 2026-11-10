@@ -89,7 +89,7 @@ describe("pick from stored batches (slice 12)", () => {
     };
     const { container } = renderAt("/processmfg/picking-stored");
     expect(screen.queryByRole("table", { name: "Batches of the item" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     const listed = await findTable({ name: "Batches of the item" });
     expect(within(listed).getByText("L-HOLD")).toBeInTheDocument();
     expect(calls[0].url.searchParams.get("itemId")).toBe(ITEM);
@@ -118,7 +118,7 @@ describe("pick from stored batches (slice 12)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Propose batches" }));
     expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
     expect(screen.getByText("Enter a quantity with at most 6 decimals.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     expect(await screen.findByText("No batches registered for this item")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Line quantity"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Propose batches" }));
@@ -129,7 +129,7 @@ describe("pick from stored batches (slice 12)", () => {
   it("shows a load failure with a retry and a refusal from the service", async () => {
     handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/processmfg/picking-stored");
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
     expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
     handler = (url) =>
       url.pathname === "/api/v1/production/batches"

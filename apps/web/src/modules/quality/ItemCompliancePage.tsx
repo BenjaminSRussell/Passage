@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import {
@@ -48,8 +49,8 @@ export function ItemLookupPage() {
       />
       <Card>
         <form className={styles.toolbar} onSubmit={open} noValidate aria-label="Open item">
-          <FormField id="compliance-item" label="Item id" error={error ?? undefined}>
-            {(control) => <Input {...control} className={styles.mono} value={itemId} invalid={Boolean(error)} onChange={(event) => setItemId(event.target.value)} />}
+          <FormField id="compliance-item" label="Item" error={error ?? undefined}>
+            {(control) => <EntityLookup entity="product" {...control} value={itemId} invalid={Boolean(error)} onChange={(event) => setItemId(event.target.value)} />}
           </FormField>
           <Button type="submit" variant="primary">
             Open item

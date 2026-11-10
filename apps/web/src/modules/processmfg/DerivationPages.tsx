@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { holdsDuty } from "../../shell/dutyGate";
@@ -200,8 +201,8 @@ export function DerivationMonitorPage() {
         <FormField id="mon-batch" label="Receiver batch id" error={batch !== "" && !UUID.test(batch) ? "Enter the batch id as a UUID." : undefined}>
           {(c) => <Input {...c} value={batchId} onChange={(e) => setBatchId(e.target.value)} invalid={batch !== "" && !UUID.test(batch)} />}
         </FormField>
-        <FormField id="mon-item" label="Item id" error={item !== "" && !UUID.test(item) ? "Enter the item id as a UUID." : undefined}>
-          {(c) => <Input {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={item !== "" && !UUID.test(item)} />}
+        <FormField id="mon-item" label="Item" error={item !== "" && !UUID.test(item) ? "Enter the item id as a UUID." : undefined}>
+          {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={item !== "" && !UUID.test(item)} />}
         </FormField>
         <div className={styles.lineChecks}>
           <label htmlFor="mon-missing">

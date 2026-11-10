@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -219,8 +220,8 @@ export function NewFlowPage() {
             <FormField id="flow-stream" label="Value stream id" hint="The wave-6 operating unit of type value stream." error={errors.valueStreamId}>
               {(c) => <Input {...c} className={styles.mono} value={values.valueStreamId} onChange={(e) => update({ valueStreamId: e.target.value })} invalid={Boolean(errors.valueStreamId)} />}
             </FormField>
-            <FormField id="flow-site" label="Site id" error={errors.siteId}>
-              {(c) => <Input {...c} className={styles.mono} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
+            <FormField id="flow-site" label="Site" error={errors.siteId}>
+              {(c) => <EntityLookup entity="site" {...c} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
             </FormField>
             <FormField id="flow-takt" label="Takt time (seconds)" optional error={errors.taktTimeS}>
               {(c) => <Input {...c} inputMode="numeric" value={values.taktTimeS} onChange={(e) => update({ taktTimeS: e.target.value })} invalid={Boolean(errors.taktTimeS)} />}

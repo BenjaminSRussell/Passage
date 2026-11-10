@@ -323,18 +323,18 @@ describe("batch record profiles (slice 15)", () => {
     fireEvent.click(within(table).getByRole("button", { name: "Retire EBR-1" }));
     await waitFor(() => expect(within(screen.getByRole("table", { name: "Batch record profiles" })).getByText("Retired")).toBeInTheDocument());
     expect(calls.find((c) => c.method === "POST")!.body).toEqual({ version: 1 });
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("itemId") === ITEM)).toBe(true));
     await waitFor(() => expect(checkAxeAA(container).filter((v) => !shellRules.has(v.id))).toEqual([]));
   });
 
-  it("shows the empty state, flags a bad filter and hides the actions without the duty", async () => {
+  it("shows the empty state, ignores a typed item that is not an id and hides the actions without the duty", async () => {
     handler = () => ({ status: 200, body: { items: [] } });
     renderAt("/processmfg/batch-record-profiles", [READ]);
     expect(await screen.findByText("No batch record profiles yet")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Define profile" })).toBeNull();
-    fill("Item id", "nope");
-    expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
+    fill("Item", "nope");
+    expect(screen.queryByText("Enter the item id as a UUID.")).toBeNull();
     expect(calls.every((c) => c.url.searchParams.get("itemId") !== "nope")).toBe(true);
   });
 
@@ -357,7 +357,7 @@ describe("batch record profiles (slice 15)", () => {
     expect(screen.getByText("Enter the item id as a UUID.")).toBeInTheDocument();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
     fill("Code", "EBR-1");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fireEvent.click(screen.getByLabelText(/needs the approved record/));
     fireEvent.click(screen.getByRole("button", { name: "Define profile" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
@@ -371,7 +371,7 @@ describe("batch record profiles (slice 15)", () => {
     handler = () => ({ status: 409, body: { code: "PMF-0116", detail: "item already has an active batch record profile" } });
     const first = renderAt("/processmfg/batch-record-profiles/new");
     fill("Code", "EBR-1");
-    fill("Item id", ITEM);
+    fill("Item", ITEM);
     fireEvent.click(screen.getByRole("button", { name: "Define profile" }));
     expect(await findAlert()).toHaveTextContent("PMF-0116");
     first.unmount();

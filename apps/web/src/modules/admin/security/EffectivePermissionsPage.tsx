@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { EntityLookup } from "../../../shell/lookup/EntityLookup";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../../shell/ui";
@@ -103,13 +104,13 @@ export function EffectivePermissionsPage() {
           </FormField>
           <FormField
             id="ep-entity"
-            label="Legal entity id"
+            label="Legal entity"
             optional
             hint="Include assignments for this legal entity as well as tenant-wide ones."
             error={errors.legalEntityId}
           >
             {(c) => (
-              <Input {...c} value={values.legalEntityId} onChange={(e) => change({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} autoComplete="off" />
+              <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => change({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
             )}
           </FormField>
           <div className={styles.formActions}>

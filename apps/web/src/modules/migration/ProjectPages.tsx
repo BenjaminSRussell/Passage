@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -241,18 +242,18 @@ export function NewProjectPage() {
                   </Select>
                 )}
               </FormField>
-              <FormField id="project-migrate-target-le" label="Target legal entity id" optional error={errors.targetLegalEntityId} hint="The legal entity the migrated data lands in.">
-                {(control) => <Input {...control} value={form.targetLegalEntityId} invalid={Boolean(errors.targetLegalEntityId)} onChange={(event) => change("targetLegalEntityId", event.target.value)} />}
+              <FormField id="project-migrate-target-le" label="Target legal entity" optional error={errors.targetLegalEntityId} hint="The legal entity the migrated data lands in.">
+                {(control) => <EntityLookup entity="legalEntity" prefill={false} {...control} value={form.targetLegalEntityId} invalid={Boolean(errors.targetLegalEntityId)} onChange={(event) => change("targetLegalEntityId", event.target.value)} />}
               </FormField>
             </>
           ) : null}
           {form.projectType === "copy" ? (
             <>
-              <FormField id="project-source-le" label="Source legal entity id" error={errors.sourceLegalEntityId}>
-                {(control) => <Input {...control} value={form.sourceLegalEntityId} invalid={Boolean(errors.sourceLegalEntityId)} onChange={(event) => change("sourceLegalEntityId", event.target.value)} />}
+              <FormField id="project-source-le" label="Source legal entity" error={errors.sourceLegalEntityId}>
+                {(control) => <EntityLookup entity="legalEntity" prefill={false} {...control} value={form.sourceLegalEntityId} invalid={Boolean(errors.sourceLegalEntityId)} onChange={(event) => change("sourceLegalEntityId", event.target.value)} />}
               </FormField>
-              <FormField id="project-target-le" label="Target legal entity id" error={errors.targetLegalEntityId}>
-                {(control) => <Input {...control} value={form.targetLegalEntityId} invalid={Boolean(errors.targetLegalEntityId)} onChange={(event) => change("targetLegalEntityId", event.target.value)} />}
+              <FormField id="project-target-le" label="Target legal entity" error={errors.targetLegalEntityId}>
+                {(control) => <EntityLookup entity="legalEntity" prefill={false} {...control} value={form.targetLegalEntityId} invalid={Boolean(errors.targetLegalEntityId)} onChange={(event) => change("targetLegalEntityId", event.target.value)} />}
               </FormField>
             </>
           ) : null}
