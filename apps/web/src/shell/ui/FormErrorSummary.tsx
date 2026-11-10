@@ -8,6 +8,28 @@ export interface FormErrorItem {
   message: string;
 }
 
+export interface FormFieldTarget {
+  id?: string;
+  label: string;
+}
+
+export function summaryItems(
+  errors: Record<string, string>,
+  fields: Record<string, FormFieldTarget>,
+  dynamic?: (key: string) => FormFieldTarget | undefined,
+): FormErrorItem[] {
+  const declared = Object.keys(fields)
+    .filter((key) => errors[key])
+    .map((key) => ({ fieldId: fields[key].id, label: fields[key].label, message: errors[key] }));
+  const computed = Object.keys(errors)
+    .filter((key) => !(key in fields))
+    .flatMap((key) => {
+      const target = dynamic?.(key);
+      return target ? [{ fieldId: target.id, label: target.label, message: errors[key] }] : [];
+    });
+  return [...declared, ...computed];
+}
+
 export interface FormErrorSummaryProps {
   items: FormErrorItem[];
   attempt: number;
@@ -26,17 +48,21 @@ export function focusField(fieldId: string): boolean {
 }
 
 export function FormErrorSummary({ items, attempt }: FormErrorSummaryProps) {
-  const first = items[0]?.fieldId;
+  const first = items.find((item) => item.fieldId)?.fieldId;
+  const has = items.length > 0;
   const focused = useRef(0);
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (attempt > focused.current && first) {
+    if (attempt > focused.current && has) {
       focused.current = attempt;
-      focusField(first);
+      if (!first || !focusField(first)) {
+        box.current?.focus();
+      }
     }
-  }, [attempt, first]);
+  }, [attempt, first, has]);
 
   return (
-    <div className={styles.summary} role="group" aria-label={copy.forms.errorSummaryLabel} hidden={items.length === 0}>
+    <div ref={box} tabIndex={-1} className={styles.summary} role="alert" aria-label={copy.forms.errorSummaryLabel} hidden={!has}>
       <p className={styles.title}>{copy.forms.errorSummaryTitle(items.length)}</p>
       <ul className={styles.list}>
         {items.map((item) => (

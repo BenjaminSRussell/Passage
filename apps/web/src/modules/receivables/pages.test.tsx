@@ -196,6 +196,22 @@ describe("Record payment", () => {
     expect(post.body).toMatchObject({ legalEntityId: LE, customerId: CUST, amount: "980.00", source: "MANUAL", remittance: [{ reference: "INV-30001", amount: "0" }] });
   });
 
+  it("is not dirty because the working legal entity was filled in, and is dirty after an edit", async () => {
+    window.localStorage.setItem("passage.workContext.tester", JSON.stringify({ legalEntityId: LE, siteId: "" }));
+    server.handler = () => json(200, { id: LE, name: "Acme", code: "ACME" });
+    renderAt("/receivables/payments/new");
+    await screen.findByLabelText("Amount");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const untouched = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(untouched);
+    expect(untouched.defaultPrevented).toBe(false);
+    fill("Amount", "5");
+    const edited = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(edited);
+    expect(edited.defaultPrevented).toBe(true);
+    window.localStorage.clear();
+  });
+
   it("shows the service's field errors and refusals", async () => {
     server.handler = () => json(409, { code: "AR-PAYMENT-DUPLICATE", detail: "a payment or open item with this reference already exists" });
     renderAt("/receivables/payments/new");

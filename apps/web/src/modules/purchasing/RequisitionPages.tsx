@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { useWorkContext } from "../../shell/lookup/workContextState";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -17,9 +18,10 @@ import {
   Select,
   Textarea,
   buttonClassName,
+  summaryItems,
   useUnsavedChanges,
   type DataTableColumn,
-  type FormErrorItem,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import { copy } from "../../shell/copy";
 import {
@@ -316,7 +318,7 @@ export function RequisitionEditPage() {
   return <RequisitionForm existing={req} />;
 }
 
-const LINE_FIELD_IDS: Record<string, [string, string]> = {
+const LINE_FIELDS: Record<string, [string, string]> = {
   qty: ["qty", "Quantity"],
   requestedDate: ["date", "Requested date"],
   warehouseId: ["warehouse", "Deliver to warehouse"],
@@ -328,26 +330,25 @@ const LINE_FIELD_IDS: Record<string, [string, string]> = {
   unit: ["unit", "Unit"],
 };
 
-const HEADER_FIELD_IDS: Record<string, [string, string]> = {
-  legalEntityId: ["req-legal-entity", "Legal entity"],
-  operatingUnitId: ["req-operating-unit", "Operating unit id"],
-  currency: ["req-currency", "Currency"],
+const HEADER_TARGETS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "req-legal-entity", label: "Legal entity" },
+  currency: { id: "req-currency", label: "Currency" },
+  operatingUnitId: { id: "req-operating-unit", label: "Operating unit" },
+  lines: { label: "Lines" },
 };
 
-function requisitionErrorItems(errors: Errors): FormErrorItem[] {
-  return Object.entries(errors).flatMap(([key, message]) => {
-    const header = HEADER_FIELD_IDS[key];
-    if (header) return [{ fieldId: header[0], label: header[1], message }];
-    const line = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
-    const target = line ? LINE_FIELD_IDS[line[2]] : undefined;
-    if (line && target) return [{ fieldId: `req-line-${line[1]}-${target[0]}`, label: `Line ${Number(line[1]) + 1} ${target[1].toLowerCase()}`, message }];
-    return key === "lines" ? [{ label: "Lines", message }] : [];
-  });
+function lineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  const field = match ? LINE_FIELDS[match[2]] : undefined;
+  return match && field ? { id: `req-line-${match[1]}-${field[0]}`, label: `Line ${Number(match[1]) + 1} ${field[1].toLowerCase()}` } : undefined;
 }
+
+const requisitionErrorItems = (errors: Errors) => summaryItems(errors, HEADER_TARGETS, lineTarget);
 
 function RequisitionForm({ existing }: { existing?: Requisition }) {
   const navigate = useNavigate();
-  const [legalEntityId, setLegalEntityId] = useState(existing?.legalEntityId ?? "");
+  const work = useWorkContext();
+  const [legalEntityId, setLegalEntityId] = useState(existing?.legalEntityId ?? work.legalEntityId);
   const [operatingUnitId, setOperatingUnitId] = useState(existing?.operatingUnitId ?? "");
   const [currency, setCurrency] = useState(existing?.currency ?? "USD");
   const [lines, setLines] = useState<LineDraft[]>(() => (existing ? existing.lines.map(draftOf) : [emptyLine()]));

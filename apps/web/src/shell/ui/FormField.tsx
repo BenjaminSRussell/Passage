@@ -30,7 +30,7 @@ export function FormField({ id, label, hint, error, optional = false, required =
         <label htmlFor={id} className={styles.label}>
           {label}
         </label>
-        {optional ? <span className={styles.optional}>Optional</span> : null}
+        {optional ? <span className={styles.optional}>{copy.forms.optional}</span> : null}
         {required && !optional ? <span className={styles.optional}>{copy.forms.required}</span> : null}
       </div>
       {children({ id, "aria-describedby": describedBy || undefined, "aria-invalid": error ? true : undefined, "aria-required": required && !optional ? true : undefined })}

@@ -6,6 +6,11 @@
   color: var(--color-danger);
 }
 
+.summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .summary[hidden] {
   display: none;
 }

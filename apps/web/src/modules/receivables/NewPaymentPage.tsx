@@ -1,8 +1,9 @@
 import { useRef, useState, type FormEvent } from "react";
+import { useWorkContext } from "../../shell/lookup/workContextState";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormErrorSummary, FormField, FormSection, Input, PageHeader, Select, useUnsavedChanges, type FormErrorItem } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormErrorSummary, FormField, FormSection, Input, PageHeader, Select, summaryItems, useUnsavedChanges, type FormFieldTarget } from "../../shell/ui";
 import { copy } from "../../shell/copy";
 import { createPayment, describeProblem, newKey, PAYMENT_MODES, ReceivablesApiError, type PaymentInput, type PaymentMode, type Problem } from "./api/client";
 import { CURRENCY, DAY, DECIMAL, MODE_LABELS, today, UUID } from "./format";
@@ -26,27 +27,25 @@ export interface PaymentDraft {
   remittance: { reference: string; amount: string }[];
 }
 
-const FIELD_TARGETS: Record<string, { id: string; label: string }> = {
+const FIELD_TARGETS: Record<string, FormFieldTarget> = {
   legalEntityId: { id: "np-legal-entity", label: "Legal entity" },
   customerId: { id: "np-customer", label: "Customer" },
-  sourceRef: { id: "np-ref", label: "Check or bank reference" },
   amount: { id: "np-amount", label: "Amount" },
   currency: { id: "np-currency", label: "Currency" },
   receivedDate: { id: "np-received", label: "Received date" },
   valueDate: { id: "np-value", label: "Value date" },
+  sourceRef: { id: "np-ref", label: "Check or bank reference" },
   payerName: { id: "np-payer", label: "Payer name" },
   payerAccount: { id: "np-account", label: "Payer bank account" },
   shortPayReason: { id: "np-short", label: "Short-pay reason" },
 };
 
-function errorItems(errors: Errors): FormErrorItem[] {
-  return Object.entries(errors).flatMap(([key, message]) => {
-    const remittance = /^remittance\[(\d+)\]$/.exec(key);
-    if (remittance) return [{ fieldId: `np-rem-ref-${remittance[1]}`, label: `Reference ${Number(remittance[1]) + 1}`, message }];
-    const target = FIELD_TARGETS[key];
-    return target ? [{ fieldId: target.id, label: target.label, message }] : [];
-  });
+function remittanceTarget(key: string): FormFieldTarget | undefined {
+  const match = /^remittance\[(\d+)\]$/.exec(key);
+  return match ? { id: `np-rem-ref-${match[1]}`, label: `Reference ${Number(match[1]) + 1}` } : undefined;
 }
+
+const errorItems = (errors: Errors) => summaryItems(errors, FIELD_TARGETS, remittanceTarget);
 
 export function emptyPayment(day: string = today()): PaymentDraft {
   return {
@@ -112,12 +111,11 @@ export function toPaymentInput(v: PaymentDraft): PaymentInput {
   };
 }
 
-const FIELD_KEYS_MORE = ["sourceRef", "payerName", "payerAccount", "shortPayReason"] as const;
-
 /** Record a manual payment (FR-30.2): check, ACH, wire, card or cash, with the payer's remittance references. */
 export function NewPaymentPage() {
   const navigate = useNavigate();
-  const [values, setValues] = useState<PaymentDraft>(() => emptyPayment());
+  const work = useWorkContext();
+  const [values, setValues] = useState<PaymentDraft>(() => ({ ...emptyPayment(), legalEntityId: work.legalEntityId }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -198,7 +196,7 @@ export function NewPaymentPage() {
           <FormErrorSummary items={errorItems(errors)} attempt={attempt} />
           {text("np-legal-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true, required: true })}
           {text("np-customer", "customerId", "Customer", { entity: "customer", optional: true, mono: true, hint: copy.fieldHelp.paymentCustomer })}
-          <FormField id="np-mode" label="Payment mode">
+          <FormField id="np-mode" label="Payment mode" required>
             {(c) => (
               <Select {...c} value={values.paymentMode} onChange={(e) => update({ paymentMode: e.target.value as PaymentMode })}>
                 {PAYMENT_MODES.map((m) => (
@@ -217,7 +215,7 @@ export function NewPaymentPage() {
           <FormField id="np-value" label="Value date" required hint={copy.fieldHelp.paymentValueDate} error={errors.valueDate}>
             {(c) => <Input {...c} type="date" value={values.valueDate} onChange={(e) => update({ valueDate: e.target.value })} invalid={Boolean(errors.valueDate)} />}
           </FormField>
-          <FormSection collapse="more" defaultOpen={FIELD_KEYS_MORE.some((k) => values[k] !== "" || errors[k])}>
+          <FormSection collapse="more">
             {text("np-ref", "sourceRef", "Check or bank reference", { optional: true, mono: true })}
             {text("np-payer", "payerName", "Payer name", { optional: true, hint: copy.fieldHelp.paymentPayerName })}
             {text("np-account", "payerAccount", "Payer bank account", { optional: true, mono: true, hint: copy.fieldHelp.paymentPayerAccount })}

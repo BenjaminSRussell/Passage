@@ -4,7 +4,7 @@ import axe from "axe-core";
 import { useState } from "react";
 import { createMemoryRouter, Link, MemoryRouter, RouterProvider, useNavigate } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { FormErrorSummary, FormField, FormSection, Input, useUnsavedChanges } from "./index";
+import { FormErrorSummary, FormField, FormSection, Input, summaryItems, useUnsavedChanges } from "./index";
 
 function Demo() {
   const [name, setName] = useState("");
@@ -104,6 +104,35 @@ describe("inline validation summary", () => {
     screen.getByRole("button", { name: "Save" }).focus();
     await user.click(screen.getByRole("button", { name: "Name: Enter a name." }));
     expect(screen.getByLabelText("Name")).toHaveFocus();
+  });
+});
+
+describe("summary without a field to focus", () => {
+  it("takes focus itself and is announced as an alert", () => {
+    const { rerender } = render(<FormErrorSummary items={[]} attempt={0} />);
+    rerender(<FormErrorSummary items={[{ label: "Lines", message: "Add at least one line." }]} attempt={1} />);
+    const summary = screen.getByRole("alert", { name: "Problems with this form" });
+    expect(summary).toHaveFocus();
+    expect(summary).toHaveTextContent("Lines: Add at least one line.");
+  });
+
+  it("focuses the first entry that has a field, skipping fieldless ones", () => {
+    render(
+      <>
+        <input id="f" aria-label="F" />
+        <FormErrorSummary items={[{ label: "Lines", message: "x" }, { fieldId: "f", label: "F", message: "y" }]} attempt={1} />
+      </>,
+    );
+    expect(screen.getByLabelText("F")).toHaveFocus();
+  });
+
+  it("builds items in declared form order, then computed ones", () => {
+    const items = summaryItems(
+      { b: "B bad", a: "A bad", "row[1]": "Row bad" },
+      { a: { id: "a-id", label: "A" }, b: { id: "b-id", label: "B" } },
+      (key) => (key === "row[1]" ? { id: "row-1", label: "Row 2" } : undefined),
+    );
+    expect(items.map((i) => i.fieldId)).toEqual(["a-id", "b-id", "row-1"]);
   });
 });
 

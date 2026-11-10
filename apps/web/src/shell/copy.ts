@@ -46,6 +46,7 @@ export const copy = {
   },
   forms: {
     required: "Required",
+    optional: "Optional",
     moreOptions: "More options",
     advanced: "Advanced",
     errorSummaryLabel: "Problems with this form",

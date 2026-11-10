@@ -3,24 +3,35 @@ import { UNSAFE_DataRouterContext, useBlocker } from "react-router-dom";
 import { copy } from "../copy";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-function NavigationPrompt({ shouldBlock }: { shouldBlock: () => boolean }) {
+export interface UnsavedChangesDialog {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  cancelLabel: string;
+}
+
+const defaultDialog: UnsavedChangesDialog = {
+  title: copy.forms.unsavedTitle,
+  description: copy.forms.unsavedBody,
+  confirmLabel: copy.forms.leave,
+  cancelLabel: copy.forms.stay,
+};
+
+function NavigationPrompt({ shouldBlock, dialog }: { shouldBlock: () => boolean; dialog: UnsavedChangesDialog }) {
   const blocker = useBlocker(shouldBlock);
   if (blocker.state !== "blocked") {
     return null;
   }
   return (
     <ConfirmDialog
-      title={copy.forms.unsavedTitle}
-      description={copy.forms.unsavedBody}
-      confirmLabel={copy.forms.leave}
-      cancelLabel={copy.forms.stay}
+      {...dialog}
       onConfirm={blocker.proceed}
       onCancel={blocker.reset}
     />
   );
 }
 
-export function useUnsavedChanges(dirty: boolean): { prompt: ReactNode; release: () => void } {
+export function useUnsavedChanges(dirty: boolean, dialog: UnsavedChangesDialog = defaultDialog): { prompt: ReactNode; release: () => void } {
   const dirtyRef = useRef(dirty);
   const released = useRef(false);
   dirtyRef.current = dirty;
@@ -44,5 +55,5 @@ export function useUnsavedChanges(dirty: boolean): { prompt: ReactNode; release:
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty, shouldBlock]);
 
-  return { prompt: inDataRouter ? <NavigationPrompt shouldBlock={shouldBlock} /> : null, release };
+  return { prompt: inDataRouter ? <NavigationPrompt shouldBlock={shouldBlock} dialog={dialog} /> : null, release };
 }

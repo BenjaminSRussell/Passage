@@ -12,7 +12,7 @@ Shared pieces live in `src/shell/ui` and are exported from `src/shell/ui/index.t
 
 ## Required, optional and help
 
-- `FormField required` shows "Required" and sets `aria-required` on the control. `optional` shows "Optional". Mark one or the other on every field.
+- `FormField required` shows "Required" and sets `aria-required` on the control. `optional` shows "Optional". Mark one or the other on every field, including selects that have a default.
 - Help text is one line, passed as `hint`. Take the text from `copy.fieldHelp` in `src/shell/copy.ts`, not from an inline string, so it can be translated.
 - Write help in plain language: say what the field does or where to find the value. Skip help on obvious fields.
 
@@ -20,7 +20,8 @@ Shared pieces live in `src/shell/ui` and are exported from `src/shell/ui/index.t
 
 - Keep field errors in `FormField error` (plain message, shown under the field with `role="alert"`).
 - Render `<FormErrorSummary items={...} attempt={attempt} />` at the top of the form. `items` is `{ fieldId, label, message }` for each error in form order; `attempt` is a counter the page increments each time a submit fails (client or server field errors).
-- When `attempt` increases, focus moves to the first problem field and opens any collapsed section holding it. Each summary entry is a button that focuses its field. The summary is hidden when there are no items.
+- Declare each field's `{ id, label }` once per form in a map keyed by error key, in form order, and build `items` with `summaryItems(errors, fields, dynamic?)`. Entries without an `id` (a form-level problem) are listed but cannot be focused; `dynamic(key)` resolves repeated rows such as `lines[2].qty`. Do not hand-write labels at the call site.
+- When `attempt` increases, focus moves to the first item that has a field (or to the summary itself when none does; it is an alert, so it is announced) and opens any collapsed section holding it. Each summary entry is a button that focuses its field. The summary is hidden when there are no items.
 
 ## Unsaved changes
 
@@ -33,8 +34,9 @@ navigate(nextPage);
 return <div>...{prompt}</div>;
 ```
 
+- Start a legal-entity field from `useWorkContext().legalEntityId` (as the proof forms do): `EntityLookup` prefills it from the top bar, and a baseline taken before that would make an untouched form look edited.
 - Pass `true` once the form differs from its starting values (compare a JSON snapshot taken on mount).
-- The browser warns on tab close or reload while dirty. Inside a data router (`createBrowserRouter`) in-app navigation also asks "Leave without saving?" in a dialog with "Leave without saving" and "Keep editing". Outside a data router (some tests) only the tab-close guard applies.
+- The browser warns on tab close or reload while dirty. Inside a data router (`createBrowserRouter`) in-app navigation also asks "Leave without saving?" in a dialog (pass a second argument to change its wording) with "Leave without saving" and "Keep editing". Outside a data router (some tests) only the tab-close guard applies.
 - Call `release()` right before the navigation that follows a successful save, or the guard blocks it.
 
 ## Examples
