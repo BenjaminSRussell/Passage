@@ -941,6 +941,10 @@ paths:
         they are), stores the snapshot and makes the first call to the dispatch service. Work orders without
         coordinates or with a window outside the day, and technicians off that day, in another time zone,
         without a home position or whose held visits cannot be reached by travel, are listed in skipped.
+        A work order that no technician can reach within a day's travel, and a technician with nothing to
+        reach, are skipped as TOO_FAR (a wrong coordinate shows up here rather than failing the run). The
+        technician's visits on the day in any territory are held where they are; a technician whose held
+        visits do not fit the snapshot limit is skipped as OVER_LIMIT.
         A failed call is retried by :sync after min(3600, 60 * 2^attempts) seconds and the optimization is
         PARKED after five failures or a refusal that cannot change. Nothing to place is SVC-DSP-016; a
         service without DISPATCH_URL or signing key is SVC-DSP-017.
@@ -3236,7 +3240,7 @@ components:
       properties:
         kind: { type: string, enum: [TECHNICIAN, WORK_ORDER] }
         id: { type: string, format: uuid }
-        reason: { type: string, enum: [TIME_ZONE, OFF_DAY, NO_HOME, HELD_ROUTE_UNREACHABLE, HELD_VISIT_STALE, NO_LOCATION, WINDOW_OUTSIDE_DAY, OVER_LIMIT] }
+        reason: { type: string, enum: [TIME_ZONE, OFF_DAY, NO_HOME, HELD_ROUTE_UNREACHABLE, HELD_VISIT_STALE, NO_LOCATION, WINDOW_OUTSIDE_DAY, TOO_FAR, OVER_LIMIT] }
     OptimizationOutcome:
       type: object
       properties:

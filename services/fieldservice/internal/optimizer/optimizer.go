@@ -107,11 +107,16 @@ type Result struct {
 	Cost           Cost         `json:"cost"`
 }
 
+type RunError struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+}
+
 type Run struct {
-	ID     string  `json:"id"`
-	Status string  `json:"status"`
-	Result *Result `json:"result"`
-	Error  *string `json:"error"`
+	ID     string    `json:"id"`
+	Status string    `json:"status"`
+	Result *Result   `json:"result"`
+	Error  *RunError `json:"error"`
 }
 
 type Client struct {

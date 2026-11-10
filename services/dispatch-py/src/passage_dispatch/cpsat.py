@@ -184,6 +184,9 @@ def _add_hint(model, hint, nodes, presence, starts, arc_lit, used, unassigned, p
     hinted = {a.work_order_id for items in routes.values() for a in items}
     for wid, var in unassigned.items():
         model.AddHint(var, int(wid not in hinted))
+    arcs: dict[str, list[tuple[int, int, object]]] = {}
+    for (kt, i, j), lit in arc_lit.items():
+        arcs.setdefault(kt, []).append((i, j, lit))
     for tid, orders in nodes.items():
         route = sorted(routes.get(tid, []), key=lambda a: a.sequence)
         index = {w.id: j for j, w in enumerate(orders, start=1)}
@@ -191,9 +194,8 @@ def _add_hint(model, hint, nodes, presence, starts, arc_lit, used, unassigned, p
         chain = [0, *on_route, 0] if on_route else []
         walked = {(chain[k], chain[k + 1]) for k in range(len(chain) - 1)}
         model.AddHint(used[tid], int(bool(on_route)))
-        for (kt, i, j), lit in arc_lit.items():
-            if kt == tid:
-                model.AddHint(lit, int((i, j) in walked))
+        for i, j, lit in arcs.get(tid, []):
+            model.AddHint(lit, int((i, j) in walked))
         start_of = {a.work_order_id: a.start for a in route}
         for w in orders:
             model.AddHint(presence[(tid, w.id)], int(w.id in start_of and w.id in index))

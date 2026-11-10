@@ -41,6 +41,7 @@ const (
 	maxHeldOrders           = 300
 	defaultCasePriority     = 4
 	maxMinute               = 100_000
+	maxTravelMinutes        = 1440
 )
 
 type Skipped struct {
@@ -245,6 +246,41 @@ func buildRequest(date, zone string, limitSeconds int, techs []Technician, open,
 		}
 	}
 
+	live := make([]*candidate, 0, len(order))
+	for _, id := range order {
+		if c := byID[id]; c != nil {
+			live = append(live, c)
+		}
+	}
+	var planned []stop
+	for _, o := range open {
+		ws, we, inDay := window(o.WindowStart, o.WindowEnd)
+		switch {
+		case o.Latitude == nil || o.Longitude == nil:
+			skipped = append(skipped, Skipped{"WORK_ORDER", o.ID, "NO_LOCATION"})
+			continue
+		case !inDay:
+			skipped = append(skipped, Skipped{"WORK_ORDER", o.ID, "WINDOW_OUTSIDE_DAY"})
+			continue
+		case len(live) > 0 && !slices.ContainsFunc(live, func(c *candidate) bool { return withinReach(c.lat, c.lon, *o.Latitude, *o.Longitude) }):
+			skipped = append(skipped, Skipped{"WORK_ORDER", o.ID, "TOO_FAR"})
+			continue
+		}
+		wo := optimizer.WorkOrder{ID: o.ID, Territory: o.TerritoryID, Skills: nonNil(o.RequiredSkills), Duration: o.EstDurationMinutes,
+			Priority: o.priority, WindowStart: ws, WindowEnd: we}
+		if o.due != nil {
+			due := min(maxMinute, max(0, int(math.Ceil(o.due.Sub(from).Minutes()))))
+			wo.Due = &due
+		}
+		planned = append(planned, stop{order: wo, lat: *o.Latitude, lon: *o.Longitude})
+	}
+	for _, c := range live {
+		if len(c.route) == 0 && !slices.ContainsFunc(planned, func(s stop) bool { return withinReach(c.lat, c.lon, s.lat, s.lon) }) {
+			skipped = append(skipped, Skipped{"TECHNICIAN", c.tech.ID, "TOO_FAR"})
+			delete(byID, c.tech.ID)
+		}
+	}
+
 	req := optimizer.Request{BufferMinutes: domain.BufferMinutes, TimeLimitSeconds: limitSeconds, Technicians: []optimizer.Technician{},
 		WorkOrders: []optimizer.WorkOrder{}, Pinned: []optimizer.Assignment{}}
 	type point struct{ lat, lon float64 }
@@ -266,34 +302,24 @@ func buildRequest(date, zone string, limitSeconds int, techs []Technician, open,
 			req.Pinned = append(req.Pinned, s.assigned)
 		}
 	}
-	for _, o := range open {
-		ws, we, inDay := window(o.WindowStart, o.WindowEnd)
-		switch {
-		case o.Latitude == nil || o.Longitude == nil:
-			skipped = append(skipped, Skipped{"WORK_ORDER", o.ID, "NO_LOCATION"})
-			continue
-		case !inDay:
-			skipped = append(skipped, Skipped{"WORK_ORDER", o.ID, "WINDOW_OUTSIDE_DAY"})
-			continue
-		}
-		wo := optimizer.WorkOrder{ID: o.ID, Territory: o.TerritoryID, Skills: nonNil(o.RequiredSkills), Duration: o.EstDurationMinutes,
-			Location: place(*o.Latitude, *o.Longitude), Priority: o.priority, WindowStart: ws, WindowEnd: we}
-		if o.due != nil {
-			due := min(maxMinute, max(0, int(math.Ceil(o.due.Sub(from).Minutes()))))
-			wo.Due = &due
-		}
-		req.WorkOrders = append(req.WorkOrders, wo)
+	for _, s := range planned {
+		s.order.Location = place(s.lat, s.lon)
+		req.WorkOrders = append(req.WorkOrders, s.order)
 	}
 	req.Travel = make([][]int, len(points))
 	for i, a := range points {
 		req.Travel[i] = make([]int, len(points))
 		for j, b := range points {
 			if i != j {
-				req.Travel[i][j] = domain.TravelMinutes(a.lat, a.lon, b.lat, b.lon)
+				req.Travel[i][j] = min(maxTravelMinutes, domain.TravelMinutes(a.lat, a.lon, b.lat, b.lon))
 			}
 		}
 	}
 	return req, skipped, nil
+}
+
+func withinReach(aLat, aLon, bLat, bLon float64) bool {
+	return domain.TravelMinutes(aLat, aLon, bLat, bLon) <= maxTravelMinutes
 }
 
 func holdsNoMore(t optimizer.Technician, s stop) bool {
@@ -310,14 +336,18 @@ func reachable(t optimizer.Technician, homeLat, homeLon float64, route []stop) b
 	prevEnd, lat, lon, load := t.ShiftStart, homeLat, homeLon, 0
 	for _, s := range route {
 		in := domain.TravelMinutes(lat, lon, s.lat, s.lon)
-		if s.assigned.Start < prevEnd+in+domain.BufferMinutes {
+		if in > maxTravelMinutes || s.assigned.Start < prevEnd+in+domain.BufferMinutes {
 			return false
 		}
 		load += s.order.Duration + in
 		prevEnd, lat, lon = s.assigned.End, s.lat, s.lon
 	}
 	if len(route) > 0 {
-		load += domain.TravelMinutes(lat, lon, homeLat, homeLon)
+		back := domain.TravelMinutes(lat, lon, homeLat, homeLon)
+		if back > maxTravelMinutes {
+			return false
+		}
+		load += back
 	}
 	return load <= t.MaxDailyMinutes+t.OvertimeMinutes
 }
@@ -360,12 +390,22 @@ func optimizationInputs(ctx context.Context, tx pgx.Tx, tid string, in OptimizeI
 		left = append(left, Skipped{"WORK_ORDER", open[maxOptimizerOrders].ID, "OVER_LIMIT"})
 		open = open[:maxOptimizerOrders]
 	}
-	held, err := orderRows(ctx, tx, `select `+workOrderColumns+` from service_work_order where tenant_id = $1 and legal_entity_id = $2 and territory_id = $3
-		and technician_id = any($4::uuid[]) and `+busyStatuses+` and assigned_start >= $5 and assigned_start < $6
-		order by technician_id, assigned_start, id limit $7`,
-		tid, in.LegalEntityID, in.TerritoryID, techIDs, from, to, maxHeldOrders)
+	held, err := orderRows(ctx, tx, `select `+workOrderColumns+` from service_work_order where tenant_id = $1 and legal_entity_id = $2
+		and technician_id = any($3::uuid[]) and `+busyStatuses+` and assigned_start < $5 and assigned_end > $4
+		order by technician_id::text, assigned_start, id limit $6`,
+		tid, in.LegalEntityID, techIDs, from, to, maxHeldOrders+1)
 	if err != nil {
 		return nil, nil, nil, nil, err
+	}
+	if len(held) > maxHeldOrders {
+		cut := *held[maxHeldOrders].TechnicianID
+		for _, t := range techs {
+			if t.ID >= cut {
+				left = append(left, Skipped{"TECHNICIAN", t.ID, "OVER_LIMIT"})
+			}
+		}
+		techs = slices.DeleteFunc(techs, func(t Technician) bool { return t.ID >= cut })
+		held = slices.DeleteFunc(held[:maxHeldOrders], func(h plannedOrder) bool { return *h.TechnicianID >= cut })
 	}
 	if err := withCases(ctx, tx, tid, open); err != nil {
 		return nil, nil, nil, nil, err

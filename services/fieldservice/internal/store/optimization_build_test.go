@@ -165,3 +165,49 @@ func TestBuildRequest_HeldVisitTheTechnicianCannotWorkAnymoreIsReported(t *testi
 		t.Fatalf("a visit ending after its window: %+v %v", skipped, err)
 	}
 }
+
+func TestBuildRequest_TravelBeyondADayNeverReachesTheOptimizer(t *testing.T) {
+	ana := techAt("ANA", ref(41.88), ref(-87.63))
+	nearby := orderAt(ref(41.9), ref(-87.65), 60)
+	nullIsland := orderAt(ref(0.0), ref(0.0), 60)
+
+	req, skipped, err := buildRequest("2026-10-26", "America/Chicago", 10, []Technician{ana}, []plannedOrder{nearby, nullIsland}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := skippedReasons(skipped); !maps.Equal(got, map[string]string{nullIsland.ID: "TOO_FAR"}) || len(req.WorkOrders) != 1 || req.WorkOrders[0].ID != nearby.ID {
+		t.Fatalf("skipped %v work orders %+v", got, req.WorkOrders)
+	}
+
+	remote := techAt("REM", ref(0.0), ref(0.0))
+	req, skipped, err = buildRequest("2026-10-26", "America/Chicago", 10, []Technician{ana, remote}, []plannedOrder{nearby}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := skippedReasons(skipped); !maps.Equal(got, map[string]string{remote.ID: "TOO_FAR"}) || len(req.Technicians) != 1 {
+		t.Fatalf("skipped %v technicians %+v", got, req.Technicians)
+	}
+
+	req, skipped, err = buildRequest("2026-10-26", "America/Chicago", 10, []Technician{ana, remote}, []plannedOrder{nearby, nullIsland}, nil)
+	if err != nil || len(skipped) != 0 || len(req.Technicians) != 2 || len(req.WorkOrders) != 2 {
+		t.Fatalf("both reachable by someone: %+v %+v %v", skipped, req, err)
+	}
+	for i, row := range req.Travel {
+		for j, minutes := range row {
+			if minutes < 0 || minutes > maxTravelMinutes {
+				t.Fatalf("travel %d,%d is %d, outside what dispatch accepts", i, j, minutes)
+			}
+		}
+	}
+}
+
+func TestBuildRequest_HeldVisitFarFromTheTechnicianCannotBeReached(t *testing.T) {
+	loc, _ := time.LoadLocation("America/Chicago")
+	ana := techAt("ANA", ref(41.88), ref(-87.63))
+	start := time.Date(2026, 10, 26, 16, 0, 0, 0, loc)
+	far := heldBy(ana, 0, 0, start, start.Add(30*time.Minute))
+	_, skipped, err := buildRequest("2026-10-26", "America/Chicago", 10, []Technician{ana}, []plannedOrder{orderAt(ref(41.9), ref(-87.65), 60)}, []plannedOrder{far})
+	if err != nil || skippedReasons(skipped)[ana.ID] != "HELD_ROUTE_UNREACHABLE" {
+		t.Fatalf("skipped %+v %v", skipped, err)
+	}
+}

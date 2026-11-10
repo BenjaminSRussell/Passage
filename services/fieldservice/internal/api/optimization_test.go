@@ -24,7 +24,7 @@ type fakeOptimizer struct {
 	submitErr error
 	getErr    error
 	status    string
-	failure   *string
+	failure   *optimizer.RunError
 	sent      []optimizer.Request
 	keys      []string
 	gets      int
@@ -251,8 +251,8 @@ func TestAPI_OptimizationFailureKinds(t *testing.T) {
 	if o.Status != store.OptRunning {
 		t.Fatalf("second optimization: %+v", o)
 	}
-	message := "solver crashed"
-	fake.status, fake.failure = optimizer.Failed, &message
+	message := "solver_error RuntimeError"
+	fake.status, fake.failure = optimizer.Failed, &optimizer.RunError{Code: "solver_error", Detail: "RuntimeError"}
 	if o = d.step(t, o.ID, "sync"); o.Status != store.OptPending || o.AttemptCount != 1 || o.LastError == nil || *o.LastError != message || o.RemoteRunID != nil {
 		t.Fatalf("failed run: %+v", o)
 	}

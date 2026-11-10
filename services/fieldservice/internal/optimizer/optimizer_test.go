@@ -103,6 +103,18 @@ func TestClient_GetCarriesOnlyTheReadDutyAndDecodesThePlan(t *testing.T) {
 	}
 }
 
+func TestClient_GetDecodesAFailedRunAsDispatchEmitsIt(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request, _ tenant.ServiceClaims) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"run-1","status":"FAILED","createdAt":"2026-10-26T14:00:00+00:00","startedAt":"2026-10-26T14:00:01+00:00",` +
+			`"finishedAt":"2026-10-26T14:00:02+00:00","result":null,"error":{"code":"solver_error","detail":"RuntimeError"}}`))
+	})
+	run, err := f.client.Get(f.ctx, f.le, "run-1")
+	if err != nil || run.Status != Failed || run.Result != nil || run.Error == nil || run.Error.Code != "solver_error" || run.Error.Detail != "RuntimeError" {
+		t.Fatalf("failed run: %+v %v", run, err)
+	}
+}
+
 func TestClient_FailuresAreClassified(t *testing.T) {
 	status := http.StatusOK
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request, _ tenant.ServiceClaims) {

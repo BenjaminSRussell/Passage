@@ -267,3 +267,30 @@ func TestStore_OptimizationReportsAStaleHeldVisitAndPlansTheRest(t *testing.T) {
 		t.Fatalf("request %+v %v", req, err)
 	}
 }
+
+func TestStore_OptimizationPinsTheTechniciansVisitsInOtherTerritories(t *testing.T) {
+	d := newDispatch(t, 24)
+	other := ids.New()
+	ana, _, err := d.s.CreateTechnician(d.ctx, Technician{Code: "ANA", Name: "Tech ANA", LegalEntityID: d.le, TerritoryIDs: []string{d.territory, other},
+		Skills: []string{"HVAC"}, TimeZone: optZone, ShiftDays: []int{1, 2, 3, 4, 5}, ShiftStartMinute: 480, ShiftEndMinute: 1020,
+		MaxDailyMinutes: 480, Active: true, HomeLatitude: ref(41.88), HomeLongitude: ref(-87.63)}, "key-ANA", "hash-ANA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	away, _, err := d.s.CreateWorkOrder(d.ctx, WorkOrder{CustomerPartyID: d.customer, LegalEntityID: d.le, TerritoryID: other, EstDurationMinutes: 60,
+		Currency: "USD", RequiredSkills: []string{"HVAC"}, Latitude: ref(41.9), Longitude: ref(-87.7)}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	away = d.assign(t, away, ana, d.at(26, 10, 0))
+	d.located(t, 60, 41.9, -87.65, nil)
+
+	o := d.request(t, "other-territory")
+	req, err := d.s.OptimizationRequest(d.ctx, o.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Pinned != 1 || o.WorkOrders != 1 || len(req.Pinned) != 1 || req.Pinned[0].WorkOrderID != away.ID || req.Pinned[0].Start != 600 {
+		t.Fatalf("optimization %+v pinned %+v", o, req.Pinned)
+	}
+}
