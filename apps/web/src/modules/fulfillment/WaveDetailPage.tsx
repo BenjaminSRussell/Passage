@@ -9,12 +9,14 @@ import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { OrderNumber } from "../sales/OrderNumber";
 
 const shipmentColumns: DataTableColumn<WaveShipment>[] = [
   { key: "shipmentNumber", header: "Shipment", mono: true },
   { key: "status", header: "Status", render: (row) => <ShipmentStatusBadge status={row.status} /> },
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
+  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "carrierCode", header: "Carrier", render: (row) => row.carrierCode ?? dash },
   { key: "plannedShipDate", header: "Planned ship", render: (row) => formatDate(row.plannedShipDate) },
   { key: "lineCount", header: "Lines", align: "end" },
@@ -180,14 +182,14 @@ export function WaveDetailPage() {
           {[
             ["Group", wave.groupKey === "UNASSIGNED" ? "Unassigned" : wave.groupKey],
             ["Picker", wave.picker ?? "Not assigned"],
-            ["Warehouse", wave.warehouseId],
-            ["Legal entity", wave.legalEntityId],
+            ["Warehouse", <EntityName entity="warehouse" id={wave.warehouseId} />],
+            ["Legal entity", <EntityName entity="legalEntity" id={wave.legalEntityId} />],
             ["Created", formatDateTime(wave.createdAt)],
             ...(wave.closedAt ? [["Closed", formatDateTime(wave.closedAt)]] : []),
           ].map(([term, value]) => (
-            <div key={term} className={styles.entry}>
+            <div key={String(term)} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
-              <dd className={`${styles.value} ${styles.mono}`}>{value}</dd>
+              <dd className={styles.value}>{value}</dd>
             </div>
           ))}
         </dl>

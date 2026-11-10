@@ -166,7 +166,6 @@
     {"id": "controller", "label": "Accounting and close", "persona": "Accountant or controller", "description": "Post journals, close the period and report on the books.", "entries": [
       "/ledger/journal-batches",
       "/ledger/trial-balance",
-      "/close",
       "/finreport",
       "/ledger/transactions",
       "/ledger/recurring-journals",

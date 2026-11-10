@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the consolidation service (services/consolidation/api/openapi.yaml).
 // Browser calls use /api/v1/consol/..., which the web BFF rewrites to the
 // service's /v1/consol/... paths and signs with the user's tenant and duties.
@@ -113,7 +114,7 @@ async function toError(res: Response): Promise<ConsolidationApiError> {
 }
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`${base}${path}`, {
+  const res = await apiFetch(`${base}${path}`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(body),

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { PrincipalProvider } from "../../shell/principal";
 import type { Andon } from "./api/client";
+import { resetResourceCache } from "../mfg-shared/resources";
 import shopfloor from "./module";
 
 const RESOURCE = "0195f0a0-0000-7000-8000-000000000010";
@@ -22,7 +23,8 @@ let calls: { method: string; url: URL; init: RequestInit; body: unknown }[];
 
 beforeEach(() => {
   calls = [];
-  handler = () => undefined;
+  resetResourceCache();
+  handler = (url) => (url.pathname.endsWith("/engineering/resources") ? json(200, { items: [{ id: RESOURCE, code: "INS-1", name: "Inspection cell" }] }) : undefined);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
@@ -104,7 +106,7 @@ describe("Clear a quality-fail alert", () => {
         return json(200, base);
       }
       if (url.pathname.endsWith("/andon")) return json(200, { items: cleared ? [] : [base] });
-      return undefined;
+      return url.pathname.endsWith("/engineering/resources") ? json(200, { items: [{ id: RESOURCE, code: "INS-1", name: "Inspection cell" }] }) : undefined;
     };
     renderAndon(SUPERVISOR);
     const table = await findTable({ name: "Open andon alerts" });
@@ -119,7 +121,7 @@ describe("Clear a quality-fail alert", () => {
     const post = calls.find((c) => c.method === "POST");
     expect(post?.body).toEqual({ reason: "reworked and re-checked" });
     expect(new Headers(post?.init.headers).get("Idempotency-Key")).toBeTruthy();
-    expect(screen.getByText(/quality-fail alert on resource .* is cleared/)).toBeInTheDocument();
+    expect(screen.getByText(/quality-fail alert on Inspection cell \(INS-1\) is cleared/)).toBeInTheDocument();
   });
 
   it("shows a refusal and keeps the form", async () => {

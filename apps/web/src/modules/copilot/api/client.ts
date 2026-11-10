@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CopilotMode } from "../domain";
+import { apiFetch } from "../../../shell/api/http";
 
 /** Response of POST /api/v1/copilot/chat. Validated before any field is rendered. */
 export const citationSchema = z.object({
@@ -30,7 +31,7 @@ export interface ChatRequest {
   recordRef?: string;
 }
 
-export async function postChat(req: ChatRequest, fetchFn: typeof fetch = fetch): Promise<ChatResponse> {
+export async function postChat(req: ChatRequest, fetchFn: typeof fetch = apiFetch): Promise<ChatResponse> {
   const res = await fetchFn("/api/v1/copilot/chat", {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },

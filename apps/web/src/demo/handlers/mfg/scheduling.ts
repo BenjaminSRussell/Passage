@@ -1,9 +1,10 @@
 // Scheduling service (/api/v1/scheduling) for the demo: the resource Gantt and capacity load. Resources and
 // their load come from company.ts (BAL-01 over capacity, MCH-01 near full); the bars are the running and
 // released production orders of the production demo.
-import type { Firm, GanttBar, LoadItem, LoadJob, Resource, SchedulingParameters } from "../../../modules/scheduling/api/client";
+import type { Firm, GanttBar, LoadItem, LoadJob, MoveRequest, MoveResponse, Resource, Run, RunKpis, SchedulingParameters } from "../../../modules/scheduling/api/client";
 import { reply, route } from "../../backend";
 import { RESOURCES, resourceByCode } from "../../company";
+import { orders as productionOrders } from "./production";
 import { at, day, table, uid } from "../../store";
 
 const BASE = "/api/v1/scheduling";
@@ -102,6 +103,143 @@ route("POST", `${BASE}/jobs/{id}:firm`, (req) => {
   const out: Firm = { jobId: bar.jobId, orderId: bar.orderId, resourceId: bar.resourceId, start: bar.start, end: bar.end, firmed };
   return reply.ok(out);
 });
+
+// Moves: the Gantt previews a move with dryRun and saves it without. A move that lands on another job of the same
+// resource is refused with the job it collides with; otherwise every segment of the job shifts by the same amount.
+const jobBars = (jobId: string) => bars.filter((b) => b.jobId === jobId).sort((a, b) => a.segment - b.segment);
+const resourceName = (id: string) => RESOURCES.find((r) => r.id === id)?.name ?? "the resource";
+
+function planMove(jobId: string, req: MoveRequest): MoveResponse | { notFound: true } {
+  const segs = jobBars(jobId);
+  if (segs.length === 0) return { notFound: true };
+  const delta = Date.parse(req.start) - Date.parse(segs[0].start);
+  const resourceId = req.resourceId ?? segs[0].resourceId;
+  const moved = segs.map((b) => ({ start: Date.parse(b.start) + delta, end: Date.parse(b.end) + delta }));
+  const violations: MoveResponse["violations"] = [];
+  for (const other of bars) {
+    if (other.jobId === jobId || other.resourceId !== resourceId) continue;
+    const clash = moved.some((m) => Date.parse(other.start) < m.end && Date.parse(other.end) > m.start);
+    if (clash && !violations.some((v) => v.jobId === other.jobId)) {
+      violations.push({ code: "SCHED-0005", detail: `Overlaps order ${other.orderId}, operation ${other.operNumber} on ${resourceName(resourceId)}.`, jobId: other.jobId });
+    }
+  }
+  const lastEnd = moved[moved.length - 1].end;
+  const order = productionOrders.get(segs[0].orderId);
+  const due = order?.deliveryDate ? Date.parse(`${order.deliveryDate}T23:59:59Z`) : null;
+  const late = due !== null && lastEnd > due ? Math.round((lastEnd - due) / MIN) : 0;
+  return {
+    dryRun: req.dryRun,
+    feasible: violations.length === 0,
+    violations,
+    changes: [
+      {
+        operationId: jobId,
+        orderId: segs[0].orderId,
+        resourceId,
+        oldStart: segs[0].start,
+        oldEnd: segs[segs.length - 1].end,
+        newStart: iso(moved[0].start),
+        newEnd: iso(lastEnd),
+        lateMinutes: late,
+      },
+    ],
+    orderId: segs[0].orderId,
+    orderStart: iso(moved[0].start),
+    orderEnd: iso(lastEnd),
+    dependents: [],
+  };
+}
+
+route("POST", `${BASE}/jobs/{id}:move`, (req) => {
+  const body = req.body as MoveRequest;
+  if (!body?.start) return reply.problem(422, "SCHED-0001", "Enter a start.", { start: "Enter a start." });
+  const plan = planMove(req.params.id, body);
+  if ("notFound" in plan) return reply.problem(404, "SCHED-0404", "Job not found.");
+  if (body.dryRun || !plan.feasible) return plan;
+  const segs = jobBars(req.params.id);
+  const delta = Date.parse(body.start) - Date.parse(segs[0].start);
+  for (const b of segs) {
+    b.start = iso(Date.parse(b.start) + delta);
+    b.end = iso(Date.parse(b.end) + delta);
+    b.resourceId = body.resourceId ?? b.resourceId;
+    b.lateMinutes = plan.changes[0].lateMinutes;
+  }
+  runs.unshift(newRun("move", 1, plan.changes[0].lateMinutes, { makespanMinutes: 0 }));
+  return { ...plan, run: runs[0] };
+});
+
+// Schedule runs: a short history, and a new run can be started from the form. A run keeps the plan as it is
+// (the demo's bars are the plan); it only records itself, so the Gantt looks the same afterwards.
+let runSeq = 420;
+const jobCount = () => new Set(bars.map((b) => b.jobId)).size;
+function newRun(scope: Run["scope"], operations: number, lateness: number, extra: Partial<Run> = {}): Run {
+  runSeq += 1;
+  return {
+    id: `RUN-${String(runSeq).padStart(4, "0")}`,
+    scope,
+    mode: "jobs",
+    direction: "forward",
+    finite: true,
+    algorithm: "heuristic",
+    status: "complete",
+    operationsCount: operations,
+    makespanMinutes: 8460,
+    totalLatenessMinutes: lateness,
+    solverStatus: null,
+    messages: [],
+    warnings: [],
+    createdAt: at(0),
+    snapshot: true,
+    ...extra,
+  };
+}
+const past = (id: string, daysAgo: number, rest: Partial<Run>): Run => ({ ...newRun("site", jobCount(), 5760), ...rest, id, createdAt: at(-daysAgo) });
+const runs: Run[] = [
+  past("RUN-0420", 0.3, {}),
+  past("RUN-0419", 1.3, { operationsCount: 11, makespanMinutes: 8100, totalLatenessMinutes: 7200 }),
+  past("RUN-0418", 2.1, { scope: "move", operationsCount: 1, makespanMinutes: 0, totalLatenessMinutes: 4320 }),
+  past("RUN-0417", 3.3, { direction: "backward", operationsCount: 11, makespanMinutes: 9240, totalLatenessMinutes: 2880 }),
+  past("RUN-0416", 5.2, { finite: false, operationsCount: 10, makespanMinutes: 6120, totalLatenessMinutes: 0, snapshot: false }),
+];
+runSeq = 420;
+
+route("GET", `${BASE}/runs`, () => ({ items: runs }));
+route("POST", `${BASE}/runs`, (req) => {
+  const body = req.body as { scope?: Run["scope"]; mode?: string; direction?: string; finite?: boolean };
+  const run = newRun(body.scope ?? "site", jobCount(), 5760, { mode: body.mode ?? "jobs", direction: body.direction ?? "forward", finite: body.finite !== false });
+  runs.unshift(run);
+  return reply.created(run);
+});
+route("GET", `${BASE}/runs/{id}/kpis`, (req) => {
+  if (!runs.some((r) => r.id === req.params.id)) return reply.problem(404, "SCHED-0404", "Run not found.");
+  const booked = (list: GanttBar[]) => Math.round(list.reduce((n, b) => n + (Date.parse(b.end) - Date.parse(b.start)) / MIN, 0));
+  const late = bars.filter((b) => b.lateMinutes > 0);
+  const kpis: RunKpis = {
+    runId: req.params.id,
+    placedJobs: jobCount(),
+    orders: new Set(bars.map((b) => b.orderId)).size,
+    lateJobs: new Set(late.map((b) => b.jobId)).size,
+    lateOrders: new Set(late.map((b) => b.orderId)).size,
+    maxLateMinutes: Math.max(0, ...bars.map((b) => b.lateMinutes)),
+    changeoverMinutes: 0,
+    bookedMinutes: booked(bars),
+    spanStart: bars.map((b) => b.start).sort()[0] ?? null,
+    spanEnd: bars.map((b) => b.end).sort().at(-1) ?? null,
+    resources: RESOURCES.map((r) => {
+      const mine = bars.filter((b) => b.resourceId === r.id);
+      return {
+        resourceId: r.id,
+        resourceCode: r.code,
+        jobs: new Set(mine.map((b) => b.jobId)).size,
+        bookedMinutes: booked(mine),
+        openMinutes: r.hoursPerDay * 60 * 5,
+        utilizationPct: Math.round(r.load * 1000) / 10,
+      };
+    }).filter((r) => r.jobs > 0),
+  };
+  return kpis;
+});
+route("GET", `${BASE}/runs/{id}`, (req) => runs.find((r) => r.id === req.params.id) ?? reply.problem(404, "SCHED-0404", "Run not found."));
 
 // Capacity load: week buckets start on Monday; the weekly curve comes from each resource's load in company.ts.
 const WEEK_CURVE = [0.02, 0, -0.04, -0.1, -0.14, -0.16, -0.18, -0.2];

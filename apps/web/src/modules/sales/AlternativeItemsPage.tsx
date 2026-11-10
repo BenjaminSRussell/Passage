@@ -20,6 +20,7 @@ import { DECIMAL, dash, shortId, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 type Errors = Record<string, string>;
 
@@ -268,9 +269,9 @@ export function AlternativeItemsPage() {
     { key: "orderedProductId", header: "Ordered product", mono: true },
     { key: "alternativeProductId", header: "Alternative product", mono: true },
     { key: "priority", header: "Priority", align: "end" },
-    { key: "customerId", header: "Customer", mono: true, render: (r) => (r.customerId ? shortId(r.customerId) : "Every customer") },
+    { key: "customerId", header: "Customer", render: (r) => (r.customerId ? <EntityName entity="customer" id={r.customerId} /> : "Every customer") },
     { key: "validity", header: "Valid", render: (r) => validityText(r) },
-    { key: "legalEntityId", header: "Legal entity", mono: true, render: (r) => shortId(r.legalEntityId) },
+    { key: "legalEntityId", header: "Legal entity", render: (r) => <EntityName entity="legalEntity" id={r.legalEntityId} /> },
     {
       key: "actions",
       header: "Action",

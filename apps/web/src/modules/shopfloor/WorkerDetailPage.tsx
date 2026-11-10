@@ -35,6 +35,7 @@ import { WorkerHomeResource } from "./WorkerHomeResource";
 import { WorkerMaintenance } from "./WorkerMaintenance";
 import { WorkerPaySetup } from "./WorkerPaySetup";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** Longest range GET registrations accepts, in days. */
 const MAX_LIST_DAYS = 31;
@@ -185,7 +186,9 @@ export function WorkerDetailPage() {
           </div>
           <div className={styles.entry}>
             <dt className={styles.term}>Party id</dt>
-            <dd className={`${styles.value} ${styles.mono}`}>{worker.partyId}</dd>
+            <dd className={styles.value}>
+              <EntityName entity="party" id={worker.partyId} fallback={worker.partyId} />
+            </dd>
           </div>
           <div className={styles.entry}>
             <dt className={styles.term}>Created</dt>

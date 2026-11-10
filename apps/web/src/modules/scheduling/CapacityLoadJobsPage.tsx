@@ -1,10 +1,11 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchLoadJobs, getResource, type LoadJob, type LoadJobs, type Resource } from "./api/client";
-import { dash, formatDateTime, formatMinutes, shortId, UUID } from "./format";
+import { dash, formatDateTime, formatMinutes, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../mfg-shared/orders";
 
 const MAX_RANGE_MS = 93 * 86_400_000;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
@@ -55,7 +56,7 @@ export function CapacityLoadJobsPage() {
   }
 
   const columns: DataTableColumn<LoadJob>[] = [
-    { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+    { key: "orderId", header: "Order", mono: true, render: (row) => <OrderNumber id={row.orderId} /> },
     { key: "operNumber", header: "Operation", align: "end" },
     { key: "segment", header: "Segment", align: "end" },
     { key: "role", header: "Role", render: (row) => (row.role === "secondary" ? "Secondary" : "Primary") },

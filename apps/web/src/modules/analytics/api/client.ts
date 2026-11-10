@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { apiFetch } from "../../../shell/api/http";
 
 // Client for the analytics service (services/analytics/api/openapi.yaml).
 // Responses are validated with zod before the pages use them.
@@ -130,7 +131,7 @@ async function toError(res: Response): Promise<AnalyticsApiError> {
 }
 
 type Fetch = typeof fetch;
-const defaultFetch: Fetch = (input, init) => fetch(input, init);
+const defaultFetch: Fetch = (input, init) => apiFetch(input, init);
 
 interface Reply {
   body: unknown;

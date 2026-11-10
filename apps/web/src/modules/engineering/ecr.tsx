@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, StatusPill, Textarea, type DataTableColumn } from "../../shell/ui";
 import { actOnEcr, ApiError, createEcr, getEcr, listEcrs, type Ecr, type EcrAction } from "./api/client";
 import styles from "./pages.module.css";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const ecrStates = ["draft", "submitted", "under_review", "approved", "rejected", "cancelled"];
 const priorities = ["low", "medium", "high", "critical"];
@@ -112,7 +113,7 @@ export function EcrsPage({ onOpen, onCreate }: { onOpen?: (id: string) => void; 
           </div>
           <div className={styles.field}>
             <FormField id="ecr-product" label="Affected product" optional>
-              {(control) => <Input {...control} value={productInput} onChange={(e) => setProductInput(e.target.value)} maxLength={64} />}
+              {(control) => <EntityLookup {...control} entity="product" prefill={false} value={productInput} onChange={(e) => setProductInput(e.target.value)} />}
             </FormField>
           </div>
           <div className={styles.toolbar}>

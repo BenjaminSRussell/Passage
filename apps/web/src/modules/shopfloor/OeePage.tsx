@@ -7,12 +7,19 @@ import { OeeLiveTile } from "./OeeLiveTile";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { useResources } from "../mfg-shared/resources";
 
 const BUCKETS: { value: OeeBucketSize; label: string }[] = [
   { value: "15m", label: "15 minutes" },
   { value: "60m", label: "1 hour" },
   { value: "5m", label: "5 minutes" },
 ];
+
+/** "M-101 · CNC machining cell": the machine code with the name of the work center it runs. */
+function labelOf(m: Machine, resources: { id: string; code: string; name: string }[]): string {
+  const found = resources.find((r) => r.id === m.resourceId || r.code === m.resourceId);
+  return found ? `${m.machineId} · ${found.name}` : m.machineId;
+}
 
 /** The viewer's local day [00:00, next 00:00) as RFC 3339 instants. */
 export function dayWindow(date: string): { from: string; to: string } | null {
@@ -35,11 +42,12 @@ export function OeePage() {
     (signal) => (range && resourceIds.length > 0 ? getOee({ resourceIds, from: range.from, to: range.to, bucket }, signal) : Promise.resolve([])),
     `${date}|${bucket}|${resourceIds.join(",")}`,
   );
-  const machineOf = new Map((machines.data ?? []).map((m) => [m.resourceId, m.machineId]));
+  const resources = useResources();
+  const machineOf = new Map((machines.data ?? []).map((m) => [m.resourceId, labelOf(m, resources)]));
   const rows = series.data ?? [];
 
   const columns: DataTableColumn<OeeBucket>[] = [
-    { key: "resourceId", header: "Machine", mono: true, render: (row) => machineOf.get(row.resourceId) ?? row.resourceId },
+    { key: "resourceId", header: "Machine", render: (row) => machineOf.get(row.resourceId) ?? row.resourceId },
     { key: "bucketStart", header: "Bucket", render: (row) => formatDateTime(row.bucketStart) },
     { key: "plannedMinutes", header: "Planned", align: "end", render: (row) => `${fixed(row.plannedMinutes, 1)} min` },
     { key: "downMinutes", header: "Down", align: "end", render: (row) => `${fixed(row.downMinutes, 1)} min` },
@@ -73,7 +81,7 @@ export function OeePage() {
               <option value="">{machines.loading ? "Loading machines…" : "All machines"}</option>
               {(machines.data ?? []).map((m) => (
                 <option key={m.id} value={m.resourceId}>
-                  {m.machineId}
+                  {machineOf.get(m.resourceId) ?? m.machineId}
                 </option>
               ))}
             </Select>

@@ -34,10 +34,11 @@ import {
   type CollectionCase,
   type Problem,
 } from "./api/client";
-import { CASE_CATEGORY_LABELS, CASE_PRIORITY_LABELS, CURRENCY, dateTime, DECIMAL, money, PRIORITY_TONES, shortId, UUID } from "./format";
+import { CASE_CATEGORY_LABELS, CASE_PRIORITY_LABELS, CURRENCY, dateTime, DECIMAL, money, PRIORITY_TONES, UUID } from "./format";
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
 const SLA_HOURS: Record<CaseCategory, number> = { COLLECTION: 72, DISPUTE: 120, DEDUCTION: 240 };
@@ -49,7 +50,7 @@ function statusBadge(c: CollectionCase) {
 
 const columns: DataTableColumn<CollectionCase>[] = [
   { key: "category", header: "Category", render: (row) => CASE_CATEGORY_LABELS[row.category] ?? row.category },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "reason", header: "Reason" },
   { key: "documentNumber", header: "Item", mono: true, render: (row) => row.documentNumber ?? "None" },
   {

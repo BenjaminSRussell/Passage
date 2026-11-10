@@ -3,10 +3,11 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, importLockbox, listLockboxBatches, type LockboxBatch, type Payment, type Problem } from "./api/client";
-import { dateTime, DAY, money, shortId, STATUS_LABELS, today, UUID } from "./format";
+import { dateTime, DAY, money, STATUS_LABELS, today, UUID } from "./format";
 import { CommandFailure, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const MAX_BYTES = 3 * 1024 * 1024;
 const CREDIT_CODE = /^[1-3]\d{2}$/;
@@ -14,7 +15,7 @@ const CREDIT_CODE = /^[1-3]\d{2}$/;
 const batchColumns: DataTableColumn<LockboxBatch>[] = [
   { key: "importedAt", header: "Imported", mono: true, render: (row) => dateTime(row.importedAt) },
   { key: "receivedDate", header: "Received", mono: true },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => <span title={row.legalEntityId}>{shortId(row.legalEntityId)}</span> },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
   { key: "accountCount", header: "Accounts", mono: true, align: "end" },
   { key: "paymentCount", header: "Checks", mono: true, align: "end" },
   { key: "fileSha256", header: "File SHA-256", mono: true, render: (row) => <span title={row.fileSha256}>{row.fileSha256.slice(0, 12)}…</span> },

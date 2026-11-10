@@ -15,6 +15,7 @@ import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { useCategoryOptions } from "./processLabels";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderSelect } from "../mfg-shared/orders";
 
 export interface ValueRow {
   name: string;
@@ -52,7 +53,7 @@ function nowLocal(): string {
 export function validateProcessMessage(values: Values, sourceMessageId: string): { errors: Errors; input?: NewProcessMessage } {
   const errors: Errors = {};
   const orderId = values.orderId.trim();
-  if (!UUID.test(orderId)) errors.orderId = "Enter the production or batch order id (a UUID).";
+  if (!UUID.test(orderId)) errors.orderId = "Choose the production order.";
   const phasePath = values.phasePath.trim();
   if (phasePath.length > 255) errors.phasePath = "Keep the phase path to 255 characters.";
   const occurred = new Date(values.occurredAt);
@@ -158,10 +159,8 @@ export function NewProcessMessagePage() {
               </Select>
             )}
           </FormField>
-          <FormField id="pm-order" label="Order id" hint="The production or batch order the message belongs to." error={errors.orderId}>
-            {(control) => (
-              <Input {...control} value={values.orderId} invalid={Boolean(errors.orderId)} onChange={(event) => update({ orderId: event.target.value })} />
-            )}
+          <FormField id="pm-order" label="Production order" hint="The production order the message belongs to." error={errors.orderId}>
+            {(control) => <OrderSelect {...control} value={values.orderId} onChange={(v) => update({ orderId: v })} />}
           </FormField>
           <FormField id="pm-phase" label="Phase path" hint="ISA-88 path, e.g. /mix/unit1/heat/hold." optional error={errors.phasePath}>
             {(control) => (

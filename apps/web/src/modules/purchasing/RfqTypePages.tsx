@@ -14,7 +14,7 @@ import {
   type RFQTypeInput,
   type RFQTypeStatus,
 } from "./api/client";
-import { Details, LoadError, StatusBadge, decimalPattern, rankingLabels, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
+import { Details, LoadError, StatusBadge, decimalPattern, rankingLabels, statusLabel, useResource, uuidPattern, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -405,7 +405,7 @@ export function RFQTypeDetailPage() {
             <Details
               items={[
                 { label: "Code", value: saved.code, mono: true },
-                { label: "Legal entity", value: saved.legalEntityId, mono: true },
+                { label: "Legal entity", value: <Named entity="legalEntity" id={saved.legalEntityId} /> },
                 { label: "Bidding", value: saved.sealed ? "Sealed" : "Open" },
                 { label: "Status", value: <StatusBadge status={saved.status} /> },
                 { label: "Version", value: String(saved.version), mono: true },

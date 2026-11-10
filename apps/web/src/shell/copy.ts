@@ -3,7 +3,7 @@ const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platfo
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
 export const copy = {
-  nav: { home: "Home", notes: "Notes", general: "General", allFeatures: "All features", myWork: "My work" },
+  nav: { home: "Home", general: "General", allFeatures: "All features", myWork: "My work" },
   workspaces: {
     switcherLabel: "Workspace",
     chooseSummary: "Choose my workspaces",
@@ -31,6 +31,14 @@ export const copy = {
     tryAgain: "Try again",
     browseWorkspaces: "Browse workspaces",
     goHome: "Go to home",
+  },
+  account: {
+    menuLabel: "Account",
+    signedInAs: "Signed in as",
+    signOut: "Sign out",
+    expiredTitle: "Your session has ended",
+    expiredBody: "Sign in again to keep working. Anything you have not saved on this page may be lost.",
+    signIn: "Sign in",
   },
   announce: {
     searchOpened: "Search opened",
@@ -161,11 +169,6 @@ export const copy = {
     getStarted: "Approvals, holds and other tasks assigned to you will appear here, with a button to deal with each one.",
     summary: (count: number, more: boolean) => (count === 0 ? "Nothing is waiting for you." : `${count}${more ? "+" : ""} ${count === 1 && !more ? "item is" : "items are"} waiting for you.`),
   },
-  notes: {
-    title: "Notes",
-    description: "A preview of a form generated from entity metadata.",
-    saved: (title: string) => `${title} saved`,
-  },
   notFound: {
     title: "We couldn't find that page",
     description: "Check the address, or search for the page you need.",
@@ -181,9 +184,5 @@ export const copy = {
   errorBoundary: {
     title: "This page couldn't load",
     body: "Something went wrong while showing this page. Your other workspaces still work.",
-  },
-  placeholder: {
-    title: "This workspace isn't available yet",
-    badge: "Coming soon",
   },
 } as const;

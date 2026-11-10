@@ -18,6 +18,7 @@ import {
 } from "./api/client";
 import { dash, DECIMAL, describeDimensions, sentence, shortId, UUID } from "./format";
 import { ALL_DIMENSIONS, emptyDimensions, FORM_DIMENSIONS, ProblemAlert, RowAction, type FormDimension } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -255,7 +256,7 @@ export function CountTagsPage() {
   const columns: DataTableColumn<CountTag>[] = [
     { key: "tagNumber", header: "Tag", mono: true },
     { key: "status", header: "Status", render: (row) => <Badge tone={tagTones[row.status] ?? "neutral"}>{sentence(row.status)}</Badge> },
-    { key: "productId", header: "Product", mono: true, render: (row) => (row.productId ? shortId(row.productId) : dash) },
+    { key: "productId", header: "Product", mono: true, render: (row) => (row.productId ? <Named entity="product" id={row.productId} /> : dash) },
     { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
     { key: "countedQty", header: "Counted", align: "end", mono: true, render: (row) => row.countedQty ?? dash },
     {

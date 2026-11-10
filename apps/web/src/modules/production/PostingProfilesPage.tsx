@@ -11,6 +11,7 @@ import {
 } from "./api/client";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -73,7 +74,7 @@ export function validateProfile(p: PostingProfileInput): Record<string, string> 
 
 const columns: DataTableColumn<PostingProfile>[] = [
   { key: "itemGroup", header: "Item group" },
-  { key: "siteId", header: "Site", mono: true },
+  { key: "siteId", header: "Site", render: (row) => (row.siteId === "All" ? "All sites" : <EntityName entity="site" id={row.siteId} fallback={row.siteId} />) },
   { key: "wipAccount", header: "WIP", mono: true },
   { key: "inventoryAccount", header: "Inventory", mono: true },
   { key: "finishedGoodsAccount", header: "Finished goods", mono: true },

@@ -3,13 +3,15 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { fetchReceipts, RECEIPT_STATES, type Receipt, type ReceiptState } from "./api/client";
-import { StateBadge } from "./parts";
+import { Named, StateBadge } from "./parts";
+import { PurchaseOrderRef } from "./parts";
 import styles from "../../shell/pageLayout.module.css";
 
 const columns: DataTableColumn<Receipt>[] = [
   { key: "receiptNumber", header: "Receipt", mono: true },
   { key: "packingSlip", header: "Packing slip" },
-  { key: "vendorId", header: "Vendor", mono: true },
+  { key: "vendorId", header: "Vendor", render: (r) => <Named entity="vendor" id={r.vendorId} /> },
+  { key: "purchaseOrderId", header: "Purchase order", render: (r) => <PurchaseOrderRef id={r.purchaseOrderId} /> },
   { key: "receiptDate", header: "Receipt date" },
   { key: "currency", header: "Currency" },
   { key: "state", header: "State", render: (r) => <StateBadge state={r.state} /> },

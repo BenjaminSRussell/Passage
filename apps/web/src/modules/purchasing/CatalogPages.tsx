@@ -37,7 +37,6 @@ import {
 import {
   Details,
   LoadError,
-  ShortId,
   StatusBadge,
   currencyPattern,
   datePattern,
@@ -48,6 +47,7 @@ import {
   useResource,
   uuidPattern,
   type Failure,
+  Named,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -62,7 +62,7 @@ const listColumns: DataTableColumn<CatalogSummary>[] = [
   { key: "status", header: "Status", render: (c) => <StatusBadge status={c.status} /> },
   { key: "validity", header: "Validity", mono: true, render: validity },
   { key: "entryCount", header: "Entries", align: "end" },
-  { key: "legalEntityId", header: "Legal entity", render: (c) => <ShortId id={c.legalEntityId} /> },
+  { key: "legalEntityId", header: "Legal entity", render: (c) => <Named entity="legalEntity" id={c.legalEntityId} /> },
 ];
 
 /** Procurement catalog list with a status filter and load-more paging (FR-17.18). */
@@ -392,7 +392,7 @@ const entryColumns = (remove?: (e: CatalogEntry) => void, busyId?: string | null
   { key: "image", header: "Image", render: thumbnail },
   { key: "name", header: "Item", render: (e) => (e.preferred ? `${e.name} (preferred)` : e.name) },
   { key: "category", header: "Category" },
-  { key: "vendorId", header: "Vendor", render: (e) => <ShortId id={e.vendorId} /> },
+  { key: "vendorId", header: "Vendor", render: (e) => <Named entity="vendor" id={e.vendorId} /> },
   { key: "unit", header: "Unit" },
   { key: "unitPrice", header: "Price", align: "end", render: (e) => money(e.unitPrice, e.currency) },
   { key: "leadTimeDays", header: "Lead time", align: "end", render: (e) => `${e.leadTimeDays ?? 0} d` },
@@ -548,7 +548,7 @@ export function CatalogDetailPage() {
       <Card title="Summary">
         <Details
           items={[
-            { label: "Legal entity", value: catalog.legalEntityId, mono: true },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={catalog.legalEntityId} /> },
             { label: "Validity", value: validity(catalog), mono: true },
             { label: "Published to", value: catalog.orgUnitIds.length === 0 ? "Every operating unit" : catalog.orgUnitIds.join(", "), mono: catalog.orgUnitIds.length > 0 },
             { label: "Description", value: catalog.description ?? "" },
@@ -601,7 +601,7 @@ const hitColumns = (onPick: (h: CatalogHit) => void): DataTableColumn<CatalogHit
   { key: "image", header: "Image", render: thumbnail },
   { key: "name", header: "Item", render: (h) => (h.preferred ? `${h.name} (preferred)` : h.name) },
   { key: "category", header: "Category" },
-  { key: "vendorId", header: "Vendor", render: (h) => <ShortId id={h.vendorId} /> },
+  { key: "vendorId", header: "Vendor", render: (h) => <Named entity="vendor" id={h.vendorId} /> },
   { key: "unitPrice", header: "Price", align: "end", render: (h) => `${money(h.unitPrice, h.currency)} per ${h.unit}` },
   { key: "leadTimeDays", header: "Lead time", align: "end", render: (h) => `${h.leadTimeDays ?? 0} d` },
   {

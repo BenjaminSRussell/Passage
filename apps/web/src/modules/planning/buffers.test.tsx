@@ -240,7 +240,8 @@ describe("DDMRP buffer status", () => {
     expect(within(table).getByText("Yellow")).toBeInTheDocument();
     expect(within(table).getByText("Red")).toBeInTheDocument();
     expect(within(table).getByText("115")).toBeInTheDocument();
-    expect(within(table).getByText(`${SITE} / ${WH}`)).toBeInTheDocument();
+    expect(within(table).getByText(WH)).toBeInTheDocument();
+    expect(within(table).getAllByText(SITE).length).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.change(screen.getByLabelText("Zone"), { target: { value: "red" } });

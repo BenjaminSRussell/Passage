@@ -20,9 +20,9 @@ describe("BOM lifecycle client", () => {
   it("posts activation and cancellation to the escaped version id", async () => {
     const fetchMock = stub((url) => ok(bom(url.endsWith(":cancel") ? "cancelled" : "active")));
     expect((await activateBomVersion("a/b")).status).toBe("active");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/a%2Fb:activate", { method: "POST" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/a%2Fb:activate", expect.objectContaining({ method: "POST" }));
     expect((await cancelBomVersion("a/b")).status).toBe("cancelled");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/a%2Fb:cancel", { method: "POST" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/a%2Fb:cancel", expect.objectContaining({ method: "POST" }));
   });
 
   it("surfaces the code of a refused cancel", async () => {
@@ -72,7 +72,7 @@ describe("BomVersionPage lifecycle controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel draft" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Activate" })).toBeNull());
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/v1:cancel", { method: "POST" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/v1:cancel", expect.objectContaining({ method: "POST" }));
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel draft" })).toBeNull();
     expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent("BOM BIKE draft is cancelled");

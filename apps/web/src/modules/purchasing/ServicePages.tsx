@@ -26,7 +26,7 @@ import {
   type ServiceSpecResult,
 } from "./api/client";
 import { MAX_DEPTH, MAX_NODES, draftFromOutline, newOutlineRow, toOutlineInput, type OutlineDraftRow } from "./outline";
-import { Details, LoadError, ShortId, StatusBadge, currencyPattern, dash, decimalPattern, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
+import { Details, LoadError, ShortId, StatusBadge, currencyPattern, dash, decimalPattern, statusLabel, useResource, uuidPattern, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -42,7 +42,7 @@ const outlineColumns = (currency: string): DataTableColumn<OutlineRow>[] => [
     header: "Service",
     render: (r) => (
       <span style={{ paddingInlineStart: `${(r.depth - 1) * 1.25}rem`, fontWeight: r.kind === "LEVEL" ? 600 : undefined }}>
-        {r.description || <ShortId id={r.productId} />}
+        {r.description || <Named entity="product" id={r.productId} />}
       </span>
     ),
   },
@@ -360,7 +360,7 @@ export function ServiceSpecPage() {
       <Card title="Line">
         <Details
           items={[
-            { label: "Item", value: line.description || <ShortId id={line.productId} /> },
+            { label: "Item", value: line.description || <Named entity="product" id={line.productId} /> },
             { label: "Line amount", value: `${line.lineAmount} ${order.currency}`, mono: true },
             { label: "Line status", value: <StatusBadge status={line.status} /> },
             { label: "Order status", value: <StatusBadge status={order.approvalStatus} /> },
@@ -801,7 +801,7 @@ export function ModelServiceSpecDetailPage() {
             <Details
               items={[
                 { label: "Code", value: saved.code, mono: true },
-                { label: "Legal entity", value: saved.legalEntityId, mono: true },
+                { label: "Legal entity", value: <Named entity="legalEntity" id={saved.legalEntityId} /> },
                 { label: "Planned total", value: `${saved.plannedTotal} ${saved.currency}`, mono: true },
                 { label: "Status", value: <StatusBadge status={saved.status} /> },
                 { label: "Version", value: String(saved.version), mono: true },
