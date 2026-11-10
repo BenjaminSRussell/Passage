@@ -16,6 +16,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/api"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/bankconnect"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
@@ -78,6 +79,20 @@ func run() error {
 	}
 	if err := wireEBICS(ctx, a, pg, vault, vaultCfg); err != nil {
 		return err
+	}
+	a.WithReconciliations(pg)
+	ledger, err := ledgerclient.FromEnv(os.Getenv, "treasury")
+	if err != nil {
+		return fmt.Errorf("ledger client: %w", err)
+	}
+	if ledger != nil {
+		profiles := map[string]api.GLProfile{}
+		if raw := os.Getenv(api.EnvGLProfiles); raw != "" {
+			if profiles, err = api.ParseGLProfiles(raw); err != nil {
+				return err
+			}
+		}
+		a.WithLedger(ledger, profiles)
 	}
 
 	router := httpx.NewRouter()
