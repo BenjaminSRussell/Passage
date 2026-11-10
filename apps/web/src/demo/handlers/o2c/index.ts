@@ -6,3 +6,7 @@ import "./pricing";
 import "./quotations";
 import "./receivables";
 import "./collections";
+import "./outbound";
+import "./promotions";
+import "./salesops";
+import "./servicecases";
