@@ -1030,7 +1030,7 @@ paths:
             default: 15m
       responses:
         "200":
-          description: Server-Sent Events, each `event: oee` with an OeeTile as data.
+          description: "Server-Sent Events, each `event: oee` with an OeeTile as data."
           content:
             text/event-stream:
               schema:
@@ -3093,6 +3093,7 @@ paths:
   /v1/shopfloor/edge-nodes/{id}:enroll:
     post:
       operationId: enrollEdgeNode
+      x-passage-duty: public
       summary: Redeem an enrollment token for a client certificate
       description: |
         The connector's first call. It carries no session: the token is the credential and names its
