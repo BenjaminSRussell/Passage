@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { copy } from "../copy";
-import { Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
+import { Badge, Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
+import { MyWorkSummary } from "./MyWorkSummary";
 import { ALL_FEATURES_PATH, HOME_WORKSPACE_LIMIT, TOP_TASK_COUNT } from "../workspaces/model";
 import { useWorkspaceNav } from "../workspaces/WorkspaceNav";
 import styles from "./pages.module.css";
@@ -11,6 +12,7 @@ export function HomePage() {
   return (
     <>
       <PageHeader title={copy.home.pageTitle} description={copy.home.description} />
+      <MyWorkSummary />
       {ordered.length === 0 ? (
         <Card>
           <EmptyState icon="grid" title={copy.home.emptyTitle} description={copy.home.emptyDescription} />
@@ -22,6 +24,7 @@ export function HomePage() {
               <Card>
                 <div className={styles.cardHead}>
                   <h3 className={styles.cardTitle}>{w.label}</h3>
+                  {w.id === active?.id ? <Badge tone="neutral">{copy.home.current}</Badge> : null}
                 </div>
                 <p className={styles.cardDescription}>{w.description}</p>
                 <ul className={styles.links} aria-label={`${w.label}: ${copy.home.topTasks}`}>
