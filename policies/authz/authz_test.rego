@@ -1571,6 +1571,38 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
 }
 
+test_treasury_bank_reconciliation_duties_are_distinct if {
+	allowed("treasury.reconciliation.view", "GET", "/v1/treasury/bank-reconciliations")
+	allowed("treasury.reconciliation.view", "GET", "/v1/treasury/bank-reconciliations/r-1")
+	allowed("treasury.reconciliation.close", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+	allowed("treasury.reconciliation.reopen", "POST", "/v1/treasury/bank-reconciliations/r-1:reopen")
+	allowed("treasury.reconciliation.post", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:create-transaction")
+	allowed("treasury.reconciliation.abandon", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:abandon")
+	not allowed("treasury.reconciliation.post", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:abandon")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:abandon")
+	not allowed("treasury.reconciliation.abandon", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:create-transaction")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1:set-balances")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:exclude")
+	allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:include")
+	not allowed("treasury.reconciliation.close", "POST", "/v1/treasury/bank-reconciliations/r-1:reopen")
+	not allowed("treasury.reconciliation.reopen", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+	not allowed("treasury.reconciliation.close", "GET", "/v1/treasury/bank-reconciliations/r-1")
+	not allowed("treasury.reconciliation.close", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:create-transaction")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1:reopen")
+	not allowed("treasury.reconciliation.write", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:create-transaction")
+	not allowed("treasury.reconciliation.post", "POST", "/v1/treasury/bank-reconciliations/r-1/lines/3:exclude")
+	not allowed("treasury.reconciliation.view", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+	not allowed("treasury.reconciliation.view", "DELETE", "/v1/treasury/bank-reconciliations/r-1")
+	not allowed("treasury.view", "GET", "/v1/treasury/bank-reconciliations")
+	not allowed("treasury.view", "POST", "/v1/treasury/bank-reconciliations/r-1:close")
+}
+
+test_treasury_service_posts_to_the_ledger_only if {
+	data.service_grants.treasury == {"ledger": ["ledger.entry.post"]}
+}
+
 test_treasury_ebics_duties_split_ceremony_from_confirmation if {
 	allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers")
 	not allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")

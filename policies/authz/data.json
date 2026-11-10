@@ -3360,7 +3360,19 @@
     ]},
     "treasury.forecast.write": {"permissions": [{"resource": "/v1/treasury/cash-forecast-entries", "methods": ["POST"]}]},
     "treasury.loan.write": {"permissions": [{"resource": "/v1/treasury/loans", "methods": ["POST"]}]},
+    "treasury.reconciliation.close": {"permissions": [{"resource": "/v1/treasury/bank-reconciliations/*:close", "methods": ["POST"]}]},
+    "treasury.reconciliation.abandon": {"permissions": [{"resource": "/v1/treasury/bank-reconciliations/*/lines/*:abandon", "methods": ["POST"]}]},
+    "treasury.reconciliation.post": {"permissions": [{"resource": "/v1/treasury/bank-reconciliations/*/lines/*:create-transaction", "methods": ["POST"]}]},
+    "treasury.reconciliation.reopen": {"permissions": [{"resource": "/v1/treasury/bank-reconciliations/*:reopen", "methods": ["POST"]}]},
+    "treasury.reconciliation.view": {"permissions": [
+      {"resource": "/v1/treasury/bank-reconciliations", "methods": ["GET"]},
+      {"resource": "/v1/treasury/bank-reconciliations/*", "methods": ["GET"]}
+    ]},
     "treasury.reconciliation.write": {"permissions": [
+      {"resource": "/v1/treasury/bank-reconciliations", "methods": ["POST"]},
+      {"resource": "/v1/treasury/bank-reconciliations/*:set-balances", "methods": ["POST"]},
+      {"resource": "/v1/treasury/bank-reconciliations/*/lines/*:exclude", "methods": ["POST"]},
+      {"resource": "/v1/treasury/bank-reconciliations/*/lines/*:include", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-matches", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-matches/*:unmatch", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-rules", "methods": ["POST"]},
@@ -3541,6 +3553,9 @@
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "expense": {
+      "ledger": ["ledger.entry.post"]
+    },
+    "treasury": {
       "ledger": ["ledger.entry.post"]
     },
     "sales": {
