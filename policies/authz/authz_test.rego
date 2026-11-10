@@ -1109,6 +1109,12 @@ test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject i
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
 }
 
+test_budget_view_reads_the_scenario_comparison_and_cannot_write_it if {
+	allowed("budget.view", "GET", "/v1/budget/plans/p1/scenarios:compare")
+	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios:compare")
+	not allowed("budget.plan.workflow", "GET", "/v1/budget/plans/p1/scenarios:compare")
+}
+
 test_budget_plan_workflow_routes_are_refused_to_every_person_duty if {
 	routes := [
 		"/v1/budget/plans/p1/stages/review:sign-off",

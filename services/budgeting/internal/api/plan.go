@@ -36,6 +36,7 @@ const (
 	codeZeroWeights      = "BUD-0060"
 	spreadEven           = "even"
 	spreadPriorYear      = "prior-year-actuals"
+	spreadCustom         = "custom"
 )
 
 var (
@@ -56,6 +57,7 @@ type PlanStore interface {
 	ListPlans(ctx context.Context, legalEntityID string) ([]store.Plan, error)
 	GetPlan(ctx context.Context, id string) (store.PlanView, error)
 	GetGrid(ctx context.Context, planID, scenarioID string, f store.GridFilter) (store.Grid, error)
+	CompareScenarios(ctx context.Context, planID, baseID, otherID, groupBy string) (store.Comparison, error)
 	Replayed(ctx context.Context, key, hash string) (bool, error)
 }
 
@@ -87,6 +89,7 @@ func (a *API) registerPlans(r chi.Router) {
 	view.Get("/v1/budget/plans", a.listPlans)
 	view.Get("/v1/budget/plans/{id}", a.getPlan)
 	view.Get("/v1/budget/plans/{id}/scenarios/{sid}/grid", a.getGrid)
+	view.Get("/v1/budget/plans/{id}/scenarios:compare", a.compareScenarios)
 }
 
 func planPathID(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -351,10 +354,12 @@ func gridCells(in []gridCellRequest) ([]domain.PlanCell, map[string]string) {
 }
 
 type spreadRequest struct {
-	Account     string          `json:"account"`
-	Total       decimal.Decimal `json:"total"`
-	Method      string          `json:"method"`
-	CostCenters []struct {
+	Account string          `json:"account"`
+	Total   decimal.Decimal `json:"total"`
+	Method  string          `json:"method"`
+	// PeriodWeights is the distribution key for method custom: 12 weights, one per period of the fiscal year (a seasonal curve).
+	PeriodWeights []decimal.Decimal `json:"periodWeights"`
+	CostCenters   []struct {
 		CostCenter string          `json:"costCenter"`
 		Weight     decimal.Decimal `json:"weight"`
 	} `json:"costCenters"`
@@ -383,8 +388,26 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 	if msg := moneyField(req.Total); msg != "" {
 		fields["total"] = msg
 	}
-	if req.Method != spreadEven && req.Method != spreadPriorYear {
-		fields["method"] = "must be even or prior-year-actuals"
+	if req.Method != spreadEven && req.Method != spreadPriorYear && req.Method != spreadCustom {
+		fields["method"] = "must be even, prior-year-actuals or custom"
+	}
+	if req.Method == spreadCustom {
+		if len(req.PeriodWeights) != 12 {
+			fields["periodWeights"] = "must hold exactly 12 weights, one per period"
+		} else {
+			sum := decimal.Zero
+			for _, pw := range req.PeriodWeights {
+				if pw.Sign() < 0 || pw.Exponent() < -4 {
+					fields["periodWeights"] = "must not be negative and have at most 4 decimal places"
+				}
+				sum = sum.Add(pw)
+			}
+			if fields["periodWeights"] == "" && sum.Sign() <= 0 {
+				fields["periodWeights"] = "must not all be zero"
+			}
+		}
+	} else if len(req.PeriodWeights) > 0 {
+		fields["periodWeights"] = "is only used with method custom"
 	}
 	if len(req.CostCenters) == 0 || len(req.CostCenters) > maxCostCenters {
 		fields["costCenters"] = fmt.Sprintf("must hold 1 to %d cost centers", maxCostCenters)
@@ -433,10 +456,13 @@ func (a *API) spreadGrid(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, store.CodePlanNotDraft, fmt.Sprintf("the plan is %s; only a Draft plan can be changed", plan.Status)))
 		return
 	}
-	periodWeights, fallback, err := a.periodWeights(r.Context(), plan.Plan, req.Account, req.Method)
-	if err != nil {
-		httpx.Fail(w, r, err)
-		return
+	periodWeights, fallback := req.PeriodWeights, false
+	if req.Method != spreadCustom {
+		periodWeights, fallback, err = a.periodWeights(r.Context(), plan.Plan, req.Account, req.Method)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
 	}
 	periods := domain.Periods(plan.FiscalYear)
 	cells := make([]domain.PlanCell, 0, len(req.CostCenters)*len(periods))
@@ -607,4 +633,36 @@ func (a *API) getGrid(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", etag(g.Scenario.Version))
 	}
 	one(w, r, g, err)
+}
+
+// compareScenarios sets two scenarios of a plan side by side (FR-38.2): base and other are scenario ids, groupBy is
+// account (default), costCenter or period.
+func (a *API) compareScenarios(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := planPathID(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	fields := map[string]string{}
+	for _, name := range []string{"base", "other"} {
+		if !ids.Valid(q.Get(name)) {
+			fields[name] = "must be a scenario id (UUID)"
+		}
+	}
+	groupBy := q.Get("groupBy")
+	if groupBy == "" {
+		groupBy = "account"
+	}
+	if !store.ValidComparisonGroup(groupBy) {
+		fields["groupBy"] = "must be account, costCenter or period"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	c, err := a.plans.CompareScenarios(r.Context(), id, q.Get("base"), q.Get("other"), groupBy)
+	one(w, r, c, err)
 }

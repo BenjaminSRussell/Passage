@@ -385,6 +385,21 @@ paths:
       responses:
         '200': { description: Cells written and the scenario total. A spread by prior-year-actuals that found no actuals sets priorYearFallback., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGridWritten' } } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/scenarios:compare:
+    get:
+      operationId: compareBudgetPlanScenarios
+      x-passage-duty: budget.view
+      description: >-
+        Sets two scenarios of the plan side by side, grouped by account (default), cost center or period. A key only one scenario
+        holds shows zero for the other. deltaPct is omitted when the base is zero.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: base, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: other, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: groupBy, in: query, required: false, schema: { type: string, enum: [account, costCenter, period], default: account } }
+      responses:
+        '200': { description: The comparison., content: { application/json: { schema: { $ref: '#/components/schemas/PlanComparison' } } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/budget/plans/{id}/scenarios/{sid}:spread:
     post:
       operationId: spreadBudgetPlanGrid
@@ -403,7 +418,7 @@ paths:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [account, total, method, costCenters], properties: { account: { type: string }, total: { type: string }, method: { type: string, enum: [even, prior-year-actuals] }, costCenters: { type: array, items: { type: object, required: [costCenter, weight], properties: { costCenter: { type: string }, weight: { type: string } } } } } } } }
+        content: { application/json: { schema: { type: object, required: [account, total, method, costCenters], properties: { account: { type: string }, total: { type: string }, method: { type: string, enum: [even, prior-year-actuals, custom] }, periodWeights: { type: array, minItems: 12, maxItems: 12, items: { type: string }, description: 'The distribution key of method custom, and only with it: 12 weights, one per period (a seasonal curve); not negative, not all zero.' }, costCenters: { type: array, items: { type: object, required: [costCenter, weight], properties: { costCenter: { type: string }, weight: { type: string } } } } } } } }
       responses:
         '200': { description: Cells written and the scenario total. A spread by prior-year-actuals that found no actuals sets priorYearFallback., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGridWritten' } } } }
         default: { $ref: '#/components/responses/Problem' }
@@ -649,6 +664,25 @@ components:
         cells: { type: array, maxItems: 10000, items: { $ref: '#/components/schemas/PlanCell' } }
         total: { $ref: '#/components/schemas/Money' }
         truncated: { type: boolean, description: More than 10000 cells matched; narrow the filter to see the rest. total still covers every match. }
+    PlanComparison:
+      type: object
+      required: [groupBy, base, other, rows, delta]
+      properties:
+        groupBy: { type: string, enum: [account, costCenter, period] }
+        base: { $ref: '#/components/schemas/PlanScenario' }
+        other: { $ref: '#/components/schemas/PlanScenario' }
+        delta: { $ref: '#/components/schemas/Money', description: Other total less base total. }
+        rows:
+          type: array
+          items:
+            type: object
+            required: [key, base, other, delta]
+            properties:
+              key: { type: string }
+              base: { $ref: '#/components/schemas/Money' }
+              other: { $ref: '#/components/schemas/Money' }
+              delta: { $ref: '#/components/schemas/Money' }
+              deltaPct: { type: string, description: Change as a percentage of the base, two decimals; omitted when the base is zero. }
     PlanGridWritten:
       type: object
       required: [scenarioId, version, cells, total]

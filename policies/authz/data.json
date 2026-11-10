@@ -2091,6 +2091,7 @@
       {"resource": "/v1/budget/plans", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["GET"]},
+      {"resource": "/v1/budget/plans/*/scenarios:compare", "methods": ["GET"]},
       {"resource": "/v1/budget/available", "methods": ["GET"]},
       {"resource": "/v1/budget/checks", "methods": ["GET"]},
       {"resource": "/v1/budget/checks/*", "methods": ["GET"]},
