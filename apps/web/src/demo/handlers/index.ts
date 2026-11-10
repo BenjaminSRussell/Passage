@@ -3,5 +3,6 @@ import "./mfg";
 import "./supply";
 import "./o2c";
 import "./treasury";
+import "./budgeting";
 import "./documents";
 import "./shell";
