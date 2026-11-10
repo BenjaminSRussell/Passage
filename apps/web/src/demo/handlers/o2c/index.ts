@@ -5,3 +5,7 @@ import "./billing";
 import "./pricing";
 import "./quotations";
 import "./receivables";
+import "./outbound";
+import "./salesops";
+import "./promotions";
+import "./servicecases";

@@ -264,7 +264,7 @@ route("POST", `${BASE}/count-sheets/{id}:{action}`, ({ params }) => {
       if (s.lines.some((l) => l.countedQty === null)) return reply.problem(422, "INV-CNT-007", "Count every line before posting");
       const lines = s.lines.map(posted);
       const variances = lines.filter((l) => Number(l.postedVariance) !== 0);
-      const j = countJournal(s, variances);
+      const j = countJournal(variances);
       return sheets.update(s.id, { status: "POSTED", lines, journalId: j.id, postedAt: at(0), version: s.version + 1 });
     }
     default:
@@ -402,7 +402,7 @@ const journals = table<Journal>([
   journal(14, "MOVEMENT", "DRAFT", 0.05, []),
 ]);
 
-function countJournal(_sheet: CountSheet, variances: CountLine[]): Journal {
+function countJournal(variances: CountLine[]): Journal {
   const n = 100 + journals.all().length;
   const lines = variances.map((l, i): JournalLine => {
     const it = ITEMS.find((x) => x.id === l.productId)!;

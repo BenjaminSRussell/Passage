@@ -6,3 +6,7 @@ import "./warehouse";
 import "./inventory";
 import "./receiving";
 import "./payables";
+import "./stock";
+import "./procurement";
+import "./docks";
+import "./quality";
