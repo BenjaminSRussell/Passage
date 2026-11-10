@@ -2378,6 +2378,18 @@ test_print_document_render_is_its_own_duty if {
 	not allowed("print.admin", "POST", "/print/v1/documents:render")
 }
 
+test_print_queue_management_is_admin_only if {
+	allowed("print.admin", "PATCH", "/print/v1/printers/p-1")
+	allowed("print.admin", "POST", "/print/v1/printers/p-1:retire")
+	allowed("print.admin", "PUT", "/print/v1/routing-rules/r-1")
+	allowed("print.admin", "DELETE", "/print/v1/routing-rules/r-1")
+	allowed("print.admin", "POST", "/print/v1/jobs:sweep")
+	not allowed("print.job.submit", "PATCH", "/print/v1/printers/p-1")
+	not allowed("print.job.submit", "POST", "/print/v1/printers/p-1:retire")
+	not allowed("print.job.submit", "DELETE", "/print/v1/routing-rules/r-1")
+	not allowed("print.job.submit", "POST", "/print/v1/jobs:sweep")
+}
+
 test_receiving_document_flow_is_read_only_and_separate if {
 	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
