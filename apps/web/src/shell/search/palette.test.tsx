@@ -31,6 +31,18 @@ describe("palette record results", () => {
     expect(readRecent("user-a")).toEqual([po]);
   });
 
+  it("lists production orders and workers under their own headings", async () => {
+    const order: RecordHit = { type: "production_order", id: "mo-1", number: "MO-24611", title: "MO-24611", status: "REPORTED_AS_FINISHED", link: "/production/mo-1" };
+    const worker: RecordHit = { type: "worker", id: "w-1", number: "W-0112", title: "W-0112", subtitle: "employee", link: "/hr/workers/w-1" };
+    const { user, onSelect } = open(vi.fn<RecordSearch>().mockResolvedValue([order, worker]));
+    await user.type(screen.getByRole("combobox"), "mo-24");
+    const orders = await screen.findByRole("group", { name: "Production orders" });
+    expect(within(orders).getByRole("option", { name: "Production order MO-24611, Reported as finished" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Workers" })).getByRole("option", { name: "Worker W-0112, employee" })).toBeInTheDocument();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ to: "/hr/workers/w-1", record: worker }));
+  });
+
   it("keeps page results after the records", async () => {
     const { user } = open(vi.fn<RecordSearch>().mockResolvedValue([po]));
     await user.type(screen.getByRole("combobox"), "purchase");
