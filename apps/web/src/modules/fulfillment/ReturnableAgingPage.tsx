@@ -3,16 +3,17 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { returnableAging, type AgedReturnableBalance } from "./api/client";
-import { formatDate, formatDateTime, shortId, UUID } from "./format";
+import { formatDate, formatDateTime, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { PlainName } from "../sales/OrderNumber";
 
 /** Most balances one view shows; the counts above the table cover all of them. */
 export const AGING_LIMIT = 500;
 
 const columns: DataTableColumn<AgedReturnableBalance>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
+  { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
   { key: "containerType", header: "Container type", mono: true },
   { key: "balance", header: "Held by customer", align: "end" },
   { key: "oldestOutstandingDate", header: "Oldest held since", render: (row) => formatDate(row.oldestOutstandingDate) },

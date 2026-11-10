@@ -28,6 +28,9 @@ import {
 } from "./api/client";
 import { CopyVersionCard } from "./copyVersion";
 import styles from "./pages.module.css";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { useNames } from "../mfg-shared/names";
 
 const bomStatuses = ["draft", "active", "expired", "superseded", "cancelled"];
 const emptyFilters: BomVersionFilters = { productId: "", siteId: "", status: "", asOf: "", usage: "", category: "" };
@@ -57,8 +60,8 @@ function discontinuationText(line: BomLine): string {
 }
 
 const bomColumns: DataTableColumn<BomVersion>[] = [
-  { key: "productId", header: "Product", mono: true },
-  { key: "siteId", header: "Site", render: (row) => row.siteId || "All sites" },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} fallback={row.productId} /> },
+  { key: "siteId", header: "Site", render: (row) => (row.siteId ? <EntityName entity="site" id={row.siteId} fallback={row.siteId} /> : "All sites") },
   { key: "usage", header: "Usage", render: (row) => row.usage || "production" },
   { key: "effectiveFrom", header: "Effective from" },
   { key: "effectiveTo", header: "Effective to", render: (row) => row.effectiveTo ?? "open" },
@@ -142,12 +145,12 @@ export function BomVersionsPage({ onOpen, onCreate }: { onOpen?: (id: string) =>
         <form className={styles.form} onSubmit={applyFilters}>
           <div className={styles.field}>
             <FormField id="bom-product" label="Product" optional>
-              {(control) => <Input {...control} value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })} />}
+              {(control) => <EntityLookup {...control} entity="product" prefill={false} value={draft.productId ?? ""} onChange={(e) => setDraft({ ...draft, productId: e.target.value })} />}
             </FormField>
           </div>
           <div className={styles.field}>
             <FormField id="bom-site" label="Site" optional>
-              {(control) => <Input {...control} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
+              {(control) => <EntityLookup {...control} entity="site" prefill={false} value={draft.siteId ?? ""} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
             </FormField>
           </div>
           <div className={styles.field}>
@@ -251,6 +254,7 @@ export function BomVersionPage({
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [actionError, setActionError] = useState("");
   const [announcement, setAnnouncement] = useState("");
+  const names = useNames("product", version ? [version.productId, ...(version.lines ?? []).map((l) => l.componentProductId)] : []);
 
   async function change(action: () => Promise<void>) {
     setActionError("");
@@ -268,7 +272,7 @@ export function BomVersionPage({
     change(async () => {
       const activated = await activateBomVersion(id);
       setVersion(activated);
-      setAnnouncement(`BOM ${activated.productId} is now active`);
+      setAnnouncement(`BOM ${names[activated.productId] ?? activated.productId} is now active`);
     });
 
   const cancel = () =>
@@ -276,7 +280,7 @@ export function BomVersionPage({
       const cancelled = await cancelBomVersion(id);
       setConfirmCancel(false);
       setVersion(cancelled);
-      setAnnouncement(`BOM ${cancelled.productId} draft is cancelled`);
+      setAnnouncement(`BOM ${names[cancelled.productId] ?? cancelled.productId} draft is cancelled`);
     });
 
   useEffect(() => {
@@ -297,8 +301,8 @@ export function BomVersionPage({
   const notFound = loadError instanceof ApiError && loadError.code === notFoundCode;
   const facts: [string, ReactNode][] = version
     ? [
-        ["Product", version.productId],
-        ["Site", version.siteId || "All sites"],
+        ["Product", <EntityName entity="product" id={version.productId} fallback={version.productId} />],
+        ["Site", version.siteId ? <EntityName entity="site" id={version.siteId} fallback={version.siteId} /> : "All sites"],
         ["Usage", version.usage || "production"],
         ["Category", version.category || "material"],
         ["Effective", `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`],
@@ -310,7 +314,7 @@ export function BomVersionPage({
     : [];
   const lineColumns: DataTableColumn<BomLine>[] = [
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "componentProductId", header: "Component", mono: true },
+    { key: "componentProductId", header: "Component", render: (line) => <EntityName entity="product" id={line.componentProductId} fallback={line.componentProductId} /> },
     { key: "quantity", header: "Quantity", align: "end" },
     { key: "lineType", header: "Type" },
     { key: "scrapConst", header: "Scrap const", align: "end" },
@@ -326,7 +330,7 @@ export function BomVersionPage({
       render: (line) =>
         onWhereUsed ? (
           <Button size="sm" onClick={() => onWhereUsed(line.componentProductId)}>
-            Where used {line.componentProductId}
+            Where used {names[line.componentProductId] ?? line.componentProductId}
           </Button>
         ) : null,
     },
@@ -334,7 +338,7 @@ export function BomVersionPage({
 
   return (
     <>
-      <PageHeader title={version ? `BOM ${version.productId}` : "BOM version"} description="Components, scrap and effectivity." />
+      <PageHeader title={version ? `BOM ${names[version.productId] ?? version.productId}` : "BOM version"} description="Components, scrap and effectivity." />
       <div className={styles.toolbar}>
         {onBack ? <Button size="sm" onClick={onBack}>Back to bills of material</Button> : null}
         {loadError && !notFound ? <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Retry</Button> : null}
@@ -526,12 +530,12 @@ export function BomVersionCreatePage({ onCreated, onCancel }: { onCreated?: (id:
         <form className={styles.form} onSubmit={submit}>
           <div className={styles.field}>
             <FormField id="new-bom-product" label="Product" error={errors.fields.productId}>
-              {(control) => <Input {...control} value={productId} onChange={(e) => setProductId(e.target.value)} required maxLength={64} />}
+              {(control) => <EntityLookup {...control} entity="product" prefill={false} value={productId} onChange={(e) => setProductId(e.target.value)} />}
             </FormField>
           </div>
           <div className={styles.field}>
             <FormField id="new-bom-site" label="Site" optional>
-              {(control) => <Input {...control} value={siteId} onChange={(e) => setSiteId(e.target.value)} maxLength={64} />}
+              {(control) => <EntityLookup {...control} entity="site" prefill={false} value={siteId} onChange={(e) => setSiteId(e.target.value)} />}
             </FormField>
           </div>
           <div className={styles.field}>
@@ -585,7 +589,7 @@ export function BomVersionCreatePage({ onCreated, onCancel }: { onCreated?: (id:
               <div className={styles.field}>
                 <FormField id={`new-bom-component-${line.key}`} label={`Component ${index + 1}`} error={errors.lines[line.key]}>
                   {(control) => (
-                    <Input {...control} value={line.componentProductId} onChange={(e) => updateLine(line.key, { componentProductId: e.target.value })} required maxLength={64} />
+                    <EntityLookup {...control} entity="product" prefill={false} value={line.componentProductId} onChange={(e) => updateLine(line.key, { componentProductId: e.target.value })} />
                   )}
                 </FormField>
               </div>

@@ -8,13 +8,20 @@ import { K, conditions, customerByKey, itemByKey, priceFor, r2 } from "./model";
 const BASE = "/api/v1/pricing";
 const OVERLAP = "PRC-0002";
 
-route("GET", `${BASE}/condition-records`, ({ query }) => {
+/** What a record's customer filter matches: its key plus the customer's number and name. */
+const customerText = (r: ConditionRecord): string => {
+  const c = customerByKey(r.customerKey);
+  return [r.customerKey, c?.number, c?.name].filter(Boolean).join(" ").toLowerCase();
+};
+const productText = (r: ConditionRecord): string => [r.productKey, itemByKey(r.productKey)?.name].filter(Boolean).join(" ").toLowerCase();
+const csvCell = (v: string | number | boolean): string => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+
+function filtered(query: URLSearchParams): ConditionRecord[] {
   const customer = query.get("customer")?.toLowerCase();
   const product = query.get("product")?.toLowerCase();
   const asOf = query.get("asOf");
   const endsFrom = query.get("validToFrom");
   const endsTo = query.get("validToTo");
-  const limit = Number(query.get("limit") ?? 100);
   const rows = conditions
     .all()
     .filter(
@@ -22,21 +29,34 @@ route("GET", `${BASE}/condition-records`, ({ query }) => {
         (!query.get("status") || r.status === query.get("status")) &&
         (!query.get("type") || r.type === query.get("type")) &&
         (!query.get("legalEntityId") || r.legalEntityId === query.get("legalEntityId")) &&
-        (!customer || r.customerKey.toLowerCase().includes(customer)) &&
-        (!product || r.productKey.toLowerCase().includes(product)) &&
+        (!customer || customerText(r).includes(customer)) &&
+        (!product || productText(r).includes(product)) &&
         (!asOf || (r.validFrom <= asOf && r.validTo >= asOf)) &&
         (!endsFrom || r.validTo >= endsFrom) &&
         (!endsTo || r.validTo <= endsTo),
     );
   // Products together, customer-specific records after the list prices: how a pricing analyst reads the grid.
   rows.sort((a, b) => a.productKey.localeCompare(b.productKey) || a.type.localeCompare(b.type) || a.customerKey.localeCompare(b.customerKey) || Number(a.fromQuantity) - Number(b.fromQuantity));
-  return { items: rows.slice(0, limit) };
+  return rows;
+}
+
+route("GET", `${BASE}/condition-records`, ({ query }) => ({ items: filtered(query).slice(0, Number(query.get("limit") ?? 100)) }));
+
+// The export is registered before {id} reads so the colon action is not taken for an id.
+route("GET", `${BASE}/condition-records:export`, ({ query }) => {
+  const header = ["type", "status", "customer_number", "customer", "product_number", "product", "unit", "currency", "from_quantity", "amount", "discount_pct_1", "discount_pct_2", "valid_from", "valid_to"];
+  const lines = filtered(query).map((r) => {
+    const c = r.customerKind === "customer" ? customerByKey(r.customerKey) : undefined;
+    const i = r.productKind === "product" ? itemByKey(r.productKey) : undefined;
+    return [r.type, r.status, c?.number ?? (r.customerKind === "all" ? "ALL" : r.customerKey), c?.name ?? "All customers", i?.number ?? (r.productKind === "all" ? "ALL" : r.productKey), i?.name ?? "All products", r.unit, r.currency, r.fromQuantity, r.amount, r.discPct1, r.discPct2, r.validFrom, r.validTo].map(csvCell).join(",");
+  });
+  return reply.text([header.join(","), ...lines].join("\n") + "\n", "text/csv; charset=utf-8", "trade-agreements.csv");
 });
 
 route("POST", `${BASE}/condition-records`, ({ body }) => {
   const input = body as ConditionRecordInput;
   const n = conditions.all().length + 1;
-  const created = conditions.insert({ ...input, id: uid(K.condition, 100 + n), status: "DRAFT", version: 1 });
+  const created = conditions.insert({ ...input, id: `PRC-${String(100 + n).padStart(4, "0")}`, status: "DRAFT", version: 1 });
   return reply.created(created);
 });
 route("POST", `${BASE}/condition-records/{id}:activate`, ({ params }) => {

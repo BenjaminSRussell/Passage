@@ -21,10 +21,12 @@ export interface LinesEditorProps {
   /** Lets the last line be removed (the change page starts with none). */
   allowEmpty?: boolean;
   addLabel?: string;
+  /** The selling legal entity, which narrows the site and warehouse pickers. */
+  legalEntityId?: string;
 }
 
 /** The line grid shared by the order and quotation forms: one fieldset per line. */
-export function LinesEditor({ lines, errors, newLineDate, onChange, withDeliveryControl, legend = "Line", idPrefix = "line", allowEmpty, addLabel = "Add line" }: LinesEditorProps) {
+export function LinesEditor({ lines, errors, newLineDate, onChange, withDeliveryControl, legend = "Line", idPrefix = "line", allowEmpty, addLabel = "Add line", legalEntityId }: LinesEditorProps) {
   const updateLine = (i: number, patch: Partial<LineValues>) => onChange(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   return (
     <div className={`${styles.formActions} ${styles.lines}`}>
@@ -44,6 +46,24 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
                       {...control}
                       value={line.productId}
                       onChange={(e) => updateLine(i, { productId: e.target.value, ...pickProductPatch(line, e.option) })}
+                      invalid={Boolean(errors[path])}
+                    />
+                  ) : f.name === "siteId" ? (
+                    <EntityLookup
+                      entity="site"
+                      {...control}
+                      value={line.siteId}
+                      scope={{ legalEntityId: legalEntityId || undefined }}
+                      onChange={(e) => updateLine(i, e.target.value === line.siteId ? {} : { siteId: e.target.value, warehouseId: "" })}
+                      invalid={Boolean(errors[path])}
+                    />
+                  ) : f.name === "warehouseId" ? (
+                    <EntityLookup
+                      entity="warehouse"
+                      {...control}
+                      value={line.warehouseId}
+                      scope={{ legalEntityId: legalEntityId || undefined, siteId: line.siteId || undefined }}
+                      onChange={(e) => updateLine(i, { warehouseId: e.target.value })}
                       invalid={Boolean(errors[path])}
                     />
                   ) : (

@@ -425,17 +425,19 @@ type ReturnableMovementData struct {
 // Inventory consumes the lines to issue stock; the ledger posts the journal
 // with Idempotency-Key = packing_slip_id.
 type PackingSlipPostedData struct {
-	PackingSlipID     string         `json:"packing_slip_id"`
-	PackingSlipNumber string         `json:"packing_slip_number"`
-	ShipmentID        string         `json:"shipment_id"`
-	OrderID           string         `json:"order_id"`
-	CustomerID        string         `json:"customer_id"`
-	PostingDate       string         `json:"posting_date"`
-	Currency          string         `json:"currency"`
-	TotalCost         string         `json:"total_cost"`
-	Lines             []SlipLine     `json:"lines"`
-	Journal           []JournalEntry `json:"journal"`
-	PackagingFees     []PackagingFee `json:"packaging_fees"`
+	PackingSlipID     string `json:"packing_slip_id"`
+	PackingSlipNumber string `json:"packing_slip_number"`
+	ShipmentID        string `json:"shipment_id"`
+	OrderID           string `json:"order_id"`
+	CustomerID        string `json:"customer_id"`
+	// LegalEntityID is the shipment's legal entity; the search index scopes the slip by it (#506).
+	LegalEntityID string         `json:"legal_entity_id,omitempty"`
+	PostingDate   string         `json:"posting_date"`
+	Currency      string         `json:"currency"`
+	TotalCost     string         `json:"total_cost"`
+	Lines         []SlipLine     `json:"lines"`
+	Journal       []JournalEntry `json:"journal"`
+	PackagingFees []PackagingFee `json:"packaging_fees"`
 	// PackagingFeeBillable is the legal entity's packaging_fee_billable when the
 	// slip posted: billing charges the fee lines when true (BR-28.12).
 	PackagingFeeBillable bool             `json:"packaging_fee_billable"`

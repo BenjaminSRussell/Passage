@@ -59,7 +59,7 @@ func (s *HTTPSource) Enabled(ctx context.Context, tenantID string) (map[string]b
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("features: identity answered %d", resp.StatusCode)
 	}

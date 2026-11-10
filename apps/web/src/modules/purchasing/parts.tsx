@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, Badge, Button, type BadgeTone } from "../../shell/ui";
+import { Alert, Badge, Button, statusTone } from "../../shell/ui";
 import { describeProblem, type RankingRule } from "./api/client";
+import { formatOption, resolveOption, type LookupEntityKey } from "../../shell/lookup/entities";
+import { Named } from "./Named";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
 export const dash = "—";
+export { Named };
 
 export const rankingLabels: Record<RankingRule, string> = {
   LOWEST_PRICE: "Lowest price, then lead time",
@@ -62,42 +65,6 @@ export function useResource<T>(load: (signal: AbortSignal) => Promise<T>, deps: 
   return { ...state, reload };
 }
 
-const tones: Record<string, BadgeTone> = {
-  DRAFT: "neutral",
-  IN_REVIEW: "info",
-  APPROVED: "success",
-  CONFIRMED: "success",
-  ACTIVE: "success",
-  REJECTED: "danger",
-  CANCELLED: "neutral",
-  CLOSED: "neutral",
-  FINALIZED: "success",
-  EXPIRED: "warning",
-  OPEN: "neutral",
-  CONSOLIDATED: "success",
-  EFFECTIVE: "success",
-  ON_HOLD: "warning",
-  SENT: "info",
-  REPLIES_OPEN: "info",
-  AWARDED: "success",
-  INVITED: "neutral",
-  REPLIED: "success",
-  INVOICED: "success",
-  STAGED: "info",
-  COMMITTED: "success",
-  ACCEPTABLE: "info",
-  ERROR: "danger",
-  ACCEPTED: "success",
-  PENDING: "warning",
-  APPLIED: "success",
-  REFUSED: "danger",
-  IGNORED: "neutral",
-  COMPLETED: "success",
-  PARTIAL: "warning",
-  FAILED: "danger",
-  EMPTY: "neutral",
-};
-
 /** Sentence-case label for an upper-snake status, e.g. IN_REVIEW → In review. */
 export function statusLabel(status: string): string {
   const spaced = status.replace(/_/g, " ").toLowerCase();
@@ -105,7 +72,7 @@ export function statusLabel(status: string): string {
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge tone={tones[status] ?? "neutral"}>{statusLabel(status)}</Badge>;
+  return <Badge tone={statusTone(status)}>{statusLabel(status)}</Badge>;
 }
 
 /** Danger alert for a load failure with the stable problem code and a retry. */
@@ -155,6 +122,42 @@ export function ShortId({ id }: { id?: string }) {
       {id.slice(0, 8)}
     </span>
   );
+}
+
+/** The display text of an entity for places that cannot hold a component (button labels, notices). */
+export function useEntityText(entity: LookupEntityKey, id: string | undefined, fallback: string): string {
+  const [text, setText] = useState(fallback);
+  useEffect(() => {
+    let live = true;
+    setText(fallback);
+    if (id) {
+      void resolveOption(entity, id).then((found) => {
+        if (live && found) setText(formatOption(found));
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [entity, id, fallback]);
+  return text;
+}
+
+/** Display text for several entities at once, for labels built as strings; unresolved ids read as the fallback. */
+export function useEntityNames(entity: LookupEntityKey, ids: string[], fallback: string): (id: string) => string {
+  const [names, setNames] = useState<Record<string, string>>({});
+  const key = [...new Set(ids)].sort().join(",");
+  useEffect(() => {
+    let live = true;
+    for (const id of key === "" ? [] : key.split(",")) {
+      void resolveOption(entity, id).then((found) => {
+        if (live && found) setNames((prev) => (prev[id] ? prev : { ...prev, [id]: formatOption(found) }));
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [entity, key]);
+  return (id) => names[id] ?? fallback;
 }
 
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

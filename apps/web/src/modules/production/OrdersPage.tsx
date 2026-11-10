@@ -22,6 +22,7 @@ import {
 import { amount, bulkCommandLabel, dash, statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 export interface ProductionOrdersPageProps {
   /** Opens an order's detail page. */
@@ -50,8 +51,8 @@ type Pending = { kind: "bulk"; command: BulkCommand } | { kind: "merge" };
 const irreversible: BulkCommand[] = ["cancel", "end"];
 
 const baseColumns: DataTableColumn<OrderSummary>[] = [
-  { key: "orderNumber", header: "Order", mono: true },
-  { key: "productId", header: "Product", mono: true },
+  { key: "orderNumber", header: "Order", mono: true, render: (row) => <span style={{ whiteSpace: "nowrap" }}>{row.orderNumber}</span> },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} fallback={row.productId} /> },
   { key: "quantity", header: "Quantity", align: "end" },
   { key: "remaining", header: "Remaining", align: "end" },
   { key: "status", header: "Status", render: (row) => <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge> },

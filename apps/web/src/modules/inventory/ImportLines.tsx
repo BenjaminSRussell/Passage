@@ -1,3 +1,4 @@
+import { problemSummary } from "../../shell/errors";
 import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Textarea } from "../../shell/ui";
 import { addLines, describeProblem, type Journal, type JournalType, type Problem } from "./api/client";
@@ -132,7 +133,7 @@ export function ImportLinesForm({
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Nothing was imported" live="alert">
-              {failure.message} ({failure.code}). No line was added; fix the rows and import again.
+              {problemSummary(failure)} No line was added; fix the rows and import again.
               {rowsOf(failure).length > 0 ? (
                 <ul>
                   {rowsOf(failure)

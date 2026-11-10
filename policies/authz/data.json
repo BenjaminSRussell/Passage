@@ -52,6 +52,8 @@
     "identity.legal-entity.maintain": {"permissions": [{"resource": "/v1/legal-entities{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.feature.view": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET"]}]},
     "identity.feature.maintain": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET", "PUT"]}]},
+    "identity.setup.view": {"permissions": [{"resource": "/v1/tenant/setup", "methods": ["GET"]}, {"resource": "/v1/tenant/workspace-config", "methods": ["GET"]}]},
+    "identity.setup.maintain": {"permissions": [{"resource": "/v1/tenant/setup{,/**}", "methods": ["GET", "PUT"]}, {"resource": "/v1/tenant/workspace-config", "methods": ["GET", "PUT"]}]},
     "platform.saved-view.maintain": {"permissions": [{"resource": "/v1/saved-views{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "hello.ledger.maintain": {"permissions": [{"resource": "/v1/hello-ledger{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "product.product.view": {"permissions": [{"resource": "/v1/product{,/**}", "methods": ["GET"]}]},
@@ -686,6 +688,7 @@
       {"resource": "/v1/receiving/ers-vendors/*", "methods": ["PUT"]}
     ]},
     "receiving.receipt.maintain": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/receiving/arrivals", "methods": ["POST"]},
       {"resource": "/v1/receiving/receipts", "methods": ["GET", "POST"]},
       {"resource": "/v1/receiving/receipts/*", "methods": ["GET"]},
@@ -740,7 +743,11 @@
     "receiving.ers-price.confirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
     ]},
+    "receiving.document-flow.read": {"permissions": [
+      {"resource": "/v1/receiving/related-documents", "methods": ["GET"]}
+    ]},
     "receiving.ap.inquire": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices/*", "methods": ["GET"]},
@@ -960,6 +967,11 @@
       {"resource": "/v1/analytics/dashboards/*", "methods": ["GET"]},
       {"resource": "/v1/analytics/metrics", "methods": ["GET"]},
       {"resource": "/v1/analytics/query", "methods": ["POST"]}
+    ]},
+    "analytics.ux.record": {"permissions": [{"resource": "/v1/analytics/ux-events", "methods": ["POST"]}]},
+    "analytics.ux.view": {"permissions": [
+      {"resource": "/v1/analytics/ux-funnels", "methods": ["GET"]},
+      {"resource": "/v1/analytics/ux-signals", "methods": ["GET"]}
     ]},
     "analytics.archive.admin": {"permissions": [
       {"resource": "/v1/archive/partitions", "methods": ["GET"]},
@@ -1900,6 +1912,9 @@
       {"resource": "/print/v1/printers/status", "methods": ["GET"]},
       {"resource": "/print/v1/routing-rules", "methods": ["GET"]}
     ]},
+    "print.document.render": {"permissions": [
+      {"resource": "/print/v1/documents:render", "methods": ["POST"]}
+    ]},
     "print.admin": {"permissions": [
       {"resource": "/print/v1/jobs:purge", "methods": ["POST"]},
       {"resource": "/print/v1/printers", "methods": ["POST"]},
@@ -1951,6 +1966,7 @@
       {"resource": "/v1/fulfillment/manifests/*:cancel", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.view": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/backorders", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/sales-delivery-reports", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/container-types", "methods": ["GET"]},
@@ -2021,6 +2037,7 @@
       {"resource": "/v1/billing/tax-reports/*:retry", "methods": ["POST"]}
     ]},
     "billing.invoice.view": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*/trace", "methods": ["GET"]},
@@ -2512,6 +2529,7 @@
       {"resource": "/v1/org/teams/*/members/*:end", "methods": ["POST"]},
       {"resource": "/v1/org/operating-units/*/translations/*", "methods": ["PUT", "DELETE"]}
     ]},
+    "org.demo-company.manage": {"permissions": [{"resource": "/v1/org/demo-company", "methods": ["POST"]}]},
     "org.package.manage": {"permissions": [
       {"resource": "/v1/org/export", "methods": ["POST"]},
       {"resource": "/v1/org/import", "methods": ["POST"]}
@@ -3122,6 +3140,7 @@
       {"resource": "/v1/sales/orders/*/holds/*:release", "methods": ["POST"]}
     ]},
     "sales.order.read": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements/*", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements/*/schedule-releases", "methods": ["GET"]},

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the intercompany service (services/intercompany/api/openapi.yaml).
 // Browser calls use /api/v1/interco/..., which the web BFF rewrites to the
 // service's /v1/interco/... paths and signs with the user's tenant and duties.
@@ -132,7 +133,7 @@ export interface RequestOptions {
 export async function request(method: string, path: string, opts: RequestOptions = {}): Promise<Response> {
   const headers: Record<string, string> = { Accept: opts.accept ?? "application/json", ...opts.headers };
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(`${base}${path}`, {
+  const res = await apiFetch(`${base}${path}`, {
     method,
     headers,
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),

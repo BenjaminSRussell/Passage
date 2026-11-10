@@ -23,6 +23,7 @@ import {
 import { addDecimals, amount, coProductTypeLabel, dash, describeFiring, isZero, jobTypeLabel, journalTypeLabel, proposalLabel, triggerFunctionLabel } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
 const hoursPattern = /^[0-9]{1,8}(\.[0-9]{1,2})?$/;
@@ -153,7 +154,7 @@ const journalValue = (j: Journal) => addDecimals(j.postings.map((p) => p.dr));
 
 const lineColumns: DataTableColumn<JournalLine>[] = [
   { key: "kind", header: "Line", render: (l) => (l.kind === "issue" ? `Issue ${l.lineNo}` : l.kind === "hours" ? `Operation ${l.operNumber}${l.jobType ? `, ${jobTypeLabel[l.jobType].toLowerCase()} job` : ""}` : l.kind === "coproduct" ? `Co-product ${l.coProductLineNo}` : "Finished receipt") },
-  { key: "itemId", header: "Item", mono: true, render: (l) => l.itemId ?? dash },
+  { key: "itemId", header: "Item", render: (l) => (l.itemId ? <EntityName entity="product" id={l.itemId} fallback={l.itemId} /> : dash) },
   { key: "qty", header: "Quantity or hours", align: "end" },
   { key: "qtyGood", header: "Good", align: "end", render: (l) => (l.kind === "issue" ? dash : l.qtyGood) },
   { key: "qtyError", header: "Error", align: "end", render: (l) => (l.kind === "issue" ? dash : l.qtyError) },

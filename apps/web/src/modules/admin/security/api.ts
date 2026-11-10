@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { apiFetch } from "../../../shell/api/http";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
+const defaultFetch: FetchLike = (input, init) => apiFetch(input, init);
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

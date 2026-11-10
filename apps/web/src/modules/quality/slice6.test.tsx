@@ -150,8 +150,8 @@ describe("batch on the quality order", () => {
     };
     renderAt(`/quality/orders/new?trigger=SOURCE_INSPECTION&sourceType=po_line&sourceId=${PO}&uom=KG`);
     expect(screen.getByLabelText("Trigger")).toHaveValue("SOURCE_INSPECTION");
-    expect(screen.getByLabelText("Source id")).toHaveValue(PO);
-    for (const [label, value] of [["Item id", ITEM], ["Site id", SITE], ["Warehouse id", WH], ["Lot quantity", "1000"]]) {
+    expect(screen.getByLabelText("Source document")).toHaveValue(PO);
+    for (const [label, value] of [["Item", ITEM], ["Site", SITE], ["Warehouse", WH], ["Lot quantity", "1000"]]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
     }
     fireEvent.click(screen.getByRole("button", { name: "Create quality order" }));
@@ -180,7 +180,7 @@ describe("batch on the quality order", () => {
       return undefined;
     };
     renderAt(`/quality/orders/new?trigger=PURCHASE_RECEIPT&sourceType=receipt_line&sourceId=${LINE}&lotQty=200`);
-    for (const [label, value] of [["Item id", ITEM], ["Site id", SITE], ["Warehouse id", WH]]) {
+    for (const [label, value] of [["Item", ITEM], ["Site", SITE], ["Warehouse", WH]]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
     }
     fireEvent.change(screen.getByLabelText(/^Batch/), { target: { value: "B".repeat(61) } });

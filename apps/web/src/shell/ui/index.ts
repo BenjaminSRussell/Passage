@@ -18,4 +18,4 @@ export { Skeleton, type SkeletonProps } from "./Skeleton";
 export { StatGroup, StatTile, type StatGroupProps, type StatTileProps, type StatTone } from "./StatTile";
 export { Badge, StatusPill, type BadgeProps, type BadgeTone, type StatusPillProps } from "./StatusPill";
 export { Textarea, type TextareaProps } from "./Textarea";
-export { WorkspacePlaceholder, type WorkspacePlaceholderProps } from "./WorkspacePlaceholder";
+export { standardLabel, standardStatuses, statusLabel as statusCodeLabel, statusTone } from "./status";

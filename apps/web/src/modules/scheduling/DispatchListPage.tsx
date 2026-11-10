@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { fetchDispatchList, listResources, type DispatchLine, type Resource } from "./api/client";
-import { clock, dash, formatDateTime, formatInZone, formatMinutes, shortId, today, WEEKDAYS } from "./format";
+import { clock, dash, formatDateTime, formatInZone, formatMinutes, today, WEEKDAYS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../mfg-shared/orders";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -68,7 +69,7 @@ export function DispatchListPage() {
   const zone = data?.resource.timeZone ?? "UTC";
   const columns: DataTableColumn<DispatchLine>[] = [
     { key: "sequence", header: "No.", align: "end" },
-    { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+    { key: "orderId", header: "Order", mono: true, render: (row) => <OrderNumber id={row.orderId} /> },
     { key: "operNumber", header: "Operation", align: "end", render: (row) => (row.segment > 1 ? `${row.operNumber} (part ${row.segment})` : String(row.operNumber)) },
     { key: "role", header: "Role", render: (row) => (row.role === "secondary" ? "Secondary" : "Primary") },
     { key: "start", header: `Start (${zone})`, render: (row) => formatInZone(row.start, zone) },

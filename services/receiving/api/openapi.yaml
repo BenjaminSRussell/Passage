@@ -233,6 +233,42 @@ paths:
         '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001, RCV-VAL-001 posting date before the receipt date, COM-0409.' }
         '428': { $ref: '#/components/responses/Problem', description: 'COM-0428' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/related-documents:
+    get:
+      operationId: listRelatedDocuments
+      summary: Receipts and vendor invoices that belong to the same purchase order as a document (issue #502)
+      description: Give exactly one of purchaseOrderId, receiptId or invoiceId. A receipt or an invoice is traced to its purchase order (an invoice through the receipts on its lines), then every receipt and invoice of that order is returned, newest first, at most 200 of each (truncated is true when more exist). A receipt that names no order is returned alone with the invoices that settle it. 400 COM-0001 when none or more than one is given, 404 when the receipt or invoice is unknown.
+      x-passage-duty: receiving.document-flow.read
+      parameters:
+        - { name: purchaseOrderId, in: query, schema: { type: string, format: uuid } }
+        - { name: receiptId, in: query, schema: { type: string, format: uuid } }
+        - { name: invoiceId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The related documents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receipts, invoices, truncated]
+                properties:
+                  purchaseOrderId: { type: string, format: uuid }
+                  truncated: { type: boolean }
+                  receipts:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, receiptNumber, state, receiptDate]
+                      properties: { id: { type: string, format: uuid }, receiptNumber: { type: string }, state: { type: string }, receiptDate: { type: string }, ledgerEntryId: { type: string } }
+                  invoices:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, invoiceNumber, status, invoiceDate, total, currency]
+                      properties: { id: { type: string, format: uuid }, invoiceNumber: { type: string }, status: { type: string }, invoiceDate: { type: string }, total: { type: string }, currency: { type: string }, ledgerEntryId: { type: string } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/receiving/grir:
     get:
       operationId: listGrir

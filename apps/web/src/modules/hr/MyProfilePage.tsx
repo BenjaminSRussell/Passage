@@ -67,7 +67,8 @@ export function MyProfilePage() {
       </div>
     );
   }
-  if (state.loading || !state.data) {
+  // Keep the page (and the "updated" notice inside it) mounted while a reload runs; skeleton only on the first load.
+  if (!state.data) {
     return (
       <div className={styles.stack} aria-busy="true">
         <PageHeader title="My profile" />

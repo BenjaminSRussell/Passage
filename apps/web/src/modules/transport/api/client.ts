@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the transport service (services/transport/api/openapi.yaml).
 // Browser calls use /api/v1/transport/..., which the web BFF rewrites to /v1/transport/....
 // Amounts are decimal strings end to end; the client never turns them into numbers.
@@ -214,7 +215,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }

@@ -166,6 +166,14 @@ paths:
           in: query
           description: Only the credit notes of this invoice.
           schema: { type: string, format: uuid }
+        - name: orderId
+          in: query
+          description: Only invoices with a line billed from this sales order (the order-to-cash document flow).
+          schema: { type: string, format: uuid }
+        - name: packingSlipId
+          in: query
+          description: Only invoices with a line billed from this packing slip.
+          schema: { type: string, format: uuid }
         - name: cursor
           in: query
           description: The nextCursor of the previous page (opaque).

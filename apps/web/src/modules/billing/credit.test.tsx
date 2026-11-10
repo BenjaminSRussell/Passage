@@ -222,7 +222,7 @@ describe("Credit note detail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Post credit note" }));
     expect(await screen.findByRole("heading", { name: "CN-2027-0000002" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Posted as CN-2027-0000002");
+    expect(screen.getByText("Posted as CN-2027-0000002", { exact: false })).toBeInTheDocument();
     const post = server.calls.find((c) => c.method === "POST");
     expect(post?.url.pathname).toBe(`/api/v1/billing/credit-notes/${CN}:post`);
     expect(new Headers(post?.init.headers).get("If-Match")).toBe('"1"');

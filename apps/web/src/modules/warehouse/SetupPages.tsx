@@ -27,7 +27,6 @@ import {
   INTEGER,
   LOCATION_STATUS_TONES,
   sentence,
-  shortId,
   stockText,
   usedText,
   useWarehouse,
@@ -35,7 +34,7 @@ import {
   WarehouseField,
 } from "./shared";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const PAGE = 100;
 
@@ -331,7 +330,7 @@ export function NewLocationsPage() {
           </div>
           <div className={styles.formActions}>
             <Alert tone="danger" title={failure ? "The locations were not created" : undefined} live="alert">
-              {failure ? `${failure.message} (${failure.code})${Object.keys(failure.fields).length > 0 ? `: ${Object.entries(failure.fields).map(([f, m]) => `${f} ${m}`).join("; ")}` : ""}` : null}
+              {failure ? `${problemSummary(failure)}${Object.keys(failure.fields).length > 0 ? `: ${Object.entries(failure.fields).map(([f, m]) => `${f} ${m}`).join("; ")}` : ""}` : null}
             </Alert>
             <Alert tone="success" live="status">
               {created !== null ? `${created} location${created === 1 ? "" : "s"} created.` : null}
@@ -366,7 +365,6 @@ const directiveColumns: DataTableColumn<Directive>[] = [
         : "Every line",
   },
   { key: "lines", header: "Quantity bands and actions", render: (d) => [...d.lines].sort((a, b) => a.seq - b.seq).map(bandText).join("; ") },
-  { key: "id", header: "Id", mono: true, render: (d) => <span title={d.id}>{shortId(d.id)}</span> },
 ];
 
 /** Location directives of a warehouse in evaluation order (FR-31.3). */

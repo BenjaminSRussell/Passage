@@ -4,6 +4,7 @@ import { NewProposalPage } from "./NewProposalPage";
 import { OpenItemsPage } from "./OpenItemsPage";
 import { ProposalDetailPage } from "./ProposalDetailPage";
 import { ProposalsPage } from "./ProposalsPage";
+import { RunPage } from "./RunPage";
 
 const payables: PassageModule = {
   id: "payables",
@@ -14,6 +15,7 @@ const payables: PassageModule = {
     { path: "/payables/open-items", element: createElement(OpenItemsPage), handle: { title: "Vendor open items" } },
     { path: "/payables/proposals/new", element: createElement(NewProposalPage), handle: { title: "New payment proposal", duty: "payment-proposal.write" } },
     { path: "/payables/proposals/:id", element: createElement(ProposalDetailPage), handle: { title: "Payment proposal" } },
+    { path: "/payables/runs/:id", element: createElement(RunPage), handle: { title: "Payment run" } },
   ],
   nav: [
     { label: "Payment runs", to: "/payables", duty: "payment-proposal.read" },

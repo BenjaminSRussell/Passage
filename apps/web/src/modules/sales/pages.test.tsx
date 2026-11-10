@@ -8,6 +8,7 @@ import { promiseSummary, validateAtp } from "./AtpCheckPage";
 import { blankProfile, validateProfile } from "./CreditProfileFormPage";
 import sales from "./module";
 import { emptyLine, validateOrder } from "./NewOrderPage";
+import { nameLookups } from "./testLookup";
 
 const LE = "11111111-0000-4000-8000-000000000001";
 const CUSTOMER = "22222222-0000-4000-8000-000000000002";
@@ -184,9 +185,10 @@ describe("Sales orders list", () => {
 describe("Sales order detail", () => {
   it("confirms at the current ETag and explains a credit hold with the failing rule", async () => {
     handler = (_url, init) => (init.method === "POST" ? { status: 200, body: { ...heldOrder, confirmed: false }, etag: '"2"' } : { status: 200, body: order(), etag: '"1"' });
+    nameLookups({ [PRODUCT]: "Hex bolt" });
     const { container } = renderAt(`/sales/orders/${ORDER_ID}`);
     expect(await screen.findByRole("heading", { name: "Sales order SO-0000042" })).toBeInTheDocument();
-    expect(within(screen.getByRole("table", { name: "Order lines" })).getByText(PRODUCT)).toBeInTheDocument();
+    expect(await within(screen.getByRole("table", { name: "Order lines" })).findByText("Hex bolt")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm order" }));
@@ -221,8 +223,11 @@ describe("Sales order detail", () => {
     renderAt(`/sales/orders/${ORDER_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Confirm order" }));
     expect(await screen.findByText("Someone else changed this order")).toBeInTheDocument();
+    // The document flow panel reads the order too, so count the reads before and after the click.
+    const reads = () => calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/sales/orders/${ORDER_ID}`).length;
+    const before = reads();
     fireEvent.click(screen.getByRole("button", { name: "Reload order" }));
-    await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/sales/orders/${ORDER_ID}`)).toHaveLength(2));
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
   });
 
   it("shows the error when the order cannot be loaded", async () => {
@@ -238,9 +243,25 @@ describe("New sales order", () => {
     handler = () => ({ status: 500, body: {} });
     renderAt("/sales/orders/new");
     fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
-    expect(await screen.findByText("Enter the customer's UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the customer.")).toBeInTheDocument();
     expect(screen.getByText("Choose a product.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
+  });
+
+  it("picks the customer, site and warehouse by name instead of asking for ids", async () => {
+    handler = () => ({ status: 500, body: {} });
+    setLookupFetcher(async (url) => {
+      const rows = url.includes("/party/customers:search") ? [{ id: CUSTOMER, name: "Summit Mining Supply", accountNumber: "C-10055" }] : url.includes("/org/sites") ? [{ id: SITE, name: "Cedar Rapids plant", code: "CR" }] : [];
+      return new Response(JSON.stringify({ items: rows }), { status: 200 });
+    });
+    renderAt("/sales/orders/new");
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "summit" } });
+    fireEvent.click(await screen.findByText("Summit Mining Supply"));
+    expect(screen.getByLabelText("Customer")).toHaveAttribute("data-value", CUSTOMER);
+    expect(screen.getByLabelText("Customer")).toHaveValue("Summit Mining Supply (C-10055)");
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: "cedar" } });
+    fireEvent.click(await screen.findByText("Cedar Rapids plant"));
+    expect(screen.getByLabelText("Site")).toHaveAttribute("data-value", SITE);
   });
 
   it("picks the product through the shared lookup and takes its base unit", async () => {

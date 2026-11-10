@@ -2,12 +2,15 @@ import { findTable } from "../../test-utils";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { rememberOption } from "../../shell/lookup/entities";
+import { resetResourceCache } from "../mfg-shared/resources";
 import { convertPlannedIntake, dismissPlannedIntake, listPlannedIntake, type PlannedIntake } from "./api/client";
 import production from "./module";
 import { json, order, orderId, problem } from "./testData";
 
+beforeEach(() => resetResourceCache());
 afterEach(() => vi.unstubAllGlobals());
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -175,12 +178,13 @@ describe("planned order detail (FR-22.10)", () => {
   const path = `/production/planned-intake/${rowId}`;
 
   it("shows the facts and opens the convert form", async () => {
+    rememberOption("legalEntity", { id: uuid(1), name: "Passage Works", number: "LE1" });
     stubFetch(() => json(row()));
     const { container, location } = renderAt(path);
     expect(await screen.findByRole("heading", { name: "Planned order of 40" })).toBeInTheDocument();
     expect(screen.getByText("Waiting")).toBeInTheDocument();
     expect(screen.getByText(uuid(4))).toBeInTheDocument();
-    expect(screen.getByText(uuid(1))).toBeInTheDocument();
+    expect(await screen.findByText("Passage Works (LE1)")).toBeInTheDocument();
     expect(checkAxeAA(container)).toEqual([]);
     await userEvent.click(screen.getByRole("button", { name: "Convert to production order" }));
     expect(location.pathname).toBe(`${path}/convert`);
@@ -233,6 +237,7 @@ describe("convert a planned order (FR-22.10, FR-22.18)", () => {
   it("locks what the planned order fixes and converts with the BOM and route entered", async () => {
     const fetchMock = stubFetch((url, init) => {
       if (init?.method === "POST") return json(order(), 201);
+      if (url.includes("/engineering/resources")) return json({ items: [{ id: uuid(10), code: "CNC-1", name: "CNC mill" }] });
       if (url.includes("/orders/")) return json(order());
       return json(row());
     });
@@ -241,15 +246,17 @@ describe("convert a planned order (FR-22.10, FR-22.18)", () => {
     for (const label of ["Product", "Quantity", "Delivery date", "Site", "Warehouse"]) {
       expect(screen.getByLabelText(label)).toHaveAttribute("readonly");
     }
-    expect(screen.getByLabelText("Product")).toHaveValue(uuid(2));
-    expect(screen.getByLabelText("Warehouse")).toHaveValue(uuid(4));
+    expect(screen.getByLabelText("Product")).toHaveAttribute("data-value", uuid(2));
+    expect(screen.getByLabelText("Warehouse")).toHaveAttribute("data-value", uuid(4));
     expect(screen.queryByLabelText("Order type")).not.toBeInTheDocument();
 
+    await userEvent.click(screen.getByRole("button", { name: "Add component" }));
     const component = screen.getByRole("group", { name: "Component 1" });
     fill("Item", uuid(9), component);
     fill("Quantity per unit", "3", component);
     const operation = screen.getByRole("group", { name: "Operation 1" });
-    fill("Resource", uuid(10), operation);
+    await within(operation).findByRole("option", { name: "CNC mill (CNC-1)" });
+    await userEvent.selectOptions(within(operation).getByLabelText("Resource"), uuid(10));
     fill("Run hours per unit", "0.5", operation);
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     await waitFor(() => expect(location.pathname).toBe(`/production/${orderId}`));
@@ -266,7 +273,7 @@ describe("convert a planned order (FR-22.10, FR-22.18)", () => {
     renderAt(path);
     await screen.findByRole("heading", { name: "Convert planned order" });
     expect(screen.getByLabelText("Warehouse")).not.toHaveAttribute("readonly");
-    expect(screen.getByLabelText("Warehouse")).toHaveValue("");
+    expect(screen.getByLabelText("Warehouse")).toHaveAttribute("data-value", "");
   });
 
   it("refuses a row that is already handled and reports a missing row", async () => {

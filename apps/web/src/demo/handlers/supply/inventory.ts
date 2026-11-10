@@ -1,6 +1,6 @@
 // Inventory service (/api/v1/inventory) for the demo: the on-hand projection and the workspace tiles.
-// On-hand per item comes from company.ts, so it agrees with what planning and sales show. Group values use
-// readable codes (item number, site code, warehouse code) rather than UUIDs.
+// On-hand per item comes from company.ts, so it agrees with what planning and sales show. Group values are ids, as the
+// service sends them; the page shows the names behind them.
 import type { OnHandRow, WorkspaceSummary } from "../../../modules/inventory/api/client";
 import { DC, ITEMS, LEGAL_ENTITY, PLANT, SITES, WAREHOUSES, WH_DAL, WH_FG, WH_RAW, WH_WIP, type Item, type Warehouse } from "../../company";
 import { route } from "../../backend";
@@ -55,12 +55,12 @@ route("GET", `${BASE}/onhand`, ({ query }) => {
   for (const f of rows) {
     const group: Record<string, string> = {};
     for (const g of groupBy) {
-      if (g === "product") group[g] = f.item.number;
-      else if (g === "site") group[g] = SITES.find((s) => s.id === f.warehouse.siteId)?.code ?? "";
-      else if (g === "warehouse") group[g] = f.warehouse.code;
+      if (g === "product") group[g] = f.item.id;
+      else if (g === "site") group[g] = SITES.find((s) => s.id === f.warehouse.siteId)?.id ?? "";
+      else if (g === "warehouse") group[g] = f.warehouse.id;
       else if (g === "location") group[g] = BIN_OF[f.item.number] ?? "";
       else if (g === "inventory_status") group[g] = f.status;
-      else if (g === "legal_entity") group[g] = LEGAL_ENTITY.code;
+      else if (g === "legal_entity") group[g] = LEGAL_ENTITY.id;
     }
     const key = JSON.stringify(group);
     const entry = groups.get(key) ?? { group, rows: [] };
@@ -86,7 +86,8 @@ route("GET", `${BASE}/onhand`, ({ query }) => {
       negative: false,
     };
   });
-  items.sort((a, b) => (a.group.product ?? a.group.warehouse ?? "").localeCompare(b.group.product ?? b.group.warehouse ?? "") || JSON.stringify(a.group).localeCompare(JSON.stringify(b.group)));
+  const label = (g: Partial<Record<string, string>>) => (g.product ? (ITEMS.find((i) => i.id === g.product)?.number ?? "") : (WAREHOUSES.find((w) => w.id === g.warehouse)?.code ?? ""));
+  items.sort((a, b) => label(a.group).localeCompare(label(b.group)) || JSON.stringify(a.group).localeCompare(JSON.stringify(b.group)));
   return { items, truncated: false };
 });
 
@@ -104,4 +105,4 @@ route("GET", `${BASE}/workspace/summary`, () => {
   return summary;
 });
 
-void WAREHOUSES;
+

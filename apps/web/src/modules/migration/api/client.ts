@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the migration service (services/migration/api/openapi.yaml). Commands send an
 // Idempotency-Key so a retried submit replays the first outcome.
 export interface Problem {
@@ -129,7 +130,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`/api/v1/integration${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`/api/v1/integration${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;
 }

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 const base = "/api/v1/product";
 
 export type Lifecycle = "draft" | "active" | "phase_out" | "obsolete";
@@ -111,7 +112,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) throw await toError(res);
   return (await res.json()) as T;
 }
@@ -125,6 +126,12 @@ export async function listProducts(params: { q: string; cursor?: string; limit?:
   const suffix = text === "" ? "" : `?${text}`;
   const body = await send<{ items?: Raw[]; nextCursor?: string }>(`/products${suffix}`, {}, signal);
   return { items: (body.items ?? []).map(toProduct), nextCursor: body.nextCursor || undefined };
+}
+
+/** GET /released-products: the ids of products released to the caller's legal entity (names come from the product). */
+export async function listReleasedProductIds(signal?: AbortSignal): Promise<string[]> {
+  const body = await send<{ items?: Raw[] }>("/released-products?limit=200", {}, signal);
+  return (body.items ?? []).map((row) => pick(row, "id", "ID")).filter((id) => id !== "");
 }
 
 export async function getProduct(id: string, signal?: AbortSignal): Promise<Product> {

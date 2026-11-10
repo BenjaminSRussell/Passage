@@ -17,6 +17,7 @@ import { commitmentText, DECIMAL, formatDateTime, money, supplementaryNote, toda
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -118,10 +119,10 @@ export function AgreementDetailPage() {
 
   const byAmount = agreement.commitmentType === "AMOUNT";
   const facts: [string, ReactNode][] = [
-    ["Customer", agreement.customerId],
-    ["Invoice account", agreement.invoiceAccountId],
-    ["Product", agreement.productId],
-    ["Legal entity", agreement.legalEntityId],
+    ["Customer", <EntityName entity="customer" id={agreement.customerId} />],
+    ["Invoice account", <EntityName entity="customer" id={agreement.invoiceAccountId} />],
+    ["Product", <EntityName entity="product" id={agreement.productId} />],
+    ["Legal entity", <EntityName entity="legalEntity" id={agreement.legalEntityId} />],
     ["Committed by", byAmount ? "Amount" : "Quantity"],
     ["Agreed price", `${money(agreement.unitPrice, agreement.currency)} per ${agreement.unit}`],
     ["Committed", commitmentText(agreement, agreement.commitmentQty)],
@@ -133,7 +134,7 @@ export function AgreementDetailPage() {
     ["Valid", agreement.validFrom || agreement.validTo ? `${agreement.validFrom ?? "…"} to ${agreement.validTo ?? "…"}` : "Open-ended"],
     ["Created", `${formatDateTime(agreement.createdAt)} by ${agreement.createdBy}`],
   ];
-  const mono = new Set(["Customer", "Invoice account", "Product", "Legal entity"]);
+  const mono = new Set<string>();
   const exhausted = agreement.status === "EXHAUSTED";
   const closed = agreement.status === "CLOSED";
 

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
   consolidateRequisitions,
@@ -15,7 +16,7 @@ import {
   type Warning,
 } from "./api/client";
 import { defaultDeadline } from "./RfqPages";
-import { LoadError, ShortId, money, useResource, uuidPattern, type Failure } from "./parts";
+import { LoadError, money, useResource, uuidPattern, type Failure, Named } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -250,7 +251,7 @@ export function ConsolidationPage() {
       header: "Item",
       render: (l) => (
         <>
-          {l.description || <ShortId id={l.productId} />}
+          {l.description || <Named entity="product" id={l.productId} />}
           {l.splitFromLineId ? <span className={styles.muted}> (split)</span> : null}
         </>
       ),
@@ -258,18 +259,19 @@ export function ConsolidationPage() {
     { key: "qty", header: "Quantity", align: "end", render: (l) => `${l.qty} ${l.unit}` },
     { key: "amount", header: "Estimate", align: "end", render: (l) => money(l.amount, l.currency) },
     { key: "requestedDate", header: "Requested", mono: true },
-    { key: "siteId", header: "Site", render: (l) => <ShortId id={l.siteId} /> },
-    { key: "warehouseId", header: "Warehouse", render: (l) => <ShortId id={l.warehouseId} /> },
+    { key: "siteId", header: "Site", render: (l) => <Named entity="site" id={l.siteId} /> },
+    { key: "warehouseId", header: "Warehouse", render: (l) => <Named entity="warehouse" id={l.warehouseId} /> },
     {
       key: "vendor",
       header: "Vendor",
       render: (l) => (
-        <Input
+        <EntityLookup
+          entity="vendor"
+          compact
           aria-label={`Vendor for ${lineLabel(l)}`}
-          placeholder={l.preferredVendorId ? l.preferredVendorId.slice(0, 8) : "Needs a vendor"}
-          title={l.preferredVendorId ? `Preferred vendor ${l.preferredVendorId}` : "No preferred vendor"}
+          placeholder="Needs a vendor"
           invalid={Boolean(errors[l.id])}
-          value={vendors[l.id] ?? ""}
+          value={vendors[l.id] ?? l.preferredVendorId ?? ""}
           onChange={(e) => setVendors((v) => ({ ...v, [l.id]: e.target.value }))}
         />
       ),

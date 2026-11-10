@@ -141,11 +141,13 @@ describe("raise a nonconformance", () => {
     handler = (url, init) => {
       if (url.pathname === "/api/v1/quality/nonconformances" && init.method === "POST") return json(201, { ...ncr, source: "INTERNAL" });
       if (url.pathname === `/api/v1/quality/nonconformances/${NCR}`) return json(200, ncr);
+      if (url.pathname === "/api/v1/quality/quality-orders") return json(200, { items: [{ id: ORDER, trigger: "PURCHASE_RECEIPT" }] });
       return undefined;
     };
     const { container } = renderAt(`/quality/nonconformances/new?qualityOrderId=${ORDER}`);
     const form = screen.getByRole("form", { name: "Raise a nonconformance" });
-    expect(within(form).getByLabelText("Quality order id")).toHaveValue(ORDER);
+    await within(form).findByRole("option", { name: "0195f0a0 · Purchase receipt" });
+    expect(within(form).getByLabelText("Quality order")).toHaveValue(ORDER);
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(within(form).getByLabelText("Problem type"), { target: { value: "CRACK" } });
     fireEvent.change(within(form).getByLabelText("Nonconforming quantity"), { target: { value: "4" } });
@@ -158,15 +160,18 @@ describe("raise a nonconformance", () => {
 
   it("checks the form before posting and shows the service's field errors", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/quality/nonconformances"
+      url.pathname === "/api/v1/quality/quality-orders"
+        ? json(200, { items: [{ id: ORDER, trigger: "PURCHASE_RECEIPT" }] })
+        : url.pathname === "/api/v1/quality/nonconformances"
         ? json(400, { code: "COM-0001", detail: "request failed validation", errors: { qty: "must be at most the quality order's lot quantity 100" } })
         : undefined;
     renderAt("/quality/nonconformances/new");
     const form = screen.getByRole("form", { name: "Raise a nonconformance" });
     fireEvent.click(within(form).getByRole("button", { name: "Raise nonconformance" }));
-    expect(await within(form).findByText(/Enter the item id/)).toBeInTheDocument();
-    expect(calls).toHaveLength(0);
-    fireEvent.change(within(form).getByLabelText("Quality order id"), { target: { value: ORDER } });
+    expect(await within(form).findByText(/Choose an item/)).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    await within(form).findByRole("option", { name: "0195f0a0 · Purchase receipt" });
+    fireEvent.change(within(form).getByLabelText("Quality order"), { target: { value: ORDER } });
     fireEvent.change(within(form).getByLabelText("Problem type"), { target: { value: "CRACK" } });
     fireEvent.change(within(form).getByLabelText("Nonconforming quantity"), { target: { value: "400" } });
     fireEvent.click(within(form).getByRole("button", { name: "Raise nonconformance" }));

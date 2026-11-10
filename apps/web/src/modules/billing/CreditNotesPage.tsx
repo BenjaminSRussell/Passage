@@ -7,6 +7,7 @@ import { MoreRows } from "./MoreRows";
 import styles from "./pages.module.css";
 import { usePaged } from "./usePaged";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const LIMIT = 100;
 const STATUSES: InvoiceStatus[] = ["PROPOSAL", "POSTED"];
@@ -16,7 +17,7 @@ const columns: DataTableColumn<InvoiceSummary>[] = [
   { key: "originalNumber", header: "Original invoice", mono: true, render: (row) => row.originalNumber || "—" },
   { key: "status", header: "Status", render: (row) => <StatusPill status={STATUS_LABELS[row.status] ?? row.status} /> },
   { key: "invoiceDate", header: "Credit date", mono: true },
-  { key: "customerId", header: "Customer", mono: true },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "gross", header: "Gross", mono: true, align: "end", render: (row) => `${row.totals.gross} ${row.currency}` },
 ];
 

@@ -6,6 +6,8 @@ import { DEFAULT_PLAN_CODE, PLAN_CODE, useLoad } from "./hooks";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { useNames } from "../mfg-shared/names";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const DECIMAL = /^\d{1,12}(\.\d{1,6})?$/;
@@ -160,13 +162,14 @@ function columns(currency: string | null): DataTableColumn<ProjectionPeriod>[] {
 }
 
 function Schedules({ data }: { data: PlanProjection }) {
+  const names = useNames("product", data.items.map((i) => i.itemId));
   return (
     <>
       <p className={styles.summary}>
-        Version {data.version} of plan {data.planCode} for site {data.siteId}, as of {data.asOf}. A shortage is a balance below zero; the run has already held back the safety stock.
+        Version {data.version} of plan {data.planCode} for site <EntityName entity="site" id={data.siteId} fallback={data.siteId} />, as of {data.asOf}. A shortage is a balance below zero; the run has already held back the safety stock.
       </p>
       {data.items.map((item) => (
-        <Card key={item.itemId} title={item.itemId}>
+        <Card key={item.itemId} title={names[item.itemId] ?? item.itemId}>
           {item.planned ? (
             <>
               <p className={styles.summary}>
@@ -174,7 +177,7 @@ function Schedules({ data }: { data: PlanProjection }) {
                 {item.shortagePeriods > 0 ? `; ${item.shortagePeriods} ${item.shortagePeriods === 1 ? "period" : "periods"} short.` : "; no shortages."}
               </p>
               <DataTable
-                label={`Supply schedule of ${item.itemId}`}
+                label="Supply schedule"
                 columns={columns(data.currency)}
                 rows={item.periods}
                 getRowKey={(p) => String(p.startDay)}

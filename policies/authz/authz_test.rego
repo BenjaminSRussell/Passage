@@ -1780,6 +1780,14 @@ test_reporting_balance_verification_routes if {
 	not allowed("reporting.audit.view", "POST", "/v1/reporting/balance-verifications")
 }
 
+test_org_demo_company_manage_reaches_only_the_demo_load if {
+	allowed("org.demo-company.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "GET", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/import")
+	not allowed("org.package.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.read", "POST", "/v1/org/demo-company")
+}
+
 test_org_package_manage_reaches_only_export_and_import if {
 	allowed("org.package.manage", "POST", "/v1/org/export")
 	allowed("org.package.manage", "POST", "/v1/org/import")
@@ -2032,6 +2040,11 @@ test_global_search_route_is_open_to_each_source_read_duty_only if {
 	allowed("party.read", "GET", "/v1/search")
 	allowed("product.read", "GET", "/v1/search")
 	allowed("procurement.purchase-order.inquire", "GET", "/v1/search")
+	allowed("receiving.receipt.maintain", "GET", "/v1/search")
+	allowed("receiving.ap.inquire", "GET", "/v1/search")
+	allowed("sales.order.read", "GET", "/v1/search")
+	allowed("fulfillment.warehouse.view", "GET", "/v1/search")
+	allowed("billing.invoice.view", "GET", "/v1/search")
 	not allowed("party.read", "POST", "/v1/search")
 	not allowed("party.write", "GET", "/v1/search")
 	not allowed("inbox.read", "GET", "/v1/search")
@@ -2104,6 +2117,22 @@ test_tenant_features_are_not_reachable_through_other_identity_duties if {
 	not allowed("identity.security-role.maintain", "PUT", "/v1/tenant/features")
 	not allowed("identity.feature.maintain", "GET", "/v1/tenants")
 	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/features/extra")
+}
+
+test_tenant_setup_view_reads_only if {
+	allowed("identity.setup.view", "GET", "/v1/tenant/setup")
+	allowed("identity.setup.view", "GET", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/workspace-config")
+}
+
+test_tenant_setup_maintain_reads_and_writes_setup_only if {
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "DELETE", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.maintain", "GET", "/v1/tenants")
 }
 
 test_dev_seed_every_user_reads_features_but_cannot_change_them if {
@@ -2184,4 +2213,32 @@ test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
 test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
+}
+
+test_analytics_ux_record_writes_events_and_cannot_read_funnels if {
+	allowed("analytics.ux.record", "POST", "/v1/analytics/ux-events")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/ux-funnels")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/ux-signals")
+	not allowed("analytics.ux.record", "GET", "/v1/analytics/metrics")
+}
+
+test_analytics_ux_view_reads_funnels_and_cannot_write_events if {
+	allowed("analytics.ux.view", "GET", "/v1/analytics/ux-funnels")
+	allowed("analytics.ux.view", "GET", "/v1/analytics/ux-signals")
+	not allowed("analytics.ux.view", "POST", "/v1/analytics/ux-events")
+	not allowed("analytics.ux.view", "POST", "/v1/analytics/query")
+}
+
+test_print_document_render_is_its_own_duty if {
+	allowed("print.document.render", "POST", "/print/v1/documents:render")
+	not allowed("print.document.render", "POST", "/print/v1/jobs")
+	not allowed("print.job.submit", "POST", "/print/v1/documents:render")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}
+
+test_receiving_document_flow_is_read_only_and_separate if {
+	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
+	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
+	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
+	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
 }

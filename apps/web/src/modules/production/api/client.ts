@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 /** Client for the production order API (services/production, wave 21). Paths follow api/openapi.yaml. */
 
 export const root = "/api/v1/production";
@@ -971,7 +972,7 @@ async function toError(res: Response): Promise<ProductionApiError> {
 }
 
 async function requestAt<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(url, init);
+  const res = await apiFetch(url, init);
   if (!res.ok) {
     throw await toError(res);
   }
