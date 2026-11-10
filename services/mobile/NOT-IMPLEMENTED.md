@@ -3,7 +3,7 @@
 | Item | Source | Status | Reason |
 | --- | --- | --- | --- |
 | Real devices, Android shell, voice adapter, RFID/EPC ingest | FR-32.1, FR-32.9, FR-32.10 | human/infra | Hardware and vendor work. |
-| Automation (AS/RS, conveyor) telegrams | FR-32.12 | handoff | Owned by the wms automation service and edge gateway. |
+| Automation (AS/RS, conveyor) telegrams | FR-32.12 | partly built | The telegram adapter is in `services/iot-edge/internal/mfs`; its runtime wiring and the warehouse side are open (see that service's NOT-IMPLEMENTED.md). |
 | Count, move, pack and cluster flow steps calling the warehouse | FR-32.4 | later slice | Only get-work, assign, confirm, exception and receive calls exist; those flows run as scan capture. |
 | Reapply of a resolved conflict moving inventory | BR-32.4 | handoff | `offline.resolved.v1` carries the decision; the inventory consumer is not built. |
 | Supervisor PIN override and its server check | FR-32.8, BR-32.7 | later slice | No PIN endpoint. |

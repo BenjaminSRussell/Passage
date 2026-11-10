@@ -183,6 +183,101 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /print/v1/printers/{id}:
+    patch:
+      operationId: updatePrinter
+      summary: Edit an active printer, or move it to another queue or failover rank (FR-32.13)
+      description: Omitted fields keep their value. The code and device type never change. A queue and rank already held by an active printer is PRN-0006; a retired or unknown printer is PRN-0010.
+      x-passage-duty: print.admin
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                dpi: { type: integer, enum: [203, 300, 600] }
+                mediaSize: { type: string }
+                host: { type: string }
+                port: { type: integer }
+                queueCode: { type: string }
+                failoverRank: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Printer updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Printer' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /print/v1/printers/{id}:retire:
+    post:
+      operationId: retirePrinter
+      summary: Take a printer out of its queue
+      description: The row stays so the job log still names the printer, and its failover rank is free again. Later jobs fail over past it. List retired printers with includeRetired=true on GET /printers.
+      x-passage-duty: print.admin
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Printer retired
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Printer' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /print/v1/routing-rules/{id}:
+    put:
+      operationId: updateRoutingRule
+      summary: Replace a document routing rule
+      x-passage-duty: print.admin
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutingRuleRequest' }
+      responses:
+        '200':
+          description: Rule replaced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutingRule' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteRoutingRule
+      summary: Delete a document routing rule
+      x-passage-duty: print.admin
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Rule deleted }
+        '404': { $ref: '#/components/responses/Problem' }
+  /print/v1/jobs:sweep:
+    post:
+      operationId: sweepPrintJobs
+      summary: Dispatch the tenant's jobs left QUEUED (§6.32.16)
+      description: Finds jobs QUEUED for more than a minute (the process died between insert and completion), stamps them so a second sweep skips them, and dispatches each through its queue in failover order. A swept job prints the stored layout, like a reprint. The service also runs this every 15 s for each tenant in PRINT_PURGE_TENANT_IDS.
+      x-passage-duty: print.admin
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Sweep completed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claimed, printed, failed]
+                properties:
+                  claimed: { type: integer }
+                  printed: { type: integer }
+                  failed: { type: integer }
   /print/v1/printers/status:
     get:
       operationId: listPrinterStatus

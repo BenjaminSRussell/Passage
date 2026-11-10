@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { DEFAULT_MENU_ID } from "./api/client";
-import { outcomeFromReplayStatus } from "./api/replayApply";
+import { makeApplier, type ReplayStop } from "./api/replayApply";
+import { endSession, heartbeat, startSession } from "./api/session";
 import { ClusterPanel } from "./ClusterPanel";
 import { ExceptionsPanel } from "./ExceptionsPanel";
 import { completionFor, CONFIRM_WORK_LINE, confirmationPayload, CORE_FLOWS } from "./domain/coreFlows";
@@ -9,7 +10,7 @@ import { goBack, startFlow, submitStep, type RunnerResult, type RunnerState } fr
 import { CLASS_LABEL } from "./domain/gs1";
 import { fontSizePx, targetSizePx, textDirection } from "./domain/layout";
 import { latestGraph } from "./domain/menuSync";
-import { type ApplyOutcome, DEFAULT_LIMITS, OfflineQueue, type QueuedTx } from "./domain/offlineQueue";
+import { DEFAULT_LIMITS, OfflineQueue } from "./domain/offlineQueue";
 import {
   AesGcmSealer,
   IndexedDbStore,
@@ -19,23 +20,31 @@ import {
   type KeyValueStore,
   type SealCipher,
 } from "./domain/offlineStore";
+import { labelOffer } from "./domain/receiveLabel";
+import { RfidAggregator, listenForRfid } from "./domain/rfid";
 import { listenForScans } from "./domain/scanBridge";
 import type { ScanSource } from "./domain/scanRouting";
+import { SessionKeeper, type KeeperState } from "./domain/sessionKeeper";
 import { appendTiming, type StepTiming } from "./domain/telemetry";
+import { promptFor, routeUtterance, type VoiceAdapter } from "./domain/voice";
+import { ReceiveLabelPanel } from "./ReceiveLabelPanel";
 import { useDeviceFlows } from "./useDeviceFlows";
 import "./deviceApp.css";
-import { apiFetch } from "../../shell/api/http";
 
-const REPLAY_URL = "/api/v1/mobile/offline:replay";
+/** Seconds between session heartbeats; well inside the service's idle timeout (5 to 240 min). */
+const HEARTBEAT_MS = 60_000;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Sends one queued confirmation. The server enforces ordering and idempotency per key. */
-export async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
-  const res = await apiFetch(REPLAY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Idempotency-Key": tx.idempotencyKey },
-    body: JSON.stringify({ idempotencyKey: tx.idempotencyKey, command: tx.command, payload: tx.payload, capturedAt: tx.capturedAt }),
-  });
-  return outcomeFromReplayStatus(res.status);
+export const applyOne = makeApplier();
+
+function readSetting(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
 }
 
 interface DeviceStorage {
@@ -71,6 +80,10 @@ export interface AppProps {
   flows?: readonly FlowDraft[];
   /** Device menu id (GET /mobile/v1/menus/{id}). Defaults to `default`. */
   menuId?: string;
+  /** The warehouse the device is bound to (a UUID). Defaults to `localStorage["passage.warehouseId"]`; without one the device runs without a service session. */
+  warehouseId?: string;
+  /** A headset's speech engine (FR-32.9): the step prompt is spoken and utterances answer the step. */
+  voice?: VoiceAdapter;
 }
 
 /** Device screens that sit beside the flows on the menu: exceptions and override (FR-32.8), cart positions (BR-32.5). */
@@ -88,7 +101,7 @@ const flowLabel = (code: string) => code.replace(/_/g, " ").toLowerCase();
  * sealed with the device key in IndexedDB after every change (FR-32.5) and replayed in order on
  * Sync (BR-32.3). An inquiry queues nothing, and a count is not queued while offline (§6.32.13).
  */
-export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }: AppProps) {
+export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID, warehouseId, voice }: AppProps) {
   const loaded = useDeviceFlows({ menuId, fallback: CORE_FLOWS });
   const menu = flows ?? loaded.flows;
   const [flow, setFlow] = useState<FlowDraft | null>(menu.length === 1 ? menu[0] : null);
@@ -103,9 +116,42 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
   const [typed, setTyped] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [, bump] = useState(0);
+  const [session, setSession] = useState<KeeperState>({ status: "idle" });
+  const [labelFor, setLabelFor] = useState<string | null>(null);
+  const keeperRef = useRef<SessionKeeper | null>(null);
+  const stopRef = useRef<ReplayStop | null>(null);
+  const rfid = useRef(new RfidAggregator());
   const onScanRef = useRef<(raw: string, source: ScanSource) => void>(() => undefined);
+  const onVoiceRef = useRef<(text: string) => void>(() => undefined);
+  const warehouse = warehouseId ?? readSetting("passage.warehouseId");
+  const applier = useMemo(
+    () => makeApplier({ userId, sessionId: () => keeperRef.current?.sessionId, onStop: (stop) => (stopRef.current = stop) }),
+    [userId],
+  );
   const menuRef = useRef(menu);
   menuRef.current = menu;
+
+  // The service session (FR-32.1, FR-32.6): start it, beat while the device is open, sign out on close.
+  // Without a provisioned warehouse, or with the service out of reach, the device works from its queue.
+  useEffect(() => {
+    if (!UUID.test(warehouse)) return;
+    const keeper = new SessionKeeper(
+      {
+        start: () => startSession({ deviceId, warehouseId: warehouse, menuKey: menuId }),
+        heartbeat: (id, at) => heartbeat(id, at),
+        end: (id) => endSession(id),
+      },
+      setSession,
+    );
+    keeperRef.current = keeper;
+    void keeper.start();
+    const timer = setInterval(() => void keeper.beat(), HEARTBEAT_MS);
+    return () => {
+      clearInterval(timer);
+      keeperRef.current = null;
+      void keeper.stop();
+    };
+  }, [deviceId, warehouse, menuId]);
 
   // Open the sealed queue and the device key once per device.
   useEffect(() => {
@@ -151,6 +197,25 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
     [],
   );
 
+  // Tag reads forwarded by the shell (FR-32.9): the strongest new tag of a round is a scan.
+  useEffect(
+    () =>
+      listenForRfid(window, (r) => {
+        if (!r.ok) {
+          setNotice({ tone: "error", text: `RFID: ${r.reason}` });
+          return;
+        }
+        const round = rfid.current.accept(r.reads);
+        if (round.scans.length > 0) onScanRef.current(round.scans[0].raw, "RFID");
+        else if (round.unreadable.length > 0) setNotice({ tone: "error", text: `MOB-0118 ${round.unreadable[0].reason}` });
+        if (round.scans.length > 1) console.info("rfid: tags left for the next read", round.scans.length - 1);
+      }),
+    [],
+  );
+
+  // Voice (FR-32.9): speak each prompt, and let spoken digits and commands answer the step.
+  useEffect(() => (voice ? voice.onUtterance((text) => onVoiceRef.current(text)) : undefined), [voice]);
+
   async function persist(q: OfflineQueue) {
     if (storage) await saveQueue(storage.store, storage.cipher, q);
   }
@@ -167,6 +232,7 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
   }
 
   function openMenu() {
+    setLabelFor(null);
     setFlow(null);
     setTool(null);
     setNotice(null);
@@ -176,10 +242,13 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
   async function queueConfirmation(done: RunnerState) {
     if (!queue) return;
     try {
-      queue.enqueue(CONFIRM_WORK_LINE, confirmationPayload(done));
+      // userId is the worker who captured it: after a takeover the server refuses another user's entries (BR-32.4).
+      queue.enqueue(CONFIRM_WORK_LINE, { ...confirmationPayload(done), userId });
       await persist(queue);
+      const offer = labelOffer(done);
       restart();
       setNotice({ tone: "info", text: "Confirmation queued." });
+      if (offer && navigator.onLine) setLabelFor(offer.sscc);
     } catch (e) {
       // MOB-0106: the queue is full or too old; the worker must reconnect and sync first.
       setNotice({ tone: "error", text: e instanceof Error ? e.message : "The confirmation could not be queued." });
@@ -254,17 +323,42 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
     setNotice(null);
   }
 
+  onVoiceRef.current = (text) => {
+    const current = flow && runner?.stepId ? flow.steps.find((s) => s.id === runner.stepId) : undefined;
+    const decision = routeUtterance(text, current);
+    const ctx = { deviceId, userId };
+    switch (decision.do) {
+      case "scan":
+        onScanRef.current(decision.raw, "VOICE");
+        break;
+      case "value":
+      case "outcome":
+        if (runner && flow) apply(submitStep(flow, runner, { kind: "value", value: decision.do === "value" ? decision.value : decision.value }, ctx, Date.now()));
+        break;
+      case "confirm":
+        onConfirm();
+        break;
+      case "back":
+        onBack();
+        break;
+      default:
+        voice?.speak(decision.text);
+    }
+  };
+
   async function onSync() {
     if (!queue) return;
     setSyncing(true);
     try {
       // replay() never throws on transport errors: they stop the run and leave the rest PENDING.
-      const summary = await queue.replay(applyOne);
+      stopRef.current = null;
+      const summary = await queue.replay(applier);
+      const stop = stopRef.current as ReplayStop | null;
       queue.prune();
       await persist(queue);
       setNotice(
         summary.stoppedBecause === "transport"
-          ? { tone: "error", text: "Offline: sync paused, it will retry." }
+          ? { tone: "error", text: stop ? stop.message : "Offline: sync paused, it will retry." }
           : { tone: summary.stoppedBecause === "drained" ? "info" : "error", text: `Synced ${summary.applied}; ${summary.pending} waiting (${summary.stoppedBecause}).` },
       );
     } catch (e) {
@@ -276,6 +370,12 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
   }
 
   const step = flow && runner?.stepId ? flow.steps.find((s) => s.id === runner.stepId) : undefined;
+  const stepId = step?.id;
+  useEffect(() => {
+    if (voice && step) voice.speak(promptFor(step));
+    // Speak when the step changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice, flow?.code, stepId]);
   const waiting = queue ? queue.snapshot().filter((t) => t.replayStatus !== "APPLIED" && !t.resolved).length : 0;
   const largeTargets = readFlag("passage.largeTargets");
   const layout = { "--font-base": `${fontSizePx(18, largeTargets)}px`, "--target": `${targetSizePx(largeTargets)}px` } as CSSProperties;
@@ -288,6 +388,19 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
           {waiting} queued, {DEFAULT_LIMITS.maxTx - waiting} left
         </span>
       </header>
+
+      {session.status === "blocked" ? (
+        <p role="alert" className="app__alert">
+          {session.message}
+        </p>
+      ) : null}
+      {session.status === "active" && session.message ? (
+        <p role="status" className="app__message">
+          {session.message}
+        </p>
+      ) : null}
+
+      {labelFor ? <ReceiveLabelPanel sscc={labelFor} warehouseId={UUID.test(warehouse) ? warehouse : undefined} onClose={() => setLabelFor(null)} /> : null}
 
       {fatal ? (
         <p role="alert" className="app__alert">
@@ -371,6 +484,7 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID }:
           </button>
           <span className="app__status">
             {timings.length} steps timed{ignored.length > 0 ? `, ${ignored.length} scans ignored` : ""}
+            {session.status === "offline" ? ", service offline" : ""}
           </span>
         </footer>
       ) : null}

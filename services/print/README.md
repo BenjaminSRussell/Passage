@@ -54,6 +54,17 @@ from this pod; nothing connects inbound to the cluster.
   `0x00FF`. A PDF payload never goes to a raw TCP device and a non-PDF payload never goes to
   an IPP device (`ErrWrongDocumentFormat`). No job carries PCL yet, so `PCL_6` devices are
   never offered a job; see NOT-IMPLEMENTED.md.
+- **Queue management** (print.admin): `PATCH /print/v1/printers/{id}` edits a printer or moves it to
+  another queue or failover rank (PRN-0006 when the rank is held; the code and device type never
+  change); `POST /print/v1/printers/{id}:retire` takes it out of its queue (the row stays for the
+  job log, its rank is free again, `GET /printers?includeRetired=true` lists it); `PUT` and `DELETE
+  /print/v1/routing-rules/{id}` edit and remove a rule. Migration `0006` adds `retired_at`, makes the
+  rank unique among active printers, and grants the app role UPDATE on printers and UPDATE/DELETE on
+  rules (printers are never deleted).
+- **Stale job sweep** (`POST /print/v1/jobs:sweep`, and every 15 s for each tenant in
+  `PRINT_PURGE_TENANT_IDS`): a job still QUEUED after a minute (its process died between insert and
+  completion) is claimed (its `updated_at` is stamped, so a second sweep skips it) and dispatched in
+  failover order. A swept job prints the stored layout, like a reprint.
 - **Reprints**: `reprintOf` reuses the stored ZPL or PDF and records the source job.
 - **Job log** (`GET /print/v1/jobs?status=&queueCode=&printerCode=&limit=`): newest first (§6.32.14).
 - **Printer status** (`GET /print/v1/printers/status`): per printer, the state from its last job
@@ -121,6 +132,8 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a role without BYPASSRLS).
 | PRN-0004 | 409 | Job already completed (terminal) |
 | PRN-0005 | 404 | Print job not found |
 | PRN-0006 | 409 | The queue already has a printer at this failover rank |
+| PRN-0010 | 404 | Printer not found, or already retired |
+| PRN-0011 | 404 | Routing rule not found |
 | PRN-0007 | 201 (job FAILED) | The label does not fit the media of any device in the queue |
 | MOB-0111 | 201 (job FAILED) | Printer unreachable after the attempts |
 | MOB-0112 | 422 / 201 (job FAILED) | No routing rule matches the document, or the queue has no devices |

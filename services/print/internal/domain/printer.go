@@ -40,6 +40,9 @@ type Printer struct {
 	QueueCode    string    `json:"queueCode"`
 	FailoverRank int       `json:"failoverRank"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// RetiredAt is set once the printer has left its queue (FR-32.13). A retired printer
+	// is no longer offered jobs and is listed only on request.
+	RetiredAt *time.Time `json:"retiredAt,omitempty"`
 }
 
 const codePattern = `^[A-Z0-9][A-Z0-9_-]{1,39}$`
