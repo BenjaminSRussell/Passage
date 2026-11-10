@@ -1,5 +1,6 @@
 import { readProblem } from "../../../shell/api/http";
 import { OPEN_ITEM_STATUSES, type OpenItem, type OpenItemStatus } from "../../../shell/api/openItems";
+import { apiFetch } from "../../../shell/api/http";
 
 export { ApiError } from "../../../shell/api/http";
 export { OPEN_ITEM_STATUSES, type OpenItem, type OpenItemStatus };
@@ -101,7 +102,7 @@ function query(params: Record<string, string | undefined>): string {
 }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiFetch(`${BASE}${path}`, {
     method,
     headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body),
