@@ -74,12 +74,12 @@ func runCopy(ctx context.Context, args []string, out io.Writer, getenv func(stri
 	if err != nil {
 		return err
 	}
-	defer scratch.Close(ctx)
+	defer func() { _ = scratch.Close(ctx) }()
 	live, err := connect(ctx, getenv, liveURLEnv)
 	if err != nil {
 		return err
 	}
-	defer live.Close(ctx)
+	defer func() { _ = live.Close(ctx) }()
 	result, err := RestoreTenant(ctx, scratch, live, schema, tenantID, apply)
 	if err != nil {
 		return err
@@ -101,8 +101,8 @@ func printResult(out io.Writer, tenantID string, r Result) {
 	if r.Applied {
 		mode = "APPLIED"
 	}
-	fmt.Fprintf(out, "tenant %s: %s\n", tenantID, mode)
+	_, _ = fmt.Fprintf(out, "tenant %s: %s\n", tenantID, mode)
 	for _, t := range r.Tables {
-		fmt.Fprintf(out, "%-32s restored=%d inserted=%d updated=%d unchanged=%d live-only=%d\n", t.Table, t.Source, t.Inserted, t.Updated, t.Unchanged, t.LiveOnly)
+		_, _ = fmt.Fprintf(out, "%-32s restored=%d inserted=%d updated=%d unchanged=%d live-only=%d\n", t.Table, t.Source, t.Inserted, t.Updated, t.Unchanged, t.LiveOnly)
 	}
 }
