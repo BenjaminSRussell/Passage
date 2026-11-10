@@ -53,7 +53,7 @@ type WarehousePatch struct {
 	AddressID *string `json:"addressId"`
 }
 
-type WarehouseFilter struct{ LegalEntityID, SiteID, Type, Status string }
+type WarehouseFilter struct{ LegalEntityID, SiteID, Type, Status, Query string }
 
 type WarehousePage struct {
 	Items []Warehouse
@@ -193,7 +193,8 @@ func (s *Postgres) ListWarehouses(ctx context.Context, f WarehouseFilter, after 
 		rows, err := tx.Query(ctx, `select `+warehouseColumns+` from warehouse where tenant_id = $1 and (code, id) > ($2, $3::uuid)
 			and ($4::text = '' or legal_entity_id::text = lower($4)) and ($5::text = '' or site_id::text = lower($5))
 			and ($6::text = '' or type = $6) and ($7::text = '' or status = $7)
-			order by code, id limit $8`, p.TenantID, after.Code, after.ID, f.LegalEntityID, f.SiteID, f.Type, f.Status, limit+1)
+			and ($9::text = '' or code ilike $9 or name ilike $9)
+			order by code, id limit $8`, p.TenantID, after.Code, after.ID, f.LegalEntityID, f.SiteID, f.Type, f.Status, limit+1, likePattern(f.Query))
 		if err != nil {
 			return err
 		}

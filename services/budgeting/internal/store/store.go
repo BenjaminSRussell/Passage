@@ -641,39 +641,45 @@ func (s *Postgres) PostRegisterEntry(ctx context.Context, key, hash string, req 
 			}
 			return 0, nil, httpx.NewProblem(status, de.Code, de.Detail)
 		}
-		// Sorted upserts take the balance row locks in the same order as checks.
-		lines := slices.Clone(req.Lines)
-		sort.SliceStable(lines, func(i, j int) bool {
-			return balanceKey(lines[i].DimensionKey, lines[i].SpanKey) < balanceKey(lines[j].DimensionKey, lines[j].SpanKey)
-		})
-		total := decimal.Zero
-		for _, l := range lines {
-			total = total.Add(l.Amount)
-			if _, err := tx.Exec(ctx, `insert into budget_control_balance (tenant_id, id, legal_entity_id, rule_version_id, control_dimension_key, time_span_key, budget_total)
-				values ($1, $2, $3, $4, $5, $6, $7)
-				on conflict (tenant_id, rule_version_id, control_dimension_key, time_span_key)
-				do update set budget_total = budget_control_balance.budget_total + excluded.budget_total, version = budget_control_balance.version + 1`,
-				p.TenantID, ids.New(), rule.LegalEntityID, rule.ID, l.DimensionKey, l.SpanKey, l.Amount); err != nil {
-				return 0, nil, err
-			}
-		}
-		entry := RegisterEntry{ID: ids.New(), RuleVersionID: rule.ID, EntryType: req.EntryType, Status: "Posted", Total: total, PostedAt: now(), Lines: req.Lines}
-		raw, err := json.Marshal(entry.Lines)
-		if err != nil {
-			return 0, nil, err
-		}
-		if _, err := tx.Exec(ctx, `insert into budget_register_entry (tenant_id, id, legal_entity_id, rule_version_id, entry_type, lines, total, posted_at)
-			values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::timestamptz)`,
-			p.TenantID, entry.ID, rule.LegalEntityID, rule.ID, string(req.EntryType), string(raw), total, entry.PostedAt); err != nil {
-			return 0, nil, err
-		}
-		data := budgetevents.RegisterPostedData{EntryID: entry.ID, RuleVersionID: rule.ID, EntryType: string(req.EntryType)}
-		for _, l := range req.Lines {
-			data.Lines = append(data.Lines, budgetevents.RegisterLineData{DimensionKey: l.DimensionKey, SpanKey: l.SpanKey, Amount: l.Amount.String()})
-		}
-		if err := enqueue(ctx, tx, "register", entry.ID, budgetevents.RegisterPosted, p.TenantID, data); err != nil {
-			return 0, nil, fmt.Errorf("enqueue register posted: %w", err)
-		}
-		return http.StatusCreated, entry, nil
+		entry, err := postEntry(ctx, tx, p.TenantID, rule, req.EntryType, req.Lines)
+		return http.StatusCreated, entry, err
 	})
+}
+
+// postEntry moves budget_total by each line and stores the immutable entry with its event.
+func postEntry(ctx context.Context, tx pgx.Tx, tenantID string, rule Rule, entryType domain.EntryType, reqLines []domain.RegisterLine) (RegisterEntry, error) {
+	// Sorted upserts take the balance row locks in the same order as checks.
+	lines := slices.Clone(reqLines)
+	sort.SliceStable(lines, func(i, j int) bool {
+		return balanceKey(lines[i].DimensionKey, lines[i].SpanKey) < balanceKey(lines[j].DimensionKey, lines[j].SpanKey)
+	})
+	total := decimal.Zero
+	for _, l := range lines {
+		total = total.Add(l.Amount)
+		if _, err := tx.Exec(ctx, `insert into budget_control_balance (tenant_id, id, legal_entity_id, rule_version_id, control_dimension_key, time_span_key, budget_total)
+			values ($1, $2, $3, $4, $5, $6, $7)
+			on conflict (tenant_id, rule_version_id, control_dimension_key, time_span_key)
+			do update set budget_total = budget_control_balance.budget_total + excluded.budget_total, version = budget_control_balance.version + 1`,
+			tenantID, ids.New(), rule.LegalEntityID, rule.ID, l.DimensionKey, l.SpanKey, l.Amount); err != nil {
+			return RegisterEntry{}, err
+		}
+	}
+	entry := RegisterEntry{ID: ids.New(), RuleVersionID: rule.ID, EntryType: entryType, Status: "Posted", Total: total, PostedAt: now(), Lines: reqLines}
+	raw, err := json.Marshal(entry.Lines)
+	if err != nil {
+		return RegisterEntry{}, err
+	}
+	if _, err := tx.Exec(ctx, `insert into budget_register_entry (tenant_id, id, legal_entity_id, rule_version_id, entry_type, lines, total, posted_at)
+		values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::timestamptz)`,
+		tenantID, entry.ID, rule.LegalEntityID, rule.ID, string(entryType), string(raw), total, entry.PostedAt); err != nil {
+		return RegisterEntry{}, err
+	}
+	data := budgetevents.RegisterPostedData{EntryID: entry.ID, RuleVersionID: rule.ID, EntryType: string(entryType)}
+	for _, l := range reqLines {
+		data.Lines = append(data.Lines, budgetevents.RegisterLineData{DimensionKey: l.DimensionKey, SpanKey: l.SpanKey, Amount: l.Amount.String()})
+	}
+	if err := enqueue(ctx, tx, "register", entry.ID, budgetevents.RegisterPosted, tenantID, data); err != nil {
+		return RegisterEntry{}, fmt.Errorf("enqueue register posted: %w", err)
+	}
+	return entry, nil
 }

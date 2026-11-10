@@ -35,6 +35,7 @@ type fakeStore struct {
 	refs                map[string]store.ReferenceItem
 	ous                 []store.OperatingUnit
 	ouFilter            store.OperatingUnitFilter
+	leFilter            store.LegalEntityFilter
 	compareArgs         [2]int
 	ouCalls             int
 	importCalls         int
@@ -389,7 +390,8 @@ func (f *fakeStore) ListLegalEntityNames(_ context.Context, id string) ([]store.
 	return []store.LegalEntityName{{Name: "Passage US", ValidFrom: time.Unix(0, 0).UTC()}}, err
 }
 
-func (f *fakeStore) ListLegalEntities(_ context.Context, _ store.LegalEntityFilter, after string, limit int) (store.LegalEntityPage, error) {
+func (f *fakeStore) ListLegalEntities(_ context.Context, filter store.LegalEntityFilter, after string, limit int) (store.LegalEntityPage, error) {
+	f.leFilter = filter
 	if f.err != nil {
 		return store.LegalEntityPage{}, f.err
 	}
@@ -1298,6 +1300,17 @@ func TestListLegalEntitiesPagesByCursor(t *testing.T) {
 		if rec := do(r, http.MethodGet, legalEntities+bad, "", allDuties, true); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s = %d; want 400", bad, rec.Code)
 		}
+	}
+}
+
+func TestListLegalEntitiesPassesTheSearchText(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	if rec := do(r, http.MethodGet, legalEntities+"?q=contoso%20ltd", "", allDuties, true); rec.Code != http.StatusOK || f.leFilter.Query != "contoso ltd" {
+		t.Fatalf("got %d with filter %+v; want 200 carrying the search text", rec.Code, f.leFilter)
+	}
+	if rec := do(r, http.MethodGet, legalEntities+"?q=x", "", "org.legal-entity.write", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("search without org.read = %d; want 403", rec.Code)
 	}
 }
 

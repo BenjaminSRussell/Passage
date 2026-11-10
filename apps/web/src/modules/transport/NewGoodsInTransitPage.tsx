@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createGoodsInTransit, describeProblem, newKey, ORIGIN_INCOTERMS, type NewGoodsInTransit, type Problem } from "./api/client";
@@ -19,7 +20,7 @@ export function validateGoodsInTransit(v: GoodsInTransitValues): { errors: Recor
   const voyageId = v.voyageId.trim();
   if (!UUID.test(voyageId)) errors.voyageId = "Enter the voyage id as a lower-case UUID.";
   const siteId = v.siteId.trim();
-  if (!UUID.test(siteId)) errors.siteId = "Enter the destination site id as a lower-case UUID.";
+  if (!UUID.test(siteId)) errors.siteId = "Choose a destination site.";
   if (!(ORIGIN_INCOTERMS as readonly string[]).includes(v.incoterm)) errors.incoterm = "Choose an origin Incoterm.";
   const parts = v.receiptLines
     .split(",")
@@ -89,8 +90,8 @@ export function NewGoodsInTransitPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="git-site" label="Destination site id" hint="Its in-transit warehouse holds the goods (UUID)." error={errors.siteId}>
-            {(control) => <Input {...control} className={styles.mono} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
+          <FormField id="git-site" label="Destination site" hint="Its in-transit warehouse holds the goods." error={errors.siteId}>
+            {(control) => <EntityLookup entity="site" {...control} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
           </FormField>
           <FormField id="git-lines" label="Receipt lines" hint="Comma-separated, such as 1, 2. Leave empty for every line of the voyage." optional error={errors.receiptLines}>
             {(control) => <Input {...control} inputMode="numeric" value={values.receiptLines} onChange={(e) => update({ receiptLines: e.target.value })} invalid={Boolean(errors.receiptLines)} />}

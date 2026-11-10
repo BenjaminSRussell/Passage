@@ -131,7 +131,7 @@ describe("new purchase agreement", () => {
     fireEvent.change(await screen.findByLabelText("Commitment"), { target: { value: "CATEGORY_VALUE" } });
     expect(screen.getByLabelText("Category")).toBeInTheDocument();
     expect(screen.getByLabelText("Committed amount")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Product id")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Product")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Unit")).not.toBeInTheDocument();
     expect(screen.queryByText(/instead of trade agreements/)).not.toBeInTheDocument();
   });
@@ -139,11 +139,11 @@ describe("new purchase agreement", () => {
   it("posts the commitments with an Idempotency-Key and opens the new agreement", async () => {
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(agreement, 201, { ETag: '"1"' }) : json(agreement)));
     const { router } = renderAt("/purchasing/agreements/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.change(screen.getByLabelText("Valid to"), { target: { value: "2027-12-31" } });
     fireEvent.change(screen.getByLabelText("Start as"), { target: { value: "DRAFT" } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Committed quantity"), { target: { value: "1000" } });
     fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "2.50" } });
     fireEvent.click(screen.getByLabelText("Use this price instead of trade agreements on releases"));
@@ -175,9 +175,9 @@ describe("new purchase agreement", () => {
   it("maps a service field error back onto the form", async () => {
     stubFetch(() => problem(422, "COM-0001", "lines[0].unit is required", { "lines[0].unit": "is required for a QUANTITY commitment" }));
     renderAt("/purchasing/agreements/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Committed quantity"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Save agreement" }));
     expect(await screen.findByText("is required for a QUANTITY commitment")).toBeInTheDocument();

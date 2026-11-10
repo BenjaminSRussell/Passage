@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   createServiceTokenSigner,
+  BUDGETING_GRANT,
   ENGINEERING_GRANT,
   PAYABLES_GRANT,
   QUALITY_GRANT,
@@ -37,6 +38,7 @@ describe("service token", () => {
     expect(data.service_grants[SERVICE_NAME]).toEqual({
       payables: [...PAYABLES_GRANT],
       engineering: [...ENGINEERING_GRANT],
+      budgeting: [...BUDGETING_GRANT],
       quality: [...QUALITY_GRANT],
       transport: [...TRANSPORT_GRANT],
       party: [...PARTY_GRANT, ...PARTY_MERGE_GRANT],
@@ -48,6 +50,7 @@ describe("service token", () => {
     const subject = { tenantId: "t", legalEntityId: "l", actor: "a", scope: ["L"] };
     const claims = (token: string) => JSON.parse(Buffer.from(token.split(".")[0]!, "base64url").toString()) as { aud: string; duties: string[]; iss: string };
     expect(claims(signer.mintForEngineering(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "engineering", duties: ["engineering.eco.workflow"] });
+    expect(claims(signer.mintForBudgeting(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "budgeting", duties: ["budget.plan.workflow"] });
     expect(claims(signer.mintForQuality(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "quality", duties: ["quality.capa.execute"] });
     expect(claims(signer.mintForTransport(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "transport", duties: ["transport.tender.execute"] });
     expect(claims(signer.mintForParty(subject))).toMatchObject({ iss: SERVICE_NAME, aud: "party", duties: ["party.approve"] });
@@ -59,6 +62,7 @@ describe("service token", () => {
     const subject = { tenantId: "t", legalEntityId: "le-1", actor: "a" };
     for (const scope of [undefined, [], ["le-2"], ["le-2", ""]]) {
       expect(() => signer.mintForEngineering({ ...subject, scope })).toThrow(/scope/);
+      expect(() => signer.mintForBudgeting({ ...subject, scope })).toThrow(/scope/);
       expect(() => signer.mintForQuality({ ...subject, scope })).toThrow(/scope/);
       expect(() => signer.mintForTransport({ ...subject, scope })).toThrow(/scope/);
       expect(() => signer.mintForParty({ ...subject, scope })).toThrow(/scope/);

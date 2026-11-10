@@ -25,6 +25,13 @@ productUrl: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+inbox:
+  purchasingUrl: ""
+  partyUrl: ""
+  ledgerUrl: ""
+  payablesUrl: ""
+  sourceTimeout: 3s
+  concurrency: 4
 dispatcher:
   interval: 5s
   concurrency: 4

@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -297,11 +298,11 @@ export function PurchaseAgreementCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Agreement">
           <div className={styles.grid}>
-            <FormField id="pa-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
+            <FormField id="pa-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
             </FormField>
-            <FormField id="pa-vendor" label="Vendor id" error={errors.vendorId}>
-              {(c) => <Input {...c} value={header.vendorId} onChange={(e) => setH({ vendorId: e.target.value })} />}
+            <FormField id="pa-vendor" label="Vendor" error={errors.vendorId}>
+              {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: header.legalEntityId || undefined }} {...c} value={header.vendorId} onChange={(e) => setH({ vendorId: e.target.value })} />}
             </FormField>
             <FormField id="pa-currency" label="Currency" error={errors.currency}>
               {(c) => <Input {...c} value={header.currency} maxLength={3} onChange={(e) => setH({ currency: e.target.value.toUpperCase() })} />}
@@ -357,8 +358,8 @@ export function PurchaseAgreementCreatePage() {
                     )}
                   </FormField>
                   {forProduct(t) ? (
-                    <FormField id={id("product")} label="Product id" error={err("productId")}>
-                      {(c) => <Input {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
+                    <FormField id={id("product")} label="Product" error={err("productId")}>
+                      {(c) => <EntityLookup entity="product" {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
                     </FormField>
                   ) : null}
                   {t === "CATEGORY_VALUE" ? (

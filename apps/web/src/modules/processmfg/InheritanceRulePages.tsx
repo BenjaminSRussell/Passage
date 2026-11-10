@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -105,8 +106,8 @@ export function InheritanceRulesPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="rule-filter-item" label="Item id" error={filterError ? "Enter the item id as a UUID." : undefined}>
-          {(c) => <Input {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={filterError} />}
+        <FormField id="rule-filter-item" label="Item" error={filterError ? "Enter the item id as a UUID." : undefined}>
+          {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={filterError} />}
         </FormField>
         <div className={styles.lineChecks}>
           <label htmlFor="rule-active-only">
@@ -212,8 +213,8 @@ export function NewInheritanceRulePage() {
       <PageHeader title="Define rule" description="The item must already define the attribute, and the way of deriving it must fit its kind: lowest, highest and average need a number, earliest and latest a date. A rule is never edited: retire it and define its replacement." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="rule-item" label="Item id" error={errors.itemId}>
-            {(c) => <Input {...c} value={itemId} onChange={(e) => on(setItemId)(e.target.value)} invalid={Boolean(errors.itemId)} />}
+          <FormField id="rule-item" label="Item" error={errors.itemId}>
+            {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => on(setItemId)(e.target.value)} invalid={Boolean(errors.itemId)} />}
           </FormField>
           <FormField id="rule-attribute" label="Attribute" hint="The receiver attribute the rule fills." error={errors.attribute}>
             {(c) => <Input {...c} value={attribute} onChange={(e) => on(setAttribute)(e.target.value)} invalid={Boolean(errors.attribute)} />}

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listBackorders, type BackorderRow } from "./api/client";
@@ -115,8 +116,8 @@ export function BackordersPage() {
       />
       <Card title="Filter">
         <form className={styles.form} onSubmit={apply} noValidate>
-          <FormField id="bo-warehouse" label="Warehouse id" error={errors.warehouseId} optional>
-            {(control) => <Input {...control} {...field("warehouseId")} />}
+          <FormField id="bo-warehouse" label="Warehouse" error={errors.warehouseId} optional>
+            {(control) => <EntityLookup entity="warehouse" {...control} {...field("warehouseId")} />}
           </FormField>
           <FormField id="bo-status" label="Show">
             {(control) => (

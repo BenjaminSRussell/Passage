@@ -174,8 +174,8 @@ describe("new project", () => {
     expect(await screen.findByText("Enter a project name.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "USMF to CAMF" } });
-    fireEvent.change(screen.getByLabelText("Source legal entity id"), { target: { value: LE_A } });
-    fireEvent.change(screen.getByLabelText("Target legal entity id"), { target: { value: LE_B } });
+    fireEvent.change(screen.getByLabelText("Source legal entity"), { target: { value: LE_A } });
+    fireEvent.change(screen.getByLabelText("Target legal entity"), { target: { value: LE_B } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByRole("heading", { name: "USMF to CAMF" })).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST");
@@ -187,7 +187,7 @@ describe("new project", () => {
     handler = () => json(409, { code: "MIG-PROJECT-NAME-EXISTS", detail: "a migration project with this name already exists" });
     renderAt("/migration/projects/new");
     fireEvent.change(screen.getByLabelText("Type"), { target: { value: "migrate" } });
-    expect(screen.queryByLabelText("Source legal entity id")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Source legal entity")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AX customers" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByText("Choose the source system.")).toBeInTheDocument();
@@ -217,7 +217,7 @@ describe("new project with a custom source system", () => {
     await screen.findByRole("option", { name: "Acme ERP" });
     expect(screen.queryByRole("option", { name: "AX box" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/^Connection/), { target: { value: acme.id } });
-    fireEvent.change(screen.getByLabelText(/^Target legal entity id/), { target: { value: LE_B } });
+    fireEvent.change(screen.getByLabelText(/^Target legal entity/), { target: { value: LE_B } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({

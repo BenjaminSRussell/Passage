@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listGateVisits, VISIT_STATUSES, type GateVisit, type VisitStatus } from "./api/client";
@@ -64,8 +65,8 @@ export function GatePage() {
             </Select>
           )}
         </FormField>
-        <FormField id="gate-site" label="Site id" hint="Filter by site (UUID).">
-          {(control) => <Input {...control} className={styles.mono} value={site} onChange={(e) => setSite(e.target.value)} />}
+        <FormField id="gate-site" label="Site" hint="Search by name or code, or paste its id.">
+          {(control) => <EntityLookup entity="site" prefill={false} {...control} value={site} onChange={(e) => setSite(e.target.value)} />}
         </FormField>
         <FormField id="gate-date" label="Check-in day" hint="UTC day.">
           {(control) => <Input {...control} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}

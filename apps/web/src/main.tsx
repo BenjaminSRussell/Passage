@@ -15,14 +15,14 @@ import "./shell/theme.css";
 
 const modules = loadModules();
 
-function App({ duties }: { duties?: readonly string[] }) {
+function App({ duties, identity }: { duties?: readonly string[]; identity?: string }) {
   const router = useMemo(
     () =>
       createBrowserRouter([
         ...(import.meta.env.DEV ? [{ path: "/device", element: <DeviceHost /> }] : []),
         {
           path: "/",
-          element: <Shell modules={modules} duties={duties} />,
+          element: <Shell modules={modules} duties={duties} identity={identity} />,
           children: [
             { index: true, element: <HomePage /> },
             { path: "notes", element: <NotesPage /> },
@@ -32,7 +32,7 @@ function App({ duties }: { duties?: readonly string[] }) {
           ],
         },
       ]),
-    [duties],
+    [duties, identity],
   );
   const client = useMemo(() => new QueryClient(), []);
   return (
@@ -47,7 +47,7 @@ const auth = bootstrapAuth();
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AuthRoot auth={auth} requireAuth={import.meta.env.PROD}>
-      {(duties) => <App duties={duties} />}
+      {(duties, identity) => <App duties={duties} identity={identity} />}
     </AuthRoot>
   </React.StrictMode>,
 );

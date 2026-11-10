@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useSearchParams } from "react-router-dom";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, Card, DataTable, FormField, PageHeader, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { getParty, type Party } from "./api/client";
 import { displayOrDash, isUuid, partyTypeLabel } from "./format";
 import styles from "./pages.module.css";
@@ -140,25 +141,21 @@ export function DuplicatesPage() {
         description="Compare two party records the service already knows. The duplicate queue and merge API are not on these screens: merge is ungranted until its approval workflow (#450) is built."
       />
       <form className={styles.form} onSubmit={compare} noValidate aria-label="Compare two parties">
-        <FormField id="dup-a" label="First party id" error={errors.a}>
+        <FormField id="dup-a" label="First party" error={errors.a}>
           {(control) => (
-            <Input
+            <EntityLookup entity="party"
               {...control}
               value={draft.a}
-              className={styles.mono}
-              maxLength={36}
               onChange={(event) => setDraft({ ...draft, a: event.target.value })}
               invalid={Boolean(errors.a)}
             />
           )}
         </FormField>
-        <FormField id="dup-b" label="Second party id" error={errors.b}>
+        <FormField id="dup-b" label="Second party" error={errors.b}>
           {(control) => (
-            <Input
+            <EntityLookup entity="party"
               {...control}
               value={draft.b}
-              className={styles.mono}
-              maxLength={36}
               onChange={(event) => setDraft({ ...draft, b: event.target.value })}
               invalid={Boolean(errors.b)}
             />
