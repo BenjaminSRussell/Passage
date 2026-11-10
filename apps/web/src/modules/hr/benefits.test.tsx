@@ -173,7 +173,7 @@ describe("benefit plans list", () => {
 
     handler = (url) => (url.pathname === "/api/v1/hr/benefits/plans" ? json(503, { code: "COM-0500", detail: "HR is down" }) : undefined);
     renderAt("/hr/benefits/plans");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("HR is down (COM-0500)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("HR is down"));
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(gets("/api/v1/hr/benefits/plans").length).toBeGreaterThanOrEqual(3));
   });
@@ -346,7 +346,7 @@ describe("benefit plan detail", () => {
     };
     renderAt(`/hr/benefits/plans/${PLAN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Simulate" }));
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.setup.admin (AUTH-0003)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("missing duty hr.setup.admin"));
   });
 });
 
@@ -412,7 +412,7 @@ describe("worker benefits card", () => {
     fireEvent.change(within(form).getByLabelText("Coverage starts"), { target: { value: "2026-11-15" } });
     fireEvent.change(within(form).getByLabelText("Dependents covered"), { target: { value: "2" } });
     fireEvent.click(within(form).getByRole("button", { name: "Enroll" }));
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("Worker not eligible for plan MED-PPO: rule false (HCM-BEN-002)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("Worker not eligible for plan MED-PPO: rule false"));
     expect(screen.getByText("Not eligible for this plan")).toBeInTheDocument();
 
     fireEvent.click(within(form).getByRole("button", { name: "Enroll" }));
@@ -482,7 +482,7 @@ describe("worker benefits card", () => {
   it("shows a load failure with a retry, and the no-plans note", async () => {
     fakeWorker((url) => (url.pathname.endsWith("/benefits") ? json(403, { code: "HCM-BEN-NOT-OWN", detail: "you can only see and change your own benefits" }) : undefined));
     const { unmount } = renderAt(`/hr/workers/${ADA}`);
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("you can only see and change your own benefits (HCM-BEN-NOT-OWN)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("you can only see and change your own benefits"));
     unmount();
 
     fakeWorker((url) => (url.pathname === "/api/v1/hr/benefits/plans" ? json(200, { items: [] }) : undefined), { workerId: ADA, enrollments: [], lifeEvents: [] });

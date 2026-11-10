@@ -113,6 +113,27 @@ func TestPostgres_RecordProgress(t *testing.T) {
 	}
 }
 
+// TestPostgres_RecordProgressByLineID: a line named by its id (fulfillment's
+// report, #496) is the line of that number; an unknown id is not found and a
+// line named once by number and once by id is refused.
+func TestPostgres_RecordProgressByLineID(t *testing.T) {
+	s, _, ctx := migrated(t)
+	o := confirmed(t, s, ctx, orderOf(ids.New(), ids.New(), ids.New(), "2027-03-01", 10))
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	line := o.Lines[0].ID
+	if _, _, err := s.RecordProgress(ctx, progressIn(o.ID, domain.ProgressDelivered, "PS-1", "a", "h", ProgressLineInput{LineID: ids.New(), Quantity: d(1)}), now); problemCode(t, err) != CodeLineNotFound {
+		t.Fatalf("unknown line id: %v", err)
+	}
+	if _, _, err := s.RecordProgress(ctx, progressIn(o.ID, domain.ProgressDelivered, "PS-1", "b", "h",
+		ProgressLineInput{LineNo: 1, Quantity: d(1)}, ProgressLineInput{LineID: line, Quantity: d(1)}), now); problemCode(t, err) != "COM-0001" {
+		t.Fatalf("a line named twice: %v", err)
+	}
+	got, created, err := s.RecordProgress(ctx, progressIn(o.ID, domain.ProgressDelivered, "PS-1", "c", "h", ProgressLineInput{LineID: line, Quantity: d(4)}), now)
+	if err != nil || !created || len(got.Lines) != 1 || got.Lines[0].LineNo != 1 || got.Lines[0].LineID != line || !got.Lines[0].DeliveredQty.Equal(d(4)) {
+		t.Fatalf("by id: %+v %v %v", got, created, err)
+	}
+}
+
 func TestPostgres_RecordProgressRefusals(t *testing.T) {
 	s, _, ctx := migrated(t)
 	le := ids.New()

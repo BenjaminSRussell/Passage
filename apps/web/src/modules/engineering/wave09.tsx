@@ -535,7 +535,7 @@ export function ReleaseLinesPage({ canAccept = false }: { canAccept?: boolean })
 
   return (
     <>
-      <PageHeader title="Product releases" description="Accept or reject engineering versions sent to operational legal entities (AC-9.11)." />
+      <PageHeader title="Product releases" description="Accept or reject engineering versions sent to operational legal entities." />
       <Card>
         <form className={styles.form} onSubmit={(event) => event.preventDefault()}>
           <div className={styles.field}>
@@ -608,7 +608,7 @@ export function EbomPage({ onCreate }: { onCreate?: () => void }) {
 
   return (
     <>
-      <PageHeader title="eBOM imports" description="CAD and PLM bills of material. Unknown part numbers are listed as exceptions (AC-9.17)." />
+      <PageHeader title="eBOM imports" description="CAD and PLM bills of material. Unknown part numbers are listed as exceptions." />
       <Card
         actions={
           onCreate ? (

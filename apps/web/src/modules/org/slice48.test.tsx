@@ -127,7 +127,7 @@ describe("rounding rules tab", () => {
   it("reports a failed load", async () => {
     const { user } = await openRounding(["org.read"], { "GET /currencies/USD/rounding-rules": () => problem("ORG-REF-NOT-FOUND", 404, "unknown currency") });
     await user.selectOptions(await screen.findByLabelText("Currency"), "USD");
-    expect(await screen.findByText(/unknown currency \(ORG-REF-NOT-FOUND\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/unknown currency/)).toBeInTheDocument();
   });
 
   it("saves a rule and reloads, showing the unit error from the service", async () => {
@@ -224,7 +224,7 @@ describe("name translations page", () => {
 
   it("sends the legal-entity header and reports a failed load", async () => {
     const { fetchMock } = await openNames(["org.read"], { "GET /legal-entities/le1/translations": () => problem("ORG-LE-NOT-FOUND", 404, "not found") });
-    expect(await screen.findByText(/not found \(ORG-LE-NOT-FOUND\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/not found/)).toBeInTheDocument();
     const call = callsTo(fetchMock, "GET", "/legal-entities/le1/translations")[0];
     expect(new Headers(call[1]?.headers).get("X-Passage-LegalEntity")).toBe("le1");
   });

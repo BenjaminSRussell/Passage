@@ -77,7 +77,7 @@ describe("Pricing procedures", () => {
     first.unmount();
     server.handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt("/pricing/procedures");
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -185,12 +185,12 @@ describe("Procedure detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Activate version 2" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("This version can no longer change");
-    expect(alert).toHaveTextContent("(PRC-0008)");
+    expect(alert).toHaveTextContent("PRC-0008");
   });
 
   it("shows the error state when the version is unknown", async () => {
     server.handler = () => json(404, { code: "PRC-0042", detail: "no pricing procedure x" });
     renderAt(`/pricing/procedures/${P2}`);
-    expect(await findAlert()).toHaveTextContent("(PRC-0042)");
+    expect(await findAlert()).toHaveTextContent("PRC-0042");
   });
 });

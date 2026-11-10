@@ -6,6 +6,7 @@ import { invoiceName, STATUS_LABELS, TYPE_LABELS } from "./format";
 import { MoreRows } from "./MoreRows";
 import styles from "./pages.module.css";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIMIT = 100;
 /** The invoice types the list filters by; credit notes have their own list. */
@@ -76,7 +77,7 @@ export function InvoicesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the invoices" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

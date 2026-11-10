@@ -7,6 +7,7 @@ import { describeProblem, getLegalHold, releaseLegalHold, type LegalHold, type P
 import { MAX_HOLD_REASON } from "./LegalHoldsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One legal hold (FR-15.8): who placed it and why, and the release that ends it. */
 export function LegalHoldPage() {
@@ -32,7 +33,7 @@ export function LegalHoldPage() {
           live="alert"
           action={missing ? undefined : <Button size="sm" onClick={state.reload}>Try again</Button>}
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/finreport/legal-holds">Back to the legal holds</Link>
       </div>
@@ -104,7 +105,7 @@ export function LegalHoldPage() {
             </FormField>
             {failure ? (
               <Alert tone="danger" title="The hold could not be released" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
             <div className={styles.formActions}>

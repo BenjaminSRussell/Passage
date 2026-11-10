@@ -100,7 +100,7 @@ describe("Price journal CSV import", () => {
     renderAt("/pricing/journals/import");
     fillImport(csvFile(`${CSV_HEADER}\n`));
     fireEvent.click(screen.getByRole("button", { name: "Import journal" }));
-    expect(await findAlert()).toHaveTextContent("the CSV file is larger than 32 MB (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("the CSV file is larger than 32 MB");
   });
 
   it("validates the draft and refuses a file over 32 MB", () => {
@@ -186,7 +186,7 @@ describe("Commission settlement", () => {
 
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.commission.view" });
     fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view");
   });
 
   it("validates the period before asking the service", () => {

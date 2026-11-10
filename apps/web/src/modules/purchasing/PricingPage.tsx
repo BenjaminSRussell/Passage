@@ -4,6 +4,7 @@ import { Alert, Card, DataTable, EmptyState, FormField, Input, PageHeader, Selec
 import { describeProblem, lookupPrice, type Candidate, type LookupParams, type PriceLookup, type TieRule } from "./api/client";
 import { ShortId, currencyPattern, datePattern, decimalPattern, money, todayIso, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const FIELDS: { name: Exclude<keyof LookupParams, "tie">; label: string; optional?: boolean; hint?: string; type?: string }[] = [
   { name: "vendor", label: "Vendor id" },
@@ -121,7 +122,7 @@ export function PriceLookupPage() {
         </form>
       </Card>
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       {result ? (
         <>

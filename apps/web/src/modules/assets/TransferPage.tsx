@@ -17,6 +17,7 @@ import {
 import { DATE, money, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PartValues {
   assetNumber: string;
@@ -146,7 +147,7 @@ export function TransferPage() {
       <div className={styles.stack}>
         <PageHeader title="Transfer or split" />
         <Alert tone="danger" title="Could not load the asset" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -287,7 +288,7 @@ export function TransferPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "AST-0006" ? "The asset changed since you opened it" : "Could not record the transfer"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

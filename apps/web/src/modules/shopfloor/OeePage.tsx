@@ -6,6 +6,7 @@ import { fixed, formatDateTime, percent, sumDecimals, today } from "./format";
 import { OeeLiveTile } from "./OeeLiveTile";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const BUCKETS: { value: OeeBucketSize; label: string }[] = [
   { value: "15m", label: "15 minutes" },
@@ -95,7 +96,7 @@ export function OeePage() {
       </div>
       {machines.error ? (
         <Alert tone="danger" title="Could not load machines" live="alert" action={<Button size="sm" onClick={machines.reload}>Try again</Button>}>
-          {machines.error.message} ({machines.error.code})
+          <ProblemMessage problem={machines.error} />
         </Alert>
       ) : null}
       {resourceId ? <OeeLiveTile resourceId={resourceId} machineLabel={machineOf.get(resourceId) ?? resourceId} bucket={bucket} /> : null}
@@ -107,7 +108,7 @@ export function OeePage() {
         />
       ) : series.error ? (
         <Alert tone="danger" title="Could not load OEE" live="alert" action={<Button size="sm" onClick={series.reload}>Try again</Button>}>
-          {series.error.message} ({series.error.code})
+          <ProblemMessage problem={series.error} />
         </Alert>
       ) : (
         <>

@@ -19,6 +19,7 @@ export function devIdentityHeaders(env: Env): Record<string, string> {
 }
 
 export function devProxy(env: Env): Record<string, ProxyOptions> {
+  if (env.PASSAGE_OIDC_ISSUER) return { "/api": { target: env.PASSAGE_GATEWAY_URL ?? "http://localhost:8088" } };
   const headers = devIdentityHeaders(env);
   const entry = (target: string): ProxyOptions => ({ target, headers, rewrite: stripApi });
   const proxy: Record<string, ProxyOptions> = {};

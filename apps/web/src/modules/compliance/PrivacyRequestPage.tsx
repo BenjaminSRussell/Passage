@@ -18,6 +18,7 @@ import { dash, formatDateTime, sentence } from "./format";
 import styles from "./pages.module.css";
 import { DaysLeft, privacyStateTone } from "./PrivacyRequestsPage";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const actionLabel: Record<PrivacyAction, string> = {
   VERIFY: "Verify identity",
@@ -117,7 +118,7 @@ export function PrivacyRequestPage() {
       <div className={styles.stack}>
         <PageHeader title="Privacy request" />
         <Alert tone="danger" title="Could not load the request" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/compliance/privacy/requests">Back to privacy requests</Link>
       </div>
@@ -202,7 +203,7 @@ export function PrivacyRequestPage() {
         </dl>
       </Card>
       <Alert tone="danger" title={failure ? "The step was refused" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {done}
@@ -275,7 +276,7 @@ export function PrivacyRequestPage() {
             </div>
           </form>
           <Alert tone="danger" title={previewFailure ? "No preview" : undefined} live="alert">
-            {previewFailure ? `${previewFailure.message} (${previewFailure.code})` : null}
+            {previewFailure ? <ProblemMessage problem={previewFailure} /> : null}
           </Alert>
           {preview ? (
             <dl className={styles.details} aria-label="Record after erasure">

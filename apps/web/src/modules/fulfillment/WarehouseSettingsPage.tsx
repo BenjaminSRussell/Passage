@@ -15,6 +15,7 @@ import { dash, formatDateTime, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const ACTION_LABELS: Record<ShortPickAction, string> = {
   KEEP_OPEN: "Keep open for a re-pick",
@@ -103,7 +104,7 @@ export function WarehouseSettingsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the warehouse settings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

@@ -18,6 +18,7 @@ import { dash, formatDateTime, GROUP_LABELS, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Saving a rule needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
 const DUTY_SAVE = "fulfillment.warehouse.release";
@@ -152,7 +153,7 @@ export function OperationRulesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the posting and packing rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

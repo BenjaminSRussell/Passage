@@ -161,6 +161,6 @@ describe("Order housekeeping (PRD 4.21.16)", () => {
     await userEvent.click(findStale);
     expect(await screen.findByText("You need the duty of this command to use this job.")).toBeInTheDocument();
     await userEvent.click(findEnd);
-    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
   });
 });

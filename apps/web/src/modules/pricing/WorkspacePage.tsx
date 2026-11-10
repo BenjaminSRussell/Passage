@@ -16,6 +16,7 @@ import {
 import { addDays, DAY, describeCustomer, describeProduct, today, TYPE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const EXPIRY_WINDOW_DAYS = 30;
 const PAGE = 100;
@@ -98,7 +99,7 @@ function ExpiryCard({ onExpired }: { onExpired(): void }) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not run the expiry" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -143,7 +144,7 @@ export function WorkspacePage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the pricing workspace" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -7,6 +7,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { ACCOUNT_TYPES, fetchAccount, LedgerApiError, putAccount, RECON_TYPES, type Account, type AccountInput, type AccountType, type ReconType } from "./api/client";
 import { CHART_CODE, DUTY_ACCOUNT_WRITE, typeLabel } from "./accountCommon";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const ACCOUNT_NUMBER = /^[A-Za-z0-9._-]{1,20}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -63,7 +64,7 @@ function AccountForm({ initial, existing, lockVersion }: { initial: AccountDraft
   const canWrite = holdsDuty(usePrincipalDuties(), DUTY_ACCOUNT_WRITE);
   const [values, setValues] = useState<AccountDraft>(initial);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState(false);
   const update = (patch: Partial<AccountDraft>) => setValues((prev) => ({ ...prev, ...patch }));
   const back = `/ledger/accounts?chart=${encodeURIComponent(values.chart)}`;
@@ -87,7 +88,7 @@ function AccountForm({ initial, existing, lockVersion }: { initial: AccountDraft
           : error instanceof LedgerApiError && (error.code === "LEDGER_VERSION_CONFLICT" || error.code === "LEDGER_PRECONDITION_REQUIRED")
             ? "Someone changed this account since you opened it. Go back and open it again."
             : error instanceof LedgerApiError
-              ? `${error.message} (${error.code})`
+              ? <ProblemMessage problem={error} />
               : (error as Error).message,
       );
     } finally {

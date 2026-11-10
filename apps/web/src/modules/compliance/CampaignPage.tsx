@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { closeCampaign, describeProblem, planCampaign, type CampaignCloseResult, type CampaignEntry, type CertDecision, type Problem } from "./api/client";
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DECISIONS: CertDecision[] = ["CERTIFY", "REVOKE", "PENDING"];
 
@@ -138,7 +139,7 @@ export function CampaignPage() {
         </Card>
       ) : null}
       <Alert tone="danger" title={failure ? "The campaign check was refused" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       {result ? (
         <>

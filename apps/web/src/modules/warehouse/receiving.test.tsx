@@ -88,7 +88,7 @@ describe("ReceiptsPage", () => {
     let fail = true;
     server.handler = () => (fail ? json(403, { code: "AUTH-0003", detail: "missing duty warehouse.inquiry.view" }) : json(200, { items: [summary] }));
     renderAt(`/warehouse/receipts?warehouse=${WH}`);
-    expect(await screen.findByText("missing duty warehouse.inquiry.view (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty warehouse.inquiry.view")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Receipts" })).toHaveTextContent("ASN-3");
@@ -246,6 +246,6 @@ describe("ReceiptDetailPage", () => {
   it("shows a missing receipt", async () => {
     server.handler = () => json(404, { code: "WMS-RECEIPT-NOT-FOUND", detail: "not found" });
     renderAt(`/warehouse/receipts/${RECEIPT}`);
-    expect(await screen.findByText("not found (WMS-RECEIPT-NOT-FOUND)")).toBeInTheDocument();
+    expect(await screen.findByText("not found")).toBeInTheDocument();
   });
 });

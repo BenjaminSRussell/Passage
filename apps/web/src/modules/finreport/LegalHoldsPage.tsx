@@ -19,6 +19,7 @@ import {
 import { formatBytes, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const MAX_HOLD_REASON = 500;
 
@@ -115,7 +116,7 @@ export function LegalHoldsPage() {
             </FormField>
             {failure ? (
               <Alert tone="danger" title="The hold could not be placed" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
             <div className={styles.formActions}>
@@ -128,7 +129,7 @@ export function LegalHoldsPage() {
       ) : null}
       {holds.error ? (
         <Alert tone="danger" title="Could not load the legal holds" live="alert" action={<Button size="sm" onClick={holds.reload}>Try again</Button>}>
-          {holds.error.message} ({holds.error.code})
+          <ProblemMessage problem={holds.error} />
         </Alert>
       ) : (
         <DataTable
@@ -144,7 +145,7 @@ export function LegalHoldsPage() {
       <Card title="Retention sweeps">
       {sweeps.error ? (
         <Alert tone="danger" title="Could not load the retention sweeps" live="alert" action={<Button size="sm" onClick={sweeps.reload}>Try again</Button>}>
-          {sweeps.error.message} ({sweeps.error.code})
+          <ProblemMessage problem={sweeps.error} />
         </Alert>
       ) : (
         <DataTable
@@ -160,7 +161,7 @@ export function LegalHoldsPage() {
       <Card title="Ad-hoc run sweeps">
         {runSweeps.error ? (
           <Alert tone="danger" title="Could not load the ad-hoc run sweeps" live="alert" action={<Button size="sm" onClick={runSweeps.reload}>Try again</Button>}>
-            {runSweeps.error.message} ({runSweeps.error.code})
+            <ProblemMessage problem={runSweeps.error} />
           </Alert>
         ) : (
           <DataTable

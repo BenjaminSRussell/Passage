@@ -5,6 +5,7 @@ import { createVerification, describeProblem, listVerifications, newKey, type Pr
 import { UUID, VERIFICATION_LABELS, VERIFICATION_TONES } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const verificationColumns: DataTableColumn<VerificationSummary>[] = [
   { key: "verifiedAt", header: "Checked", mono: true, render: (v) => <time dateTime={v.verifiedAt}>{v.verifiedAt}</time> },
@@ -62,7 +63,7 @@ export function VerificationsPage() {
           </FormField>
           {failure ? (
             <Alert tone="danger" title="The check could not run" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <div className={styles.formActions}>
@@ -74,7 +75,7 @@ export function VerificationsPage() {
       </Card>
       {list.error ? (
         <Alert tone="danger" title="Could not load the checks" live="alert" action={<Button size="sm" onClick={list.reload}>Try again</Button>}>
-          {list.error.message} ({list.error.code})
+          <ProblemMessage problem={list.error} />
         </Alert>
       ) : (
         <DataTable

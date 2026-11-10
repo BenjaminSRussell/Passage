@@ -212,7 +212,7 @@ function TemplateEditor({ existing }: { existing: AllocationTemplate | null }) {
               <Input type="checkbox" aria-label="Allow negative amounts" checked={form.allowNegative} onChange={(e) => setForm({ ...form, allowNegative: e.target.checked })} />
               Allow negative amounts
             </label>
-            <p className={styles.note}>Without it, a line that evaluates below zero fails the run (BR-38.12).</p>
+            <p className={styles.note}>Without it, a line that evaluates below zero fails the run.</p>
           </div>
           {lines.map((line, i) => (
             <fieldset key={line.key} className={styles.lineSet}>

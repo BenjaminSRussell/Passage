@@ -62,6 +62,7 @@ var serviceGrants = map[string]map[string][]string{
 		"sales":  {"sales.order.record-invoice", "sales.order.record-delivery"},
 	},
 	// fulfillment and transport reach carriers only through carrier-gateway (#482); transport buys no labels.
+	// fulfillment reports posted packing slips to sales' :record-progress (#496) and may report nothing else there.
 	"fulfillment": {
 		"sales":           {"sales.order.record-delivery"},
 		"inventory":       {"inventory.issue.claim"},
@@ -84,7 +85,7 @@ var serviceGrants = map[string]map[string][]string{
 		"compliance": {"compliance.legal-hold.check"},
 	},
 	"tax": {
-		"ledger": {"ledger.balance.read"},
+		"ledger": {"ledger.balance.read", "ledger.entry.lookup", "ledger.ledger.lookup", "ledger.account.lookup"},
 	},
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
@@ -124,7 +125,7 @@ var serviceGrants = map[string]map[string][]string{
 		"audit": {"audit.write"},
 	},
 	"revrec": {
-		"ledger": {"ledger.entry.post", "ledger.balance.read"},
+		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
 	"costacct": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup"},
@@ -149,7 +150,9 @@ var serviceGrants = map[string]map[string][]string{
 		"party":       {"party.read"},
 	},
 	"receivables": {
-		"ledger": {"ledger.entry.post", "ledger.ledger.lookup"},
+		"ledger":  {"ledger.entry.post", "ledger.ledger.lookup"},
+		"tax":     {"tax.transaction.record"},
+		"billing": {"billing.invoice.read"},
 	},
 	"ledger": {
 		"close": {"period.check"},
@@ -173,6 +176,9 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"warehouse": {
 		"inventory": {"inventory.issue.claim"},
+	},
+	"mobile": {
+		"warehouse": {"warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register"},
 	},
 	"hr": {
 		"compliance": {"compliance.legal-hold.check"},
@@ -198,7 +204,10 @@ var serviceGrants = map[string]map[string][]string{
 	"edi": {
 		"fulfillment": {"fulfillment.shipment.read"},
 		"billing":     {"billing.invoice.read"},
-		"sales":       {"sales.order.lookup"},
+		"sales":       {"sales.order.lookup", "sales.channel.intake"},
+	},
+	"fieldservice": {
+		"dispatch": {"dispatch.run.create", "dispatch.run.read"},
 	},
 }
 

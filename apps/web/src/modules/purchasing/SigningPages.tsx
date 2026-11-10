@@ -19,6 +19,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, StatusBadge, currencyPattern, decimalPattern, statusLabel, todayIso, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DOC_TYPES: SigningDocumentType[] = ["REQUISITION", "PURCHASE_ORDER", "INVOICE", "EXPENSE"];
 const REQUEST_STATUSES: SigningRequestStatus[] = ["PENDING", "APPROVED", "REJECTED"];
@@ -199,7 +200,7 @@ export function SigningLimitDetailPage() {
               ) : undefined
             }
           >
-            {failure ? `${failure.message} (${failure.code})` : null}
+            {failure ? <ProblemMessage problem={failure} /> : null}
           </Alert>
           <Alert tone="success" live="status">
             {notice}
@@ -391,7 +392,7 @@ export function SigningLimitRequestCreatePage() {
           </div>
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -484,7 +485,7 @@ export function SigningLimitRequestDetailPage() {
               ) : undefined
             }
           >
-            {failure ? `${failure.message} (${failure.code})` : null}
+            {failure ? <ProblemMessage problem={failure} /> : null}
           </Alert>
           <Alert tone="success" live="status">
             {notice}

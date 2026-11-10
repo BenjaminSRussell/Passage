@@ -4,6 +4,7 @@ import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Te
 import { describeProblem, evaluate, simulate, type Conflict, type Problem, type Role, type SimulatedConflict, type SimulateResult } from "./api/client";
 import { sentence, severityTone, stateTone, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /**
  * Parses one role per line, "RoleName: DutyA, DutyB". Blank lines are
@@ -154,7 +155,7 @@ export function RoleCheckPage() {
       </Card>
       <Alert tone="danger" title={failure ? "The check failed" : result?.blocked ? "This assignment is blocked" : undefined} live="alert">
         {failure
-          ? `${failure.message} (${failure.code})`
+          ? <ProblemMessage problem={failure} />
           : result?.blocked
             ? `Unmitigated high-severity conflict on ${result.blockingRuleIds.join(", ")} (${result.code ?? "SOD-1101"}). Mitigate it or remove a role before saving.`
             : null}

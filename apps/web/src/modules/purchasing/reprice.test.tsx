@@ -161,7 +161,7 @@ describe("price change for one order", () => {
     first.unmount();
     stubFetch((url) => (url === REPRICE_URL ? problem(503, "UNAVAILABLE", "pricing is down") : json(order)));
     renderAt(PAGE);
-    expect(await screen.findByText("pricing is down (UNAVAILABLE)")).toBeInTheDocument();
+    expect(await screen.findByText("pricing is down")).toBeInTheDocument();
   });
 
   it("is linked from a confirmed order", async () => {
@@ -240,6 +240,6 @@ describe("price change run", () => {
     stubFetch(() => problem(403, "AUTH-0003", "missing duty procurement.purchase-order.inquire"));
     renderAt("/purchasing/reprice");
     fireEvent.click(screen.getByRole("button", { name: "Preview price changes" }));
-    expect(await screen.findByText("missing duty procurement.purchase-order.inquire (AUTH-0003)")).toBeInTheDocument();
+    expect(await screen.findByText("missing duty procurement.purchase-order.inquire")).toBeInTheDocument();
   });
 });

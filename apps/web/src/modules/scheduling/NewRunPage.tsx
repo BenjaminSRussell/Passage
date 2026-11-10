@@ -5,6 +5,7 @@ import { describeProblem, getParameters, newKey, startRun, type NewRun, type Pro
 import { fromUtcInput, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   scope: "site" | "selection";
@@ -167,7 +168,7 @@ export function NewRunPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The run did not start" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

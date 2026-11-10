@@ -9,6 +9,7 @@ import styles from "./pages.module.css";
 import { LoadMore } from "./LoadMore";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 export const DUTY_RUN = "migration.run";
 
@@ -69,7 +70,7 @@ export function RunsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load migration runs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -153,7 +154,7 @@ export function NewRunPage() {
       <PageHeader title="Start migration run" description="A dry run maps and validates without loading. Loaded rows are keyed by their legacy id, so a repeat load changes nothing." />
       {specs.error ? (
         <Alert tone="danger" title="Could not load mapping specs" live="alert" action={<Button size="sm" onClick={specs.reload}>Try again</Button>}>
-          {specs.error.message} ({specs.error.code})
+          <ProblemMessage problem={specs.error} />
         </Alert>
       ) : (
         <Card>
@@ -252,7 +253,7 @@ export function NewRunPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not run the migration" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                   {failure.errors ? (
                     <ul>
                       {Object.entries(failure.errors).map(([name, reason]) => (
@@ -305,7 +306,7 @@ function TemplateLineage({ runId, templateId }: { runId: string; templateId: str
       </p>
       {state.error ? (
         <Alert tone="danger" title="Could not load the lineage" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -362,7 +363,7 @@ export function RunDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Migration run" />
         <Alert tone="danger" title="Could not load this run" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration">
           Back to runs
@@ -397,7 +398,7 @@ export function RunDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not re-run" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <StatGroup label="Counts">

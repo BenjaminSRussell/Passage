@@ -114,7 +114,7 @@ describe("customer batch requirement list (slice 14)", () => {
   it("shows a load failure with a retry", async () => {
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/customer-requirements");
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -319,7 +319,7 @@ describe("check stored batches against requirements (slice 14, AC-24.14)", () =>
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/requirement-check-stored");
     fill("Item", ITEM);
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

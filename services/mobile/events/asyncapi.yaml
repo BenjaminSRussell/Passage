@@ -1,0 +1,103 @@
+asyncapi: 3.0.0
+info:
+  title: Passage mobile events (wave 32)
+  version: 0.1.0
+  description: >
+    Flow, session and offline-conflict events, written to the outbox in the same
+    transaction as the change and relayed by Debezium as CloudEvents 1.0 (source
+    "mobile", subject = flow, session or transaction key, Kafka key = that id).
+    Payload fields are snake_case. Nothing is consumed yet; the inventory
+    service is expected to consume offline.resolved.v1 with action REAPPLY.
+defaultContentType: application/json
+channels:
+  mobileFlow:
+    address: passage.mobile.flow
+    messages:
+      flowPublished: { $ref: "#/components/messages/flowPublished" }
+  mobileSession:
+    address: passage.mobile.session
+    messages:
+      sessionStarted: { $ref: "#/components/messages/sessionStarted" }
+      sessionEnded: { $ref: "#/components/messages/sessionEnded" }
+  mobileOffline:
+    address: passage.mobile.offline
+    messages:
+      offlineConflict: { $ref: "#/components/messages/offlineConflict" }
+      offlineResolved: { $ref: "#/components/messages/offlineResolved" }
+operations:
+  publishFlowPublished:
+    action: send
+    channel: { $ref: "#/channels/mobileFlow" }
+    messages: [{ $ref: "#/channels/mobileFlow/messages/flowPublished" }]
+  publishSessionStarted:
+    action: send
+    channel: { $ref: "#/channels/mobileSession" }
+    messages: [{ $ref: "#/channels/mobileSession/messages/sessionStarted" }]
+  publishSessionEnded:
+    action: send
+    channel: { $ref: "#/channels/mobileSession" }
+    messages: [{ $ref: "#/channels/mobileSession/messages/sessionEnded" }]
+  publishOfflineConflict:
+    action: send
+    channel: { $ref: "#/channels/mobileOffline" }
+    messages: [{ $ref: "#/channels/mobileOffline/messages/offlineConflict" }]
+  publishOfflineResolved:
+    action: send
+    channel: { $ref: "#/channels/mobileOffline" }
+    messages: [{ $ref: "#/channels/mobileOffline/messages/offlineResolved" }]
+components:
+  messages:
+    flowPublished:
+      name: dev.passage.mobile.flow.published.v1
+      title: Flow published
+      summary: A flow version was published; devices pick it up on their next menu load (at most 60 s).
+      payload:
+        type: object
+        required: [flow_id, code, version, warehouses]
+        properties:
+          flow_id: { type: string, format: uuid }
+          code: { type: string }
+          version: { type: integer, minimum: 1 }
+          warehouses: { type: array, items: { type: string, format: uuid }, description: Empty means every warehouse. }
+    sessionStarted:
+      name: dev.passage.mobile.session.started.v1
+      title: Device session started
+      payload: { $ref: "#/components/schemas/Session" }
+    sessionEnded:
+      name: dev.passage.mobile.session.ended.v1
+      title: Device session ended
+      summary: reason is SIGN_OUT, FORCE_SIGNOUT or TAKEOVER (a session silent past the idle timeout was replaced).
+      payload: { $ref: "#/components/schemas/Session" }
+    offlineConflict:
+      name: dev.passage.mobile.offline.conflict.v1
+      title: Offline transaction parked as CONFLICT
+      summary: The warehouse refused a replayed transaction because its target changed (MOB-0107). It waits in the supervisor queue and blocks the device's later transactions.
+      payload:
+        type: object
+        required: [idempotency_key, command, reason]
+        properties:
+          idempotency_key: { type: string, description: "device_id:seq" }
+          command: { type: string }
+          reason: { type: string }
+    offlineResolved:
+      name: dev.passage.mobile.offline.resolved.v1
+      title: Offline conflict resolved by a supervisor
+      summary: action REJECT ends the transaction. action REAPPLY records the decision to move the inventory as scanned; the mobile service does not move it, a consumer does.
+      payload:
+        type: object
+        required: [idempotency_key, command, action, resolved_by]
+        properties:
+          idempotency_key: { type: string }
+          command: { type: string }
+          action: { type: string, enum: [REAPPLY, REJECT] }
+          resolved_by: { type: string }
+  schemas:
+    Session:
+      type: object
+      required: [session_id, device_id, user_id, warehouse]
+      properties:
+        session_id: { type: string, format: uuid }
+        device_id: { type: string }
+        user_id: { type: string }
+        warehouse: { type: string, format: uuid }
+        reason: { type: string }

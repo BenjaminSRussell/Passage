@@ -19,6 +19,8 @@ import { clickTrace } from "./telemetry";
 import { TopBar } from "./TopBar";
 import { Alert, Skeleton } from "./ui";
 import { workspaceIcon } from "./workspaceIcons";
+import { WorkspaceNavProvider } from "./workspaces/WorkspaceNav";
+import { loadWorkspaceConfig, resolveNavEntries, type WorkspaceConfig } from "./workspaces/model";
 
 const TOAST_MS = 4000;
 const DRAWER_BREAKPOINT = "(min-width: 960px)";
@@ -31,6 +33,7 @@ export interface ShellProps {
   modules: PassageModule[];
   duties?: readonly string[];
   identity?: string;
+  workspaceConfig?: WorkspaceConfig;
 }
 
 function PageSkeleton() {
@@ -44,7 +47,7 @@ function PageSkeleton() {
   );
 }
 
-export function Shell({ modules: allModules, duties, identity }: ShellProps) {
+export function Shell({ modules: allModules, duties, identity, workspaceConfig }: ShellProps) {
   const principalDuties = useMemo(() => duties ?? devDuties(), [duties]);
   const modules = useMemo(() => visibleModules(allModules, principalDuties), [allModules, principalDuties]);
   const navigate = useNavigate();
@@ -73,14 +76,27 @@ export function Shell({ modules: allModules, duties, identity }: ShellProps) {
     [available, pathname, allModules],
   );
 
+  const config = useMemo(() => workspaceConfig ?? loadWorkspaceConfig(), [workspaceConfig]);
+  const navEntries = useMemo(() => resolveNavEntries(modules, config.areas), [modules, config]);
+  const navEntryByTo = useMemo(() => new Map(navEntries.map((e) => [e.to, e])), [navEntries]);
   const entries = useMemo<PaletteEntry[]>(
     () => [
       ...shellNav.map((n) => ({ id: `shell:${n.to}`, group: copy.nav.general, label: n.label, to: n.to, icon: n.icon })),
       ...modules.flatMap((m) =>
-        m.nav.map((n) => ({ id: `${m.id}:${n.to}`, group: m.title, label: n.label, to: n.to, icon: workspaceIcon(m.id) })),
+        m.nav.map((n) => {
+          const entry = navEntryByTo.get(n.to);
+          return {
+            id: `${m.id}:${n.to}`,
+            group: m.title,
+            label: entry?.label ?? n.label,
+            to: n.to,
+            icon: workspaceIcon(m.id),
+            keywords: `${n.label} ${entry?.areaLabel ?? ""}`,
+          };
+        }),
       ),
     ],
-    [modules],
+    [modules, navEntryByTo],
   );
 
   const announce = useCallback((message: string, visual = false) => {
@@ -238,15 +254,16 @@ export function Shell({ modules: allModules, duties, identity }: ShellProps) {
   return (
     <PrincipalProvider duties={principalDuties}>
       <WorkContextProvider identity={identity ?? devIdentity()} enabled={principalDuties.includes("org.read")}>
+      <WorkspaceNavProvider entries={navEntries} config={config}>
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
           Skip to content
         </a>
         <div className={styles.frame}>
           <Sidebar
-            modules={modules}
             shellNav={shellNav}
             drawerOpen={drawerOpen}
+            announce={announceQuietly}
             searchRef={searchRef}
             onOpenSearch={openSearch}
             onCloseDrawer={closeDrawer}
@@ -288,6 +305,7 @@ export function Shell({ modules: allModules, duties, identity }: ShellProps) {
         ) : null}
         {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
       </div>
+      </WorkspaceNavProvider>
       </WorkContextProvider>
     </PrincipalProvider>
   );

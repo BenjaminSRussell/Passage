@@ -7,6 +7,7 @@ import { amount, dash, isCurrency, isDecimal, isSignedDecimal } from "./format";
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type HeadKey = "currency" | "threshold";
 type PairKey = "pair" | "receivable" | "payable";
@@ -108,7 +109,7 @@ export function IcDifferencesPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The elimination was not built" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

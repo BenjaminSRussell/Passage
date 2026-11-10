@@ -36,6 +36,7 @@ import {
 import { formatDateTime } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const statusTone: Record<ChecklistStatus, BadgeTone> = { MET: "success", OPEN: "danger", UNCONFIRMED: "warning" };
 const statusLabel: Record<ChecklistStatus, string> = { MET: "Met", OPEN: "Open", UNCONFIRMED: "Unconfirmed" };
@@ -231,12 +232,12 @@ export function CutoverDecisionPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the checklist" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       {failure ? (
         <Alert tone="danger" title="The decision was not recorded" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {done ? (

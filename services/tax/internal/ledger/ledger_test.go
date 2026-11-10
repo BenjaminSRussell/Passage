@@ -92,3 +92,19 @@ func TestMovements_SurfacesLedgerFailure(t *testing.T) {
 		t.Fatalf("got %v, want the ledger error wrapped", err)
 	}
 }
+
+func TestJournalsGroupsLinesByEntryAndSourceTypeAndSkipsZeroLines(t *testing.T) {
+	line := func(entry, source string, n int, credit bool, amount string) ledgerclient.JournalLine {
+		return ledgerclient.JournalLine{EntryID: entry, SourceType: source, PostingDate: "2026-01-05", LineNumber: n, Account: "1000", Credit: credit, Amount: decimal.RequireFromString(amount)}
+	}
+	got, err := ledger.Journals([]ledgerclient.JournalLine{
+		line("e1", "ar", 1, false, "5"), line("e1", "ar", 2, true, "5"), line("e1", "ar", 3, true, "0"),
+		line("e2", "", 1, false, "3"), line("e2", "", 2, true, "3"),
+	})
+	if err != nil || len(got) != 2 || got[0].ID != "ar" || got[1].ID != "GL" || len(got[0].Transactions) != 1 || len(got[0].Transactions[0].Lines) != 2 {
+		t.Fatalf("journals %+v err %v", got, err)
+	}
+	if _, err := ledger.Journals([]ledgerclient.JournalLine{{EntryID: "e", PostingDate: "soon", Amount: decimal.NewFromInt(1)}}); !errors.Is(err, ledger.ErrRead) {
+		t.Fatalf("bad date: %v", err)
+	}
+}

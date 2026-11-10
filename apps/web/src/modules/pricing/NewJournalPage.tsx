@@ -5,6 +5,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Tex
 import { createPriceJournal, describeProblem, newKey, type JournalLineInput, type Problem } from "./api/client";
 import { SIGNED_DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface JournalDraft {
   legalEntityId: string;
@@ -140,7 +141,7 @@ export function NewJournalPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the journal" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

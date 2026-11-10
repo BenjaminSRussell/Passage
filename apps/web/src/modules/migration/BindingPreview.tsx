@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, Select, StatGroup, St
 import { describeProblem, type BindingPreview, type MappingSpec, type PreviewOptions, type PreviewRow, type Problem } from "./api/client";
 import { MAX_UPLOAD_BYTES, toBase64 } from "./bindingDomain";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIMITS = [5, 10, 25, 50, 100];
 
@@ -124,7 +125,7 @@ export function PreviewPanel({
       ) : null}
       {failure ? (
         <Alert tone="danger" title="The preview could not run" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
           {failure.errors ? ` ${Object.entries(failure.errors).map(([k, v]) => `${k}: ${v}`).join("; ")}` : ""}
         </Alert>
       ) : null}

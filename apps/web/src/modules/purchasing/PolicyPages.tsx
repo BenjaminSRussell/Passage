@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, uuidPattern, useResource, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const yesNo = (v: boolean) => (v ? "On" : "Off");
 
@@ -205,8 +206,8 @@ export function PolicyDetailPage() {
           >
             {failure
               ? failure.code === "PRC-POL-003"
-                ? `Someone else saved this policy since you opened it. Reload to see their settings, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else saved this policy since you opened it. Reload to see their settings, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">

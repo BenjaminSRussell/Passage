@@ -272,6 +272,132 @@ paths:
               schema: { $ref: '#/components/schemas/TransportView' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/item-xrefs:
+    get:
+      operationId: listItemXrefs
+      summary: List the partner's item cross-references (partner item to Passage product)
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The cross-references, by qualifier and partner item
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ItemXref' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createItemXref
+      summary: Map a partner item reference (PO106/PO107 qualifier BP, VP, UP or EN) to a product, site and warehouse
+      description: >
+        Belongs to the legal entity of the partner's trade profile (409 EDI-0012 without one; a caller
+        outside that entity sees the profile as absent). One mapping per qualifier and partner item (409 EDI-0019).
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ItemXref' }
+      responses:
+        '201':
+          description: Mapping created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ItemXref' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0012 — no trade profile; EDI-0019 — the item reference is already mapped
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/partners/{id}/item-xrefs/{xrefId}:
+    put:
+      operationId: putItemXref
+      summary: Replace one item cross-reference
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/XrefId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ItemXref' }
+      responses:
+        '200':
+          description: Mapping replaced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ItemXref' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0012 — no trade profile; EDI-0019 — the item reference is already mapped
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    delete:
+      operationId: deleteItemXref
+      summary: Delete one item cross-reference
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/XrefId'
+      responses:
+        '204': { description: Mapping deleted }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/sales-defaults:
+    put:
+      operationId: putSalesDefaults
+      summary: Set the invoice account and the currency an inbound order without CUR is placed in
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SalesDefaults' }
+      responses:
+        '200':
+          description: Defaults saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesDefaults' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0012 — the partner has no trade profile
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: getSalesDefaults
+      summary: Read the partner's sales defaults
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The defaults
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesDefaults' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /edi/v1/partners/{id}/outbound:from-source:
     post:
       operationId: outboundFromSource
@@ -694,6 +820,58 @@ paths:
                       piiMasked: { type: boolean, description: true when party names were masked (no edi.pii.view) }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/messages/{id}:post:
+    post:
+      operationId: postMessage
+      summary: Post an inbound 850 or ORDERS to sales as an order
+      description: >
+        Builds the sales intake order (channel EDI) from the stored canonical order, the partner's
+        item cross-references and sales defaults, and places it with sales under the service grant
+        edi to sales for sales.channel.intake, in the legal entity of the trade profile. The
+        Idempotency-Key sent to sales is the message id and the externalRef is the partner id and PO
+        number, so posting again, or the same PO in a second interchange, gives the one sales order.
+        The message becomes POSTED with the sales order id and message.posted is published. An order
+        that cannot be mapped (BEG01 other than 00, BEG02 other than SA, no DTM 010 or 002, an item
+        with no cross-reference EDI-0105) or that sales refuses (EDI-0023) is parked: the message is
+        FAILED with a park code and its error in the message monitor, the answer is 422, and the route
+        posts it again once the cause is fixed.
+      x-passage-duty: edi.operate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Posted (or already posted)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messageId, status, salesOrderId]
+                properties:
+                  messageId: { type: string, format: uuid }
+                  status: { type: string, enum: [POSTED] }
+                  salesOrderId: { type: string, format: uuid }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0021 — not an inbound 850 or ORDERS, or its mapping failed; EDI-0012 — no trade profile; EDI-0020 — no sales defaults
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: EDI-0105, EDI-0022, EDI-0023 or EDI-0024 — the order is parked
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '502':
+          description: EDI-0010 — sales could not take the order; post again
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: EDI-0010 — sales intake is not configured
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
   /edi/v1/partners/sla:
     get:
       operationId: partnerSla
@@ -1086,6 +1264,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    XrefId:
+      name: xrefId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   responses:
     Problem:
       description: RFC 9457 problem details
@@ -1368,6 +1551,34 @@ components:
               error: { type: string }
         ack997: { type: string, description: Serialized X12 997 functional acknowledgment; absent when only 997s were received }
         contrl: { type: string, description: Serialized EDIFACT CONTRL; absent when the partner does not get one or only CONTRLs were received }
+    ItemXref:
+      type: object
+      additionalProperties: false
+      required: [qualifier, partnerItem, productId, siteId, warehouseId]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        qualifier: { type: string, enum: [BP, VP, UP, EN], description: PO106 qualifier the partner sends the item under }
+        partnerItem: { type: string, minLength: 1, maxLength: 48 }
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        version: { type: integer, readOnly: true }
+    SalesDefaults:
+      type: object
+      additionalProperties: false
+      required: [invoiceAccountId, currency]
+      properties:
+        invoiceAccountId: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        autoPost:
+          type: boolean
+          default: true
+          description: Whether the background poster posts the partner's mapped orders to sales; false leaves them for POST /messages/{id}:post
+        unitMap:
+          type: object
+          description: The partner's unit of measure (1 to 3 characters, e.g. EA, CA, PCE) to ours (1 to 10); empty means units pass through; otherwise a line whose unit has no entry parks the order (EDI-0024)
+          additionalProperties: { type: string, minLength: 1, maxLength: 10 }
+          maxProperties: 200
     TradeProfile:
       type: object
       additionalProperties: false

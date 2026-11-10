@@ -21,3 +21,8 @@ configure({
     return result;
   },
 });
+
+beforeEach(() => {
+  // Node-environment suites (e.g. plainLanguage.test.ts) have no window.
+  if (typeof window !== "undefined") window.localStorage.clear();
+});

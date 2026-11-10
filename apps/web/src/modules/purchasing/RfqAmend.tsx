@@ -4,6 +4,7 @@ import { acknowledgeRFQAmendment, amendRFQ, describeProblem, editRFQ, newIdempot
 import { CriteriaEditor, criteriaInput, newCriterion, validateCriteria, type CriterionDraft } from "./RfqTypePages";
 import { formatInstant, rankingLabels, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -103,7 +104,7 @@ export function EditDraftForm({ rfq, onSaved }: { rfq: RFQ; onSaved(rfq: RFQ): v
       </Card>
       <CriteriaEditor id="rfq-edit" criteria={criteria} onChange={setCriteria} errors={errors} />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <div className={styles.actions}>
         <Button type="submit" variant="secondary" loading={busy}>
@@ -248,7 +249,7 @@ export function AmendmentsPanel({ rfq, onChanged }: { rfq: RFQ; onChanged(rfq: R
         empty={{ title: "No amendments", description: "An amendment tells the invited vendors what changed and can move the reply deadline." }}
       />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice}

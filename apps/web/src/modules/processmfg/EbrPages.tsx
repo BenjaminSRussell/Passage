@@ -44,6 +44,7 @@ import {
 import { dash, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Review duty: compiles records, raises and decides exceptions, maintains profiles; enforced by the service (FR-24.21, PRD 4.24.17). */
 export const RECORD_WRITE_DUTY = "production.batch-record.write";
@@ -65,7 +66,7 @@ function RecordStatusBadge({ status }: { status: RecordStatus }) {
 function LoadError({ title, error, reload }: { title: string; error: Problem; reload: () => void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-      {error.message} ({error.code})
+      <ProblemMessage problem={error} />
     </Alert>
   );
 }
@@ -173,7 +174,7 @@ export function BatchRecordsPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not compile the record" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}
@@ -317,7 +318,7 @@ export function BatchRecordDetailPage() {
       </StatGroup>
       {failure ? (
         <Alert tone="danger" title="The step was refused" live="alert" action={failure.code === "PMF-0104" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {record.status === "sealed" ? (
@@ -503,7 +504,7 @@ export function RecordProfilesPage() {
       </div>
       {failure ? (
         <Alert tone="danger" title="Could not retire the profile" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
@@ -589,7 +590,7 @@ export function NewRecordProfilePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not define the profile" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

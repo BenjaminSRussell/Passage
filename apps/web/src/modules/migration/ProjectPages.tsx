@@ -40,6 +40,7 @@ import { DUTY_RUN } from "./RunPages";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 export const DUTY_PROJECT_WRITE = "migration.project.write";
 
@@ -134,7 +135,7 @@ export function ProjectsPage() {
       </div>
       {first.error ? (
         <Alert tone="danger" title="Could not load migration projects" live="alert" action={<Button size="sm" onClick={first.reload}>Try again</Button>}>
-          {first.error.message} ({first.error.code})
+          <ProblemMessage problem={first.error} />
         </Alert>
       ) : (
         <DataTable
@@ -149,7 +150,7 @@ export function ProjectsPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more projects" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !first.error ? (
@@ -269,7 +270,7 @@ export function NewProjectPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the project" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -309,7 +310,7 @@ export function ProjectDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Migration project" />
         <Alert tone="danger" title="Could not load this project" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/projects">
           Back to projects
@@ -356,7 +357,7 @@ export function ProjectDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not change the project" live="alert" action={<Button size="sm" onClick={state.reload}>Reload</Button>}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <DetailsCard project={project} canEdit={canWrite && project.status === "active"} onSaved={state.set} />
@@ -397,7 +398,7 @@ function ProjectRunsCard({ project }: { project: MigrationProject }) {
     >
       {state.error ? (
         <Alert tone="danger" title="Could not load the project's runs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -472,7 +473,7 @@ function DetailsCard({ project, canEdit, onSaved }: { project: MigrationProject;
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the details" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -580,7 +581,7 @@ function RewriteRulesCard({ project, canWrite: holdsWrite, onSaved }: { project:
     return (
       <Card title="Key rewrite rules">
         <Alert tone="danger" title="Could not load the key rewrite rules" live="alert" action={<Button size="sm" onClick={rules.reload}>Try again</Button>}>
-          {rules.error.message} ({rules.error.code})
+          <ProblemMessage problem={rules.error} />
         </Alert>
       </Card>
     );
@@ -625,7 +626,7 @@ function RewriteRulesCard({ project, canWrite: holdsWrite, onSaved }: { project:
         {saved ? <Alert tone="success" title="Rules saved" live="status">The copy will use these rules from its next run.</Alert> : null}
         {failure ? (
           <Alert tone="danger" title="Could not save the rules" live="alert" action={failure.code === "MIG-VERSION-CONFLICT" ? <Button size="sm" onClick={() => { setFailure(null); rules.reload(); }}>Reload rules</Button> : undefined}>
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <FormField id="rule-sample" label="Sample keys (one per line)" hint="Shows what the rules above, saved or not, would do to these keys.">
@@ -636,7 +637,7 @@ function RewriteRulesCard({ project, canWrite: holdsWrite, onSaved }: { project:
         </div>
         {previewError ? (
           <Alert tone="danger" title="Could not preview" live="alert">
-            {previewError.message} ({previewError.code})
+            <ProblemMessage problem={previewError} />
           </Alert>
         ) : null}
         {preview ? <DataTable label="Rewrite preview" columns={previewColumns} rows={preview} getRowKey={(r, i) => `${i}:${r.key}`} empty={{ title: "Nothing to preview", description: "Enter sample keys." }} /> : null}

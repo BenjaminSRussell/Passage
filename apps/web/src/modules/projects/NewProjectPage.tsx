@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { BILLABLE_TYPES, createProject, describeProblem, newKey, PROJECT_TYPES, type NewProject, type Problem, type ProjectType } from "./api/client";
 import { typeLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ProjectValues {
   id: string;
@@ -182,7 +183,7 @@ export function NewProjectPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failureTitle[failure.code] ?? "Could not create the project"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

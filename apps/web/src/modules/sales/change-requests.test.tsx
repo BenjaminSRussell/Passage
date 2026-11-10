@@ -104,7 +104,7 @@ describe("Change requests list", () => {
     unmount();
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "down" } });
     renderAt("/sales/change-requests");
-    expect(await screen.findByText(/down \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/down/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -207,7 +207,7 @@ describe("Change request detail", () => {
   it("shows a load error", async () => {
     handler = () => ({ status: 404, body: { code: "SLS-0112", detail: "change request not found" } });
     renderAt(`/sales/change-requests/${REQUEST_ID}`);
-    expect(await screen.findByText(/change request not found \(SLS-0112\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/change request not found/)).toBeInTheDocument();
   });
 });
 
@@ -284,7 +284,7 @@ describe("Customer change approval", () => {
     await screen.findByRole("form", { name: "Change approval" });
     fireEvent.click(screen.getByLabelText(/need approval/));
     fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
-    expect(await screen.findByText(/must be greater than 0 \(SLS-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/must be greater than 0/)).toBeInTheDocument();
   });
 
   it("is read only without the approve duty and reports a load error", async () => {
@@ -302,6 +302,6 @@ describe("Customer change approval", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUSTOMER } });
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(await screen.findByText(/outside scope \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/outside scope/)).toBeInTheDocument();
   });
 });

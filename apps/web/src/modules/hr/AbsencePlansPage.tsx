@@ -5,6 +5,7 @@ import { describeProblem, listAbsencePlans, type AbsencePlan, type Problem } fro
 import { absenceUnitLabel, frequencyLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<AbsencePlan>[] = [
   { key: "code", header: "Plan", mono: true },
@@ -58,7 +59,7 @@ export function AbsencePlansPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load absence plans" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -73,7 +74,7 @@ export function AbsencePlansPage() {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more plans" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {!state.error && !state.loading && cursor ? (

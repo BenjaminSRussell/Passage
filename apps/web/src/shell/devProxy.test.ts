@@ -40,6 +40,14 @@ describe("devProxy", () => {
     expect(match(proxy, "/api/v1/fx/x")?.target).toBe("http://localhost:8080");
   });
 
+  it("in OIDC mode sends every call to the gateway untouched, with no injected identity", () => {
+    const proxy = devProxy({ PASSAGE_OIDC_ISSUER: "http://localhost:8080/realms/passage", PASSAGE_GATEWAY_URL: "http://localhost:8088", PASSAGE_SVC_LEDGER_URL: "http://localhost:1" });
+    expect(Object.keys(proxy)).toEqual(["/api"]);
+    expect(proxy["/api"]?.target).toBe("http://localhost:8088");
+    expect(proxy["/api"]?.headers).toBeUndefined();
+    expect(proxy["/api"]?.rewrite).toBeUndefined();
+  });
+
   it("lets env override the identity headers", () => {
     expect(devIdentityHeaders({ PASSAGE_DEV_TENANT: "t", PASSAGE_DEV_DUTIES: "a.b,c.d" })).toMatchObject({
       "X-Passage-Tenant": "t",

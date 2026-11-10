@@ -6,6 +6,7 @@ import { COUNTRY, CURRENCY, DECIMAL, formatDate, formatMoney, MATERIAL_CODE, MON
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const rateColumns: DataTableColumn<FeeRate>[] = [
   { key: "countryCode", header: "Country" },
@@ -72,7 +73,7 @@ function PackagingReport() {
       {query ? (
         report.error ? (
           <Alert tone="danger" title="Could not load the report" live="alert" action={<Button size="sm" onClick={report.reload}>Try again</Button>}>
-            {report.error.message} ({report.error.code})
+            <ProblemMessage problem={report.error} />
           </Alert>
         ) : (
           <DataTable
@@ -149,7 +150,7 @@ export function PackagingFeesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load fee rates" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

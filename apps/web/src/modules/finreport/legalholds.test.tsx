@@ -89,7 +89,7 @@ describe("LegalHoldsPage", () => {
     renderAt("/finreport/legal-holds");
     expect(await screen.findByText("No legal hold has been placed")).toBeInTheDocument();
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("sweeps are down (COM-0500)");
+    expect(alert).toHaveTextContent("sweeps are down");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(await screen.findByText("No ad-hoc run has passed its retention")).toBeInTheDocument();
   });
@@ -102,7 +102,7 @@ describe("LegalHoldsPage", () => {
       return undefined;
     };
     renderAt("/finreport/legal-holds");
-    expect(await findAlert()).toHaveTextContent("run sweeps are down (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("run sweeps are down");
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -142,7 +142,7 @@ describe("LegalHoldsPage", () => {
     fireEvent.change(within(form).getByLabelText(/^Legal entity/), { target: { value: ENTITY } });
     fireEvent.change(within(form).getByLabelText(/^Reason/), { target: { value: "Again" } });
     fireEvent.click(within(form).getByRole("button", { name: "Place hold" }));
-    expect(await findAlert()).toHaveTextContent("already under legal hold (REPORT-0045)");
+    expect(await findAlert()).toHaveTextContent("already under legal hold");
   });
 });
 

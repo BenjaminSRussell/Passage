@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createSkill, describeProblem, MAX_SKILL_SCALE, newKey, SKILL_CODE, type NewSkill, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface SkillValues {
   code: string;
@@ -92,7 +93,7 @@ export function NewSkillPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not add the skill" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -933,6 +933,7 @@ components:
         gross: {type: string}
         restocking: {type: string}
         net: {type: string}
+        tax: {type: string}
         credit_note_id: {type: string}
         journal_posting_id: {type: string}
         actor: {type: string}

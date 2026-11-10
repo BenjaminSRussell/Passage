@@ -63,6 +63,7 @@ import {
 } from "./parts";
 import { AmendmentsPanel, EditDraftForm } from "./RfqAmend";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUSES: RFQStatus[] = ["DRAFT", "SENT", "REPLIES_OPEN", "CLOSED", "AWARDED", "CANCELLED"];
 
@@ -445,7 +446,7 @@ export function RFQCreatePage() {
           })}
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -618,7 +619,7 @@ export function RFQDetailPage() {
         }
       />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice}
@@ -872,7 +873,7 @@ function ScoreForm({ rfq, onScored }: { rfq: RFQ; onScored(rfq: RFQ, vendorId: s
           ))}
         </div>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : error}
+          {failure ? <ProblemMessage problem={failure} /> : error}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -1036,7 +1037,7 @@ function ReplyForm({ rfq, onRecorded }: { rfq: RFQ; onRecorded(rfq: RFQ): void }
           );
         })}
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : errors.replies ?? null}
+          {failure ? <ProblemMessage problem={failure} /> : errors.replies ?? null}
         </Alert>
         <Alert tone="warning" live="status">
           {warnings.length > 0 ? warnings.map((w) => `Line ${w.lineNo}: ${w.detail} (${w.code})`).join(" ") : null}
@@ -1185,7 +1186,7 @@ function CompareAndAward({ rfq, onAwarded }: { rfq: RFQ; onAwarded(rfq: RFQ, ord
           );
         })}
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : errors.awards ?? null}
+          {failure ? <ProblemMessage problem={failure} /> : errors.awards ?? null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy} disabled={lines.length === 0}>

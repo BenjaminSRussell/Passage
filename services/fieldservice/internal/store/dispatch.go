@@ -352,54 +352,61 @@ func bookings(ctx context.Context, tx pgx.Tx, tenantID, technicianID, exceptID s
 // so two dispatchers cannot book the same time; every hard constraint that fails is
 // returned together (SVC-DSP-003 to 008). Dispatched orders are not moved.
 func (s *Postgres) AssignWorkOrder(ctx context.Context, id string, version int, in AssignInput, now time.Time) (WorkOrder, error) {
-	tid := tenantOf(ctx)
 	var out WorkOrder
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		wo, err := lockWorkOrder(ctx, tx, tid, id)
-		if err != nil {
-			return err
-		}
-		if wo.Version != version {
-			return versionConflict(wo.Version)
-		}
-		if wo.Status != string(domain.WOUnscheduled) && wo.Status != string(domain.WOScheduled) {
-			return unprocessable(CodeWOInvalid, fmt.Sprintf("a %s work order cannot be assigned", wo.Status))
-		}
-		tech, err := getTechnician(ctx, tx, tid, in.TechnicianID, true)
-		if err != nil {
-			return err
-		}
-		end := in.Start.Add(time.Duration(wo.EstDurationMinutes) * time.Minute)
-		others, err := bookings(ctx, tx, tid, tech.ID, id, in.Start, end)
-		if err != nil {
-			return err
-		}
-		job := domain.Job{ID: id, LegalEntityID: wo.LegalEntityID, TerritoryID: wo.TerritoryID, RequiredSkills: wo.RequiredSkills,
-			WindowStart: wo.WindowStart, WindowEnd: wo.WindowEnd, DurationMinutes: wo.EstDurationMinutes}
-		if vs := domain.CheckAssignment(tech.dispatchable(), job, in.Start, others); len(vs) > 0 {
-			return violationProblem(vs)
-		}
-		if _, err := tx.Exec(ctx, `update service_work_order set technician_id = $3, assigned_start = $4, assigned_end = $5, assignment_pinned = $6,
-			status = 'SCHEDULED', version = version + 1, updated_at = $7 where tenant_id = $1 and id = $2`,
-			tid, id, tech.ID, in.Start, end, in.Pinned, now); err != nil {
-			return err
-		}
-		out, err = getWorkOrder(ctx, tx, tid, id)
-		if err != nil {
-			return err
-		}
-		start, endText := in.Start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339)
-		var previous *string
-		if wo.TechnicianID != nil && *wo.TechnicianID != tech.ID {
-			previous = wo.TechnicianID
-		}
-		return enqueue(ctx, tx, "workorder", id, svcevents.AssignmentChanged, tid, svcevents.AssignmentChangedData{
-			WorkOrderID: id, Number: wo.Number, LegalEntityID: wo.LegalEntityID, TerritoryID: wo.TerritoryID, Action: "ASSIGNED",
-			TechnicianID: &tech.ID, PreviousTechnicianID: previous, Start: &start, End: &endText, Pinned: in.Pinned,
-			At: now.UTC().Format(time.RFC3339), Actor: actorOf(ctx),
-		})
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		out, err = assignTx(ctx, tx, id, version, in, now)
+		return err
 	})
 	return out, err
+}
+
+// assignTx is AssignWorkOrder inside the caller's transaction; a version below 1 skips
+// the version check (the optimizer accept applies a plan to the orders as they are).
+func assignTx(ctx context.Context, tx pgx.Tx, id string, version int, in AssignInput, now time.Time) (WorkOrder, error) {
+	tid := tenantOf(ctx)
+	wo, err := lockWorkOrder(ctx, tx, tid, id)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	if version > 0 && wo.Version != version {
+		return WorkOrder{}, versionConflict(wo.Version)
+	}
+	if wo.Status != string(domain.WOUnscheduled) && wo.Status != string(domain.WOScheduled) {
+		return WorkOrder{}, unprocessable(CodeWOInvalid, fmt.Sprintf("a %s work order cannot be assigned", wo.Status))
+	}
+	tech, err := getTechnician(ctx, tx, tid, in.TechnicianID, true)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	end := in.Start.Add(time.Duration(wo.EstDurationMinutes) * time.Minute)
+	others, err := bookings(ctx, tx, tid, tech.ID, id, in.Start, end)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	job := domain.Job{ID: id, LegalEntityID: wo.LegalEntityID, TerritoryID: wo.TerritoryID, RequiredSkills: wo.RequiredSkills,
+		WindowStart: wo.WindowStart, WindowEnd: wo.WindowEnd, DurationMinutes: wo.EstDurationMinutes}
+	if vs := domain.CheckAssignment(tech.dispatchable(), job, in.Start, others); len(vs) > 0 {
+		return WorkOrder{}, violationProblem(vs)
+	}
+	if _, err := tx.Exec(ctx, `update service_work_order set technician_id = $3, assigned_start = $4, assigned_end = $5, assignment_pinned = $6,
+		status = 'SCHEDULED', version = version + 1, updated_at = $7 where tenant_id = $1 and id = $2`,
+		tid, id, tech.ID, in.Start, end, in.Pinned, now); err != nil {
+		return WorkOrder{}, err
+	}
+	out, err := getWorkOrder(ctx, tx, tid, id)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	start, endText := in.Start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339)
+	var previous *string
+	if wo.TechnicianID != nil && *wo.TechnicianID != tech.ID {
+		previous = wo.TechnicianID
+	}
+	return out, enqueue(ctx, tx, "workorder", id, svcevents.AssignmentChanged, tid, svcevents.AssignmentChangedData{
+		WorkOrderID: id, Number: wo.Number, LegalEntityID: wo.LegalEntityID, TerritoryID: wo.TerritoryID, Action: "ASSIGNED",
+		TechnicianID: &tech.ID, PreviousTechnicianID: previous, Start: &start, End: &endText, Pinned: in.Pinned,
+		At: now.UTC().Format(time.RFC3339), Actor: actorOf(ctx),
+	})
 }
 
 // UnassignWorkOrder takes a SCHEDULED work order off the schedule: it is UNSCHEDULED

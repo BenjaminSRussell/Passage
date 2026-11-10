@@ -13,6 +13,7 @@ import { getTeamMember } from "./api/selfService";
 import { dash } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Entry({
   term,
@@ -67,7 +68,7 @@ export function TeamMemberPage() {
               </Button>
             }
           >
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )}
       </div>

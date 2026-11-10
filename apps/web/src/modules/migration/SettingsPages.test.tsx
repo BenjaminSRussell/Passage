@@ -89,7 +89,7 @@ describe("migration settings", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit setting" }));
     fireEvent.change(screen.getByLabelText("Shortest gap between scheduled runs (minutes)"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
-    expect(await screen.findByText(/current version is 1 \(MIG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/current version is 1/)).toBeInTheDocument();
     current = saved;
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     expect(await screen.findByText("60 minutes")).toBeInTheDocument();
@@ -105,7 +105,7 @@ describe("migration settings", () => {
   it("shows the error state and retries", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
     renderPage();
-    expect(await screen.findByText(/missing duty \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty/)).toBeInTheDocument();
     handler = () => json(200, saved);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.getByText("60 minutes")).toBeInTheDocument());

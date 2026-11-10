@@ -12,6 +12,7 @@ import {
 } from "./api/client";
 import { currencyPlaces, DATE, planTypeLabel, UUID, validRate } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface OptionValues {
   code: string;
@@ -270,7 +271,7 @@ export function NewBenefitPlanPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the plan" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

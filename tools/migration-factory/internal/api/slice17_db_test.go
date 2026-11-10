@@ -309,9 +309,15 @@ func TestParallelReplay_DiffsTrialBalances(t *testing.T) {
 type fakeAdapter struct {
 	in        []domain.InboundRecord
 	suspended map[string]bool
+	sys       domain.SourceSystem // AX2012 when unset
 }
 
-func (a *fakeAdapter) System() domain.SourceSystem { return domain.SourceAX2012 }
+func (a *fakeAdapter) System() domain.SourceSystem {
+	if a.sys == "" {
+		return domain.SourceAX2012
+	}
+	return a.sys
+}
 func (a *fakeAdapter) Pull(context.Context, string, string, time.Time) ([]domain.InboundRecord, error) {
 	return a.in, nil
 }

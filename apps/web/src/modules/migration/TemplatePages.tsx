@@ -10,6 +10,7 @@ import { DUTY_SPEC_WRITE } from "./SpecPages";
 import { LoadMore } from "./LoadMore";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<DataTemplate>[] = [
   { key: "entity", header: "Entity", mono: true },
@@ -56,7 +57,7 @@ export function TemplatesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load data templates" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -128,7 +129,7 @@ export function NewTemplatePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not publish the template" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -155,7 +156,7 @@ export function TemplateDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Data template" />
         <Alert tone="danger" title="Could not load this template" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/templates">
           Back to templates

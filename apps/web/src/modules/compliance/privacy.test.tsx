@@ -145,7 +145,7 @@ describe("Privacy requests", () => {
   it("shows a load failure with a retry", async () => {
     handler = () => problem(403, "AUTH-0003", "missing duty compliance.privacy-request.process");
     renderAt("/compliance/privacy/requests");
-    expect((await findAlert()).textContent).toContain("missing duty compliance.privacy-request.process (AUTH-0003)");
+    expect((await findAlert()).textContent).toContain("missing duty compliance.privacy-request.process");
     handler = () => ({ status: 200, body: { items: [request()] } });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Privacy requests" })).toBeInTheDocument();
@@ -174,7 +174,7 @@ describe("Record a privacy request", () => {
     renderAt("/compliance/privacy/requests/new");
     fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "party:42" } });
     fireEvent.click(screen.getByRole("button", { name: "Record request" }));
-    expect((await findAlert()).textContent).toContain("(PRV-1206)");
+    expect((await findAlert()).textContent).toContain("PRV-1206");
   });
 });
 
@@ -219,7 +219,7 @@ describe("Privacy request", () => {
   it("shows a missing request", async () => {
     handler = () => problem(404, "PRV-1209", "no subject request with that id");
     renderAt(`/compliance/privacy/requests/${REQ}`);
-    expect((await findAlert()).textContent).toContain("no subject request with that id (PRV-1209)");
+    expect((await findAlert()).textContent).toContain("no subject request with that id");
     expect(screen.getByRole("link", { name: "Back to privacy requests" })).toBeInTheDocument();
   });
 });
@@ -278,7 +278,7 @@ describe("Certification campaign", () => {
     renderAt("/compliance/campaigns");
     fireEvent.change(screen.getByLabelText("Starts on (UTC)"), { target: { value: "2026-10-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Plan window" }));
-    expect((await findAlert()).textContent).toContain("(SOD-1120)");
+    expect((await findAlert()).textContent).toContain("SOD-1120");
   });
 });
 
@@ -333,7 +333,7 @@ describe("Incident step check", () => {
     renderAt("/compliance/incidents/step");
     fireEvent.change(screen.getByLabelText("Current status"), { target: { value: "RECOVERED" } });
     fireEvent.click(screen.getByRole("button", { name: "Check step" }));
-    expect((await findAlert()).textContent).toContain("(INC-1302)");
+    expect((await findAlert()).textContent).toContain("INC-1302");
   });
 });
 
@@ -367,6 +367,6 @@ describe("Export policy check", () => {
     renderAt("/compliance/export-policy");
     fireEvent.change(screen.getByLabelText("Rows"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Check download" }));
-    expect((await findAlert()).textContent).toContain("(SEC-0709)");
+    expect((await findAlert()).textContent).toContain("SEC-0709");
   });
 });

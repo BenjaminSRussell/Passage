@@ -8,6 +8,7 @@ import { formatDateTime, UUID, dash } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<LegalEntitySetting>[] = [
   { key: "legalEntityId", header: "Legal entity", mono: true },
@@ -127,7 +128,7 @@ export function LegalEntitySettingsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the posting settings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

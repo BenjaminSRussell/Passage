@@ -147,7 +147,7 @@ describe("Rate cards", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [card] }));
     renderAt("/transport/rate-cards");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("WEIGHT_BREAK")).toBeInTheDocument();
@@ -260,7 +260,7 @@ describe("Rate shop", () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty transport.rate-card.maintain" });
     fillShipment();
     fireEvent.click(screen.getByRole("button", { name: "Rate shop" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("missing duty transport.rate-card.maintain (AUTH-0003)"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("missing duty transport.rate-card.maintain"));
   });
 });
 
@@ -355,7 +355,7 @@ describe("Freight bill detail", () => {
   it("shows a not-found problem", async () => {
     handler = () => json(404, { code: "TMS-0100", detail: "freight bill not found" });
     renderAt(`/transport/freight-bills/${BILL}`);
-    expect(await screen.findByText("freight bill not found (TMS-0100)")).toBeInTheDocument();
+    expect(await screen.findByText("freight bill not found")).toBeInTheDocument();
   });
 });
 

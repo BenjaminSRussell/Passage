@@ -19,13 +19,14 @@ import styles from "./pages.module.css";
 import { BackLink, Entry, Facts, FormActions, LoadFailure, Loaded, SelectField, TextAreaField, TextField, labelled, useSubmit } from "./parts";
 import { GoalProgressForm, GoalsTable, NewGoalForm, Notice, ReviewStatus, ReviewText, validatePeriod, validateSelfAssessment, validateSignOff } from "./PerformanceParts";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const period = (r: Review) => `${r.periodStart} to ${r.periodEnd}`;
 
 function SectionError({ title, error, reload }: { title: string; error: { message: string; code: string }; reload(): void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-      {error.message} ({error.code})
+      <ProblemMessage problem={error} />
     </Alert>
   );
 }

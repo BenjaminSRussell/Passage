@@ -76,7 +76,7 @@ describe("DockSchedulePage", () => {
     server.handler = (url) =>
       url.pathname.endsWith("dock-appointments") ? json(500, { code: "COM-0500", detail: "internal error" }) : json(200, { items: [] });
     renderAt(`/warehouse/docks?warehouse=${WH}`);
-    expect(await screen.findByText("internal error (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("internal error")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

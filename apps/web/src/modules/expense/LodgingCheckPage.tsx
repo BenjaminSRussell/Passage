@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { checkLodging, describeProblem, type LodgingInput, type LodgingResult, type PolicyResult, type Problem } from "./api/client";
 import { DECIMAL, splitProblem } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -105,7 +106,7 @@ export function LodgingCheckPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not check the stay" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

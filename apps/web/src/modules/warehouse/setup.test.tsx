@@ -78,7 +78,7 @@ describe("LocationsPage", () => {
     server.handler = () => (fail ? json(503, { code: "COM-0500", detail: "database unavailable" }) : json(200, { items: [location] }));
     renderAt(`/warehouse/locations?warehouse=${WH}`);
     const alert = await screen.findByText("Could not load the locations");
-    expect(alert.closest("[role=alert]")).toHaveTextContent("database unavailable (COM-0500)");
+    expect(alert.closest("[role=alert]")).toHaveTextContent("database unavailable");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("R-05-02-01")).toBeInTheDocument();
@@ -227,7 +227,7 @@ describe("NewDirectivePage", () => {
     renderAt(`/warehouse/directives/new?warehouse=${WH}`);
     fireEvent.click(screen.getByRole("button", { name: "Create directive" }));
     expect(await screen.findByText("lines[1].fromQty overlaps the quantity range of lines[0]")).toBeInTheDocument();
-    expect(screen.getByText("request failed validation (COM-0001)")).toBeInTheDocument();
+    expect(screen.getByText("request failed validation")).toBeInTheDocument();
   });
 
   it("refuses bad JSON before calling the service", async () => {

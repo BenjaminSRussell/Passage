@@ -39,6 +39,18 @@ postgres:
     defaultPoolSize: 50
     maxPreparedStatements: 200  # pgx uses the extended protocol
 
+backup:
+  enabled: true
+  # Empty derives s3://passage-pg-backups-<region.id>/ so each region archives to its own bucket.
+  destinationPath: ""
+  endpointURL: ""             # S3-compatible stores only
+  credentialsSecret: passage-pg-backup-s3   # keys: ACCESS_KEY_ID, ACCESS_SECRET_KEY
+  compression: gzip
+  retentionPolicy: 30d        # base backups and the WAL they need are kept this long
+  schedule: "0 0 2 * * *"     # CNPG six-field cron (seconds first): daily 02:00 UTC
+  # Alert when the newest base backup is older than this (hours).
+  maxAgeHours: 26
+
 kafka:
   namespace: kafka                          # namespace of the Strimzi Kafka cluster (deploy/kafka)
   clusterName: passage                      # Strimzi Kafka name; its CA secret is <name>-cluster-ca-cert

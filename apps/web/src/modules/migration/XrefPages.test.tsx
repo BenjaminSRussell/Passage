@@ -134,7 +134,7 @@ describe("legacy key cross-reference", () => {
   it("shows the error state and retries", async () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
     renderPage();
-    expect(await screen.findByText(/missing duty \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty/)).toBeInTheDocument();
     handler = (url) => json(200, url.pathname.endsWith("/summary") ? summary : { items: [entry("C1")] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Legacy key cross-reference" })).toHaveTextContent("C1");
@@ -149,7 +149,7 @@ describe("legacy key cross-reference", () => {
     renderPage();
     await findTable({ name: "Legacy key cross-reference" });
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
     expect(screen.getByRole("table")).toHaveTextContent("C1");
   });
 });

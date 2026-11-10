@@ -16,6 +16,7 @@ import {
 } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DUTY_ADMIN = "pricing.admin";
 const CHANNEL = /^([A-Z0-9][A-Z0-9_-]{0,31})?$/;
@@ -143,7 +144,7 @@ export function ProcedureAssignmentsPage() {
       </Card>
       {failure ? (
         <Alert tone="danger" title="Could not complete the request" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {saved ? (

@@ -4,6 +4,7 @@ import { listCleanoutRules, type CleanoutRule } from "./api/client";
 import { dash, formatMinutes } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** "After 5 batches · after 48 h · at campaign end". */
 export function describeTriggers(rule: CleanoutRule): string {
@@ -41,7 +42,7 @@ export function CleanoutRulesPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load cleanout rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

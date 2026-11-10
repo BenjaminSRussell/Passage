@@ -19,6 +19,7 @@ import { StatusBadge } from "./badges";
 import { dash, money, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Detail({ term, children }: { term: string; children: ReactNode }) {
   return (
@@ -125,7 +126,7 @@ function ListCard<T>({ title, label, state, columns, rowKey, empty }: {
     <Card title={title}>
       {state.error ? (
         <Alert tone="danger" title={`Could not load ${label.toLowerCase()}`} live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable label={label} columns={columns} rows={state.data ?? []} getRowKey={rowKey} loading={state.loading} empty={empty} />
@@ -142,7 +143,7 @@ function ScheduleCard({ assetId, book }: { assetId: string; book: Book }) {
       <div className={styles.stack}>
         {state.error ? (
           <Alert tone="danger" title="Could not load the schedule" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : (
           <>
@@ -180,7 +181,7 @@ export function AssetDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Asset" />
         <Alert tone="danger" title="Could not load the asset" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/assets">
           Back to the register
@@ -273,7 +274,7 @@ export function AssetDetailPage() {
       <Card title="Transactions">
         {transactions.error ? (
           <Alert tone="danger" title="Could not load transactions" live="alert" action={<Button size="sm" onClick={transactions.reload}>Try again</Button>}>
-            {transactions.error.message} ({transactions.error.code})
+            <ProblemMessage problem={transactions.error} />
           </Alert>
         ) : (
           <DataTable

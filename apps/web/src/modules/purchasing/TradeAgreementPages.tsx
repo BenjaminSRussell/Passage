@@ -39,6 +39,7 @@ import {
   type Failure,
 } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const accountLabels: Record<AccountCode, string> = { VENDOR: "Vendor", GROUP: "Vendor group", ALL: "All vendors" };
 const itemLabels: Record<ItemCode, string> = { PRODUCT: "Product", GROUP: "Product group", ALL: "All products" };
@@ -284,7 +285,7 @@ export function TradeAgreementCreatePage() {
           </label>
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>

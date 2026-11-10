@@ -38,6 +38,7 @@ import {
 import { dash, QUANTITY, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Duty that defines and retires customer batch requirements; enforced by the service (FR-24.19). */
 export const REQUIREMENT_DUTY = "production.batch-requirement.write";
@@ -70,7 +71,7 @@ function StatusBadge({ rule }: { rule: CustomerRequirement }) {
 function LoadError({ title, error, reload }: { title: string; error: Problem; reload: () => void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-      {error.message} ({error.code})
+      <ProblemMessage problem={error} />
     </Alert>
   );
 }
@@ -281,7 +282,7 @@ export function NewCustomerRequirementPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not define the requirement" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -360,7 +361,7 @@ export function CustomerRequirementDetailPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not retire the requirement" live="alert" action={failure.code === "PMF-0104" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div className={styles.formActions}>
@@ -509,7 +510,7 @@ export function StoredRequirementCheckPage({ check = defaultCheck, list = defaul
       </form>
       {failure ? (
         <Alert tone="danger" title="Check refused" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {result ? (

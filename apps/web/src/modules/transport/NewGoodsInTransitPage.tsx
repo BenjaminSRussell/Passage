@@ -5,6 +5,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { createGoodsInTransit, describeProblem, newKey, ORIGIN_INCOTERMS, type NewGoodsInTransit, type Problem } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface GoodsInTransitValues {
   voyageId: string;
@@ -98,7 +99,7 @@ export function NewGoodsInTransitPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not open the order" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
                 {Object.values(failure.fields).length > 0 ? ` ${Object.values(failure.fields).join(" ")}` : null}
               </Alert>
             </div>

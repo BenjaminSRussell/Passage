@@ -7,6 +7,7 @@ import { CONTRACT_STATUS_LABELS, METHOD_LABELS, UUID } from "./format";
 import { MoreRows } from "./MoreRows";
 import styles from "./pages.module.css";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIMIT = 100;
 
@@ -80,7 +81,7 @@ export function RevenueContractsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the revenue contracts" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

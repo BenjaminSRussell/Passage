@@ -5,6 +5,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { createSalesGroup, describeProblem, newKey, type Problem, type SalesGroupInput } from "./api/client";
 import { DECIMAL, sumDecimals, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface RepDraft {
   repId: string;
@@ -127,7 +128,7 @@ export function NewSalesGroupPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the sales group" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

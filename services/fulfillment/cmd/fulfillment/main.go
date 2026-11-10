@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -17,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/api"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/carrier"
+	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/salesreport"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/store"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/migrations"
 )
@@ -86,7 +88,25 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("carrier-gateway client: %w", err)
 	}
+	sales, err := salesreport.FromEnv(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("sales client: %w", err)
+	}
+	interval := salesreport.DefaultInterval
+	if raw := os.Getenv("SALES_REPORT_INTERVAL"); raw != "" {
+		if interval, err = time.ParseDuration(raw); err != nil || interval < time.Second {
+			return errors.New("SALES_REPORT_INTERVAL must be a duration of at least 1s")
+		}
+	}
 	s := store.New(pool, prefix, ext).WithReleaseDefaults(horizon, fullATP).WithHolds(holds)
+	if sales != nil {
+		// Every replica runs the reporter: reports are leased, so each is sent by one at a time (#496).
+		reporter := &salesreport.Reporter{Store: s, Sales: sales}
+		go salesreport.Run(ctx, interval, reporter.RunOnce)
+		slog.Info("sales delivery reporter running", "interval", interval)
+	} else {
+		slog.Warn("SALES_URL is unset: posted packing slips are queued for sales but not reported")
+	}
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}

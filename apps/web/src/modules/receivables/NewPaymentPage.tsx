@@ -6,6 +6,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { createPayment, describeProblem, newKey, PAYMENT_MODES, ReceivablesApiError, type PaymentInput, type PaymentMode, type Problem } from "./api/client";
 import { CURRENCY, DAY, DECIMAL, MODE_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -217,7 +218,7 @@ export function NewPaymentPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not record the payment" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -6,6 +6,7 @@ import { amount, isCurrency, isDecimal, isPositive } from "./format";
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type HeadKey = "sellerEntity" | "buyerEntity" | "period" | "currency";
 type RowKey = keyof EvidenceRow;
@@ -147,7 +148,7 @@ export function TransferPricingPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The evidence file was not produced" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -9,6 +9,7 @@ import { sumDecimals, UUID } from "./format";
 import styles from "./pages.module.css";
 import { CLAIM_STATUS_LABELS } from "./rebateFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$/;
 
@@ -102,7 +103,7 @@ export function ContractClaimsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the claims" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

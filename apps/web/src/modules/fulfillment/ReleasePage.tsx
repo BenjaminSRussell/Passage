@@ -5,6 +5,7 @@ import { describeProblem, newKey, ORDER_TYPES, runRelease, type OrderType, type 
 import { ShipmentStatusBadge } from "./badges";
 import { DECIMAL, formatDate, LOGISTICS_CODE, SKIP_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface LineValues {
   orderId: string;
@@ -219,7 +220,7 @@ export function ReleasePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not release the lines" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

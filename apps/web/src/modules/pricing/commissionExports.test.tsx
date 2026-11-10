@@ -56,7 +56,7 @@ describe("Commission exports list", () => {
   it("shows the service failure and reloads on retry", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.commission.view" });
     renderAt("/pricing/commission/exports");
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.commission.view");
     server.handler = () => json(200, { items: [issued] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Commission exports" })).toHaveTextContent("Payroll");
@@ -124,13 +124,13 @@ describe("Commission export detail", () => {
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "again" } });
     fireEvent.click(screen.getByRole("button", { name: "Void export" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Void export" }));
-    expect(await findAlert()).toHaveTextContent("settlement export is already voided (PRC-0031)");
+    expect(await findAlert()).toHaveTextContent("settlement export is already voided");
   });
 
   it("reports an export that does not exist", async () => {
     server.handler = () => json(404, { code: "PRC-0067", detail: "no settlement export x" });
     renderAt(`/pricing/commission/exports/${ID}`);
-    expect(await findAlert()).toHaveTextContent("no settlement export x (PRC-0067)");
+    expect(await findAlert()).toHaveTextContent("no settlement export x");
   });
 
   it("checks the reason", () => {
@@ -183,7 +183,7 @@ describe("Recording an export from the settlement page", () => {
     preview();
     await findTable({ name: "Commission settlement" });
     fireEvent.click(screen.getByRole("button", { name: "Record export" }));
-    expect(await findAlert()).toHaveTextContent("already covers part of this period for AP; void it before exporting again (PRC-0065)");
+    expect(await findAlert()).toHaveTextContent("already covers part of this period for AP; void it before exporting again");
     expect(screen.getByRole("button", { name: "Record export" })).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { listVoyages, VOYAGE_STATUSES, type VoyageStatus, type VoyageSummary } f
 import { formatDateTime, money, stateTone, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<VoyageSummary>[] = [
   { key: "reference", header: "Voyage", mono: true },
@@ -48,7 +49,7 @@ export function VoyagesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load voyages" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

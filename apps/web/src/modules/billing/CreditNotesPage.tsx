@@ -6,6 +6,7 @@ import { invoiceName, STATUS_LABELS } from "./format";
 import { MoreRows } from "./MoreRows";
 import styles from "./pages.module.css";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIMIT = 100;
 const STATUSES: InvoiceStatus[] = ["PROPOSAL", "POSTED"];
@@ -52,7 +53,7 @@ export function CreditNotesPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the credit notes" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

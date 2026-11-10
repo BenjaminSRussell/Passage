@@ -6,6 +6,7 @@ import { returnableAging, type AgedReturnableBalance } from "./api/client";
 import { formatDate, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Most balances one view shows; the counts above the table cover all of them. */
 export const AGING_LIMIT = 500;
@@ -123,7 +124,7 @@ export function ReturnableAgingPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load the aging" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

@@ -4,6 +4,7 @@ import { listFunds, type Fund } from "./api/client";
 import { describeScope } from "./fundFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Fund>[] = [
   { key: "name", header: "Fund" },
@@ -38,7 +39,7 @@ export function FundsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the funds" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Select, t
 import { INTAKE_STATUSES, describeProblem, listPlannedIntake, type IntakePage, type IntakeStatus, type PlannedIntake, type Problem } from "./api/client";
 import { intakeStatusLabel, intakeStatusTone } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface PlannedIntakePageProps {
   /** Opens a planned order from its row. */
@@ -104,7 +105,7 @@ export function PlannedIntakePage({ onOpen }: PlannedIntakePageProps) {
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The planned orders are not available" live="alert">
           {state.error.status === 403
             ? "You need the View production orders duty to see the planned orders."
-            : `${state.error.message} (${state.error.code})`}
+            : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>
@@ -122,7 +123,7 @@ export function PlannedIntakePage({ onOpen }: PlannedIntakePageProps) {
           />
           {state.moreError ? (
             <Alert tone="danger" title="More planned orders could not be loaded" live="alert">
-              {`${state.moreError.message} (${state.moreError.code})`}
+              {<ProblemMessage problem={state.moreError} />}
             </Alert>
           ) : null}
           {state.page.nextCursor && !state.loading ? (

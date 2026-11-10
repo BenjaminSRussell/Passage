@@ -4,6 +4,7 @@ import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeade
 import { comparePrices, describeProblem, listProcedures, type CompareResponse, type LineComparison, type Problem, type Procedure } from "./api/client";
 import { DAY, DECIMAL, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Draft {
   customerId: string;
@@ -151,7 +152,7 @@ export function ComparePage() {
       </Card>
       {failure ? (
         <Alert tone="danger" title="The comparison could not be completed" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {loading ? <Skeleton height="tile" /> : null}

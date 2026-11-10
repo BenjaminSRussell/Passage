@@ -7,6 +7,7 @@ import { formatDateTime, shortId } from "./format";
 import { parseCondition } from "./NewCapacityBlockPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BlockEditValues {
   priority: string;
@@ -139,7 +140,7 @@ function Form({ initial, onReload }: { initial: CapacityBlock; onReload: () => v
               </Alert>
             ) : (
               <Alert tone="danger" title="Could not save the block" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             )}
           </div>
@@ -193,7 +194,7 @@ export function CapacityBlockDetailPage() {
       <PageHeader title={state.data ? state.data.code : "Capacity block"} description="Deactivate a block to retire it. The window and resource do not change; create a new block for those." />
       {state.error ? (
         <Alert tone="danger" title="Could not load the capacity block" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.data ? (
         <div aria-busy="true">

@@ -3,6 +3,7 @@ import { Alert, Button, Card, EmptyState, FormField, PageHeader, Textarea } from
 import { describeProblem, testMaps, type MapTestResponse, type Problem } from "./api/client";
 import { IssueList, MessagePill, OrderView } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Run the 850 map over a sample interchange without storing anything (FR-35.3 test harness). */
 export function MapTesterPage() {
@@ -52,7 +53,7 @@ export function MapTesterPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "The interchange could not be read" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       {result ? (
         result.transactions.length === 0 ? (

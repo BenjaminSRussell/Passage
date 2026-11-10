@@ -34,6 +34,7 @@ import {
 import { dash, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Duty that defines and retires inheritance rules; enforced by the service (FR-24.15). */
 export const INHERITANCE_RULE_DUTY = "production.inheritance-rule.write";
@@ -66,7 +67,7 @@ function StatusBadge({ rule }: { rule: InheritanceRule }) {
 function LoadError({ title, error, reload }: { title: string; error: Problem; reload: () => void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-      {error.message} ({error.code})
+      <ProblemMessage problem={error} />
     </Alert>
   );
 }
@@ -253,7 +254,7 @@ export function NewInheritanceRulePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not define the rule" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -331,7 +332,7 @@ export function InheritanceRuleDetailPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title="Could not retire the rule" live="alert" action={failure.code === "PMF-0104" ? <Button size="sm" onClick={state.reload}>Reload</Button> : undefined}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div className={styles.formActions}>

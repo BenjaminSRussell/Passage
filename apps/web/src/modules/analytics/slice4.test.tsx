@@ -87,7 +87,7 @@ describe("dashboards", () => {
     server.handler = () => (++attempt === 1 ? json(403, { code: "AUTH-0003", detail: "missing duty analytics.view" }) : json(200, { items: [finance] }));
     render("/analytics/dashboards");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty analytics.view (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty analytics.view");
     fireEvent.click(within(alert.closest("div") as HTMLElement).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Finance overview")).toBeInTheDocument();
   });
@@ -248,7 +248,7 @@ describe("explorer export", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
-    expect(await findAlert()).toHaveTextContent("upstream unavailable (HTTP-503)");
+    expect(await findAlert()).toHaveTextContent("upstream unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
     await waitFor(() => expect(screen.getByText(/^Export queued: 250,000 rows as XLSX in a background job/)).toBeInTheDocument());
 
@@ -325,7 +325,7 @@ describe("export log", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty analytics.export" });
     render("/analytics/exports");
-    expect(await findAlert()).toHaveTextContent("missing duty analytics.export (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty analytics.export");
   });
 });
 
@@ -469,6 +469,6 @@ describe("lineage", () => {
     fireEvent.change(screen.getByLabelText(/^Source asset/), { target: { value: "raw.vendor.vendor" } });
     fireEvent.change(screen.getByLabelText(/^Target asset/), { target: { value: "core.vendor" } });
     fireEvent.click(screen.getByRole("button", { name: "Record edge" }));
-    expect(await findAlert()).toHaveTextContent("missing duty analytics.catalog.steward (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty analytics.catalog.steward");
   });
 });

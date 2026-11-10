@@ -2,6 +2,7 @@ import { Alert, Badge, Button, Card, DataTable, type DataTableColumn } from "../
 import { listContractAccruals, type ContractAccrual, type ContractKind } from "./api/client";
 import { ACCRUAL_KIND_LABELS } from "./contractFormat";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ContractAccrual>[] = [
   { key: "periodId", header: "Period", mono: true },
@@ -19,7 +20,7 @@ export function ContractAccrualsCard({ kind, contractId }: { kind: ContractKind;
     <Card title="Accruals">
       {state.error ? (
         <Alert tone="danger" title="Could not load the accruals" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

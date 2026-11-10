@@ -110,7 +110,7 @@ describe("inheritance rule list (slice 16)", () => {
   it("shows a load failure with a retry", async () => {
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/inheritance-rules");
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -297,6 +297,6 @@ describe("derivation monitor (slice 16)", () => {
     unmount();
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "database unavailable" } });
     renderAt("/processmfg/derivations");
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
   });
 });

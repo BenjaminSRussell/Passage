@@ -198,7 +198,7 @@ describe("sequence register", () => {
     unmount();
     handler = (url, init) => (isGet("/sequences")(url, init) ? json(503, { code: "COM-0503", detail: "down" }) : undefined);
     renderAt("/eam/sequences");
-    expect(await findAlert()).toHaveTextContent("(COM-0503)");
+    expect(await findAlert()).toHaveTextContent("COM-0503");
   });
 });
 
@@ -319,7 +319,7 @@ describe("sequence detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate occurrence 4" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Finish or cancel the previous occurrence's work order first");
-    expect(alert).toHaveTextContent("(EAM-SEQ-002)");
+    expect(alert).toHaveTextContent("EAM-SEQ-002");
     expect(posts("/occurrences")[0].body).toEqual({ currency: "EUR" });
   });
 

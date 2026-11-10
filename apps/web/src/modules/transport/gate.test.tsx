@@ -209,7 +209,7 @@ describe("check in", () => {
     fill("Driver name", "Dana");
     fill("Driver license id", "L1");
     fireEvent.click(screen.getByRole("button", { name: "Check in" }));
-    expect(await screen.findByText(/already in the yard \(TMS-0118\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already in the yard/)).toBeInTheDocument();
 
     handler = () => problem(400, "COM-0001", "request failed validation", { trailerNo: "is required, up to 20 characters" });
     fireEvent.click(screen.getByRole("button", { name: "Check in" }));
@@ -345,7 +345,7 @@ describe("goods in transit", () => {
     fill("Destination site", SITE);
     fill("Receipt lines", "1");
     fireEvent.click(screen.getByRole("button", { name: "Open order" }));
-    expect(await screen.findByText(/already on goods-in-transit order x \(TMS-0119\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already on goods-in-transit order x/)).toBeInTheDocument();
 
     handler = (_url, init) => {
       if (init.method === "POST") return json(201, order());

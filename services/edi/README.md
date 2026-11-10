@@ -391,20 +391,32 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   rotated CRL needs no restart. `GET /transport` shows `partnerCertificateTrust` (`pinned`, `trusted`,
   `untrusted`, `revocation-unknown`) with the reason. Nothing is fetched from the network: OCSP and
   CRL distribution points are not used.
-- **Posting inbound documents (decision)**: nothing in edi posts a received document into another
-  service, and no service grant was added for it. Sales already has the intake route
-  (`POST /v1/sales/orders`, service-only `sales.channel.intake`), but its request needs a product,
-  site and warehouse per line and an invoice account that the 850 and ORDERS do not carry and edi
-  cannot resolve without the BR-35.1 item cross-reference; transport's
+- **Posting inbound documents (decision)**: only an inbound 850 or ORDERS is posted into another
+  service: to sales, with the partner item cross-references and sales defaults (`/partners/{id}/item-xrefs`,
+  `/partners/{id}/sales-defaults`), by `POST /messages/{id}:post` and, for a partner whose `autoPost` is not
+  turned off, by the background poster, which runs with the transport workers (`EDI_TRANSPORT_WORKERS=true`) when
+  the sales URL and service signing key are set. The poster signs as the service principal `edi-sales` (only
+  `sales.channel.intake`), takes MAPPED orders under `skip locked`, backs off a minute doubling to an hour after a
+  failure it can retry (sales down, no trade profile), and parks what cannot be mapped or sales refuses; a parked
+  order is posted again only by the route, and reprocess leaves it alone. The body sent under a message's
+  Idempotency-Key is pinned at the first attempt. Transport's
   `POST /v1/transport/tracking-events` needs a load id and stop number the 214 does not carry;
   receivables has no remittance-advice route. Consumers read `dev.passage.edi.message.received.v1`
   and the canonical document; `NOT-IMPLEMENTED.md` (Handoffs) lists what each posting needs.
 
 ## Wave 35 proof
 
-- **Partner simulator round trip** (`internal/api/partnersim_test.go`, AC-35.1): the demo
-  distributor's translator, written independently of `internal/domain`, exchanges 850/997,
-  855, 856 and 810 with the engine and answers with 997s (A, E, R, group-only).
+- **Partner simulator round trip** (`internal/api/partnersim_test.go`,
+  `partnersim_transport_test.go`, AC-35.1): the demo distributor's translator, with its own X12
+  and EDIFACT readers and writers (nothing from `internal/domain`), trades every set the
+  service maps or sends. Over the routes: 850/997, 855, 856 and 810 answered with 997s (A, E,
+  R, group-only). Over AS2: its 820 and 214 mapped and answered with 997s, a 204 rejected as
+  unsupported, our 820 and 214 read and answered with a 997 and with TA1 A and R, a duplicate
+  answered with TA1 R 025 and a broken IEA with TA1 R 001. Over SFTP: its ORDERS, DESADV and
+  INVOIC (UNA with a decimal comma, released service characters) answered with a CONTRL that
+  rejects a CNT mismatch (UCM 29), a duplicate answered with CONTRL UCI 4 26, and our DESADV,
+  INVOIC and ORDERS read (CPS tree, SSCCs, its own total check) and answered by an interchange
+  of CONTRLs that the service matches (ACKED, and FAILED for a UCM 4).
 - **peppol-invoices-50** (`testdata/peppol`, AC-35.2): 50 demo invoices and credit notes,
   reference amounts from `gen_peppol50.py`, the engine's XML, and `schematron-report.json`
   from `validate.py` (official Peppol BIS 3.0.21 schematron with Saxon-HE, UBL 2.1 XSD with
@@ -450,6 +462,10 @@ testdata/as2/       a third-party MDN
 | PUT | /edi/v1/partners/{id}/trade-profile | edi.admin | Legal entity, customer, party GLNs and default SCAC the sources do not carry; 200 |
 | PUT | /edi/v1/partners/{id}/transport | edi.admin | Transport API, AS2 or SFTP with secret references; 409 EDI-0012 without a trade profile in the caller's entities |
 | GET | /edi/v1/partners/{id}/transport | edi.admin | The transport, the AS2 inbound and MDN URLs, the partner certificate fingerprint and whether each secret reference resolves |
+| GET, POST | /edi/v1/partners/{id}/item-xrefs | edi.admin | Item cross-references of the partner: `{"qualifier":"BP"\|"VP"\|"UP"\|"EN","partnerItem","productId","siteId","warehouseId"}`; 201, 409 EDI-0019 when the item reference is mapped, 409 EDI-0012 without a trade profile; the legal entity is the profile's |
+| PUT, DELETE | /edi/v1/partners/{id}/item-xrefs/{xrefId} | edi.admin | Replace or delete one cross-reference (404 outside the caller's legal entities) |
+| GET, PUT | /edi/v1/partners/{id}/sales-defaults | edi.admin | `{"invoiceAccountId","currency","autoPost","unitMap"}`: the invoice account of posted orders, the currency of an order without CUR, whether the background poster posts the partner's orders (default true) and the partner unit (EA, CA, PCE) to our unit map (with no map units pass through; with one, a unit with no entry parks the order, EDI-0024); 404 for an unknown partner |
+| POST | /edi/v1/messages/{id}:post | edi.operate | Post an inbound 850 or ORDERS to sales (service grant `sales.channel.intake`, channel EDI, key = message id, externalRef = partner id and PO number); 200 `{messageId,status:POSTED,salesOrderId}`, repeat 200; 422 EDI-0105, EDI-0022, EDI-0023 or EDI-0024 parks the message (FAILED, park code, reason in the monitor); 409 EDI-0021 (not an inbound 850 or ORDERS, or its mapping failed), EDI-0012, EDI-0020; 502 EDI-0010 when sales is down (retry); 503 without sales configured |
 | POST | /edi/v1/partners/{id}/outbound:from-source | edi.operate | Body `{"transactionSet":"856"\|"810"\|"DESADV"\|"INVOIC","sourceId"}`; 201 with the X12 or EDIFACT, repeat 200; 409 EDI-0012 without a profile, EDI-0017 EDIFACT without `edifactId`; 503 EDI-0010 without source services |
 | POST | /edi/v1/partners/{id}/outbound | edi.operate | Only with `EDI_ALLOW_BODY_OUTBOUND=true`. Body `{"transactionSet":"855"\|"856"\|"810"\|"820"\|"214"\|"ORDERS"\|"DESADV"\|"INVOIC","document":{...}}`; requires `Idempotency-Key`; 201 with the X12 or EDIFACT, replay 200 |
 | POST | /edi/v1/maps:test | edi.admin | Body `{"raw": "<X12>"}`; nothing is stored |
@@ -534,6 +550,12 @@ signing uses the standard library only.
 | EDI-0015 | 409 | Nothing to resend: not outbound, its last delivery is not FAILED or REJECTED, or the partner has no AS2 or SFTP transport in the caller's entities |
 | EDI-0016 | 503 | No secret directory is configured (`EDI_SECRETS_DIR`), so AS2 and SFTP transports cannot be saved |
 | EDI-0017 | 409 | An EDIFACT ORDERS, DESADV or INVOIC for a partner without an EDIFACT identity (`edifactId`) |
+| EDI-0019 | 409 | The partner already maps this item reference (qualifier and partner item) |
+| EDI-0020 | 409 | An order is posted for a partner without sales defaults (`PUT /partners/{id}/sales-defaults`) |
+| EDI-0021 | 409 | The message is not an inbound 850 or ORDERS, or it failed mapping and is reprocessed, not posted |
+| EDI-0022 | 422 | The order is parked: a change or cancellation (BEG01), a blanket or release (BEG02), or no requested ship or delivery date |
+| EDI-0023 | 422 | The order is parked: sales refused it (its code and reason are in the message error) |
+| EDI-0024 | 422 | The order is parked: the partner has a `unitMap` and a line's unit of measure is not in it |
 | EDI-0018 | 403 | The partner's trade profile binds it to a legal entity outside the caller's scope; it cannot be changed |
 | COM-0428 | 428 | `If-Match` with the partner version is required (PATCH /partners/{id}) |
 | conflict_version | 412 | `If-Match` is not the partner's current version; the response `ETag` is |

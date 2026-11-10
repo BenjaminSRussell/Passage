@@ -25,6 +25,7 @@ import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { describeProblem, newKey, type Page, type Problem } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad, type LoadState } from "./useLoad";
+import { lookupProblem, ProblemMessage } from "../../shell/errors";
 
 const KNOWN: Record<string, string> = {
   "HCM-QST-SCOPE":
@@ -44,9 +45,12 @@ const KNOWN: Record<string, string> = {
   "HCM-LOAN-001": "Items are still out on loan. Record them returned or lost first.",
 };
 
+/** Plain wording for a problem; `ProblemMessage` keeps its code under Details. */
 export function problemText(problem: Problem): string {
   const known = KNOWN[problem.code];
-  if (known) return `${known} (${problem.code})`;
+  if (known) return known;
+  const entry = lookupProblem(problem.code);
+  if (entry) return `${entry.message} ${entry.action}`;
   const lead =
     problem.status === 403
       ? "You don't have access to do this. "
@@ -55,13 +59,13 @@ export function problemText(problem: Problem): string {
         : problem.status === 409
           ? "This conflicts with the current state of the record; reload and try again. "
           : "";
-  return `${lead}${problem.message} (${problem.code})`;
+  return `${lead}${problem.message}`;
 }
 
 export function ProblemAlert({ problem, title }: { problem: Problem; title: string }) {
   return (
     <Alert tone="danger" title={title} live="alert">
-      {problemText(problem)}
+      <ProblemMessage problem={problem} message={problemText(problem)} />
     </Alert>
   );
 }
@@ -90,7 +94,7 @@ export function LoadFailure({ error, reload, what, backTo }: { error: Problem; r
   if (error.status === 403) {
     return (
       <Alert tone="warning" title={`You can't view this ${what}`} live="alert">
-        {problemText(error)}
+        <ProblemMessage problem={error} message={problemText(error)} />
       </Alert>
     );
   }
@@ -105,7 +109,7 @@ export function LoadFailure({ error, reload, what, backTo }: { error: Problem; r
         </Button>
       }
     >
-      {problemText(error)}
+      <ProblemMessage problem={error} message={problemText(error)} />
     </Alert>
   );
 }

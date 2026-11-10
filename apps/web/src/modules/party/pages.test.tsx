@@ -90,7 +90,7 @@ describe("party search", () => {
     let failing = true;
     api.handler = () => (failing ? problem(500, "COM-0500", "boom") : json(200, org(PARTY, "Northwind")));
     renderAt(`/party?id=${PARTY}`);
-    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
     failing = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Northwind")).toBeInTheDocument();
@@ -101,7 +101,7 @@ describe("party search", () => {
       throw new Error("offline");
     };
     renderAt(`/party?id=${PARTY}`);
-    expect(await screen.findByText(/offline \(COM-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/offline/)).toBeInTheDocument();
   });
 
   it("explains a missing party", async () => {

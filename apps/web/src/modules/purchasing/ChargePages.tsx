@@ -26,6 +26,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, StatusBadge, currencyPattern, datePattern, decimalPattern, statusLabel, todayIso, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -359,7 +360,7 @@ export function ChargeCodeCreatePage() {
           <CodeFields id="cc" form={form} set={set} errors={errors} creating />
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -484,8 +485,8 @@ export function ChargeCodeDetailPage() {
           >
             {failure
               ? stale
-                ? `Someone else changed this charge code since you opened it. Reload to see their change, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else changed this charge code since you opened it. Reload to see their change, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">
@@ -807,7 +808,7 @@ export function AutoChargeCreatePage() {
           </div>
         </Card>
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -939,8 +940,8 @@ export function AutoChargeDetailPage() {
           >
             {failure
               ? stale
-                ? `Someone else changed this auto charge since you opened it. Reload to see their change, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else changed this auto charge since you opened it. Reload to see their change, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">

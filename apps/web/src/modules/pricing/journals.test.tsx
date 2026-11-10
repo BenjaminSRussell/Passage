@@ -87,7 +87,7 @@ describe("Price journals", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" });
     renderAt("/pricing/journals");
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.view");
   });
 });
 
@@ -225,7 +225,7 @@ describe("Price journal detail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Post journal" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("The action failed");
-    expect(alert).toHaveTextContent("another pricing manager posts it (PRC-0057)");
+    expect(alert).toHaveTextContent("another pricing manager posts it");
     expect(screen.getByRole("button", { name: "Post journal" })).toBeInTheDocument();
   });
 

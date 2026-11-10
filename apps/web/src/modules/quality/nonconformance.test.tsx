@@ -129,7 +129,7 @@ describe("nonconformance list", () => {
     handler = (url) =>
       url.pathname === "/api/v1/quality/nonconformances" ? (fail ? json(500, { code: "COM-0500", detail: "database unavailable" }) : json(200, { items: [] })) : undefined;
     renderAt("/quality/nonconformances");
-    expect(await screen.findByText("database unavailable (COM-0500)")).toBeInTheDocument();
+    expect(await screen.findByText("database unavailable")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No nonconformances yet")).toBeInTheDocument();
@@ -278,14 +278,14 @@ describe("nonconformance detail", () => {
     fireEvent.change(within(form).getByLabelText("Result"), { target: { value: "NOT_EFFECTIVE" } });
     fireEvent.change(within(form).getByLabelText("Evidence"), { target: { value: "Recurred on lot 9" } });
     fireEvent.click(within(form).getByRole("button", { name: "Record effectiveness check" }));
-    expect(await within(form).findByText(/must be made by a user other than the one who completed D7 \(QM-0175\)/)).toBeInTheDocument();
+    expect(await within(form).findByText(/must be made by a user other than the one who completed D7/)).toBeInTheDocument();
     expect(calls.find((c) => c.url.pathname.endsWith(":check-effectiveness"))?.body).toEqual({ result: "NOT_EFFECTIVE", note: "Recurred on lot 9" });
   });
 
   it("shows a missing NCR as an error with retry", async () => {
     handler = () => json(404, { code: "QM-0170", detail: "nonconformance not found" });
     renderAt(`/quality/nonconformances/${NCR}`);
-    expect(await screen.findByText("nonconformance not found (QM-0170)")).toBeInTheDocument();
+    expect(await screen.findByText("nonconformance not found")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

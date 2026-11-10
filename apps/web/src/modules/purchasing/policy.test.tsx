@@ -101,7 +101,7 @@ describe("purchasing policy detail", () => {
     renderAt(`/purchasing/policies/${LE}`);
     fireEvent.click(await screen.findByLabelText("Allow invoicing before receipt"));
     fireEvent.click(screen.getByRole("button", { name: "Update policy" }));
-    expect(await screen.findByText(/Someone else saved this policy.*PRC-POL-003/)).toBeInTheDocument();
+    expect(await screen.findByText(/Someone else saved this policy/)).toBeInTheDocument();
     expect(screen.getByLabelText("Allow invoicing before receipt")).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Reload policy" }));
     expect(await screen.findByText("3")).toBeInTheDocument();

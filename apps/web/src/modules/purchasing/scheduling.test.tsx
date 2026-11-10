@@ -124,7 +124,7 @@ describe("scheduling agreement monitor", () => {
   it("shows the problem code on error and retries", async () => {
     const fetchMock = stubFetch(() => problem(503, "COM-0503", "service unavailable"));
     renderAt("/purchasing/scheduling-agreements");
-    expect(await screen.findByText(/service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/service unavailable/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
@@ -294,7 +294,8 @@ describe("scheduling agreement detail", () => {
     serve(() => problem(422, "PRC-SA-003", "cumulative released 1050 cannot decrease from 1200 without a recorded reset"));
     renderAt(`/purchasing/scheduling-agreements/${SA_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Run release" }));
-    expect(await screen.findByText(/without a recorded reset \(PRC-SA-003\)/)).toBeInTheDocument();
+    expect(await screen.findByText("cumulative released 1050 cannot decrease from 1200 without a recorded reset")).toBeInTheDocument();
+    expect(screen.getByText("PRC-SA-003")).toBeInTheDocument();
   });
 
   it("explains a missing agreement", async () => {

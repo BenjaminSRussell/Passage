@@ -45,6 +45,8 @@ type fakeStore struct {
 	rollReplayKey   string
 	attempts        []store.Attempt
 	resolve         *store.ResolveInput
+	report          *store.Activation
+	reportID        string
 }
 
 func (f *fakeStore) ListComponents(context.Context) ([]store.Component, error) {
@@ -124,6 +126,15 @@ func (f *fakeStore) ActivateVersion(_ context.Context, in store.ActivationInput)
 func (f *fakeStore) ActivationPositions(context.Context, string) ([]inventory.Position, error) {
 	f.calls++
 	return f.positions, f.err
+}
+
+func (f *fakeStore) GetActivation(_ context.Context, id string) (store.Activation, error) {
+	f.calls++
+	f.reportID = id
+	if f.report == nil {
+		return store.Activation{}, f.err
+	}
+	return *f.report, f.err
 }
 
 func (f *fakeStore) StoreRoll(_ context.Context, in store.RollInput) (store.RollResult, bool, error) {

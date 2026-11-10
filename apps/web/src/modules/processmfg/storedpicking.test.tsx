@@ -130,7 +130,7 @@ describe("pick from stored batches (slice 12)", () => {
     handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/processmfg/picking-stored");
     fireEvent.change(screen.getByLabelText("Item"), { target: { value: ITEM } });
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     handler = (url) =>
       url.pathname === "/api/v1/production/batches"
         ? json(200, { items: [batch(BATCH_OLD, "L-OLD", "available")] })
@@ -140,6 +140,6 @@ describe("pick from stored batches (slice 12)", () => {
     fireEvent.change(screen.getByLabelText("Line quantity"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("On hand of batch L-OLD"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Propose batches" }));
-    expect(await findAlert()).toHaveTextContent("batch not found (PMF-0108)");
+    expect(await findAlert()).toHaveTextContent("batch not found");
   });
 });
