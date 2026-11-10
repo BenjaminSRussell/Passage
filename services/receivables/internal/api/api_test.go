@@ -96,6 +96,12 @@ func (f *fakeStore) SweepRMACredits(context.Context, time.Time, int) (store.RMAS
 	return store.RMASweepResult{Posted: 1}, nil
 }
 
+func (f *fakeStore) ApplyRemittanceAdvice(context.Context, string, []domain.AdviceLine) (store.AdviceResult, error) {
+	return store.AdviceResult{}, nil
+}
+func (f *fakeStore) AutoApplyPayments(context.Context, []string) (store.AutoApplyResult, error) {
+	return store.AutoApplyResult{}, nil
+}
 func (f *fakeStore) SettleCredit(context.Context, store.CreditSettlementRequest, string) (store.CreditSettlementResult, error) {
 	return store.CreditSettlementResult{}, nil
 }

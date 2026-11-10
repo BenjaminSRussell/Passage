@@ -2217,6 +2217,12 @@ test_rma_credit_operator_routes_belong_to_the_payment_duty if {
 	not allowed("receivables.view", "POST", "/v1/receivables/rma-credits/c1:backfill-reservation")
 }
 
+test_remittance_advice_belongs_to_the_payment_post_duty if {
+	allowed("receivables.payment.post", "POST", "/v1/receivables/remittance-advices")
+	not allowed("receivables.view", "POST", "/v1/receivables/remittance-advices")
+	not allowed("receivables.payment-file.import", "POST", "/v1/receivables/remittance-advices")
+}
+
 test_credit_settlement_belongs_to_the_settle_duty if {
 	allowed("receivables.payment.settle", "POST", "/v1/receivables/credit-settlements")
 	not allowed("receivables.payment.post", "POST", "/v1/receivables/credit-settlements")

@@ -30,6 +30,8 @@ func (a *API) bankStatementRoutes(r chi.Router) {
 type bankStatementImportRequest struct {
 	LegalEntityID string `json:"legalEntityId"`
 	Content       string `json:"content"`
+	// AutoApply matches each imported payment and applies the ones the matcher is sure of (needs receivables.payment.post).
+	AutoApply bool `json:"autoApply"`
 }
 
 // importBankStatement handles POST /bank-statements/imports: parse a camt.053 file
@@ -60,6 +62,9 @@ func (a *API) importBankStatement(w http.ResponseWriter, r *http.Request) {
 	if !scopeAllows(w, r, req.LegalEntityID) {
 		return
 	}
+	if req.AutoApply && !require(w, r, dutyPayment) {
+		return
+	}
 	stmt, err := domain.ParseCAMT053([]byte(req.Content))
 	if err != nil {
 		var ce *domain.CAMTError
@@ -83,7 +88,11 @@ func (a *API) importBankStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.received.Add(int64(out.PaymentCount))
-	httpx.JSON(w, http.StatusCreated, out)
+	applied, ok := a.autoApplyImported(w, r, req.AutoApply, out.Payments)
+	if !ok {
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, statementImportResponse{BankStatementBatch: out, AutoApply: applied})
 }
 
 // listBankStatementImports handles GET /bank-statements/imports: imported files, newest first.

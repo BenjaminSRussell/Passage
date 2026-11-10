@@ -21,6 +21,8 @@ type lockboxImportRequest struct {
 	ReceivedDate  string   `json:"receivedDate"`
 	TypeCodes     []string `json:"typeCodes"`
 	Content       string   `json:"content"`
+	// AutoApply matches each imported payment and applies the ones the matcher is sure of (needs receivables.payment.post).
+	AutoApply bool `json:"autoApply"`
 }
 
 // importLockbox handles POST /lockbox/imports: parse a BAI2 file (AR-0004 on a
@@ -59,6 +61,9 @@ func (a *API) importLockbox(w http.ResponseWriter, r *http.Request) {
 	if !scopeAllows(w, r, req.LegalEntityID) {
 		return
 	}
+	if req.AutoApply && !require(w, r, dutyPayment) {
+		return
+	}
 
 	file, err := domain.ParseBAI2(req.Content)
 	if err != nil {
@@ -87,7 +92,11 @@ func (a *API) importLockbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.received.Add(int64(len(out.Payments)))
-	httpx.JSON(w, http.StatusCreated, out)
+	applied, ok := a.autoApplyImported(w, r, req.AutoApply, out.Payments)
+	if !ok {
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, lockboxImportResponse{LockboxBatch: out, AutoApply: applied})
 }
 
 // listLockboxBatches handles GET /lockbox/imports: imported files, newest first.
