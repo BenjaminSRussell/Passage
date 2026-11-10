@@ -1,0 +1,66 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
+)
+
+type fakeSalesReports struct {
+	listed  string
+	retried string
+	err     error
+}
+
+func (f *fakeSalesReports) ListSalesReports(_ context.Context, status string, _ int) ([]store.SalesReport, error) {
+	f.listed = status
+	return []store.SalesReport{{ID: "r1", Status: store.SalesReportParked}}, nil
+}
+
+func (f *fakeSalesReports) RetrySalesReport(_ context.Context, id string) (store.SalesReport, error) {
+	f.retried = id
+	return store.SalesReport{ID: id, Status: store.SalesReportPending}, f.err
+}
+
+// #29: parked sales reports are listed under invoice view and retried under invoice post, and nothing else may; an unknown
+// status is a 400, a report that is not parked is a 409 and a deployment without the store answers 503.
+func TestSalesReports_OperatorListAndRetry(t *testing.T) {
+	fake := &fakeSalesReports{}
+	a, h := setupAPI(t, newFakeStore(), &fakeTax{perLine: "19.00"})
+	a.WithSalesReports(fake)
+	id := "018f0000-0000-7000-8000-0000000000aa"
+
+	if rec := doAs(h, http.MethodGet, "/v1/billing/sales-reports?status=PARKED", "", "", dutyView, nil); rec.Code != http.StatusOK || fake.listed != "PARKED" || !strings.Contains(rec.Body.String(), `"r1"`) {
+		t.Fatalf("list = %d %s (status %q)", rec.Code, rec.Body, fake.listed)
+	}
+	if rec := doAs(h, http.MethodGet, "/v1/billing/sales-reports?status=DONE", "", "", dutyView, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown status = %d", rec.Code)
+	}
+	if rec := doAs(h, http.MethodGet, "/v1/billing/sales-reports", "", "", dutyPost, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("list with the post duty = %d, want 403", rec.Code)
+	}
+	for _, duty := range []string{dutyView, dutyMaintain, ""} {
+		if rec := doAs(h, http.MethodPost, "/v1/billing/sales-reports/"+id+":retry", "", "", duty, nil); rec.Code != http.StatusForbidden || fake.retried != "" {
+			t.Errorf("retry with duty %q = %d (retried %q), want 403", duty, rec.Code, fake.retried)
+		}
+	}
+	if rec := doAs(h, http.MethodPost, "/v1/billing/sales-reports/"+id+":retry", "", "", dutyPost, nil); rec.Code != http.StatusOK || fake.retried != id {
+		t.Fatalf("retry = %d %s", rec.Code, rec.Body)
+	}
+	if rec := doAs(h, http.MethodPost, "/v1/billing/sales-reports/not-a-uuid:retry", "", "", dutyPost, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("malformed id = %d", rec.Code)
+	}
+	fake.err = httpx.NewProblem(http.StatusConflict, store.CodeSalesReportState, "the sales report is REPORTED")
+	if rec := doAs(h, http.MethodPost, "/v1/billing/sales-reports/"+id+":retry", "", "", dutyPost, nil); rec.Code != http.StatusConflict {
+		t.Errorf("reported report = %d, want 409", rec.Code)
+	}
+
+	bare := setup(t, newFakeStore(), &fakeTax{perLine: "19.00"})
+	if rec := doAs(bare, http.MethodGet, "/v1/billing/sales-reports", "", "", dutyView, nil); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("without a store = %d, want 503", rec.Code)
+	}
+}
