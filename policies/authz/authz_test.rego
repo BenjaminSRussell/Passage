@@ -1423,6 +1423,23 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
 }
 
+test_treasury_ebics_duties_split_ceremony_from_confirmation if {
+	allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers")
+	not allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:send-hia")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:fetch-bank-keys")
+	not allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+	not allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:unpark")
+	allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+	allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:unpark")
+	not allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	not allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers")
+	allowed("treasury.view", "GET", "/v1/treasury/ebics-subscribers/s-1")
+	allowed("treasury.view", "GET", "/v1/treasury/ebics-subscribers/s-1/letters/INI")
+	not allowed("treasury.view", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+}
+
 test_payroll_run_duties_split_maintain_finalize_post_and_read if {
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs")
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs/r-1/review")

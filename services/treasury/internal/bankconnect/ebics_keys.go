@@ -1,0 +1,286 @@
+package bankconnect
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"math/big"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var vaultKVPath = regexp.MustCompile(`^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$`)
+
+const (
+	ebicsUsageA006 = "A006"
+	ebicsUsageX002 = "X002"
+	ebicsUsageE002 = "E002"
+	minEBICSBits   = 2048
+)
+
+// EBICSKeyRefs names where a subscriber's three keys live. A006 and X002 are
+// non-exportable transit keys (RSA), so signing happens inside Vault. E002 is
+// a KV v2 secret holding the PEM private key: E002 wraps the transaction key
+// with RSA PKCS#1 v1.5, which the transit engine cannot decrypt (it offers only
+// OAEP), so the key is read into memory for each decryption and not kept.
+//
+// A006Version and X002Version are the transit key versions pinned at INI and
+// HIA; zero means not pinned yet. Signatures are made with exactly the pinned
+// version, never the latest, so a rotation in Vault cannot change which key
+// signs what the bank holds a public key for.
+type EBICSKeyRefs struct {
+	A006, X002               string
+	A006Version, X002Version int
+	E002KVMount              string
+	E002KVPath               string
+}
+
+// VaultKeys is the Vault-backed EBICS key custody. It satisfies ebics.Keys; no
+// method returns private key material.
+type VaultKeys struct {
+	vault *Vault
+	refs  EBICSKeyRefs
+}
+
+// EBICSKeys returns the key custody for one subscriber. The transit key names
+// must be on the signing allow-list and distinct, and the KV location must be
+// well formed; none may be the SFTP login key.
+func (v *Vault) EBICSKeys(r EBICSKeyRefs) (*VaultKeys, error) {
+	if !v.cfg.Enabled() {
+		return nil, errors.New("vault is not configured")
+	}
+	allowed := map[string]bool{}
+	for _, n := range v.cfg.SigningKeyNames {
+		allowed[n] = true
+	}
+	for _, n := range []string{r.A006, r.X002} {
+		if !vaultName.MatchString(n) || !allowed[n] {
+			return nil, fmt.Errorf("ebics key %q is not an allowed signing key", n)
+		}
+	}
+	if r.A006 == r.X002 {
+		return nil, errors.New("ebics A006 and X002 must be different keys")
+	}
+	if !vaultName.MatchString(r.E002KVMount) || !vaultKVPath.MatchString(r.E002KVPath) {
+		return nil, errors.New("ebics E002 secret location is malformed")
+	}
+	return &VaultKeys{vault: v, refs: r}, nil
+}
+
+func (k *VaultKeys) token(ctx context.Context) (string, error) { return k.vault.Token(ctx) }
+
+func (k *VaultKeys) sign(ctx context.Context, name string, version int, input []byte, algorithm string) ([]byte, error) {
+	if version < 1 {
+		return nil, fmt.Errorf("vault sign: the version of transit key %q is not pinned; send INI and HIA first", name)
+	}
+	tok, err := k.token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req := map[string]any{"input": base64.StdEncoding.EncodeToString(input), "signature_algorithm": algorithm, "key_version": version}
+	if algorithm == "pss" {
+		req["salt_length"] = "hash"
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Data struct {
+			Signature string `json:"signature"`
+		} `json:"data"`
+	}
+	if err := k.vault.cfg.call(ctx, http.MethodPost, "/v1/transit/sign/"+name+"/sha2-256", tok, body, &out); err != nil {
+		k.vault.dropOnForbidden(err)
+		return nil, fmt.Errorf("vault sign: %w", err)
+	}
+	return parseVaultSignature(out.Data.Signature)
+}
+
+// SignA006 signs the SHA-256 digest of an order with RSASSA-PSS; Vault hashes
+// the digest once more, which is what A006 prescribes.
+func (k *VaultKeys) SignA006(ctx context.Context, orderHash []byte) ([]byte, error) {
+	return k.sign(ctx, k.refs.A006, k.refs.A006Version, orderHash, "pss")
+}
+
+// SignX002 signs the canonical SignedInfo with RSASSA-PKCS1-v1_5 and SHA-256.
+func (k *VaultKeys) SignX002(ctx context.Context, signedInfo []byte) ([]byte, error) {
+	return k.sign(ctx, k.refs.X002, k.refs.X002Version, signedInfo, "pkcs1v15")
+}
+
+// Public returns the public key and its transit version: the pinned version
+// when the subscriber has one, otherwise the latest (which the caller pins).
+// E002 has no version (0).
+func (k *VaultKeys) Public(ctx context.Context, usage string) (*rsa.PublicKey, int, error) {
+	switch usage {
+	case ebicsUsageA006:
+		return k.transitPublic(ctx, k.refs.A006, k.refs.A006Version)
+	case ebicsUsageX002:
+		return k.transitPublic(ctx, k.refs.X002, k.refs.X002Version)
+	case ebicsUsageE002:
+		pub, err := k.e002Public(ctx)
+		return pub, 0, err
+	}
+	return nil, 0, fmt.Errorf("unknown ebics key usage %q", usage)
+}
+
+func (k *VaultKeys) transitPublic(ctx context.Context, name string, pinned int) (*rsa.PublicKey, int, error) {
+	tok, err := k.token(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	var out struct {
+		Data struct {
+			Type                 string `json:"type"`
+			Exportable           bool   `json:"exportable"`
+			AllowPlaintextBackup bool   `json:"allow_plaintext_backup"`
+			LatestVersion        int    `json:"latest_version"`
+			Keys                 map[string]struct {
+				PublicKey string `json:"public_key"`
+			} `json:"keys"`
+		} `json:"data"`
+	}
+	if err := k.vault.cfg.call(ctx, http.MethodGet, "/v1/transit/keys/"+name, tok, nil, &out); err != nil {
+		k.vault.dropOnForbidden(err)
+		return nil, 0, fmt.Errorf("vault read ebics public key: %w", err)
+	}
+	if out.Data.Exportable || out.Data.AllowPlaintextBackup {
+		return nil, 0, errors.New("ebics transit key must not be exportable or allow plaintext backup")
+	}
+	if !strings.HasPrefix(out.Data.Type, "rsa-") {
+		return nil, 0, fmt.Errorf("ebics transit key type %q is not RSA", out.Data.Type)
+	}
+	version := out.Data.LatestVersion
+	if pinned > 0 {
+		version = pinned
+	}
+	block, _ := pem.Decode([]byte(out.Data.Keys[strconv.Itoa(version)].PublicKey))
+	if block == nil {
+		return nil, 0, fmt.Errorf("vault read ebics public key: version %d is not available", version)
+	}
+	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+	pub, ok := parsed.(*rsa.PublicKey)
+	if err != nil || !ok || pub.N.BitLen() < minEBICSBits {
+		return nil, 0, errors.New("vault read ebics public key: not an RSA key of 2048 bits or more")
+	}
+	return pub, version, nil
+}
+
+// DecryptE002 unwraps an E002 transaction key. A wrapped key that fails PKCS#1
+// padding yields a random key rather than an error, so the failure shows only
+// as undecryptable data and the key store is no padding oracle.
+func (k *VaultKeys) DecryptE002(ctx context.Context, wrapped []byte) ([]byte, error) {
+	priv, err := k.e002(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer zeroPrivateKey(priv)
+	key := make([]byte, 16)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	if err := rsa.DecryptPKCS1v15SessionKey(rand.Reader, priv, wrapped, key); err != nil {
+		return nil, fmt.Errorf("unwrap transaction key: %w", err)
+	}
+	return key, nil
+}
+
+// E002PublicPath is where the E002 public key is kept, apart from the private
+// key, so that building a letter or an HIA order never reads the private key.
+func (r EBICSKeyRefs) E002PublicPath() string { return r.E002KVPath + "-pub" }
+
+func (k *VaultKeys) e002Public(ctx context.Context) (*rsa.PublicKey, error) {
+	tok, err := k.token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Data struct {
+			Data struct {
+				PEM string `json:"pem"`
+			} `json:"data"`
+		} `json:"data"`
+	}
+	if err := k.vault.cfg.call(ctx, http.MethodGet, "/v1/"+k.refs.E002KVMount+"/data/"+k.refs.E002PublicPath(), tok, nil, &out); err != nil {
+		k.vault.dropOnForbidden(err)
+		return nil, fmt.Errorf("vault read ebics E002 public key: %w", err)
+	}
+	block, _ := pem.Decode([]byte(out.Data.Data.PEM))
+	if block == nil {
+		return nil, errors.New("vault read ebics E002 public key: malformed PEM")
+	}
+	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+	pub, ok := parsed.(*rsa.PublicKey)
+	if err != nil || !ok || pub.N.BitLen() < minEBICSBits {
+		return nil, errors.New("vault read ebics E002 public key: not an RSA key of 2048 bits or more")
+	}
+	return pub, nil
+}
+
+// zeroPrivateKey overwrites the key's secret integers in place and drops the
+// precomputed CRT values. It is best effort: Go cannot wipe the JSON reply and
+// PEM strings the key was parsed from, the copies the garbage collector made,
+// or the internal state the crypto/rsa and FIPS 140 modules build while
+// decrypting, which the package does not expose.
+func zeroPrivateKey(k *rsa.PrivateKey) {
+	wipe := func(x *big.Int) {
+		if x != nil {
+			clear(x.Bits())
+			x.SetInt64(0)
+		}
+	}
+	wipe(k.D)
+	for _, p := range k.Primes {
+		wipe(p)
+	}
+	wipe(k.Precomputed.Dp)
+	wipe(k.Precomputed.Dq)
+	wipe(k.Precomputed.Qinv)
+	for _, c := range k.Precomputed.CRTValues {
+		wipe(c.Exp)
+		wipe(c.Coeff)
+		wipe(c.R)
+	}
+	k.Precomputed = rsa.PrecomputedValues{}
+}
+
+func (k *VaultKeys) e002(ctx context.Context) (*rsa.PrivateKey, error) {
+	tok, err := k.token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Data struct {
+			Data struct {
+				PEM string `json:"pem"`
+			} `json:"data"`
+		} `json:"data"`
+	}
+	if err := k.vault.cfg.call(ctx, http.MethodGet, "/v1/"+k.refs.E002KVMount+"/data/"+k.refs.E002KVPath, tok, nil, &out); err != nil {
+		k.vault.dropOnForbidden(err)
+		return nil, fmt.Errorf("vault read ebics E002 key: %w", err)
+	}
+	block, _ := pem.Decode([]byte(out.Data.Data.PEM))
+	if block == nil {
+		return nil, errors.New("vault read ebics E002 key: malformed PEM")
+	}
+	defer clear(block.Bytes)
+	var priv *rsa.PrivateKey
+	if parsed, perr := x509.ParsePKCS8PrivateKey(block.Bytes); perr == nil {
+		priv, _ = parsed.(*rsa.PrivateKey)
+	} else {
+		priv, _ = x509.ParsePKCS1PrivateKey(block.Bytes)
+	}
+	if priv == nil || priv.N.BitLen() < minEBICSBits {
+		return nil, errors.New("vault read ebics E002 key: not an RSA key of 2048 bits or more")
+	}
+	return priv, nil
+}
