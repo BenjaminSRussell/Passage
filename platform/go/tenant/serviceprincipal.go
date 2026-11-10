@@ -33,6 +33,7 @@ var servicePrincipals = map[string][]string{
 	"integration-hub":          {"migration.outbound.render", "migration.xref.record"},
 	"inventory-postings":       {"inventory.transaction.apply"},
 	"pricing-cache":            {"pricing.cache.invalidate"},
+	"search-index":             {"search.index.write"},
 	"migration-loader":         {"party.import.write", "party.import.read", "product.import.write", "product.import.read", "receivables.import.write", "receivables.import.read", "engineering.import.write", "engineering.import.read"},
 	"production-planning":      {"production.planned.intake"},
 	"production-shopfloor":     {"production.jobcard.shopfloor"},
@@ -60,6 +61,7 @@ var servicePrincipalIssuers = map[string][]string{
 	"integration-hub":          {"integration-hub"},
 	"inventory-postings":       {"inventory"},
 	"pricing-cache":            {"pricing"},
+	"search-index":             {"search"},
 	// party forwards the loader as act on the one onward call a party create makes: the party number from numbering.
 	// Its token holds only party's own grant (numbering.sequence.allocate), so nothing is borrowed (#475).
 	"migration-loader":        {"migration", "migration-factory", "party"},

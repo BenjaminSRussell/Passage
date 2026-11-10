@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Added
 
+- search: a new `services/search` module serves `GET /v1/search?q=&types=&limit=` over parties, products and purchase orders (#506). A consumer keeps a pg_trgm index current from the party, product and purchase order events (idempotent, ordered by event time, a merge removes the losers and re-indexes the survivor, a cancelled order stays searchable as CANCELLED); an exact number ranks first, then trigram similarity. The index is under forced tenant and legal-entity row-level security, and a caller searches a type only with its source's read duty. The party, product and purchase order events gain the fields the index needs (`search.index.write` flag duty, `search-index` service principal, `deploy/kafka/search-consumer.yaml`, gateway route `/v1/search`).
 - Payables: cutover import of open vendor items (`POST /v1/payables/opening-batches`, service-only) with idempotent batches, per-row errors, control totals and a read-back of counts and totals; nothing posts to the ledger (#49).
 - Receivables opens an item for every invoice and credit note billing posts (#30): a new consumer (`receivables consume`, group
   and service principal `receivables-billing`, flag duty `receivables.openitem.from-billing`, dead-letter topic

@@ -159,7 +159,12 @@ func mergeIn(ctx context.Context, tx pgx.Tx, tenantID string, req MergeRequest) 
 		values ($1, $2, $3, $4, $5, $6, $7) returning merged_at`, tenantID, res.MergeID, req.WinnerID, req.LoserID, resolution, res.RolesMoved, res.ReferencesRewritten).Scan(&mergedAt); err != nil {
 		return res, err
 	}
-	return res, enqueueMerged(ctx, tx, tenantID, req, res, movedRoles, mergedAt.UTC())
+	survivor := domain.PartySnapshot{PartyType: winner.partyType, Name: resolved["name"]}
+	if err := tx.QueryRow(ctx, `select party_number, status, version from party where tenant_id = $1 and id = $2`,
+		tenantID, req.WinnerID).Scan(&survivor.PartyNumber, &survivor.Status, &survivor.Version); err != nil {
+		return res, err
+	}
+	return res, enqueueMerged(ctx, tx, tenantID, req, res, movedRoles, mergedAt.UTC(), survivor)
 }
 
 func lockParties(ctx context.Context, tx pgx.Tx, tenantID string, partyIDs ...string) (map[string]*partyRow, error) {
@@ -248,9 +253,9 @@ func moveRoles(ctx context.Context, tx pgx.Tx, tenantID string, req MergeRequest
 	return moved, nil
 }
 
-func enqueueMerged(ctx context.Context, tx pgx.Tx, tenantID string, req MergeRequest, res MergeResult, roleMap []domain.RoleIDMapping, mergedAt time.Time) error {
+func enqueueMerged(ctx context.Context, tx pgx.Tx, tenantID string, req MergeRequest, res MergeResult, roleMap []domain.RoleIDMapping, mergedAt time.Time, survivor domain.PartySnapshot) error {
 	evt, err := events.New(domain.PartyMergedType, domain.EventSource, req.WinnerID, tenantID, domain.PartyMerged{
-		MergeID: res.MergeID, SurvivorPartyID: req.WinnerID, MergedPartyIDs: []string{req.LoserID}, RoleIDMap: roleMap, MergedAt: mergedAt,
+		MergeID: res.MergeID, SurvivorPartyID: req.WinnerID, MergedPartyIDs: []string{req.LoserID}, RoleIDMap: roleMap, MergedAt: mergedAt, Survivor: survivor,
 	})
 	if err != nil {
 		return err

@@ -225,7 +225,7 @@ func (s *Postgres) CreateProduct(ctx context.Context, in domain.Product, idem st
 			}
 		}
 		return emit(ctx, tx, pevents.ProductCreated, "product", in.ID, pevents.ProductCreatedData{
-			ProductID: in.ID, ProductNumber: in.ProductNumber, Subtype: in.Subtype, ProductType: in.ProductType, BaseUOM: in.BaseUOM,
+			ProductID: in.ID, ProductNumber: in.ProductNumber, Name: in.Name, Subtype: in.Subtype, ProductType: in.ProductType, BaseUOM: in.BaseUOM, LifecycleState: in.LifecycleState, Version: 1,
 		})
 	})
 	var pgErr *pgconn.PgError
@@ -331,7 +331,7 @@ func (s *Postgres) UpdateProduct(ctx context.Context, id string, patch domain.Pr
 		}
 		cur.Version++
 		out = cur
-		return emit(ctx, tx, pevents.ProductUpdated, "product", id, pevents.ProductUpdatedData{ProductID: id, ChangedFields: changed, Version: cur.Version})
+		return emit(ctx, tx, pevents.ProductUpdated, "product", id, pevents.ProductUpdatedData{ProductID: id, ProductNumber: cur.ProductNumber, Name: cur.Name, ProductType: cur.ProductType, LifecycleState: cur.LifecycleState, ChangedFields: changed, Version: cur.Version})
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, httpx.NewProblem(http.StatusNotFound, "COM-0001", "product not found")
