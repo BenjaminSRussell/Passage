@@ -179,3 +179,58 @@ func supplyDate(t time.Time) any {
 	}
 	return t
 }
+
+func (s *Postgres) ListInvoices(ctx context.Context, f InvoiceFilter) ([]Invoice, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	limit := f.Limit
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+	limit = min(limit, maxListLimit)
+	var cursorID any
+	if !f.CursorCreatedAt.IsZero() {
+		cursorID = f.CursorID
+	}
+	var out []Invoice
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT i.id::text, i.legal_entity_id::text, i.vendor_id::text, i.invoice_number, i.invoice_date, i.posting_date, i.currency, i.ledger_id::text,
+			i.fiscal_period_id::text, i.ledger_entry_id, i.total, i.created_at, i.source, i.status, i.posted_by, COALESCE(i.one_time_payee_id::text, ''), i.audit_reason,
+			COALESCE(i.audit_rule_version, 0), COALESCE(i.released_by, ''), i.released_at, COALESCE(i.rejected_by, ''), i.rejected_at, COALESCE(i.reject_reason, '')
+			FROM receiving_vendor_invoice i
+			WHERE i.tenant_id = $1
+			AND ($2 = '' OR i.vendor_id = $2::uuid)
+			AND ($3 = '' OR i.status = $3)
+			AND ($4 = '' OR EXISTS (SELECT 1 FROM receiving_vendor_invoice_line l WHERE l.tenant_id = i.tenant_id AND l.invoice_id = i.id AND l.receipt_id = $4::uuid))
+			AND ($5 = '' OR EXISTS (SELECT 1 FROM receiving_vendor_invoice_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
+				WHERE l.tenant_id = i.tenant_id AND l.invoice_id = i.id AND r.purchase_order_id = $5::uuid))
+			AND ($6::timestamptz IS NULL OR (i.created_at, i.id) < ($6::timestamptz, $7::uuid))
+			ORDER BY i.created_at DESC, i.id DESC LIMIT $8`,
+			tenantID, f.VendorID, f.Status, f.ReceiptID, f.PurchaseOrderID, nullTime(f.CursorCreatedAt), cursorID, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var inv Invoice
+			if err := rows.Scan(&inv.ID, &inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID,
+				&inv.FiscalPeriodID, &inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy, &inv.OneTimePayeeID, &inv.AuditReason,
+				&inv.AuditRuleVersion, &inv.ReleasedBy, &inv.ReleasedAt, &inv.RejectedBy, &inv.RejectedAt, &inv.RejectReason); err != nil {
+				return err
+			}
+			out = append(out, inv)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for i := range out {
+			if err := loadInvoiceLines(ctx, tx, tenantID, &out[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return out, err
+}
