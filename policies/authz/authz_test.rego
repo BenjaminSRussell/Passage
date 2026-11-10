@@ -1381,6 +1381,14 @@ test_migration_factory_grant_reaches_only_the_receivables_import if {
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
 }
 
+test_migration_payables_load_routes_need_run_and_view_duties if {
+	allowed("migration.factory.run", "POST", "/api/v1/migration/runs/r1/load-payables")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/load-payables")
+	allowed("migration.factory.view", "GET", "/api/v1/migration/runs/r1/payables-load")
+	not allowed("migration.factory.view", "POST", "/api/v1/migration/runs/r1/load-payables")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/payables-load")
+}
+
 test_opening_item_duties_are_service_only_and_cover_only_their_route if {
 	allowed("opening-item.import", "POST", "/v1/payables/opening-batches")
 	not allowed("opening-item.import", "GET", "/v1/payables/opening-batches")

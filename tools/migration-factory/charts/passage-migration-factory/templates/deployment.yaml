@@ -48,6 +48,10 @@ spec:
             - name: RECEIVABLES_URL
               value: {{ .Values.receivables.url | quote }}
             {{- end }}
+            {{- if .Values.payables.url }}
+            - name: PAYABLES_URL
+              value: {{ .Values.payables.url | quote }}
+            {{- end }}
             {{- if .Values.signing.secretName }}
             - name: PASSAGE_SERVICE_NAME
               value: migration-factory

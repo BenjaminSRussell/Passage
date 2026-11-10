@@ -70,6 +70,9 @@ type TargetConfig struct {
 	LegalEntityID string
 	ImportSource  string
 	Customers     map[string]string
+	// Payables, when set, stages the run's AP lines for the payables opening-batch import (49-3). Without it
+	// AP lines are NOT_AVAILABLE, as before.
+	Payables *PayablesConfig
 }
 
 // ValidateImportSource checks the import source name against receivables' rule.
@@ -157,9 +160,11 @@ type StagedRow struct {
 	Ledger   string
 	Hash     string
 	Row      *ReceivablesRow
-	Status   string
-	Code     string
-	Detail   string
+	// AP is the payables opening item of an AP line staged for payables (TargetConfig.Payables).
+	AP     *PayablesRow
+	Status string
+	Code   string
+	Detail string
 }
 
 // StageRows builds the receivables row of each accepted record. An AP record is NOT_AVAILABLE (payables has no
@@ -172,6 +177,18 @@ func StageRows(accepted []Record, extras map[string]TargetExtra, cfg TargetConfi
 		st := StagedRow{Seq: i + 1, LegacyID: rec.LegacyID, Ledger: LedgerAR, Status: RowPending}
 		if x.Ledger != "" {
 			st.Ledger = x.Ledger
+		}
+		if st.Ledger == LedgerAP && cfg.Payables != nil {
+			ap, code, detail := buildPayablesRow(rec, x, cfg)
+			if code != "" {
+				st.Status, st.Code, st.Detail = RowRejected, code, detail
+				out = append(out, st)
+				continue
+			}
+			st.AP = &ap
+			st.Hash = ap.Hash(cfg.ImportSource, cfg.LegalEntityID)
+			out = append(out, st)
+			continue
 		}
 		if st.Ledger == LedgerAP {
 			st.Status, st.Code = RowNotAvailable, CodeTargetNotAvailable

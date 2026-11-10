@@ -100,13 +100,28 @@ Built and tested:
   /v1/receivables/open-item-imports` (item count, debit, credit, net per currency) with what the
   factory sent; a difference is MISMATCH and flags the pack. A rerun of an unchanged snapshot sends
   nothing (`target_loaded` remembers each accepted row's hash). Open AP rows are `NOT_AVAILABLE`
-  rejects until payables has an opening-item API. Both sides of the reconciliation cover the whole
+  rejects unless the run names `load.payables` (see the next item). Both sides of the reconciliation cover the whole
   import source in the legal entity across runs; one load runs at a time per import source and legal
   entity, an older run is not loaded over a newer one, and one import source belongs to one legacy
   company. The factory calls as the service `migration-factory` (its own key) acting as
   `migration-loader`, each token holding one duty; without `RECEIVABLES_URL` and a signing key the service starts and the
   load answers 503 `MIG-1520`. Tests run against `internal/target/targettest`, an httptest fake that
   mirrors the receivables handler.
+- **Open AP into payables** (49-3, `internal/target/payables.go`, `migrations/0027_payables_load.sql`): a run
+  started with `load.payables` (legacy vendor to Passage vendor id, or `vendorId` on the record) stages its AP
+  records for the payables opening batches. `POST /migration/runs/{id}/load-payables` sends them to
+  `POST /v1/payables/opening-batches` in batches of at most 1000 (all or nothing at payables, a control total per
+  currency in minor units, a batch key `mf-ap-<importSource>-<hash>` derived from the rows so a retry is a replay).
+  Rows payables refuses by name (`AP-OPB-001` unknown vendor or bad field, `AP-OPB-004` reference held by another
+  batch) are stored REJECTED with its reason and the rest of the batch is sent again; a 5xx, 429 or timeout leaves the
+  rows pending (PARTIAL); a refusal of the whole request fails the load (502 `MIG-1552`, token refused `MIG-1551`).
+  Rows equal to what payables already holds are skipped. When nothing is pending, the batches payables lists for the
+  legal entity under the factory's keys are compared with what was sent (item count, total per currency in minor
+  units; control totals `target.payables.*`, MISMATCH never passed silently). `GET /migration/runs/{id}/payables-load`
+  reads it. The run's `payables_staged` stays at every AP line until the load is RECONCILED, so the go/no-go keeps
+  open_items staged; rejected lines stay staged and need a waiver. An AP amount carries the ledger sign (owed to the
+  vendor is negative); a positive amount (vendor debit balance) is rejected `MIG-LOAD-AP-DEBIT-BALANCE`. Configure
+  `PAYABLES_URL` (chart `payables.url`) next to `RECEIVABLES_URL`; tests use `targettest.FakePayables`.
 - **Legacy cross-reference lookup**: `GET /api/v1/migration/xref` by legacy id or by Passage record.
 - **Store** (`internal/store`, `migrations/`): Postgres with forced row-level security on every
   table, the outbox written in the same transaction, `Idempotency-Key` replay, and an optimistic
@@ -225,6 +240,10 @@ Problem details use `type` `https://passage.dev/problems/<code>`. The stable `co
 | `MIG-1524` | 502 | Receivables refused the whole batch request (a 4xx that is not a row result); the load is FAILED and its rows stay pending. |
 | `MIG-1525` | 409 | A later run of the same import source and legal entity has already been loaded; load the latest run. |
 | `MIG-1526` | 409 | The run's import source is already used by another legacy (system, company). |
+| `MIG-1550` | 503 | The payables target is not configured (`PAYABLES_URL` and the service signing key). |
+| `MIG-1551` | 502 | Payables refused the factory's service token; the load is FAILED and its rows stay pending. |
+| `MIG-1552` | 502 | Payables refused the batch request as a whole (control totals, a changed batch under an old key); the rows stay pending. |
+| `MIG-1553` | 409 | The run was started without `load.payables`, so it has no AP load. |
 | `AUTH-0001` | 401 | No tenant or principal. (Kernel.) |
 | `AUTH-0003` | 403 | Missing duty. (Kernel.) |
 | `COM-0001` | 400 | Malformed JSON body. (Kernel.) |
