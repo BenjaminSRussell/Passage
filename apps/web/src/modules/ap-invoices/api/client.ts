@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import { defaultFetch, request, type FetchLike } from "../../../shell/api/http";
+import { ApiError, defaultFetch, newKey, request, type FetchLike } from "../../../shell/api/http";
 
-export { ApiError, newKey } from "../../../shell/api/http";
+export { ApiError, newKey };
 
 export const GRIR_STATUSES = ["OPEN", "PARTIAL", "CLEARED", "WRITTEN_OFF"] as const;
 export type GrirStatus = (typeof GRIR_STATUSES)[number];
@@ -34,7 +34,18 @@ const grirPageSchema = z.object({
 });
 export type GrirPage = z.infer<typeof grirPageSchema>;
 
+export const INVOICE_STATUSES = ["POSTED", "AUDIT_BLOCKED", "AUDIT_REJECTED"] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
 export const invoiceSchema = z.object({
+  status: z.enum(INVOICE_STATUSES),
+  source: z.enum(["MANUAL", "ERS"]).optional(),
+  auditReason: z.string().optional(),
+  releasedBy: z.string().optional(),
+  releasedAt: z.string().optional(),
+  rejectedBy: z.string().optional(),
+  rejectedAt: z.string().optional(),
+  rejectReason: z.string().optional(),
   id: z.string(),
   vendorId: z.string(),
   legalEntityId: z.string(),
@@ -98,6 +109,43 @@ export async function fetchGrir(q: GrirQuery = {}, fetchImpl: FetchLike = defaul
   if (q.limit) params.set("limit", String(q.limit));
   const query = params.size > 0 ? `?${params}` : "";
   return request("GET", `/grir${query}`, grirPageSchema, fetchImpl);
+}
+
+const invoicePageSchema = z.object({ items: z.array(invoiceSchema), nextCursor: z.string().optional() });
+export type InvoicePage = z.infer<typeof invoicePageSchema>;
+
+export interface InvoiceQuery {
+  vendorId?: string;
+  status?: InvoiceStatus;
+  cursor?: string;
+  limit?: number;
+}
+
+/** GET /invoices: vendor invoices newest first with their lines. */
+export async function fetchInvoices(q: InvoiceQuery = {}, fetchImpl: FetchLike = defaultFetch): Promise<InvoicePage> {
+  const params = new URLSearchParams();
+  if (q.vendorId) params.set("vendorId", q.vendorId);
+  if (q.status) params.set("status", q.status);
+  if (q.cursor) params.set("cursor", q.cursor);
+  if (q.limit) params.set("limit", String(q.limit));
+  const query = params.size > 0 ? `?${params}` : "";
+  return request("GET", `/invoices${query}`, invoicePageSchema, fetchImpl);
+}
+
+const DETAIL_PAGE_SIZE = 200;
+const DETAIL_MAX_PAGES = 10;
+
+// ponytail: the service has no read-one route, so the detail pages through the newest 2000 invoices; add GET /invoices/{id} and call it here.
+export async function fetchInvoice(id: string, fetchImpl: FetchLike = defaultFetch): Promise<Invoice> {
+  let cursor: string | undefined;
+  for (let page = 0; page < DETAIL_MAX_PAGES; page += 1) {
+    const result = await fetchInvoices({ cursor, limit: DETAIL_PAGE_SIZE }, fetchImpl);
+    const found = result.items.find((i) => i.id === id);
+    if (found) return found;
+    if (!result.nextCursor) break;
+    cursor = result.nextCursor;
+  }
+  throw new ApiError(404, "RCV-NF-005", "This invoice was not found.");
 }
 
 /** POST /invoices:post. The caller keeps one Idempotency-Key per intended invoice so a retry replays. */

@@ -42,6 +42,7 @@ function page(items: GrirItem[], nextCursor?: string) {
 function invoice(patch: Partial<Invoice> = {}): Invoice {
   return {
     id: UUID_C,
+    status: "POSTED",
     vendorId: UUID_A,
     legalEntityId: UUID_B,
     invoiceNumber: "INV-1",
