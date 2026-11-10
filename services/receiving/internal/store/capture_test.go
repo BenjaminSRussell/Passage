@@ -63,3 +63,40 @@ func TestCapture_RoundTripsDeduplicatesAndIsIsolated(t *testing.T) {
 		}
 	}
 }
+
+func TestCapture_ListIsNewestFirstFilteredPagedAndIsolated(t *testing.T) {
+	db := seedInvoice(t)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	older := sampleCapture(payeeOne, db.one.LegalEntityID, "aaa")
+	older.Status, older.Reasons = domain.CaptureCaptured, []string{}
+	newer := sampleCapture(payeeOther, db.one.LegalEntityID, "bbb")
+	for _, c := range []store.Capture{older, newer} {
+		if _, _, err := st.CreateCapture(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	all, err := st.ListCaptures(ctx, store.CaptureFilter{})
+	if err != nil || len(all) != 2 || all[0].ID != payeeOther || all[1].ID != payeeOne {
+		t.Fatalf("all %+v %v, want the newer capture first", all, err)
+	}
+	review, err := st.ListCaptures(ctx, store.CaptureFilter{Status: domain.CaptureNeedsReview})
+	if err != nil || len(review) != 1 || review[0].ID != payeeOther || len(review[0].Reasons) != 1 {
+		t.Fatalf("needs review %+v %v", review, err)
+	}
+	page, err := st.ListCaptures(ctx, store.CaptureFilter{Limit: 1})
+	if err != nil || len(page) != 2 {
+		t.Fatalf("limit 1 returns the extra row that signals another page: %d %v", len(page), err)
+	}
+	rest, err := st.ListCaptures(ctx, store.CaptureFilter{Limit: 1, CursorCreatedAt: page[0].CreatedAt, CursorID: page[0].ID})
+	if err != nil || len(rest) != 1 || rest[0].ID != payeeOne {
+		t.Fatalf("after the cursor %+v %v", rest, err)
+	}
+	otherEntity := tenant.Principal{TenantID: db.one.TenantID, LegalEntityID: testkit.TenantID(8)}
+	for name, c := range map[string]context.Context{"another tenant": tenant.With(context.Background(), principal(2)), "another legal entity": tenant.With(context.Background(), otherEntity)} {
+		if got, err := st.ListCaptures(c, store.CaptureFilter{}); err != nil || len(got) != 0 {
+			t.Errorf("%s lists %d captures: %v", name, len(got), err)
+		}
+	}
+}

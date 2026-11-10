@@ -282,7 +282,7 @@ paths:
       operationId: getInvoice
       summary: Read one vendor invoice
       x-passage-duty: receiving.ap.inquire
-      description: The invoice with its lines and the ledger entry id (empty while held for audit), in the same shape as an item of GET /v1/receiving/invoices. An invoice outside the caller's tenant or legal entities answers 404.
+      description: The invoice with its lines and the ledger entry id (empty while held for audit), in the shape of an item of GET /v1/receiving/invoices plus match. match compares each invoice line with the receipt line it clears (received quantity and unit price) under the standard matching tolerances; receiving stores no matching result and no per-entity policy, so it is computed on read. An invoice outside the caller's tenant or legal entities answers 404.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -350,6 +350,25 @@ paths:
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
         '503': { $ref: '#/components/responses/Problem', description: 'RCV-CRY-001 no field encryption keys are configured.' }
   /v1/receiving/invoice-captures:
+    get:
+      operationId: listInvoiceCaptures
+      summary: List captured vendor invoices
+      x-passage-duty: receiving.ap.inquire
+      description: Invoice captures newest first (CAPTURED or NEEDS_REVIEW), inside the caller's tenant and legal entities. A capture is a draft that posted nothing; it becomes an invoice through POST /v1/receiving/invoices:post. Page with nextCursor.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [CAPTURED, NEEDS_REVIEW] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of captures.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceCapturePage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
     post:
       operationId: createInvoiceCapture
       x-passage-duty: receiving.vendor-invoice.post
@@ -1304,6 +1323,12 @@ components:
         format: { type: string, enum: [UBL, OCR] }
         mediaType: { type: string, enum: [application/pdf, image/png, image/jpeg, image/tiff], description: Required for OCR. }
         content: { type: string, format: byte, description: The document, base64. }
+    InvoiceCapturePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InvoiceCapture' } }
+        nextCursor: { type: string, description: Absent on the last page. }
     InvoiceCapture:
       type: object
       required: [id, legalEntityId, source, status, reviewReasons, vendorTaxId, invoiceNumber, invoiceDate, currency, total, confidence, lines, createdAt]
@@ -1420,6 +1445,24 @@ components:
       type: object
       required: [id, vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, source, status, createdAt, lines]
       properties:
+        match:
+          type: object
+          description: Only on GET /v1/receiving/invoices/{id}. Each line against the receipt line it clears, under the standard tolerances (the default matching policy).
+          required: [status, withinTolerance, lines]
+          properties:
+            status: { type: string, enum: [MATCHED, PRICE_VARIANCE, QTY_VARIANCE, NO_RECEIPT, WAITING_RECEIPT] }
+            withinTolerance: { type: boolean }
+            lines:
+              type: array
+              items:
+                type: object
+                required: [lineNo, status, priceVariance]
+                properties:
+                  lineNo: { type: integer }
+                  status: { type: string, enum: [MATCHED, PRICE_VARIANCE, QTY_VARIANCE, NO_RECEIPT, WAITING_RECEIPT] }
+                  receivedQty: { type: string, description: Quantity on the receipt line; absent when the receipt line is not visible to the caller. }
+                  priceVariance: { $ref: '#/components/schemas/Money' }
+                  currencyMismatch: { type: boolean }
         source: { type: string, enum: [MANUAL, ERS] }
         oneTimePayeeId: { type: string, format: uuid, description: The payee recorded for the invoice; its data is never returned. }
         auditReason: { type: string, enum: [stochastic sample, re-issue after audit rejection], description: Why an invoice is or was held for audit. }

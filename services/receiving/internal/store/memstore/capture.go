@@ -1,11 +1,14 @@
 package memstore
 
 import (
+	"cmp"
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
@@ -54,4 +57,23 @@ func (s *Store) FindCapture(ctx context.Context, legalEntityID, digest string) (
 		return nil
 	})
 	return out, found, err
+}
+
+func (s *Store) ListCaptures(ctx context.Context, f store.CaptureFilter) (out []store.Capture, err error) {
+	limit := pageLimit(f.Limit)
+	principal, _ := tenant.FromContext(ctx)
+	err = s.with(ctx, func(t *tenantData) error {
+		for _, c := range t.captures {
+			if !tenant.InLegalEntityScope(principal, c.LegalEntityID) || (f.Status != "" && c.Status != f.Status) || skipForCursor(c.CreatedAt, c.ID, f.CursorCreatedAt, f.CursorID) {
+				continue
+			}
+			out = append(out, cloneCapture(c))
+		}
+		slices.SortFunc(out, func(a, b store.Capture) int {
+			return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(b.ID, a.ID))
+		})
+		out = out[:min(len(out), limit+1)]
+		return nil
+	})
+	return out, err
 }

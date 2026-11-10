@@ -165,7 +165,12 @@ func (a *API) getInvoice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toInvoiceBody(inv))
+	body := toInvoiceBody(inv)
+	if body.Match, err = a.invoiceMatch(r.Context(), inv); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 type grirItemBody struct {

@@ -102,6 +102,54 @@ func TestGetInvoice_ReturnsTheInvoiceWithLinesAndLedgerEntry(t *testing.T) {
 	}
 }
 
+type matchJSON struct {
+	Match *struct {
+		Status          string `json:"status"`
+		WithinTolerance bool   `json:"withinTolerance"`
+		Lines           []struct {
+			LineNo        int    `json:"lineNo"`
+			Status        string `json:"status"`
+			ReceivedQty   string `json:"receivedQty"`
+			PriceVariance struct {
+				Amount   string `json:"amount"`
+				Currency string `json:"currency"`
+			} `json:"priceVariance"`
+		} `json:"lines"`
+	} `json:"match"`
+}
+
+func TestGetInvoice_ShowsTheMatchAgainstTheReceiptUnderStandardTolerances(t *testing.T) {
+	for name, tc := range map[string]struct {
+		price, status, variance string
+		within                  bool
+	}{
+		"same price":                        {"2.5", "MATCHED", "0.00", true},
+		"small difference inside tolerance": {"2.6", "MATCHED", "4.00", true},
+		"price far above the receipt":       {"40", "PRICE_VARIANCE", "1500.00", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rg := newRig(domain.PeriodOpen)
+			_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, tc.price, "")
+			got := decode[matchJSON](t, rg.call(http.MethodGet, listInvoicesPath+"/"+inv.ID, "", rg.inquirer()), http.StatusOK).Match
+			if got == nil || got.Status != tc.status || got.WithinTolerance != tc.within || len(got.Lines) != 1 {
+				t.Fatalf("match %+v, want %s within=%v", got, tc.status, tc.within)
+			}
+			line := got.Lines[0]
+			if line.LineNo != 1 || line.Status != tc.status || line.PriceVariance.Amount != tc.variance || line.PriceVariance.Currency != "USD" || line.ReceivedQty != "100" {
+				t.Fatalf("line %+v, want %s with variance %s on 100 received", line, tc.status, tc.variance)
+			}
+		})
+	}
+}
+
+func TestListInvoices_LeavesTheMatchToTheDetailRead(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
+	if rec := rg.call(http.MethodGet, listInvoicesPath, "", rg.inquirer()); strings.Contains(rec.Body.String(), `"match"`) {
+		t.Fatalf("list carries a match: %s", rec.Body)
+	}
+}
+
 func TestGetInvoice_IsNotFoundOutsideTheCallersLegalEntityOrForAnUnknownId(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
 	_, inv := rg.invoiced(t, "PS-1", "INV-1", 40, "2.5", "")
