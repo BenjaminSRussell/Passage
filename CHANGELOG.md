@@ -8,6 +8,10 @@ release may change public APIs.
 
 ## [Unreleased]
 
+### Added
+
+- Web: payables module with vendor open items (filters, paging, hold and release), payment proposals (list, create, detail with totals and held items, approve and cancel with a confirm step and segregation-of-duties messages); payables open items now return `paymentHoldReason` (#528).
+
 ### Fixed
 
 - Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).

@@ -14,6 +14,7 @@
       "/ap-invoices/post",
       "/ap-invoices/grir",
       "/payables",
+      "/payables/open-items",
       "/ledger/open-items",
       "/ledger/clearings",
       "/workflow/inbox",
