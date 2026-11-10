@@ -56,7 +56,7 @@ function readFilters(params: URLSearchParams): Filters {
 
 export function validateFilters(f: Filters): Errors {
   const errors: Errors = {};
-  if (!UUID.test(f.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(f.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (f.asOf !== "" && !DAY.test(f.asOf)) errors.asOf = "Enter a date as YYYY-MM-DD.";
   if (f.currency.trim() !== "" && !CURRENCY.test(f.currency.trim())) errors.currency = "Enter an ISO 4217 code such as EUR.";
   return errors;

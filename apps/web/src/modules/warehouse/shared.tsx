@@ -43,9 +43,9 @@ export function useWarehouse(): [string, (id: string) => void] {
 }
 
 export function WarehouseField({ value, onChange, id = "wh-warehouse", error }: { value: string; onChange(id: string): void; id?: string; error?: string }) {
-  const invalid = error ?? (value.trim() !== "" && !UUID.test(value.trim()) ? "Enter the warehouse id, a UUID." : undefined);
+  const invalid = error ?? (value.trim() !== "" && !UUID.test(value.trim()) ? "Choose a warehouse." : undefined);
   return (
-    <FormField id={id} label="Warehouse" hint="The warehouse's UUID, as listed under Organization › Warehouses." error={invalid}>
+    <FormField id={id} label="Warehouse" hint="Search by name or code, or paste its id." error={invalid}>
       {(c) => <EntityLookup entity="warehouse" {...c} value={value} onChange={(e) => onChange(e.target.value)} invalid={Boolean(invalid)} />}
     </FormField>
   );
@@ -54,7 +54,7 @@ export function WarehouseField({ value, onChange, id = "wh-warehouse", error }: 
 export function ChooseWarehouse() {
   return (
     <Card>
-      <EmptyState icon="box" title="Choose a warehouse" description="Enter the warehouse id above to see its records." headingLevel={3} compact />
+      <EmptyState icon="box" title="Choose a warehouse" description="Choose a warehouse above to see its records." headingLevel={3} compact />
     </Card>
   );
 }

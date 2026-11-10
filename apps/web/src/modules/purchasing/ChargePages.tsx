@@ -291,7 +291,7 @@ function CodeFields({ id, form, set, errors, creating }: { id: string; form: Cod
           hint={form.debitType === "VENDOR" ? "The vendor the charge is passed on to" : "Blank is the order's vendor"}
           error={errors.vendorId}
         >
-          {(c) => <EntityLookup entity="vendor" {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
+          {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: form.legalEntityId || undefined }} {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
         </FormField>
       ) : null}
       <FormField id={`${id}-allocation`} label="Allocated to lines by" hint="Applied when the vendor invoice is posted">

@@ -193,7 +193,7 @@ export function CategoryVendorCreatePage() {
               {(c) => <Input {...c} value={form.category} onChange={(e) => set({ category: e.target.value })} />}
             </FormField>
             <FormField id="cv-vendor" label="Vendor" error={errors.vendorId}>
-              {(c) => <EntityLookup entity="vendor" {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
+              {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: form.legalEntityId || undefined }} {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
             </FormField>
             <FormField id="cv-status" label="Status" error={errors.status}>
               {(c) => (

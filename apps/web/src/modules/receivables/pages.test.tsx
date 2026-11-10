@@ -179,7 +179,7 @@ describe("Record payment", () => {
     const { container } = renderAt("/receivables/payments/new");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a legal entity.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
 
     fill("Legal entity", LE);

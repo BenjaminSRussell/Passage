@@ -301,7 +301,7 @@ export function PurchaseAgreementCreatePage() {
               {(c) => <EntityLookup entity="legalEntity" {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="pa-vendor" label="Vendor" error={errors.vendorId}>
-              {(c) => <EntityLookup entity="vendor" {...c} value={header.vendorId} onChange={(e) => setH({ vendorId: e.target.value })} />}
+              {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: header.legalEntityId || undefined }} {...c} value={header.vendorId} onChange={(e) => setH({ vendorId: e.target.value })} />}
             </FormField>
             <FormField id="pa-currency" label="Currency" error={errors.currency}>
               {(c) => <Input {...c} value={header.currency} maxLength={3} onChange={(e) => setH({ currency: e.target.value.toUpperCase() })} />}

@@ -157,7 +157,7 @@ export interface DeductionDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validateDeduction(v: DeductionDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!UUID.test(v.openItemId.trim())) errors.openItemId = "Enter the short-paid open item id (a UUID).";
   const payment = v.paymentId.trim();
   if (payment !== "" && !UUID.test(payment)) errors.paymentId = "Enter the payment id (a UUID) or leave it empty.";

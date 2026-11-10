@@ -73,7 +73,7 @@ export function FacilitiesPage() {
     event.preventDefault();
     const value = draft.trim();
     if (!UUID.test(value)) {
-      setError("Enter the legal entity id (a UUID).");
+      setError("Choose a legal entity.");
       return;
     }
     setError(undefined);
@@ -132,7 +132,7 @@ export interface FacilityDraft {
 
 export function validateFacility(v: FacilityDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!ACCOUNT_CODE.test(v.code.trim())) errors.code = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
   const bank = v.bankName.trim();
   if (bank.length < 1 || bank.length > 120) errors.bankName = "Enter the bank's name, up to 120 characters.";

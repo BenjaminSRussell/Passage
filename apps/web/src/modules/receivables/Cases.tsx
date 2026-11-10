@@ -141,8 +141,8 @@ export interface CaseDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validateCase(v: CaseDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (!UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
+  if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer.";
   const owner = v.owner.trim();
   if (owner === "" || owner.length > 120) errors.owner = "Enter who owns the case (up to 120 characters).";
   const reason = v.reason.trim();
@@ -227,6 +227,7 @@ export function NewCasePage() {
           <EntityLookup
             {...c}
             entity={opts.entity}
+            scope={opts.entity === "customer" ? { legalEntityId: values.legalEntityId || undefined } : undefined}
             value={values[field]}
             onChange={(e) => update({ [field]: e.target.value } as Partial<CaseDraft>)}
             invalid={Boolean(errors[field])}

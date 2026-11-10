@@ -110,7 +110,7 @@ export function EffectivePermissionsPage() {
             error={errors.legalEntityId}
           >
             {(c) => (
-              <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => change({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
+              <EntityLookup entity="legalEntity" prefill={false} {...c} value={values.legalEntityId} onChange={(e) => change({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />
             )}
           </FormField>
           <div className={styles.formActions}>

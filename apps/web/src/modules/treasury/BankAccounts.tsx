@@ -59,7 +59,7 @@ export function BankAccountsPage() {
     event.preventDefault();
     const value = draft.trim();
     if (!UUID.test(value)) {
-      setError("Enter the legal entity id (a UUID).");
+      setError("Choose a legal entity.");
       return;
     }
     setError(undefined);
@@ -125,7 +125,7 @@ export interface AccountDraft {
 /** The same checks the service applies (COM-0001, TRS-0401), so most mistakes are caught before the round trip. */
 export function validateAccount(v: AccountDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!ACCOUNT_CODE.test(v.accountCode.trim())) errors.accountCode = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
   if (!validIban(v.iban)) errors.iban = "Enter a valid IBAN; the check digits do not match.";
   const statementAccount = normalizeIban(v.statementAccount);

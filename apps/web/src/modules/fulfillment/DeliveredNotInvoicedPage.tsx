@@ -67,7 +67,7 @@ export function DeliveredNotInvoicedPage() {
             {(control) => <EntityLookup entity="legalEntity" {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => setValues({ ...values, legalEntityId: event.target.value })} />}
           </FormField>
           <FormField id="dni-customer" label="Customer" error={errors.customerId} optional>
-            {(control) => <EntityLookup entity="customer" {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => setValues({ ...values, customerId: event.target.value })} />}
+            {(control) => <EntityLookup entity="customer" scope={{ legalEntityId: values.legalEntityId || undefined }} {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => setValues({ ...values, customerId: event.target.value })} />}
           </FormField>
           <FormField id="dni-asof" label="As of" error={errors.asOf}>
             {(control) => <Input {...control} type="date" value={values.asOf} invalid={Boolean(errors.asOf)} onChange={(event) => setValues({ ...values, asOf: event.target.value })} />}

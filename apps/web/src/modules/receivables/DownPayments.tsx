@@ -142,8 +142,8 @@ export interface DownPaymentDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validateDownPayment(v: DownPaymentDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (!UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
+  if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer.";
   const order = v.salesOrderId.trim();
   if (order !== "" && !UUID.test(order)) errors.salesOrderId = "Enter the sales order id (a UUID) or leave it empty.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a currency such as USD.";
@@ -213,6 +213,7 @@ export function NewDownPaymentPage() {
           <EntityLookup
             {...c}
             entity={opts.entity}
+            scope={opts.entity === "customer" ? { legalEntityId: values.legalEntityId || undefined } : undefined}
             value={values[field]}
             onChange={(e) => update({ [field]: e.target.value } as Partial<DownPaymentDraft>)}
             invalid={Boolean(errors[field])}

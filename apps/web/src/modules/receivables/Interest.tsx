@@ -78,7 +78,7 @@ export interface InterestDraft {
 
 export function validateInterest(v: InterestDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!DAY.test(v.calculationDate)) errors.calculationDate = "Enter the calculation date.";
   const rate = v.annualRate.trim();
   if (!RATE.test(rate) || /^0(\.0+)?$/.test(rate)) errors.annualRate = "Enter the annual rate as a fraction above 0 and at most 1, such as 0.09 for 9%.";

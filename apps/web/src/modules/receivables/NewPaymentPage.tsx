@@ -44,8 +44,8 @@ export function emptyPayment(day: string = today()): PaymentDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validatePayment(v: PaymentDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (v.customerId.trim() !== "" && !UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID) or leave it empty.";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
+  if (v.customerId.trim() !== "" && !UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer or leave it empty.";
   if (!DECIMAL.test(v.amount.trim()) || /^0+(\.0+)?$/.test(v.amount.trim())) errors.amount = "Enter an amount above zero, such as 1250.00.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as USD.";
   if (!DAY.test(v.receivedDate)) errors.receivedDate = "Enter the date the payment arrived.";
@@ -136,6 +136,7 @@ export function NewPaymentPage() {
           <EntityLookup
             {...c}
             entity={opts.entity}
+            scope={opts.entity === "customer" ? { legalEntityId: values.legalEntityId || undefined } : undefined}
             value={values[field]}
             onChange={(e) => update({ [field]: e.target.value } as Partial<PaymentDraft>)}
             invalid={Boolean(errors[field])}

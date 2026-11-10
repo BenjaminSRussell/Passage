@@ -115,7 +115,7 @@ export function CustomerRequirementsPage() {
         <FormField id="req-filter-item" label="Item" error={item !== "" && !UUID.test(item) ? "Enter the item id as a UUID." : undefined}>
           {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={item !== "" && !UUID.test(item)} />}
         </FormField>
-        <FormField id="req-filter-customer" label="Customer" error={customer !== "" && !UUID.test(customer) ? "Enter the customer id as a UUID." : undefined}>
+        <FormField id="req-filter-customer" label="Customer" error={customer !== "" && !UUID.test(customer) ? "Choose a customer." : undefined}>
           {(c) => <EntityLookup entity="customer" {...c} value={customerId} onChange={(e) => setCustomerId(e.target.value)} invalid={customer !== "" && !UUID.test(customer)} />}
         </FormField>
       </div>
@@ -181,7 +181,7 @@ export function NewCustomerRequirementPage() {
     event.preventDefault();
     const found: Record<string, string> = {};
     if (!UUID.test(itemId.trim())) found.itemId = "Enter the item id as a UUID.";
-    if (scope !== "item" && !UUID.test(partyId.trim())) found.partyId = `Enter the ${scope === "group" ? "customer group" : "customer"} id as a UUID.`;
+    if (scope !== "item" && !UUID.test(partyId.trim())) found.partyId = `Choose a ${scope === "group" ? "customer group" : "customer"}.`;
     const d = days.trim();
     if (d !== "" && (!/^\d{1,4}$/.test(d) || Number(d) > 3650)) found.days = "Enter whole days from 0 to 3650.";
     const name = attribute.trim();
@@ -408,7 +408,7 @@ export function StoredRequirementCheckPage({ check = defaultCheck, list = defaul
     event.preventDefault();
     const found: Record<string, string> = {};
     if (!itemValid) found.itemId = "Enter the item id as a UUID.";
-    if (customerId.trim() !== "" && !UUID.test(customerId.trim())) found.customerId = "Enter the customer id as a UUID.";
+    if (customerId.trim() !== "" && !UUID.test(customerId.trim())) found.customerId = "Choose a customer.";
     if (groupId.trim() !== "" && !UUID.test(groupId.trim())) found.groupId = "Enter the customer group id as a UUID.";
     if (!DATE.test(shipDate.trim())) found.shipDate = "Enter the ship date as yyyy-mm-dd.";
     if (!QUANTITY.test(qty.trim()) || Number(qty) === 0) found.qty = "Enter the line quantity above zero.";

@@ -96,7 +96,7 @@ export interface RunDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validateConfirmationRun(v: RunDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!DAY.test(v.asOfDate)) errors.asOfDate = "Enter the key date.";
   if (!DECIMAL.test(v.threshold.trim())) errors.threshold = "Enter a threshold such as 10000.00.";
   const sample = v.sampleSize.trim();

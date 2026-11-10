@@ -93,7 +93,7 @@ export interface RunDraft {
 
 export function validateRun(v: RunDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!DAY.test(v.runDate)) errors.runDate = "Enter the run date.";
   const grace = Number(v.graceDays);
   if (!/^\d{1,2}$/.test(v.graceDays.trim()) || grace > 60) errors.graceDays = "Enter whole days from 0 to 60.";

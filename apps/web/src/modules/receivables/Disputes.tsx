@@ -125,7 +125,7 @@ export interface DisputeDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validateDispute(v: DisputeDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!UUID.test(v.openItemId.trim())) errors.openItemId = "Enter the open item id (a UUID).";
   if (!REASON.test(v.reasonCode.trim())) errors.reasonCode = "Use an upper-case code such as PRICE or DAMAGE.";
   if (!DECIMAL.test(v.disputedAmount.trim()) || /^0+(\.0+)?$/.test(v.disputedAmount.trim())) {

@@ -156,7 +156,7 @@ describe("define a customer batch requirement (slice 14)", () => {
     renderAt("/processmfg/customer-requirements/new");
     fireEvent.click(screen.getByRole("button", { name: "Define requirement" }));
     expect(await screen.findByText("Enter the item id as a UUID.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the customer id as a UUID.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a customer.")).toBeInTheDocument();
     expect(screen.getByText("Set the sellable days, an attribute range or the same-batch flag.")).toBeInTheDocument();
     fill("Item", ITEM);
     fill("Customer id", CUSTOMER);

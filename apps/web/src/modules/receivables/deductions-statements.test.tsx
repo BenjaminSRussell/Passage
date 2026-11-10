@@ -97,7 +97,7 @@ describe("Bank statements", () => {
       url.pathname.endsWith("/bank-statements/imports") && init.method === "POST" ? json(201, { ...statement, payments: [payment] }) : undefined;
     const { container } = renderAt("/receivables/bank-statements/new");
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a legal entity.")).toBeInTheDocument();
     expect(screen.getByText("Choose the camt.053 file or paste its XML.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
 

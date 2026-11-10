@@ -223,11 +223,11 @@ describe("change a purchase order", () => {
     renderAt(`/purchasing/purchase-orders/${PO_ID}/edit`);
     const line1 = await screen.findByRole("group", { name: "Line 1" });
     expect(within(line1).getByLabelText(/Deliver to warehouse/)).toHaveAttribute("data-value", WH_OLD);
-    expect(within(line1).getByLabelText(/Deliver to warehouse/)).toBeDisabled();
-    expect(within(line1).getByLabelText(/Deliver to site/)).toBeDisabled();
+    expect(within(line1).getByLabelText(/Deliver to warehouse/)).toHaveAttribute("readonly");
+    expect(within(line1).getByLabelText(/Deliver to site/)).toHaveAttribute("readonly");
     // Line 3 has no receipts: its warehouse can be changed and the change is sent.
     const line3 = screen.getByRole("group", { name: "Line 3" });
-    expect(within(line3).getByLabelText(/Deliver to warehouse/)).not.toBeDisabled();
+    expect(within(line3).getByLabelText(/Deliver to warehouse/)).not.toHaveAttribute("readonly");
     fireEvent.change(within(line3).getByLabelText(/Deliver to warehouse/), { target: { value: WH_NEW } });
     fireEvent.click(screen.getByRole("button", { name: "Add line" }));
     const added = screen.getByRole("group", { name: "New line 1" });

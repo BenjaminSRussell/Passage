@@ -64,7 +64,7 @@ export interface StatementDraft {
 
 export function validateStatement(v: StatementDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.content.trim() === "") errors.content = "Choose the camt.053 file or paste its XML.";
   else if (new Blob([v.content]).size > MAX_BYTES) errors.content = "The file is larger than 3 MB; ask the bank for daily statements.";
   return errors;

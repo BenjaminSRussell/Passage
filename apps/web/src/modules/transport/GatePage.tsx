@@ -64,7 +64,7 @@ export function GatePage() {
             </Select>
           )}
         </FormField>
-        <FormField id="gate-site" label="Site" hint="Filter by site (UUID).">
+        <FormField id="gate-site" label="Site" hint="Search by name or code, or paste its id.">
           {(control) => <EntityLookup entity="site" prefill={false} {...control} value={site} onChange={(e) => setSite(e.target.value)} />}
         </FormField>
         <FormField id="gate-date" label="Check-in day" hint="UTC day.">

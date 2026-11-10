@@ -460,7 +460,7 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
                     {(c) => <Input {...c} type="date" value={line.requestedDate} onChange={(e) => update(i, { requestedDate: e.target.value })} />}
                   </FormField>
                   <FormField id={id("vendor")} label="Preferred vendor" optional error={err("preferredVendorId")}>
-                    {(c) => <EntityLookup entity="vendor" {...c} value={line.preferredVendorId} onChange={(e) => update(i, { preferredVendorId: e.target.value })} />}
+                    {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: legalEntityId || undefined }} {...c} value={line.preferredVendorId} onChange={(e) => update(i, { preferredVendorId: e.target.value })} />}
                   </FormField>
                   <FormField id={id("warehouse")} label="Deliver to warehouse" optional error={err("warehouseId")}>
                     {(c) => <EntityLookup entity="warehouse" {...c} value={line.warehouseId} onChange={(e) => update(i, { warehouseId: e.target.value })} />}

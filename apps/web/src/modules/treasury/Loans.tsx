@@ -73,7 +73,7 @@ export function LoansPage() {
     event.preventDefault();
     const value = draft.trim();
     if (!UUID.test(value)) {
-      setError("Enter the legal entity id (a UUID).");
+      setError("Choose a legal entity.");
       return;
     }
     setError(undefined);
@@ -137,7 +137,7 @@ export interface LoanDraft {
 
 export function validateLoan(v: LoanDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   const name = v.counterpartyName.trim();
   if (name.length < 1 || name.length > 140) errors.counterpartyName = "Enter the bank or group company, up to 140 characters.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter an ISO 4217 code such as EUR.";

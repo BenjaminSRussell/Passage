@@ -71,7 +71,7 @@ export function OpenItemsPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="oi-customer" label="Customer" optional error={customerValid ? undefined : "Enter a customer id (a UUID)."}>
+        <FormField id="oi-customer" label="Customer" optional error={customerValid ? undefined : "Choose a customer."}>
           {(c) => <EntityLookup entity="customer" {...c} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={!customerValid} />}
         </FormField>
         <FormField id="oi-status" label="Show">

@@ -52,7 +52,7 @@ export function WorklistPage() {
         <FormField
           id="wl-entity"
           label="Legal entity"
-          error={entity !== "" && !entityValid ? "Enter the legal entity id (a UUID)." : undefined}
+          error={entity !== "" && !entityValid ? "Choose a legal entity." : undefined}
         >
           {(c) => (
             <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />

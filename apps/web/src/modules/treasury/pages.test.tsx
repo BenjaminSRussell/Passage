@@ -59,7 +59,7 @@ describe("bank accounts list", () => {
 
     fill("Legal entity", "nope");
     fireEvent.click(screen.getByRole("button", { name: "Show accounts" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a legal entity.")).toBeInTheDocument();
 
     fill("Legal entity", LE);
     fireEvent.click(screen.getByRole("button", { name: "Show accounts" }));

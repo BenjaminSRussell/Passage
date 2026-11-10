@@ -50,7 +50,7 @@ export function PromisesPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="pr-customer" label="Customer" optional error={valid ? undefined : "Enter a customer id (a UUID)."}>
+        <FormField id="pr-customer" label="Customer" optional error={valid ? undefined : "Choose a customer."}>
           {(c) => <EntityLookup entity="customer" {...c} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={!valid} />}
         </FormField>
       </div>
@@ -82,7 +82,7 @@ export interface PromiseDraft {
 
 export function validatePromise(v: PromiseDraft, day: string = today()): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!UUID.test(v.openItemId.trim())) errors.openItemId = "Enter the open item id (a UUID).";
   if (!DECIMAL.test(v.amount.trim()) || /^0+(\.0+)?$/.test(v.amount.trim())) errors.amount = "Enter an amount above zero, such as 800.00.";
   if (!DAY.test(v.promiseDate)) errors.promiseDate = "Enter the promise date.";

@@ -413,7 +413,7 @@ function LinesCard({
                 hint={destinationHint}
                 error={err("siteId")}
               >
-                {(c) => <EntityLookup entity="site" prefill={false} {...c} value={line.siteId} disabled={received} onChange={(e) => update(i, { siteId: e.target.value })} />}
+                {(c) => <EntityLookup entity="site" prefill={false} {...c} value={line.siteId} readOnly={received} onChange={(e) => update(i, { siteId: e.target.value })} />}
               </FormField>
               <FormField
                 id={id("warehouse")}
@@ -422,7 +422,7 @@ function LinesCard({
                 hint={destinationHint}
                 error={err("warehouseId")}
               >
-                {(c) => <EntityLookup entity="warehouse" {...c} value={line.warehouseId} disabled={received} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
+                {(c) => <EntityLookup entity="warehouse" {...c} value={line.warehouseId} readOnly={received} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
               </FormField>
               {existing ? (
                 line.agreementLineId ? (
@@ -652,7 +652,7 @@ export function PurchaseOrderCreatePage() {
               {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} />}
             </FormField>
             <FormField id="po-vendor" label="Vendor" error={errors.vendorId}>
-              {(c) => <EntityLookup entity="vendor" {...c} value={vendorId} onChange={(e) => setVendorId(e.target.value)} />}
+              {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: legalEntityId || undefined }} {...c} value={vendorId} onChange={(e) => setVendorId(e.target.value)} />}
             </FormField>
             <FormField id="po-currency" label="Currency" error={errors.currency}>
               {(c) => <Input {...c} value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />}

@@ -82,7 +82,7 @@ describe("party search", () => {
       target: { value: "x" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Find party" }));
-    expect(await screen.findByText("Enter the party id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a party.")).toBeInTheDocument();
     expect(api.calls).toHaveLength(0);
   });
 

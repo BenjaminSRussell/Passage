@@ -61,7 +61,7 @@ function PackagingReport() {
           {(control) => <Input {...control} maxLength={7} value={values.period} invalid={Boolean(errors.period)} onChange={(event) => setValues({ ...values, period: event.target.value })} />}
         </FormField>
         <FormField id="report-le" label="Legal entity" error={errors.legalEntityId} optional>
-          {(control) => <EntityLookup entity="legalEntity" {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => setValues({ ...values, legalEntityId: event.target.value })} />}
+          {(control) => <EntityLookup entity="legalEntity" prefill={false} {...control} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(event) => setValues({ ...values, legalEntityId: event.target.value })} />}
         </FormField>
         <div className={styles.formActions}>
           <Button type="submit" variant="primary">

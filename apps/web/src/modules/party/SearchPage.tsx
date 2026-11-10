@@ -31,13 +31,12 @@ function Result({ id }: { id: string }) {
       rows={rows}
       getRowKey={(row) => row.id}
       loading={state.loading}
-      empty={{ title: "No party with that id", description: "Check the id and try again." }}
+      empty={{ title: "No party found", description: "Choose another party and try again." }}
       onRowOpen={(row) => navigate(`/party/${row.id}`)}
     />
   );
 }
 
-/** Look up a party by id (GET /v1/party/parties/{id}); name search is a later slice. */
 export function SearchPage() {
   const [params, setParams] = useSearchParams();
   const id = params.get("id") ?? "";
@@ -48,7 +47,7 @@ export function SearchPage() {
     event.preventDefault();
     const value = draft.trim();
     if (!isUuid(value)) {
-      setError("Enter the party id (a UUID).");
+      setError("Choose a party.");
       return;
     }
     setError("");
@@ -59,15 +58,14 @@ export function SearchPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Parties"
-        description="Look up an organization or person by id, then open it to see vendor roles. Name search is not on this API yet."
+        description="Find an organization or person by name or number, then open it to see vendor roles."
       />
       <form className={styles.toolbar} onSubmit={search} role="search" aria-label="Find a party">
-        <FormField id="party-search" label="Party" hint="The party's UUID." error={error || undefined}>
+        <FormField id="party-search" label="Party" hint="Search by name or number, or paste its id." error={error || undefined}>
           {(control) => (
             <EntityLookup entity="party"
               {...control}
               value={draft}
-              placeholder="00000000-0000-4000-8000-000000000000"
               onChange={(event) => setDraft(event.target.value)}
               invalid={Boolean(error)}
             />
@@ -79,7 +77,7 @@ export function SearchPage() {
       {isUuid(id) ? <Result id={id} /> : null}
       {!id ? (
         <p className={styles.note}>
-          Enter a party id to load one record. The service has no list or name-search route yet, so this page looks up by id only.
+          Choose a party to load its record.
         </p>
       ) : null}
     </div>
