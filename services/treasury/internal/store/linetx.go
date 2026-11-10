@@ -275,6 +275,9 @@ func (s *Postgres) FinishLineTransaction(ctx context.Context, id, ledgerEntryID 
 			out = t
 			return nil
 		}
+		if t.Status == TransactionAbandon {
+			return httpx.NewProblem(http.StatusConflict, CodeLineConflict, "a person abandoned this bank transaction while the general ledger was being called; nothing was matched, but the ledger may now hold the entry, so check the general ledger before this line is retried or excluded")
+		}
 		if t.Status != TransactionPending {
 			return postingProblem()
 		}
@@ -347,6 +350,18 @@ func (s *Postgres) AbandonLineTransaction(ctx context.Context, reconciliationID 
 		}
 		if t.Status != TransactionPending && t.Status != TransactionHeld {
 			return httpx.NewProblem(http.StatusConflict, CodeNothingToAbandon, "only a bank transaction that is pending or held for a person can be abandoned")
+		}
+		// A pending transaction whose ledger call was never started may be posting right now; only one whose call went
+		// unanswered, or one held for a person, is abandoned.
+		if t.Status == TransactionPending && !t.AttemptUnanswered {
+			return httpx.NewProblem(http.StatusConflict, CodeLinePosting, "this bank transaction is being created right now; wait for it to finish or fail, then abandon it if the general ledger did not answer")
+		}
+		var startedBy string
+		if err := tx.QueryRow(ctx, `select created_by from bank_line_transaction where tenant_id = $1 and id = $2`, p.TenantID, t.ID).Scan(&startedBy); err != nil {
+			return err
+		}
+		if startedBy == createdBy(p) {
+			return httpx.NewProblem(http.StatusForbidden, CodeAbandonOwn, "the person who started this bank transaction cannot abandon it; another person must check the general ledger and abandon it")
 		}
 		if _, err := tx.Exec(ctx, `update bank_line_transaction set status = 'abandoned', abandoned_by = $3, abandon_reason = $4, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`, p.TenantID, t.ID, createdBy(p), reason); err != nil {

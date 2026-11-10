@@ -38,6 +38,7 @@ const (
 	CodeMatchFromTransaction = "TRS-0521"
 	CodeLineConflict         = "TRS-0522"
 	CodeNothingToAbandon     = "TRS-0523"
+	CodeAbandonOwn           = "TRS-0524"
 
 	StateOpen     = "open"
 	StateClosed   = "closed"

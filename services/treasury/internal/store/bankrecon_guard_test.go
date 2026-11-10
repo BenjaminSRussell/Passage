@@ -142,14 +142,20 @@ func TestLineTransaction_AnUnansweredAttemptThenHeldNeedsAPersonAndCanBeAbandone
 	if !errors.As(err, &blocked) || blocked.Code != CodePostingPending || blocked.Errors["pendingLines"] != "4" {
 		t.Fatalf("close with a held line: err = %v; want %s naming line 4", err, CodePostingPending)
 	}
-	abandoned, err := f.s.AbandonLineTransaction(f.ctx, f.rec.ID, 4, "the ledger will never accept it")
+	if _, err := f.s.AbandonLineTransaction(f.ctx, f.rec.ID, 4, "my own"); problemCode(t, err) != CodeAbandonOwn {
+		t.Fatalf("abandon by the person who started it: err = %v; want %s", err, CodeAbandonOwn)
+	}
+	abandoned, err := f.s.AbandonLineTransaction(f.closer, f.rec.ID, 4, "the ledger will never accept it")
 	if err != nil || abandoned.Status != TransactionAbandon {
 		t.Fatalf("abandon = %+v, %v; want abandoned", abandoned, err)
 	}
 	if n := count(t, f.admin, `select count(*) from bank_reconciliation_event where reconciliation_id = $1 and event = 'line_abandoned' and reason = 'the ledger will never accept it'`, f.rec.ID); n != 1 {
 		t.Fatalf("line_abandoned events = %d; want 1", n)
 	}
-	if _, err := f.s.AbandonLineTransaction(f.ctx, f.rec.ID, 4, "again"); problemCode(t, err) != CodeNothingToAbandon {
+	if _, err := f.s.FinishLineTransaction(f.ctx, first.ID, "entry-late"); problemCode(t, err) != CodeLineConflict {
+		t.Fatalf("finish after an abandon: err = %v; want %s", err, CodeLineConflict)
+	}
+	if _, err := f.s.AbandonLineTransaction(f.closer, f.rec.ID, 4, "again"); problemCode(t, err) != CodeNothingToAbandon {
 		t.Fatalf("second abandon: err = %v; want %s", err, CodeNothingToAbandon)
 	}
 	if _, err := f.s.AbandonLineTransaction(f.ctx, f.rec.ID, 1, "no transaction"); problemCode(t, err) != CodeNothingToAbandon {
@@ -157,6 +163,25 @@ func TestLineTransaction_AnUnansweredAttemptThenHeldNeedsAPersonAndCanBeAbandone
 	}
 	if _, err := f.s.ExcludeLine(f.ctx, f.rec.ID, 4, "checked the ledger by hand"); err != nil {
 		t.Fatalf("exclude after abandon: %v", err)
+	}
+}
+
+// A transaction whose ledger call never started may be posting right now, so it is not abandoned (#560).
+func TestLineTransaction_AFreshPendingTransactionCannotBeAbandoned(t *testing.T) {
+	f := newBankFixture(t)
+	f.matchLines123(t)
+	first, err := f.s.BeginLineTransaction(f.ctx, NewLineTransaction{ReconciliationID: f.rec.ID, LineNo: 4, Kind: domain.LineUnknownReceipt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.AbandonLineTransaction(f.closer, f.rec.ID, 4, "too early"); problemCode(t, err) != CodeLinePosting {
+		t.Fatalf("abandon of a fresh pending transaction: err = %v; want %s", err, CodeLinePosting)
+	}
+	if err := f.s.MarkLineAttempt(f.ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.AbandonLineTransaction(f.closer, f.rec.ID, 4, "no answer"); err != nil {
+		t.Fatalf("abandon after an unanswered attempt: %v", err)
 	}
 }
 
