@@ -465,3 +465,75 @@ func TestResolveReapplyRecordsDecisionForConsumers(t *testing.T) {
 		t.Fatalf("a resolved conflict leaves the queue: %+v", queue)
 	}
 }
+
+func TestHeartbeatAndSweepLeaveTheRunVersionAlone(t *testing.T) {
+	st, _, ctx := setup(t)
+	now := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	alice := as(ctx, "alice", dutyExecute)
+	a, _, err := st.StartSession(alice, StartInput{DeviceID: "dev-v", WarehouseID: ids.New(), MenuKey: "default", Now: now, Idle: 30 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beat, _, err := st.Heartbeat(alice, a.SessionID, now.Add(time.Minute), nil)
+	if err != nil || beat.Version != a.Version {
+		t.Fatalf("a heartbeat between a read and SaveRun must not fail the save: %d -> %d %v", a.Version, beat.Version, err)
+	}
+	if n, _ := st.SweepStale(ctx, now.Add(time.Hour), 30*time.Minute); n != 1 {
+		t.Fatalf("sweep marked %d", n)
+	}
+	if _, err := st.SaveRun(alice, a.SessionID, a.Version, []byte(`{}`), "", now.Add(time.Hour)); err != nil {
+		t.Fatalf("a step read before the sweep still saves: %v", err)
+	}
+}
+
+func TestSessionOnDeviceIsTheCallersOwnOpenSession(t *testing.T) {
+	st, _, ctx := setup(t)
+	now := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	alice, bob := as(ctx, "alice", dutyExecute), as(ctx, "bob", dutyExecute)
+	a, _, err := st.StartSession(alice, StartInput{DeviceID: "dev-o", WarehouseID: ids.New(), MenuKey: "default", Now: now, Idle: 30 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.SessionOnDevice(alice, "dev-o", ""); err != nil || got.SessionID != a.SessionID {
+		t.Fatalf("own session: %+v %v", got, err)
+	}
+	if got, err := st.SessionOnDevice(alice, "dev-o", a.SessionID); err != nil || got.SessionID != a.SessionID {
+		t.Fatalf("own session by id: %+v %v", got, err)
+	}
+	for name, call := range map[string]func() error{
+		"another user":    func() error { _, err := st.SessionOnDevice(bob, "dev-o", ""); return err },
+		"another device":  func() error { _, err := st.SessionOnDevice(alice, "dev-x", ""); return err },
+		"another session": func() error { _, err := st.SessionOnDevice(alice, "dev-o", ids.New()); return err },
+	} {
+		if err := call(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := st.EndSession(alice, a.SessionID, "SIGN_OUT", false, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SessionOnDevice(alice, "dev-o", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("an ended session is not open: %v", err)
+	}
+}
+
+func TestIdempotentRunsOncePerKeyAndKeepsFailuresRetryable(t *testing.T) {
+	st, _, ctx := setup(t)
+	runs := 0
+	fn := func() (map[string]int, error) { runs++; return map[string]int{"n": runs}, nil }
+	first, replayed, err := Idempotent(ctx, st, Idem{Key: "idem-1", Hash: "h"}, 200, fn)
+	again, replayedAgain, err2 := Idempotent(ctx, st, Idem{Key: "idem-1", Hash: "h"}, 200, fn)
+	if err != nil || err2 != nil || replayed || !replayedAgain || runs != 1 || first["n"] != 1 || again["n"] != 1 {
+		t.Fatalf("%v %v %v %v runs=%d %v %v", err, err2, replayed, replayedAgain, runs, first, again)
+	}
+	if _, _, err := Idempotent(ctx, st, Idem{Key: "idem-1", Hash: "another"}, 200, fn); !errors.Is(err, ErrIdempotencyReuse) {
+		t.Fatalf("same key, another request: %v", err)
+	}
+	boom := errors.New("warehouse down")
+	if _, _, err := Idempotent(ctx, st, Idem{Key: "idem-2", Hash: "h"}, 200, func() (int, error) { return 0, boom }); !errors.Is(err, boom) {
+		t.Fatalf("failure: %v", err)
+	}
+	if out, replayed, err := Idempotent(ctx, st, Idem{Key: "idem-2", Hash: "h"}, 200, func() (int, error) { return 7, nil }); err != nil || replayed || out != 7 {
+		t.Fatalf("a failed attempt stores nothing, so the retry runs: %d %v %v", out, replayed, err)
+	}
+}

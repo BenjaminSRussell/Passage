@@ -75,9 +75,12 @@ type counters struct {
 	sessions, scans, scanErrors, steps, published, applied, conflicts, rejected atomic.Int64
 }
 
-// New returns the API over st and the warehouse client wh. idle is the device
+// New returns the API over st and the warehouse client wh, which is guarded:
+// an operation the calling user lacks the duty for is refused with a 403
+// outcome before anything is sent. idle is the device
 // session idle timeout after which a session is STALE.
 func New(st *store.Store, wh warehouse.Caller, idle time.Duration) *API {
+	wh = warehouse.Guard(wh)
 	return &API{st: st, wh: wh, run: replay.Runner{Ledger: st, Warehouse: wh}, idle: idle, now: time.Now, hub: newHub()}
 }
 

@@ -34,6 +34,12 @@ const (
 
 var ErrBatchTooLarge = errors.New("replay: batch is too large")
 
+// WarehouseError is a failure to reach the warehouse; what it left unapplied
+// stays PENDING for the next replay.
+type WarehouseError struct{ error }
+
+func (e WarehouseError) Unwrap() error { return e.error }
+
 // SkewError blocks replay when the device clock is too far off (MOB-0114).
 type SkewError struct{ Skew time.Duration }
 
@@ -97,8 +103,11 @@ func (r Runner) Run(ctx context.Context, deviceID, sessionID string, items []Ite
 	results := make([]Result, 0, len(items))
 	for _, it := range items {
 		key := store.OfflineKey(deviceID, it.Seq)
-		_, err := r.Ledger.Record(ctx, store.OfflineIn{DeviceID: deviceID, SessionID: sessionID, Seq: it.Seq, Command: it.Command, Payload: it.Payload,
-			CapturedAt: it.CapturedAt.Add(skew), Hash: hash(it)})
+		in := store.OfflineIn{DeviceID: deviceID, SessionID: sessionID, Seq: it.Seq, Command: it.Command, Payload: it.Payload, CapturedAt: it.CapturedAt.Add(skew), Hash: hash(it)}
+		_, err := r.Ledger.Record(ctx, in)
+		if errors.Is(err, store.ErrConflict) {
+			_, err = r.Ledger.Record(ctx, in)
+		}
 		var gap *store.GapError
 		switch {
 		case errors.As(err, &gap):
@@ -168,7 +177,7 @@ func (r Runner) apply(ctx context.Context, t store.OfflineTx) (status, reason st
 	}
 	out, err := r.Warehouse.Do(ctx, op, t.IdempotencyKey, params)
 	if err != nil {
-		return "", "", err
+		return "", "", WarehouseError{err}
 	}
 	switch {
 	case out.OK():

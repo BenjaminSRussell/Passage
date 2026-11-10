@@ -174,6 +174,18 @@ func endSession(ctx context.Context, tx pgx.Tx, x Session, reason string, now ti
 		evts.SessionData{SessionID: x.SessionID, DeviceID: x.DeviceID, UserID: x.UserID, Warehouse: x.WarehouseID, Reason: reason})
 }
 
+// SessionOnDevice is the caller's open session on the device; a non-empty
+// sessionID must be that session. No such session is ErrNotFound.
+func (s *Store) SessionOnDevice(ctx context.Context, deviceID, sessionID string) (Session, error) {
+	var x Session
+	err := s.inTx(ctx, func(tx pgx.Tx) (err error) {
+		x, err = scanSession(tx.QueryRow(ctx, `select `+sessionColumns+` from device_session where tenant_id = $1 and device_id = $2 and user_id = $3
+			and status in ('ACTIVE', 'STALE') and ($4 = '' or session_id::text = $4)`, tenantID(ctx), deviceID, userID(ctx), sessionID))
+		return err
+	})
+	return x, err
+}
+
 func (s *Store) GetSession(ctx context.Context, sessionID string) (Session, error) {
 	var x Session
 	err := s.inTx(ctx, func(tx pgx.Tx) (err error) {
@@ -200,7 +212,7 @@ func (s *Store) Heartbeat(ctx context.Context, sessionID string, now time.Time, 
 			return ErrSessionEnded
 		}
 		wasStale = cur.Status == string(session.Stale)
-		x, err = scanSession(tx.QueryRow(ctx, `update device_session set status = 'ACTIVE', last_seen_at = $3, version = version + 1
+		x, err = scanSession(tx.QueryRow(ctx, `update device_session set status = 'ACTIVE', last_seen_at = $3
 			where tenant_id = $1 and session_id = $2 returning `+sessionColumns, tenantID(ctx), sessionID, now))
 		if err != nil {
 			return err
@@ -305,7 +317,7 @@ func (s *Store) SessionsForWork(ctx context.Context, workID string) ([]Session, 
 func (s *Store) SweepStale(ctx context.Context, now time.Time, idle time.Duration) (int, error) {
 	var n int
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `update device_session set status = 'STALE', version = version + 1
+		tag, err := tx.Exec(ctx, `update device_session set status = 'STALE'
 			where tenant_id = $1 and status = 'ACTIVE' and last_seen_at < $2`, tenantID(ctx), now.Add(-idle))
 		n = int(tag.RowsAffected())
 		return err

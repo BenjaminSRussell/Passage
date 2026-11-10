@@ -119,6 +119,19 @@ func once[T any](ctx context.Context, tx pgx.Tx, idem Idem, status int, fn func(
 	return out, false, nil
 }
 
+// Idempotent runs fn at most once per Idempotency-Key and stores its result,
+// so a repeat returns the first answer without running fn again. fn may call
+// other services; when it fails nothing is stored and the key can be retried.
+func Idempotent[T any](ctx context.Context, s *Store, idem Idem, status int, fn func() (T, error)) (T, bool, error) {
+	var out T
+	var replayed bool
+	err := s.inTx(ctx, func(tx pgx.Tx) (err error) {
+		out, replayed, err = once(ctx, tx, idem, status, fn)
+		return err
+	})
+	return out, replayed, err
+}
+
 func enqueue(ctx context.Context, tx pgx.Tx, aggregate, id, typ string, data any) error {
 	evt, err := kernelevents.New(typ, evts.Source, id, tenantID(ctx), data)
 	if err != nil {

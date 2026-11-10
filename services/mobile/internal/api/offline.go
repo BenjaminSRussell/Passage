@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/replay"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/store"
+	"github.com/BenjaminSRussell/passage/services/mobile/internal/warehouse"
 )
 
 type replayItem struct {
@@ -83,7 +86,21 @@ func (a *API) replay(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	results, err := a.run.Run(r.Context(), deviceID, req.SessionID, items)
+	ctx := r.Context()
+	if err := missingDuty(ctx, items); err != nil {
+		fail(w, r, err)
+		return
+	}
+	own, err := a.st.SessionOnDevice(ctx, deviceID, req.SessionID)
+	if errors.Is(err, store.ErrNotFound) {
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, codeNotOwner, "the caller has no open session on this device"))
+		return
+	}
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	results, err := a.run.Run(ctx, deviceID, own.SessionID, items)
 	for _, res := range results {
 		switch res.Status {
 		case store.TxApplied:
@@ -105,14 +122,31 @@ func (a *API) replay(w http.ResponseWriter, r *http.Request) {
 	a.answerSingle(w, r, results)
 }
 
+// missingDuty refuses a batch holding a command whose warehouse operation the
+// caller lacks the duty for, before anything is recorded.
+func missingDuty(ctx context.Context, items []replay.Item) error {
+	p, _ := tenant.FromContext(ctx)
+	for _, it := range items {
+		op, _, err := replay.Map(it.Command, it.Payload)
+		if err != nil {
+			continue
+		}
+		if duty, known := warehouse.DutyFor(op); known && !p.HasDuty(duty) {
+			return httpx.NewProblem(http.StatusForbidden, warehouse.CodeMissingDuty, "missing duty "+duty)
+		}
+	}
+	return nil
+}
+
 func replayFailure(err error) error {
-	if err == replay.ErrBatchTooLarge {
+	var wh replay.WarehouseError
+	switch {
+	case errors.Is(err, replay.ErrBatchTooLarge):
 		return httpx.NewProblem(http.StatusRequestEntityTooLarge, "COM-0413", "at most 500 transactions per request")
+	case errors.As(err, &wh):
+		return transportError{err}
 	}
-	if _, ok := err.(*replay.SkewError); ok {
-		return err
-	}
-	return transportError{err}
+	return err
 }
 
 func (a *API) answerSingle(w http.ResponseWriter, r *http.Request, results []replay.Result) {

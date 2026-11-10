@@ -36,6 +36,9 @@ func (h *hub) subscribe(tenantID string) (chan flowEvent, func()) {
 	return ch, func() {
 		h.mu.Lock()
 		delete(h.subs[tenantID], ch)
+		if len(h.subs[tenantID]) == 0 {
+			delete(h.subs, tenantID)
+		}
 		h.mu.Unlock()
 	}
 }

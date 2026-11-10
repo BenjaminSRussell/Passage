@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -10,14 +11,15 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/flows"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/gs1"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/store"
 )
 
-func userOf(r *http.Request) string {
-	p, _ := tenant.FromContext(r.Context())
+func userOf(ctx context.Context) string {
+	p, _ := tenant.FromContext(ctx)
 	return p.UserID
 }
 
@@ -74,6 +76,10 @@ type menuResponse struct {
 // its next load. The default key always exists and offers every published flow.
 func (a *API) getMenu(w http.ResponseWriter, r *http.Request) {
 	ctx, key, site := r.Context(), chi.URLParam(r, "id"), r.URL.Query().Get("warehouseId")
+	if site != "" && !ids.Valid(site) {
+		validationFailed(w, r, map[string]string{"warehouseId": "must be a UUID"})
+		return
+	}
 	m, err := a.st.ResolveMenu(ctx, key, site)
 	if errors.Is(err, store.ErrNotFound) && key == defaultMenuKey {
 		m, err = store.Menu{Key: key, Name: "Default", Version: 1}, nil
@@ -208,6 +214,11 @@ func (a *API) installCore(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, r, err)
 		return
+	}
+	if !replayed {
+		for _, f := range out {
+			a.hub.publish(tenantOf(r), flowEvent{FlowID: f.FlowID, Code: f.Code, Version: f.Version})
+		}
 	}
 	answer(w, http.StatusOK, replayed, map[string]any{"items": out})
 }

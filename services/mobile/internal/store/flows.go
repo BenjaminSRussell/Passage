@@ -231,7 +231,8 @@ func (s *Store) ListFlows(ctx context.Context, code string, limit int) ([]Flow, 
 }
 
 // PublishedFor lists the PUBLISHED flows a warehouse may run, optionally only
-// the given codes, in code order.
+// the given codes, in code order. With no warehouse, flows restricted to
+// warehouses are left out.
 func (s *Store) PublishedFor(ctx context.Context, warehouseID string, codes []string) ([]Flow, error) {
 	var out []Flow
 	if codes == nil {
@@ -240,7 +241,7 @@ func (s *Store) PublishedFor(ctx context.Context, warehouseID string, codes []st
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+flowColumns+` from mobile_flow
 			where tenant_id = $1 and status = 'PUBLISHED'
-			  and (cardinality(warehouses) = 0 or $2::text = '' or $2::text = any(warehouses::text[]))
+			  and (cardinality(warehouses) = 0 or $2::text = any(warehouses::text[]))
 			  and (cardinality($3::text[]) = 0 or code = any($3::text[]))
 			order by code`, tenantID(ctx), warehouseID, codes)
 		if err != nil {

@@ -30,7 +30,49 @@ func signer(t *testing.T) *tenant.ServiceSigner {
 }
 
 func ctx() context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "22222222-2222-2222-2222-222222222222", UserID: "alice"})
+	return ctxWith("warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register")
+}
+
+func ctxWith(duties ...string) context.Context {
+	held := map[string]struct{}{}
+	for _, d := range duties {
+		held[d] = struct{}{}
+	}
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "22222222-2222-2222-2222-222222222222", UserID: "alice", Duties: held})
+}
+
+type countingCaller struct{ calls int }
+
+func (c *countingCaller) Do(context.Context, string, string, map[string]string) (Outcome, error) {
+	c.calls++
+	return Outcome{Status: 200}, nil
+}
+
+func TestGuardRefusesAnOperationTheUserLacksTheDutyFor(t *testing.T) {
+	inner := &countingCaller{}
+	g := Guard(inner)
+	cases := []struct{ op, holds string }{
+		{"receive", "warehouse.work.execute"},
+		{"confirm", "warehouse.inquiry.view"},
+		{"exception", "warehouse.receipt.register"},
+		{"assign", "warehouse.receipt.register"},
+		{"get-work", "warehouse.work.execute"},
+	}
+	for _, c := range cases {
+		out, err := g.Do(ctxWith(c.holds), c.op, "k", nil)
+		if err != nil || out.Status != http.StatusForbidden || out.Code != CodeMissingDuty {
+			t.Errorf("%s holding only %s: %+v %v", c.op, c.holds, out, err)
+		}
+	}
+	if inner.calls != 0 {
+		t.Fatalf("the warehouse was called %d times without the user's duty", inner.calls)
+	}
+	if out, err := g.Do(ctxWith("warehouse.receipt.register"), "receive", "k", nil); err != nil || !out.OK() || inner.calls != 1 {
+		t.Fatalf("a user holding the duty passes: %+v %v %d", out, err, inner.calls)
+	}
+	if _, err := g.Do(ctxWith(), "nuke", "k", nil); !errors.Is(err, ErrUnknownOp) {
+		t.Fatalf("unknown op: %v", err)
+	}
 }
 
 func TestDoSendsSignedIdempotentRequestPerOperation(t *testing.T) {

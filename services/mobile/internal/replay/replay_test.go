@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -331,5 +332,50 @@ func TestMapRefusesWhatCannotBeReplayed(t *testing.T) {
 		if _, _, err := Map(c.command, json.RawMessage(c.payload)); err == nil {
 			t.Errorf("%s: want an error", name)
 		}
+	}
+}
+
+func TestReplayRefusesAnOperationTheCallerLacksTheDutyFor(t *testing.T) {
+	r, _, fake, ctx := setup(t)
+	r.Warehouse = warehouse.Guard(fake)
+	receive := Item{Seq: 1, Command: "ReceiveLine", CapturedAt: time.Now(), Payload: json.RawMessage(`{"receiptId":"r-1","lineNo":1,"qty":"2"}`)}
+	res, err := r.Run(ctx, "dev-duty", "", []Item{receive})
+	if err != nil || len(res) != 1 || res[0].Status != store.TxRejected || !strings.Contains(res[0].Reason, warehouse.CodeMissingDuty) {
+		t.Fatalf("a ReceiveLine from a user without warehouse.receipt.register is rejected: %+v %v", res, err)
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("the warehouse was called: %v", fake.calls)
+	}
+}
+
+type racingLedger struct {
+	*store.Store
+	records int
+}
+
+func (l *racingLedger) Record(ctx context.Context, in store.OfflineIn) (store.OfflineTx, error) {
+	l.records++
+	if l.records == 1 {
+		return store.OfflineTx{}, store.ErrConflict
+	}
+	return l.Store.Record(ctx, in)
+}
+
+func TestARecordLostToAConcurrentInsertIsRetried(t *testing.T) {
+	r, st, _, ctx := setup(t)
+	r.Ledger = &racingLedger{Store: st}
+	res, err := r.Run(ctx, "dev-race", "", batch(1))
+	if err != nil || len(res) != 1 || res[0].Status != store.TxApplied {
+		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+func TestAnUnreachableWarehouseIsAWarehouseError(t *testing.T) {
+	r, _, fake, ctx := setup(t)
+	fake.failEvery = 1
+	_, err := r.Run(ctx, "dev-down", "", batch(1))
+	var wh WarehouseError
+	if !errors.As(err, &wh) {
+		t.Fatalf("err = %v", err)
 	}
 }

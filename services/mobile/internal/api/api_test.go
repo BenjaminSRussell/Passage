@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,14 +18,17 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/mobile/internal/replay"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/store"
 	"github.com/BenjaminSRussell/passage/services/mobile/internal/warehouse"
 	"github.com/BenjaminSRussell/passage/services/mobile/migrations"
 )
 
 const (
-	siteA   = "5e5510a0-0000-4000-8000-0000000000a1"
-	workOne = `{"work":{"id":"w-1","status":"ASSIGNED","version":2,"lines":[{"lineNo":1,"itemId":"BOLT","qty":"5","status":"OPEN"}]}}`
+	dutyReceive = "warehouse.receipt.register"
+	dutyInquiry = "warehouse.inquiry.view"
+	siteA       = "5e5510a0-0000-4000-8000-0000000000a1"
+	workOne     = `{"work":{"id":"w-1","status":"ASSIGNED","version":2,"lines":[{"lineNo":1,"itemId":"BOLT","qty":"5","status":"OPEN"}]}}`
 )
 
 type fakeWH struct {
@@ -31,11 +36,15 @@ type fakeWH struct {
 	params    []map[string]string
 	respond   map[string]warehouse.Outcome
 	conflicts map[string]bool
+	during    func(op string)
 }
 
 func (f *fakeWH) Do(_ context.Context, op, key string, p map[string]string) (warehouse.Outcome, error) {
 	f.calls = append(f.calls, op)
 	f.params = append(f.params, p)
+	if f.during != nil {
+		f.during(op)
+	}
 	if f.conflicts[key] {
 		return warehouse.Outcome{Status: 409, Code: "WMS-0110", Detail: "line 1 was CANCELLED by alice"}, nil
 	}
@@ -117,7 +126,7 @@ func expect(t *testing.T, rec *httptest.ResponseRecorder, status int, code strin
 }
 
 func (h *harness) startSession(user, device string) *httptest.ResponseRecorder {
-	return h.do(req{method: "POST", path: "/v1/mobile/sessions", duties: dutyExecute, user: user, body: `{"deviceId":"` + device + `","warehouseId":"` + siteA + `"}`})
+	return h.do(req{method: "POST", path: "/v1/mobile/sessions", duties: dutyExecute + "," + dutyInquiry, user: user, body: `{"deviceId":"` + device + `","warehouseId":"` + siteA + `"}`})
 }
 
 func TestRoutesRequireTheirDutyAndATenant(t *testing.T) {
@@ -188,7 +197,7 @@ func TestStaleSessionResumeKeepsWorkOnlyWhileWarehouseStillHasIt(t *testing.T) {
 				t.Fatalf("sweep: %s", rec.Body)
 			}
 			h.wh.respond["get-work"] = warehouse.Outcome{Status: 200, Body: json.RawMessage(strings.Replace(workOne, "ASSIGNED", tc.status, 1))}
-			rec := h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":heartbeat", duties: dutyExecute})
+			rec := h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":heartbeat", duties: dutyExecute + "," + dutyInquiry})
 			got := decode[heartbeatResponse](t, rec)
 			if rec.Code != 200 || !got.Resumed || got.Relocked != tc.relocked || (got.Session.CurrentWorkID == "w-1") != tc.relocked {
 				t.Fatalf("heartbeat: %d %+v", rec.Code, got)
@@ -322,6 +331,7 @@ func replayBody(device string, seq int, line int) string {
 func TestAC326ConflictIsParkedBlocksTheQueueAndResolves(t *testing.T) {
 	h := newHarness(t)
 	h.wh.conflicts["dev-6:2"] = true
+	h.startSession("alice", "dev-6")
 	send := func(seq int) *httptest.ResponseRecorder {
 		return h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, key: "dev-6:" + string(rune('0'+seq)), body: replayBody("dev-6", seq, seq)})
 	}
@@ -354,6 +364,7 @@ func TestAC326ConflictIsParkedBlocksTheQueueAndResolves(t *testing.T) {
 
 func TestBatchReplayAnswersPerTransactionAndWarehouseOutageIs503(t *testing.T) {
 	h := newHarness(t)
+	h.startSession("alice", "dev-7")
 	batch := `{"deviceId":"dev-7","transactions":[` +
 		`{"seq":1,"command":"ConfirmWorkLine","capturedAt":"2026-03-02T07:00:00Z","payload":{"workId":"w","lineNo":1,"qty":"1"}},` +
 		`{"seq":2,"command":"ConfirmWorkLine","capturedAt":"2026-03-02T07:00:01Z","payload":{"workId":"w","lineNo":2,"qty":"1"}}]}`
@@ -380,5 +391,216 @@ func TestMetricsExposeCounters(t *testing.T) {
 	h.api.Metrics().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
 	if !strings.Contains(rec.Body.String(), "mobile_sessions_started_total 1") {
 		t.Fatalf("%s", rec.Body)
+	}
+}
+
+func (h *harness) runReceive(id, duties, keyPrefix string) *httptest.ResponseRecorder {
+	h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs", duties: duties, body: `{"flowCode":"RECEIVE"}`})
+	var last *httptest.ResponseRecorder
+	for i, in := range []struct{ step, body string }{
+		{"scan_receipt", `{"value":"R-1"}`}, {"enter_line", `{"value":"1"}`}, {"enter_qty", `{"value":"4"}`}, {"confirm_receive", `{}`}, {"call_receive", `{}`},
+	} {
+		last = h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs/current/steps/" + in.step + ":submit", duties: duties, key: keyPrefix + string(rune('a'+i)), body: in.body})
+	}
+	return last
+}
+
+func TestAWarehouseCallNeedsTheUsersOwnDutyOnTheStepPath(t *testing.T) {
+	h := newHarness(t)
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/flows:install-core", duties: dutyAdmin, key: "core"}), http.StatusOK, "")
+	id := decode[sessionResponse](t, h.startSession("alice", "dev-r")).Session.SessionID
+	expect(t, h.runReceive(id, dutyExecute, "rcv1-"), http.StatusForbidden, "AUTH-0003")
+	if slicesContain(h.wh.calls, "receive") {
+		t.Fatalf("the warehouse was asked to post a receipt for a user without warehouse.receipt.register: %v", h.wh.calls)
+	}
+	done := h.runReceive(id, dutyExecute+","+dutyReceive, "rcv2-")
+	if done.Code != http.StatusOK || !slicesContain(h.wh.calls, "receive") {
+		t.Fatalf("a user holding the duty posts the receipt: %d %s %v", done.Code, done.Body, h.wh.calls)
+	}
+}
+
+func sameJSON(t *testing.T, a, b *httptest.ResponseRecorder) bool {
+	t.Helper()
+	return reflect.DeepEqual(decode[any](t, a), decode[any](t, b))
+}
+
+func slicesContain(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAWarehouseCallNeedsTheUsersOwnDutyOnTheReplayPath(t *testing.T) {
+	h := newHarness(t)
+	h.startSession("alice", "dev-rr")
+	body := `{"idempotencyKey":"dev-rr:1","command":"ReceiveLine","capturedAt":"2026-03-02T07:00:00Z","payload":{"receiptId":"r-1","lineNo":1,"qty":"3"}}`
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, key: "dev-rr:1", body: body}), http.StatusForbidden, "AUTH-0003")
+	if len(h.wh.calls) != 0 {
+		t.Fatalf("warehouse called: %v", h.wh.calls)
+	}
+	if _, err := h.api.st.GetOffline(tenantCtx(), "dev-rr:1"); err == nil {
+		t.Fatal("a refused transaction must not be recorded")
+	}
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute + "," + dutyReceive, key: "dev-rr:1", body: body}), http.StatusOK, "")
+}
+
+func tenantCtx() context.Context { return testkit.Ctx(testkit.TenantID(1), dutyExecute) }
+
+func TestReplayNeedsTheCallersOpenSessionOnTheDevice(t *testing.T) {
+	h := newHarness(t)
+	h.startSession("bob", "dev-b")
+	h.startSession("alice", "dev-a")
+	send := func(user, device string, seq int) *httptest.ResponseRecorder {
+		key := device + ":" + string(rune('0'+seq))
+		return h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, user: user, key: key, body: replayBody(device, seq, seq)})
+	}
+	expect(t, send("mallory", "dev-a", 1), http.StatusForbidden, codeNotOwner)
+	expect(t, send("bob", "dev-a", 1), http.StatusForbidden, codeNotOwner)
+	if len(h.wh.calls) != 0 {
+		t.Fatalf("another user's replay reached the warehouse: %v", h.wh.calls)
+	}
+	expect(t, send("alice", "dev-a", 1), http.StatusOK, "")
+	other := `{"deviceId":"dev-a","sessionId":"` + decode[sessionResponse](t, h.startSession("bob", "dev-b")).Session.SessionID + `","transactions":[{"seq":2,"command":"ConfirmWorkLine","capturedAt":"2026-03-02T07:00:00Z","payload":{"workId":"w","lineNo":1,"qty":"1"}}]}`
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/offline:replay", duties: dutyExecute, user: "alice", body: other}), http.StatusForbidden, codeNotOwner)
+}
+
+func TestSubmitStepRepeatReturnsTheFirstAnswerAndSurvivesAHeartbeat(t *testing.T) {
+	h := newHarness(t)
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/flows:install-core", duties: dutyAdmin, key: "core"}), http.StatusOK, "")
+	id := decode[sessionResponse](t, h.startSession("alice", "dev-i")).Session.SessionID
+	h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":assign-work", duties: dutyExecute, key: "as"})
+	h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs", duties: dutyExecute, body: `{"flowCode":"PICK"}`})
+	submit := func(step, body, key string) *httptest.ResponseRecorder {
+		return h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs/current/steps/" + step + ":submit", duties: dutyExecute, key: key, body: body})
+	}
+	for i, in := range []struct{ step, body string }{
+		{"scan_location", `{"value":"A-01-02"}`}, {"scan_item", `{"value":"0112345678901231"}`}, {"enter_qty", `{"value":"5"}`}, {"qty_check", `{"outcome":"full"}`}, {"confirm_pick", `{}`},
+	} {
+		expect(t, submit(in.step, in.body, "i"+string(rune('a'+i))), http.StatusOK, "")
+	}
+	h.wh.during = func(op string) {
+		if op == "confirm" {
+			expect(t, h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":heartbeat", duties: dutyExecute}), http.StatusOK, "")
+		}
+	}
+	first := submit("call_confirm", `{}`, "call-1")
+	if first.Code != http.StatusOK || !decode[runResponse](t, first).Run.Done {
+		t.Fatalf("a heartbeat during the warehouse call must not fail the step: %d %s", first.Code, first.Body)
+	}
+	h.wh.during = nil
+	calls := len(h.wh.calls)
+	again := submit("call_confirm", `{}`, "call-1")
+	if again.Code != http.StatusOK || again.Header().Get(headerReplayed) != "true" || !sameJSON(t, again, first) || len(h.wh.calls) != calls {
+		t.Fatalf("a repeat of a successful step returns the first answer without calling again: %d %s calls=%d/%d", again.Code, again.Body, len(h.wh.calls), calls)
+	}
+	expect(t, submit("scan_location", `{"value":"A-01-02"}`, "call-1"), http.StatusUnprocessableEntity, codeReuse)
+}
+
+func TestAssignWorkRepeatReturnsTheFirstAnswer(t *testing.T) {
+	h := newHarness(t)
+	id := decode[sessionResponse](t, h.startSession("alice", "dev-as")).Session.SessionID
+	assign := func() *httptest.ResponseRecorder {
+		return h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":assign-work", duties: dutyExecute, key: "as-1"})
+	}
+	first := assign()
+	again := assign()
+	if first.Code != 200 || again.Header().Get(headerReplayed) != "true" || !sameJSON(t, again, first) || len(h.wh.calls) != 1 {
+		t.Fatalf("%d %s | %d %s | calls %v", first.Code, first.Body, again.Code, again.Body, h.wh.calls)
+	}
+}
+
+func TestResumingAStaleSessionByLoginRelocksOrReleasesItsWork(t *testing.T) {
+	for _, taken := range []bool{false, true} {
+		h := newHarness(t)
+		expect(t, h.do(req{method: "POST", path: "/v1/mobile/flows:install-core", duties: dutyAdmin, key: "core"}), http.StatusOK, "")
+		h.wh.respond["get-work"] = warehouse.Outcome{Status: 200, Body: json.RawMessage(workOne)}
+		id := decode[sessionResponse](t, h.startSession("alice", "dev-s1")).Session.SessionID
+		h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + ":assign-work", duties: dutyExecute, key: "as"})
+		h.do(req{method: "POST", path: "/v1/mobile/sessions/" + id + "/runs", duties: dutyExecute, body: `{"flowCode":"PICK"}`})
+		h.now = h.now.Add(31 * time.Minute)
+		if taken {
+			carol := decode[sessionResponse](t, h.startSession("carol", "dev-s2")).Session.SessionID
+			h.do(req{method: "POST", path: "/v1/mobile/sessions/" + carol + ":assign-work", duties: dutyExecute, user: "carol", key: "as-c"})
+		}
+		resumed := decode[sessionResponse](t, h.startSession("alice", "dev-s1"))
+		holds := resumed.Session.CurrentWorkID == "w-1"
+		if !resumed.Resumed || holds == taken {
+			t.Fatalf("taken=%v: resumed=%v currentWorkId=%q", taken, resumed.Resumed, resumed.Session.CurrentWorkID)
+		}
+		if taken && (docOf(resumed.Session).Run != nil || docOf(resumed.Session).Seed != nil) {
+			t.Fatalf("the run seeded with the lost work must be cleared: %s", resumed.Session.State)
+		}
+		if !taken && docOf(resumed.Session).Run == nil {
+			t.Fatalf("a run on work that was re-locked is kept: %s", resumed.Session.State)
+		}
+	}
+}
+
+func TestMenuWithoutWarehouseHidesRestrictedFlowsAndRejectsABadWarehouse(t *testing.T) {
+	h := newHarness(t)
+	restricted := `{"code":"SITE_ONLY","entryStepId":"s","warehouses":["` + siteA + `"],"steps":[{"id":"s","type":"scan","prompt":"x","expectedScan":["LP"],"next":{"default":null}}]}`
+	saved := decode[store.Flow](t, h.do(req{method: "POST", path: "/v1/mobile/flows", duties: dutyAdmin, key: "d", body: restricted}))
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/flows/" + saved.FlowID + ":publish", duties: dutyAdmin, key: "p"}), http.StatusOK, "")
+	if m := decode[menuResponse](t, h.do(req{method: "GET", path: "/v1/mobile/menus/default", duties: dutyExecute})); len(m.Flows) != 0 {
+		t.Fatalf("a warehouse-restricted flow is offered without a warehouse: %+v", m.Flows)
+	}
+	if m := decode[menuResponse](t, h.do(req{method: "GET", path: "/v1/mobile/menus/default?warehouseId=" + siteA, duties: dutyExecute})); len(m.Flows) != 1 {
+		t.Fatalf("the flow is offered at its warehouse: %+v", m.Flows)
+	}
+	expect(t, h.do(req{method: "GET", path: "/v1/mobile/menus/default?warehouseId=nope", duties: dutyExecute}), http.StatusBadRequest, codeValidation)
+}
+
+func TestInstallCoreNotifiesTheEventHub(t *testing.T) {
+	h := newHarness(t)
+	ch, stop := h.api.hub.subscribe(testkit.TenantID(1))
+	defer stop()
+	expect(t, h.do(req{method: "POST", path: "/v1/mobile/flows:install-core", duties: dutyAdmin, key: "core"}), http.StatusOK, "")
+	select {
+	case e := <-ch:
+		if e.Code == "" || e.Version != 1 {
+			t.Fatalf("event %+v", e)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("installing the core flows published nothing to the event stream")
+	}
+}
+
+func TestEventHubKeepsTenantsApartAndDropsEmptyTenants(t *testing.T) {
+	hub := newHub()
+	chA, stopA := hub.subscribe("tenant-a")
+	chB, stopB := hub.subscribe("tenant-b")
+	hub.publish("tenant-a", flowEvent{Code: "PICK", Version: 1})
+	select {
+	case <-chA:
+	default:
+		t.Fatal("tenant A's own stream gets its publish")
+	}
+	select {
+	case e := <-chB:
+		t.Fatalf("tenant B received tenant A's event: %+v", e)
+	default:
+	}
+	stopA()
+	stopB()
+	if len(hub.subs) != 0 {
+		t.Fatalf("empty tenant maps remain: %v", hub.subs)
+	}
+}
+
+func TestReplayFailureMapsErrorsByKind(t *testing.T) {
+	if _, ok := replayFailure(replay.WarehouseError{}).(transportError); !ok {
+		t.Error("a warehouse outage is a 503")
+	}
+	dbErr := errors.New("connection refused")
+	if _, ok := replayFailure(dbErr).(transportError); ok || !errors.Is(replayFailure(dbErr), dbErr) {
+		t.Error("a database error is not reported as an unreachable warehouse")
+	}
+	rec := httptest.NewRecorder()
+	fail(rec, httptest.NewRequest("GET", "/", nil), replayFailure(store.ErrConflict))
+	if rec.Code != http.StatusConflict {
+		t.Errorf("a unique violation is a 409, got %d", rec.Code)
 	}
 }

@@ -86,6 +86,12 @@ func (a *API) startSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	if resumed && session.StateAt(s.View(), a.now(), a.idle) != session.Active {
+		if s, err = a.resumeStale(r.Context(), s, a.now()); err != nil {
+			fail(w, r, err)
+			return
+		}
+	}
 	out := sessionResponse{Session: s, Resumed: resumed}
 	status := http.StatusCreated
 	if resumed {
@@ -127,22 +133,45 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	out := heartbeatResponse{Session: s, Resumed: wasStale}
 	if wasStale && s.CurrentWorkID != "" {
-		relocked, reason := a.relock(ctx, s, now)
-		out.Relocked, out.Reason = relocked, reason
-		if !relocked {
-			if out.Session, err = a.st.SaveRun(ctx, id, s.Version, s.State, "", now); err != nil {
-				fail(w, r, err)
-				return
-			}
+		if out.Session, out.Relocked, out.Reason, err = a.relockOrRelease(ctx, s, now); err != nil {
+			fail(w, r, err)
+			return
 		}
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// resumeStale brings a STALE session of the caller back on a new login: the
+// heartbeat that the device would have sent, then the same work re-lock.
+func (a *API) resumeStale(ctx context.Context, s store.Session, now time.Time) (store.Session, error) {
+	beaten, _, err := a.st.Heartbeat(ctx, s.SessionID, now, nil)
+	if err != nil || beaten.CurrentWorkID == "" {
+		return beaten, err
+	}
+	out, _, _, err := a.relockOrRelease(ctx, beaten, now)
+	return out, err
+}
+
+// relockOrRelease keeps the session's work only if it can be re-locked; when
+// it cannot, the work and the run seeded from it are cleared together.
+func (a *API) relockOrRelease(ctx context.Context, s store.Session, now time.Time) (store.Session, bool, string, error) {
+	relocked, reason := a.relock(ctx, s, now)
+	if relocked {
+		return s, true, reason, nil
+	}
+	doc := docOf(s)
+	doc.Seed, doc.Run = nil, nil
+	saved, err := a.st.SaveRun(ctx, s.SessionID, s.Version, doc.raw(), "", now)
+	return saved, false, reason, err
 }
 
 func (a *API) relock(ctx context.Context, s store.Session, now time.Time) (bool, string) {
 	out, err := a.wh.Do(ctx, "get-work", "", map[string]string{"workId": s.CurrentWorkID})
 	if err != nil {
 		return false, "the warehouse could not confirm the work"
+	}
+	if out.Status == http.StatusForbidden {
+		return false, "you may not view the work, so it cannot be confirmed"
 	}
 	if !out.OK() {
 		return false, "the work no longer exists"
@@ -233,6 +262,7 @@ type assignResponse struct {
 
 // assignWork asks the warehouse for the user's next work in the session's
 // warehouse and records it on the session, so its lock follows the heartbeat.
+// A repeat of the same Idempotency-Key returns the first answer.
 func (a *API) assignWork(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]string{}
 	idem, err := command(r, nil, fields)
@@ -245,30 +275,35 @@ func (a *API) assignWork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, id := r.Context(), chi.URLParam(r, "id")
-	s, ok := a.ownSession(w, r, id)
-	if !ok {
+	out, replayed, err := store.Idempotent(ctx, a.st, idem, http.StatusOK, func() (assignResponse, error) { return a.applyAssign(ctx, id, idem.Key) })
+	if err != nil {
+		fail(w, r, err)
 		return
 	}
-	out, err := a.wh.Do(ctx, "assign", idem.Key, map[string]string{"warehouseId": s.WarehouseID})
+	answer(w, http.StatusOK, replayed, out)
+}
+
+func (a *API) applyAssign(ctx context.Context, id, key string) (assignResponse, error) {
+	s, err := a.ownSession(ctx, id)
 	if err != nil {
-		fail(w, r, transportError{err})
-		return
+		return assignResponse{}, err
+	}
+	out, err := a.wh.Do(ctx, "assign", key, map[string]string{"warehouseId": s.WarehouseID})
+	if err != nil {
+		return assignResponse{}, transportError{err}
 	}
 	if !out.OK() {
-		fail(w, r, httpx.NewProblem(out.Status, out.Code, out.Detail))
-		return
+		return assignResponse{}, httpx.NewProblem(out.Status, out.Code, out.Detail)
 	}
 	work, found := warehouse.WorkFrom(out.Body)
 	if !found {
-		httpx.JSON(w, http.StatusOK, assignResponse{Work: json.RawMessage("null"), Session: s})
-		return
+		return assignResponse{Work: json.RawMessage("null"), Session: s}, nil
 	}
 	doc := docOf(s)
 	doc.Seed, doc.Run = work.Values(), nil
 	saved, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), work.ID, a.now())
 	if err != nil {
-		fail(w, r, err)
-		return
+		return assignResponse{}, err
 	}
 	var wrapped struct {
 		Work json.RawMessage `json:"work"`
@@ -277,24 +312,21 @@ func (a *API) assignWork(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal(out.Body, &wrapped) == nil && len(wrapped.Work) > 0 {
 		raw = wrapped.Work
 	}
-	answer(w, http.StatusOK, out.Replayed, assignResponse{Work: raw, Session: saved})
+	return assignResponse{Work: raw, Session: saved}, nil
 }
 
-func (a *API) ownSession(w http.ResponseWriter, r *http.Request, id string) (store.Session, bool) {
-	s, err := a.st.GetSession(r.Context(), id)
+func (a *API) ownSession(ctx context.Context, id string) (store.Session, error) {
+	s, err := a.st.GetSession(ctx, id)
 	if err != nil {
-		fail(w, r, err)
-		return store.Session{}, false
+		return store.Session{}, err
 	}
-	if s.UserID != userOf(r) {
-		fail(w, r, store.ErrNotOwner)
-		return store.Session{}, false
+	if s.UserID != userOf(ctx) {
+		return store.Session{}, store.ErrNotOwner
 	}
 	if s.Status == string(session.Ended) {
-		fail(w, r, store.ErrSessionEnded)
-		return store.Session{}, false
+		return store.Session{}, store.ErrSessionEnded
 	}
-	return s, true
+	return s, nil
 }
 
 type stepView struct {
@@ -340,8 +372,9 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, id := r.Context(), chi.URLParam(r, "id")
-	s, ok := a.ownSession(w, r, id)
-	if !ok {
+	s, err := a.ownSession(ctx, id)
+	if err != nil {
+		fail(w, r, err)
 		return
 	}
 	published, err := a.st.PublishedFor(ctx, s.WarehouseID, []string{req.FlowCode})
@@ -372,7 +405,8 @@ type submitRequest struct {
 // submitStep applies one scan, value or outcome to the run's current step. A
 // scan that fails its check answers 422 with the catalog code and leaves the
 // run where it was. A call step makes its warehouse call as the user, keyed by
-// the request's Idempotency-Key, and moves on only when the call succeeds.
+// the request's Idempotency-Key, and moves on only when the call succeeds. A
+// repeat of the same Idempotency-Key returns the first answer.
 func (a *API) submitStep(w http.ResponseWriter, r *http.Request) {
 	var req submitRequest
 	fields := map[string]string{}
@@ -385,59 +419,60 @@ func (a *API) submitStep(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	ctx, id := r.Context(), chi.URLParam(r, "id")
-	s, ok := a.ownSession(w, r, id)
-	if !ok {
-		return
-	}
-	doc := docOf(s)
-	if doc.Run == nil {
-		fail(w, r, httpx.NewProblem(http.StatusConflict, codeStep, "the session has no flow run in progress"))
-		return
-	}
-	pinned, err := a.st.FlowVersion(ctx, doc.Run.FlowCode, doc.Run.Version)
+	ctx, id, step := r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "step")
+	out, replayed, err := store.Idempotent(ctx, a.st, idem, http.StatusOK, func() (runResponse, error) { return a.applyStep(ctx, id, step, idem.Key, req) })
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	draft := pinned.Draft()
-	res, err := flows.Submit(draft, *doc.Run, chi.URLParam(r, "step"), flows.Input{Value: req.Value, Outcome: req.Outcome}, gs1.ClassifyOptions{Options: gs1.Options{Now: a.now()}})
+	answer(w, http.StatusOK, replayed, out)
+}
+
+func (a *API) applyStep(ctx context.Context, id, step, key string, req submitRequest) (runResponse, error) {
+	s, err := a.ownSession(ctx, id)
 	if err != nil {
-		fail(w, r, stepProblem(err))
-		return
+		return runResponse{}, err
+	}
+	doc := docOf(s)
+	if doc.Run == nil {
+		return runResponse{}, httpx.NewProblem(http.StatusConflict, codeStep, "the session has no flow run in progress")
+	}
+	pinned, err := a.st.FlowVersion(ctx, doc.Run.FlowCode, doc.Run.Version)
+	if err != nil {
+		return runResponse{}, err
+	}
+	draft := pinned.Draft()
+	res, err := flows.Submit(draft, *doc.Run, step, flows.Input{Value: req.Value, Outcome: req.Outcome}, gs1.ClassifyOptions{Options: gs1.Options{Now: a.now()}})
+	if err != nil {
+		return runResponse{}, stepProblem(err)
 	}
 	a.stats.steps.Add(1)
 	if res.Verdict != nil {
 		a.stats.scanErrors.Add(1)
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, res.Verdict.Code, res.Verdict.Message))
-		return
+		return runResponse{}, httpx.NewProblem(http.StatusUnprocessableEntity, res.Verdict.Code, res.Verdict.Message)
 	}
 	next, workID := res.State, s.CurrentWorkID
 	if res.Call != nil {
-		out, err := a.wh.Do(ctx, res.Call.Op, idem.Key, res.Call.Params)
+		out, err := a.wh.Do(ctx, res.Call.Op, key, res.Call.Params)
 		if err != nil {
-			fail(w, r, transportError{err})
-			return
+			return runResponse{}, transportError{err}
 		}
 		if !out.OK() {
-			fail(w, r, httpx.NewProblem(out.Status, out.Code, out.Detail))
-			return
+			return runResponse{}, httpx.NewProblem(out.Status, out.Code, out.Detail)
 		}
 		produced := map[string]string{}
 		if work, found := warehouse.WorkFrom(out.Body); found {
 			produced, workID = work.Values(), work.ID
 		}
 		if next, err = flows.Resolve(draft, res.State, produced); err != nil {
-			fail(w, r, stepProblem(err))
-			return
+			return runResponse{}, stepProblem(err)
 		}
 	}
 	doc.Run = &next
 	if _, err := a.st.SaveRun(ctx, id, s.Version, doc.raw(), workID, a.now()); err != nil {
-		fail(w, r, err)
-		return
+		return runResponse{}, err
 	}
-	httpx.JSON(w, http.StatusOK, viewOf(draft, next))
+	return viewOf(draft, next), nil
 }
 
 func stepProblem(err error) error {
@@ -446,7 +481,7 @@ func stepProblem(err error) error {
 		return httpx.NewProblem(http.StatusConflict, codeStep, err.Error())
 	case errors.Is(err, flows.ErrWrongStep):
 		return httpx.NewProblem(http.StatusConflict, codeStep, err.Error())
-	case errors.Is(err, flows.ErrNoOutcome), errors.Is(err, flows.ErrValueNeeded):
+	case errors.Is(err, flows.ErrNoOutcome), errors.Is(err, flows.ErrValueNeeded), errors.Is(err, flows.ErrValueTooLong):
 		return httpx.NewProblem(http.StatusBadRequest, codeValidation, err.Error())
 	}
 	return err

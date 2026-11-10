@@ -22,6 +22,7 @@ const (
 	Audience        = "warehouse"
 	Timeout         = 5 * time.Second
 	maxResponseSize = 1 << 20
+	CodeMissingDuty = "AUTH-0003"
 
 	dutyExecute = "warehouse.work.execute"
 	dutyInquiry = "warehouse.inquiry.view"
@@ -108,6 +109,31 @@ func lineNumber(s string) int {
 	var n int
 	_, _ = fmt.Sscanf(s, "%d", &n)
 	return n
+}
+
+// DutyFor is the duty a user must hold for op to be called on their behalf.
+func DutyFor(op string) (string, bool) {
+	r, err := plan(op, nil)
+	return r.duty, err == nil
+}
+
+// Guard refuses an operation the calling user lacks the duty for. The service
+// token carries the service grant's duties, never the user's, and the warehouse
+// trusts them, so the user's own duty is checked here before every call. The
+// refusal is a 403 outcome and nothing is sent.
+func Guard(next Caller) Caller { return guard{next} }
+
+type guard struct{ next Caller }
+
+func (g guard) Do(ctx context.Context, op, key string, params map[string]string) (Outcome, error) {
+	duty, known := DutyFor(op)
+	if !known {
+		return Outcome{}, ErrUnknownOp
+	}
+	if p, ok := tenant.FromContext(ctx); ok && !p.HasDuty(duty) {
+		return Outcome{Status: http.StatusForbidden, Code: CodeMissingDuty, Detail: "missing duty " + duty}, nil
+	}
+	return g.next.Do(ctx, op, key, params)
 }
 
 // Do runs one operation. key is sent as the Idempotency-Key, so repeating a
