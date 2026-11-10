@@ -1,0 +1,400 @@
+{"invoiceId":"INV-10001","vendorId":"V-139","amount":"19357.52","text":"Foxglove Electrical Ltd (CRP-US) Q3 supply ref 1646","account":"6600","history":[]}
+{"invoiceId":"INV-10002","vendorId":"V-131","amount":"33282.19","text":"Cedar Freight Ltd (CRP-DE) annual maintenance ref 7105","account":"5200","history":[]}
+{"invoiceId":"INV-10003","vendorId":"V-122","amount":"9029.90","text":"Millbrook Seals GmbH (CRP-DE) surcharge ref 3302","account":"5300","history":[]}
+{"invoiceId":"INV-10004","vendorId":"V-136","amount":"24095.03","text":"Summit Coatings LLC (CRP-US) sample lot ref 5247","account":"7100","history":[]}
+{"invoiceId":"INV-10005","vendorId":"V-129","amount":"5660.34","text":"Foxglove Electrical Inc (CRP-MX) expedite ref 6149","account":"5100","history":[]}
+{"invoiceId":"INV-10006","vendorId":"V-102","amount":"25509.86","text":"Millbrook Seals GmbH (CRP-MX) Q2 supply ref 6054","account":"5300","history":[]}
+{"invoiceId":"INV-10007","vendorId":"V-107","amount":"10486.39","text":"Pine Valley Fasteners Ltd (CRP-DE) monthly service ref 8258","account":"6400","history":[]}
+{"invoiceId":"INV-10008","vendorId":"V-119","amount":"5908.88","text":"Foxglove Electrical Ltd (CRP-DE) monthly service ref 2846","account":"6200","history":[]}
+{"invoiceId":"INV-10009","vendorId":"V-126","amount":"1862.13","text":"Summit Coatings GmbH (CRP-MX) annual maintenance ref 8560","account":"5200","history":[]}
+{"invoiceId":"INV-10010","vendorId":"V-102","amount":"9726.11","text":"Millbrook Seals GmbH (CRP-MX) freight and handling ref 6616","account":"5300","history":["5300"]}
+{"invoiceId":"INV-10011","vendorId":"V-124","amount":"12592.81","text":"Northgate Castings LLC (CRP-US) monthly service ref 2716","account":"6500","history":[]}
+{"invoiceId":"INV-10012","vendorId":"V-138","amount":"37180.75","text":"Brightwater Chemicals GmbH (CRP-MX) sample lot ref 2951","account":"7100","history":[]}
+{"invoiceId":"INV-10013","vendorId":"V-105","amount":"18554.11","text":"Alder Packaging Inc (CRP-MX) bulk order ref 2988","account":"6700","history":[]}
+{"invoiceId":"INV-10014","vendorId":"V-115","amount":"17609.01","text":"Alder Packaging Ltd (CRP-US) annual maintenance ref 2257","account":"6800","history":[]}
+{"invoiceId":"INV-10015","vendorId":"V-137","amount":"22267.74","text":"Pine Valley Fasteners Inc (CRP-DE) surcharge ref 6035","account":"7100","history":[]}
+{"invoiceId":"INV-10016","vendorId":"V-132","amount":"25253.72","text":"Millbrook Seals LLC (CRP-MX) Q2 supply ref 3196","account":"5200","history":[]}
+{"invoiceId":"INV-10017","vendorId":"V-133","amount":"36783.16","text":"Harbor Bearings Inc (CRP-US) expedite ref 6178","account":"6800","history":[]}
+{"invoiceId":"INV-10018","vendorId":"V-111","amount":"16525.92","text":"Cedar Freight Ltd (CRP-MX) surcharge ref 2976","account":"6100","history":[]}
+{"invoiceId":"INV-10019","vendorId":"V-123","amount":"1701.64","text":"Harbor Bearings Ltd (CRP-MX) surcharge ref 5511","account":"5200","history":[]}
+{"invoiceId":"INV-10020","vendorId":"V-104","amount":"36852.29","text":"Northgate Castings LLC (CRP-DE) sample lot ref 7575","account":"6300","history":[]}
+{"invoiceId":"INV-10021","vendorId":"V-117","amount":"40939.49","text":"Pine Valley Fasteners Inc (CRP-MX) Q2 supply ref 1627","account":"6300","history":[]}
+{"invoiceId":"INV-10022","vendorId":"V-126","amount":"36688.97","text":"Summit Coatings GmbH (CRP-MX) Q2 supply ref 8635","account":"5200","history":["5200"]}
+{"invoiceId":"INV-10023","vendorId":"V-115","amount":"13586.95","text":"Alder Packaging Ltd (CRP-US) surcharge ref 9274","account":"6800","history":["6800"]}
+{"invoiceId":"INV-10024","vendorId":"V-115","amount":"24162.24","text":"Alder Packaging Ltd (CRP-US) monthly service ref 1373","account":"6800","history":["6800","6800"]}
+{"invoiceId":"INV-10025","vendorId":"V-121","amount":"23158.90","text":"Cedar Freight Inc (CRP-US) Q1 supply ref 8906","account":"6100","history":[]}
+{"invoiceId":"INV-10026","vendorId":"V-127","amount":"32210.21","text":"Pine Valley Fasteners Ltd (CRP-US) annual maintenance ref 5031","account":"6700","history":[]}
+{"invoiceId":"INV-10027","vendorId":"V-135","amount":"17203.05","text":"Alder Packaging Ltd (CRP-MX) Q3 supply ref 5212","account":"6100","history":[]}
+{"invoiceId":"INV-10028","vendorId":"V-132","amount":"25272.23","text":"Millbrook Seals LLC (CRP-MX) Q3 supply ref 5875","account":"5200","history":["5200"]}
+{"invoiceId":"INV-10029","vendorId":"V-101","amount":"6285.96","text":"Cedar Freight Inc (CRP-DE) surcharge ref 8567","account":"5300","history":[]}
+{"invoiceId":"INV-10030","vendorId":"V-111","amount":"2137.01","text":"Cedar Freight Ltd (CRP-MX) Q1 supply ref 3738","account":"5300","history":["6100"]}
+{"invoiceId":"INV-10031","vendorId":"V-122","amount":"37657.23","text":"Millbrook Seals GmbH (CRP-DE) Q3 supply ref 6005","account":"5300","history":["5300"]}
+{"invoiceId":"INV-10032","vendorId":"V-105","amount":"32439.87","text":"Alder Packaging Inc (CRP-MX) annual maintenance ref 5731","account":"6700","history":["6700"]}
+{"invoiceId":"INV-10033","vendorId":"V-117","amount":"16769.24","text":"Pine Valley Fasteners Inc (CRP-MX) surcharge ref 6351","account":"6300","history":["6300"]}
+{"invoiceId":"INV-10034","vendorId":"V-119","amount":"26714.05","text":"Foxglove Electrical Ltd (CRP-DE) surcharge ref 7588","account":"6200","history":["6200"]}
+{"invoiceId":"INV-10035","vendorId":"V-108","amount":"2234.27","text":"Brightwater Chemicals LLC (CRP-MX) bulk order ref 4594","account":"6800","history":[]}
+{"invoiceId":"INV-10036","vendorId":"V-137","amount":"36538.24","text":"Pine Valley Fasteners Inc (CRP-DE) replenishment ref 9485","account":"7100","history":["7100"]}
+{"invoiceId":"INV-10037","vendorId":"V-117","amount":"14593.22","text":"Pine Valley Fasteners Inc (CRP-MX) surcharge ref 6051","account":"6500","history":["6300","6300"]}
+{"invoiceId":"INV-10038","vendorId":"V-118","amount":"31753.03","text":"Brightwater Chemicals GmbH (CRP-US) freight and handling ref 5953","account":"6600","history":[]}
+{"invoiceId":"INV-10039","vendorId":"V-111","amount":"28327.12","text":"Cedar Freight Ltd (CRP-MX) replenishment ref 5899","account":"6100","history":["6100","5300"]}
+{"invoiceId":"INV-10040","vendorId":"V-133","amount":"2773.55","text":"Harbor Bearings Inc (CRP-US) monthly service ref 6358","account":"6800","history":["6800"]}
+{"invoiceId":"INV-10041","vendorId":"V-119","amount":"32366.60","text":"Foxglove Electrical Ltd (CRP-DE) annual maintenance ref 1910","account":"6200","history":["6200","6200"]}
+{"invoiceId":"INV-10042","vendorId":"V-113","amount":"31234.91","text":"Harbor Bearings Inc (CRP-DE) expedite ref 1925","account":"6100","history":[]}
+{"invoiceId":"INV-10043","vendorId":"V-108","amount":"18820.37","text":"Brightwater Chemicals LLC (CRP-MX) replenishment ref 4031","account":"6800","history":["6800"]}
+{"invoiceId":"INV-10044","vendorId":"V-135","amount":"28398.80","text":"Alder Packaging Ltd (CRP-MX) Q3 supply ref 3133","account":"6100","history":["6100"]}
+{"invoiceId":"INV-10045","vendorId":"V-123","amount":"44345.30","text":"Harbor Bearings Ltd (CRP-MX) expedite ref 3746","account":"5200","history":["5200"]}
+{"invoiceId":"INV-10046","vendorId":"V-114","amount":"35348.46","text":"Northgate Castings GmbH (CRP-MX) annual maintenance ref 3431","account":"6400","history":[]}
+{"invoiceId":"INV-10047","vendorId":"V-138","amount":"26720.78","text":"Brightwater Chemicals GmbH (CRP-MX) Q4 supply ref 5685","account":"7100","history":["7100"]}
+{"invoiceId":"INV-10048","vendorId":"V-113","amount":"33871.97","text":"Harbor Bearings Inc (CRP-DE) expedite ref 6521","account":"6100","history":["6100"]}
+{"invoiceId":"INV-10049","vendorId":"V-112","amount":"9161.23","text":"Millbrook Seals LLC (CRP-US) Q2 supply ref 2484","account":"6700","history":[]}
+{"invoiceId":"INV-10050","vendorId":"V-117","amount":"24208.52","text":"Pine Valley Fasteners Inc (CRP-MX) Q4 supply ref 3249","account":"6300","history":["6300","6300","6500"]}
+{"invoiceId":"INV-10051","vendorId":"V-108","amount":"16755.94","text":"Brightwater Chemicals LLC (CRP-MX) surcharge ref 3579","account":"5100","history":["6800","6800"]}
+{"invoiceId":"INV-10052","vendorId":"V-105","amount":"34122.45","text":"Alder Packaging Inc (CRP-MX) surcharge ref 1034","account":"6700","history":["6700","6700"]}
+{"invoiceId":"INV-10053","vendorId":"V-130","amount":"36938.44","text":"Ridgeline Steel GmbH (CRP-US) sample lot ref 8152","account":"6800","history":[]}
+{"invoiceId":"INV-10054","vendorId":"V-124","amount":"26361.03","text":"Northgate Castings LLC (CRP-US) annual maintenance ref 6593","account":"6500","history":["6500"]}
+{"invoiceId":"INV-10055","vendorId":"V-110","amount":"24592.81","text":"Ridgeline Steel GmbH (CRP-DE) surcharge ref 7318","account":"6500","history":[]}
+{"invoiceId":"INV-10056","vendorId":"V-122","amount":"13575.12","text":"Millbrook Seals GmbH (CRP-DE) Q1 supply ref 3684","account":"5300","history":["5300","5300"]}
+{"invoiceId":"INV-10057","vendorId":"V-123","amount":"24526.15","text":"Harbor Bearings Ltd (CRP-MX) freight and handling ref 8253","account":"5200","history":["5200","5200"]}
+{"invoiceId":"INV-10058","vendorId":"V-127","amount":"8050.36","text":"Pine Valley Fasteners Ltd (CRP-US) freight and handling ref 7361","account":"6700","history":["6700"]}
+{"invoiceId":"INV-10059","vendorId":"V-107","amount":"35637.90","text":"Pine Valley Fasteners Ltd (CRP-DE) Q1 supply ref 1886","account":"6700","history":["6400"]}
+{"invoiceId":"INV-10060","vendorId":"V-129","amount":"40571.50","text":"Foxglove Electrical Inc (CRP-MX) surcharge ref 9304","account":"5200","history":["5100"]}
+{"invoiceId":"INV-10061","vendorId":"V-125","amount":"473.72","text":"Alder Packaging Inc (CRP-DE) Q3 supply ref 5473","account":"6600","history":[]}
+{"invoiceId":"INV-10062","vendorId":"V-119","amount":"29625.86","text":"Foxglove Electrical Ltd (CRP-DE) Q3 supply ref 8346","account":"6200","history":["6200","6200","6200"]}
+{"invoiceId":"INV-10063","vendorId":"V-111","amount":"30035.34","text":"Cedar Freight Ltd (CRP-MX) expedite ref 2482","account":"5300","history":["6100","5300","6100"]}
+{"invoiceId":"INV-10064","vendorId":"V-114","amount":"19710.83","text":"Northgate Castings GmbH (CRP-MX) annual maintenance ref 6781","account":"6800","history":["6400"]}
+{"invoiceId":"INV-10065","vendorId":"V-125","amount":"14440.08","text":"Alder Packaging Inc (CRP-DE) Q3 supply ref 3727","account":"6800","history":["6600"]}
+{"invoiceId":"INV-10066","vendorId":"V-116","amount":"8913.77","text":"Summit Coatings LLC (CRP-DE) Q3 supply ref 4918","account":"6200","history":[]}
+{"invoiceId":"INV-10067","vendorId":"V-116","amount":"20362.10","text":"Summit Coatings LLC (CRP-DE) expedite ref 7660","account":"6200","history":["6200"]}
+{"invoiceId":"INV-10068","vendorId":"V-130","amount":"39775.67","text":"Ridgeline Steel GmbH (CRP-US) surcharge ref 9750","account":"6800","history":["6800"]}
+{"invoiceId":"INV-10069","vendorId":"V-100","amount":"40431.14","text":"Ridgeline Steel LLC (CRP-US) replenishment ref 2017","account":"6100","history":[]}
+{"invoiceId":"INV-10070","vendorId":"V-104","amount":"5353.23","text":"Northgate Castings LLC (CRP-DE) Q1 supply ref 7808","account":"6300","history":["6300"]}
+{"invoiceId":"INV-10071","vendorId":"V-102","amount":"8783.11","text":"Millbrook Seals GmbH (CRP-MX) Q4 supply ref 5753","account":"6100","history":["5300","5300"]}
+{"invoiceId":"INV-10072","vendorId":"V-126","amount":"19084.41","text":"Summit Coatings GmbH (CRP-MX) Q1 supply ref 5782","account":"5200","history":["5200","5200"]}
+{"invoiceId":"INV-10073","vendorId":"V-120","amount":"24437.01","text":"Ridgeline Steel LLC (CRP-MX) freight and handling ref 7001","account":"6100","history":[]}
+{"invoiceId":"INV-10074","vendorId":"V-107","amount":"10105.35","text":"Pine Valley Fasteners Ltd (CRP-DE) monthly service ref 3748","account":"6400","history":["6400","6700"]}
+{"invoiceId":"INV-10075","vendorId":"V-138","amount":"24402.72","text":"Brightwater Chemicals GmbH (CRP-MX) surcharge ref 2935","account":"7100","history":["7100","7100"]}
+{"invoiceId":"INV-10076","vendorId":"V-115","amount":"43631.75","text":"Alder Packaging Ltd (CRP-US) replenishment ref 7365","account":"6800","history":["6800","6800","6800"]}
+{"invoiceId":"INV-10077","vendorId":"V-109","amount":"41569.31","text":"Foxglove Electrical Inc (CRP-US) replenishment ref 1841","account":"5200","history":[]}
+{"invoiceId":"INV-10078","vendorId":"V-120","amount":"28553.78","text":"Ridgeline Steel LLC (CRP-MX) monthly service ref 7577","account":"6100","history":["6100"]}
+{"invoiceId":"INV-10079","vendorId":"V-109","amount":"39334.20","text":"Foxglove Electrical Inc (CRP-US) replenishment ref 3414","account":"5200","history":["5200"]}
+{"invoiceId":"INV-10080","vendorId":"V-137","amount":"12883.85","text":"Pine Valley Fasteners Inc (CRP-DE) freight and handling ref 2826","account":"5100","history":["7100","7100"]}
+{"invoiceId":"INV-10081","vendorId":"V-135","amount":"29524.43","text":"Alder Packaging Ltd (CRP-MX) freight and handling ref 7188","account":"6100","history":["6100","6100"]}
+{"invoiceId":"INV-10082","vendorId":"V-126","amount":"5070.57","text":"Summit Coatings GmbH (CRP-MX) Q4 supply ref 8381","account":"5200","history":["5200","5200","5200"]}
+{"invoiceId":"INV-10083","vendorId":"V-127","amount":"44585.98","text":"Pine Valley Fasteners Ltd (CRP-US) monthly service ref 9407","account":"6700","history":["6700","6700"]}
+{"invoiceId":"INV-10084","vendorId":"V-112","amount":"25356.64","text":"Millbrook Seals LLC (CRP-US) annual maintenance ref 4016","account":"5100","history":["6700"]}
+{"invoiceId":"INV-10085","vendorId":"V-106","amount":"1704.12","text":"Summit Coatings GmbH (CRP-US) bulk order ref 3084","account":"6100","history":[]}
+{"invoiceId":"INV-10086","vendorId":"V-106","amount":"24667.47","text":"Summit Coatings GmbH (CRP-US) expedite ref 7790","account":"6100","history":["6100"]}
+{"invoiceId":"INV-10087","vendorId":"V-118","amount":"43688.74","text":"Brightwater Chemicals GmbH (CRP-US) freight and handling ref 9169","account":"6600","history":["6600"]}
+{"invoiceId":"INV-10088","vendorId":"V-112","amount":"38040.51","text":"Millbrook Seals LLC (CRP-US) surcharge ref 1416","account":"5100","history":["6700","5100"]}
+{"invoiceId":"INV-10089","vendorId":"V-137","amount":"36838.55","text":"Pine Valley Fasteners Inc (CRP-DE) bulk order ref 3445","account":"7100","history":["7100","7100","5100"]}
+{"invoiceId":"INV-10090","vendorId":"V-102","amount":"25265.32","text":"Millbrook Seals GmbH (CRP-MX) Q1 supply ref 9793","account":"5300","history":["5300","5300","6100"]}
+{"invoiceId":"INV-10091","vendorId":"V-117","amount":"19662.00","text":"Pine Valley Fasteners Inc (CRP-MX) Q1 supply ref 7208","account":"6300","history":["6300","6300","6500","6300"]}
+{"invoiceId":"INV-10092","vendorId":"V-121","amount":"6816.46","text":"Cedar Freight Inc (CRP-US) Q1 supply ref 8154","account":"6300","history":["6100"]}
+{"invoiceId":"INV-10093","vendorId":"V-128","amount":"21642.75","text":"Brightwater Chemicals LLC (CRP-DE) freight and handling ref 1165","account":"7100","history":[]}
+{"invoiceId":"INV-10094","vendorId":"V-114","amount":"19865.41","text":"Northgate Castings GmbH (CRP-MX) Q2 supply ref 1721","account":"6400","history":["6400","6800"]}
+{"invoiceId":"INV-10095","vendorId":"V-125","amount":"1314.54","text":"Alder Packaging Inc (CRP-DE) Q2 supply ref 3997","account":"6800","history":["6600","6800"]}
+{"invoiceId":"INV-10096","vendorId":"V-134","amount":"34488.32","text":"Northgate Castings GmbH (CRP-DE) sample lot ref 9744","account":"7100","history":[]}
+{"invoiceId":"INV-10097","vendorId":"V-107","amount":"13402.03","text":"Pine Valley Fasteners Ltd (CRP-DE) annual maintenance ref 5276","account":"6400","history":["6400","6700","6400"]}
+{"invoiceId":"INV-10098","vendorId":"V-137","amount":"21090.79","text":"Pine Valley Fasteners Inc (CRP-DE) bulk order ref 3880","account":"7100","history":["7100","7100","5100","7100"]}
+{"invoiceId":"INV-10099","vendorId":"V-129","amount":"18461.88","text":"Foxglove Electrical Inc (CRP-MX) Q2 supply ref 6669","account":"5200","history":["5100","5200"]}
+{"invoiceId":"INV-10100","vendorId":"V-117","amount":"13785.13","text":"Pine Valley Fasteners Inc (CRP-MX) Q1 supply ref 9223","account":"6300","history":["6300","6300","6500","6300","6300"]}
+{"invoiceId":"INV-10101","vendorId":"V-105","amount":"32278.94","text":"Alder Packaging Inc (CRP-MX) Q4 supply ref 4731","account":"6700","history":["6700","6700","6700"]}
+{"invoiceId":"INV-10102","vendorId":"V-105","amount":"24172.41","text":"Alder Packaging Inc (CRP-MX) bulk order ref 4690","account":"6700","history":["6700","6700","6700","6700"]}
+{"invoiceId":"INV-10103","vendorId":"V-115","amount":"13741.74","text":"Alder Packaging Ltd (CRP-US) replenishment ref 8680","account":"6800","history":["6800","6800","6800","6800"]}
+{"invoiceId":"INV-10104","vendorId":"V-107","amount":"28670.23","text":"Pine Valley Fasteners Ltd (CRP-DE) sample lot ref 7402","account":"6400","history":["6400","6700","6400","6400"]}
+{"invoiceId":"INV-10105","vendorId":"V-107","amount":"29903.18","text":"Pine Valley Fasteners Ltd (CRP-DE) monthly service ref 4146","account":"6400","history":["6400","6700","6400","6400","6400"]}
+{"invoiceId":"INV-10106","vendorId":"V-129","amount":"5441.60","text":"Foxglove Electrical Inc (CRP-MX) sample lot ref 6571","account":"5200","history":["5100","5200","5200"]}
+{"invoiceId":"INV-10107","vendorId":"V-134","amount":"13967.85","text":"Northgate Castings GmbH (CRP-DE) replenishment ref 3956","account":"6100","history":["7100"]}
+{"invoiceId":"INV-10108","vendorId":"V-105","amount":"17775.80","text":"Alder Packaging Inc (CRP-MX) Q4 supply ref 3678","account":"6700","history":["6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10109","vendorId":"V-117","amount":"19416.62","text":"Pine Valley Fasteners Inc (CRP-MX) Q4 supply ref 7917","account":"6300","history":["6300","6300","6500","6300","6300","6300"]}
+{"invoiceId":"INV-10110","vendorId":"V-101","amount":"30076.90","text":"Cedar Freight Inc (CRP-DE) monthly service ref 9455","account":"5300","history":["5300"]}
+{"invoiceId":"INV-10111","vendorId":"V-106","amount":"5705.99","text":"Summit Coatings GmbH (CRP-US) monthly service ref 7083","account":"6100","history":["6100","6100"]}
+{"invoiceId":"INV-10112","vendorId":"V-126","amount":"5016.74","text":"Summit Coatings GmbH (CRP-MX) expedite ref 5342","account":"5200","history":["5200","5200","5200","5200"]}
+{"invoiceId":"INV-10113","vendorId":"V-116","amount":"42881.95","text":"Summit Coatings LLC (CRP-DE) sample lot ref 4410","account":"6200","history":["6200","6200"]}
+{"invoiceId":"INV-10114","vendorId":"V-123","amount":"25286.03","text":"Harbor Bearings Ltd (CRP-MX) sample lot ref 1922","account":"5200","history":["5200","5200","5200"]}
+{"invoiceId":"INV-10115","vendorId":"V-126","amount":"38555.39","text":"Summit Coatings GmbH (CRP-MX) annual maintenance ref 1159","account":"5200","history":["5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10116","vendorId":"V-115","amount":"1469.70","text":"Alder Packaging Ltd (CRP-US) Q4 supply ref 9224","account":"6800","history":["6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10117","vendorId":"V-138","amount":"14783.66","text":"Brightwater Chemicals GmbH (CRP-MX) Q4 supply ref 3008","account":"7100","history":["7100","7100","7100"]}
+{"invoiceId":"INV-10118","vendorId":"V-137","amount":"4946.82","text":"Pine Valley Fasteners Inc (CRP-DE) annual maintenance ref 8197","account":"7100","history":["7100","7100","5100","7100","7100"]}
+{"invoiceId":"INV-10119","vendorId":"V-113","amount":"14678.57","text":"Harbor Bearings Inc (CRP-DE) Q3 supply ref 1603","account":"6100","history":["6100","6100"]}
+{"invoiceId":"INV-10120","vendorId":"V-114","amount":"14364.31","text":"Northgate Castings GmbH (CRP-MX) monthly service ref 9125","account":"6400","history":["6400","6800","6400"]}
+{"invoiceId":"INV-10121","vendorId":"V-120","amount":"9112.92","text":"Ridgeline Steel LLC (CRP-MX) Q1 supply ref 1000","account":"6100","history":["6100","6100"]}
+{"invoiceId":"INV-10122","vendorId":"V-128","amount":"6006.74","text":"Brightwater Chemicals LLC (CRP-DE) monthly service ref 9088","account":"7100","history":["7100"]}
+{"invoiceId":"INV-10123","vendorId":"V-106","amount":"24680.39","text":"Summit Coatings GmbH (CRP-US) bulk order ref 9666","account":"6100","history":["6100","6100","6100"]}
+{"invoiceId":"INV-10124","vendorId":"V-134","amount":"40391.80","text":"Northgate Castings GmbH (CRP-DE) freight and handling ref 3815","account":"7100","history":["7100","6100"]}
+{"invoiceId":"INV-10125","vendorId":"V-126","amount":"6760.48","text":"Summit Coatings GmbH (CRP-MX) sample lot ref 7205","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10126","vendorId":"V-125","amount":"39844.63","text":"Alder Packaging Inc (CRP-DE) annual maintenance ref 8335","account":"6800","history":["6600","6800","6800"]}
+{"invoiceId":"INV-10127","vendorId":"V-122","amount":"12125.30","text":"Millbrook Seals GmbH (CRP-DE) annual maintenance ref 4627","account":"6800","history":["5300","5300","5300"]}
+{"invoiceId":"INV-10128","vendorId":"V-139","amount":"40786.15","text":"Foxglove Electrical Ltd (CRP-US) surcharge ref 4475","account":"6600","history":["6600"]}
+{"invoiceId":"INV-10129","vendorId":"V-111","amount":"40889.95","text":"Cedar Freight Ltd (CRP-MX) bulk order ref 6065","account":"5300","history":["6100","5300","6100","5300"]}
+{"invoiceId":"INV-10130","vendorId":"V-101","amount":"25587.02","text":"Cedar Freight Inc (CRP-DE) annual maintenance ref 5991","account":"5300","history":["5300","5300"]}
+{"invoiceId":"INV-10131","vendorId":"V-116","amount":"5330.69","text":"Summit Coatings LLC (CRP-DE) expedite ref 7337","account":"6200","history":["6200","6200","6200"]}
+{"invoiceId":"INV-10132","vendorId":"V-115","amount":"15353.32","text":"Alder Packaging Ltd (CRP-US) replenishment ref 3449","account":"6800","history":["6800","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10133","vendorId":"V-136","amount":"41197.44","text":"Summit Coatings LLC (CRP-US) Q1 supply ref 6515","account":"6600","history":["7100"]}
+{"invoiceId":"INV-10134","vendorId":"V-132","amount":"32391.36","text":"Millbrook Seals LLC (CRP-MX) annual maintenance ref 3430","account":"5200","history":["5200","5200"]}
+{"invoiceId":"INV-10135","vendorId":"V-136","amount":"15635.66","text":"Summit Coatings LLC (CRP-US) Q3 supply ref 3949","account":"6600","history":["7100","6600"]}
+{"invoiceId":"INV-10136","vendorId":"V-129","amount":"14763.03","text":"Foxglove Electrical Inc (CRP-MX) expedite ref 9870","account":"5200","history":["5100","5200","5200","5200"]}
+{"invoiceId":"INV-10137","vendorId":"V-135","amount":"27719.78","text":"Alder Packaging Ltd (CRP-MX) Q2 supply ref 6831","account":"6100","history":["6100","6100","6100"]}
+{"invoiceId":"INV-10138","vendorId":"V-110","amount":"31379.53","text":"Ridgeline Steel GmbH (CRP-DE) replenishment ref 5940","account":"6500","history":["6500"]}
+{"invoiceId":"INV-10139","vendorId":"V-103","amount":"21887.43","text":"Harbor Bearings Ltd (CRP-US) Q3 supply ref 3636","account":"6300","history":[]}
+{"invoiceId":"INV-10140","vendorId":"V-136","amount":"29691.60","text":"Summit Coatings LLC (CRP-US) Q3 supply ref 6802","account":"6600","history":["7100","6600","6600"]}
+{"invoiceId":"INV-10141","vendorId":"V-108","amount":"1825.11","text":"Brightwater Chemicals LLC (CRP-MX) Q3 supply ref 2355","account":"5100","history":["6800","6800","5100"]}
+{"invoiceId":"INV-10142","vendorId":"V-123","amount":"19347.81","text":"Harbor Bearings Ltd (CRP-MX) Q3 supply ref 9828","account":"5200","history":["5200","5200","5200","5200"]}
+{"invoiceId":"INV-10143","vendorId":"V-105","amount":"36757.69","text":"Alder Packaging Inc (CRP-MX) bulk order ref 9699","account":"6700","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10144","vendorId":"V-115","amount":"23491.78","text":"Alder Packaging Ltd (CRP-US) expedite ref 6973","account":"6800","history":["6800","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10145","vendorId":"V-127","amount":"6650.98","text":"Pine Valley Fasteners Ltd (CRP-US) surcharge ref 7593","account":"6700","history":["6700","6700","6700"]}
+{"invoiceId":"INV-10146","vendorId":"V-105","amount":"11144.94","text":"Alder Packaging Inc (CRP-MX) freight and handling ref 9541","account":"6700","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10147","vendorId":"V-135","amount":"8077.45","text":"Alder Packaging Ltd (CRP-MX) freight and handling ref 4016","account":"6100","history":["6100","6100","6100","6100"]}
+{"invoiceId":"INV-10148","vendorId":"V-137","amount":"27523.21","text":"Pine Valley Fasteners Inc (CRP-DE) Q2 supply ref 9478","account":"7100","history":["7100","7100","5100","7100","7100","7100"]}
+{"invoiceId":"INV-10149","vendorId":"V-137","amount":"11455.59","text":"Pine Valley Fasteners Inc (CRP-DE) freight and handling ref 1353","account":"7100","history":["7100","5100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10150","vendorId":"V-109","amount":"40390.30","text":"Foxglove Electrical Inc (CRP-US) Q4 supply ref 8519","account":"5200","history":["5200","5200"]}
+{"invoiceId":"INV-10151","vendorId":"V-129","amount":"22766.01","text":"Foxglove Electrical Inc (CRP-MX) expedite ref 5024","account":"5200","history":["5100","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10152","vendorId":"V-127","amount":"15719.55","text":"Pine Valley Fasteners Ltd (CRP-US) monthly service ref 1770","account":"6700","history":["6700","6700","6700","6700"]}
+{"invoiceId":"INV-10153","vendorId":"V-112","amount":"21428.70","text":"Millbrook Seals LLC (CRP-US) surcharge ref 8246","account":"6700","history":["6700","5100","5100"]}
+{"invoiceId":"INV-10154","vendorId":"V-119","amount":"26151.13","text":"Foxglove Electrical Ltd (CRP-DE) sample lot ref 6149","account":"6200","history":["6200","6200","6200","6200"]}
+{"invoiceId":"INV-10155","vendorId":"V-135","amount":"22027.32","text":"Alder Packaging Ltd (CRP-MX) annual maintenance ref 2056","account":"6100","history":["6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10156","vendorId":"V-135","amount":"37858.31","text":"Alder Packaging Ltd (CRP-MX) replenishment ref 9265","account":"6100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10157","vendorId":"V-120","amount":"545.40","text":"Ridgeline Steel LLC (CRP-MX) sample lot ref 9528","account":"6100","history":["6100","6100","6100"]}
+{"invoiceId":"INV-10158","vendorId":"V-126","amount":"19760.74","text":"Summit Coatings GmbH (CRP-MX) monthly service ref 1065","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10159","vendorId":"V-115","amount":"24343.89","text":"Alder Packaging Ltd (CRP-US) bulk order ref 4517","account":"6800","history":["6800","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10160","vendorId":"V-114","amount":"7115.71","text":"Northgate Castings GmbH (CRP-MX) replenishment ref 3209","account":"6400","history":["6400","6800","6400","6400"]}
+{"invoiceId":"INV-10161","vendorId":"V-139","amount":"18017.26","text":"Foxglove Electrical Ltd (CRP-US) Q2 supply ref 5344","account":"6600","history":["6600","6600"]}
+{"invoiceId":"INV-10162","vendorId":"V-139","amount":"15038.06","text":"Foxglove Electrical Ltd (CRP-US) bulk order ref 3089","account":"6600","history":["6600","6600","6600"]}
+{"invoiceId":"INV-10163","vendorId":"V-120","amount":"21947.49","text":"Ridgeline Steel LLC (CRP-MX) bulk order ref 1370","account":"6100","history":["6100","6100","6100","6100"]}
+{"invoiceId":"INV-10164","vendorId":"V-126","amount":"38381.78","text":"Summit Coatings GmbH (CRP-MX) Q3 supply ref 4070","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10165","vendorId":"V-116","amount":"20884.64","text":"Summit Coatings LLC (CRP-DE) bulk order ref 3724","account":"6200","history":["6200","6200","6200","6200"]}
+{"invoiceId":"INV-10166","vendorId":"V-135","amount":"3500.91","text":"Alder Packaging Ltd (CRP-MX) sample lot ref 6287","account":"6100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10167","vendorId":"V-117","amount":"30785.99","text":"Pine Valley Fasteners Inc (CRP-MX) Q1 supply ref 1184","account":"6300","history":["6300","6500","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10168","vendorId":"V-136","amount":"6466.04","text":"Summit Coatings LLC (CRP-US) Q4 supply ref 7514","account":"6600","history":["7100","6600","6600","6600"]}
+{"invoiceId":"INV-10169","vendorId":"V-104","amount":"14950.75","text":"Northgate Castings LLC (CRP-DE) surcharge ref 8476","account":"6300","history":["6300","6300"]}
+{"invoiceId":"INV-10170","vendorId":"V-132","amount":"20477.15","text":"Millbrook Seals LLC (CRP-MX) expedite ref 3649","account":"5200","history":["5200","5200","5200"]}
+{"invoiceId":"INV-10171","vendorId":"V-132","amount":"36656.70","text":"Millbrook Seals LLC (CRP-MX) expedite ref 2384","account":"5200","history":["5200","5200","5200","5200"]}
+{"invoiceId":"INV-10172","vendorId":"V-128","amount":"35640.39","text":"Brightwater Chemicals LLC (CRP-DE) replenishment ref 5051","account":"7100","history":["7100","7100"]}
+{"invoiceId":"INV-10173","vendorId":"V-106","amount":"19515.97","text":"Summit Coatings GmbH (CRP-US) surcharge ref 5417","account":"6100","history":["6100","6100","6100","6100"]}
+{"invoiceId":"INV-10174","vendorId":"V-123","amount":"41405.85","text":"Harbor Bearings Ltd (CRP-MX) Q1 supply ref 1256","account":"5200","history":["5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10175","vendorId":"V-125","amount":"38127.42","text":"Alder Packaging Inc (CRP-DE) replenishment ref 9104","account":"6800","history":["6600","6800","6800","6800"]}
+{"invoiceId":"INV-10176","vendorId":"V-116","amount":"38744.32","text":"Summit Coatings LLC (CRP-DE) bulk order ref 5540","account":"6200","history":["6200","6200","6200","6200","6200"]}
+{"invoiceId":"INV-10177","vendorId":"V-124","amount":"9139.94","text":"Northgate Castings LLC (CRP-US) annual maintenance ref 1632","account":"6700","history":["6500","6500"]}
+{"invoiceId":"INV-10178","vendorId":"V-107","amount":"35539.66","text":"Pine Valley Fasteners Ltd (CRP-DE) replenishment ref 9669","account":"6400","history":["6400","6700","6400","6400","6400","6400"]}
+{"invoiceId":"INV-10179","vendorId":"V-126","amount":"30396.20","text":"Summit Coatings GmbH (CRP-MX) sample lot ref 9687","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10180","vendorId":"V-132","amount":"21951.81","text":"Millbrook Seals LLC (CRP-MX) surcharge ref 9434","account":"6400","history":["5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10181","vendorId":"V-135","amount":"14231.59","text":"Alder Packaging Ltd (CRP-MX) surcharge ref 2107","account":"5300","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10182","vendorId":"V-127","amount":"41953.31","text":"Pine Valley Fasteners Ltd (CRP-US) surcharge ref 7207","account":"6700","history":["6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10183","vendorId":"V-115","amount":"28246.71","text":"Alder Packaging Ltd (CRP-US) Q3 supply ref 1981","account":"6800","history":["6800","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10184","vendorId":"V-103","amount":"41954.63","text":"Harbor Bearings Ltd (CRP-US) monthly service ref 5002","account":"6300","history":["6300"]}
+{"invoiceId":"INV-10185","vendorId":"V-105","amount":"24547.59","text":"Alder Packaging Inc (CRP-MX) Q2 supply ref 9614","account":"6700","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10186","vendorId":"V-112","amount":"20999.94","text":"Millbrook Seals LLC (CRP-US) expedite ref 9214","account":"6700","history":["6700","5100","5100","6700"]}
+{"invoiceId":"INV-10187","vendorId":"V-107","amount":"41974.21","text":"Pine Valley Fasteners Ltd (CRP-DE) Q3 supply ref 8930","account":"5200","history":["6700","6400","6400","6400","6400","6400"]}
+{"invoiceId":"INV-10188","vendorId":"V-130","amount":"34585.97","text":"Ridgeline Steel GmbH (CRP-US) Q1 supply ref 7698","account":"6800","history":["6800","6800"]}
+{"invoiceId":"INV-10189","vendorId":"V-105","amount":"27961.28","text":"Alder Packaging Inc (CRP-MX) annual maintenance ref 2277","account":"6700","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10190","vendorId":"V-111","amount":"26658.95","text":"Cedar Freight Ltd (CRP-MX) Q4 supply ref 4080","account":"5300","history":["6100","5300","6100","5300","5300"]}
+{"invoiceId":"INV-10191","vendorId":"V-108","amount":"37582.11","text":"Brightwater Chemicals LLC (CRP-MX) sample lot ref 8799","account":"5100","history":["6800","6800","5100","5100"]}
+{"invoiceId":"INV-10192","vendorId":"V-109","amount":"4733.91","text":"Foxglove Electrical Inc (CRP-US) Q3 supply ref 8431","account":"5200","history":["5200","5200","5200"]}
+{"invoiceId":"INV-10193","vendorId":"V-106","amount":"15684.48","text":"Summit Coatings GmbH (CRP-US) freight and handling ref 7327","account":"6100","history":["6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10194","vendorId":"V-125","amount":"32753.77","text":"Alder Packaging Inc (CRP-DE) sample lot ref 7378","account":"6800","history":["6600","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10195","vendorId":"V-113","amount":"31025.01","text":"Harbor Bearings Inc (CRP-DE) annual maintenance ref 6945","account":"6100","history":["6100","6100","6100"]}
+{"invoiceId":"INV-10196","vendorId":"V-111","amount":"7333.21","text":"Cedar Freight Ltd (CRP-MX) Q1 supply ref 6297","account":"5300","history":["6100","5300","6100","5300","5300","5300"]}
+{"invoiceId":"INV-10197","vendorId":"V-109","amount":"12580.49","text":"Foxglove Electrical Inc (CRP-US) Q1 supply ref 3328","account":"5200","history":["5200","5200","5200","5200"]}
+{"invoiceId":"INV-10198","vendorId":"V-136","amount":"35422.50","text":"Summit Coatings LLC (CRP-US) freight and handling ref 6379","account":"6600","history":["7100","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10199","vendorId":"V-123","amount":"9689.76","text":"Harbor Bearings Ltd (CRP-MX) Q3 supply ref 6284","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10200","vendorId":"V-114","amount":"12105.30","text":"Northgate Castings GmbH (CRP-MX) Q1 supply ref 6760","account":"6400","history":["6400","6800","6400","6400","6400"]}
+{"invoiceId":"INV-10201","vendorId":"V-129","amount":"2702.10","text":"Foxglove Electrical Inc (CRP-MX) Q3 supply ref 5221","account":"5200","history":["5100","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10202","vendorId":"V-138","amount":"24778.77","text":"Brightwater Chemicals GmbH (CRP-MX) bulk order ref 3916","account":"7100","history":["7100","7100","7100","7100"]}
+{"invoiceId":"INV-10203","vendorId":"V-108","amount":"31680.47","text":"Brightwater Chemicals LLC (CRP-MX) Q2 supply ref 3612","account":"5100","history":["6800","6800","5100","5100","5100"]}
+{"invoiceId":"INV-10204","vendorId":"V-120","amount":"42812.50","text":"Ridgeline Steel LLC (CRP-MX) annual maintenance ref 1147","account":"6100","history":["6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10205","vendorId":"V-126","amount":"37073.10","text":"Summit Coatings GmbH (CRP-MX) bulk order ref 1006","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10206","vendorId":"V-139","amount":"4215.47","text":"Foxglove Electrical Ltd (CRP-US) surcharge ref 6937","account":"6600","history":["6600","6600","6600","6600"]}
+{"invoiceId":"INV-10207","vendorId":"V-120","amount":"21414.97","text":"Ridgeline Steel LLC (CRP-MX) Q2 supply ref 5835","account":"6100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10208","vendorId":"V-137","amount":"44167.78","text":"Pine Valley Fasteners Inc (CRP-DE) Q4 supply ref 2823","account":"7100","history":["5100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10209","vendorId":"V-102","amount":"44573.27","text":"Millbrook Seals GmbH (CRP-MX) Q3 supply ref 3159","account":"5300","history":["5300","5300","6100","5300"]}
+{"invoiceId":"INV-10210","vendorId":"V-136","amount":"686.32","text":"Summit Coatings LLC (CRP-US) Q3 supply ref 5859","account":"6600","history":["7100","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10211","vendorId":"V-111","amount":"23704.73","text":"Cedar Freight Ltd (CRP-MX) freight and handling ref 5098","account":"5300","history":["5300","6100","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10212","vendorId":"V-108","amount":"18303.81","text":"Brightwater Chemicals LLC (CRP-MX) bulk order ref 5496","account":"5100","history":["6800","6800","5100","5100","5100","5100"]}
+{"invoiceId":"INV-10213","vendorId":"V-133","amount":"1286.05","text":"Harbor Bearings Inc (CRP-US) surcharge ref 2263","account":"6400","history":["6800","6800"]}
+{"invoiceId":"INV-10214","vendorId":"V-113","amount":"38437.84","text":"Harbor Bearings Inc (CRP-DE) Q1 supply ref 7246","account":"6100","history":["6100","6100","6100","6100"]}
+{"invoiceId":"INV-10215","vendorId":"V-107","amount":"26763.48","text":"Pine Valley Fasteners Ltd (CRP-DE) Q2 supply ref 2927","account":"6400","history":["6400","6400","6400","6400","6400","5200"]}
+{"invoiceId":"INV-10216","vendorId":"V-129","amount":"12411.29","text":"Foxglove Electrical Inc (CRP-MX) bulk order ref 8222","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10217","vendorId":"V-127","amount":"1030.47","text":"Pine Valley Fasteners Ltd (CRP-US) expedite ref 5891","account":"6700","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10218","vendorId":"V-108","amount":"10855.36","text":"Brightwater Chemicals LLC (CRP-MX) annual maintenance ref 4729","account":"5100","history":["6800","5100","5100","5100","5100","5100"]}
+{"invoiceId":"INV-10219","vendorId":"V-130","amount":"20512.80","text":"Ridgeline Steel GmbH (CRP-US) Q2 supply ref 8588","account":"6800","history":["6800","6800","6800"]}
+{"invoiceId":"INV-10220","vendorId":"V-139","amount":"17875.28","text":"Foxglove Electrical Ltd (CRP-US) Q1 supply ref 9731","account":"6600","history":["6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10221","vendorId":"V-113","amount":"39916.83","text":"Harbor Bearings Inc (CRP-DE) Q2 supply ref 5432","account":"6100","history":["6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10222","vendorId":"V-126","amount":"44986.32","text":"Summit Coatings GmbH (CRP-MX) Q1 supply ref 5607","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10223","vendorId":"V-101","amount":"31173.88","text":"Cedar Freight Inc (CRP-DE) Q2 supply ref 5808","account":"5300","history":["5300","5300","5300"]}
+{"invoiceId":"INV-10224","vendorId":"V-131","amount":"287.66","text":"Cedar Freight Ltd (CRP-DE) Q2 supply ref 1454","account":"5200","history":["5200"]}
+{"invoiceId":"INV-10225","vendorId":"V-102","amount":"22462.42","text":"Millbrook Seals GmbH (CRP-MX) annual maintenance ref 5459","account":"5300","history":["5300","5300","6100","5300","5300"]}
+{"invoiceId":"INV-10226","vendorId":"V-101","amount":"38391.15","text":"Cedar Freight Inc (CRP-DE) bulk order ref 8955","account":"5300","history":["5300","5300","5300","5300"]}
+{"invoiceId":"INV-10227","vendorId":"V-110","amount":"16635.68","text":"Ridgeline Steel GmbH (CRP-DE) sample lot ref 8922","account":"6500","history":["6500","6500"]}
+{"invoiceId":"INV-10228","vendorId":"V-113","amount":"41350.57","text":"Harbor Bearings Inc (CRP-DE) sample lot ref 8528","account":"6100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10229","vendorId":"V-101","amount":"14144.87","text":"Cedar Freight Inc (CRP-DE) surcharge ref 6760","account":"5300","history":["5300","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10230","vendorId":"V-139","amount":"31013.79","text":"Foxglove Electrical Ltd (CRP-US) monthly service ref 1678","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10231","vendorId":"V-133","amount":"22684.74","text":"Harbor Bearings Inc (CRP-US) Q4 supply ref 3069","account":"6800","history":["6800","6800","6400"]}
+{"invoiceId":"INV-10232","vendorId":"V-118","amount":"19674.40","text":"Brightwater Chemicals GmbH (CRP-US) surcharge ref 9407","account":"6600","history":["6600","6600"]}
+{"invoiceId":"INV-10233","vendorId":"V-131","amount":"35594.47","text":"Cedar Freight Ltd (CRP-DE) expedite ref 7703","account":"5200","history":["5200","5200"]}
+{"invoiceId":"INV-10234","vendorId":"V-126","amount":"21487.39","text":"Summit Coatings GmbH (CRP-MX) Q2 supply ref 1918","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10235","vendorId":"V-118","amount":"28036.67","text":"Brightwater Chemicals GmbH (CRP-US) replenishment ref 8744","account":"6600","history":["6600","6600","6600"]}
+{"invoiceId":"INV-10236","vendorId":"V-124","amount":"3863.11","text":"Northgate Castings LLC (CRP-US) bulk order ref 8679","account":"6500","history":["6500","6500","6700"]}
+{"invoiceId":"INV-10237","vendorId":"V-105","amount":"18731.81","text":"Alder Packaging Inc (CRP-MX) sample lot ref 8231","account":"6700","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10238","vendorId":"V-136","amount":"30986.54","text":"Summit Coatings LLC (CRP-US) Q2 supply ref 5969","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10239","vendorId":"V-114","amount":"21371.64","text":"Northgate Castings GmbH (CRP-MX) surcharge ref 6481","account":"6400","history":["6400","6800","6400","6400","6400","6400"]}
+{"invoiceId":"INV-10240","vendorId":"V-106","amount":"17469.52","text":"Summit Coatings GmbH (CRP-US) Q2 supply ref 6589","account":"6100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10241","vendorId":"V-108","amount":"19557.42","text":"Brightwater Chemicals LLC (CRP-MX) expedite ref 4395","account":"5100","history":["5100","5100","5100","5100","5100","5100"]}
+{"invoiceId":"INV-10242","vendorId":"V-101","amount":"14085.65","text":"Cedar Freight Inc (CRP-DE) replenishment ref 7212","account":"5300","history":["5300","5300","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10243","vendorId":"V-117","amount":"28589.74","text":"Pine Valley Fasteners Inc (CRP-MX) bulk order ref 7856","account":"6300","history":["6500","6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10244","vendorId":"V-137","amount":"15889.01","text":"Pine Valley Fasteners Inc (CRP-DE) Q4 supply ref 3929","account":"7100","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10245","vendorId":"V-121","amount":"27350.90","text":"Cedar Freight Inc (CRP-US) replenishment ref 1121","account":"6300","history":["6100","6300"]}
+{"invoiceId":"INV-10246","vendorId":"V-100","amount":"3763.03","text":"Ridgeline Steel LLC (CRP-US) annual maintenance ref 5605","account":"6100","history":["6100"]}
+{"invoiceId":"INV-10247","vendorId":"V-105","amount":"23403.40","text":"Alder Packaging Inc (CRP-MX) Q4 supply ref 9435","account":"6400","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10248","vendorId":"V-139","amount":"27016.97","text":"Foxglove Electrical Ltd (CRP-US) monthly service ref 4722","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10249","vendorId":"V-138","amount":"39640.84","text":"Brightwater Chemicals GmbH (CRP-MX) monthly service ref 2158","account":"7100","history":["7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10250","vendorId":"V-103","amount":"44074.16","text":"Harbor Bearings Ltd (CRP-US) Q3 supply ref 4309","account":"6300","history":["6300","6300"]}
+{"invoiceId":"INV-10251","vendorId":"V-133","amount":"16559.62","text":"Harbor Bearings Inc (CRP-US) sample lot ref 3821","account":"6800","history":["6800","6800","6400","6800"]}
+{"invoiceId":"INV-10252","vendorId":"V-101","amount":"30904.80","text":"Cedar Freight Inc (CRP-DE) sample lot ref 3413","account":"5300","history":["5300","5300","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10253","vendorId":"V-132","amount":"34688.02","text":"Millbrook Seals LLC (CRP-MX) Q1 supply ref 5606","account":"5200","history":["5200","5200","5200","5200","5200","6400"]}
+{"invoiceId":"INV-10254","vendorId":"V-127","amount":"19368.00","text":"Pine Valley Fasteners Ltd (CRP-US) bulk order ref 8474","account":"6700","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10255","vendorId":"V-127","amount":"42366.29","text":"Pine Valley Fasteners Ltd (CRP-US) annual maintenance ref 9318","account":"6700","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10256","vendorId":"V-103","amount":"44290.30","text":"Harbor Bearings Ltd (CRP-US) bulk order ref 5588","account":"6300","history":["6300","6300","6300"]}
+{"invoiceId":"INV-10257","vendorId":"V-119","amount":"37431.96","text":"Foxglove Electrical Ltd (CRP-DE) Q3 supply ref 8793","account":"6200","history":["6200","6200","6200","6200","6200"]}
+{"invoiceId":"INV-10258","vendorId":"V-109","amount":"39888.48","text":"Foxglove Electrical Inc (CRP-US) Q4 supply ref 1159","account":"5200","history":["5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10259","vendorId":"V-133","amount":"15241.15","text":"Harbor Bearings Inc (CRP-US) surcharge ref 7674","account":"6400","history":["6800","6800","6400","6800","6800"]}
+{"invoiceId":"INV-10260","vendorId":"V-139","amount":"26164.86","text":"Foxglove Electrical Ltd (CRP-US) Q4 supply ref 8369","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10261","vendorId":"V-108","amount":"26062.19","text":"Brightwater Chemicals LLC (CRP-MX) replenishment ref 2547","account":"5100","history":["5100","5100","5100","5100","5100","5100"]}
+{"invoiceId":"INV-10262","vendorId":"V-119","amount":"22232.54","text":"Foxglove Electrical Ltd (CRP-DE) monthly service ref 9866","account":"6200","history":["6200","6200","6200","6200","6200","6200"]}
+{"invoiceId":"INV-10263","vendorId":"V-135","amount":"7229.29","text":"Alder Packaging Ltd (CRP-MX) monthly service ref 1232","account":"6100","history":["6100","6100","6100","6100","6100","5300"]}
+{"invoiceId":"INV-10264","vendorId":"V-126","amount":"35527.37","text":"Summit Coatings GmbH (CRP-MX) Q3 supply ref 1109","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10265","vendorId":"V-117","amount":"13205.66","text":"Pine Valley Fasteners Inc (CRP-MX) Q2 supply ref 4494","account":"6300","history":["6300","6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10266","vendorId":"V-105","amount":"29384.18","text":"Alder Packaging Inc (CRP-MX) Q1 supply ref 5764","account":"6700","history":["6700","6700","6700","6700","6700","6400"]}
+{"invoiceId":"INV-10267","vendorId":"V-126","amount":"7770.47","text":"Summit Coatings GmbH (CRP-MX) surcharge ref 5716","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10268","vendorId":"V-131","amount":"7611.79","text":"Cedar Freight Ltd (CRP-DE) Q1 supply ref 4905","account":"5200","history":["5200","5200","5200"]}
+{"invoiceId":"INV-10269","vendorId":"V-134","amount":"22713.50","text":"Northgate Castings GmbH (CRP-DE) Q4 supply ref 2404","account":"7100","history":["7100","6100","7100"]}
+{"invoiceId":"INV-10270","vendorId":"V-118","amount":"10607.14","text":"Brightwater Chemicals GmbH (CRP-US) Q1 supply ref 3200","account":"6600","history":["6600","6600","6600","6600"]}
+{"invoiceId":"INV-10271","vendorId":"V-115","amount":"38940.20","text":"Alder Packaging Ltd (CRP-US) Q2 supply ref 1146","account":"6800","history":["6800","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10272","vendorId":"V-113","amount":"3022.05","text":"Harbor Bearings Inc (CRP-DE) surcharge ref 8693","account":"6100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10273","vendorId":"V-116","amount":"19557.32","text":"Summit Coatings LLC (CRP-DE) surcharge ref 6218","account":"6200","history":["6200","6200","6200","6200","6200","6200"]}
+{"invoiceId":"INV-10274","vendorId":"V-122","amount":"41277.01","text":"Millbrook Seals GmbH (CRP-DE) bulk order ref 7570","account":"5300","history":["5300","5300","5300","6800"]}
+{"invoiceId":"INV-10275","vendorId":"V-132","amount":"42325.02","text":"Millbrook Seals LLC (CRP-MX) Q2 supply ref 3982","account":"5200","history":["5200","5200","5200","5200","6400","5200"]}
+{"invoiceId":"INV-10276","vendorId":"V-129","amount":"26420.58","text":"Foxglove Electrical Inc (CRP-MX) Q4 supply ref 4391","account":"7100","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10277","vendorId":"V-137","amount":"33485.85","text":"Pine Valley Fasteners Inc (CRP-DE) surcharge ref 4748","account":"7100","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10278","vendorId":"V-125","amount":"16897.91","text":"Alder Packaging Inc (CRP-DE) expedite ref 2737","account":"6300","history":["6600","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10279","vendorId":"V-116","amount":"37022.23","text":"Summit Coatings LLC (CRP-DE) Q3 supply ref 5984","account":"6200","history":["6200","6200","6200","6200","6200","6200"]}
+{"invoiceId":"INV-10280","vendorId":"V-113","amount":"39623.80","text":"Harbor Bearings Inc (CRP-DE) annual maintenance ref 1604","account":"6100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10281","vendorId":"V-111","amount":"8849.12","text":"Cedar Freight Ltd (CRP-MX) annual maintenance ref 1341","account":"5300","history":["6100","5300","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10282","vendorId":"V-108","amount":"190.08","text":"Brightwater Chemicals LLC (CRP-MX) Q2 supply ref 4664","account":"6800","history":["5100","5100","5100","5100","5100","5100"]}
+{"invoiceId":"INV-10283","vendorId":"V-138","amount":"38927.77","text":"Brightwater Chemicals GmbH (CRP-MX) Q2 supply ref 6374","account":"7100","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10284","vendorId":"V-128","amount":"8097.39","text":"Brightwater Chemicals LLC (CRP-DE) Q4 supply ref 7573","account":"7100","history":["7100","7100","7100"]}
+{"invoiceId":"INV-10285","vendorId":"V-126","amount":"20946.06","text":"Summit Coatings GmbH (CRP-MX) freight and handling ref 4159","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10286","vendorId":"V-122","amount":"17377.22","text":"Millbrook Seals GmbH (CRP-DE) monthly service ref 3187","account":"6400","history":["5300","5300","5300","6800","5300"]}
+{"invoiceId":"INV-10287","vendorId":"V-128","amount":"12301.25","text":"Brightwater Chemicals LLC (CRP-DE) bulk order ref 2968","account":"7100","history":["7100","7100","7100","7100"]}
+{"invoiceId":"INV-10288","vendorId":"V-114","amount":"9581.11","text":"Northgate Castings GmbH (CRP-MX) Q2 supply ref 7812","account":"6400","history":["6800","6400","6400","6400","6400","6400"]}
+{"invoiceId":"INV-10289","vendorId":"V-113","amount":"17383.37","text":"Harbor Bearings Inc (CRP-DE) replenishment ref 4013","account":"5100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10290","vendorId":"V-116","amount":"36054.58","text":"Summit Coatings LLC (CRP-DE) sample lot ref 4357","account":"6200","history":["6200","6200","6200","6200","6200","6200"]}
+{"invoiceId":"INV-10291","vendorId":"V-103","amount":"33310.30","text":"Harbor Bearings Ltd (CRP-US) surcharge ref 2453","account":"6300","history":["6300","6300","6300","6300"]}
+{"invoiceId":"INV-10292","vendorId":"V-134","amount":"11000.03","text":"Northgate Castings GmbH (CRP-DE) monthly service ref 1308","account":"7100","history":["7100","6100","7100","7100"]}
+{"invoiceId":"INV-10293","vendorId":"V-121","amount":"43118.69","text":"Cedar Freight Inc (CRP-US) bulk order ref 9596","account":"6300","history":["6100","6300","6300"]}
+{"invoiceId":"INV-10294","vendorId":"V-111","amount":"20330.02","text":"Cedar Freight Ltd (CRP-MX) Q1 supply ref 4482","account":"5300","history":["5300","5300","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10295","vendorId":"V-134","amount":"39649.13","text":"Northgate Castings GmbH (CRP-DE) annual maintenance ref 7086","account":"7100","history":["7100","6100","7100","7100","7100"]}
+{"invoiceId":"INV-10296","vendorId":"V-108","amount":"41735.55","text":"Brightwater Chemicals LLC (CRP-MX) freight and handling ref 2101","account":"5100","history":["5100","5100","5100","5100","5100","6800"]}
+{"invoiceId":"INV-10297","vendorId":"V-118","amount":"42770.62","text":"Brightwater Chemicals GmbH (CRP-US) Q4 supply ref 9964","account":"6600","history":["6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10298","vendorId":"V-124","amount":"1242.24","text":"Northgate Castings LLC (CRP-US) annual maintenance ref 6451","account":"6500","history":["6500","6500","6700","6500"]}
+{"invoiceId":"INV-10299","vendorId":"V-124","amount":"3111.20","text":"Northgate Castings LLC (CRP-US) bulk order ref 9984","account":"6500","history":["6500","6500","6700","6500","6500"]}
+{"invoiceId":"INV-10300","vendorId":"V-123","amount":"18464.32","text":"Harbor Bearings Ltd (CRP-MX) Q4 supply ref 1506","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10301","vendorId":"V-130","amount":"10018.05","text":"Ridgeline Steel GmbH (CRP-US) surcharge ref 9098","account":"6800","history":["6800","6800","6800","6800"]}
+{"invoiceId":"INV-10302","vendorId":"V-121","amount":"35164.08","text":"Cedar Freight Inc (CRP-US) annual maintenance ref 1535","account":"6300","history":["6100","6300","6300","6300"]}
+{"invoiceId":"INV-10303","vendorId":"V-131","amount":"1665.52","text":"Cedar Freight Ltd (CRP-DE) Q2 supply ref 5264","account":"6300","history":["5200","5200","5200","5200"]}
+{"invoiceId":"INV-10304","vendorId":"V-127","amount":"5912.76","text":"Pine Valley Fasteners Ltd (CRP-US) freight and handling ref 4477","account":"6300","history":["6700","6700","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10305","vendorId":"V-118","amount":"44664.04","text":"Brightwater Chemicals GmbH (CRP-US) annual maintenance ref 6820","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10306","vendorId":"V-124","amount":"37935.48","text":"Northgate Castings LLC (CRP-US) Q1 supply ref 7613","account":"6500","history":["6500","6500","6700","6500","6500","6500"]}
+{"invoiceId":"INV-10307","vendorId":"V-105","amount":"27600.62","text":"Alder Packaging Inc (CRP-MX) monthly service ref 9871","account":"6700","history":["6700","6700","6700","6700","6400","6700"]}
+{"invoiceId":"INV-10308","vendorId":"V-128","amount":"41303.99","text":"Brightwater Chemicals LLC (CRP-DE) Q4 supply ref 9593","account":"7100","history":["7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10309","vendorId":"V-110","amount":"33942.38","text":"Ridgeline Steel GmbH (CRP-DE) bulk order ref 5729","account":"6500","history":["6500","6500","6500"]}
+{"invoiceId":"INV-10310","vendorId":"V-124","amount":"70.37","text":"Northgate Castings LLC (CRP-US) expedite ref 6615","account":"6500","history":["6500","6700","6500","6500","6500","6500"]}
+{"invoiceId":"INV-10311","vendorId":"V-133","amount":"13204.70","text":"Harbor Bearings Inc (CRP-US) Q3 supply ref 4305","account":"6800","history":["6800","6800","6400","6800","6800","6400"]}
+{"invoiceId":"INV-10312","vendorId":"V-133","amount":"28377.50","text":"Harbor Bearings Inc (CRP-US) sample lot ref 8521","account":"6800","history":["6800","6400","6800","6800","6400","6800"]}
+{"invoiceId":"INV-10313","vendorId":"V-115","amount":"25883.42","text":"Alder Packaging Ltd (CRP-US) Q2 supply ref 6524","account":"7100","history":["6800","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10314","vendorId":"V-113","amount":"9907.24","text":"Harbor Bearings Inc (CRP-DE) bulk order ref 7936","account":"6100","history":["6100","6100","6100","6100","6100","5100"]}
+{"invoiceId":"INV-10315","vendorId":"V-127","amount":"2508.76","text":"Pine Valley Fasteners Ltd (CRP-US) Q3 supply ref 5220","account":"6700","history":["6700","6700","6700","6700","6700","6300"]}
+{"invoiceId":"INV-10316","vendorId":"V-123","amount":"32644.30","text":"Harbor Bearings Ltd (CRP-MX) monthly service ref 3577","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10317","vendorId":"V-119","amount":"41563.51","text":"Foxglove Electrical Ltd (CRP-DE) expedite ref 4944","account":"5100","history":["6200","6200","6200","6200","6200","6200"]}
+{"invoiceId":"INV-10318","vendorId":"V-113","amount":"1916.34","text":"Harbor Bearings Inc (CRP-DE) monthly service ref 7081","account":"6100","history":["6100","6100","6100","6100","5100","6100"]}
+{"invoiceId":"INV-10319","vendorId":"V-110","amount":"258.30","text":"Ridgeline Steel GmbH (CRP-DE) expedite ref 1310","account":"6500","history":["6500","6500","6500","6500"]}
+{"invoiceId":"INV-10320","vendorId":"V-128","amount":"12706.88","text":"Brightwater Chemicals LLC (CRP-DE) surcharge ref 4623","account":"7100","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10321","vendorId":"V-129","amount":"9136.05","text":"Foxglove Electrical Inc (CRP-MX) surcharge ref 9763","account":"5200","history":["5200","5200","5200","5200","5200","7100"]}
+{"invoiceId":"INV-10322","vendorId":"V-134","amount":"19381.72","text":"Northgate Castings GmbH (CRP-DE) surcharge ref 5755","account":"7100","history":["7100","6100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10323","vendorId":"V-127","amount":"21356.26","text":"Pine Valley Fasteners Ltd (CRP-US) surcharge ref 8304","account":"6700","history":["6700","6700","6700","6700","6300","6700"]}
+{"invoiceId":"INV-10324","vendorId":"V-134","amount":"13222.67","text":"Northgate Castings GmbH (CRP-DE) Q1 supply ref 7367","account":"7100","history":["6100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10325","vendorId":"V-114","amount":"29351.60","text":"Northgate Castings GmbH (CRP-MX) monthly service ref 7721","account":"6400","history":["6400","6400","6400","6400","6400","6400"]}
+{"invoiceId":"INV-10326","vendorId":"V-133","amount":"1045.24","text":"Harbor Bearings Inc (CRP-US) sample lot ref 4904","account":"6800","history":["6400","6800","6800","6400","6800","6800"]}
+{"invoiceId":"INV-10327","vendorId":"V-132","amount":"26269.98","text":"Millbrook Seals LLC (CRP-MX) sample lot ref 7239","account":"5200","history":["5200","5200","5200","6400","5200","5200"]}
+{"invoiceId":"INV-10328","vendorId":"V-110","amount":"7414.13","text":"Ridgeline Steel GmbH (CRP-DE) Q3 supply ref 3949","account":"6500","history":["6500","6500","6500","6500","6500"]}
+{"invoiceId":"INV-10329","vendorId":"V-103","amount":"38930.09","text":"Harbor Bearings Ltd (CRP-US) Q2 supply ref 2966","account":"6300","history":["6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10330","vendorId":"V-123","amount":"41968.56","text":"Harbor Bearings Ltd (CRP-MX) sample lot ref 6848","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10331","vendorId":"V-118","amount":"18745.68","text":"Brightwater Chemicals GmbH (CRP-US) bulk order ref 2631","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10332","vendorId":"V-129","amount":"16666.36","text":"Foxglove Electrical Inc (CRP-MX) surcharge ref 3650","account":"5200","history":["5200","5200","5200","5200","7100","5200"]}
+{"invoiceId":"INV-10333","vendorId":"V-128","amount":"22647.17","text":"Brightwater Chemicals LLC (CRP-DE) Q3 supply ref 7370","account":"7100","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10334","vendorId":"V-117","amount":"203.46","text":"Pine Valley Fasteners Inc (CRP-MX) bulk order ref 8493","account":"6300","history":["6300","6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10335","vendorId":"V-126","amount":"27441.22","text":"Summit Coatings GmbH (CRP-MX) Q1 supply ref 2921","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10336","vendorId":"V-135","amount":"13691.05","text":"Alder Packaging Ltd (CRP-MX) freight and handling ref 1350","account":"6100","history":["6100","6100","6100","6100","5300","6100"]}
+{"invoiceId":"INV-10337","vendorId":"V-104","amount":"2587.89","text":"Northgate Castings LLC (CRP-DE) Q2 supply ref 7181","account":"6300","history":["6300","6300","6300"]}
+{"invoiceId":"INV-10338","vendorId":"V-111","amount":"25204.62","text":"Cedar Freight Ltd (CRP-MX) Q2 supply ref 8175","account":"5300","history":["5300","5300","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10339","vendorId":"V-101","amount":"7101.34","text":"Cedar Freight Inc (CRP-DE) monthly service ref 6601","account":"5300","history":["5300","5300","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10340","vendorId":"V-105","amount":"13820.73","text":"Alder Packaging Inc (CRP-MX) annual maintenance ref 7771","account":"6700","history":["6700","6700","6700","6400","6700","6700"]}
+{"invoiceId":"INV-10341","vendorId":"V-131","amount":"11551.58","text":"Cedar Freight Ltd (CRP-DE) freight and handling ref 1173","account":"5200","history":["5200","5200","5200","5200","6300"]}
+{"invoiceId":"INV-10342","vendorId":"V-104","amount":"23646.88","text":"Northgate Castings LLC (CRP-DE) bulk order ref 4274","account":"6300","history":["6300","6300","6300","6300"]}
+{"invoiceId":"INV-10343","vendorId":"V-135","amount":"28006.73","text":"Alder Packaging Ltd (CRP-MX) sample lot ref 2538","account":"6100","history":["6100","6100","6100","5300","6100","6100"]}
+{"invoiceId":"INV-10344","vendorId":"V-109","amount":"35257.33","text":"Foxglove Electrical Inc (CRP-US) Q2 supply ref 9303","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10345","vendorId":"V-138","amount":"10574.64","text":"Brightwater Chemicals GmbH (CRP-MX) replenishment ref 4534","account":"7100","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10346","vendorId":"V-133","amount":"43059.99","text":"Harbor Bearings Inc (CRP-US) bulk order ref 3994","account":"6800","history":["6800","6800","6400","6800","6800","6800"]}
+{"invoiceId":"INV-10347","vendorId":"V-128","amount":"37791.39","text":"Brightwater Chemicals LLC (CRP-DE) Q2 supply ref 4670","account":"7100","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10348","vendorId":"V-107","amount":"21926.05","text":"Pine Valley Fasteners Ltd (CRP-DE) annual maintenance ref 4762","account":"6400","history":["6400","6400","6400","6400","5200","6400"]}
+{"invoiceId":"INV-10349","vendorId":"V-139","amount":"1566.06","text":"Foxglove Electrical Ltd (CRP-US) monthly service ref 3876","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10350","vendorId":"V-126","amount":"1542.72","text":"Summit Coatings GmbH (CRP-MX) surcharge ref 8284","account":"7100","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10351","vendorId":"V-113","amount":"1668.86","text":"Harbor Bearings Inc (CRP-DE) expedite ref 7259","account":"6100","history":["6100","6100","6100","5100","6100","6100"]}
+{"invoiceId":"INV-10352","vendorId":"V-138","amount":"3232.10","text":"Brightwater Chemicals GmbH (CRP-MX) freight and handling ref 7232","account":"7100","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10353","vendorId":"V-118","amount":"40814.33","text":"Brightwater Chemicals GmbH (CRP-US) replenishment ref 5960","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10354","vendorId":"V-131","amount":"37685.08","text":"Cedar Freight Ltd (CRP-DE) monthly service ref 2104","account":"5200","history":["5200","5200","5200","5200","6300","5200"]}
+{"invoiceId":"INV-10355","vendorId":"V-111","amount":"38338.23","text":"Cedar Freight Ltd (CRP-MX) Q2 supply ref 9723","account":"6700","history":["5300","5300","5300","5300","5300","5300"]}
+{"invoiceId":"INV-10356","vendorId":"V-136","amount":"2063.17","text":"Summit Coatings LLC (CRP-US) freight and handling ref 6379","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10357","vendorId":"V-132","amount":"26685.95","text":"Millbrook Seals LLC (CRP-MX) annual maintenance ref 9324","account":"5200","history":["5200","5200","6400","5200","5200","5200"]}
+{"invoiceId":"INV-10358","vendorId":"V-104","amount":"20003.71","text":"Northgate Castings LLC (CRP-DE) replenishment ref 3952","account":"6300","history":["6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10359","vendorId":"V-128","amount":"16155.81","text":"Brightwater Chemicals LLC (CRP-DE) Q2 supply ref 3386","account":"6800","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10360","vendorId":"V-132","amount":"28683.85","text":"Millbrook Seals LLC (CRP-MX) surcharge ref 1791","account":"5200","history":["5200","6400","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10361","vendorId":"V-133","amount":"1649.28","text":"Harbor Bearings Inc (CRP-US) monthly service ref 4625","account":"6800","history":["6800","6400","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10362","vendorId":"V-112","amount":"39433.87","text":"Millbrook Seals LLC (CRP-US) annual maintenance ref 6611","account":"6700","history":["6700","5100","5100","6700","6700"]}
+{"invoiceId":"INV-10363","vendorId":"V-116","amount":"13839.64","text":"Summit Coatings LLC (CRP-DE) surcharge ref 7465","account":"6200","history":["6200","6200","6200","6200","6200","6200"]}
+{"invoiceId":"INV-10364","vendorId":"V-114","amount":"4798.78","text":"Northgate Castings GmbH (CRP-MX) expedite ref 3597","account":"6400","history":["6400","6400","6400","6400","6400","6400"]}
+{"invoiceId":"INV-10365","vendorId":"V-129","amount":"8332.93","text":"Foxglove Electrical Inc (CRP-MX) expedite ref 1318","account":"5200","history":["5200","5200","5200","7100","5200","5200"]}
+{"invoiceId":"INV-10366","vendorId":"V-103","amount":"15080.61","text":"Harbor Bearings Ltd (CRP-US) monthly service ref 1637","account":"6300","history":["6300","6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10367","vendorId":"V-124","amount":"11750.76","text":"Northgate Castings LLC (CRP-US) surcharge ref 8462","account":"6500","history":["6700","6500","6500","6500","6500","6500"]}
+{"invoiceId":"INV-10368","vendorId":"V-132","amount":"37978.79","text":"Millbrook Seals LLC (CRP-MX) expedite ref 5571","account":"5200","history":["6400","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10369","vendorId":"V-112","amount":"26896.34","text":"Millbrook Seals LLC (CRP-US) freight and handling ref 3743","account":"6700","history":["6700","5100","5100","6700","6700","6700"]}
+{"invoiceId":"INV-10370","vendorId":"V-131","amount":"16258.83","text":"Cedar Freight Ltd (CRP-DE) replenishment ref 3513","account":"5200","history":["5200","5200","5200","6300","5200","5200"]}
+{"invoiceId":"INV-10371","vendorId":"V-123","amount":"43913.37","text":"Harbor Bearings Ltd (CRP-MX) Q3 supply ref 8955","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10372","vendorId":"V-133","amount":"6923.13","text":"Harbor Bearings Inc (CRP-US) Q4 supply ref 2113","account":"6800","history":["6400","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10373","vendorId":"V-125","amount":"32730.55","text":"Alder Packaging Inc (CRP-DE) monthly service ref 1093","account":"6600","history":["6800","6800","6800","6800","6800","6300"]}
+{"invoiceId":"INV-10374","vendorId":"V-114","amount":"22667.89","text":"Northgate Castings GmbH (CRP-MX) replenishment ref 9440","account":"6400","history":["6400","6400","6400","6400","6400","6400"]}
+{"invoiceId":"INV-10375","vendorId":"V-117","amount":"29932.15","text":"Pine Valley Fasteners Inc (CRP-MX) bulk order ref 3739","account":"6300","history":["6300","6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10376","vendorId":"V-102","amount":"1679.25","text":"Millbrook Seals GmbH (CRP-MX) bulk order ref 5184","account":"5300","history":["5300","5300","6100","5300","5300","5300"]}
+{"invoiceId":"INV-10377","vendorId":"V-108","amount":"14874.40","text":"Brightwater Chemicals LLC (CRP-MX) Q4 supply ref 5007","account":"5100","history":["5100","5100","5100","5100","6800","5100"]}
+{"invoiceId":"INV-10378","vendorId":"V-120","amount":"3528.11","text":"Ridgeline Steel LLC (CRP-MX) freight and handling ref 5149","account":"6100","history":["6100","6100","6100","6100","6100","6100"]}
+{"invoiceId":"INV-10379","vendorId":"V-119","amount":"36307.41","text":"Foxglove Electrical Ltd (CRP-DE) sample lot ref 5709","account":"6200","history":["6200","6200","6200","6200","6200","5100"]}
+{"invoiceId":"INV-10380","vendorId":"V-130","amount":"37899.55","text":"Ridgeline Steel GmbH (CRP-US) annual maintenance ref 7646","account":"5100","history":["6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10381","vendorId":"V-107","amount":"26591.91","text":"Pine Valley Fasteners Ltd (CRP-DE) sample lot ref 4399","account":"6400","history":["6400","6400","6400","5200","6400","6400"]}
+{"invoiceId":"INV-10382","vendorId":"V-124","amount":"42675.23","text":"Northgate Castings LLC (CRP-US) sample lot ref 5244","account":"6500","history":["6500","6500","6500","6500","6500","6500"]}
+{"invoiceId":"INV-10383","vendorId":"V-126","amount":"23260.85","text":"Summit Coatings GmbH (CRP-MX) Q3 supply ref 1772","account":"5200","history":["5200","5200","5200","5200","5200","7100"]}
+{"invoiceId":"INV-10384","vendorId":"V-107","amount":"12086.35","text":"Pine Valley Fasteners Ltd (CRP-DE) replenishment ref 1748","account":"6400","history":["6400","6400","5200","6400","6400","6400"]}
+{"invoiceId":"INV-10385","vendorId":"V-118","amount":"4499.35","text":"Brightwater Chemicals GmbH (CRP-US) expedite ref 3109","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10386","vendorId":"V-125","amount":"18809.33","text":"Alder Packaging Inc (CRP-DE) Q2 supply ref 8448","account":"6800","history":["6800","6800","6800","6800","6300","6600"]}
+{"invoiceId":"INV-10387","vendorId":"V-123","amount":"40182.82","text":"Harbor Bearings Ltd (CRP-MX) annual maintenance ref 6883","account":"5200","history":["5200","5200","5200","5200","5200","5200"]}
+{"invoiceId":"INV-10388","vendorId":"V-103","amount":"33792.70","text":"Harbor Bearings Ltd (CRP-US) Q3 supply ref 5333","account":"6300","history":["6300","6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10389","vendorId":"V-138","amount":"14093.80","text":"Brightwater Chemicals GmbH (CRP-MX) Q3 supply ref 5211","account":"6400","history":["7100","7100","7100","7100","7100","7100"]}
+{"invoiceId":"INV-10390","vendorId":"V-118","amount":"39679.22","text":"Brightwater Chemicals GmbH (CRP-US) surcharge ref 4666","account":"6600","history":["6600","6600","6600","6600","6600","6600"]}
+{"invoiceId":"INV-10391","vendorId":"V-126","amount":"7842.89","text":"Summit Coatings GmbH (CRP-MX) replenishment ref 5329","account":"6500","history":["5200","5200","5200","5200","7100","5200"]}
+{"invoiceId":"INV-10392","vendorId":"V-133","amount":"14977.79","text":"Harbor Bearings Inc (CRP-US) expedite ref 7218","account":"6800","history":["6800","6800","6800","6800","6800","6800"]}
+{"invoiceId":"INV-10393","vendorId":"V-135","amount":"23796.72","text":"Alder Packaging Ltd (CRP-MX) Q1 supply ref 1898","account":"6100","history":["6100","6100","5300","6100","6100","6100"]}
+{"invoiceId":"INV-10394","vendorId":"V-117","amount":"43570.03","text":"Pine Valley Fasteners Inc (CRP-MX) freight and handling ref 5504","account":"6300","history":["6300","6300","6300","6300","6300","6300"]}
+{"invoiceId":"INV-10395","vendorId":"V-112","amount":"7243.75","text":"Millbrook Seals LLC (CRP-US) sample lot ref 3578","account":"7100","history":["5100","5100","6700","6700","6700","6700"]}
+{"invoiceId":"INV-10396","vendorId":"V-128","amount":"12422.39","text":"Brightwater Chemicals LLC (CRP-DE) bulk order ref 8845","account":"7100","history":["7100","7100","7100","7100","7100","6800"]}
+{"invoiceId":"INV-10397","vendorId":"V-124","amount":"11727.22","text":"Northgate Castings LLC (CRP-US) expedite ref 5682","account":"6500","history":["6500","6500","6500","6500","6500","6500"]}
+{"invoiceId":"INV-10398","vendorId":"V-124","amount":"32697.67","text":"Northgate Castings LLC (CRP-US) annual maintenance ref 8520","account":"6500","history":["6500","6500","6500","6500","6500","6500"]}
+{"invoiceId":"INV-10399","vendorId":"V-127","amount":"21523.82","text":"Pine Valley Fasteners Ltd (CRP-US) freight and handling ref 3907","account":"6700","history":["6700","6700","6700","6300","6700","6700"]}
+{"invoiceId":"INV-10400","vendorId":"V-110","amount":"37917.63","text":"Ridgeline Steel GmbH (CRP-DE) expedite ref 2684","account":"6500","history":["6500","6500","6500","6500","6500","6500"]}
