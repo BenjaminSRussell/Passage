@@ -32,3 +32,36 @@ resources:
 serviceMonitor:
   enabled: false
   interval: 30s
+
+# The billing consumer (#30, args [consume]): opens the open items of billing's posted
+# invoices (one per installment) and credit notes. It exits at start unless
+# service:receivables-billing is seeded in the service principal table. Its KafkaUser,
+# ACLs and dead-letter topic are deploy/kafka/receivables-consumer.yaml; off by default,
+# like the other consumers in dev, until it is turned on per environment (billing's
+# outbox connector, which creates passage.billing.invoice, is not deployed yet).
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: receivables-billing
+    username: receivables-consumer
+    dlqTopic: passage.receivables.invoices.dlq
+    secret: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi

@@ -86,8 +86,9 @@ components:
           installments:
             type: array
             description: >
-              One open item per installment (FR-29.18, BR-29.11), all under the
-              invoice number; amounts sum to totals.gross exactly. Empty when the
+              One open item per installment (FR-29.18, BR-29.11); receivables numbers
+              them <invoice number>/<no> (the invoice number alone for one or no
+              installment) and refuses an event whose amounts do not sum to totals.gross exactly. Empty when the
               invoice has no installment plan (one open item for the gross, due on
               due_date). Tax is reported once on the invoice, not per installment.
             items:
@@ -109,7 +110,7 @@ components:
         The PRD names this event passage.billing.credit-note.posted.v1; the
         platform type grammar allows lowercase letters and digits per segment, so
         the entity is "creditnote". Amounts are positive magnitudes that reduce
-        AR, revenue and tax. Receivables settles the original's open items with
+        AR, revenue and tax. Receivables (consumer receivables-billing) opens a credit item linked to the original invoice and settles the original's open items with
         it; revrec reverses recognized and deferred revenue (BR-29.6); the ledger
         books the reversal journal.
       payload:

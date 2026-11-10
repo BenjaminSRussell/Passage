@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
-import { DesignerPage, InboxPage, JobMonitorPage, TemplatesPage, WorkflowHome } from "./pages";
+import { InboxPage } from "./InboxPage";
+import { DesignerPage, JobMonitorPage, TemplatesPage, WorkflowHome } from "./pages";
 
 const workflow: PassageModule = {
   id: "workflow",
@@ -15,7 +16,7 @@ const workflow: PassageModule = {
   ],
   nav: [
     { label: "Workflow", to: "/workflow", duty: "workflow.read" },
-    { label: "Inbox", to: "/workflow/inbox", duty: "workflow.approve" },
+    { label: "Inbox", to: "/workflow/inbox", duty: "inbox.read" },
     { label: "Designer", to: "/workflow/designer", duty: "workflow.write" },
     { label: "Job monitor", to: "/workflow/jobs", duty: "batch.read" },
     { label: "Templates", to: "/workflow/templates", duty: "notify.write" },

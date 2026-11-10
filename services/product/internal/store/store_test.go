@@ -70,12 +70,27 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := tenant.With(context.Background(), principal(2))
-	items, err := app.ListProducts(other, 10)
+	items, err := app.ListProducts(other, "", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != 0 {
 		t.Fatalf("tenant 2 must see 0 products, got %d", len(items))
+	}
+	if own, err := app.ListProducts(ctx, "rls", "", 10); err != nil || len(own) != 1 {
+		t.Fatalf("tenant 1 text search: %d %v", len(own), err)
+	}
+	if none, err := app.ListProducts(ctx, "%", "", 10); err != nil || len(none) != 0 {
+		t.Fatalf("a percent sign is literal text: %d %v", len(none), err)
+	}
+	if found, err := app.Search(ctx, "rls", 10); err != nil || len(found) != 1 {
+		t.Fatalf("search by text: %d %v", len(found), err)
+	}
+	if none, err := app.Search(ctx, "%", 10); err != nil || len(none) != 0 {
+		t.Fatalf("a percent sign in search is literal text: %d %v", len(none), err)
+	}
+	if past, err := app.ListProducts(ctx, "", "RLS1", 10); err != nil || len(past) != 0 {
+		t.Fatalf("after the last number: %d %v", len(past), err)
 	}
 }
 
@@ -349,6 +364,11 @@ func TestImportIDsAndNumbersAreScopedToTheTenantUnderRLS(t *testing.T) {
 	if err := admin.QueryRow(context.Background(), `select count(*), coalesce(min(payload->'data'->>'changedFields'),'') from outbox where type=$1 and tenant_id=$2`,
 		"dev.passage.product.product.updated.v1", testkit.TenantID(2)).Scan(&events, &fields); err != nil || events != 1 || fields != `["name"]` {
 		t.Fatalf("one product.updated event for tenant 2 naming the changed field, got %d %s %v", events, fields, err)
+	}
+	var indexed bool
+	if err := admin.QueryRow(context.Background(), `select payload->'data'->>'name' = 'Tenant two' and coalesce(payload->'data'->>'productNumber','') <> '' and coalesce(payload->'data'->>'lifecycleState','') <> '' from outbox where type=$1 and tenant_id=$2`,
+		"dev.passage.product.product.updated.v1", testkit.TenantID(2)).Scan(&indexed); err != nil || !indexed {
+		t.Fatalf("product.updated must carry name, number and lifecycle state for the search index: %v %v", indexed, err)
 	}
 	if _, err := s.UpdateProduct(tenant.With(context.Background(), principal(3)), id, domain.ProductPatch{Name: &name}, 1); !errors.As(err, &pr) || pr.Status != 404 {
 		t.Fatalf("update from a tenant without the product = %v, want 404", err)

@@ -192,3 +192,84 @@ func TestRMA_TaxedInvoiceLineWithoutATaxCodeIsRefusedNotDropped(t *testing.T) {
 		t.Fatalf("nothing is sent to AR: %+v", e.ar.credits)
 	}
 }
+
+func invoiceLinesSent(t *testing.T, e *taxEnv) map[int]string {
+	t.Helper()
+	if len(e.ar.credits) != 1 {
+		t.Fatalf("credits sent: %+v", e.ar.credits)
+	}
+	out := map[int]string{}
+	for _, l := range e.ar.credits[0].InvoiceLines {
+		out[l.LineNo] = l.Qty.String()
+	}
+	return out
+}
+
+func TestRMA_InvoiceLinesSentAreTheInvoicesNotTheReturnOrders(t *testing.T) {
+	e := newTaxEnv(t)
+	e.src.invoice.Lines = []InvoiceLine{{LineNo: 7, ProductID: e.product, OrderLineID: ids.New(), Qty: d(10), Net: dec("1000.00")}}
+	e.creditOnly(t, 4, 0)
+	if got := invoiceLinesSent(t, e); len(got) != 1 || got[7] != "4" {
+		t.Fatalf("an untaxed product on invoice line 7 must reserve line 7: %v", got)
+	}
+}
+
+func TestRMA_AProductOnTwoInvoiceLinesSplitsTheReturnedQuantity(t *testing.T) {
+	e := newTaxEnv(t)
+	e.src.invoice.Lines = []InvoiceLine{
+		{LineNo: 2, ProductID: e.product, OrderLineID: ids.New(), Qty: d(3), Net: dec("300.00")},
+		{LineNo: 5, ProductID: e.product, OrderLineID: ids.New(), Qty: d(10), Net: dec("1000.00")},
+	}
+	e.creditOnly(t, 5, 0)
+	if got := invoiceLinesSent(t, e); len(got) != 2 || got[2] != "3" || got[5] != "2" {
+		t.Fatalf("5 units over lines 2 (3) and 5 (10): %v", got)
+	}
+}
+
+func TestRMA_TwoReturnLinesOfOneProductAreOneInvoiceAllocation(t *testing.T) {
+	e := newTaxEnv(t)
+	e.src.invoice.Lines = []InvoiceLine{{LineNo: 4, ProductID: e.product, OrderLineID: ids.New(), Qty: d(10), Net: dec("1000.00")}}
+	in := NewReturnOrder{LegalEntityID: e.le, CustomerID: e.customer, OriginalInvoiceID: e.src.invoice.ID, ReturnReasonCode: "DAMAGED",
+		IdempotencyKey: ids.New(), RequestHash: ids.New(), Actor: e.createdBy,
+		Lines: []NewReturnLine{
+			{LineNo: 1, ProductID: e.product, Quantity: d(2), Unit: "EA", Disposition: domain.DispositionCreditOnly},
+			{LineNo: 2, ProductID: e.product, Quantity: d(3), Unit: "EA", Disposition: domain.DispositionCreditOnly}}}
+	rma := e.create(t, in)
+	auth, err := e.s.AuthorizeReturnOrder(e.ctx, rma.ID, rma.Version, e.authorizer, e.now)
+	if err != nil {
+		t.Fatalf("authorize: %v", err)
+	}
+	recv, err := e.s.ReceiveReturnOrder(e.ctx, auth.ID, auth.Version, []ReceiveLine{{LineNo: 1, Quantity: d(2)}, {LineNo: 2, Quantity: d(3)}}, "wh", e.now)
+	if err != nil {
+		t.Fatalf("receive: %v", err)
+	}
+	insp, err := e.s.InspectReturnOrder(e.ctx, recv.ID, recv.Version, []InspectLine{
+		{LineNo: 1, Accepted: d(2), Disposition: domain.DispositionCreditOnly}, {LineNo: 2, Accepted: d(3), Disposition: domain.DispositionCreditOnly}}, "qc", e.now)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	disp, err := e.s.DispositionReturnOrder(e.ctx, insp.ID, insp.Version, "returns", e.now)
+	if err != nil {
+		t.Fatalf("disposition: %v", err)
+	}
+	if _, err := e.s.CreditReturnOrder(e.ctx, disp.ID, disp.Version, "ar", e.now); err != nil {
+		t.Fatalf("credit: %v", err)
+	}
+	if got := invoiceLinesSent(t, e); len(got) != 1 || got[4] != "5" {
+		t.Fatalf("2 + 3 of one product on invoice line 4: %v", got)
+	}
+}
+
+func TestRMA_AnEarlierReturnsUntaxedQuantityMovesTheNextToTheNextInvoiceLine(t *testing.T) {
+	e := newTaxEnv(t)
+	e.src.invoice.Lines = []InvoiceLine{
+		{LineNo: 2, ProductID: e.product, OrderLineID: ids.New(), Qty: d(3), Net: dec("300.00")},
+		{LineNo: 5, ProductID: e.product, OrderLineID: ids.New(), Qty: d(10), Net: dec("1000.00")},
+	}
+	e.creditOnly(t, 3, 0)
+	e.ar.credits = nil
+	e.creditOnly(t, 2, 0)
+	if got := invoiceLinesSent(t, e); len(got) != 1 || got[5] != "2" {
+		t.Fatalf("line 2 is used up by the first return: %v", got)
+	}
+}
