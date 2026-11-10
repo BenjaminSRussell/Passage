@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -185,14 +186,14 @@ export function CategoryVendorCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Assignment">
           <div className={styles.grid}>
-            <FormField id="cv-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
+            <FormField id="cv-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => set({ legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="cv-category" label="Category" hint="As written on requisition and PO lines and catalog entries" error={errors.category}>
               {(c) => <Input {...c} value={form.category} onChange={(e) => set({ category: e.target.value })} />}
             </FormField>
-            <FormField id="cv-vendor" label="Vendor id" error={errors.vendorId}>
-              {(c) => <Input {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
+            <FormField id="cv-vendor" label="Vendor" error={errors.vendorId}>
+              {(c) => <EntityLookup entity="vendor" {...c} value={form.vendorId} onChange={(e) => set({ vendorId: e.target.value })} />}
             </FormField>
             <FormField id="cv-status" label="Status" error={errors.status}>
               {(c) => (
@@ -462,14 +463,14 @@ export function CategoryManagersPage() {
       <Card title="Add a manager">
         <form className={styles.form} onSubmit={onAdd} noValidate>
           <div className={styles.grid}>
-            <FormField id="cm-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={form.legalEntityId} onChange={(e) => setForm({ ...form, legalEntityId: e.target.value })} />}
+            <FormField id="cm-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} onChange={(e) => setForm({ ...form, legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="cm-category" label="Category" error={errors.category}>
               {(c) => <Input {...c} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />}
             </FormField>
-            <FormField id="cm-worker" label="Worker id" error={errors.workerId}>
-              {(c) => <Input {...c} value={form.workerId} onChange={(e) => setForm({ ...form, workerId: e.target.value })} />}
+            <FormField id="cm-worker" label="Worker" error={errors.workerId}>
+              {(c) => <EntityLookup entity="worker" {...c} value={form.workerId} onChange={(e) => setForm({ ...form, workerId: e.target.value })} />}
             </FormField>
           </div>
           <div className={styles.actions}>

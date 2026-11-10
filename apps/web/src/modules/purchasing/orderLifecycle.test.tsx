@@ -222,21 +222,18 @@ describe("change a purchase order", () => {
     const fetchMock = serve(withWarehouse, [v1], () => json({ ...withWarehouse, rowVersion: 5 }));
     renderAt(`/purchasing/purchase-orders/${PO_ID}/edit`);
     const line1 = await screen.findByRole("group", { name: "Line 1" });
-    expect(within(line1).getByLabelText(/Deliver to warehouse id/)).toHaveValue(WH_OLD);
-    expect(within(line1).getByLabelText(/Deliver to warehouse id/)).toHaveAttribute("readonly");
-    expect(within(line1).getByLabelText(/Deliver to site id/)).toHaveAttribute("readonly");
+    expect(within(line1).getByLabelText(/Deliver to warehouse/)).toHaveAttribute("data-value", WH_OLD);
+    expect(within(line1).getByLabelText(/Deliver to warehouse/)).toBeDisabled();
+    expect(within(line1).getByLabelText(/Deliver to site/)).toBeDisabled();
     // Line 3 has no receipts: its warehouse can be changed and the change is sent.
     const line3 = screen.getByRole("group", { name: "Line 3" });
-    expect(within(line3).getByLabelText(/Deliver to warehouse id/)).not.toHaveAttribute("readonly");
-    fireEvent.change(within(line3).getByLabelText(/Deliver to warehouse id/), { target: { value: WH_NEW } });
+    expect(within(line3).getByLabelText(/Deliver to warehouse/)).not.toBeDisabled();
+    fireEvent.change(within(line3).getByLabelText(/Deliver to warehouse/), { target: { value: WH_NEW } });
     fireEvent.click(screen.getByRole("button", { name: "Add line" }));
     const added = screen.getByRole("group", { name: "New line 1" });
     fireEvent.change(within(added).getByLabelText("Description"), { target: { value: "Pallet" } });
     fireEvent.change(within(added).getByLabelText("Unit price"), { target: { value: "4" } });
-    fireEvent.change(within(added).getByLabelText(/Deliver to warehouse id/), { target: { value: "nope" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save change" }));
-    expect(await screen.findByText("Warehouse id must be a UUID.")).toBeInTheDocument();
-    fireEvent.change(within(added).getByLabelText(/Deliver to warehouse id/), { target: { value: WH_NEW } });
+    fireEvent.change(within(added).getByLabelText(/Deliver to warehouse/), { target: { value: WH_NEW } });
     fireEvent.click(screen.getByRole("button", { name: "Save change" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => (init as Init).method === "PATCH")).toBe(true));
     const patch = fetchMock.mock.calls.find(([, init]) => (init as Init).method === "PATCH") as [string, Init];

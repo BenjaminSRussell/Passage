@@ -81,7 +81,7 @@ describe("vendor import form", () => {
   it("posts the pasted rows with an Idempotency-Key and opens the staged import", async () => {
     const mock = stubFetch((url, init) => (init.method === "POST" ? json(staged, 201, { ETag: '"1"' }) : url.includes("/rows") ? json({ items: [] }) : json(staged)));
     const { router } = renderAt(`/purchasing/catalogs/${CAT_ID}/import`);
-    fireEvent.change(await screen.findByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(await screen.findByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.change(screen.getByLabelText("Rows"), { target: { value: "name,category,unit,price,currency\nGloves,MRO,PR,4.25,USD\n" } });
     fireEvent.click(screen.getByRole("button", { name: "Stage file" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/catalog-imports/${IMP_ID}`));
@@ -94,7 +94,7 @@ describe("vendor import form", () => {
   it("shows a file-level refusal with its code", async () => {
     stubFetch(() => problem(422, "PRC-CAT-005", "the header has no unit column"));
     renderAt(`/purchasing/catalogs/${CAT_ID}/import`);
-    fireEvent.change(await screen.findByLabelText("Vendor id"), { target: { value: VENDOR } });
+    fireEvent.change(await screen.findByLabelText("Vendor"), { target: { value: VENDOR } });
     fireEvent.change(screen.getByLabelText("Rows"), { target: { value: "name\nx" } });
     fireEvent.click(screen.getByRole("button", { name: "Stage file" }));
     expect(await screen.findByText(/the header has no unit column \(PRC-CAT-005\)/)).toBeInTheDocument();

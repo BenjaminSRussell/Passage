@@ -87,7 +87,7 @@ describe("RFQ type create", () => {
   it("posts the type with its criteria and opens it", async () => {
     const mock = stubFetch(() => json(sealedType, 201));
     const { router } = renderAt("/purchasing/rfq-types/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "sealed" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sealed bid" } });
     fireEvent.click(screen.getByLabelText(/Sealed bids/));
@@ -116,7 +116,7 @@ describe("RFQ type create", () => {
   it("shows the service's refusal with its code", async () => {
     stubFetch(() => problem(409, "PRC-RFQ-TYPE-002", "the legal entity already has an RFQ type SEALED"));
     renderAt("/purchasing/rfq-types/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "SEALED" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sealed bid" } });
     fireEvent.click(screen.getByRole("button", { name: "Save RFQ type" }));

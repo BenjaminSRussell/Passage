@@ -1,4 +1,5 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -249,11 +250,11 @@ export function CatalogImportCreatePage() {
           <div className={styles.grid}>
             <FormField
               id="import-vendor"
-              label="Vendor id"
+              label="Vendor"
               error={errors.vendorId}
             >
               {(c) => (
-                <Input
+                <EntityLookup entity="vendor"
                   {...c}
                   value={vendorId}
                   onChange={(e) => setVendorId(e.target.value)}

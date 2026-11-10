@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -322,8 +323,8 @@ export function RFQCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Request">
           <div className={styles.grid}>
-            <FormField id="rfq-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
+            <FormField id="rfq-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={header.legalEntityId} onChange={(e) => setH({ legalEntityId: e.target.value })} />}
             </FormField>
             <FormField id="rfq-deadline" label="Reply deadline" hint="Your local time" error={errors.replyDeadline}>
               {(c) => <Input {...c} type="datetime-local" value={header.deadline} onChange={(e) => setH({ deadline: e.target.value })} />}
@@ -423,8 +424,8 @@ export function RFQCreatePage() {
                   ) : null}
                 </div>
                 <div className={styles.grid}>
-                  <FormField id={id("product")} label="Product id" optional error={err("productId")}>
-                    {(c) => <Input {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
+                  <FormField id={id("product")} label="Product" optional error={err("productId")}>
+                    {(c) => <EntityLookup entity="product" {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
                   </FormField>
                   <FormField id={id("description")} label="Description" optional hint="Needed when there is no product" error={err("description")}>
                     {(c) => <Input {...c} value={line.description} onChange={(e) => update(i, { description: e.target.value })} />}

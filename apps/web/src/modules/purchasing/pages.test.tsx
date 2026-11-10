@@ -145,7 +145,7 @@ describe("new requisition", () => {
       return json(requisition, 200, { ETag: '"1"' });
     });
     const { router } = renderAt("/purchasing/requisitions/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Laptop" } });
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "IT" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
@@ -170,8 +170,8 @@ describe("new requisition", () => {
     });
     renderAt("/purchasing/requisitions/new");
     expect(await screen.findByText(/or the price of the product's last approved order/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: "0197c1f2-0000-7000-8000-0000000000aa" } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "0197c1f2-0000-7000-8000-0000000000aa" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
     expect(await screen.findByText(/taken from the last order of P1, PO-00000042/)).toBeInTheDocument();
@@ -191,7 +191,7 @@ describe("new requisition", () => {
       json({ type: "t", title: "Unprocessable", status: 422, code: "COM-0001", detail: "legalEntityId must be a UUID", errors: { "lines[0].qty": "must be positive" } }, 422),
     );
     renderAt("/purchasing/requisitions/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Pens" } });
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "OFFICE" } });
     fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
@@ -280,9 +280,9 @@ describe("purchase orders", () => {
   it("creates an order with a trade-agreement-priced line and a charge", async () => {
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(purchaseOrder, 201) : json(purchaseOrder)));
     const { router } = renderAt("/purchasing/purchase-orders/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: "Add charge" }));
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: "25" } });
@@ -306,9 +306,9 @@ describe("purchase orders", () => {
   it("shows PRC-PRICE-001 when no agreement prices the line", async () => {
     stubFetch(() => problem(422, "PRC-PRICE-001", "no trade agreement price; enter a unit price"));
     renderAt("/purchasing/purchase-orders/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
     expect(await screen.findByText(/PRC-PRICE-001/)).toBeInTheDocument();
   });
@@ -322,9 +322,9 @@ describe("purchase orders", () => {
     };
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(released, 201) : json(released)));
     const { router } = renderAt("/purchasing/purchase-orders/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Agreement line id"), { target: { value: "nope" } });
     fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
     expect(await screen.findByText("Agreement line id must be a UUID.")).toBeInTheDocument();
