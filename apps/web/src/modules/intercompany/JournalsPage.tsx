@@ -154,7 +154,7 @@ export function JournalDetailPage() {
     <div className={styles.stack}>
       <PageHeader
         title={`${journal.source === "charge" ? "IC charge" : "IC journal"} posted ${journal.postingDate}`}
-        description={`Both entities book under pair ${journal.pairId}.`}
+        description="Each entity books its own side in its own ledger and currency."
         actions={<Link to="/intercompany/journals">All journals</Link>}
       />
       <Alert tone={journal.status === "posted" ? "success" : journal.status === "pending" ? "warning" : "danger"} title={statusLabel[journal.status]}>
