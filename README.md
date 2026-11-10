@@ -119,6 +119,7 @@ make test-go
 ## Learn more
 
 - [docs/PRD.md](docs/PRD.md): what Passage does and why
+- [docs/user/README.md](docs/user/README.md): task-based guides for the people who use the app
 - [docs/architecture.md](docs/architecture.md): how it fits together
 - [docs/engineering/CONVENTIONS.md](docs/engineering/CONVENTIONS.md): coding rules for services
 - [apps/web/docs/design-system.md](apps/web/docs/design-system.md): UI design system
