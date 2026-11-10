@@ -457,6 +457,144 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /v1/billing/invoices/{id}/credit-reservations:
+    post:
+      operationId: createCreditReservation
+      summary: Reserve part of a posted invoice for a credit issued outside billing (an RMA credit).
+      description: >
+        Takes the named quantities of the invoice's lines (and optionally
+        `chargeAmount`) under the invoice's row lock, the same lock credit note
+        posting takes, so posted credit notes plus active reservations never
+        exceed what was invoiced. Net and tax are planned like a credit note:
+        the original's tax pro rata, the last quantity of a line taking exactly
+        what is left. A reservation counts against the invoice until it is
+        released or consumed; `credited.reserved` and `reservedQty` on the invoice
+        read show it. Reserving again with the key of a released reservation
+        re-runs the bound under the same lock: it succeeds (200, RESERVED again)
+        or is refused 422 BIL-0005; the key of a consumed reservation replays it.
+        Beyond what the invoice still allows, or on an invoice that is not
+        posted, it is refused with 422 BIL-0005. The Idempotency-Key is stable
+        per RMA: the same key and body return the stored reservation (200),
+        the same key with another body is 422.
+      x-passage-duty: billing.credit-reservation.write (service only)
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditReservationRequest"
+      responses:
+        "201":
+          description: Credit reserved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "200":
+          description: Idempotent replay of an earlier request with the same key and body.
+          headers:
+            Idempotent-Replayed:
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: The invoice does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: A concurrent request holds the same Idempotency-Key (idempotency_in_progress).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Credit beyond the remaining creditable amount or invoice not posted (BIL-0005), or Idempotency-Key reuse (idempotency_key_reuse).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/billing/credit-reservations/{id}:release:
+    post:
+      operationId: releaseCreditReservation
+      summary: Release a credit reservation so its amount can be credited again.
+      description: >
+        Releasing a released reservation returns it unchanged. A consumed
+        reservation cannot be released (409 reservation_state). Reservations do
+        not expire; the caller releases or commits them.
+      x-passage-duty: billing.credit-reservation.write (service only)
+      parameters:
+        - $ref: "#/components/parameters/ReservationId"
+      responses:
+        "200":
+          description: The released reservation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: The reservation does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The reservation is consumed (reservation_state).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/billing/credit-reservations/{id}:commit:
+    post:
+      operationId: commitCreditReservation
+      summary: Mark a reservation consumed once the credit it held was issued.
+      description: >
+        RESERVED becomes CONSUMED; a consumed reservation keeps counting against
+        the invoice and can no longer be released. Committing a consumed
+        reservation returns it unchanged; a released one is refused (409
+        reservation_state).
+      x-passage-duty: billing.credit-reservation.write (service only)
+      parameters:
+        - $ref: "#/components/parameters/ReservationId"
+      responses:
+        "200":
+          description: The consumed reservation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditReservation"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: The reservation does not exist (BIL-0100).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The reservation is released (reservation_state).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /v1/billing/credit-notes/{id}:post:
     post:
       operationId: postCreditNote
@@ -642,6 +780,14 @@ components:
         type: string
         minLength: 1
         maxLength: 255
+    ReservationId:
+      name: id
+      in: path
+      required: true
+      description: The credit reservation.
+      schema:
+        type: string
+        format: uuid
     InvoiceId:
       name: id
       in: path
@@ -878,6 +1024,54 @@ components:
             properties:
               lineNo: { type: integer, minimum: 1 }
               qty: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive; at most the line's remaining quantity." }
+    CreditReservationRequest:
+      type: object
+      required: [reference, lines]
+      additionalProperties: false
+      properties:
+        reference: { type: string, minLength: 1, maxLength: 255, description: "The credit's own identifier, for example the RMA id." }
+        chargeAmount:
+          type: string
+          pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$"
+          description: Header charges to reserve.
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items:
+            type: object
+            required: [lineNo, qty]
+            additionalProperties: false
+            properties:
+              lineNo: { type: integer, minimum: 1 }
+              qty: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive; at most the line's remaining quantity." }
+    CreditReservation:
+      type: object
+      required: [id, invoiceId, reference, status, currency, lines, totals, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        invoiceId: { type: string, format: uuid }
+        reference: { type: string }
+        status: { type: string, enum: [RESERVED, CONSUMED, RELEASED] }
+        currency: { type: string }
+        createdAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time }
+        totals:
+          type: object
+          properties:
+            net: { $ref: "#/components/schemas/Money" }
+            charges: { $ref: "#/components/schemas/Money" }
+            tax: { $ref: "#/components/schemas/Money" }
+            gross: { $ref: "#/components/schemas/Money" }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              lineNo: { type: integer, description: "The invoice line reserved." }
+              qty: { type: string }
+              net: { $ref: "#/components/schemas/Money" }
+              tax: { $ref: "#/components/schemas/Money" }
     Money:
       type: string
       pattern: "^-?[0-9]+\\.[0-9]+$"
@@ -892,9 +1086,10 @@ components:
             credited:
               type: object
               description: On a posted invoice that can be credited.
-              required: [gross, remaining]
+              required: [gross, reserved, remaining]
               properties:
                 gross: { $ref: "#/components/schemas/Money" }
+                reserved: { $ref: "#/components/schemas/Money" }
                 remaining: { $ref: "#/components/schemas/Money" }
             installments:
               type: array
@@ -925,6 +1120,7 @@ components:
                   taxCode: { type: string }
                   originalLineNo: { type: integer, description: "On a credit note: the credited line of the original." }
                   creditedQty: { type: string, description: "On a creditable invoice: quantity credited by posted credit notes." }
+                  reservedQty: { type: string, description: "On a creditable invoice with credit: quantity held by active credit reservations." }
                   creditedTax: { type: string, description: "On a creditable invoice with credits: tax already reversed by posted credit notes." }
                   packingSlipId: { type: string, format: uuid, description: "Shipment and consolidated lines: the packing slip billed." }
                   packingSlipLineId: { type: string, format: uuid }

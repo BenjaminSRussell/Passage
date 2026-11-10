@@ -290,7 +290,11 @@ func creditUsage(ctx context.Context, tx pgx.Tx, invoiceID string) (domain.Credi
 		}
 		u.Lines[no] = domain.Credited{Qty: v[0], Net: v[1], Tax: v[2]}
 	}
-	return u, rows.Err()
+	if err := rows.Err(); err != nil {
+		return u, err
+	}
+	rows.Close()
+	return addReservations(ctx, tx, invoiceID, u)
 }
 
 // parseDecimals reads numeric columns selected as text.
