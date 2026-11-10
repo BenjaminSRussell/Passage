@@ -11,6 +11,7 @@ import "./tax";
 import "./ledger";
 import "./importSetup";
 import "./finance";
+import "./hr";
 import "./shell";
 import "./fx";
 import "./print";
