@@ -237,13 +237,24 @@ describe("My work inbox", () => {
 
     it("takes a row off the list when someone else already decided it", async () => {
       const user = userEvent.setup();
-      server.handler = (url) => (url.pathname === "/api/v1/inbox" ? json(200, page()) : json(409, { code: "TEST-409", detail: "Already decided" }));
+      server.handler = (url) => (url.pathname === "/api/v1/inbox" ? json(200, page()) : json(409, { code: "PTY-CHANGE-DECIDED", detail: "Already decided" }));
       mount(["party.approve"]);
       await findTable();
       await user.click(screen.getByRole("button", { name: "Approve Customer change credit limit 5000" }));
       await user.click(screen.getByRole("button", { name: "Confirm approval" }));
       expect(await screen.findByText("credit limit 5000 was already decided, so it has been taken off your list.")).toBeInTheDocument();
       expect(screen.getByRole("table")).not.toHaveTextContent("Customer change");
+    });
+
+    it("keeps the row and explains a stale change that is still pending", async () => {
+      const user = userEvent.setup();
+      server.handler = (url) => (url.pathname === "/api/v1/inbox" ? json(200, page()) : json(409, { code: "PTY-PENDING-STALE", detail: "stale" }));
+      mount(["party.approve"]);
+      await findTable();
+      await user.click(screen.getByRole("button", { name: "Approve Customer change credit limit 5000" }));
+      await user.click(screen.getByRole("button", { name: "Confirm approval" }));
+      expect(await screen.findByText(/The credit limit changed after this request was made/)).toBeInTheDocument();
+      expect(screen.getByRole("table")).toHaveTextContent("credit limit 5000");
     });
 
     it("does nothing when the confirmation is cancelled", async () => {

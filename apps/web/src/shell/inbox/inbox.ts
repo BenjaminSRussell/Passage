@@ -60,6 +60,10 @@ export function decisionDuty(item: InboxItem): string | undefined {
   return item.actions.includes("approve") ? decisionDuties[item.source] : undefined;
 }
 
+const decisionEndpoints: Record<string, string> = { party: "/api/v1/party/pending-changes" };
+
 export async function decideInboxItem(item: InboxItem, decision: InboxDecision, fetchImpl: FetchLike = defaultFetch): Promise<void> {
-  await requestUrl("POST", `/api/v1/party/pending-changes/${encodeURIComponent(item.id)}:${decision}`, z.unknown(), fetchImpl);
+  const endpoint = decisionEndpoints[item.source];
+  if (endpoint === undefined) throw new Error(`No decision can be made from My work for ${item.source} items`);
+  await requestUrl("POST", `${endpoint}/${encodeURIComponent(item.id)}:${decision}`, z.unknown(), fetchImpl);
 }

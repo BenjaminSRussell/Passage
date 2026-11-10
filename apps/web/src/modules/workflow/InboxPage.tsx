@@ -48,7 +48,7 @@ export function InboxPage() {
       inbox.remove(item);
       setOutcome({ tone: "success", text: `${action === "approve" ? "Approved" : "Rejected"}: ${item.number}.` });
     } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 409) {
+      if (failure instanceof ApiError && failure.status === 409 && failure.code === "PTY-CHANGE-DECIDED") {
         inbox.remove(item);
         setOutcome({ tone: "warning", text: `${item.number} was already decided, so it has been taken off your list.` });
       } else {
@@ -192,7 +192,7 @@ export function InboxPage() {
       )}
       {inbox.status === "ready" && inbox.hasMore ? (
         <div>
-          {activeKind !== ALL_KINDS ? <p>The filter only covers what is loaded so far. More items may match.</p> : null}
+          {activeKind !== ALL_KINDS ? <p role="status">The filter only covers what is loaded so far. More items may match.</p> : null}
           <Button loading={inbox.loadingMore} onClick={inbox.loadMore}>
             {copy.myWork.loadMore}
           </Button>
