@@ -11,6 +11,9 @@ Implementation spec for `apps/web`. Follow it as written. No new npm dependencie
 - R6. jsdom has no `scrollIntoView` or `matchMedia`. Call `el.scrollIntoView?.({ block: "nearest" })`, and do responsive behaviour in CSS only.
 - R7. Keep exact accessible names: `Search`, `Find a page`, `Apply saved view`, `Skip to content`, `Find parents`, `Save Note`, `Workspaces`.
 
+- R8. Status colours and labels come from one standard, `src/shell/ui/status.ts` (`statusTone`, `standardLabel`, used by `StatusPill`). Neutral means nothing to do, info in progress, success done or in force, warning a person should look, danger failed or refused. A page does not keep its own status tone table, and a status is never shown by colour alone.
+- R9. The living component catalog is the page `/design-system` (`src/shell/pages/ComponentCatalogPage.tsx`). It renders each shared component from the real code with its usage rule. Add a new shared component there when you add it to `shell/ui`.
+
 ## 1. Design tokens (`src/shell/theme.css`)
 
 Declare on `:root`. Dark values go under `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {…} }` and again under `:root[data-theme="dark"]`. Add `<meta name="color-scheme" content="light dark">` to `index.html`. `body` uses `--color-bg-app` and `--color-text`.

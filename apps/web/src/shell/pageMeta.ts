@@ -19,7 +19,10 @@ export function resolvePage(pathname: string, modules: PassageModule[], shellNav
   if (pathname === "/whats-new") {
     return { title: copy.whatsNew.pageTitle };
   }
-  const shellEntry =shellNav.find((n) => isExact(n.to, pathname));
+  if (pathname === "/design-system") {
+    return { title: "Component catalog" };
+  }
+  const shellEntry = shellNav.find((n) => isExact(n.to, pathname));
   if (shellEntry) {
     return { title: shellEntry.label };
   }

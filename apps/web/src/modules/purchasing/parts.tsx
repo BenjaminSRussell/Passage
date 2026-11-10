@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, Badge, Button, type BadgeTone } from "../../shell/ui";
+import { Alert, Badge, Button, statusTone } from "../../shell/ui";
 import { describeProblem, type RankingRule } from "./api/client";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -62,42 +62,6 @@ export function useResource<T>(load: (signal: AbortSignal) => Promise<T>, deps: 
   return { ...state, reload };
 }
 
-const tones: Record<string, BadgeTone> = {
-  DRAFT: "neutral",
-  IN_REVIEW: "info",
-  APPROVED: "success",
-  CONFIRMED: "success",
-  ACTIVE: "success",
-  REJECTED: "danger",
-  CANCELLED: "neutral",
-  CLOSED: "neutral",
-  FINALIZED: "success",
-  EXPIRED: "warning",
-  OPEN: "neutral",
-  CONSOLIDATED: "success",
-  EFFECTIVE: "success",
-  ON_HOLD: "warning",
-  SENT: "info",
-  REPLIES_OPEN: "info",
-  AWARDED: "success",
-  INVITED: "neutral",
-  REPLIED: "success",
-  INVOICED: "success",
-  STAGED: "info",
-  COMMITTED: "success",
-  ACCEPTABLE: "info",
-  ERROR: "danger",
-  ACCEPTED: "success",
-  PENDING: "warning",
-  APPLIED: "success",
-  REFUSED: "danger",
-  IGNORED: "neutral",
-  COMPLETED: "success",
-  PARTIAL: "warning",
-  FAILED: "danger",
-  EMPTY: "neutral",
-};
-
 /** Sentence-case label for an upper-snake status, e.g. IN_REVIEW → In review. */
 export function statusLabel(status: string): string {
   const spaced = status.replace(/_/g, " ").toLowerCase();
@@ -105,7 +69,7 @@ export function statusLabel(status: string): string {
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge tone={tones[status] ?? "neutral"}>{statusLabel(status)}</Badge>;
+  return <Badge tone={statusTone(status)}>{statusLabel(status)}</Badge>;
 }
 
 /** Danger alert for a load failure with the stable problem code and a retry. */

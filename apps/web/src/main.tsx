@@ -9,6 +9,7 @@ import { AuthRoot } from "./shell/auth/AuthRoot";
 import { bootstrapAuth } from "./shell/auth/auth";
 import { AllFeaturesPage } from "./shell/pages/AllFeaturesPage";
 import { HomePage } from "./shell/pages/HomePage";
+import { ComponentCatalogPage } from "./shell/pages/ComponentCatalogPage";
 import { WhatsNewPage } from "./shell/pages/WhatsNewPage";
 import { NotesPage } from "./shell/pages/NotesPage";
 import { NotFoundPage } from "./shell/pages/NotFoundPage";
@@ -34,6 +35,7 @@ function App({ duties, identity, banner }: { duties?: readonly string[]; identit
               { path: "notes", element: <NotesPage /> },
               { path: "features", element: <AllFeaturesPage /> },
               { path: "whats-new", element: <WhatsNewPage /> },
+              { path: "design-system", element: <ComponentCatalogPage /> },
               ...modules.flatMap((m) => m.routes),
               { path: "*", element: <NotFoundPage /> },
             ],
