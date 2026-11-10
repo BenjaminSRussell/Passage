@@ -11,7 +11,9 @@ on the bank account (so files that name the account by its domestic number
 match), and the reconciliation close rule and BR-36.3 state machine (domain
 only, like the matching engine). Slice 5: stored reconciliation rules, a stored match table
 (N:1, 1:N, manual match and unmatch) with run, match and unmatch routes, and an SFTP bank
-channel adapter with an in-memory test double. Screens live in `apps/web/src/modules/treasury`.
+channel adapter with an in-memory test double. Reconciliation header with close and reopen, line exclusion and
+transactions created from a statement line and posted to the ledger (FR-36.5, see "Bank reconciliation").
+Screens live in `apps/web/src/modules/treasury`.
 
 ## Run
 
@@ -23,7 +25,8 @@ go run ./cmd/treasury                 # HTTP :8080, admin (/metrics) :9090
 ```
 
 Env: `DATABASE_URL` (required), `MIGRATE_ON_START`, `TREASURY_MAX_FILE_MB`,
-`HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`).
+`HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`), `LEDGER_URL` and the service signing key
+(read by `ledgerclient.FromEnv`) and `TREASURY_GL_PROFILES` (see "Bank reconciliation") for posting from a statement line.
 
 ## Test
 
@@ -107,7 +110,15 @@ A bank account has at most 20 active rules, its own and the entity-wide ones (TR
 All creates take `Idempotency-Key`; `:deactivate` and `:unmatch` take `If-Match`. Events:
 `dev.passage.treasury.reconciliation.matched.v1` and `...unmatched.v1`.
 
-Duties: `treasury.view`, `treasury.bank-account.write`,
+Bank reconciliation (FR-36.5, migration `0010_bank_reconciliation.sql`): one header per statement, so per bank account and period.
+`POST /bank-reconciliations` opens it from a statement (`statementId`, the caller's `bookBalance` and `outstandingAmount`, the book items not yet on the statement; `Idempotency-Key`), `:set-balances` corrects both until the period closes, `GET /bank-reconciliations` lists by `bankAccountId`, `legalEntityId`, `state`, `periodFrom` and `periodTo` (newest period first, `limit` up to 100, `cursor` from `nextCursor`), and `GET /bank-reconciliations/{id}` returns the header with its summary of matched, excluded and unmatched lines. The book balance is stated by the caller, not read from the ledger: each change is written to `bank_reconciliation_event` (`balances_set`, with the actor and the old and new values), the reconciliation answers `bookBalanceSource: "stated"` with `bookBalanceStatedBy` and `bookBalanceStatedAt`, and the person who last stated it cannot close the period (TRS-0520). It also moves by the line amount when a transaction is created from a line, so state it before creating transactions or leave those entries out of it; otherwise they are counted twice. `difference` is `closing - (book + outstanding + excluded lines)`; a positive `outstandingAmount` is book payments not yet on the statement (outstanding checks), a negative one is book receipts not yet on it (deposits in transit).
+States `open`, `closed`, `reopened`. `POST /{id}/lines/{lineNo}:exclude` (reason required) and `:include` take a line out of the count and back; a matched line must be unmatched first.
+Close (`:close`, duty `treasury.reconciliation.close`, `If-Match`): every line must be matched or excluded (TRS-0507), the difference zero (TRS-0410) and no transaction from a line still being posted or held for a person (TRS-0517; `errors.pendingLines` lists the line numbers). It records who closed it and when. A second close answers 200 with the closed reconciliation unchanged. While closed, triggers in the database refuse any change to the period's lines, matches, exclusions and line transactions (TRS-0506), and a trigger on the header lets a closed reconciliation change only by being reopened by another person with a reason, with the balances frozen. The same triggers hold for the application role, so no route and no SQL run as `passage_app` can alter a closed period; a database superuser or the table owner can still bypass them. Two closes at once close once; closing and reopening of one bank account serialize on an advisory lock.
+Reopen (`:reopen`, duty `treasury.reconciliation.reopen`, `If-Match`, `reason` required, stored with the actor and time and written to `bank_reconciliation_event`): the person who closed the period cannot reopen it (TRS-0509, four eyes); it is refused (TRS-0508) while any later period of the same bank account is closed, so periods reopen latest first and a closed period never rests on an open earlier one; only a closed reconciliation can be reopened (TRS-0510). A reopened reconciliation accepts changes and closes again.
+Create a transaction from a line (`POST /{id}/lines/{lineNo}:create-transaction`, body `kind` of `bank_fee` (money out), `interest` or `unknown_receipt` (money in), duty `treasury.reconciliation.post`): the line currency must equal the account currency and the amount has at most the currency's minor units (TRS-0512). The service records the transaction as pending, posts a two-line journal through `platform/go/ledgerclient` and then, in one database transaction, stores the entry id, matches the line to it and moves the book balance. A bank fee debits the fee account and credits the bank; interest and unknown receipts debit the bank and credit the interest or suspense account (negative interest reverses the sides). The ledger key is derived from the statement and line, so repeating the request, also after a lost answer, never posts twice; a line with its transaction answers 200 with it. A ledger or profile refusal gives 422 TRS-0518 with `errors.ledgerCode`, releases the line for another try (also as another kind) and matches nothing. A ledger that does not answer gives 503 TRS-0519 and leaves the transaction pending; repeating the request finishes it, and so does a repeat after the ledger accepted the entry but the match could not be saved. Once an attempt went unanswered the entry may already exist, so a later 4xx or an idempotency conflict (`LEDGER_IDEMPOTENCY_CONFLICT`) never releases the line: it is held for a person (409 TRS-0522) and repeating is refused. A 401, 403 or 429 from the ledger is not a refusal and gives 503 TRS-0519. A pending or held transaction blocks the close (TRS-0517) until it is finished, refused or abandoned, and an `:exclude` of that line is refused (TRS-0516). `POST /{id}/lines/{lineNo}:abandon` (duty `treasury.reconciliation.abandon`, `reason` required) gives up a transaction the ledger will never accept after someone checked the general ledger by hand; it is audited (`line_abandoned`) and leaves the line unmatched, to exclude or match. The match created from a transaction cannot be unmatched (TRS-0521); reverse the entry in the general ledger instead.
+Posting profile: `TREASURY_GL_PROFILES` is a JSON array, one entry per legal entity: `{"legalEntityId", "ledgerId", "bankAccounts": {"<bank account id>": "<ledger account>"}, "feeAccount", "interestAccount", "suspenseAccount"}`. `LEDGER_URL` and the service signing key (the `ledgerclient.FromEnv` variables) enable the ledger client; without it the create-transaction route answers 503 TRS-0514, as do all reconciliation routes when the store is not wired. The `treasury` service holds only `ledger.entry.post` at the ledger.
+
+Duties: `treasury.reconciliation.view`, `.close`, `.reopen` and `.post` (distinct; `treasury.reconciliation.write` covers opening, balances, exclusions, rules, runs and manual matches), `treasury.view`, `treasury.bank-account.write`,
 `treasury.bank-account.approve`, `treasury.statement.import`,
 `treasury.forecast.write`, `treasury.check.write`, `treasury.facility.write`,
 `treasury.facility.override`, `treasury.loan.write`, `treasury.reconciliation.write` (the PRD's `TreasuryView`,
@@ -175,6 +186,25 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0501` | 502 | the bank refused the EBICS order; the bank's return code is in the detail |
 | `TRS-0502` | 503 | EBICS is not enabled on this instance (`ebics` is not in `TREASURY_BANK_CHANNELS`) |
 | `TRS-0503` | 403 | the person who downloaded the bank keys tried to confirm them; another person must compare the hashes |
+| `TRS-0504` | 409 | the statement already has a reconciliation |
+| `TRS-0505` | 404 | reconciliation not found (also for another legal entity's) |
+| `TRS-0506` | 409 | the reconciliation is closed; reopen it before changing its lines or matches |
+| `TRS-0507` | 422 | close refused: statement lines are neither matched nor excluded |
+| `TRS-0508` | 409 | reopen refused: a later period of the same bank account is closed |
+| `TRS-0509` | 403 | the person who closed the reconciliation tried to reopen it |
+| `TRS-0510` | 422 | only a closed reconciliation can be reopened |
+| `TRS-0511` | 404 | the statement line is not on this reconciliation |
+| `TRS-0512` | 422 | the line cannot become that kind of transaction (sign, currency or decimals) |
+| `TRS-0514` | 503 | bank reconciliation or the general ledger is not configured on this instance |
+| `TRS-0515` | 422 | no GL posting profile for the legal entity |
+| `TRS-0516` | 409 | a bank transaction is being created from the line, or it already has another kind |
+| `TRS-0517` | 409 | close refused: transactions from statement lines are still being posted; repeat their requests |
+| `TRS-0518` | 422 | the general ledger or the posting profile refused the entry; nothing was matched (`errors.ledgerCode`) |
+| `TRS-0519` | 503 | the general ledger did not answer, or the match could not be saved after it accepted; safe to repeat |
+| `TRS-0520` | 403 | the person who last stated the book balance tried to close the reconciliation |
+| `TRS-0521` | 409 | the match was created from a bank transaction and cannot be unmatched |
+| `TRS-0522` | 409 | an earlier attempt to post the line went unanswered and the ledger then refused it; a person must check the ledger and abandon the transaction |
+| `TRS-0523` | 409 | the line has no pending or held bank transaction to abandon |
 | `conflict_version` | 412 | `If-Match` does not match the current ETag |
 | `precondition_required` | 428 | `If-Match` is required on every custom method |
 | `AUTH-0003` | 403 | missing duty, including `treasury.facility.override` when `overrideLimit` is set; or a legal-entity-scoped caller creating a bank account, forecast entry, facility or loan for another legal entity |

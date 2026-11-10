@@ -23,6 +23,8 @@ const (
 	audience        = "party"
 	dutyBankReveal  = "party.vendor-bank.reveal"
 	revealPath      = "/v1/party/vendors/%s/bank-accounts:reveal"
+	vendorPath      = "/v1/party/vendors/%s"
+	dutyVendorRead  = "party.import.read"
 	maxResponseSize = 1 << 20
 )
 
@@ -95,6 +97,27 @@ func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
 func (c *Client) Signed() bool { return c.signer != nil }
 
 func (c *Client) BankAccounts(ctx context.Context, legalEntityID, vendorID string) ([]BankAccount, error) {
+	raw, err := c.fetch(ctx, legalEntityID, vendorID, revealPath, dutyBankReveal)
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		BankAccounts []BankAccount `json:"bankAccounts"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		slog.ErrorContext(ctx, "party bank response unusable", "err", err, "vendorId", vendorID, "correlationId", middleware.GetReqID(ctx))
+		return nil, errors.New("party: response is not a bank account list")
+	}
+	return body.BankAccounts, nil
+}
+
+// VendorExists reads the plain vendor record (no bank details, no reveal audit) to learn whether the vendor is in the party master.
+func (c *Client) VendorExists(ctx context.Context, legalEntityID, vendorID string) error {
+	_, err := c.fetch(ctx, legalEntityID, vendorID, vendorPath, dutyVendorRead)
+	return err
+}
+
+func (c *Client) fetch(ctx context.Context, legalEntityID, vendorID, path, duty string) ([]byte, error) {
 	if c.signer == nil {
 		return nil, ErrUnsigned
 	}
@@ -102,11 +125,11 @@ func (c *Client) BankAccounts(ctx context.Context, legalEntityID, vendorID strin
 	if !ok {
 		return nil, fmt.Errorf("%w: no principal in context", ErrConfig)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+fmt.Sprintf(revealPath, url.PathEscape(vendorID)), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+fmt.Sprintf(path, url.PathEscape(vendorID)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("party: %w", err)
 	}
-	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyBankReveal}); err != nil {
+	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{duty}); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 	resp, err := c.http.Do(req)
@@ -122,18 +145,11 @@ func (c *Client) BankAccounts(ctx context.Context, legalEntityID, vendorID strin
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
+		return raw, nil
 	case http.StatusNotFound:
 		return nil, ErrVendorNotFound
 	default:
-		slog.ErrorContext(ctx, "party rejected the bank reveal", "status", resp.StatusCode, "vendorId", vendorID, "correlationId", middleware.GetReqID(ctx))
+		slog.ErrorContext(ctx, "party rejected the vendor request", "status", resp.StatusCode, "path", path, "vendorId", vendorID, "correlationId", middleware.GetReqID(ctx))
 		return nil, &StatusError{Status: resp.StatusCode}
 	}
-	var body struct {
-		BankAccounts []BankAccount `json:"bankAccounts"`
-	}
-	if err := json.Unmarshal(raw, &body); err != nil {
-		slog.ErrorContext(ctx, "party bank response unusable", "err", err, "vendorId", vendorID, "correlationId", middleware.GetReqID(ctx))
-		return nil, errors.New("party: response is not a bank account list")
-	}
-	return body.BankAccounts, nil
 }

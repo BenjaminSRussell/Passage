@@ -69,6 +69,24 @@ spec:
             - name: REVREC_URL
               value: {{ .Values.revrecUrl | quote }}
             {{- end }}
+            {{- if .Values.salesUrl }}
+            {{- if not .Values.serviceIdentity.signingKeySecret }}
+            {{- fail "salesUrl needs serviceIdentity.signingKeySecret: billing signs its :record-progress calls" }}
+            {{- end }}
+            - name: SALES_URL
+              value: {{ .Values.salesUrl | quote }}
+            - name: BILLING_SALES_REPORT_INTERVAL
+              value: {{ .Values.salesReportInterval | quote }}
+            {{- end }}
+            {{- if .Values.taxUrl }}
+            {{- if not .Values.serviceIdentity.signingKeySecret }}
+            {{- fail "taxUrl needs serviceIdentity.signingKeySecret: billing signs its tax transaction calls" }}
+            {{- end }}
+            - name: TAX_URL
+              value: {{ .Values.taxUrl | quote }}
+            - name: BILLING_TAX_REPORT_INTERVAL
+              value: {{ .Values.taxReportInterval | quote }}
+            {{- end }}
             {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key

@@ -36,6 +36,14 @@ autoBook:
 # chart and the service refuse to start without it): an order invoice is never booked at its
 # billed amounts, it backs off with BIL-0207 until revrec answers with the order's contract.
 revrecUrl: ""
+# With salesUrl set (needs serviceIdentity.signingKeySecret; sales must list billing's public key) every replica runs a
+# reporter that sends posted invoices to sales' :record-progress (SALES_URL, BILLING_SALES_REPORT_INTERVAL). Unset, reports wait.
+salesUrl: ""
+salesReportInterval: "30s"
+# With taxUrl set (needs serviceIdentity.signingKeySecret; tax must list billing's public key) every replica runs a reporter
+# that records booked invoices and credit notes with the tax service (TAX_URL, BILLING_TAX_REPORT_INTERVAL). Unset, reports wait.
+taxUrl: ""
+taxReportInterval: "30s"
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits: { cpu: 500m, memory: 256Mi }

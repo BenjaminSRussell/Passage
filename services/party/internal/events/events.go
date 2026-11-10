@@ -84,10 +84,16 @@ type PartyCreatedData struct {
 	PartyNumber string `json:"party_number"`
 	PartyType   string `json:"party_type"`
 	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Version     int    `json:"version"`
 }
 
 type PartyUpdatedData struct {
 	PartyID       string   `json:"party_id"`
+	PartyNumber   string   `json:"party_number"`
+	PartyType     string   `json:"party_type"`
+	Name          string   `json:"name"`
+	Status        string   `json:"status"`
 	ChangedFields []string `json:"changed_fields"`
 	Version       int      `json:"version"`
 }

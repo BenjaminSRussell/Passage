@@ -74,6 +74,6 @@ Warnings in the response `warnings` array: TAX-0004 (no code shared by the group
 
 ## Handoffs outside the owned paths
 
-- `policies/authz/data.json`: grant the duty `tax.tax.calculate` to the service roles that call the endpoint; the new duties (`tax.transaction.record`, `tax.settlement.run`, `tax.recommit.run`, `tax.saft.export`, `tax.ledgerconfig.manage`) are seeded and need role assignments.
+- `policies/authz/data.json`: grant the duty `tax.tax.calculate` to the service roles that call the endpoint; `tax.transaction.record` is service-only (billing, receiving and receivables hold it through service grants; no role takes it); the new duties (`tax.settlement.run`, `tax.recommit.run`, `tax.saft.export`, `tax.ledgerconfig.manage`) are seeded and need role assignments.
 - `deploy/argocd`, the CI matrix and root `lint-charts`: add the tax application now that the chart exists.
 - The settlement domain posts through the `Poster` interface with key `post:tax:settlement:<id>:settle`; no client is wired because the clearing accounts of the posting are not specified.

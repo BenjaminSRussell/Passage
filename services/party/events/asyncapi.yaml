@@ -118,6 +118,8 @@ components:
           party_number: { type: string }
           party_type: { type: string, enum: [organization, person] }
           name: { type: string }
+          status: { type: string, description: the party status at creation; read by the search index }
+          version: { type: integer }
       x-passage-type: dev.passage.party.party.created.v1
     partyUpdated:
       name: updated
@@ -125,9 +127,13 @@ components:
       description: changed_fields names the camelCase fields that changed, sorted. dob and gender are never named (BR-7.9); a change to only those bumps version with an empty list.
       payload:
         type: object
-        required: [party_id, changed_fields, version]
+        required: [party_id, party_number, party_type, name, status, changed_fields, version]
         properties:
           party_id: { type: string, format: uuid }
+          party_number: { type: string }
+          party_type: { type: string, enum: [organization, person] }
+          name: { type: string }
+          status: { type: string }
           changed_fields: { type: array, items: { type: string } }
           version: { type: integer }
       x-passage-type: dev.passage.party.party.updated.v1
@@ -151,6 +157,15 @@ components:
                 fromId: { type: string, format: uuid }
                 toId: { type: string, format: uuid }
           mergedAt: { type: string, format: date-time }
+          survivor:
+            type: object
+            description: the survivor after the merge fields resolved; read by the search index
+            properties:
+              partyNumber: { type: string }
+              partyType: { type: string }
+              name: { type: string }
+              status: { type: string }
+              version: { type: integer }
       x-passage-type: dev.passage.party.party.merged.v1
     customerCreated:
       name: created
