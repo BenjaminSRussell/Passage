@@ -175,6 +175,13 @@ type Store interface {
 	ListInboundChanges(ctx context.Context, f InboundFilter, after string, limit int) (Page[InboundChange], error)
 	AcknowledgeInboundChange(ctx context.Context, id, note string, idem Idem) (InboundChange, error)
 	RetryInboundChange(ctx context.Context, id, note string, idem Idem) (InboundChange, error)
+	AcknowledgePurchaseOrder(ctx context.Context, vendorID, poID string, in domain.AckInput, idem Idem) (POAcknowledgement, error)
+	DecideAcknowledgement(ctx context.Context, id string, approve bool, note string, idem Idem) (POAcknowledgement, error)
+	GetAcknowledgement(ctx context.Context, id string) (POAcknowledgement, error)
+	ListAcknowledgements(ctx context.Context, f AckFilter, after string, limit int) (Page[POAcknowledgement], error)
+	ListAwaitingAcknowledgement(ctx context.Context, after string, limit int) (Page[PurchaseOrderAckSummary], error)
+	ListVendorPurchaseOrders(ctx context.Context, vendorID, after string, limit int) (Page[PurchaseOrderAckSummary], error)
+	GetVendorPurchaseOrder(ctx context.Context, vendorID, id string) (PurchaseOrder, error)
 	Ping(ctx context.Context) error
 }
 

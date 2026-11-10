@@ -164,6 +164,10 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/signing-limit-requests/{id}:approve`, `:reject` | procurement.signing-limit.approve | Idempotency-Key and If-Match required (412 PRC-SL-005); approving writes or changes the worker's limit and `signinglimit.changed.v1` in one transaction; a decided request is 409 PRC-SL-004; the requester and the worker cannot decide (403 PRC-SL-003) |
 | GET `/signing-limits`, GET `/signing-limits/{id}`, GET `/signing-limits/evaluation` | procurement.signing-limit.approve or procurement.purchase-order.inquire | Limits (filter by worker, document type, `expired=true`); the evaluation shows what a limit does to an amount as requester and as approver |
 | POST `/signing-limits/{id}:recertify` | procurement.signing-limit.approve | Idempotency-Key and If-Match required; moves `recertifyBy` 12 months past today; the worker cannot recertify their own limit (403 PRC-SL-003); writes `signinglimit.changed.v1` |
+| GET `/acknowledgements/awaiting`, GET `/acknowledgements`, GET `/purchase-orders/{id}/acknowledgements` | procurement.purchase-order.inquire | Buyer side (#511): confirmed POs whose current version no vendor has answered; vendor answers (`purchaseOrderId`, `outcome`, `pending=true` for undecided proposals); the answers to one PO |
+| POST `/acknowledgements/{id}:approve`, `:decline` | procurement.purchase-order.confirm | Idempotency-Key required; approve writes the proposal as the PO's next version through the edit path (a quantity or price change past the change rules waits for re-approval); decline leaves the order as it is |
+| GET `/vendor/purchase-orders`, GET `/vendor/purchase-orders/{id}` | procurement.vendor-portal.read (service-only) | The calling vendor's confirmed POs and its commercial view of one; the vendor comes from the verified `VendorPrincipal`, never from a header, query parameter or body; another vendor's order is 404 |
+| POST `/vendor/purchase-orders/{id}/acknowledgements` | procurement.vendor-portal.acknowledge (service-only) | Idempotency-Key required (namespaced by vendor); accept, reject with a reason, or propose per-line `qty`, `unitPrice`, `deliveryDate`; 201 |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -499,6 +503,19 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
 
+## Vendor acknowledgement (#511, subtask 1)
+
+A vendor answers the latest version of a CONFIRMED PO once: accepts it, rejects it with a reason, or proposes changes to
+lines (quantity, delivery date, unit price). A proposal is stored PENDING; a buyer with `procurement.purchase-order.confirm`
+approves it (the PO moves to its next version through the normal edit path, including re-approval) or declines it (the order is
+unchanged and the version stays unanswered). One proposal may be open per PO. An answer to a version that is not the latest is
+refused with a plain message (PRC-ACK-001). Every answer and decision is a row in `purchase_order_ack` (FORCEd RLS, tenant and
+legal entity) and writes `poack.accepted.v1`, `poack.rejected.v1`, `poack.proposed.v1` or `poack.decided.v1`.
+
+The vendor routes take the vendor only from `VendorPrincipal` (`API.WithVendorPrincipal`). No credential in the platform carries a
+vendor yet, so the default `NoVendorPrincipal` refuses every caller (403 AUTH-0003) until the supplier portal supplies one. Their
+duties, `procurement.vendor-portal.read` and `procurement.vendor-portal.acknowledge`, are `service_only`: never assignable to a person.
+
 ## Inbound changes from planning and fulfillment (slice 18)
 
 `purchasing consume` (a second process from the same image; Helm `consumer.enabled`) follows two topics with the
@@ -607,6 +624,12 @@ store codes are returned as the `code` field.
 | PRC-IP-NOT-FOUND | 404 | The PO line has no invoicing plan (or no such row on a settlement report) |
 | PRC-IP-004 | 409 | The plan row is settled under another reference or amount, or the line cannot absorb the settled amount |
 | PRC-PO-LINE-NOT-FOUND | 404 | The PO has no line with that number |
+| PRC-ACK-001 | 409 | The answer or proposal is for a version that is not the PO's latest |
+| PRC-ACK-002 | 409 | The PO is not CONFIRMED (being changed or closed), or the answer is not a proposal |
+| PRC-ACK-003 | 409 | A proposal is already open on the PO |
+| PRC-ACK-004 | 409 | The version has already been accepted or rejected |
+| PRC-ACK-005 | 409 | The proposal has already been approved or declined |
+| PRC-ACK-NOT-FOUND | 404 | No such vendor answer |
 | PRC-POL-002 | 403 | Four-eyes policy: a user who created, submitted or last changed the PO (or a caller with no user id) cannot approve or confirm it |
 | PRC-POL-003 | 412 | If-Match is not the saved purchasing policy version (0 when none is saved) |
 | PRC-CAT-002 | 422 | Category access is HARD and a line's vendor has no valid APPROVED or PROVISIONAL assignment in a restricted category, or a BLOCKED assignment in force (SOFT returns it as a warning) |

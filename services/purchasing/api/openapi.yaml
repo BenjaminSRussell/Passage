@@ -2204,6 +2204,121 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/ImportRow' } }
         nextCursor: { type: string, description: "The last row number of this page; pass it as cursor." }
+    AckLineChange:
+      type: object
+      required: [lineNo]
+      properties:
+        lineNo: { type: integer, minimum: 1 }
+        qty: { type: string, description: "Decimal string, more than zero" }
+        unitPrice: { type: string, description: "Decimal string, zero or more" }
+        deliveryDate: { type: string, format: date }
+    AckInput:
+      type: object
+      required: [versionNo, outcome]
+      additionalProperties: false
+      properties:
+        versionNo: { type: integer, minimum: 1, description: "The version being answered; only the latest can be" }
+        outcome: { type: string, enum: [ACCEPTED, REJECTED, CHANGES_PROPOSED] }
+        reason: { type: string, maxLength: 2000, description: "Required for REJECTED" }
+        changes:
+          type: array
+          minItems: 1
+          maxItems: 500
+          description: "Only with CHANGES_PROPOSED; each line at most once, at least one of qty, unitPrice, deliveryDate"
+          items: { $ref: '#/components/schemas/AckLineChange' }
+    POAcknowledgement:
+      type: object
+      required: [id, legalEntityId, purchaseOrderId, poNumber, vendorId, versionNo, outcome, changes, acknowledgedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        poNumber: { type: string }
+        vendorId: { type: string, format: uuid }
+        versionNo: { type: integer }
+        outcome: { type: string, enum: [ACCEPTED, REJECTED, CHANGES_PROPOSED] }
+        reason: { type: string }
+        changes: { type: array, items: { $ref: '#/components/schemas/AckLineChange' } }
+        acknowledgedBy: { type: string, format: uuid, description: "Absent in the vendor view" }
+        acknowledgedAt: { type: string, format: date-time }
+        decision: { type: string, enum: [APPROVED, DECLINED] }
+        decidedBy: { type: string, format: uuid, description: "Absent in the vendor view" }
+        decidedAt: { type: string, format: date-time }
+        decisionNote: { type: string }
+        resultingVersionNo: { type: integer, description: "The PO version an approved proposal produced" }
+    POAcknowledgementPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/POAcknowledgement' } }
+        nextCursor: { type: string, format: uuid }
+    PurchaseOrderAckSummary:
+      type: object
+      required: [id, number, legalEntityId, vendorId, currency, approvalStatus, versionNo, total, lineCount, acknowledgement, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        currency: { type: string }
+        approvalStatus: { type: string }
+        versionNo: { type: integer }
+        total: { type: string }
+        lineCount: { type: integer }
+        acknowledgement: { type: string, description: "Where the current version stands: NONE until answered (also after a declined proposal), ACCEPTED, REJECTED or PROPOSAL_PENDING" }
+        createdAt: { type: string, format: date-time }
+    PurchaseOrderAckSummaryPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PurchaseOrderAckSummary' } }
+        nextCursor: { type: string, format: uuid }
+    VendorOrderLine:
+      type: object
+      properties:
+        lineNo: { type: integer }
+        productId: { type: string, format: uuid }
+        description: { type: string }
+        qty: { type: string }
+        unit: { type: string }
+        unitPrice: { type: string }
+        priceUnit: { type: string }
+        discountPct: { type: string }
+        lineAmount: { type: string }
+        taxAmount: { type: string }
+        deliveryDate: { type: string, format: date }
+        receivedQty: { type: string }
+        status: { type: string }
+    VendorOrder:
+      type: object
+      description: "A vendor's view of its own order: commercial content only, with none of the buyer's users, accounts, requisition or agreement links."
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        currency: { type: string }
+        approvalStatus: { type: string }
+        versionNo: { type: integer }
+        subtotal: { type: string }
+        discountTotal: { type: string }
+        chargesTotal: { type: string }
+        taxTotal: { type: string }
+        total: { type: string }
+        lines: { type: array, items: { $ref: '#/components/schemas/VendorOrderLine' } }
+        charges:
+          type: array
+          items:
+            type: object
+            properties:
+              calc: { type: string }
+              value: { type: string }
+              amount: { type: string }
+              lineNo: { type: integer }
+        acknowledgements: { type: array, items: { $ref: '#/components/schemas/POAcknowledgement' } }
+    AckDecisionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: string, maxLength: 1000 }
 paths:
   /v1/procurement/requisitions:
     post:
@@ -5550,3 +5665,143 @@ paths:
         '412': { description: If-Match is not the stored version (PRC-SRV-007), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Validation (COM-0001) or outline total mismatch (PRC-SRV-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/acknowledgements/awaiting:
+    get:
+      operationId: listPurchaseOrdersAwaitingAcknowledgement
+      x-passage-duty: procurement.purchase-order.inquire
+      summary: Confirmed POs whose current version no vendor has answered yet, newest first (duty procurement.purchase-order.inquire)
+      parameters: [{ $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/Cursor' }]
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseOrderAckSummaryPage' }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Bad limit or cursor (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/acknowledgements:
+    get:
+      operationId: listAcknowledgements
+      x-passage-duty: procurement.purchase-order.inquire
+      summary: Vendor answers, newest first; pending=true lists the proposals nobody has decided (duty procurement.purchase-order.inquire)
+      parameters:
+        - { name: purchaseOrderId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: outcome, in: query, required: false, schema: { type: string, enum: [ACCEPTED, REJECTED, CHANGES_PROPOSED] } }
+        - { name: pending, in: query, required: false, schema: { type: boolean } }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/POAcknowledgementPage' }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Bad filter, limit or cursor (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/purchase-orders/{id}/acknowledgements:
+    get:
+      operationId: listPurchaseOrderAcknowledgements
+      x-passage-duty: procurement.purchase-order.inquire
+      summary: Every vendor answer to one PO, newest first (duty procurement.purchase-order.inquire)
+      parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/Cursor' }]
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/POAcknowledgementPage' }
+        '403': { description: Missing duty (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Bad id, limit or cursor (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/acknowledgements/{id}:approve:
+    post:
+      operationId: approveAcknowledgement
+      x-passage-duty: procurement.purchase-order.confirm
+      summary: Approve a vendor's proposed changes; the PO moves to its next version (duty procurement.purchase-order.confirm)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AckDecisionInput' }
+      responses:
+        '200':
+          description: The proposal, now decided, with the version it produced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/POAcknowledgement' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Proposal not found (PRC-ACK-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Already decided (PRC-ACK-005), not a proposal (PRC-ACK-002) or the order has moved to another version (PRC-ACK-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: The change breaks an existing order rule, or validation (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/acknowledgements/{id}:decline:
+    post:
+      operationId: declineAcknowledgement
+      x-passage-duty: procurement.purchase-order.confirm
+      summary: Decline a vendor's proposed changes; the order is unchanged (duty procurement.purchase-order.confirm)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AckDecisionInput' }
+      responses:
+        '200':
+          description: The proposal, now decided
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/POAcknowledgement' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty or legal entity outside the caller's scope (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Proposal not found (PRC-ACK-NOT-FOUND) or unknown action (PRC-ACTION-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Already decided (PRC-ACK-005) or not a proposal (PRC-ACK-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/vendor/purchase-orders:
+    get:
+      operationId: listVendorPurchaseOrders
+      x-passage-duty: procurement.vendor-portal.read
+      summary: The calling vendor's confirmed POs, newest first. The vendor comes from the verified credential only (service-only duty procurement.vendor-portal.read)
+      parameters: [{ $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/Cursor' }]
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseOrderAckSummaryPage' }
+        '403': { description: Missing duty, or the caller is not a supplier account (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Bad limit or cursor (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/vendor/purchase-orders/{id}:
+    get:
+      operationId: getVendorPurchaseOrder
+      x-passage-duty: procurement.vendor-portal.read
+      summary: One of the calling vendor's POs, with its answers; another vendor's PO is 404 (service-only duty procurement.vendor-portal.read)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: The vendor's view of the order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorOrder' }
+        '403': { description: Missing duty, or the caller is not a supplier account (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Purchase order not found for this vendor (PRC-PO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/vendor/purchase-orders/{id}/acknowledgements:
+    post:
+      operationId: acknowledgeVendorPurchaseOrder
+      x-passage-duty: procurement.vendor-portal.acknowledge
+      summary: Accept, reject or propose line changes to the current version of the calling vendor's PO (service-only duty procurement.vendor-portal.acknowledge)
+      parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AckInput' }
+      responses:
+        '201':
+          description: The recorded answer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/POAcknowledgement' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { description: Missing duty, or the caller is not a supplier account (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: Purchase order not found for this vendor (PRC-PO-NOT-FOUND), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: Not the latest version (PRC-ACK-001), order not confirmed (PRC-ACK-002), a proposal already open (PRC-ACK-003) or the version already answered (PRC-ACK-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001) or a proposed line that does not exist on the order, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

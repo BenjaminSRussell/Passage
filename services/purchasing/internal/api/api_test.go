@@ -113,6 +113,9 @@ type fakeStore struct {
 	// Changes other services asked of purchase orders (slice 18).
 	inbound inboundLog
 
+	// Vendor acknowledgements of purchase orders (511-1).
+	ack ackLog
+
 	// Procurement catalogs: what the catalog methods received and answer.
 	cat catalogLog
 	imp importLog

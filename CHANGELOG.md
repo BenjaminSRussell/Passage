@@ -10,6 +10,7 @@ release may change public APIs.
 
 ### Added
 
+- purchasing: a vendor can accept, reject or propose line changes (quantity, delivery date, price) to the latest version of a confirmed PO, and the buyer approves (next PO version) or declines; vendor-scoped reads take the vendor only from a verified principal, with `procurement.vendor-portal.*` duties that are service-only (#511, subtask 1)
 - batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
   approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
   source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners

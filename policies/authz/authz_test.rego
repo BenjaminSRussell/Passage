@@ -803,6 +803,37 @@ awaiting_service_caller := {
 	"inventory.transaction.apply",
 	"pricing.contract.accrue",
 	"hub.client.consume",
+	"procurement.vendor-portal.read",
+	"procurement.vendor-portal.acknowledge",
+}
+
+test_vendor_portal_duties_are_service_only_and_open_only_their_routes if {
+	data.duties["procurement.vendor-portal.read"].service_only
+	data.duties["procurement.vendor-portal.acknowledge"].service_only
+	allowed("procurement.vendor-portal.read", "GET", "/v1/procurement/vendor/purchase-orders")
+	allowed("procurement.vendor-portal.read", "GET", "/v1/procurement/vendor/purchase-orders/po-1")
+	allowed("procurement.vendor-portal.acknowledge", "POST", "/v1/procurement/vendor/purchase-orders/po-1/acknowledgements")
+	not allowed("procurement.vendor-portal.read", "POST", "/v1/procurement/vendor/purchase-orders/po-1/acknowledgements")
+	not allowed("procurement.vendor-portal.read", "GET", "/v1/procurement/purchase-orders/po-1")
+	not allowed("procurement.vendor-portal.read", "GET", "/v1/procurement/acknowledgements")
+	not allowed("procurement.vendor-portal.acknowledge", "GET", "/v1/procurement/vendor/purchase-orders/po-1")
+	not allowed("procurement.vendor-portal.acknowledge", "POST", "/v1/procurement/acknowledgements/a1:approve")
+	not allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/vendor/purchase-orders")
+	not allowed("procurement.purchase-order.confirm", "POST", "/v1/procurement/vendor/purchase-orders/po-1/acknowledgements")
+	not allowed("procurement.purchase-order.maintain", "POST", "/v1/procurement/vendor/purchase-orders/po-1/acknowledgements")
+}
+
+test_buyer_acknowledgement_routes if {
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/acknowledgements")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/acknowledgements/awaiting")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/purchase-orders/po-1/acknowledgements")
+	allowed("procurement.purchase-order.confirm", "POST", "/v1/procurement/acknowledgements/a1:approve")
+	allowed("procurement.purchase-order.confirm", "POST", "/v1/procurement/acknowledgements/a1:decline")
+	not allowed("procurement.purchase-order.inquire", "POST", "/v1/procurement/acknowledgements/a1:approve")
+	not allowed("procurement.purchase-order.inquire", "POST", "/v1/procurement/acknowledgements/a1:decline")
+	not allowed("procurement.purchase-order.confirm", "POST", "/v1/procurement/acknowledgements/a1:release")
+	not allowed("procurement.purchase-order.maintain", "POST", "/v1/procurement/acknowledgements/a1:approve")
+	not allowed("procurement.purchase-order.confirm", "GET", "/v1/procurement/acknowledgements")
 }
 
 test_internal_only_duties_are_service_only if {

@@ -461,14 +461,24 @@ func applyPlan(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, line PurchaseO
 		head.ApprovalStatus = domain.POStatusCancelled
 		return editResult{}, updateHeader(ctx, tx, head)
 	}
+	if err := priceLines(&next, cur.Charges); err != nil {
+		return editResult{}, err
+	}
+	_, res, err := editLocked(ctx, tx, cur, cur.RowVersion, next, true)
+	return res, err
+}
+
+// priceLines prices next again over its lines and the live charges of charges, so line amounts,
+// percentage charges and totals stay exact (BR-17.5).
+func priceLines(next *PurchaseOrder, charges []PurchaseOrderCharge) error {
 	inputs := make([]domain.LineInput, 0, len(next.Lines))
 	for _, l := range next.Lines {
 		inputs = append(inputs, domain.LineInput{Qty: l.Qty, UnitPrice: l.UnitPrice, PriceUnit: l.PriceUnit, DiscountPct: l.DiscountPct, Tax: l.TaxAmount})
 	}
-	charges, kept := LiveCharges(cur.Charges, next.Lines)
-	doc, err := domain.Price(inputs, charges, money.MinorUnits(cur.Currency))
+	chargeInputs, kept := LiveCharges(charges, next.Lines)
+	doc, err := domain.Price(inputs, chargeInputs, money.MinorUnits(next.Currency))
 	if err != nil {
-		return editResult{}, err
+		return err
 	}
 	for i := range next.Lines {
 		la := doc.Lines[i]
@@ -480,8 +490,7 @@ func applyPlan(ctx context.Context, tx pgx.Tx, cur PurchaseOrder, line PurchaseO
 	}
 	next.Subtotal, next.DiscountTotal, next.ChargesTotal, next.TaxTotal, next.Total =
 		doc.Totals.Subtotal, doc.Totals.DiscountTotal, doc.Totals.ChargesTotal, doc.Totals.TaxTotal, doc.Totals.Total
-	_, res, err := editLocked(ctx, tx, cur, cur.RowVersion, next, true)
-	return res, err
+	return nil
 }
 
 // scaledTax keeps the tax of a line in proportion when its quantity changes.
