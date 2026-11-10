@@ -19,8 +19,12 @@ func TestBuildOpeningJournals_SidesAndKeys(t *testing.T) {
 	}
 	again, _ := BuildOpeningJournals(rows, SourceAX2012, "USMF", "le", "L1", "2027-01-01")
 	moved, _ := BuildOpeningJournals(rows, SourceAX2012, "USMF", "le", "L1", "2027-02-01")
-	if again[1].Hash != js[1].Hash || moved[1].Hash == js[1].Hash || moved[1].Key != js[1].Key {
-		t.Fatal("hash must follow the content and date, the key only the company, entity and currency")
+	changed := append([]GLBalance{}, rows...)
+	changed[0].Balance = decimal.NewFromInt(200)
+	changed[1].Balance = decimal.NewFromInt(-200)
+	other, _ := BuildOpeningJournals(changed, SourceAX2012, "USMF", "le", "L1", "2027-01-01")
+	if again[1].Hash != js[1].Hash || moved[1].Hash != js[1].Hash || other[1].Hash == js[1].Hash || moved[1].Key != js[1].Key {
+		t.Fatal("hash must follow the lines only, the key the company and currency only")
 	}
 }
 

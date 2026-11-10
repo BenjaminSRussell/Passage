@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -59,10 +60,10 @@ func openingRun(ctx context.Context, tx pgx.Tx, runID string) (domain.PackRun, e
 	return run, nil
 }
 
-func readOpeningBalances(ctx context.Context, tx pgx.Tx, run domain.PackRun) ([]domain.GLBalance, error) {
+func readOpeningBalances(ctx context.Context, tx pgx.Tx, system, company string) ([]domain.GLBalance, error) {
 	rows, err := tx.Query(ctx, `select legacy_id, account, dimensions, currency, balance::text from gl_opening_balance
 		where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_company = $2
-		order by legacy_id`, string(run.SourceSystem), run.SourceCompany)
+		order by legacy_id`, system, company)
 	if err != nil {
 		return nil, fmt.Errorf("read gl_opening_balance: %w", err)
 	}
@@ -78,12 +79,30 @@ func readOpeningBalances(ctx context.Context, tx pgx.Tx, run domain.PackRun) ([]
 	})
 }
 
+var ErrOpeningTargetTaken = errors.New("opening target taken")
+
+type openingTarget struct{ legalEntityID, ledgerID string }
+
+func readOpeningTarget(ctx context.Context, tx pgx.Tx, system, company string) (*openingTarget, error) {
+	var t openingTarget
+	err := tx.QueryRow(ctx, `select target_legal_entity_id::text, ledger_id from gl_opening_target
+		where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_company = $2`, system, company).Scan(&t.legalEntityID, &t.ledgerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return &t, err
+}
+
+func openingTargetTaken(company string) error {
+	return fmt.Errorf("%w: the opening balances of %s are already assigned to another legal entity or ledger; one company is booked to one legal entity and ledger only", ErrOpeningTargetTaken, company)
+}
+
 type postedKey struct{ ledgerID, hash string }
 
-func readOpeningPostings(ctx context.Context, tx pgx.Tx, run domain.PackRun, legalEntityID string) (map[string]OpeningPosting, map[string]postedKey, error) {
+func readOpeningPostings(ctx context.Context, tx pgx.Tx, system, company, legalEntityID string) (map[string]OpeningPosting, map[string]postedKey, error) {
 	q := `select currency, legal_entity_id::text, ledger_id, posting_date::text, line_count, debit::text, credit::text, entry_id, posted_at, content_hash
 		from gl_opening_posting where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_company = $2`
-	args := []any{string(run.SourceSystem), run.SourceCompany}
+	args := []any{system, company}
 	if legalEntityID != "" {
 		q += ` and legal_entity_id = $3`
 		args = append(args, legalEntityID)
@@ -117,25 +136,45 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 	var run domain.PackRun
 	var journals []domain.OpeningJournal
 	var held map[string]OpeningPosting
+	pinned := false
 	if err := s.tx(ctx, func(tx pgx.Tx) error {
 		var err error
 		if run, err = openingRun(ctx, tx, in.RunID); err != nil {
 			return err
 		}
-		rows, err := readOpeningBalances(ctx, tx, run)
+		rows, err := readOpeningBalances(ctx, tx, string(run.SourceSystem), run.SourceCompany)
 		if err != nil {
 			return err
 		}
 		if journals, err = domain.BuildOpeningJournals(rows, run.SourceSystem, run.SourceCompany, in.LegalEntityID, in.LedgerID, in.PostingDate); err != nil {
 			return err
 		}
-		var keys map[string]postedKey
-		if held, keys, err = readOpeningPostings(ctx, tx, run, in.LegalEntityID); err != nil {
+		pin, err := readOpeningTarget(ctx, tx, string(run.SourceSystem), run.SourceCompany)
+		if err != nil {
 			return err
 		}
+		if pin != nil && (pin.legalEntityID != in.LegalEntityID || pin.ledgerID != in.LedgerID) {
+			return openingTargetTaken(run.SourceCompany)
+		}
+		pinned = pin != nil
+		var keys map[string]postedKey
+		if held, keys, err = readOpeningPostings(ctx, tx, string(run.SourceSystem), run.SourceCompany, in.LegalEntityID); err != nil {
+			return err
+		}
+		current := map[string]bool{}
 		for _, j := range journals {
-			if k, ok := keys[in.LegalEntityID+"|"+j.Currency]; ok && k.hash != j.Hash {
-				return fmt.Errorf("%w: the %s opening journal of legal entity %s was already posted with other balances, ledger or date; correct it in the ledger by reversal, not by posting again",
+			current[j.Currency] = true
+		}
+		for _, p := range held {
+			if !current[p.Currency] && p.LegalEntityID == in.LegalEntityID {
+				return fmt.Errorf("%w: the %s opening journal of legal entity %s was posted, but the company no longer holds a balance in that currency; correct it in the ledger by reversal",
+					domain.ErrTransition, p.Currency, in.LegalEntityID)
+			}
+		}
+		for _, j := range journals {
+			k, ok := keys[in.LegalEntityID+"|"+j.Currency]
+			if ok && (k.hash != j.Hash || held[in.LegalEntityID+"|"+j.Currency].PostingDate != in.PostingDate) {
+				return fmt.Errorf("%w: the %s opening journal of legal entity %s was already posted with other balances or another date; correct it in the ledger by reversal, not by posting again",
 					domain.ErrTransition, j.Currency, in.LegalEntityID)
 			}
 		}
@@ -160,6 +199,11 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 		}
 		if owner != in.LegalEntityID {
 			return OpeningJournalResult{}, fmt.Errorf("%w: ledger %s belongs to another legal entity", ErrLedgerForeign, in.LedgerID)
+		}
+	}
+	if !pinned && len(journals) > 0 {
+		if err := s.pinOpeningTarget(ctx, run, in); err != nil {
+			return OpeningJournalResult{}, err
 		}
 	}
 	for _, j := range journals {
@@ -190,6 +234,54 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 	return res, nil
 }
 
+func (s *Postgres) pinOpeningTarget(ctx context.Context, run domain.PackRun, in OpeningJournalRequest) error {
+	return s.tx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into gl_opening_target (tenant_id, source_system, source_company, target_legal_entity_id, ledger_id, pinned_by)
+			values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5) on conflict do nothing`,
+			string(run.SourceSystem), run.SourceCompany, in.LegalEntityID, in.LedgerID, in.By); err != nil {
+			return fmt.Errorf("pin gl_opening_target: %w", err)
+		}
+		t, err := readOpeningTarget(ctx, tx, string(run.SourceSystem), run.SourceCompany)
+		if err != nil {
+			return err
+		}
+		if t == nil || t.legalEntityID != in.LegalEntityID || t.ledgerID != in.LedgerID {
+			return openingTargetTaken(run.SourceCompany)
+		}
+		return nil
+	})
+}
+
+// openingPosted reports whether every currency the company holds a balance in is posted to the
+// company's pinned legal entity with the lines of the balances held now.
+func openingPosted(ctx context.Context, tx pgx.Tx, system, company string) (bool, error) {
+	rows, err := readOpeningBalances(ctx, tx, system, company)
+	if err != nil {
+		return false, err
+	}
+	pin, err := readOpeningTarget(ctx, tx, system, company)
+	if err != nil || pin == nil {
+		return false, err
+	}
+	journals, err := domain.BuildOpeningJournals(rows, domain.SourceSystem(system), company, pin.legalEntityID, pin.ledgerID, "2000-01-01")
+	if err != nil || len(journals) == 0 {
+		return false, nil
+	}
+	_, keys, err := readOpeningPostings(ctx, tx, system, company, pin.legalEntityID)
+	if err != nil {
+		return false, err
+	}
+	if len(keys) != len(journals) {
+		return false, nil
+	}
+	for _, j := range journals {
+		if k, ok := keys[pin.legalEntityID+"|"+j.Currency]; !ok || k.hash != j.Hash {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // OpeningPostings lists the opening journals posted for the legacy company of a gl_balances run, in
 // the legal entities the caller may see.
 func (s *Postgres) OpeningPostings(ctx context.Context, runID string) ([]OpeningPosting, error) {
@@ -202,7 +294,7 @@ func (s *Postgres) OpeningPostings(ctx context.Context, runID string) ([]Opening
 		if run.Pack != domain.PackGLBalances {
 			return fmt.Errorf("%w: run %s is a %s run, not gl_balances", domain.ErrInvalid, runID, run.Pack)
 		}
-		posts, _, err := readOpeningPostings(ctx, tx, run, "")
+		posts, _, err := readOpeningPostings(ctx, tx, string(run.SourceSystem), run.SourceCompany, "")
 		if err != nil {
 			return err
 		}

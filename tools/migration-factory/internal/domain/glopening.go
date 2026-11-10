@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
 )
+
+var ErrOpeningUnbalanced = errors.New("opening journal out of balance")
 
 const (
 	GLOpeningSourceType = "opening_balance"
@@ -29,8 +32,8 @@ type OpeningJournal struct {
 	Entry     ledgerclient.Entry
 }
 
-func OpeningKey(system SourceSystem, company, legalEntityID, currency string) string {
-	sum := sha256.Sum256([]byte(string(system) + "\x1f" + company + "\x1f" + legalEntityID + "\x1f" + currency))
+func OpeningKey(system SourceSystem, company, currency string) string {
+	sum := sha256.Sum256([]byte(string(system) + "\x1f" + company + "\x1f" + currency))
 	return "mf-gl-open-" + hex.EncodeToString(sum[:16])
 }
 
@@ -67,7 +70,7 @@ func BuildOpeningJournals(rows []GLBalance, system SourceSystem, company, legalE
 	for _, cur := range currencies {
 		list := byCurrency[cur]
 		sort.Slice(list, func(i, j int) bool { return list[i].LegacyID < list[j].LegacyID })
-		j := OpeningJournal{Currency: cur, Key: OpeningKey(system, company, legalEntityID, cur), LineCount: len(list)}
+		j := OpeningJournal{Currency: cur, Key: OpeningKey(system, company, cur), LineCount: len(list)}
 		j.Entry = ledgerclient.Entry{LegalEntityID: legalEntityID, LedgerID: ledgerID, DocumentID: "opening:" + company + ":" + cur,
 			PostingDate: postingDate, Currency: cur, IdempotencyKey: j.Key, SourceType: GLOpeningSourceType}
 		var hashed []string
@@ -89,13 +92,13 @@ func BuildOpeningJournals(rows []GLBalance, system SourceSystem, company, legalE
 		if len(j.Entry.Lines) > MaxOpeningLines {
 			return nil, fmt.Errorf("%w: the opening journal in %s has %d lines, more than the %d one journal may hold", ErrInvalid, cur, len(j.Entry.Lines), MaxOpeningLines)
 		}
-		sum := sha256.Sum256([]byte(ledgerID + "\x1f" + postingDate + "\x1f" + strings.Join(hashed, "\n")))
+		sum := sha256.Sum256([]byte(strings.Join(hashed, "\n")))
 		j.Hash = hex.EncodeToString(sum[:])
 		out = append(out, j)
 	}
 	if len(unbalanced) > 0 {
 		return nil, fmt.Errorf("%w: MIG-1540 the opening journal of legal entity %s is out of balance: %s; quarantined or missing balances are the usual cause, nothing was posted",
-			ErrInvalid, legalEntityID, strings.Join(unbalanced, "; "))
+			ErrOpeningUnbalanced, legalEntityID, strings.Join(unbalanced, "; "))
 	}
 	return out, nil
 }

@@ -13,7 +13,12 @@ import (
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
-const CodeOpeningRejected = "MIG-1541"
+const (
+	CodeOpeningRejected   = "MIG-1541"
+	CodeOpeningTarget     = "MIG-1542"
+	CodeOpeningConflict   = "MIG-1543"
+	CodeOpeningUnbalanced = "MIG-1540"
+)
 
 type openingJournalRequest struct {
 	LegalEntityID string `json:"legalEntityId"`
@@ -49,14 +54,32 @@ func toOpeningJournalsDTO(runID string, in []store.OpeningPosting) openingJourna
 	return out
 }
 
-func failOpening(w http.ResponseWriter, r *http.Request, err error) {
+func postedNote(posted []store.OpeningPosting) string {
+	var cur []string
+	for _, p := range posted {
+		cur = append(cur, p.Currency)
+	}
+	if len(cur) == 0 {
+		return "no currency was posted"
+	}
+	return "already posted: " + strings.Join(cur, ", ")
+}
+
+func failOpening(w http.ResponseWriter, r *http.Request, err error, posted []store.OpeningPosting) {
 	var le *ledgerclient.Error
 	switch {
+	case errors.Is(err, store.ErrOpeningTargetTaken):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeOpeningTarget, err.Error()))
+	case errors.Is(err, domain.ErrOpeningUnbalanced):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOpeningUnbalanced, err.Error()))
+	case errors.As(err, &le) && le.Status == http.StatusConflict:
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeOpeningConflict,
+			"the general ledger already holds a journal under this opening key with different lines, probably from an earlier attempt before the balances changed; reverse it in the ledger, then post again ("+postedNote(posted)+")"))
 	case errors.As(err, &le) && ledgerclient.Rejected(err):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOpeningRejected,
-			"the general ledger refused the opening journal ("+le.Code+"); journals posted before it stay posted and a call after the cause is fixed posts the rest"))
+			"the general ledger refused the opening journal ("+le.Code+"); "+postedNote(posted)+"; a call after the cause is fixed posts the rest"))
 	case errors.As(err, &le), errors.Is(err, ledgerclient.ErrNoPrincipal):
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, "the general ledger did not answer; call again to post what is left"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, "the general ledger did not answer; call again to post what is left ("+postedNote(posted)+")"))
 	default:
 		failLedger(w, r, err)
 	}
@@ -100,7 +123,7 @@ func (s *Server) postOpeningJournal(w http.ResponseWriter, r *http.Request) {
 	res, err := s.store.PostOpeningJournal(r.Context(), s.ledger, store.OpeningJournalRequest{RunID: id, LegalEntityID: req.LegalEntityID,
 		LedgerID: ledgerID, PostingDate: date, By: p.UserID})
 	if err != nil {
-		failOpening(w, r, err)
+		failOpening(w, r, err, res.Journals)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, toOpeningJournalsDTO(res.RunID, res.Journals))

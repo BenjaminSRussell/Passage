@@ -38,6 +38,11 @@ func startGL(t *testing.T, h http.Handler, extra string, records ...string) runD
 	return decode[runDetailDTO](t, rec)
 }
 
+func postOpeningAs(t *testing.T, h http.Handler, runID, body, le string) *httptest.ResponseRecorder {
+	t.Helper()
+	return do(t, h, request{method: "POST", path: "/api/v1/migration/runs/" + runID + "/opening-journal", tenant: tenantA, duties: allDuties, body: body, user: "engineer", le: le})
+}
+
 func postOpening(t *testing.T, h http.Handler, runID, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	return do(t, h, request{method: "POST", path: "/api/v1/migration/runs/" + runID + "/opening-journal", tenant: tenantA, duties: allDuties, body: body, user: "engineer", le: le1})
@@ -95,7 +100,7 @@ func TestOpeningJournal_UnbalancedRefusedWholeNamingTheDifference(t *testing.T) 
 	}
 	rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US"))
 	body := rec.Body.String()
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(body, "MIG-1540") || !strings.Contains(body, "USD debits 800, credits 550, difference 250") || strings.Contains(body, "EUR") {
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeOpeningUnbalanced || !strings.Contains(body, "MIG-1540") || !strings.Contains(body, "USD debits 800, credits 550, difference 250") || strings.Contains(body, "EUR") {
 		t.Fatalf("unbalanced: %d %s", rec.Code, body)
 	}
 	if len(fake.Entries()) != 0 || count(t, admin, `select count(*) from gl_opening_posting`) != 0 {
@@ -192,5 +197,124 @@ func TestOpeningJournal_PostedBalancesCountForTheGoNoGoChecklist(t *testing.T) {
 	}
 	if d := detail(); strings.Contains(d, "gl_balances/USMF") {
 		t.Fatalf("after posting: %s", d)
+	}
+}
+
+// One company is booked to one legal entity and ledger: the first posting fixes it, a caller who
+// cannot see that legal entity is refused all the same and learns nothing of it.
+func TestOpeningJournal_CompanyIsPinnedToOneLegalEntity(t *testing.T) {
+	h, admin, _, fake, _ := ledgerServer(t)
+	run := startGL(t, h, "", cleanGL...)
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusOK {
+		t.Fatalf("A: %d %s", rec.Code, rec.Body)
+	}
+	rec := postOpeningAs(t, h, run.RunID, openingBody(le2, "L-OTHER"), le2)
+	if rec.Code != http.StatusConflict || problemCode(t, rec) != CodeOpeningTarget || strings.Contains(rec.Body.String(), le1) || strings.Contains(rec.Body.String(), "L-US") {
+		t.Fatalf("B: %d %s", rec.Code, rec.Body)
+	}
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-OTHER")); rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusConflict {
+		t.Fatalf("A on another ledger: %d %s", rec.Code, rec.Body)
+	}
+	if len(fake.Entries()) != 1 || count(t, admin, `select count(*) from gl_opening_posting`) != 1 {
+		t.Fatal("the company was booked twice")
+	}
+}
+
+func TestOpeningJournal_ConcurrentFirstPostingsEndWithOneTarget(t *testing.T) {
+	h, admin, _, fake, _ := ledgerServer(t)
+	run := startGL(t, h, "", cleanGL...)
+	codes := make(chan int, 2)
+	for _, c := range [][2]string{{le1, "L-US"}, {le2, "L-OTHER"}} {
+		go func() { codes <- postOpeningAs(t, h, run.RunID, openingBody(c[0], c[1]), c[0]).Code }()
+	}
+	a, b := <-codes, <-codes
+	if !(a == http.StatusOK && b == http.StatusConflict || a == http.StatusConflict && b == http.StatusOK) {
+		t.Fatalf("outcomes %d %d", a, b)
+	}
+	if len(fake.Entries()) != 1 || count(t, admin, `select count(*) from gl_opening_target`) != 1 || count(t, admin, `select count(*) from gl_opening_posting`) != 1 {
+		t.Fatalf("entries %d", len(fake.Entries()))
+	}
+}
+
+// The checklist counts the pack as posted only for a posting that matches the balances held now.
+func TestOpeningJournal_StalePostingDoesNotCountForTheChecklist(t *testing.T) {
+	h, admin, _, _, _ := ledgerServer(t)
+	plan, t0 := readyPlan(t, h, admin)
+	run := startGL(t, h, "", cleanGL...)
+	if _, err := admin.Exec(context.Background(), `update pack_run set created_at = $2 where run_id = $1`, run.RunID, t0.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	staged := func() bool {
+		rec := do(t, h, request{method: "GET", path: "/api/v1/cutover/plans/" + plan.PlanID + "/go-no-go", tenant: tenantA, duties: "migration.cutover.manage", user: "viewer", le: le1})
+		return strings.Contains(rec.Body.String(), "gl_balances/USMF is RECONCILED but staged")
+	}
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusOK || staged() {
+		t.Fatalf("matching posting: %d staged=%v", rec.Code, staged())
+	}
+	if _, err := admin.Exec(context.Background(), `update gl_opening_balance set balance = balance + 1 where account = '1100' and dimensions = 'USMF-100'`); err != nil {
+		t.Fatal(err)
+	}
+	if !staged() {
+		t.Fatal("a posting that no longer matches the balances counted as posted")
+	}
+	if _, err := admin.Exec(context.Background(), `update gl_opening_balance set balance = balance - 1 where account = '1100' and dimensions = 'USMF-100'; delete from gl_opening_target`); err != nil {
+		t.Fatal(err)
+	}
+	if !staged() {
+		t.Fatal("a posting without a pinned target counted as posted")
+	}
+}
+
+// A lost answer leaves nothing recorded; the retry reaches the same ledger entry and posts exactly once.
+func TestOpeningJournal_LostLedgerAnswerThenRetryPostsOnce(t *testing.T) {
+	h, admin, _, fake, _ := ledgerServer(t)
+	run := startGL(t, h, "", cleanGL...)
+	fake.LoseAnswers(&ledgerclient.Error{Op: "post", Status: http.StatusBadGateway})
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusBadGateway || problemCode(t, rec) != CodeLedgerUnavailable {
+		t.Fatalf("lost answer: %d %s", rec.Code, rec.Body)
+	}
+	if count(t, admin, `select count(*) from gl_opening_posting`) != 0 {
+		t.Fatal("a lost answer was recorded as posted")
+	}
+	fake.LoseAnswers(nil)
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusOK || len(fake.Entries()) != 1 {
+		t.Fatalf("retry: %d %s, ledger holds %d", rec.Code, rec.Body, len(fake.Entries()))
+	}
+}
+
+// After one currency posted and the other was refused, the retry skips the posted one, and the refusal names it.
+func TestOpeningJournal_RetrySkipsPostedCurrencyAndRefusalNamesIt(t *testing.T) {
+	h, _, _, fake, _ := ledgerServer(t)
+	run := startGL(t, h, "", append(append([]string{}, cleanGL...), glCurRec("GL-4", "1100", "EUR", "10"), glCurRec("GL-5", "3000", "EUR", "-10"))...)
+	fake.FailPostsIn("USD", &ledgerclient.Error{Op: "post", Status: http.StatusUnprocessableEntity, Code: ledgerclient.CodePeriodClosed})
+	rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US"))
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeOpeningRejected || !strings.Contains(rec.Body.String(), "already posted: EUR") || len(fake.Entries()) != 1 {
+		t.Fatalf("refused USD: %d %s", rec.Code, rec.Body)
+	}
+	fake.FailPostsIn("USD", nil)
+	out := decode[openingJournalsDTO](t, postOpening(t, h, run.RunID, openingBody(le1, "L-US")))
+	if len(fake.Entries()) != 2 || !out.Journals[0].AlreadyPosted || out.Journals[1].AlreadyPosted {
+		t.Fatalf("retry %+v, ledger holds %d", out.Journals, len(fake.Entries()))
+	}
+}
+
+// A ledger conflict on the key is a 409 in plain words; the unbalanced refusal carries MIG-1540; a posted
+// currency that left the balances is a change since posting.
+func TestOpeningJournal_ConflictCodeAndPostedCurrencyGone(t *testing.T) {
+	h, admin, _, fake, _ := ledgerServer(t)
+	run := startGL(t, h, "", cleanGL...)
+	fake.FailPosts(&ledgerclient.Error{Op: "post", Status: http.StatusConflict, Code: ledgerclient.CodeIdempotencyConflict})
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeOpeningConflict {
+		t.Fatalf("conflict: %d %s", rec.Code, rec.Body)
+	}
+	fake.FailPosts(nil)
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusOK {
+		t.Fatalf("post: %d %s", rec.Code, rec.Body)
+	}
+	if _, err := admin.Exec(context.Background(), `update gl_opening_balance set currency = 'EUR'`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeTransition {
+		t.Fatalf("currency gone: %d %s", rec.Code, rec.Body)
 	}
 }
