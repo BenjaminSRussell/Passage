@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Alert, Button, Card, EmptyState, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
 import styles from "./MetadataForm.module.css";
+import { apiFetch } from "../../shell/api/http";
 
 interface FieldSchema {
   type?: string;
@@ -38,7 +39,7 @@ export function MetadataForm({ entity }: MetadataFormProps) {
     setError("");
     setMissing(false);
     setSaved(false);
-    fetch(`/api/v1/metadata/entities/${encodeURIComponent(entity)}/schema`, {
+    apiFetch(`/api/v1/metadata/entities/${encodeURIComponent(entity)}/schema`, {
       signal: controller.signal,
       headers: apiHeaders(),
     })
@@ -76,7 +77,7 @@ export function MetadataForm({ entity }: MetadataFormProps) {
       if (typeof value === "string" && value !== "") input[name] = value;
     }
     try {
-      const response = await fetch(`/api/v1/data/${encodeURIComponent(entity)}`, {
+      const response = await apiFetch(`/api/v1/data/${encodeURIComponent(entity)}`, {
         method: "POST",
         headers: { ...apiHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify(input),
