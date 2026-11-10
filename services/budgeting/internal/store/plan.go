@@ -662,7 +662,7 @@ func checkApproverIndependent(ctx context.Context, tx pgx.Tx, tenantID string, p
 	var ownersSetBy string
 	var edited, positive bool
 	if err := tx.QueryRow(ctx, `select coalesce(p.owners_set_by, ''),
-		exists (select 1 from budget_plan_scenario_editor e where e.tenant_id = s.tenant_id and e.scenario_id = s.id and e.actor = $4),
+		coalesce(s.updated_by = $4, false) or exists (select 1 from budget_plan_scenario_editor e where e.tenant_id = s.tenant_id and e.scenario_id = s.id and e.actor = $4),
 		exists (select 1 from budget_plan_cell c where c.tenant_id = s.tenant_id and c.scenario_id = s.id and c.amount > 0)
 		from budget_plan_process p join budget_plan_scenario s on s.tenant_id = p.tenant_id and s.process_id = p.id
 		where p.tenant_id = $1 and p.id = $2 and s.id = $3`, tenantID, plan.ID, scenarioID, actor).Scan(&ownersSetBy, &edited, &positive); err != nil {

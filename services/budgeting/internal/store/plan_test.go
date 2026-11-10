@@ -663,3 +663,20 @@ func TestPlan_SpreadAnswerCarriesThePriorYearFallbackFlag(t *testing.T) {
 		t.Fatalf("spread answer %s (%v), want priorYearFallback true", raw, err)
 	}
 }
+
+func TestPlan_ALastEditorRecordedOnlyInUpdatedByCannotApprove(t *testing.T) {
+	f := newPlanFixture(t)
+	base := f.scenario(t, "Baseline")
+	f.writeAs(t, "author", base, cell("6000", "CC1", "2027-01", "10"))
+	if _, err := f.st.pool.Exec(context.Background(), `delete from budget_plan_scenario_editor where scenario_id = $1`, base.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.st.pool.Exec(context.Background(), `update budget_plan_scenario set updated_by = 'legacy' where id = $1`, base.ID); err != nil {
+		t.Fatal(err)
+	}
+	unit := f.reviewedWith(t, "legacy")
+	err := f.signOff("legacy", SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: base.ID, Submission: 1})
+	if !hasCode(err, CodePlanSeparation) {
+		t.Fatalf("a pre-existing scenario's last editor approving: %v, want %s", err, CodePlanSeparation)
+	}
+}
