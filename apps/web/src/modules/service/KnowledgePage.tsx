@@ -28,6 +28,7 @@ import { dash, formatDateTime, sentence, shortId, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -135,7 +136,7 @@ function SearchResults({ text, itemId, label, onOpen }: { text: string; itemId?:
   if (state.error) {
     return (
       <Alert tone="danger" title="Could not search the knowledge base" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-        {state.error.message} ({state.error.code})
+        <ProblemMessage problem={state.error} />
       </Alert>
     );
   }
@@ -251,7 +252,7 @@ function FormFailure({ failure, title }: { failure: Problem | null; title: strin
   return (
     <div className={styles.formActions}>
       <Alert tone="danger" title={title} live="alert">
-        {failure.message} ({failure.code})
+        <ProblemMessage problem={failure} />
       </Alert>
     </div>
   );
@@ -355,7 +356,7 @@ export function ArticleDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Knowledge article" />
         <Alert tone="danger" title="Could not load the article" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -462,7 +463,7 @@ export function ArticleDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failureTitle} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {editing ? (

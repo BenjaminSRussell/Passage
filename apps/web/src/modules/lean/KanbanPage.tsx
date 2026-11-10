@@ -4,6 +4,7 @@ import { getKanban, type KanbanJob } from "./api/client";
 import { dash, formatDateTime, shortId, STATE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const jobColumns: DataTableColumn<KanbanJob>[] = [
   { key: "sequence", header: "Step", align: "end" },
@@ -38,7 +39,7 @@ export function KanbanPage() {
       <div className={styles.stack}>
         <PageHeader title="Kanban" />
         <Alert tone="danger" title="Could not load the kanban" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

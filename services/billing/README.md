@@ -27,7 +27,7 @@ internal/store/         Postgres persistence under RLS; post = one transaction
 internal/api/           HTTP handlers, DTOs, validation, idempotency, duties, metrics;
                         tax.go holds the TaxEngine seam (rate table or fail-closed);
                         credit.go the credit-note handlers; shipment.go the proposals and trace
-internal/events/        event types and payloads (invoice.posted, creditnote.posted)
+internal/events/        event types and payloads (invoice.posted, creditnote.posted, creditnote.booked)
 migrations/             0001_billing_init.sql (invoice, invoice_line, number_sequence_counter, outbox)
                         0002_credit_notes_and_installments.sql (original reference, reason,
                         original line, invoice_installment)
@@ -35,7 +35,7 @@ migrations/             0001_billing_init.sql (invoice, invoice_line, number_seq
                         unique packing slip line)
                         0008_subscriptions.sql (subscription, subscription_term, subscription_period)
 api/openapi.yaml        OpenAPI 3.1 for the eight endpoints
-events/asyncapi.yaml    AsyncAPI 3 for invoice.posted and creditnote.posted
+events/asyncapi.yaml    AsyncAPI 3 for invoice.posted, creditnote.posted and creditnote.booked
 charts/billing/         Helm chart (deployment, service with admin port, ServiceMonitor toggle)
 ```
 
@@ -169,4 +169,9 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
   the contract liability are 2400. `REVREC_URL` (chart value `revrecUrl`, required with `LEDGER_URL`) names the revrec service whose
   contract allocation splits the invoice journal; the call is signed with the `revrec.allocation.read` grant. The
   profile's ledger is checked against its entity at each call. `invoice.posted` carries `intercompany=false` until wave 40.
+- Booking a credit note's journal writes `dev.passage.billing.creditnote.booked.v1` to the outbox in the same transaction (#29):
+  per line the order and product of the credited original line, the credited net, and the allocated amount and its deferred part
+  the journal debited (the deferred part is the Dr 2400). `creditnote.posted` cannot carry them: it is published at the post,
+  before the journal exists, and a credit note's share is its original's booked share apportioned to the credited net. Revrec's
+  credit-note consumer reverses its schedules by exactly these amounts, so its roll-forward keeps tying to GL 2400.
 - Dependencies: pgx, chi, shopspring/decimal, rapid (all in the platform module set).

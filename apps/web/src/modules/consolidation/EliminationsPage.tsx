@@ -25,6 +25,7 @@ import {
 import { amount, dash, isCurrency, isDecimal, isNonZero, isPositive, isSignedDecimal } from "./format";
 import { accountNames } from "./entries";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type AmountKey =
   | "ownershipPct"
@@ -266,7 +267,7 @@ export function EliminationsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The eliminations were not built" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

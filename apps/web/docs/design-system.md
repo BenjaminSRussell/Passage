@@ -225,6 +225,8 @@ Every module page uses `PageHeader` (h2). The state matrix applies: **Offline** 
 
 ## 7. Microcopy (sentence case, second person; strings live in `src/shell/copy.ts` until i18next is allowed)
 
+The full writing rules (voice, task verbs, error messages, glossary) are in [ux-writing.md](ux-writing.md).
+
 - **Shell nav:** "Home", "Notes". Module nav labels stay as they are, except two changes: `PIM workspace` → "Overview", and `Engineering workspace` → "Overview". This keeps "one concept, one word" with Admin's "Overview".
 - **Module descriptions:**
   - Admin: "Numbering, audit, alerts, imports and documents."

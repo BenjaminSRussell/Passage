@@ -12,6 +12,13 @@ var InvoicePosted = events.Type("billing", "invoice", "posted", 1)
 // letters and digits only, so the entity is "creditnote" (like "packingslip").
 var CreditNotePosted = events.Type("billing", "creditnote", "posted", 1)
 
+// CreditNoteBooked is dev.passage.billing.creditnote.booked.v1: the credit
+// note's journal was booked in the general ledger (POST /v1/billing/gl-postings).
+// It carries, per line, the allocated amount and the deferred part (Dr 2400)
+// the journal reversed, which billing only knows once the original invoice is
+// booked; revrec reverses its schedules by exactly these amounts (BR-29.6).
+var CreditNoteBooked = events.Type("billing", "creditnote", "booked", 1)
+
 // InvoicePostedLine is one posted line. A shipment or consolidated invoice line
 // also names its order line, product and packing slip line, so sales and
 // fulfillment can mark them invoiced (AC-29.5) and revrec can find the
@@ -92,4 +99,34 @@ type CreditNotePostedData struct {
 	Lines             []CreditNotePostedLine `json:"lines"`
 	Totals            InvoicePostedTotals    `json:"totals"`
 	JournalPostingID  *string                `json:"journal_posting_id"`
+}
+
+// CreditNoteBookedLine is one line of a booked credit note. OrderID and
+// Product are those of the credited original line (a credit note line has no
+// source of its own) and are absent on free-text lines. Allocated is the
+// revenue the journal debited for the line at the revrec allocation, Deferred
+// the part of it debited to 2400 (deferred revenue), both positive magnitudes
+// at the currency's minor unit.
+type CreditNoteBookedLine struct {
+	LineNo         int    `json:"line_no"`
+	OriginalLineNo int    `json:"original_line_no"`
+	OrderID        string `json:"order_id,omitempty"`
+	Product        string `json:"product,omitempty"`
+	Net            string `json:"net"`
+	Allocated      string `json:"allocated"`
+	Deferred       string `json:"deferred"`
+}
+
+// CreditNoteBookedData is the data member of creditnote.booked. JournalEntryID
+// is the ledger entry of the credit note (invoice.journal_posting_id).
+type CreditNoteBookedData struct {
+	CreditNoteID      string                 `json:"credit_note_id"`
+	Number            string                 `json:"number"`
+	OriginalInvoiceID string                 `json:"original_invoice_id"`
+	OriginalNumber    string                 `json:"original_number"`
+	LegalEntityID     string                 `json:"legal_entity_id"`
+	Currency          string                 `json:"currency"`
+	PostingDate       string                 `json:"posting_date"`
+	JournalEntryID    string                 `json:"journal_entry_id"`
+	Lines             []CreditNoteBookedLine `json:"lines"`
 }

@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 info:
   title: Passage Billing events
   version: 0.1.0
-  description: CloudEvents published by the billing context (PSG-29, slices 1 and 3).
+  description: CloudEvents published by the billing context (PSG-29, slices 1 and 3, and creditnote.booked for revrec, #29).
 defaultContentType: application/cloudevents+json
 channels:
   invoicePosted:
@@ -13,6 +13,8 @@ channels:
         $ref: "#/components/messages/InvoicePosted"
       creditNotePosted:
         $ref: "#/components/messages/CreditNotePosted"
+      creditNoteBooked:
+        $ref: "#/components/messages/CreditNoteBooked"
 operations:
   publishInvoicePosted:
     action: send
@@ -28,6 +30,13 @@ operations:
     summary: Billing publishes creditnote.posted when a credit note proposal posts (FR-29.5).
     messages:
       - $ref: "#/channels/invoicePosted/messages/creditNotePosted"
+  publishCreditNoteBooked:
+    action: send
+    channel:
+      $ref: "#/channels/invoicePosted"
+    summary: Billing publishes creditnote.booked when the credit note's journal is booked in the general ledger (POST /v1/billing/gl-postings).
+    messages:
+      - $ref: "#/channels/invoicePosted/messages/creditNoteBooked"
 components:
   messages:
     InvoicePosted:
@@ -146,3 +155,43 @@ components:
           journal_posting_id:
             type: [string, "null"]
             description: Always null on the event; the journal is booked after the post by POST /v1/billing/gl-postings and its ledger entry id is kept in invoice.journal_posting_id.
+    CreditNoteBooked:
+      name: dev.passage.billing.creditnote.booked.v1
+      contentType: application/cloudevents+json
+      description: >
+        Written in the transaction that stores the credit note's ledger entry
+        (invoice.journal_posting_id). creditnote.posted is published before the
+        journal exists, and the deferred share a credit note debits to 2400 is
+        the original invoice line's booked share apportioned to the credited net,
+        known only once the original is booked; this event carries it per line.
+        Revrec consumes it (consumer revrec-creditnotes) and reverses the
+        schedules of the credited obligations by `deferred` (BR-29.6), so the
+        roll-forward keeps tying to GL 2400. Keyed by the credit note id; a line
+        is identified by (credit_note_id, line_no).
+      payload:
+        type: object
+        required: [credit_note_id, number, original_invoice_id, original_number, legal_entity_id, currency, posting_date, journal_entry_id, lines]
+        additionalProperties: false
+        properties:
+          credit_note_id: { type: string, format: uuid }
+          number: { type: string }
+          original_invoice_id: { type: string, format: uuid }
+          original_number: { type: string }
+          legal_entity_id: { type: string, format: uuid }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          posting_date: { type: string, format: date, description: "The credit note's posting date, the date of its journal." }
+          journal_entry_id: { type: string, description: "The ledger entry of the credit note's journal (invoice.journal_posting_id)." }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [line_no, original_line_no, net, allocated, deferred]
+              additionalProperties: false
+              properties:
+                line_no: { type: integer }
+                original_line_no: { type: integer }
+                order_id: { type: string, format: uuid, description: "The order of the credited original line; absent on free-text lines." }
+                product: { type: string, format: uuid, description: "The product of the credited original line; absent on free-text lines." }
+                net: { type: string, description: "The credited net, a decimal string at the currency's minor unit." }
+                allocated: { type: string, description: "Revenue the journal debited for the line at the revrec allocation (positive)." }
+                deferred: { type: string, description: "The part of allocated debited to 2400 deferred revenue (positive, at most allocated)." }

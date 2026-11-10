@@ -4,6 +4,7 @@ import { getRuleAnalysis, type RuleAnalysis } from "./api/client";
 import { dash, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The service's longest analysis period, in days. */
 export const MAX_ANALYSIS_DAYS = 366;
@@ -68,7 +69,7 @@ export function RuleAnalysisCard({ ruleId }: { ruleId: string }) {
         </form>
         {state.error ? (
           <Alert tone="danger" title="Could not load the analysis" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : !a ? (
           <div aria-busy="true">

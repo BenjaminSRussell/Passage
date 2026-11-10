@@ -159,7 +159,7 @@ describe("plant structure", () => {
   it("shows the service error with its code", async () => {
     handler = (url, init) => (isGet("/functional-locations")(url, init) ? json(503, { code: "COM-0503", detail: "database unavailable" }) : undefined);
     renderAt("/eam/locations");
-    expect(await findAlert()).toHaveTextContent("(COM-0503)");
+    expect(await findAlert()).toHaveTextContent("COM-0503");
   });
 });
 
@@ -192,7 +192,7 @@ describe("new location", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create location" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("This path already exists at the site");
-    expect(alert).toHaveTextContent("(EAM-DUP-001)");
+    expect(alert).toHaveTextContent("EAM-DUP-001");
   });
 
   it("refuses to add under a level-12 location (EAM-FL-001)", async () => {
@@ -286,7 +286,7 @@ describe("asset location card", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove from location" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Someone else changed this asset");
-    expect(alert).toHaveTextContent("(conflict_version)");
+    expect(alert).toHaveTextContent("conflict_version");
     expect(posts("/location")[0].body).toEqual({ functionalLocationId: null });
   });
 

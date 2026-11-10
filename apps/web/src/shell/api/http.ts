@@ -51,10 +51,6 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 export const DECIMAL = /^\d+(\.\d{1,6})?$/;
 export const SIGNED_DECIMAL = /^-?\d+(\.\d{1,6})?$/;
 
-export function describeFailure(error: unknown): string {
-  return error instanceof ApiError ? `${error.message} (${error.code})` : (error as Error).message;
-}
-
 export function fieldErrors(error: unknown): Record<string, string> {
   return error instanceof ApiError ? error.fields : {};
 }

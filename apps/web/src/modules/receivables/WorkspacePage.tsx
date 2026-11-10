@@ -5,6 +5,7 @@ import { BUCKETS, fetchAging, listDisputes, listPayments, type AgingResponse, ty
 import { DAY, sumDecimals, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const PAGE = 500;
 
@@ -98,7 +99,7 @@ export function WorkspacePage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the AR workspace" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

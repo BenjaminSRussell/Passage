@@ -8,6 +8,7 @@ import { formatDateTime } from "./format";
 import { IntakeErrorStatusBadge } from "./IntakeErrorsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Closing an intake error needs this duty (SalesOrderMaintain); the service enforces it. */
 export const DUTY_ORDER_WRITE = "sales.order.write";
@@ -31,7 +32,7 @@ export function IntakeErrorDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Intake error" />
         <Alert tone="danger" title="Could not load the intake error" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -123,7 +124,7 @@ export function IntakeErrorDetailPage() {
           live="alert"
           action={problem.code === "SLS-0006" || problem.code === "SLS-0116" ? <Button size="sm" onClick={() => { setProblem(null); state.reload(); }}>Reload</Button> : undefined}
         >
-          {problem.message} ({problem.code})
+          <ProblemMessage problem={problem} />
         </Alert>
       ) : null}
       <Alert tone="success" live="status">
@@ -131,7 +132,7 @@ export function IntakeErrorDetailPage() {
       </Alert>
       {replay && !replay.replayed && replay.failure ? (
         <Alert tone="warning" title="Intake refused the order again" live="alert">
-          {replay.failure.message} ({replay.failure.code})
+          <ProblemMessage problem={replay.failure} />
         </Alert>
       ) : null}
       <Card>

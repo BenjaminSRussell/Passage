@@ -13,6 +13,7 @@ import {
 } from "./api/client";
 import { dash } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const OUTCOMES: Record<BulkOutcome, { label: string; tone: BadgeTone }> = {
   REPROCESSED: { label: "Reprocessed", tone: "success" },
@@ -115,7 +116,7 @@ export function BulkReprocessCard({ rows, onDone }: { rows: MonitorMessage[]; on
         </p>
         {error ? (
           <Alert tone="danger" title="Bulk reprocess failed" live="alert">
-            {error.message} ({error.code})
+            <ProblemMessage problem={error} />
           </Alert>
         ) : null}
         {result ? (

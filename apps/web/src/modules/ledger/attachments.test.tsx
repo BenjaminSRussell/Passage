@@ -171,7 +171,7 @@ describe("batch attachments card", () => {
     expect(screen.queryByRole("button", { name: "Remove invoice.pdf" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove note" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Remove old.pdf" }));
-    expect(await screen.findByText(/retained until 2030-01-01 and cannot be deleted. \(LEDGER_ATTACHMENT_RETAINED\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/retained until 2030-01-01 and cannot be deleted./)).toBeInTheDocument();
   });
 
   it("shows the load error with a retry", async () => {

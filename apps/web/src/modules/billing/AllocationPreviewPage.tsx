@@ -21,6 +21,7 @@ import {
 } from "./api/client";
 import { BASIS_HINT, BASIS_LABELS, CURRENCY, DAY, DECIMAL, METHOD_LABELS, RESIDUAL_SSP_HINT, SSP_SOURCE_LABELS } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -251,7 +252,7 @@ export function AllocationPreviewPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not allocate the contract" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

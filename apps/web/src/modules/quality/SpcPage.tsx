@@ -5,6 +5,7 @@ import { getSpc, listTestGroups, type SpcLimits, type SpcResult, type Violation 
 import { shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const RULES: Record<number, string> = {
   1: "Rule 1: a point beyond 3σ",
@@ -233,7 +234,7 @@ export function SpcPage() {
         </Card>
       ) : chart.error ? (
         <Alert tone="danger" title="Could not compute the chart" live="alert" action={<Button size="sm" onClick={chart.reload}>Try again</Button>}>
-          {chart.error.message} ({chart.error.code})
+          <ProblemMessage problem={chart.error} />
         </Alert>
       ) : chart.loading || !chart.data ? (
         <div className={styles.stack} aria-busy="true">

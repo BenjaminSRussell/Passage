@@ -112,7 +112,7 @@ describe("Absence codes list", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [sick] }));
     renderAt("/shopfloor/absence-codes");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Sick leave")).toBeInTheDocument();
@@ -241,7 +241,7 @@ describe("Record absence", () => {
     let fail = true;
     handler = (url) => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : url.pathname.endsWith("/workers") ? json(200, { items: [ana] }) : json(200, { items: [sick] }));
     renderAt("/shopfloor/absences/new");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("option", { name: "Ana Silva" })).toBeInTheDocument();

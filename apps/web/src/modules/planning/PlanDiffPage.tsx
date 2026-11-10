@@ -5,6 +5,7 @@ import { PlanPicker } from "./pages";
 import { useLoad, usePlanCode, type LoadError } from "./hooks";
 import { trimQty } from "./NetRequirementsPage";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const dash = "—";
 
@@ -14,7 +15,7 @@ const diffLimit = 500;
 function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
   return (
     <Alert tone="danger" title={error ? `Could not load ${what}` : undefined} live="alert">
-      {error ? `${error.message} (${error.code})` : null}
+      {error ? <ProblemMessage problem={error} /> : null}
     </Alert>
   );
 }

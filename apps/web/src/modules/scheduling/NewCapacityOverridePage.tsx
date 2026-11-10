@@ -6,6 +6,7 @@ import { formatDateTime, fromUtcInput, shortId, UUID } from "./format";
 import { mapFields } from "./forms";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface OverrideValues {
   resourceId: string;
@@ -108,7 +109,7 @@ function Form({ resources, initial }: { resources: { id: string; code: string; n
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the override" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

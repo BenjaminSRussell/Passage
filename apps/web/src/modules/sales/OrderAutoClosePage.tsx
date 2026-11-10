@@ -6,6 +6,7 @@ import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, type Bad
 import { autoCloseOrders, describeProblem, type AutoCloseItem, type AutoCloseRequest, type AutoCloseResultKind, type AutoCloseRun, type Problem } from "./api/client";
 import { formatDateTime, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Running the close or its preview needs this duty (SalesOrderMaintain); the service enforces it. */
 const DUTY_ORDER_WRITE = "sales.order.write";
@@ -119,7 +120,7 @@ export function OrderAutoClosePage() {
       </form>
       {problem ? (
         <Alert tone="danger" title="The run could not finish" live="alert">
-          {problem.message} ({problem.code})
+          <ProblemMessage problem={problem} />
         </Alert>
       ) : null}
       <Alert tone={run && run.result.skipped > 0 ? "warning" : "success"} live="status">

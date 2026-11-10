@@ -22,6 +22,7 @@ import {
 } from "./api/unitImport";
 import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const example =
   "type,code,name,legalEntity\ndepartment,D200,Assembly,USMF\ncost_center,CC100,Plant overhead,\n";
@@ -185,7 +186,7 @@ export function OperatingUnitImportPage() {
       )}
       {failure ? (
         <Alert tone="danger" title="The request failed" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {report ? (

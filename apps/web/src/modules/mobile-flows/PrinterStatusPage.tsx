@@ -3,6 +3,7 @@ import { listPrinterStatuses, type PrinterStatus } from "./api/print";
 import { dash, formatDateTime, PrinterStateBadge } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<PrinterStatus>[] = [
   { key: "code", header: "Printer", mono: true },
@@ -25,7 +26,7 @@ export function PrinterStatusPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load printer status" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { createWorker, describeProblem, newKey, type NewWorker, type Problem, type WorkerType } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   personnelNumber: string;
@@ -106,7 +107,7 @@ export function NewWorkerPage() {
     <div className={styles.stack}>
       <PageHeader
         title="New worker"
-        description="A worker is one person (wave 7 party). Start an employment from the worker's page once it is created."
+        description="A worker is one person, recorded as a party. Start an employment from the worker's page once it is created."
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
@@ -128,7 +129,7 @@ export function NewWorkerPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the worker" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

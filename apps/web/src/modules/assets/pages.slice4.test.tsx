@@ -162,7 +162,7 @@ describe("capex decisions", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("You cannot decide your own request");
-    expect(alert).toHaveTextContent("(AST-0028)");
+    expect(alert).toHaveTextContent("AST-0028");
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
   });
 
@@ -259,6 +259,6 @@ describe("mid-quarter test", () => {
     renderAt("/assets/mid-quarter-test");
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.click(screen.getByRole("button", { name: "Run test" }));
-    expect(await findAlert()).toHaveTextContent("more than one currency (AST-0029)");
+    expect(await findAlert()).toHaveTextContent("more than one currency");
   });
 });

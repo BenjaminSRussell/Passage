@@ -147,7 +147,7 @@ describe("address forms", () => {
     const { table, form } = await openAddress(user, "Add address of site DET");
     await fill(user, form);
     await user.click(within(form).getByRole("button", { name: "Save address of site DET" }));
-    expect(await within(form).findByText(/current version is 6 \(ORG-VERSION-CONFLICT\)/)).toBeInTheDocument();
+    expect(await within(form).findByText(/current version is 6/)).toBeInTheDocument();
     expect(await within(table).findByText("Detroit plant")).toBeInTheDocument();
     expect(within(form).getByLabelText("Street")).toHaveValue("1 Main St");
     await user.click(within(form).getByRole("button", { name: "Save address of site DET" }));

@@ -41,6 +41,7 @@ import {
   type Failure,
 } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const IMPORT_STATUSES: CatalogImportStatus[] = [
   "STAGED",
@@ -242,7 +243,7 @@ export function CatalogImportCreatePage() {
         }
       />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Vendor file">
@@ -517,7 +518,7 @@ export function CatalogImportDetailPage() {
         }
       />
       <Alert tone="danger" live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {notice}

@@ -156,6 +156,7 @@ type rollForwardOut struct {
 	Opening       string `json:"opening"`
 	Additions     string `json:"additions"`
 	Recognized    string `json:"recognized"`
+	Reversed      string `json:"reversed"`
 	Adjustments   string `json:"adjustments"`
 	Closing       string `json:"closing"`
 }
@@ -488,7 +489,7 @@ func toRollForwardOut(rf domain.RollForward, le, contractID, cur, period string,
 		LegalEntityID: le, ContractID: contractID, Currency: cur, Period: period,
 		Start: start.Format(dateLayout), End: end.Format(dateLayout),
 		Opening: fixed(rf.Opening, cur), Additions: fixed(rf.Additions, cur), Recognized: fixed(rf.Recognized, cur),
-		Adjustments: fixed(rf.Adjustments, cur), Closing: fixed(rf.Closing, cur),
+		Reversed: fixed(rf.Reversed, cur), Adjustments: fixed(rf.Adjustments, cur), Closing: fixed(rf.Closing, cur),
 	}
 }
 

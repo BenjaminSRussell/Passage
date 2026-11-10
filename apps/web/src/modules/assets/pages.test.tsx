@@ -179,7 +179,7 @@ describe("asset register", () => {
     let fail = true;
     handler = () => (fail ? { status: 503, body: { code: "COM-0500", detail: "internal error" } } : { status: 200, body: { items: [asset] } });
     renderAt("/assets");
-    expect(await findAlert()).toHaveTextContent("internal error (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("internal error");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Delivery van")).toBeInTheDocument();
@@ -273,7 +273,7 @@ describe("asset detail", () => {
     handler = () => ({ status: 404, body: { code: "AST-0001", detail: "no asset with id x" } });
     renderAt(`/assets/${ASSET}`);
     const alerts = await screen.findAllByRole("alert");
-    expect(alerts[0]).toHaveTextContent("no asset with id x (AST-0001)");
+    expect(alerts[0]).toHaveTextContent("no asset with id x");
   });
 });
 

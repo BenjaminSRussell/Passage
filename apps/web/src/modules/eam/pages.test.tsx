@@ -128,7 +128,7 @@ describe("workspace", () => {
     handler = (url, init) =>
       get("/workspace")(url, init) ? (fail ? json(503, { code: "COM-0500", detail: "EAM is down" }) : json(200, { requestsToTriage: 0, dueIn7Days: 0, overdue: 0, openWorkOrders: 0 })) : undefined;
     renderAt("/eam");
-    expect(await findAlert()).toHaveTextContent("EAM is down (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("EAM is down");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("list", { name: "Asset management tiles" })).toHaveTextContent("Overdue 0");
@@ -184,7 +184,7 @@ describe("assets", () => {
     fireEvent.change(screen.getByLabelText("Asset type"), { target: { value: "pump" } });
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.click(screen.getByRole("button", { name: "Create asset" }));
-    expect(await findAlert()).toHaveTextContent("busy (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("busy");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Create asset" }));
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/eam/assets/${PUMP}`));
@@ -249,7 +249,7 @@ describe("asset detail", () => {
     fireEvent.change(await screen.findByLabelText("Reading"), { target: { value: "12250" } });
     fireEvent.click(screen.getByRole("button", { name: "Record reading" }));
     expect(await screen.findByText("Reading rejected")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("(EAM-CTR-001)");
+    expect(screen.getByRole("alert")).toHaveTextContent("EAM-CTR-001");
     expect(posts("/readings")[0].body).toEqual({ value: 12250, reset: false });
   });
 

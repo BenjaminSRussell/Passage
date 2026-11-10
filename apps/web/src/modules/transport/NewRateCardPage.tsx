@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { AMOUNT, CURRENCY, DATE, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface RowValues {
   origin: string;
@@ -274,7 +275,7 @@ export function NewRateCardPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the rate card" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

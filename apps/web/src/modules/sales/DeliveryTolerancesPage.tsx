@@ -25,6 +25,7 @@ import {
 import { DECIMAL, PERCENT, dash, formatDateTime, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Changing a delivery tolerance needs this duty (enforced by the service; the route rows are seeded under #313). */
 export const DUTY_DELIVERY_TOLERANCE_MAINTAIN = "sales.parameter.maintain";
@@ -177,7 +178,7 @@ function ResolveCard() {
       </form>
       {failure ? (
         <Alert tone="danger" title="Could not check the tolerance" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div role="status">
@@ -248,7 +249,7 @@ export function DeliveryTolerancesListPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load delivery tolerances" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -317,7 +318,7 @@ export function NewDeliveryTolerancePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0126" ? "This product already has a rule for that customer" : "Could not save the delivery tolerance"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -366,7 +367,7 @@ export function DeliveryToleranceDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Delivery tolerance" />
         <Alert tone="danger" title="Could not load the delivery tolerance" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -459,7 +460,7 @@ export function DeliveryToleranceDetailPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0006" ? "Someone else changed this tolerance" : "Could not change the delivery tolerance"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -333,8 +333,14 @@ func TestParseMoney(t *testing.T) {
 		}
 	}
 	started := time.Now()
-	if _, err := toLines([]tupleDTO{{Area: "GL", Key: "k", Amount: "1e2147483647"}}, "legacy"); err == nil {
+	if _, err := toLines([]tupleDTO{{Area: "GL", Key: "k", Amount: "1e2147483647"}}, "legacy", 0); err == nil {
 		t.Error("toLines accepted a huge exponent")
+	}
+	if _, err := toLines([]tupleDTO{{Area: "TB", Key: "k", Amount: "1", Documents: 1_000_000}}, "legacy", 42_000); !errors.Is(err, domain.ErrInvalid) {
+		t.Errorf("a tuple claiming 1,000,000 documents of a 42,000-document replay: %v, want ErrInvalid", err)
+	}
+	if lines, err := toLines([]tupleDTO{{Area: "TB", Key: "k", Amount: "1", Documents: 42_000}}, "legacy", 42_000); err != nil || lines[0].Documents != 42_000 {
+		t.Errorf("a tuple summing every replayed document: %v, %v", lines, err)
 	}
 	if _, err := toPostings([]postingDTO{{Kind: "JOURNAL", Amount: "9e9999999"}}); err == nil {
 		t.Error("toPostings accepted a huge exponent")

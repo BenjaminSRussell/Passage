@@ -12,6 +12,7 @@ import {
 } from "./api/client";
 import { dash, statusLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const candidateColumns: DataTableColumn<HousekeepingOrder>[] = [
   { key: "orderNumber", header: "Order", mono: true },
@@ -104,7 +105,7 @@ function JobCard({ job, title, description, verb, confirm, nothing }: JobProps) 
         </div>
         {error ? (
           <Alert tone={error.status === 403 ? "info" : "danger"} title="The job could not run" live="alert">
-            {error.status === 403 ? "You need the duty of this command to use this job." : `${error.message} (${error.code})`}
+            {error.status === 403 ? "You need the duty of this command to use this job." : <ProblemMessage problem={error} />}
           </Alert>
         ) : null}
         {found ? (

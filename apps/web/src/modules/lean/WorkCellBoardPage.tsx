@@ -18,6 +18,7 @@ import { useCommandKeys } from "./commandKeys";
 import { formatDateTime, overdue, reportQuantity, shortId, STATE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** "MIX-A-0001 · 1 Mix": how a job is named on screen. */
 export function jobLabel(job: Pick<KanbanJob, "cardNumber" | "sequence" | "activityName">): string {
@@ -310,7 +311,7 @@ export function WorkCellBoardPage() {
       </div>
       {failure ? (
         <Alert tone="danger" title={`${failure.job} stays in ${STATE_LABELS[failure.from]}`} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {notice ? <Alert tone="success" title={notice} live="status" /> : null}
@@ -322,7 +323,7 @@ export function WorkCellBoardPage() {
         />
       ) : board.error ? (
         <Alert tone="danger" title="Could not load the work-cell board" live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-          {board.error.message} ({board.error.code})
+          <ProblemMessage problem={board.error} />
         </Alert>
       ) : !board.data ? (
         <div aria-busy="true" className={styles.loading}>

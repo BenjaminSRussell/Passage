@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Input, StatGroup, StatTile } from "../.
 import { checkRuleCount, describeProblem, type CountCheck, type Problem } from "./api/client";
 import { QUANTITY } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The service's safety percentage must stay below this. */
 export const MAX_SAFETY_PCT = 1000;
@@ -85,7 +86,7 @@ export function RuleCountCheckCard({ ruleId }: { ruleId: string }) {
         </form>
         {failure ? (
           <Alert tone="danger" title="Could not check the count" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : result ? (
           <>

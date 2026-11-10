@@ -16,6 +16,7 @@ import { useCommandKeys } from "./commandKeys";
 import { formatDateTime, jobDriven, nextState, overdue, shortId, STATE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The board refreshes on its own; SSE push is a later slice (PRD 4.24.19: 30 s polling is the fallback). */
 export const REFRESH_MS = 30_000;
@@ -182,13 +183,13 @@ export function BoardPage() {
       </div>
       {failure ? (
         <Alert tone="danger" title={`${failure.card} stays in ${STATE_LABELS[failure.from]}`} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {notice ? <Alert tone="success" title={notice} live="status" /> : null}
       {board.error ? (
         <Alert tone="danger" title="Could not load the board" live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-          {board.error.message} ({board.error.code})
+          <ProblemMessage problem={board.error} />
         </Alert>
       ) : !board.data ? (
         <div aria-busy="true" className={styles.loading}>

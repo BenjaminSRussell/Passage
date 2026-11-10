@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Input, Select } from "../../shell/ui";
 import { describeProblem, newKey, recordResults, type Instrument, type OrderView, type Problem, type ResultInput, type TestLine } from "./api/client";
 import { CALIBRATION_LABELS, SIGNED_DECIMAL, shortId } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const OTHER = "__other__";
 
@@ -177,7 +178,7 @@ export function ResultsEntry({ order, instruments, onRecorded }: { order: OrderV
             ) : null}
             {failure ? (
               <Alert tone="danger" title="Could not record the results" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             ) : null}
             {notice ? (

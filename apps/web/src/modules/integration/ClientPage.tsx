@@ -22,6 +22,7 @@ import { parseCount } from "./NewClientPage";
 import styles from "./pages.module.css";
 import { ProblemAlert } from "./parts";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const usageColumns: DataTableColumn<UsageMinute>[] = [
   { key: "minute", header: "Minute", render: (row) => formatDateTime(row.minute) },
@@ -104,7 +105,7 @@ function UsageCard({ id }: { id: string }) {
     <Card title="Usage, last hour">
       {usage.error ? (
         <Alert tone="danger" title="Could not load usage" live="alert" action={<Button size="sm" onClick={usage.reload}>Try again</Button>}>
-          {usage.error.message} ({usage.error.code})
+          <ProblemMessage problem={usage.error} />
         </Alert>
       ) : (
         <div className={styles.stack}>
@@ -155,7 +156,7 @@ export function ClientPage() {
       <div className={styles.stack}>
         <PageHeader title="API client" />
         <Alert tone="danger" title="Could not load the API client" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

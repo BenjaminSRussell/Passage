@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { createWorker, describeProblem, newKey, type NewWorker, type Problem } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   name: string;
@@ -103,7 +104,7 @@ export function NewWorkerPage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {field("name", "Name", undefined, false, { maxLength: 120 })}
-          {field("partyId", "Party id", "The employee's party record (wave 7).")}
+          {field("partyId", "Party id", "The employee's party record.")}
           {field("badgeId", "Badge", "Scanned at the kiosk; unique in your tenant.", true, { maxLength: 64 })}
           {field("userId", "Sign-in user", "This user can't approve their own time.", true, { maxLength: 200 })}
           {field("costRate", "Cost rate per hour", "For example 21.50.", false, { inputMode: "decimal" })}
@@ -111,7 +112,7 @@ export function NewWorkerPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the worker" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -19,6 +19,7 @@ import {
 } from "./api/client";
 import { dash, editOpLabel, flushingLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** What one submission of the editor changes. */
 export type EditKind =
@@ -352,7 +353,7 @@ export function OrderEditPanel({ order, onEdited }: OrderEditPanelProps) {
         </Alert>
         {failure ? (
           <Alert tone="danger" live="alert" title="The edit was refused">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Edit the BOM or route">
@@ -474,7 +475,7 @@ export function OrderEditPanel({ order, onEdited }: OrderEditPanelProps) {
         </form>
         {trail.error ? (
           <Alert tone="danger" title="Could not load the edit history">
-            {trail.error.message} ({trail.error.code})
+            <ProblemMessage problem={trail.error} />
           </Alert>
         ) : (
           <DataTable

@@ -19,6 +19,7 @@ import { CAMPAIGN_STATES, campaignState, describeTarget } from "./campaignFormat
 import { describeCustomer, describePercent, describeProduct, today, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function Detail({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -62,7 +63,7 @@ export function CampaignDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Campaign" />
         <Alert tone="danger" title="Could not load the campaign" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -121,7 +122,7 @@ export function CampaignDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.title} live="alert">
-          {failure.problem.message} ({failure.problem.code})
+          <ProblemMessage problem={failure.problem} />
         </Alert>
       ) : null}
       <Card title="Campaign">

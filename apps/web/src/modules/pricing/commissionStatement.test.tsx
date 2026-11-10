@@ -103,7 +103,7 @@ describe("Commission statement", () => {
     server.handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/pricing/commission/statement");
     ask();
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     server.handler = () => json(200, statement);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("INV-1/1")).toBeInTheDocument();

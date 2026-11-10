@@ -140,7 +140,7 @@ describe("standard cost conversion page", () => {
         : undefined;
     renderAt("/productcost/conversion");
     fireEvent.click(screen.getByRole("button", { name: "Run step: Select items and sites" }));
-    expect(await findAlert()).toHaveTextContent("(CST-0736)");
+    expect(await findAlert()).toHaveTextContent("CST-0736");
     expect(screen.getByRole("button", { name: "Run step: Select items and sites" })).toBeInTheDocument();
   });
 

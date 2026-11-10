@@ -12,6 +12,7 @@ import {
   type ReverseInput,
 } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_TEXT = 255;
@@ -63,7 +64,7 @@ export function ReverseEntryForm({ entry }: { entry: Entry }) {
   const reasons = useQuery({ queryKey: ["ledger", "reason-codes"], queryFn: () => fetchReasonCodes() });
   const [values, setValues] = useState<ReverseDraft>({ reasonCode: "", reasonComment: "", postingDate: "", description: "" });
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ problem: unknown; message?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
 
@@ -100,12 +101,12 @@ export function ReverseEntryForm({ entry }: { entry: Entry }) {
           else other.push(v.message);
         }
         setErrors(fieldErrors);
-        setFailure(other.length > 0 ? `${other.join(" ")} (${error.code})` : null);
+        setFailure(other.length > 0 ? { problem: error, message: other.join(" ") } : null);
       } else if (error instanceof LedgerApiError) {
-        setFailure(`${error.message} (${error.code})`);
+        setFailure({ problem: error });
         if (error.status === 409) key.current = newKey();
       } else {
-        setFailure((error as Error).message);
+        setFailure({ problem: error });
       }
     } finally {
       setBusy(false);
@@ -177,7 +178,7 @@ export function ReverseEntryForm({ entry }: { entry: Entry }) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not reverse the entry" live="alert">
-              {failure}
+              <ProblemMessage problem={failure.problem} message={failure.message} />
             </Alert>
           </div>
         ) : null}

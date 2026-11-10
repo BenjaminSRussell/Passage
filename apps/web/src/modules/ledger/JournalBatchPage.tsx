@@ -23,6 +23,7 @@ import { BatchStatusBadge } from "./JournalBatchesPage";
 import { LedgerPicker, useLedgerParam } from "./LedgerPicker";
 import { UUID } from "./pages";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -57,17 +58,18 @@ export function validateBatch(header: HeaderDraft, lines: LineDraft[], needsName
 /** What went wrong with a request, ready to show. */
 interface Failure {
   title: string;
-  message: string;
+  /** Plain text, or the problem to show with `ProblemMessage`. */
+  problem: unknown;
   details: string[];
 }
 
 function failureOf(title: string, error: unknown): Failure {
-  if (!(error instanceof LedgerApiError)) return { title, message: (error as Error).message, details: [] };
+  if (!(error instanceof LedgerApiError)) return { title, problem: error, details: [] };
   if (error.status === 412) {
-    return { title: "The batch changed since you opened it", message: "It was reloaded. Check it and try again.", details: [] };
+    return { title: "The batch changed since you opened it", problem: "It was reloaded. Check it and try again.", details: [] };
   }
   const details = [...error.violations.map(violationText), ...serviceLineErrors(error.fields)];
-  return { title, message: `${error.message} (${error.code})`, details };
+  return { title, problem: error, details };
 }
 
 function violationText(v: Violation): string {
@@ -78,7 +80,7 @@ function violationText(v: Violation): string {
 function FailureAlert({ failure }: { failure: Failure }) {
   return (
     <Alert tone="danger" title={failure.title} live="alert">
-      {failure.message}
+      <ProblemMessage problem={failure.problem} />
       {failure.details.length > 0 ? (
         <ul className={styles.problems}>
           {failure.details.map((d) => (

@@ -19,6 +19,7 @@ import { dash, minuteOf, sentence } from "./format";
 import { Failure, PagedTable, State, StatusFilter } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad, usePaged } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const STATUSES = ["NEW", "TRIAGED", "CONVERTED", "REJECTED", "DEFERRED"];
 
@@ -250,7 +251,7 @@ export function NewRequestPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not create the request" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

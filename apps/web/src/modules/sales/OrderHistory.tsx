@@ -4,6 +4,7 @@ import { diffColumns } from "./ChangeOrderPage";
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const versionColumns: DataTableColumn<OrderVersion>[] = [
   { key: "version", header: "Version", align: "end" },
@@ -25,7 +26,7 @@ export function OrderHistory({ orderId, version }: { orderId: string; version: n
     <Card title="Change history">
       {state.error ? (
         <Alert tone="danger" title="Could not load the change history" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !state.loading && versions.length === 0 ? (
         <EmptyState compact headingLevel={3} title="No changes yet" description="Each change or cancellation after entry is recorded here as a new version." />

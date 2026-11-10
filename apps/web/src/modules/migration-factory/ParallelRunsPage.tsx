@@ -5,6 +5,7 @@ import { listParallelRuns, type ParallelRun, type ParallelState } from "./api/cl
 import { formatDateTime, money, PARALLEL_STATES, SOURCE_LABELS } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ParallelRun>[] = [
   { key: "period", header: "Period", mono: true },
@@ -49,7 +50,7 @@ export function ParallelRunsPage() {
       </div>
       {load.error ? (
         <Alert tone="danger" title="Could not load parallel runs" live="alert" action={<Button size="sm" onClick={load.reload}>Try again</Button>}>
-          {load.error.message} ({load.error.code})
+          <ProblemMessage problem={load.error} />
         </Alert>
       ) : (
         <DataTable

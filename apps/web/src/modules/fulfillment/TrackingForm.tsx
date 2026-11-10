@@ -124,7 +124,7 @@ export function TrackingForm({ shipment, onDone }: { shipment: Shipment; onDone(
     <Card title="Batch and serial tracking">
       <form className={styles.form} onSubmit={submit} noValidate>
         <p className={styles.note}>
-          Record the batch or serial numbers and the pick location of what was picked. A tracked line cannot post a packing slip until its entries cover the quantity the slip ships (BR-28.10).
+          Record the batch or serial numbers and the pick location of what was picked. A tracked line cannot post a packing slip until its entries cover the quantity the slip ships.
           Saving replaces the entries that have not shipped.
         </p>
         <FormField id="tracking-line" label="Shipment line">

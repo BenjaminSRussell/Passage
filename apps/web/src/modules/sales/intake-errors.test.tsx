@@ -93,7 +93,7 @@ describe("Intake errors list", () => {
     unmount();
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "down" } });
     renderAt("/sales/intake-errors");
-    expect(await screen.findByText(/down \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/down/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -150,7 +150,7 @@ describe("Intake error detail", () => {
     unmount();
     handler = () => ({ status: 404, body: { code: "SLS-0115", detail: "intake error not found" } });
     renderAt(`/sales/intake-errors/${ERROR_ID}`);
-    expect(await screen.findByText(/intake error not found \(SLS-0115\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/intake error not found/)).toBeInTheDocument();
   });
 });
 
@@ -180,7 +180,7 @@ describe("Replaying refused orders", () => {
     await screen.findByText("Intake error from EDI");
     fireEvent.click(screen.getByRole("button", { name: "Replay order" }));
     expect(await screen.findByText("Intake refused the order again")).toBeInTheDocument();
-    expect(screen.getByText(/product is still not listed \(SLS-0011\)/)).toBeInTheDocument();
+    expect(screen.getByText(/product is still not listed/)).toBeInTheDocument();
   });
 
   it("explains a replay the service rejects, hides the button without the duty or a kept request", async () => {

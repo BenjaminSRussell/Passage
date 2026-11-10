@@ -6,6 +6,7 @@ import { onHandCsv, downloadText } from "./csvExport";
 import { dash, isIsoDate, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const GROUP_LABELS: Record<OnHandGroup, string> = {
   product: "Product",
@@ -206,7 +207,7 @@ export function OnHandPage() {
           live="alert"
           action={<Button size="sm" onClick={state.reload}>Try again</Button>}
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       {state.data?.asOf ? (

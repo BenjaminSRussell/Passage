@@ -78,7 +78,7 @@ describe("ESS profile changes", () => {
     });
     renderAt("/hr/my/profile", ["hr.profile.self"]);
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw the bank account change" }));
-    expect(await screen.findByText(/no longer waiting for a decision \(HCM-ESS-004\)/)).toBeTruthy();
+    expect(await screen.findByText(/no longer waiting for a decision/)).toBeTruthy();
   });
 
   it("validates the bank account and preferred name like the service", () => {

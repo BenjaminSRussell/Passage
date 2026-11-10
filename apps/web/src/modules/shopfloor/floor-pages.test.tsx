@@ -100,7 +100,7 @@ describe("Machines", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [] }));
     renderAt("/shopfloor/machines");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No machines yet")).toBeInTheDocument();
@@ -207,7 +207,7 @@ describe("Downtimes", () => {
     expect(await screen.findByLabelText("Reason code")).toHaveValue("JAM");
     expect(calls[0].url.search).toBe("");
     fireEvent.click(screen.getByRole("button", { name: "Save reason" }));
-    expect(await screen.findByText(/downtime not found \(SF-0110\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/downtime not found/)).toBeInTheDocument();
   });
 });
 
@@ -297,7 +297,7 @@ describe("OEE", () => {
       return json(400, { code: "COM-0001", detail: "request failed validation" });
     };
     renderAt("/shopfloor/oee");
-    expect(await screen.findByText(/request failed validation \(COM-0001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/request failed validation/)).toBeInTheDocument();
   });
 });
 
@@ -355,6 +355,6 @@ describe("Payroll export", () => {
   it("shows a missing batch", async () => {
     handler = () => json(404, { code: "SF-0112", detail: "export batch not found" });
     renderAt(`/shopfloor/pay-exports/${BATCH}`);
-    expect(await screen.findByText(/export batch not found \(SF-0112\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/export batch not found/)).toBeInTheDocument();
   });
 });

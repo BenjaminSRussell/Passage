@@ -5,6 +5,7 @@ import { formatDateTime } from "./format";
 import { AckPill } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<InterchangeSummary>[] = [
   { key: "controlNumber", header: "ISA13", mono: true },
@@ -26,7 +27,7 @@ export function PartnerDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Trading partner" />
         <Alert tone="danger" title="Could not load the partner" live="alert" action={<Button size="sm" onClick={partner.reload}>Try again</Button>}>
-          {partner.error.message} ({partner.error.code})
+          <ProblemMessage problem={partner.error} />
         </Alert>
       </div>
     );
@@ -87,7 +88,7 @@ export function PartnerDetailPage() {
       <Card title="Recent interchanges">
         {recent.error ? (
           <Alert tone="danger" title="Could not load interchanges" action={<Button size="sm" onClick={recent.reload}>Try again</Button>}>
-            {recent.error.message} ({recent.error.code})
+            <ProblemMessage problem={recent.error} />
           </Alert>
         ) : (
           <DataTable

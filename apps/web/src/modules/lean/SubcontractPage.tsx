@@ -11,6 +11,7 @@ import {
 } from "./api/client";
 import { positiveQuantity, QUANTITY } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -227,7 +228,7 @@ export function SubcontractPage({ preview = defaultPreview }: { preview?: typeof
       </form>
       {failure ? (
         <Alert tone="danger" title="PO lines refused" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {lines ? (

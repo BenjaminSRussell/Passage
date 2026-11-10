@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type Data
 import { atpCheck, describeProblem, type AtpCheckInput, type AtpCheckResult, type AtpPeriod, type AtpScheduleLine, type Problem } from "./api/client";
 import { DECIMAL, today } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -163,7 +164,7 @@ export function AtpCheckPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not check ATP" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

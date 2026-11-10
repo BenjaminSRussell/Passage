@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { trackingLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
 
@@ -174,12 +175,12 @@ export function AsBuiltPanel({ order }: AsBuiltPanelProps) {
         ) : null}
         {failure ? (
           <Alert tone="danger" live="alert" title="The as-built change was refused">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {records.error ? (
           <Alert tone="danger" title="Could not load the as-built records">
-            {records.error.message} ({records.error.code})
+            <ProblemMessage problem={records.error} />
           </Alert>
         ) : (
           <DataTable

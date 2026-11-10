@@ -92,7 +92,7 @@ describe("create party", () => {
     type("Legal name", "x");
     click("Create party");
     expect(await screen.findByText("legal name is too long")).toBeInTheDocument();
-    expect(screen.getByText(/party failed validation \(PTY-PARTY-INVALID\)/)).toBeInTheDocument();
+    expect(screen.getByText(/party failed validation/)).toBeInTheDocument();
   });
 
   it("reuses the key on an identical retry and issues a new one when the body changes", async () => {
@@ -104,7 +104,7 @@ describe("create party", () => {
     renderAt("/party/new");
     type("Legal name", "Northwind");
     click("Create party");
-    await screen.findByText(/offline \(COM-0001\)/);
+    await screen.findByText(/offline/);
     click("Create party");
     await waitFor(() => expect(posts()).toHaveLength(2));
     expect(posts()[1]?.headers.get("Idempotency-Key")).toBe(posts()[0]?.headers.get("Idempotency-Key"));
@@ -376,7 +376,7 @@ describe("idempotency key follows the sent body", () => {
     type("Vendor group id", GROUP);
     type("Vendor currency", "EUR");
     click("Add vendor role");
-    await screen.findByText(/offline \(COM-0001\)/);
+    await screen.findByText(/offline/);
     fail = false;
     type("Vendor account number", "V-100 ");
     click("Add vendor role");

@@ -111,7 +111,7 @@ describe("API clients list", () => {
     renderAt("/integration/clients");
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not load API clients");
-    expect(alert).toHaveTextContent("unexpected error (HUB-0500)");
+    expect(alert).toHaveTextContent("unexpected error");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Acme ERP")).toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("register API client", () => {
 
     handler = () => json(500, { code: "HUB-0500", detail: "unexpected error" });
     fireEvent.click(screen.getByRole("button", { name: "Register client" }));
-    expect(await findAlert()).toHaveTextContent("unexpected error (HUB-0500)");
+    expect(await findAlert()).toHaveTextContent("unexpected error");
   });
 
   it("tells a user without the write duty why they cannot register", () => {
@@ -266,7 +266,7 @@ describe("API client detail", () => {
   it("shows loading, then the error state when the client cannot be loaded", async () => {
     handler = () => json(404, { code: "HUB-0404", detail: "no such API client" });
     renderAt(`/integration/clients/${CLIENT_UUID}`);
-    expect(await findAlert()).toHaveTextContent("no such API client (HUB-0404)");
+    expect(await findAlert()).toHaveTextContent("no such API client");
   });
 
   it("shows the usage error and the empty usage separately", async () => {

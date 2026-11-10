@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { describeProblem, optimizeRoutes, type Problem, type RouteRequest } from "./api/client";
 import styles from "./pages.module.css";
 import { RowsEditor, type RowField } from "./RowsEditor";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface RouteValues {
   depotX: string;
@@ -168,7 +169,7 @@ export function NewRoutePlanPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "TMS-0123" ? "The route optimizer is unavailable" : "Could not optimize the routes"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

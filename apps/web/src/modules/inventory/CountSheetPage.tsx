@@ -18,6 +18,7 @@ import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, shortId, s
 import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Inline count entry for one line; saves at the sheet version the screen holds. */
 function CountEntry({ sheet, line, onSaved, onError }: { sheet: CountSheet; line: CountLine; onSaved(next: CountSheet): void; onError(p: Problem): void }) {
@@ -284,7 +285,7 @@ export function CountSheetPage() {
           live="alert"
           action={failure.code === "conflict_version" ? <Button size="sm" onClick={state.reload}>Reload sheet</Button> : undefined}
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {sheet.freezeStock && reviewable ? (

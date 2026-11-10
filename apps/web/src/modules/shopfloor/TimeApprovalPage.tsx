@@ -17,6 +17,7 @@ import { addDays, browserZone, daysBetween, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { dayColumns } from "./dayColumns";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One pay:approve call: a worker's contiguous ready days, with no flagged day inside. */
 export interface ApprovalRun {
@@ -234,12 +235,12 @@ export function TimeApprovalPage() {
       ) : null}
       {failures.map((f) => (
         <Alert key={f.title} tone="danger" title={f.title} live="alert">
-          {f.problem.message} ({f.problem.code})
+          <ProblemMessage problem={f.problem} />
         </Alert>
       ))}
       {days.error ? (
         <Alert tone="danger" title="Could not load worker-days" live="alert" action={<Button size="sm" onClick={days.reload}>Try again</Button>}>
-          {days.error.message} ({days.error.code})
+          <ProblemMessage problem={days.error} />
         </Alert>
       ) : (
         <DataTable

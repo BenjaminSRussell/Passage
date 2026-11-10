@@ -24,6 +24,7 @@ import {
 import { amount, isDecimal, isNegative, isPositive, isSignedDecimal } from "./format";
 import { LineGrid, type LineField } from "./LineGrid";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type LineKey = "component" | "kind" | "plannedQty" | "stdUnitCost" | "estPerLot" | "actualQty" | "actualUnitCost";
 type LineValues = Record<LineKey, string>;
@@ -214,7 +215,7 @@ export function VariancePage() {
                 title={failure.code === "CST-0720" ? "The variance does not close" : "The variance was not computed"}
                 live="alert"
               >
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -223,7 +224,7 @@ export function VariancePage() {
               Compute variance
             </Button>
             <Button variant="ghost" onClick={() => setValues(ac395)}>
-              Load AC-39.5 example
+              Load the example
             </Button>
           </div>
         </form>

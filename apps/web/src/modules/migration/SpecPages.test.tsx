@@ -80,7 +80,7 @@ describe("mapping specs by project", () => {
   it("shows the error state and retries", async () => {
     handler = (url) => (url.pathname.endsWith("/projects") ? json(200, projects) : json(500, { code: "COM-0500", detail: "boom" }));
     renderAt("/migration/specs");
-    expect(await screen.findByText(/boom \(COM-0500\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
     handler = () => json(200, { items: [wide] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Mapping specs" })).toHaveTextContent("customer");
@@ -110,7 +110,7 @@ describe("mapping specs by project", () => {
     renderAt("/migration/specs/new");
     fireEvent.change(await screen.findByLabelText("Mapping JSON"), { target: { value: '{"entity":"customer","version":1}' } });
     fireEvent.click(screen.getByRole("button", { name: "Publish spec" }));
-    expect(await screen.findByText(/not produced by any field rule \(MIG-MAP-INVALID\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/not produced by any field rule/)).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ mapping: { entity: "customer", version: 1 } });
   });
 

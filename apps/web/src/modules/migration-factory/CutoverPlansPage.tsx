@@ -4,6 +4,7 @@ import { listPlans, type CutoverPlan } from "./api/client";
 import { formatDateTime } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 function planState(plan: CutoverPlan): string {
   if (plan.rolledBack) return "Rolled back";
@@ -37,7 +38,7 @@ export function CutoverPlansPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load cutover plans" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

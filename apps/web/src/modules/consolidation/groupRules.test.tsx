@@ -211,7 +211,7 @@ describe("investments page", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Apply equity method" }));
     await waitFor(() => expect(screen.getByText("The equity method was not applied")).toBeInTheDocument());
-    expect(screen.getByText("The equity method was not applied").closest("[role=alert]")).toHaveTextContent("(COM-0001)");
+    expect(screen.getByText("The equity method was not applied").closest("[role=alert]")).toHaveTextContent("COM-0001");
   });
 
   it("checks the inputs before sending", () => {
@@ -303,7 +303,7 @@ describe("unit validation page", () => {
     renderAt("/consolidation/validation");
     fireEvent.click(screen.getByRole("button", { name: "Validate units" }));
     await waitFor(() => expect(screen.getByText("The units were not validated")).toBeInTheDocument());
-    expect(screen.getByText("The units were not validated").closest("[role=alert]")).toHaveTextContent("missing duty consolidation.run (AUTH-0003)");
+    expect(screen.getByText("The units were not validated").closest("[role=alert]")).toHaveTextContent("missing duty consolidation.run");
     expect(screen.queryByRole("table", { name: "Validate tasks" })).not.toBeInTheDocument();
   });
 });
