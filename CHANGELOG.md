@@ -19,6 +19,8 @@ release may change public APIs.
 
 ### Added
 
+- Usability program (#510): persona task scripts, a baseline report template and a release usability gate in
+  `apps/web/docs`, and a "Usability gate" section in the release notes template.
 - Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
   seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new
   `services/identity/cmd/devgateway` (JWT verification, OPA enforcement, identity headers from claims) and the web
