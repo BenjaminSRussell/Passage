@@ -52,6 +52,8 @@
     "identity.legal-entity.maintain": {"permissions": [{"resource": "/v1/legal-entities{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.feature.view": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET"]}]},
     "identity.feature.maintain": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET", "PUT"]}]},
+    "identity.setup.view": {"permissions": [{"resource": "/v1/tenant/setup", "methods": ["GET"]}, {"resource": "/v1/tenant/workspace-config", "methods": ["GET"]}]},
+    "identity.setup.maintain": {"permissions": [{"resource": "/v1/tenant/setup{,/**}", "methods": ["GET", "PUT"]}, {"resource": "/v1/tenant/workspace-config", "methods": ["GET", "PUT"]}]},
     "platform.saved-view.maintain": {"permissions": [{"resource": "/v1/saved-views{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "hello.ledger.maintain": {"permissions": [{"resource": "/v1/hello-ledger{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "product.product.view": {"permissions": [{"resource": "/v1/product{,/**}", "methods": ["GET"]}]},
