@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.052.001.08">
+  <BkToCstmrAcctRpt>
+    <GrpHdr>
+      <MsgId>INTRADAY-20261022-1400</MsgId>
+      <CreDtTm>2026-10-22T14:00:00+00:00</CreDtTm>
+    </GrpHdr>
+    <Rpt>
+      <Id>RPT-20261022-1400</Id>
+      <CreDtTm>2026-10-22T14:00:00+00:00</CreDtTm>
+      <Acct>
+        <Id><IBAN>DE89370400440532013000</IBAN></Id>
+        <Ccy>EUR</Ccy>
+      </Acct>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">1000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2026-10-22</Dt></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>ITBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">1250.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><DtTm>2026-10-22T13:55:00+00:00</DtTm></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>ITAV</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="EUR">51250.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><DtTm>2026-10-22T13:55:00+00:00</DtTm></Dt>
+      </Bal>
+      <Ntry>
+        <Amt Ccy="EUR">250.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <BookgDt><Dt>2026-10-22</Dt></BookgDt>
+      </Ntry>
+    </Rpt>
+  </BkToCstmrAcctRpt>
+</Document>

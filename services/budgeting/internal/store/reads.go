@@ -121,7 +121,7 @@ func (s *Postgres) Available(ctx context.Context, ruleVersionID, dim, span strin
 }
 
 const encumbranceColumns = `e.id::text, b.rule_version_id::text, b.control_dimension_key, b.time_span_key, e.source_type, e.source_document_id::text,
-	e.source_line_id::text, e.reserved::text, e.relieved::text, e.released::text, e.status, e.lines, e.created_at`
+	e.source_line_id::text, e.reserved::text, e.relieved::text, e.released::text, e.status, e.lines, e.created_at, e.stage`
 
 func scanEncumbrance(row pgx.Row) (EncumbranceView, error) {
 	var e EncumbranceView
@@ -129,7 +129,7 @@ func scanEncumbrance(row pgx.Row) (EncumbranceView, error) {
 	var history []byte
 	var created time.Time
 	if err := row.Scan(&e.ID, &e.RuleVersionID, &e.ControlDimensionKey, &e.TimeSpanKey, &e.SourceType, &e.SourceDocumentID,
-		&e.SourceLineID, &reserved, &relieved, &released, &e.Status, &history, &created); err != nil {
+		&e.SourceLineID, &reserved, &relieved, &released, &e.Status, &history, &created, &e.Stage); err != nil {
 		return e, err
 	}
 	e.Reserved, e.Relieved, e.Released, e.CreatedAt = parseDec(reserved), parseDec(relieved), parseDec(released), stamp(created)

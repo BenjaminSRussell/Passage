@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /**
- * Keyboard-only run of the start of procure to pay (WCAG 2.1.1, 2.4.3, 2.4.7). After the first page load the test
+ * Keyboard-only run of the start of procure to pay: create a requisition, then send that draft for approval (WCAG 2.1.1, 2.4.3, 2.4.7). After the first page load the test
  * only presses keys: it never clicks, and it moves focus with Tab and Shift+Tab, so a control that cannot be
  * reached or operated from the keyboard fails the run.
  */
@@ -54,24 +54,8 @@ test("a requisition can be created and submitted for approval from the keyboard"
   await tabTo(page, save);
   await page.keyboard.press("Enter");
 
-  // The form took every value from the keyboard: nothing is flagged, and the request was sent (the demo
-  // backend answers that creating is not part of the demo).
+  // The form took every value from the keyboard: nothing is flagged, and saving opens the new draft.
   await expect(page.getByRole("alert").filter({ hasText: "Problems with this form" })).toHaveCount(0);
-  await expect(page.getByRole("alert").filter({ hasText: "isn't part of the demo" })).toBeVisible();
-
-  // Then a draft is opened from the list and sent for approval, again with keys only.
-  const cancel = page.getByRole("link", { name: "Cancel" });
-  await tabTo(page, cancel);
-  await page.keyboard.press("Enter");
-  // The form has unsaved values, so leaving asks first. The dialog takes focus, and a key press confirms it.
-  const leave = page.getByRole("button", { name: "Leave without saving" });
-  await expect(leave).toBeVisible();
-  await tabTo(page, leave);
-  await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { level: 2, name: "Requisitions" })).toBeVisible();
-  const draft = page.getByRole("row").filter({ hasText: "Draft" }).getByRole("button").first();
-  await tabTo(page, draft);
-  await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { level: 2, name: /^Requisition / })).toBeVisible();
   const submit = page.getByRole("button", { name: "Submit for approval" });
   await tabTo(page, submit);

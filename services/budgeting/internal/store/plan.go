@@ -796,3 +796,70 @@ func (s *Postgres) RejectPlan(ctx context.Context, key, hash string, in RejectRe
 		return http.StatusOK, view, err
 	})
 }
+
+// ComparisonRow is one group of the scenario comparison: the two scenarios' totals for a key and the change from
+// Base to Other. DeltaPct is empty when Base is zero, because a percentage of nothing has no meaning.
+type ComparisonRow struct {
+	Key      string          `json:"key"`
+	Base     decimal.Decimal `json:"base"`
+	Other    decimal.Decimal `json:"other"`
+	Delta    decimal.Decimal `json:"delta"`
+	DeltaPct string          `json:"deltaPct,omitempty"`
+}
+
+// Comparison sets two scenarios of one plan side by side, grouped by account, cost center or period.
+type Comparison struct {
+	GroupBy string          `json:"groupBy"`
+	Base    Scenario        `json:"base"`
+	Other   Scenario        `json:"other"`
+	Rows    []ComparisonRow `json:"rows"`
+	Delta   decimal.Decimal `json:"delta"`
+}
+
+// comparisonColumns maps the groupBy values to the cell column they group on. Only these constants reach the SQL text.
+var comparisonColumns = map[string]string{"account": "account", "costCenter": "cost_center", "period": "period"}
+
+// ValidComparisonGroup reports whether groupBy names a supported grouping.
+func ValidComparisonGroup(groupBy string) bool { _, ok := comparisonColumns[groupBy]; return ok }
+
+// CompareScenarios totals two scenarios of the plan by groupBy. A key that only one scenario holds shows zero for the other.
+func (s *Postgres) CompareScenarios(ctx context.Context, planID, baseID, otherID, groupBy string) (Comparison, error) {
+	col, ok := comparisonColumns[groupBy]
+	if !ok {
+		return Comparison{}, planProblem(http.StatusBadRequest, "COM-0001", "groupBy must be account, costCenter or period")
+	}
+	cmp := Comparison{GroupBy: groupBy, Rows: []ComparisonRow{}}
+	err := s.read(ctx, func(tx pgx.Tx, tenantID string) error {
+		var err error
+		if cmp.Base, err = loadScenario(ctx, tx, tenantID, planID, baseID, false); err != nil {
+			return err
+		}
+		if cmp.Other, err = loadScenario(ctx, tx, tenantID, planID, otherID, false); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select coalesce(b.k, o.k), coalesce(b.s, 0)::text, coalesce(o.s, 0)::text
+			from (select `+col+` as k, sum(amount) as s from budget_plan_cell where tenant_id = $1 and scenario_id = $2 group by 1) b
+			full join (select `+col+` as k, sum(amount) as s from budget_plan_cell where tenant_id = $1 and scenario_id = $3 group by 1) o on o.k = b.k
+			order by 1`, tenantID, baseID, otherID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r ComparisonRow
+			var base, other string
+			if err := rows.Scan(&r.Key, &base, &other); err != nil {
+				return err
+			}
+			r.Base, r.Other = parseDec(base), parseDec(other)
+			r.Delta = r.Other.Sub(r.Base)
+			if !r.Base.IsZero() {
+				r.DeltaPct = r.Delta.Div(r.Base).Mul(decimal.NewFromInt(100)).StringFixed(2)
+			}
+			cmp.Rows = append(cmp.Rows, r)
+		}
+		return rows.Err()
+	})
+	cmp.Delta = cmp.Other.Total.Sub(cmp.Base.Total)
+	return cmp, err
+}

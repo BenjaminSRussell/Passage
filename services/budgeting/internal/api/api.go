@@ -57,6 +57,7 @@ type Store interface {
 	CheckBudget(ctx context.Context, key, hash string, req store.CheckRequest, override bool) (int, []byte, error)
 	RelieveEncumbrance(ctx context.Context, key, hash string, in store.RelieveRequest) (int, []byte, error)
 	ReleaseEncumbrance(ctx context.Context, key, hash string, in store.ReleaseRequest) (int, []byte, error)
+	ConvertPreEncumbrance(ctx context.Context, key, hash string, in store.ConvertRequest) (int, []byte, error)
 	PostRegisterEntry(ctx context.Context, key, hash string, req store.RegisterRequest) (int, []byte, error)
 	ListRules(ctx context.Context, legalEntityID string) ([]store.Rule, error)
 	GetRule(ctx context.Context, id string) (store.Rule, error)
@@ -98,6 +99,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/checks", a.checkBudget)
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:relieve", a.relieve)
 	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:release", a.release)
+	r.With(authz.RequireDuty(dutyCheck)).Post("/v1/budget/encumbrances/{id}:convert", a.convert)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations", a.createReservation)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations:expire", a.expireReservations)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/budget/reservations/{id}:close", a.closeReservation)
@@ -562,4 +564,40 @@ func (a *API) getCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := a.store.GetCheck(r.Context(), id)
 	one(w, r, c, err)
+}
+
+type convertRequest struct {
+	PurchaseOrderID     string `json:"purchaseOrderId"`
+	PurchaseOrderLineID string `json:"purchaseOrderLineId"`
+}
+
+// convert turns a requisition's pre-encumbrance into the encumbrance of the purchase order line that confirms it (FR-38.5).
+func (a *API) convert(w http.ResponseWriter, r *http.Request) {
+	body, composite, ok := readCommand(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeEncumbranceNotFound, "encumbrance not found"))
+		return
+	}
+	var req convertRequest
+	if err := decodeBody(body, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if !ids.Valid(req.PurchaseOrderID) {
+		fields["purchaseOrderId"] = "must be a UUID (the confirmed purchase order)"
+	}
+	if !ids.Valid(req.PurchaseOrderLineID) {
+		fields["purchaseOrderLineId"] = "must be a UUID (the purchase order line that carries the reservation from now on)"
+	}
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	key, hash := splitKey(composite)
+	a.replay(w, r)(a.store.ConvertPreEncumbrance(r.Context(), key, hash, store.ConvertRequest{EncumbranceID: id, PurchaseOrderID: req.PurchaseOrderID, PurchaseOrderLineID: req.PurchaseOrderLineID}))
 }

@@ -26,6 +26,13 @@ func Excess(invoiceAmount, relief decimal.Decimal) decimal.Decimal {
 	return e
 }
 
+// Reservation stages: a requisition reserves a pre-encumbrance; the purchase order that confirms it converts it
+// into an encumbrance (FR-38.5).
+const (
+	StagePre         = "pre"
+	StageEncumbrance = "encumbrance"
+)
+
 // Encumbrance statuses (PRD 7.38.4).
 const (
 	StatusOpen              = "Open"
