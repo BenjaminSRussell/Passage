@@ -1456,6 +1456,7 @@
       {"resource": "/v1/hr/skills", "methods": ["POST"]}
     ]},
     "hr.worker.inquire": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/hr/certifications/expiring", "methods": ["GET"]},
       {"resource": "/v1/hr/checklists/*", "methods": ["GET"]},
       {"resource": "/v1/hr/loaned-items/outstanding", "methods": ["GET"]},
@@ -3012,6 +3013,7 @@
       {"resource": "/v1/production/orders:auto-end", "methods": ["POST"]}
     ]},
     "production.order.read": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/production/as-built", "methods": ["GET"]},
       {"resource": "/v1/production/journals", "methods": ["GET"]},
       {"resource": "/v1/production/journals/*", "methods": ["GET"]},
