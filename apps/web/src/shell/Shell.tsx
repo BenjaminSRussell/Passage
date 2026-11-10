@@ -4,6 +4,8 @@ import type { PassageModule } from "../modules/registry";
 import { CommandPalette, type PaletteEntry } from "./CommandPalette";
 import { copy } from "./copy";
 import { holdsDuty, requiredDuty, visibleModules } from "./dutyGate";
+import { InboxProvider } from "./inbox/InboxProvider";
+import { RecentProvider, useRecentPages } from "./recent";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { NotAvailablePage } from "./pages/NotAvailablePage";
 import { resolvePage } from "./pageMeta";
@@ -28,6 +30,18 @@ const DRAWER_BREAKPOINT = "(min-width: 960px)";
 
 function isShown(el: HTMLElement): boolean {
   return el.offsetParent !== null && window.getComputedStyle(el).visibility !== "hidden";
+}
+
+/** Remembers the last pages opened, for the home page. Renders nothing. */
+function RecentTracker({ entries }: { entries: ReadonlyMap<string, { label: string }> }) {
+  const { pathname } = useLocation();
+  const { record } = useRecentPages();
+  const entry = entries.get(pathname);
+  const label = entry?.label;
+  useEffect(() => {
+    if (label !== undefined) record({ to: pathname, label });
+  }, [pathname, label, record]);
+  return null;
 }
 
 export interface ShellProps {
@@ -258,6 +272,9 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig, 
       <TenantSettingsProvider value={settings}>
       <WorkContextProvider identity={userId} enabled={principalDuties.includes("org.read")}>
       <WorkspaceNavProvider entries={navEntries} config={config}>
+      <InboxProvider>
+      <RecentProvider identity={userId}>
+      <RecentTracker entries={navEntryByTo} />
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
           Skip to content
@@ -307,6 +324,8 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig, 
         ) : null}
         {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
       </div>
+      </RecentProvider>
+      </InboxProvider>
       </WorkspaceNavProvider>
       </WorkContextProvider>
       </TenantSettingsProvider>

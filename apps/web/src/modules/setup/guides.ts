@@ -34,8 +34,8 @@ export const stepGuides: Record<string, StepGuide> = {
     help: ["Enter exchange rates for each currency you trade in besides your company currency.", "If you only use one currency, mark this step as done."],
   },
   tax: {
-    to: "/tax",
-    linkLabel: "Open tax setup",
+    to: "/party/tax-registrations",
+    linkLabel: "Open tax registrations",
     help: ["Add the tax codes and rates your invoices need.", "If you are not taxed on sales or purchases, skip this step."],
   },
   "sites-warehouses": {

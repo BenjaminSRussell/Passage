@@ -3,7 +3,7 @@ const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platfo
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
 export const copy = {
-  nav: { home: "Home", notes: "Notes", general: "General", allFeatures: "All features" },
+  nav: { home: "Home", notes: "Notes", general: "General", allFeatures: "All features", myWork: "My work" },
   workspaces: {
     switcherLabel: "Workspace",
     chooseSummary: "Choose my workspaces",
@@ -127,6 +127,14 @@ export const copy = {
     topTasks: "Top tasks",
     current: "Current workspace",
     seeAll: "See all features",
+    shortcutsLabel: "Common actions",
+    switchTo: (label: string) => `Switch to ${label}`,
+    otherWorkspaces: "Your other workspaces",
+    recentTitle: "Recent",
+    recentEmpty: "Pages you open show up here, so you can get back to them quickly.",
+    setupTitle: "Finish setting up your company",
+    setupBody: (finished: number, total: number) => `${finished} of ${total} setup steps are finished.`,
+    setupLink: "Continue setup",
     emptyTitle: "No workspaces yet",
     emptyDescription: "Workspaces appear here once your account has access to their features.",
   },
@@ -144,6 +152,13 @@ export const copy = {
     loadMore: "Load more",
     needEntity: "Choose a legal entity at the top of the page to see your work.",
     seeAll: "See all my work",
+    tilesLabel: "My work at a glance",
+    tileWaiting: "Waiting for me",
+    tileApprovals: "To approve",
+    tileOverdue: "Overdue",
+    tileOldest: "Oldest, in days",
+    badgeHint: (text: string) => `, ${text} waiting`,
+    getStarted: "Approvals, holds and other tasks assigned to you will appear here, with a button to deal with each one.",
     summary: (count: number, more: boolean) => (count === 0 ? "Nothing is waiting for you." : `${count}${more ? "+" : ""} ${count === 1 && !more ? "item is" : "items are"} waiting for you.`),
   },
   notes: {
