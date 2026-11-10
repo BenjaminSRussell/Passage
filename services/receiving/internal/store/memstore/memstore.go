@@ -55,6 +55,7 @@ type tenantData struct {
 	payees          map[string]store.OneTimePayee
 	captures        map[string]store.Capture
 	sheets          map[string]store.ServiceSheet
+	asns            map[string]store.Asn
 	selfBills       map[string]store.SelfBill
 	selfBillSeq     map[string]int
 	ersPrices       map[string]store.PriceConfirmation
@@ -97,7 +98,7 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	if t == nil {
 		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
 			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{},
-			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}, captures: map[string]store.Capture{}, sheets: map[string]store.ServiceSheet{}, selfBills: map[string]store.SelfBill{}}
+			ersVendors: map[string]bool{}, auditRates: map[string]domain.AuditPolicy{}, payees: map[string]store.OneTimePayee{}, captures: map[string]store.Capture{}, sheets: map[string]store.ServiceSheet{}, asns: map[string]store.Asn{}, selfBills: map[string]store.SelfBill{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
