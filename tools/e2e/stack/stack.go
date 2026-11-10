@@ -43,14 +43,14 @@ type service struct {
 }
 
 var services = []service{
-	{name: "ledger", callers: []string{"receiving"}, env: func(*Stack) map[string]string {
+	{name: "ledger", callers: []string{"receiving", "batch"}, env: func(*Stack) map[string]string {
 		return map[string]string{"LEDGER_PERIOD_CHECK": "disabled"}
 	}},
 	{name: "numbering", callers: []string{"party"}},
-	{name: "party", callers: []string{"receiving"}, env: func(s *Stack) map[string]string {
+	{name: "party", callers: []string{"receiving", "batch"}, env: func(s *Stack) map[string]string {
 		return map[string]string{"NUMBERING_URL": s.URL("numbering")}
 	}},
-	{name: "purchasing", callers: []string{"receiving"}},
+	{name: "purchasing", callers: []string{"receiving", "batch"}},
 	{name: "receiving", env: func(s *Stack) map[string]string {
 		return map[string]string{
 			"PASSAGE_ALLOW_FAKES": "1",
@@ -60,9 +60,16 @@ var services = []service{
 			"POSTING_LEDGER_ID":   s.LedgerID,
 		}
 	}},
+	{name: "batch", env: func(s *Stack) map[string]string {
+		return map[string]string{
+			"PURCHASING_URL": s.URL("purchasing"),
+			"PARTY_URL":      s.URL("party"),
+			"LEDGER_URL":     s.URL("ledger"),
+		}
+	}},
 }
 
-var startOrder = []string{"ledger", "numbering", "party", "purchasing", "receiving"}
+var startOrder = []string{"ledger", "numbering", "party", "purchasing", "receiving", "batch"}
 
 type proc struct {
 	name string
