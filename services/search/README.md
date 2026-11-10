@@ -1,6 +1,6 @@
 # search
 
-Global record search (#506, subtask 506-1): `GET /v1/search?q=&types=&limit=` over parties, products and purchase orders.
+Global record search (#506, subtask 506-1): `GET /v1/search?q=&types=&limit=` over parties, products, purchase orders, receipts, vendor invoices, sales orders, packing slips and customer invoices.
 
 ## Design choice: a consumer-fed service, not an ingest route
 
@@ -15,8 +15,11 @@ entity on `po.cancelled`, the survivor on `party.merged`, and a source version o
 callbacks. The flag duty `search.index.write` only names the `search-index` service principal the consumer runs as; it
 grants no route.
 
-Subscribed topics are `passage.<context>.<outbox aggregate type>`: `passage.party.party`, `passage.product.product`
-and `passage.procurement.purchase_order`. A test ties each suffix to the aggregate type the source service enqueues.
+Subscribed topics are `passage.<context>.<outbox aggregate type>`: `passage.party.party`, `passage.product.product`,
+`passage.procurement.purchase_order`, `passage.receiving.receipt`, `passage.receiving.vendorinvoice`, `passage.sales.order`,
+`passage.fulfillment.shipment` and `passage.billing.invoice`. Sales `order.confirmed` and fulfillment `packingslip.posted` gained
+`order_number` and `legal_entity_id` (additive). Documents are indexed under their legal entity; a caller searches a type
+with any one of its read duties. A test ties each suffix to the aggregate type the source service enqueues.
 
 ## Index
 

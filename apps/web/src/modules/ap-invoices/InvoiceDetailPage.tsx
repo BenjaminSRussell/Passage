@@ -8,6 +8,7 @@ import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
 import { fetchReceipt, type Receipt } from "../receiving/api/client";
+import { PurchaseFlowPanel } from "../receiving/documentFlow";
 import { ApiError, fetchInvoice, type Invoice } from "./api/client";
 import { invoiceStatusLabel, invoiceStatusTone, matchStatusLabel, matchStatusTone, priceDifferenceText, UUID } from "./parts";
 import { PaymentCard, useOpenItemsForInvoices } from "./payment";
@@ -126,6 +127,7 @@ export function InvoiceDetailPage() {
           </Link>
         }
       />
+      {invoice ? <PurchaseFlowPanel anchor={{ kind: "invoice", id: invoice.id }} refreshKey={invoice.status} /> : null}
       {result.isError ? (
         <Alert
           tone="danger"

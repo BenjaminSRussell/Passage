@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
@@ -34,6 +35,19 @@ type NoVendorPrincipal struct{}
 
 // VendorID implements VendorPrincipal.
 func (NoVendorPrincipal) VendorID(context.Context) (string, bool) { return "", false }
+
+// PortalVendorPrincipal reads the vendor from the verified principal: a supplier portal service token carries it as a signed
+// claim (tenant.ServiceClaims.Vnd), and no other caller can. A request header or body is never consulted.
+type PortalVendorPrincipal struct{}
+
+// VendorID implements VendorPrincipal.
+func (PortalVendorPrincipal) VendorID(ctx context.Context) (string, bool) {
+	p, ok := tenant.FromContext(ctx)
+	if !ok || p.Service != tenant.VendorPortalIssuer || p.VendorID == "" {
+		return "", false
+	}
+	return strings.ToLower(p.VendorID), true
+}
 
 // WithVendorPrincipal replaces the source of the vendor a caller acts for.
 func (a *API) WithVendorPrincipal(v VendorPrincipal) *API {

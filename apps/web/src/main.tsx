@@ -4,11 +4,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { DeviceHost } from "./modules/mobile-flows/DeviceHost";
 import { loadModules } from "./modules/registry";
+import { I18nProvider } from "./shell/i18n/I18nProvider";
 import { Shell } from "./shell/Shell";
 import { AuthRoot } from "./shell/auth/AuthRoot";
 import { bootstrapAuth } from "./shell/auth/auth";
 import { AllFeaturesPage } from "./shell/pages/AllFeaturesPage";
 import { HomePage } from "./shell/pages/HomePage";
+import { ComponentCatalogPage } from "./shell/pages/ComponentCatalogPage";
+import { WhatsNewPage } from "./shell/pages/WhatsNewPage";
+import { GlossaryPage } from "./shell/glossary/GlossaryPage";
 import { NotFoundPage } from "./shell/pages/NotFoundPage";
 import "./shell/theme.css";
 
@@ -30,6 +34,9 @@ function App({ duties, identity, banner }: { duties?: readonly string[]; identit
             children: [
               { index: true, element: <HomePage /> },
               { path: "features", element: <AllFeaturesPage /> },
+              { path: "whats-new", element: <WhatsNewPage /> },
+              { path: "design-system", element: <ComponentCatalogPage /> },
+              { path: "glossary", element: <GlossaryPage /> },
               ...modules.flatMap((m) => m.routes),
               { path: "*", element: <NotFoundPage /> },
             ],
@@ -41,10 +48,12 @@ function App({ duties, identity, banner }: { duties?: readonly string[]; identit
   );
   const client = useMemo(() => new QueryClient(), []);
   return (
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-      {banner}
-    </QueryClientProvider>
+    <I18nProvider>
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+        {banner}
+      </QueryClientProvider>
+    </I18nProvider>
   );
 }
 

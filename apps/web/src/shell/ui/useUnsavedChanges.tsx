@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
 import { UNSAFE_DataRouterContext, useBlocker } from "react-router-dom";
 import { copy } from "../copy";
+import { trackFormAbandoned } from "../uxEvents";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface UnsavedChangesDialog {
@@ -25,7 +26,10 @@ function NavigationPrompt({ shouldBlock, dialog }: { shouldBlock: () => boolean;
   return (
     <ConfirmDialog
       {...dialog}
-      onConfirm={blocker.proceed}
+      onConfirm={() => {
+        trackFormAbandoned();
+        blocker.proceed();
+      }}
       onCancel={blocker.reset}
     />
   );

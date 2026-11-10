@@ -1,0 +1,32 @@
+openapi: 3.1.0
+info:
+  title: Passage supplier portal BFF
+  version: 0.1.0
+  description: >-
+    The session and proxy API of apps/supplier-portal. Every /api/v1 route needs the session cookie; writes also need the
+    X-CSRF-Token from GET /bff/me and an Origin equal to the app's. The vendor comes from the session, never from the request.
+    Each /api/v1 route is one call to an owning service (table in src/routes.ts) and returns that service's answer, with 401
+    from a service turned into 502.
+paths:
+  /bff/login: { get: { summary: Start the OIDC sign-in (302 to the identity provider), responses: { '302': { description: Redirect } } } }
+  /bff/callback: { get: { summary: Finish the sign-in and set the session cookie, parameters: [ { name: code, in: query, schema: { type: string } }, { name: state, in: query, schema: { type: string } } ], responses: { '302': { description: Signed in }, '400': { description: Unknown or expired sign-in }, '403': { description: Not a supplier account } } } }
+  /bff/me: { get: { summary: The signed-in user and the CSRF token, responses: { '200': { description: OK }, '401': { description: No session } } } }
+  /bff/logout: { post: { summary: End the session, responses: { '204': { description: Signed out }, '403': { description: CSRF } } } }
+  /api/v1/purchase-orders: { get: { summary: The vendor's purchase orders, x-upstream: purchasing GET /v1/procurement/vendor/purchase-orders, responses: { '200': { description: OK } } } }
+  /api/v1/purchase-orders/{id}: { get: { summary: One purchase order, responses: { '200': { description: OK }, '404': { description: Not found or not the vendor's } } } }
+  /api/v1/purchase-orders/{id}/acknowledgements: { post: { summary: Accept, reject or propose changes, responses: { '200': { description: OK } } } }
+  /api/v1/asns: { get: { summary: The vendor's ship notices, responses: { '200': { description: OK } } }, post: { summary: Create a ship notice (legal entity set from the session), responses: { '200': { description: OK } } } }
+  /api/v1/asns/{id}: { get: { summary: One ship notice, responses: { '200': { description: OK } } } }
+  /api/v1/invoices: { get: { summary: The vendor's posted invoices in the vendor's view, responses: { '200': { description: OK } } } }
+  /api/v1/invoices/{id}: { get: { summary: One posted invoice, responses: { '200': { description: OK } } } }
+  /api/v1/invoice-documents: { get: { summary: Documents the vendor sent that are not yet posted, responses: { '200': { description: OK } } }, post: { summary: Send an invoice document (UBL or OCR), responses: { '200': { description: OK } } } }
+  /api/v1/invoice-documents/{id}: { get: { summary: One submitted document, responses: { '200': { description: OK } } } }
+  /api/v1/requests: { get: { summary: The vendor's requests and onboarding, responses: { '200': { description: OK } } }, post: { summary: Ask for a change, responses: { '200': { description: OK } } } }
+  /api/v1/requests/{id}: { get: { summary: One request with its questionnaire, responses: { '200': { description: OK } } } }
+  /api/v1/requests/{id}/submit: { post: { summary: Submit onboarding answers, responses: { '200': { description: OK } } } }
+  /api/v1/requests/{id}/withdraw: { post: { summary: Withdraw a request, responses: { '200': { description: OK } } } }
+  /api/v1/documents: { get: { summary: Documents exchanged with the buyer, responses: { '200': { description: OK } } }, post: { summary: Send a document (base64, 5 MB), responses: { '200': { description: OK } } } }
+  /api/v1/documents/{id}/content: { get: { summary: Download a document, responses: { '200': { description: The file } } } }
+  /api/v1/distributions: { get: { summary: Controlled documents distributed to the vendor, responses: { '200': { description: OK } } } }
+  /api/v1/distributions/{id}/content: { get: { summary: Download a distributed document, responses: { '200': { description: The file } } } }
+  /api/v1/distributions/{id}/acknowledge: { post: { summary: Acknowledge a distributed document, responses: { '200': { description: OK } } } }

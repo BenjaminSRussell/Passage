@@ -4,11 +4,14 @@ info:
   version: 0.1.0
   description: >
     One ranked list of records the caller may open, across parties, products and
-    purchase orders. A type is searched only when the caller holds its source
-    service's read duty (party.read, product.read,
-    procurement.purchase-order.inquire); a named type the caller may not read is
-    dropped without comment. Purchase orders are visible only for the caller's
-    legal entities. An exact number ranks first, then a number prefix, then
+    purchase orders, receipts, vendor invoices, sales orders, packing slips and
+    customer invoices. A type is searched only when the caller holds a read duty
+    of its source service (party.read, product.read,
+    procurement.purchase-order.inquire, receiving.receipt.maintain,
+    receiving.ap.inquire, sales.order.read, fulfillment.warehouse.view,
+    billing.invoice.view);
+    a named type the caller may not read is dropped without comment. Every type
+    except parties and products is visible only for the caller's legal entities. An exact number ranks first, then a number prefix, then
     trigram similarity of the number, title and subtitle. Errors are RFC 7807
     problems.
 servers:
@@ -21,7 +24,7 @@ paths:
       operationId: searchRecords
       summary: Search records by number or name
       x-passage-duty: party.read
-      x-passage-duty-alternatives: [product.read, procurement.purchase-order.inquire]
+      x-passage-duty-alternatives: [product.read, procurement.purchase-order.inquire, receiving.receipt.maintain, receiving.ap.inquire, sales.order.read, fulfillment.warehouse.view, billing.invoice.view]
       parameters:
         - { name: q, in: query, required: true, description: Two to 100 characters after trimming., schema: { type: string, minLength: 2, maxLength: 100 } }
         - { name: types, in: query, description: Comma separated record types; all readable types when empty., schema: { type: string, examples: ["party,product"] } }
@@ -49,7 +52,7 @@ components:
             type: object
             required: [type, id, number, title, link]
             properties:
-              type: { type: string, enum: [party, product, purchase_order] }
+              type: { type: string, enum: [party, product, purchase_order, receipt, vendor_invoice, sales_order, packing_slip, customer_invoice] }
               id: { type: string, format: uuid }
               legalEntityId: { type: string, format: uuid, description: Set for purchase orders. }
               number: { type: string }

@@ -369,8 +369,12 @@ type CatchWeightSpec struct {
 
 // OrderConfirmedData is the data member of order.confirmed.v1.
 type OrderConfirmedData struct {
-	OrderID    string `json:"order_id"`
-	CustomerID string `json:"customer_id"`
+	OrderID string `json:"order_id"`
+	// OrderNumber and LegalEntityID let the search index list the order
+	// under its number inside its legal entity (#506).
+	OrderNumber   string `json:"order_number,omitempty"`
+	LegalEntityID string `json:"legal_entity_id,omitempty"`
+	CustomerID    string `json:"customer_id"`
 	// OrderType lets consumers honour BR-27.7: a JOURNAL order never
 	// reserves or consumes ATP, so inventory and planning skip its lines.
 	OrderType string          `json:"order_type"`

@@ -27,6 +27,8 @@ type Principal struct {
 	UserID        string
 	Duties        map[string]struct{}
 	Service       string
+	// VendorID is the vendor a supplier portal caller acts for, from a verified service token. Empty for every other caller.
+	VendorID string
 }
 
 // LegalEntityScopeList is the one parser of the legal-entity claim: each

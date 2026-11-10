@@ -137,9 +137,10 @@ function toResponse(result: DemoResponse | DemoEvents): Response {
   const out = result instanceof DemoEvents ? reply.problem(406, "DEMO-0406", "This route streams events; open it with EventSource.") : result;
   const noBody = out.status === 204 || out.body === undefined;
   const raw = out.body instanceof RawBody;
-  return new Response(noBody ? null : raw ? (out.body as RawBody).text : JSON.stringify(out.body), {
+  const binary = out.body instanceof Uint8Array || out.body instanceof Blob;
+  return new Response(noBody ? null : raw ? (out.body as RawBody).text : binary ? (out.body as BodyInit) : JSON.stringify(out.body), {
     status: out.status,
-    headers: { ...(noBody || raw ? {} : { "Content-Type": "application/json" }), ...out.headers },
+    headers: { ...(noBody || raw || binary ? {} : { "Content-Type": "application/json" }), ...out.headers },
   });
 }
 

@@ -29,7 +29,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, ShortId, StatusBadge, money, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 // Subsequent price change (FR-17.22, BR-17.18): move confirmed order lines priced
 // from a trade agreement to the price row that wins now, as the next order version.
@@ -334,7 +334,7 @@ function runColumns(): DataTableColumn<RepriceResult>[] {
       header: "Result",
       render: (r) =>
         r.error ? (
-          <Badge tone="danger">{`Failed: ${r.error.code}`}</Badge>
+          <Badge tone="danger">{`Failed: ${problemSummary(r.error)}`}</Badge>
         ) : r.applied ? (
           <Badge tone="success">{r.reapprovalRequired ? "Applied, awaiting re-approval" : "Applied"}</Badge>
         ) : (

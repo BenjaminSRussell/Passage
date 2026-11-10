@@ -1,9 +1,13 @@
+import { activeLocale } from "./i18n/locale";
+import { localizeCopy } from "./i18n/localize";
+
 const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platform);
 
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
-export const copy = {
-  nav: { home: "Home", general: "General", allFeatures: "All features", myWork: "My work" },
+/** The English source text. Other languages live in shell/i18n and are applied by localizeCopy below. */
+const english = {
+  nav: { home: "Home", general: "General", allFeatures: "All features", myWork: "My work", glossary: "Glossary" },
   workspaces: {
     switcherLabel: "Workspace",
     chooseSummary: "Choose my workspaces",
@@ -48,6 +52,8 @@ export const copy = {
     oneResult: "1 result",
     results: (count: number) => `${count} results`,
     opened: (label: string) => `Opened ${label}`,
+    favouriteAdded: (number: string) => `${number} added to favourites`,
+    favouriteRemoved: (number: string) => `${number} removed from favourites`,
     workspaceSwitched: (label: string) => `Workspace changed to ${label}`,
   },
   forms: {
@@ -123,8 +129,14 @@ export const copy = {
   palette: {
     title: "Search",
     inputLabel: "Find a page",
-    placeholder: "Search pages and workspaces",
-    help: "Use the up and down arrows to move through results, then press Enter to open a page.",
+    placeholder: "Search pages, documents and partners",
+    help: "Type a document number or a name. Use the up and down arrows to move through results, then press Enter to open one. Press Alt and F to favourite a record.",
+    favourites: "Favourite records",
+    recent: "Recent records",
+    favouriteState: "Favourite",
+    favourite: (number: string) => `Favourite ${number}`,
+    unfavourite: (number: string) => `Remove ${number} from favourites`,
+    recordsUnavailable: "Documents and partners can't be searched right now. Pages still work.",
     noResults: (query: string) => `No pages match “${query}”.`,
     noResultsHint: "Try a workspace name, like Admin or Tax.",
     listLabel: "Pages",
@@ -169,6 +181,30 @@ export const copy = {
     getStarted: "Approvals, holds and other tasks assigned to you will appear here, with a button to deal with each one.",
     summary: (count: number, more: boolean) => (count === 0 ? "Nothing is waiting for you." : `${count}${more ? "+" : ""} ${count === 1 && !more ? "item is" : "items are"} waiting for you.`),
   },
+  format: {
+    today: "Today",
+    days: (count: number) => (count === 1 ? "1 day" : `${count} days`),
+  },
+  help: {
+    button: "Help for this page",
+    panelLabel: "Help",
+    close: "Close help",
+    purposeHeading: "What this page is for",
+    tasksHeading: "Common tasks",
+    guideLink: "Read the full guide",
+    noEntry: "There is no help for this page yet.",
+    whatsNew: "What's new",
+    announceOpened: "Help opened",
+    shareUsage: "Share anonymous usage data",
+    language: "Language",
+    opensInNewTab: "(opens in a new tab)",
+    shareUsageHint: "Which steps people finish and where forms fail, so we can make them easier. It holds no names or record details.",
+  },
+  whatsNew: {
+    pageTitle: "What's new",
+    description: "Changes to Passage in plain language, newest first.",
+    empty: "No release notes yet.",
+  },
   notFound: {
     title: "We couldn't find that page",
     description: "Check the address, or search for the page you need.",
@@ -186,3 +222,6 @@ export const copy = {
     body: "Something went wrong while showing this page. Your other workspaces still work.",
   },
 } as const;
+
+export const copyEnglish = english;
+export const copy = localizeCopy(english, activeLocale, { shortcut: shortcutHint });

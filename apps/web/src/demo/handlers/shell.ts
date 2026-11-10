@@ -86,6 +86,9 @@ const workers = WORKERS.map((w) => ({ id: w.id, personnelNumber: w.number, legal
 route("GET", "/api/v1/hr/workers", ({ query }) => ({ items: limit(workers.filter((w) => matches(query.get("q"), w.legalName, w.personnelNumber)), query) }));
 route("GET", "/api/v1/hr/workers/{id}", ({ params }) => workers.find((w) => w.id === params.id) ?? reply.problem(404, "HR-0404", "No worker with that id"));
 
+// UX telemetry: the demo accepts events and drops them, so nothing is stored or sent anywhere.
+route("POST", "/api/v1/analytics/ux-events", () => reply.accepted({ accepted: 0, dropped: 0 }));
+
 // My work: a short, believable inbox that points into the demo tour.
 const inbox: InboxPage = {
   items: [
@@ -154,3 +157,69 @@ route("PUT", "/api/v1/tenant/setup/steps/{step}", ({ params, body }) => {
 });
 route("GET", "/api/v1/tenant/workspace-config", () => ({ config: null }));
 route("POST", "/api/v1/org/demo-company", () => ({ package: "demo-manufacturer", created: 0, present: 42 }));
+
+// Record search (GET /api/v1/search): customers, vendors and products from the company data, and the documents
+// the other areas hold, read back through their own list routes so the numbers always agree with those screens.
+interface SearchHit {
+  type: string;
+  id: string;
+  number: string;
+  title: string;
+  subtitle?: string;
+  status?: string;
+  link: string;
+}
+
+async function listed(path: string): Promise<Record<string, unknown>[]> {
+  try {
+    const res = await fetch(path);
+    const body = (await res.json()) as { items?: Record<string, unknown>[] };
+    return res.ok && Array.isArray(body.items) ? body.items : [];
+  } catch {
+    return [];
+  }
+}
+
+const str = (row: Record<string, unknown>, key: string): string => (typeof row[key] === "string" ? (row[key] as string) : "");
+
+async function documents(): Promise<SearchHit[]> {
+  const [pos, receipts, orders, slips, invoices] = await Promise.all([
+    listed("/api/v1/procurement/purchase-orders"),
+    listed("/api/v1/receiving/receipts"),
+    listed("/api/v1/sales/orders"),
+    listed("/api/v1/fulfillment/packing-slips"),
+    listed("/api/v1/billing/invoices"),
+  ]);
+  const doc = (type: string, row: Record<string, unknown>, number: string, link: string, status: string, subtitle = ""): SearchHit => ({
+    type,
+    id: str(row, "id"),
+    number,
+    title: number,
+    subtitle: subtitle || undefined,
+    status: status || undefined,
+    link: `${link}/${str(row, "id")}`,
+  });
+  return [
+    ...pos.map((r) => doc("purchase_order", r, str(r, "number"), "/purchasing/purchase-orders", str(r, "documentStatus"), `${str(r, "currency")} ${str(r, "total")}`.trim())),
+    ...receipts.map((r) => doc("receipt", r, str(r, "receiptNumber"), "/receiving/receipts", str(r, "state"))),
+    ...orders.map((r) => doc("sales_order", r, str(r, "orderNumber"), "/sales/orders", str(r, "status"))),
+    ...slips.map((r) => doc("packing_slip", r, str(r, "packingSlipNumber"), "/fulfillment/packing-slips", str(r, "status"), str(r, "postingDate"))),
+    ...invoices.map((r) => doc("customer_invoice", r, str(r, "number"), "/billing/invoices", str(r, "status"))),
+  ].filter((h) => h.number !== "" && h.id !== "");
+}
+
+route("GET", "/api/v1/search", async ({ query }) => {
+  const needle = (query.get("q") ?? "").trim().toLowerCase();
+  if (needle.length < 2) return reply.problem(400, "COM-0001", "request failed validation", { q: "must be 2 to 100 characters" });
+  const wanted = new Set((query.get("types") ?? "").split(",").filter(Boolean));
+  const masters: SearchHit[] = [
+    ...[...CUSTOMERS, ...VENDORS].map((p) => ({ type: "party", id: p.id, number: p.number, title: p.name, subtitle: "organization", status: "active", link: `/party/${p.id}` })),
+    ...ITEMS.map((i) => ({ type: "product", id: i.id, number: i.number, title: i.name, status: "active", link: `/product/${encodeURIComponent(i.number)}` })),
+  ];
+  const all = [...masters, ...(await documents())].filter((h) => wanted.size === 0 || wanted.has(h.type));
+  const rank = (h: SearchHit) => (h.number.toLowerCase() === needle ? 0 : h.number.toLowerCase().startsWith(needle) ? 1 : 2);
+  const results = all
+    .filter((h) => h.number.toLowerCase().includes(needle) || h.title.toLowerCase().includes(needle))
+    .sort((a, b) => rank(a) - rank(b) || a.number.localeCompare(b.number));
+  return { results: limit(results, query) };
+});

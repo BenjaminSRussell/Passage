@@ -28,6 +28,9 @@ import (
 const (
 	HeaderServiceToken = "X-Passage-Service-Token"
 
+	// VendorPortalIssuer is the one service whose tokens name a vendor (vnd).
+	VendorPortalIssuer = "supplier-portal"
+
 	ServiceTokenMaxTTL = 60 * time.Second
 
 	EnvServiceName        = "PASSAGE_SERVICE_NAME"
@@ -225,6 +228,14 @@ var serviceGrants = map[string]map[string][]string{
 	"processmfg": {
 		"identity": {"identity.feature.view"},
 	},
+	// The supplier portal BFF acts for one vendor user at a time (#511). Every token it signs carries the vendor id (vnd) from the
+	// user's verified session, and the target service scopes every read and write to that vendor. Only vendor-portal duties,
+	// which no human role holds, are granted.
+	"supplier-portal": {
+		"purchasing": {"procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"},
+		"receiving":  {"receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"},
+		"party":      {"party.vendor-portal.read", "party.vendor-portal.write"},
+	},
 }
 
 // ServiceGrantTable returns a copy of the static grant table.
@@ -268,12 +279,15 @@ func onlyTenantReads(duties []string) bool {
 // ServiceClaims is the signed payload: iss calls aud for tenant tid in legal
 // entity le on behalf of end user act, holding only the service's own duties.
 type ServiceClaims struct {
-	Iss    string   `json:"iss"`
-	Kid    string   `json:"kid,omitempty"`
-	Aud    string   `json:"aud"`
-	Tid    string   `json:"tid"`
-	Le     string   `json:"le"`
-	Act    string   `json:"act"`
+	Iss string `json:"iss"`
+	Kid string `json:"kid,omitempty"`
+	Aud string `json:"aud"`
+	Tid string `json:"tid"`
+	Le  string `json:"le"`
+	Act string `json:"act"`
+	// Vnd is the vendor a supplier portal user acts for. Only the supplier portal may sign it; a target reads it from the
+	// verified principal and never from a header or a body.
+	Vnd    string   `json:"vnd,omitempty"`
 	Duties []string `json:"duties"`
 	Iat    int64    `json:"iat"`
 	Exp    int64    `json:"exp"`
@@ -353,6 +367,14 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 // grant. A nil duties means the whole grant less its tenant-level duties, which
 // are signed only when asked for by name.
 func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, only []string) (string, error) {
+	if s.name == VendorPortalIssuer && p.VendorID == "" {
+		return "", errors.New("the supplier portal signs tokens for a vendor only")
+	}
+	vendor := ""
+	if s.name == VendorPortalIssuer {
+		// Any other service calling onward for a vendor caller signs no vendor: its own grant is the scope of that call.
+		vendor = p.VendorID
+	}
 	duties := serviceGrant(s.name, aud)
 	if only == nil {
 		duties = slices.DeleteFunc(slices.Clone(duties), func(d string) bool { _, ok := tenantLevelDuties[d]; return ok })
@@ -382,7 +404,7 @@ func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, 
 	}
 	now := s.now()
 	payload, err := json.Marshal(ServiceClaims{
-		Iss: s.name, Kid: s.kid, Aud: aud, Tid: tid, Le: le, Act: p.UserID, Duties: duties,
+		Iss: s.name, Kid: s.kid, Aud: aud, Tid: tid, Le: le, Act: p.UserID, Vnd: vendor, Duties: duties,
 		Iat: now.Unix(), Exp: now.Add(ServiceTokenMaxTTL).Unix(), Jti: hex.EncodeToString(jti),
 	})
 	if err != nil {
@@ -598,6 +620,13 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 	if tid, ok := canonicalUUID(c.Tid); !ok || tid != c.Tid || tid == ids.Nil {
 		return ServiceClaims{}, ErrServiceToken
 	}
+	if c.Vnd != "" {
+		if vnd, ok := canonicalUUID(c.Vnd); !ok || vnd != c.Vnd || vnd == ids.Nil || c.Iss != VendorPortalIssuer {
+			return ServiceClaims{}, ErrServiceToken
+		}
+	} else if c.Iss == VendorPortalIssuer {
+		return ServiceClaims{}, ErrServiceToken
+	}
 	if tenantLevel, mixed := tenantLevelToken(c.Duties); mixed || tenantLevel != (c.Le == "") {
 		return ServiceClaims{}, ErrServiceToken
 	} else if !tenantLevel {
@@ -665,7 +694,7 @@ func (c ServiceClaims) Principal() Principal {
 	for _, d := range c.Duties {
 		duties[d] = struct{}{}
 	}
-	return Principal{TenantID: c.Tid, LegalEntityID: c.Le, UserID: c.Act, Duties: duties, Service: c.Iss}
+	return Principal{TenantID: c.Tid, LegalEntityID: c.Le, UserID: c.Act, Duties: duties, Service: c.Iss, VendorID: c.Vnd}
 }
 
 var (

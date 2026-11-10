@@ -15,5 +15,6 @@ export const TOUR: TourStop[] = [
   { area: "Order to cash", label: "Price list", to: "/pricing/price-list", blurb: "Pick a customer to see every agreement that applies today and the net price at each quantity break." },
   { area: "Order to cash", label: "Price simulation", to: "/pricing/simulate", blurb: "Price a customer and product at a quantity, then read which agreements produced the net price." },
   { area: "Order to cash", label: "Shipments", to: "/fulfillment/shipments", blurb: "Shipments from release to delivered, matching the shipped sales orders; open one for lines, pallets and tracking." },
+  { area: "Order to cash", label: "Order to cash", to: "/sales/order-to-cash", blurb: "The five steps from order to payment with what waits at each, then open an order to see its document flow and next step." },
   { area: "Order to cash", label: "Invoices", to: "/billing", blurb: "Posted, part-paid and settled invoices for the shipped orders, plus a proposal ready to post." },
 ];
