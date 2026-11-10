@@ -247,7 +247,7 @@ describe("record arrival", () => {
     fillValid();
     fireEvent.click(screen.getByRole("button", { name: "Record arrival" }));
 
-    expect(await screen.findByText(/Packing slip already used on receipt RCV-00000009 \(RCV-DUP-001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Packing slip already used on receipt RCV-00000009/)).toBeInTheDocument();
     expect(screen.getByLabelText("Packing slip")).toBeInvalid();
     expect(screen.getByLabelText("Packing slip")).toHaveValue("PS-1");
   });
@@ -307,7 +307,9 @@ describe("receipt page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Post receipt" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm post" }));
 
-    expect(await screen.findByText(/receipt is at version 3, If-Match carried 2 \(COM-0412\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/receipt is at version 3, If-Match carried 2/)).toBeInTheDocument();
+    expect(screen.getByText("Someone else changed this record after you opened it. Reload the page to see the latest version, then make your change again.")).toBeInTheDocument();
+    expect(screen.getByText("COM-0412")).toBeInTheDocument();
     const before = server.calls.filter((c) => c.method === "GET").length;
     fireEvent.click(screen.getByRole("button", { name: "Reload receipt" }));
     await waitFor(() => expect(server.calls.filter((c) => c.method === "GET").length).toBe(before + 1));
@@ -347,7 +349,8 @@ describe("receipt page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel receipt" }));
     expect(screen.getByRole("button", { name: "Confirm cancel" })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Confirm cancel" }));
-    expect(await screen.findByText(/invoiced quantity and cannot be cancelled \(RCV-STA-001\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/invoiced quantity and cannot be cancelled/)).toBeInTheDocument();
+    expect(screen.getByText("RCV-STA-001")).toBeInTheDocument();
     expect(commandCalls()[0].url.pathname).toBe(`/api/v1/receiving/receipts/${ID}:cancel`);
     expect(header(commandCalls()[0], "If-Match")).toBe('"3"');
   });

@@ -5,6 +5,7 @@ import { dash, isCount, isDecimal, isSignedDecimal } from "./format";
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type UnitKey =
   | "unitId"
@@ -179,7 +180,7 @@ export function ValidationPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The units were not validated" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -212,7 +213,7 @@ export function ValidationPage() {
             icon="calendarCheck"
             headingLevel={3}
             title="No validation yet"
-            description="The form holds acceptance example AC-40.15. Validate it, or enter your own units' totals."
+            description="The form is filled in with an example. Validate it, or enter your own units' totals."
           />
         </Card>
       )}

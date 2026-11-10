@@ -17,6 +17,7 @@ import { DECIMAL, sentence } from "./format";
 import styles from "./pages.module.css";
 import { ScheduleTable } from "./OrderSchedule";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -95,7 +96,7 @@ export function PromiseLinePage() {
       <div className={styles.stack}>
         <PageHeader title="Promise order line" />
         <Alert tone="danger" title="Could not load the order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -246,7 +247,7 @@ export function PromiseLinePage() {
                     ) : undefined
                   }
                 >
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}

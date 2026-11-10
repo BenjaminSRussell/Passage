@@ -33,6 +33,7 @@ updates:
       - /services/ledger
       - /services/metadata
       - /services/migration
+      - /services/mobile
       - /services/numbering
       - /services/org
       - /services/party

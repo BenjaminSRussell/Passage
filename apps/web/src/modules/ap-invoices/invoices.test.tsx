@@ -220,7 +220,9 @@ describe("post vendor invoice", () => {
     fillValid();
     fireEvent.click(screen.getByRole("button", { name: "Post invoice" }));
 
-    expect(await screen.findByText("AP period for 2026-10-26 is closed (PER-AP-001)")).toBeInTheDocument();
+    expect(await screen.findByText("AP period for 2026-10-26 is closed")).toBeInTheDocument();
+    expect(screen.getByText("The accounting period is closed. Choose a date in an open period, or ask finance to reopen the period.")).toBeInTheDocument();
+    expect(screen.getByText("PER-AP-001")).toBeInTheDocument();
     expect(screen.getByLabelText("Invoice number")).toHaveValue("INV-1");
     fireEvent.click(screen.getByRole("button", { name: "Post invoice" }));
     await screen.findByText("Invoice INV-1 posted");

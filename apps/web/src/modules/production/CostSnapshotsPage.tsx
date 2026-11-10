@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, ty
 import { describeProblem, listCostSnapshots, runCostSnapshot, type CostSnapshot, type Problem } from "./api/client";
 import { statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -138,7 +139,7 @@ export function CostSnapshotsPage({ onOpenOrder }: CostSnapshotsPageProps) {
         {notice ? <Alert tone="success" title="Snapshot taken" live="status">{notice}</Alert> : null}
         {failure ? (
           <Alert tone={failure.status === 403 ? "info" : "danger"} title="The snapshot was not taken" live="alert">
-            {failure.status === 403 ? "You need the View production costs duty to take a snapshot." : `${failure.message} (${failure.code})`}
+            {failure.status === 403 ? "You need the View production costs duty to take a snapshot." : <ProblemMessage problem={failure} />}
           </Alert>
         ) : null}
       </Card>
@@ -160,7 +161,7 @@ export function CostSnapshotsPage({ onOpenOrder }: CostSnapshotsPageProps) {
       </Card>
       {state.error ? (
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The cost snapshots are not available" live="alert">
-          {state.error.status === 403 ? "You need the View production costs duty to see the snapshots." : `${state.error.message} (${state.error.code})`}
+          {state.error.status === 403 ? "You need the View production costs duty to see the snapshots." : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>

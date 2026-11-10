@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { act, configure, getConfig } from "@testing-library/react";
+import { beforeEach } from "vitest";
 
 // React 19 schedules more work asynchronously: the 1 s default for findBy*/waitFor
 // times out on a loaded runner, and passive effects from the render a findBy* waited
@@ -13,4 +14,9 @@ configure({
     await act(async () => {});
     return result;
   },
+});
+
+beforeEach(() => {
+  // Node-environment suites (e.g. plainLanguage.test.ts) have no window.
+  if (typeof window !== "undefined") window.localStorage.clear();
 });

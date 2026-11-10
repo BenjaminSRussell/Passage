@@ -5,6 +5,7 @@ import { GIT_STATUSES, listGoodsInTransit, type GITStatus, type GoodsInTransit }
 import { formatDateTime, money, stateTone, statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<GoodsInTransit>[] = [
   { key: "voyageReference", header: "Voyage", mono: true },
@@ -56,7 +57,7 @@ export function GoodsInTransitPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load goods in transit" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

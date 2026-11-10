@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { CONSIGNMENT_LINE_DIMENSIONS, createConsignment, describeProblem, type ConsignmentLineDimension, type Problem } from "./api/client";
 import { DECIMAL, sentence, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ConsignmentLineValues {
   productId: string;
@@ -236,7 +237,7 @@ export function NewConsignmentPage() {
         ) : null}
         {failure ? (
           <Alert tone="danger" title="Could not create the consignment order" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.formActions}>

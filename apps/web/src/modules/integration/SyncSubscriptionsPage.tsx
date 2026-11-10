@@ -6,6 +6,7 @@ import { DUTY_HUB_WRITE, listSubscriptions, type Subscription } from "./api/hubC
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Subscription>[] = [
   { key: "name", header: "Name" },
@@ -42,7 +43,7 @@ export function SyncSubscriptionsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load subscriptions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

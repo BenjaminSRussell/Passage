@@ -5,6 +5,7 @@ import { partnerSla, SLA_WINDOWS, type PartnerSla } from "./api/client";
 import { dash } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const percent = (value: number) => `${value.toFixed(2)} %`;
 
@@ -74,7 +75,7 @@ export function PartnerSlaPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load the SLA dashboard" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

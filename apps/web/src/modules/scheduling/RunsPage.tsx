@@ -4,6 +4,7 @@ import { listRuns, type Run } from "./api/client";
 import { formatDateTime, formatMinutes, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export const scopeLabels: Record<Run["scope"], string> = { site: "Whole site", selection: "Selection", order: "One order", move: "Gantt move", rollback: "Rollback" };
 export const directionLabels: Record<string, string> = { forward: "Forward", backward: "Backward" };
@@ -37,7 +38,7 @@ export function RunsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load runs" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

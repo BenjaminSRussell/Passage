@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
 import { describeProblem, newKey, PricingApiError, reviseCampaign, type Campaign, type CampaignRevision, type Problem } from "./api/client";
 import { addDays, DAY, DECIMAL, today } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Partial<Record<"name" | "validFrom" | "validTo" | "targetCustomerGroup" | "budget" | "form", string>>;
 
@@ -108,7 +109,7 @@ export function CampaignEditCard({ campaign, onChange }: { campaign: Campaign; o
         </Alert>
         {failure ? (
           <Alert tone="danger" title={failureTitle(failure.code)} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <form className={styles.form} onSubmit={submit} noValidate>

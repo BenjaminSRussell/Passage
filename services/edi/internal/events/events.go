@@ -34,10 +34,24 @@ var MessageSent = events.Type(Context, "message", "sent", 1)
 // delivery (consumers: the monitor and the task queue).
 var DeliveryFailed = events.Type(Context, "delivery", "failed", 1)
 
-// All lists every event type this service publishes. posted (PRD §6.35.5) is
-// published once posting into waves 26/19 exists; see NOT-IMPLEMENTED.md.
+// MessagePosted is published once when an inbound 850 or ORDERS became a sales
+// order (PRD §6.35.5; consumers: the monitor and analytics).
+var MessagePosted = events.Type(Context, "message", "posted", 1)
+
+// All lists every event type this service publishes.
 func All() []string {
-	return []string{MessageReceived, MessageAcked, MessageFailed, MessageSent, DeliveryFailed}
+	return []string{MessageReceived, MessageAcked, MessageFailed, MessageSent, MessagePosted, DeliveryFailed}
+}
+
+// MessagePostedData is the payload of MessagePosted.
+type MessagePostedData struct {
+	MessageID      string `json:"message_id"`
+	InterchangeID  string `json:"interchange_id"`
+	PartnerID      string `json:"partner_id"`
+	TransactionSet string `json:"transaction_set"`
+	ControlNumber  string `json:"control_number"`
+	STControl      string `json:"st_control"`
+	SalesOrderID   string `json:"sales_order_id"`
 }
 
 // DeliveryFailedData is the payload of DeliveryFailed. PayloadKind is

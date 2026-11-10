@@ -6,6 +6,7 @@ import { AMOUNT, DATE, UUID } from "./format";
 import { loadColumns } from "./LoadsPage";
 import styles from "./pages.module.css";
 import { RowsEditor, type RowField } from "./RowsEditor";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BuildValues {
   maxWeightKg: string;
@@ -162,7 +163,7 @@ export function BuildLoadsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not build the loads" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

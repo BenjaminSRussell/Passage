@@ -121,6 +121,7 @@ func Run(ctx context.Context, ledger ledgerclient.Ledger, in Request) (Result, e
 	}
 	res.Input = domain.ParallelInput{Period: in.Period, SourceSystem: in.System, DocumentsReplayed: len(res.Posted),
 		Revenue: in.Revenue, ExplainedMaxPct: in.ExplainedMaxPct,
-		Legacy: domain.TBLines(legacy, in.Period, "legacy"), Passage: domain.TBLines(passage, in.Period, "passage")}
+		Legacy:  domain.TBLines(legacy, in.Period, "legacy", domain.DocumentCounts(in.Documents, in.Period)),
+		Passage: domain.TBLines(passage, in.Period, "passage", nil)}
 	return res, nil
 }

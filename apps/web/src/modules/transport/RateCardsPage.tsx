@@ -5,6 +5,7 @@ import { listRateCards, type RateCard } from "./api/client";
 import { dash, fixed, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<RateCard>[] = [
   { key: "carrierId", header: "Carrier", mono: true, render: (row) => <span title={row.carrierId}>{shortId(row.carrierId)}</span> },
@@ -49,7 +50,7 @@ export function RateCardsPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load rate cards" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

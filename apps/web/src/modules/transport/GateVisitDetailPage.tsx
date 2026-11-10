@@ -6,6 +6,7 @@ import { Details } from "./Details";
 import { AMOUNT, arrivalText, dash, fixed, formatDateTime, gateTone, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const detailText = (detail: Record<string, string>) =>
   Object.entries(detail)
@@ -94,7 +95,7 @@ export function GateVisitDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Gate visit" />
         <Alert tone="danger" title="Could not load the gate visit" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/gate">Back to the gate log</Link>
       </div>
@@ -127,7 +128,7 @@ export function GateVisitDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.title} live="alert">
-          {failure.problem.message} ({failure.problem.code})
+          <ProblemMessage problem={failure.problem} />
         </Alert>
       ) : null}
       <Card>

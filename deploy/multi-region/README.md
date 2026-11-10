@@ -19,6 +19,10 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
   - `region-config.yaml`: `REGION_*`, `FAILOVER_MAX_LAG_S`, `DNS_*`, `MM2_*`, `CNPG_SYNC_QUORUM` for `passage-ops`.
   - `prometheusrule.yaml`: availability burn-rate recording rules, then replication, MM2, failover, SLO burn
     (multi-window, BR-50.6) and license alerts; each alert carries `runbook_url`.
+  - `backup.yaml`: the barman-cloud `ObjectStore` (bucket, credentials secret, `retentionPolicy`) and a daily
+    `ScheduledBackup`; the `Cluster` archives WAL to the same store (`plugins`, `isWALArchiver`). PRIMARY and
+    FENCED regions render it, PASSIVE does not. Restore one tenant to a point in time with
+    [tools/tenant-restore](../../tools/tenant-restore/README.md).
   - `values.schema.json`: role and provider enums and the PRD 9.50.13 ranges (`helm lint` enforces them).
 - `values/eu-west.yaml` (PRIMARY) and `values/eu-central.yaml` (PASSIVE): the reference pair. Both are EU
   regions because failover never crosses a residency boundary (PRD 9.50.20); other residencies get their
@@ -101,6 +105,9 @@ DNS and verifies the ledger hash chain. Procedure: [docs/ops/runbooks/failover.m
 - CNPG operator in `fence.operatorNamespace`, Strimzi watching `kafka.namespace`, Prometheus Operator CRDs.
 - A cross-region reachable endpoint for `postgres.primary.host` and an external TLS listener on the peer's
   Kafka (`deploy/kafka` exposes only internal listeners today).
+- The CNPG barman-cloud plugin (and its cert-manager dependency) next to the operator, a bucket per region
+  (`backup.destinationPath`, default `s3://passage-pg-backups-<region.id>/`) and the secret
+  `backup.credentialsSecret` with `ACCESS_KEY_ID` and `ACCESS_SECRET_KEY`.
 - Secrets copied from the peer region: `postgres.primary.replicationSecret`/`tlsSecret`,
   `kafka.remoteTrustSecret` and `kafka.remoteMm2Secret`.
 

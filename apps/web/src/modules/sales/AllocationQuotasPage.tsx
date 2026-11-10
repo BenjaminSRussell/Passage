@@ -14,6 +14,7 @@ import {
 import { DECIMAL, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -115,7 +116,7 @@ export function AllocationQuotasPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load allocation quotas" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -195,7 +196,7 @@ export function NewAllocationQuotaPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0035" ? "The period overlaps another quota" : "Could not save the quota"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

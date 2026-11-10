@@ -18,6 +18,7 @@ import {
 import { DATE, dash, duration, formatDateTime, shortId, today, utcInstant, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BoardValues {
   territoryId: string;
@@ -55,10 +56,9 @@ export function validateAssign(values: AssignValues): { errors: Errors; start?: 
   return { errors, start: start ?? undefined };
 }
 
-/** The dispatch rules a refused assignment broke, one line per code, in the service's words. */
+/** The dispatch rules a refused assignment broke, one line per code, in the service's words; empty when it names none. */
 export function ruleLines(problem: Problem): string[] {
-  const entries = Object.entries(problem.fields);
-  return entries.length > 0 ? entries.map(([code, detail]) => `${code}: ${detail}`) : [`${problem.message} (${problem.code})`];
+  return Object.entries(problem.fields).map(([code, detail]) => `${code}: ${detail}`);
 }
 
 const etagOf = (wo: WorkOrder) => `"${wo.version}"`;
@@ -114,7 +114,7 @@ export function DispatchBoardPage() {
         <EmptyState title="Pick a territory and a day" description="The board lists the technicians who cover the territory and the work orders waiting to be scheduled." />
       ) : state.error ? (
         <Alert tone="danger" title="Could not load the dispatch board" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !board ? (
         <div className={styles.loading} aria-busy="true">
@@ -224,11 +224,15 @@ function BoardView({ board, reload }: { board: DispatchBoard; reload(): void }) 
           title={failure.code === "conflict_version" ? "Someone else changed this work order" : failure.code.startsWith("SVC-DSP") ? "That assignment breaks a dispatch rule" : "The action failed"}
           live="alert"
         >
-          <ul>
-            {ruleLines(failure).map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
+          {ruleLines(failure).length > 0 ? (
+            <ul>
+              {ruleLines(failure).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <ProblemMessage problem={failure} />
+          )}
         </Alert>
       ) : null}
       <Card title="Unscheduled work orders" headingLevel={3}>

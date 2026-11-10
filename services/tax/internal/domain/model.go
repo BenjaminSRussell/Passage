@@ -19,6 +19,8 @@ const (
 	CodeProviderFallback        = "TAX-0007"
 	CodeSettlementMismatch      = "TAX-0008"
 	CodeNothingToSettle         = "TAX-0009"
+	CodeCurrencyMismatch        = "TAX-0011"
+	CodeLedgerDataUnexportable  = "TAX-0012"
 	CodeValidation              = "COM-0001"
 
 	MechStandard      = "standard"

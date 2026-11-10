@@ -19,6 +19,7 @@ import {
 import { DECIMAL, formatDateTime, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -119,7 +120,7 @@ export function ScheduleReleasesPage() {
       />
       {agreement.error && !a ? (
         <Alert tone="danger" title="Could not load the agreement" live="alert" action={<Button size="sm" onClick={agreement.reload}>Try again</Button>}>
-          {agreement.error.message} ({agreement.error.code})
+          <ProblemMessage problem={agreement.error} />
         </Alert>
       ) : !a ? (
         <div aria-busy="true">
@@ -152,7 +153,7 @@ export function ScheduleReleasesPage() {
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not record the shipped quantity" live="alert">
-                  {failure.message} ({failure.code})
+                  <ProblemMessage problem={failure} />
                 </Alert>
               </div>
             ) : null}
@@ -169,7 +170,7 @@ export function ScheduleReleasesPage() {
       )}
       {releases.error ? (
         <Alert tone="danger" title="Could not load the releases" live="alert" action={<Button size="sm" onClick={releases.reload}>Try again</Button>}>
-          {releases.error.message} ({releases.error.code})
+          <ProblemMessage problem={releases.error} />
         </Alert>
       ) : (
         <DataTable
@@ -277,7 +278,7 @@ export function NewScheduleReleasePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not store the release" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

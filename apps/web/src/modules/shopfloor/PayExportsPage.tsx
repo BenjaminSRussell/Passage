@@ -5,6 +5,7 @@ import { describeProblem, exportPay, listPayExports, MAX_EXPORT_RANGE_DAYS, newK
 import { addDays, daysBetween, formatDateTime, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<PayExport>[] = [
   { key: "batchId", header: "Batch", mono: true, render: (row) => row.batchId.slice(0, 8) },
@@ -75,12 +76,12 @@ export function PayExportsPage() {
         <Alert tone={failure.code === "SF-0111" ? "info" : "danger"} title={failure.code === "SF-0111" ? "Nothing to export" : "Could not export"} live="alert">
           {failure.code === "SF-0111"
             ? `Every approved pay line from ${from} to ${to} is already in a batch, or no day in the range is approved yet.`
-            : `${failure.message} (${failure.code})`}
+            : <ProblemMessage problem={failure} />}
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load export batches" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

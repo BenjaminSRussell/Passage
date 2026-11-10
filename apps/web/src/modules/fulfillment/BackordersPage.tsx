@@ -6,6 +6,7 @@ import { ShipmentStatusBadge } from "./badges";
 import { dash, formatDateTime, shortId, SHORT_PICK_REASONS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Rows per page of the report. */
 export const BACKORDER_PAGE = 100;
@@ -145,7 +146,7 @@ export function BackordersPage() {
       </Card>
       {state.error ? (
         <Alert tone="danger" title="Could not load the backorders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

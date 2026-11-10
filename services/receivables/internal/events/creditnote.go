@@ -22,6 +22,14 @@ type CreditNotePostedData struct {
 	Gross            decimal.Decimal  `json:"gross"`
 	Restocking       decimal.Decimal  `json:"restocking"`
 	Net              decimal.Decimal  `json:"net"`
+	Tax              decimal.Decimal  `json:"tax"`
+	TaxLines         []CreditNoteTax  `json:"tax_lines"`
 	JournalPostingID *string          `json:"journal_posting_id"`
 	Postings         []domain.Posting `json:"postings"`
+}
+
+type CreditNoteTax struct {
+	Code    string          `json:"code"`
+	Account string          `json:"account"`
+	Amount  decimal.Decimal `json:"amount"`
 }

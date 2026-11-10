@@ -13,6 +13,13 @@
 {{ upper .Values.postgres.synchronous.method }} {{ .Values.postgres.synchronous.number }}
 {{- end -}}
 
+{{- define "passage-mr.backupStore" -}}{{ .Values.postgres.clusterName }}-backup{{- end -}}
+
+{{/* "true" when this region's cluster archives WAL and takes base backups. */}}
+{{- define "passage-mr.backsUp" -}}
+{{- if and .Values.backup.enabled (ne .Values.region.role "PASSIVE") -}}true{{- end -}}
+{{- end -}}
+
 {{- define "passage-mr.labels" -}}
 app.kubernetes.io/part-of: passage
 app.kubernetes.io/managed-by: {{ .Release.Service }}

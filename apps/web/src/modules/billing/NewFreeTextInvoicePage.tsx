@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } fr
 import { BillingApiError, createFreeTextInvoice, describeProblem, newKey, type FreeTextInvoiceInput, type Problem } from "./api/client";
 import { ACCOUNT, CURRENCY, DAY, DECIMAL, TAX_CODE, today, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -282,7 +283,7 @@ export function NewFreeTextInvoicePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "BIL-0001" ? "The tax engine is unavailable; nothing was saved" : "Could not save the invoice"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -4,6 +4,7 @@ import { describeProblem, queryAsBuilt, type AsBuiltRecord, type Problem } from 
 import { validTrackingId } from "./AsBuiltPanel";
 import { trackingLabel } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** as-built: what went into a finished serial; where-used: which finished serial took a component serial. */
 export type Direction = "as-built" | "where-used";
@@ -88,7 +89,7 @@ export function AsBuiltInquiryPage({ onOpenOrder }: AsBuiltInquiryPageProps) {
       </Card>
       {result?.failure ? (
         <Alert tone="danger" title="Could not trace the serial" live="alert">
-          {result.failure.message} ({result.failure.code})
+          <ProblemMessage problem={result.failure} />
         </Alert>
       ) : null}
       {result && !result.failure ? (

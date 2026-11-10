@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
@@ -133,6 +134,19 @@ func TestApplyRegistersAnExternalOrigin(t *testing.T) {
 		in.Dims["site"] != "S1" || !in.Qty.Equal(decimal.NewFromInt(5)) || !in.EnteredQty.Equal(in.Qty) || in.Status != domain.StatusOrdered ||
 		!in.CostPrice.Equal(decimal.RequireFromString("2.5")) || in.Date.Format("2006-01-02") != "2026-10-01" || in.IdempotencyKey != "reg-1" {
 		t.Fatalf("store input %+v", in)
+	}
+}
+
+func TestApplyRegistrationRefusesAnIssueRef(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	line := ids.New()
+	body := `{"origin":{"sourceType":"SALES_LINE","sourceId":"` + line + `"},"legalEntityId":"` + ids.New() + `","productId":"` + ids.New() + `",
+		"dimensions":{"site":"S1","warehouse":"W1"},"qty":"-2","enteredUnit":"EA","currency":"USD","toStatus":"SOLD","date":"2026-10-01",
+		"issueRef":"` + issueclaim.SalesLineRef(line) + `"}`
+	rec := do(t, h, http.MethodPost, applyURL, body, []string{applyDuty}, key("ref"))
+	if rec.Code != http.StatusBadRequest || fs.createIn.SourceID != "" {
+		t.Fatalf("status %d body %s input %+v, want 400 and no store call", rec.Code, rec.Body.String(), fs.createIn)
 	}
 }
 

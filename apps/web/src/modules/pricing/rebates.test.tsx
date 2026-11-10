@@ -77,7 +77,7 @@ describe("Rebate agreements", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.rebate.view" });
     renderAt("/pricing/rebates");
-    expect(await findAlert()).toHaveTextContent("missing duty pricing.rebate.view (AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("missing duty pricing.rebate.view");
   });
 });
 
@@ -145,7 +145,7 @@ describe("New rebate agreement", () => {
     fill("Valid to", "2027-12-31");
     fill("Rate %", "2");
     fireEvent.click(screen.getByRole("button", { name: "Save agreement" }));
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0500)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
   });
 });
 
@@ -241,7 +241,7 @@ describe("Retroactive recompute", () => {
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
     fill("Posted invoice lines", "INV-A, 2027-03-05, 100");
     fireEvent.click(screen.getByRole("button", { name: "Recompute" }));
-    expect(await findAlert()).toHaveTextContent("agreement is not retroactive (COM-0001)");
+    expect(await findAlert()).toHaveTextContent("agreement is not retroactive");
   });
 
   it("parses pasted rows", () => {

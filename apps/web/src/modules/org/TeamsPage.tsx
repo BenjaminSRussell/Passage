@@ -17,6 +17,7 @@ import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
 import { StatusAction, useRows } from "./referenceParts";
 import { AddMemberForm, CreateTeamTypeForm, EditTeamForm, MemberActions } from "./TeamWrites";
+import { ProblemMessage } from "../../shell/errors";
 
 const codePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{1,19}$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -128,7 +129,7 @@ function CreateTeamForm({ types, onCreated }: { types: TeamType[]; onCreated(): 
         </FormField>
         {failure ? (
           <Alert tone="danger" title="Could not add the team" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div>
@@ -158,7 +159,7 @@ function TeamMembers({ team, canWrite }: { team: Team; canWrite: boolean }) {
     <Card title={`Members of ${team.code}`}>
       {members.error ? (
         <Alert tone="danger" title="Could not load the members" live="alert">
-          {members.error.message} ({members.error.code})
+          <ProblemMessage problem={members.error} />
         </Alert>
       ) : null}
       <DataTable
@@ -222,12 +223,12 @@ export function TeamsPage() {
       {canWrite ? <CreateTeamForm types={types.rows} onCreated={state.reload} /> : null}
       {types.error ? (
         <Alert tone="danger" title="Could not load team types" live="alert">
-          {types.error.message} ({types.error.code})
+          <ProblemMessage problem={types.error} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load teams" live="alert">
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       <DataTable label="Teams" columns={columns} rows={state.rows} getRowKey={(row) => row.id} loading={state.loading} empty={{ title: "No teams" }} />

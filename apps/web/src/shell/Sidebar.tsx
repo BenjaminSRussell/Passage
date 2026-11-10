@@ -1,39 +1,33 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
-import { Link, NavLink, matchPath, useLocation } from "react-router-dom";
-import type { NavItem, PassageModule } from "../modules/registry";
+import { useRef, type RefObject } from "react";
+import { Link, matchPath, NavLink, useLocation } from "react-router-dom";
 import { copy, shortcutHint } from "./copy";
 import { useFocusTrap } from "./hooks/useFocusTrap";
 import styles from "./Shell.module.css";
 import type { ShellNavItem } from "./shellNav";
 import { Button, Icon } from "./ui";
-import { workspaceIcon } from "./workspaceIcons";
+import { useWorkspaceNav } from "./workspaces/WorkspaceNav";
+import { WorkspaceSwitcher } from "./workspaces/WorkspaceSwitcher";
 
 export interface SidebarProps {
-  modules: PassageModule[];
   shellNav: ShellNavItem[];
   drawerOpen: boolean;
+  announce(message: string): void;
   searchRef: RefObject<HTMLButtonElement | null>;
   onOpenSearch(): void;
   onCloseDrawer(): void;
 }
 
-function containsPath(items: NavItem[], pathname: string): boolean {
-  return items.some((n) => matchPath({ path: n.to, end: true }, pathname) !== null);
-}
-
-export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch, onCloseDrawer }: SidebarProps) {
-  const { pathname } = useLocation();
+export function Sidebar({ shellNav, drawerOpen, announce, searchRef, onOpenSearch, onCloseDrawer }: SidebarProps) {
   const asideRef = useRef<HTMLElement>(null);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const { active, entries } = useWorkspaceNav();
+  const { pathname } = useLocation();
+  const covers = (to: string) => matchPath({ path: to, end: false }, pathname) !== null;
+  const outsideWorkspace =
+    shellNav.some((n) => matchPath({ path: n.to, end: true }, pathname) !== null) || active?.entries.some((e) => covers(e.to))
+      ? undefined
+      : entries.filter((e) => covers(e.to)).sort((a, b) => b.to.length - a.to.length)[0];
 
   useFocusTrap(asideRef, drawerOpen);
-
-  useEffect(() => {
-    const owner = modules.find((m) => containsPath(m.nav, pathname));
-    if (owner) {
-      setCollapsed((current) => (current[owner.id] ? { ...current, [owner.id]: false } : current));
-    }
-  }, [pathname, modules]);
 
   const dialogProps = drawerOpen ? { role: "dialog", "aria-modal": true, "aria-label": "Navigation" } : {};
 
@@ -80,6 +74,7 @@ export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch
           <kbd aria-hidden="true">{shortcutHint}</kbd>
         </button>
       </div>
+      <WorkspaceSwitcher announce={announce} />
       <nav aria-label="Workspaces" className={styles.nav}>
         <ul className={styles.list}>
           {shellNav.map((n) => (
@@ -91,38 +86,36 @@ export function Sidebar({ modules, shellNav, drawerOpen, searchRef, onOpenSearch
             </li>
           ))}
         </ul>
-        {modules.map((m) => {
-          const open = !collapsed[m.id];
-          const headerId = `nav-group-${m.id}`;
-          const listId = `nav-list-${m.id}`;
-          return (
-            <div key={m.id} className={styles.group}>
-              <button
-                type="button"
-                id={headerId}
-                className={styles.groupHeader}
-                aria-expanded={open}
-                aria-controls={listId}
-                onClick={() => setCollapsed((current) => ({ ...current, [m.id]: open }))}
-              >
-                <Icon name={workspaceIcon(m.id)} />
-                <span className={styles.groupTitle}>{m.title}</span>
-                <span className={styles.chevron}>
-                  <Icon name="chevronRight" />
-                </span>
-              </button>
-              <ul id={listId} className={styles.list} aria-labelledby={headerId} hidden={!open}>
-                {m.nav.map((n) => (
-                  <li key={n.to}>
-                    <NavLink end to={n.to} className={`${styles.item} ${styles.groupItem}`} onClick={onCloseDrawer}>
-                      {n.label}
-                    </NavLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
+        {active ? (
+          <div className={styles.group}>
+            <h2 id="nav-active-workspace" className={styles.groupLabel}>
+              {active.label}
+            </h2>
+            <ul className={styles.list} aria-labelledby="nav-active-workspace">
+              {active.entries.map((n) => (
+                <li key={n.to}>
+                  <NavLink end to={n.to} className={styles.item} onClick={onCloseDrawer}>
+                    {n.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {outsideWorkspace ? (
+          <div className={styles.group}>
+            <h2 id="nav-current-page" className={styles.groupLabel}>
+              {copy.workspaces.currentPage}
+            </h2>
+            <ul className={styles.list} aria-labelledby="nav-current-page">
+              <li>
+                <NavLink to={outsideWorkspace.to} className={styles.item} onClick={onCloseDrawer}>
+                  {outsideWorkspace.label}
+                </NavLink>
+              </li>
+            </ul>
+          </div>
+        ) : null}
       </nav>
     </aside>
   );

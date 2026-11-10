@@ -158,7 +158,7 @@ describe("Campaign list", () => {
     handler = () => json(403, { code: "AUTH-0003", detail: "missing duty scheduling.read" });
     renderAt("/scheduling/campaigns");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("missing duty scheduling.read (AUTH-0003)");
+    expect(alert).toHaveTextContent("missing duty scheduling.read");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
@@ -580,7 +580,7 @@ describe("Setup matrices", () => {
   it("shows a missing matrix as an error", async () => {
     handler = withResources((url) => (url.pathname.includes("/setup-matrices/") ? json(404, { code: "SCHED-0110", detail: "setup matrix not found" }) : undefined));
     renderAt(`/scheduling/setup-matrices/${MATRIX}`);
-    expect(await findAlert()).toHaveTextContent("setup matrix not found (SCHED-0110)");
+    expect(await findAlert()).toHaveTextContent("setup matrix not found");
   });
 });
 

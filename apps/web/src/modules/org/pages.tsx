@@ -13,6 +13,7 @@ import {
 import { LegalEntitySwitcher } from "./LegalEntitySwitcher";
 import { LegalEntityProvider, useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const dash = "—";
 
@@ -25,7 +26,7 @@ function OrgFrame() {
       </div>
       {error ? (
         <Alert tone="danger" title="Could not load legal entities" live="alert">
-          {error.message} ({error.code})
+          <ProblemMessage problem={error} />
         </Alert>
       ) : null}
       <Outlet />
@@ -116,7 +117,7 @@ export function ScopedListPage<T>({ title, label, emptyTitle, columns, getRowKey
       {toolbar ? toolbar(controls) : null}
       {state.error ? (
         <Alert tone="danger" title={`Could not load ${label.toLowerCase()}`} live="alert">
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       <DataTable label={label} columns={typeof columns === "function" ? columns(controls) : columns} rows={state.rows} getRowKey={getRowKey} loading={state.loading} empty={{ title: emptyTitle }} />

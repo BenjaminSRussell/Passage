@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type ReactNode } from "react";
 import { Badge, type BadgeTone } from "../../shell/ui";
 import { newKey, type Receipt, type ReceiptState } from "./api/client";
-import { ApiError, describeFailure, fieldErrors } from "../../shell/api/http";
+import { ApiError, fieldErrors } from "../../shell/api/http";
 import styles from "../../shell/pageLayout.module.css";
 
 const stateTone: Record<ReceiptState, BadgeTone> = {
@@ -40,7 +40,7 @@ export function useAction(receiptId: string) {
   const queryClient = useQueryClient();
   const key = useRef(newKey());
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<{ message: string; fields: Record<string, string>; stale: boolean } | null>(null);
+  const [failure, setFailure] = useState<{ error: unknown; fields: Record<string, string>; stale: boolean } | null>(null);
 
   async function run(command: (idempotencyKey: string) => Promise<Receipt>): Promise<boolean> {
     setBusy(true);
@@ -52,7 +52,7 @@ export function useAction(receiptId: string) {
       await queryClient.invalidateQueries({ queryKey: ["receiving", "receipts"] });
       return true;
     } catch (error) {
-      setFailure({ message: describeFailure(error), fields: fieldErrors(error), stale: error instanceof ApiError && error.status === 412 });
+      setFailure({ error, fields: fieldErrors(error), stale: error instanceof ApiError && error.status === 412 });
       return false;
     } finally {
       setBusy(false);

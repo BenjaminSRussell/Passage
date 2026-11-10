@@ -348,6 +348,7 @@ type Store interface {
 	WavePickStore
 	TrackingStore
 	ManifestStore
+	SalesReportStore
 	Ping(ctx context.Context) error
 }
 
@@ -388,16 +389,16 @@ func (s *Postgres) claimShipment(ctx context.Context, sh Shipment) (func(), erro
 	if s.claims == nil {
 		return undo, nil
 	}
-	perProduct := map[string]decimal.Decimal{}
+	// One claim per order line (ClaimAll merges the schedule lines of one
+	// line), under the line's ref: a warehouse pick for the line carries the
+	// same ref, so the ship of what was picked is not counted twice, and the
+	// line's DELIVERED booking at inventory settles it.
+	var claims []issueclaim.Claim
 	for _, l := range sh.Lines {
 		if q := l.Packed.Sub(l.Shipped); q.IsPositive() {
-			perProduct[l.ProductID] = perProduct[l.ProductID].Add(q)
+			claims = append(claims, issueclaim.Claim{LegalEntityID: sh.LegalEntityID, ProductID: l.ProductID, Warehouse: sh.WarehouseID, Kind: issueclaim.Ship, Qty: q,
+				Ref: issueclaim.SalesLineRef(l.OrderLineID), Key: fmt.Sprintf("fulfillment-ship:%s:%d:%s:%s", sh.ID, sh.Version, l.ProductID, l.OrderLineID)})
 		}
-	}
-	var claims []issueclaim.Claim
-	for product, q := range perProduct {
-		claims = append(claims, issueclaim.Claim{LegalEntityID: sh.LegalEntityID, ProductID: product, Warehouse: sh.WarehouseID, Kind: issueclaim.Ship, Qty: q,
-			Key: fmt.Sprintf("fulfillment-ship:%s:%d:%s:%s", sh.ID, sh.Version, product, q)})
 	}
 	undo, err := issueclaim.ClaimAll(ctx, s.claims, claims)
 	switch {
@@ -1353,6 +1354,11 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipPosted, p.TenantID, posted); err != nil {
 				return PackingSlip{}, err
 			}
+			// What shipped is reported to sales after commit by the reporter (#496),
+			// so a sales outage never holds up the post.
+			if err := queueSalesReport(ctx, tx, p.TenantID, sh.LegalEntityID, slip, tracked); err != nil {
+				return PackingSlip{}, err
+			}
 			if in.EmitASN {
 				if err := enqueue(ctx, tx, sh.ID, fulevents.ASNIssued, p.TenantID, asn); err != nil {
 					return PackingSlip{}, err
@@ -1456,6 +1462,11 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 				}
 			}
 			if _, err := tx.Exec(ctx, `update packing_slip set status = 'CANCELLED' where tenant_id = $1 and id = $2`, p.TenantID, orig.ID); err != nil {
+				return PackingSlip{}, err
+			}
+			// A delivery not yet reported to sales is never reported; one already
+			// reported stays with sales, which has no reversal of a delivery (#496).
+			if err := withdrawSalesReport(ctx, tx, p.TenantID, orig.ID); err != nil {
 				return PackingSlip{}, err
 			}
 			if _, err := tx.Exec(ctx, `update container set status = 'CLOSED', packing_slip_id = null where tenant_id = $1 and packing_slip_id = $2`,

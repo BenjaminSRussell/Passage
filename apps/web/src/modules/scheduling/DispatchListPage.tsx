@@ -5,6 +5,7 @@ import { fetchDispatchList, listResources, type DispatchLine, type Resource } fr
 import { clock, dash, formatDateTime, formatInZone, formatMinutes, shortId, today, WEEKDAYS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -106,7 +107,7 @@ export function DispatchListPage() {
       />
       {resources.error ? (
         <Alert tone="danger" title="Could not load the resources" live="alert" action={<Button size="sm" onClick={resources.reload}>Try again</Button>}>
-          {resources.error.message} ({resources.error.code})
+          <ProblemMessage problem={resources.error} />
         </Alert>
       ) : (
         <div className={`${styles.toolbar} ${styles.noPrint}`}>
@@ -141,7 +142,7 @@ export function DispatchListPage() {
       )}
       {state.error ? (
         <Alert tone="danger" title="Could not load the dispatch list" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

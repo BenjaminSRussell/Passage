@@ -16,6 +16,7 @@ import { JobStatusBadge } from "./JobsPage";
 import { kioskQueue, OfflineQueueFullError, submitOrQueue } from "./offlineQueue";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The kiosk's device id on registrations, so a supervisor can tell where a punch came from. */
 export const KIOSK_DEVICE_ID = "web-kiosk";
@@ -236,7 +237,7 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
         )}
         {jobs.error ? (
           <Alert tone="danger" title="Could not load the dispatch list" live="alert" action={<Button size="sm" onClick={jobs.reload}>Try again</Button>}>
-            {jobs.error.message} ({jobs.error.code})
+            <ProblemMessage problem={jobs.error} />
           </Alert>
         ) : !jobs.data ? (
           <Skeleton />

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mobile
+description: Passage mobile warehouse execution (wave 32 - menus, sessions, flows, scan parsing and offline replay)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -24,6 +24,7 @@ import { formatDateTime, sentence, shortId, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ServiceCase>[] = [
   { key: "number", header: "Case", mono: true },
@@ -239,7 +240,7 @@ export function OpenCasePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SVC-ENT-002" ? "No agreement covers this case" : "Could not open the case"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

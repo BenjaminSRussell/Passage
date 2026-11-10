@@ -37,6 +37,7 @@ import {
   sentence,
 } from "./pages";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const MAX_NOTE = 500;
 
@@ -193,7 +194,7 @@ function DecisionCard({
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <p>
           {applicable

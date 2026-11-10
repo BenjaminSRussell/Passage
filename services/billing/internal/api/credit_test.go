@@ -41,7 +41,7 @@ func TestCreditNote_FullCreditReversesTheOriginal(t *testing.T) {
 	tax := &fakeTax{perLine: "19.00"}
 	h := setup(t, s, tax)
 	orig := postedInvoice(t, h)
-	if orig.Credited == nil || orig.Credited.Remaining != "247.99" || orig.Lines[0].CreditedQty != "0" {
+	if orig.Credited == nil || orig.Credited.Remaining != "247.99" || orig.Lines[0].CreditedQty != "0" || orig.Lines[0].CreditedTax != "" {
 		t.Fatalf("posted invoice shows credited %+v lines %+v", orig.Credited, orig.Lines)
 	}
 	tax.perLine = "99.00" // a fresh quote would differ; the credit must carry the original tax
@@ -95,7 +95,7 @@ func TestCreditNote_FullCreditReversesTheOriginal(t *testing.T) {
 
 	var after invoiceDTO
 	decode(t, do(h, http.MethodGet, "/v1/billing/invoices/"+orig.ID, "", ""), &after)
-	if after.Credited.Gross != "247.99" || after.Credited.Remaining != "0.00" || after.Lines[0].CreditedQty != "3" {
+	if after.Credited.Gross != "247.99" || after.Credited.Remaining != "0.00" || after.Lines[0].CreditedQty != "3" || after.Lines[0].CreditedTax != "19.00" || after.Lines[1].CreditedTax != "19.00" {
 		t.Fatalf("original after the credit: %+v lines %+v", after.Credited, after.Lines)
 	}
 	more := do(h, http.MethodPost, "/v1/billing/credit-notes", "cn-2", creditBody(orig.ID, "2027-03-20", ""))

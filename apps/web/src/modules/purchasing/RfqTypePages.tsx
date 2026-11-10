@@ -15,6 +15,7 @@ import {
 } from "./api/client";
 import { Details, LoadError, StatusBadge, decimalPattern, rankingLabels, statusLabel, useResource, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -330,7 +331,7 @@ export function RFQTypeCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <TypeFields id="rt" form={form} set={set} errors={errors} creating />
         <Alert tone="danger" live="alert">
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
         <div className={styles.actions}>
           <Button type="submit" variant="primary" loading={busy}>
@@ -431,8 +432,8 @@ export function RFQTypeDetailPage() {
           >
             {failure
               ? stale
-                ? `Someone else changed this RFQ type since you opened it. Reload to see their change, then save again. (${failure.code})`
-                : `${failure.message} (${failure.code})`
+                ? <ProblemMessage problem={failure} message="Someone else changed this RFQ type since you opened it. Reload to see their change, then save again." />
+                : <ProblemMessage problem={failure} />
               : null}
           </Alert>
           <Alert tone="success" live="status">

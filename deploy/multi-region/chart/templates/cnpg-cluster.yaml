@@ -24,6 +24,13 @@ spec:
   imageName: {{ .Values.postgres.imageName }}
   primaryUpdateStrategy: unsupervised
   enableSuperuserAccess: false
+  {{- if include "passage-mr.backsUp" . }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ include "passage-mr.backupStore" . }}
+  {{- end }}
   postgresql:
     parameters:
       max_wal_senders: "16"

@@ -5,6 +5,7 @@ import { describeProblem, HOLD_TYPES, listOrders, ORDER_STATUSES, type HoldType,
 import { money, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Active holds as badges: CREDIT and FRAUD block confirmation, so they show as danger. */
 export function HoldBadges({ holds }: { holds: HoldType[] }) {
@@ -111,7 +112,7 @@ function OrderList({ title, description, label, empty }: OrderListProps) {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load orders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -126,7 +127,7 @@ function OrderList({ title, description, label, empty }: OrderListProps) {
       )}
       {moreError ? (
         <Alert tone="danger" title="Could not load more orders" live="alert">
-          {moreError.message} ({moreError.code})
+          <ProblemMessage problem={moreError} />
         </Alert>
       ) : null}
       {cursor && !state.error ? (

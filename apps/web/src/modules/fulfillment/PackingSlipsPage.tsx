@@ -6,6 +6,7 @@ import { SlipStatusBadge } from "./badges";
 import { formatDate, formatMoney, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<PackingSlipSummary>[] = [
   { key: "packingSlipNumber", header: "Packing slip", mono: true },
@@ -47,7 +48,7 @@ export function PackingSlipsPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load packing slips" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

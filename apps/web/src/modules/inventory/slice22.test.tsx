@@ -73,7 +73,7 @@ describe("Transfer order draft", () => {
     handler = (_u, init) => (init.method === "POST" ? json(412, { code: "conflict_version", detail: "changed since it was read" }) : json(200, order()));
     renderAt(`/inventory/transfer-orders/${ORDER_ID}`);
     fireEvent.click(await screen.findByRole("button", { name: "Confirm order" }));
-    expect(await findAlert()).toHaveTextContent("(conflict_version)");
+    expect(await findAlert()).toHaveTextContent("conflict_version");
     expect(screen.getByRole("button", { name: "Reload order" })).toBeInTheDocument();
   });
 });
@@ -104,7 +104,7 @@ describe("Delete a transfer order", () => {
     await waitFor(() => expect(screen.queryByText("Delete transfer order TO-ABCDEF123456?")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Delete order" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Delete order" }).at(-1)!);
-    expect(await screen.findByText(/has shipped quantity \(INV-TRF-006\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/has shipped quantity/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Transfer order TO-ABCDEF123456" })).toBeInTheDocument();
   });
 

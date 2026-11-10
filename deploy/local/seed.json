@@ -1,0 +1,51 @@
+{
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "legalEntityId": "00000000-0000-0000-0000-0000000000e1",
+  "users": [
+    {
+      "username": "admin",
+      "password": "passage-admin-dev",
+      "sub": "00000000-0000-0000-0000-0000000000a1",
+      "email": "admin@passage.localhost",
+      "firstName": "Ada",
+      "lastName": "Admin",
+      "tier": "standard",
+      "duties": [
+        "audit.read",
+        "identity.effective-permission.view",
+        "identity.legal-entity.maintain",
+        "identity.security-role.maintain",
+        "identity.user.maintain",
+        "ledger.balance.read",
+        "ledger.journal.read",
+        "numbering.read",
+        "numbering.sequence.maintain",
+        "numbering.write",
+        "party.read",
+        "party.vendor.maintain",
+        "party.write",
+        "procurement.purchase-order.confirm",
+        "procurement.purchase-order.inquire",
+        "procurement.purchase-order.maintain",
+        "receiving.receipt.maintain",
+        "receiving.receipt.post",
+        "receiving.vendor-invoice.post"
+      ]
+    },
+    {
+      "username": "clerk",
+      "password": "passage-clerk-dev",
+      "sub": "00000000-0000-0000-0000-0000000000c1",
+      "email": "clerk@passage.localhost",
+      "firstName": "Cole",
+      "lastName": "Clerk",
+      "tier": "standard",
+      "duties": [
+        "ledger.journal.read",
+        "party.read",
+        "procurement.purchase-order.inquire",
+        "receiving.receipt.maintain"
+      ]
+    }
+  ]
+}

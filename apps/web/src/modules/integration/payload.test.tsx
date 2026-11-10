@@ -154,7 +154,7 @@ describe("raw payload viewer", () => {
     };
     renderAt(`/integration/interchanges/${IC_A}`);
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("the stored interchange no longer parses (EDI-0003)");
+    expect(alert).toHaveTextContent("the stored interchange no longer parses");
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("list", { name: "Segment tree" })).toBeInTheDocument();
@@ -275,7 +275,7 @@ describe("bulk reprocess", () => {
     };
     renderAt("/integration/messages");
     fireEvent.click(await screen.findByRole("button", { name: "Reprocess 1" }));
-    expect(await findAlert()).toHaveTextContent("database unavailable (COM-0503)");
+    expect(await findAlert()).toHaveTextContent("database unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Reprocess 1" }));
     expect(await screen.findByText("1 transaction in 1 interchange changed.")).toBeInTheDocument();
     const keys = calls.filter((c) => c.url.pathname.endsWith("interchanges:reprocess")).map((c) => header(c, "Idempotency-Key"));

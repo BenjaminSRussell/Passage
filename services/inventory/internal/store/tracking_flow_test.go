@@ -7,8 +7,10 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/eventing"
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/issueclaim"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/api"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
 
 // TestPostingsFlow_BatchesAndSerials follows tracked stock through the
@@ -137,5 +139,81 @@ func TestPostingsFlow_BatchesAndSerials(t *testing.T) {
 	err := handle(flowEvent(t, api.ReceiptPostedType, api.ReceiptSource, receiptData("0199f480-0000-7000-8000-0000000000d2", box)))
 	if !eventing.IsPermanent(err) || !strings.Contains(err.Error(), api.CodePostingTracking) {
 		t.Fatalf("one serial for 12 EA: %v, want permanent %s", err, api.CodePostingTracking)
+	}
+}
+
+// TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims follows
+// a packing slip post (#496) through inventory: the slip's ship claim (under
+// the order line) stands in for the 3 serials until sales' DELIVERED report of
+// the slip, the shared fixture, is booked. The booking issues the serials and
+// settles the claim, and a replay of the event changes nothing.
+func TestPostingsFlow_ThePostedSlipsDeliveryMovesStockAndSettlesItsClaims(t *testing.T) {
+	s, _, _ := setup(t)
+	handlers := api.PostingsConsumerHandlers(s, flowUnits{}, domain.NegativePolicy{})
+	consumer := flowConsumerCtx(t)
+	handle := func(evt events.Event) error { return handlers[evt.Type].Handle(consumer, nil, evt) }
+	delivery := flowEvent(t, api.OrderProgressRecordedType, api.SalesSource, flowData(t, "../tracking-flow/orderprogress-delivered-tracked.json", nil))
+	var fx struct {
+		LegalEntityID string `json:"legal_entity_id"`
+		Lines         []struct {
+			LineID      string `json:"line_id"`
+			ProductID   string `json:"product_id"`
+			SiteID      string `json:"site_id"`
+			WarehouseID string `json:"warehouse_id"`
+		} `json:"lines"`
+	}
+	if err := json.Unmarshal(delivery.Data, &fx); err != nil {
+		t.Fatal(err)
+	}
+	l := fx.Lines[0]
+	read := entityCtx(1, fx.LegalEntityID)
+	receipt, err := json.Marshal(map[string]any{"receipt_id": "0199f480-0000-7000-8000-0000000000e1", "receipt_number": "RCV-S", "legal_entity_id": fx.LegalEntityID,
+		"posting_date": "2026-10-25", "currency": "USD", "lines": []map[string]any{{"line_no": 1, "product_id": l.ProductID, "unit": "EA", "qty": "3", "batch": "LOT-7",
+			"serials": []string{"SN-0002", "SN-0003", "SN-0004"}, "inventory_status": "AVAILABLE", "amount": "9", "amount_acct": "9", "unit_price": "3",
+			"site_id": l.SiteID, "warehouse_id": l.WarehouseID}, {"line_no": 2, "product_id": l.ProductID, "unit": "EA", "qty": "1", "batch": "LOT-8",
+			"serials": []string{"SN-0005"}, "inventory_status": "AVAILABLE", "amount": "3", "amount_acct": "3", "unit_price": "3",
+			"site_id": l.SiteID, "warehouse_id": l.WarehouseID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle(flowEvent(t, api.ReceiptPostedType, api.ReceiptSource, receipt)); err != nil {
+		t.Fatal(err)
+	}
+	claim := func(key, kind, qty, ref string) {
+		t.Helper()
+		if _, err := s.ClaimIssue(read, store.IssueClaimInput{IdempotencyKey: key, LegalEntityID: fx.LegalEntityID, ProductID: l.ProductID, Warehouse: l.WarehouseID,
+			Kind: kind, Qty: dec(qty), IssueRef: ref}); err != nil {
+			t.Fatalf("%s claim: %v", kind, err)
+		}
+	}
+	claim("warehouse-pick", "PICK", "3", issueclaim.SalesLineRef(l.LineID))
+	claim("fulfillment-ship", "SHIP", "3", issueclaim.SalesLineRef(l.LineID))
+	claim("adhoc-pick", "PICK", "1", "")
+	room := func() store.IssueRoom {
+		r, err := s.GetIssueRoom(read, fx.LegalEntityID, l.ProductID, l.WarehouseID, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	if r := room(); !r.Physical.Equal(dec("4")) || !r.Outstanding.Equal(dec("4")) {
+		t.Fatalf("before the delivery: %s physical, %s claimed, want 4 and 4 (the line's pick and ship once, the ad hoc pick)", r.Physical, r.Outstanding)
+	}
+	for i := 0; i < 2; i++ {
+		if err := handle(delivery); err != nil {
+			t.Fatalf("delivery %d: %v", i+1, err)
+		}
+	}
+	if n := len(flowTransactions(t, s, read, l.ProductID, "SALES_LINE")); n != 3 {
+		t.Fatalf("%d sales transactions, want the 3 serials issued once", n)
+	}
+	if r := room(); !r.Physical.Equal(dec("1")) || !r.Held.IsZero() || !r.Outstanding.Equal(dec("1")) {
+		t.Fatalf("after the delivery: %s physical, %s held, %s claimed, want 1, 0 and the ad hoc pick's 1", r.Physical, r.Held, r.Outstanding)
+	}
+	if err := s.ReleaseIssueClaim(read, "adhoc-pick"); err != nil {
+		t.Fatal(err)
+	}
+	if r := room(); !r.Outstanding.IsZero() {
+		t.Fatalf("after releasing the ad hoc pick: %s claimed, want 0", r.Outstanding)
 	}
 }

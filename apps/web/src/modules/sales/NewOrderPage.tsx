@@ -8,6 +8,7 @@ import { emptyOneTime, OneTimeFields, validateOneTime, type OneTimeValues } from
 import { LinesEditor } from "./LinesEditor";
 import { OrderProposals } from "./OrderProposals";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export { emptyLine, type LineValues } from "./lines";
 
@@ -172,7 +173,7 @@ export function NewOrderPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0011" ? "A product is not listed for this customer" : failure.code === "SLS-0016" ? "The order is over the one-time order limit" : "Could not save the order"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

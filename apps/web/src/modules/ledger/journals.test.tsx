@@ -392,7 +392,7 @@ describe("journal batch detail", () => {
     };
     renderAt(`/ledger/journal-batches/${BATCH}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(await screen.findByText("the user who submitted the batch may not approve it (LEDGER_SELF_APPROVAL)")).toBeInTheDocument();
+    expect(await screen.findByText("the user who submitted the batch may not approve it")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit batch" })).toBeNull();
 

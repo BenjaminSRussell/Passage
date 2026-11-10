@@ -146,7 +146,7 @@ describe("absence plans list", () => {
 
     handler = (url) => (url.pathname === "/api/v1/hr/absence/plans" ? json(503, { code: "COM-0500", detail: "HR is down" }) : undefined);
     renderAt("/hr/absence/plans");
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("HR is down (COM-0500)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("HR is down"));
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(gets("/api/v1/hr/absence/plans").length).toBeGreaterThanOrEqual(3));
   });
@@ -250,7 +250,7 @@ describe("absence plan detail", () => {
     fireEvent.change(within(form).getByLabelText("First day"), { target: { value: "2026-01-01" } });
     fireEvent.change(within(form).getByLabelText("Last day"), { target: { value: "2026-01-31" } });
     fireEvent.click(within(form).getByRole("button", { name: "Run accrual" }));
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("(HCM-ABS-YEAR-OPEN)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("HCM-ABS-YEAR-OPEN"));
   });
 
   it("closes a plan year and reports what carried over", async () => {
@@ -314,7 +314,7 @@ describe("absence requests queue", () => {
     renderAt("/hr/absence/requests");
     const table = await findTable({ name: "Absence requests" });
     fireEvent.click(within(table).getByRole("button", { name: "Approve Ada Lovelace's request from 2026-06-01" }));
-    await waitFor(() => expect(alertTexts().join(" ")).toContain("an approver cannot decide their own absence request (HCM-ABS-SELF-APPROVAL)"));
+    await waitFor(() => expect(alertTexts().join(" ")).toContain("an approver cannot decide their own absence request"));
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "APPROVED" } });
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/hr/absence/requests?status=APPROVED"));

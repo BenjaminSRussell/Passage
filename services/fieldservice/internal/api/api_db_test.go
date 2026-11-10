@@ -22,6 +22,12 @@ import (
 // service duty and no legal-entity scope.
 func dbRouter(t *testing.T) (http.Handler, context.Context) {
 	t.Helper()
+	_, h, ctx := dbAPI(t, nil)
+	return h, ctx
+}
+
+func dbAPI(t *testing.T, opt Optimizer) (*API, http.Handler, context.Context) {
+	t.Helper()
 	admin, pool := testkit.DBWithApp(t)
 	duties := map[string]struct{}{tenant.DutyAllScope: {}}
 	for _, d := range []string{dutyAgreement, dutyCaseCreate, dutyCaseMaintain, dutyWorkOrder, dutyBilling, dutyInquire, dutyDispatch, dutyTechnician} {
@@ -32,8 +38,12 @@ func dbRouter(t *testing.T) (http.Handler, context.Context) {
 		t.Fatal(err)
 	}
 	r := chi.NewRouter()
-	New(store.New(pool)).Register(r)
-	return r, ctx
+	a := New(store.New(pool))
+	if opt != nil {
+		a.WithOptimizer(opt)
+	}
+	a.Register(r)
+	return a, r, ctx
 }
 
 func call(t *testing.T, h http.Handler, ctx context.Context, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {

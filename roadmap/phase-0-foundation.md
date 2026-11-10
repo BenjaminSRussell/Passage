@@ -82,6 +82,13 @@ Keycloak, OPA, Envoy Gateway and the admin UI live in dev; the placeholder servi
 - [AX 2012 role-based security (roles/duties/privileges)](https://learn.microsoft.com/en-us/dynamicsax-2012/developer/role-based-security-in-microsoft-dynamics-ax)
 - [SCIM 2.0](https://datatracker.ietf.org/doc/html/rfc7644)
 
+**Partly verified end to end by**
+
+- `tools/e2e/gateway_test.go`
+- `tools/e2e/devenv/devenv_test.go`
+- `services/identity/cmd/devgateway/gateway_test.go`
+- `policies/authz/authz_test.rego`
+
 **Depends on:** wave 1
 
 ---

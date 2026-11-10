@@ -4,6 +4,7 @@ import { describeProblem, newKey, reprocessInterchange, type Problem, type Repro
 import { dash } from "./format";
 import { MessagePill } from "./parts";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ReprocessedMessage>[] = [
   { key: "transactionSet", header: "Set", mono: true },
@@ -66,7 +67,7 @@ export function ReprocessCard({ interchangeId, failedCount, onDone }: { intercha
         </p>
         {error ? (
           <Alert tone="danger" title="Reprocess failed" live="alert">
-            {error.message} ({error.code})
+            <ProblemMessage problem={error} />
           </Alert>
         ) : null}
         {result ? (

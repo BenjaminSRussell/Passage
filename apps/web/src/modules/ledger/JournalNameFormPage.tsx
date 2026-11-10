@@ -2,8 +2,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
-import { fetchJournalName, JOURNAL_NAME_CODE, LedgerApiError, putJournalName, type JournalName, type JournalNameInput } from "./api/client";
+import { fetchJournalName, JOURNAL_NAME_CODE, putJournalName, type JournalName, type JournalNameInput } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const MAX_NAME = 60;
 const MAX_LINES = 10000;
@@ -76,7 +77,7 @@ function JournalNameForm({ initial, existing, lockVersion }: { initial: JournalN
   const queryClient = useQueryClient();
   const [values, setValues] = useState<JournalNameDraft>(initial);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
   const update = (patch: Partial<JournalNameDraft>) => setValues((prev) => ({ ...prev, ...patch }));
@@ -93,7 +94,7 @@ function JournalNameForm({ initial, existing, lockVersion }: { initial: JournalN
       await queryClient.invalidateQueries({ queryKey: ["ledger", "journal-names"] });
       navigate("/ledger/journal-names");
     } catch (error) {
-      setFailure(error instanceof LedgerApiError ? `${error.message} (${error.code})` : (error as Error).message);
+      setFailure(error);
     } finally {
       setBusy(false);
     }
@@ -147,7 +148,7 @@ function JournalNameForm({ initial, existing, lockVersion }: { initial: JournalN
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the journal name" live="alert">
-              {failure}
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}

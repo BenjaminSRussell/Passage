@@ -28,6 +28,7 @@ import { dash, formatDateTime, sentence, shortId, utcInstant, utcLocal, UUID } f
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -318,7 +319,7 @@ export function NewActivityPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the activity" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -353,7 +354,7 @@ export function ActivityDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Activity" />
         <Alert tone="danger" title="Could not load the activity" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -420,7 +421,7 @@ export function ActivityDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failure.code === "conflict_version" ? "Someone else changed this activity; it was reloaded" : "The action failed"} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <Card title="Activity" headingLevel={3}>

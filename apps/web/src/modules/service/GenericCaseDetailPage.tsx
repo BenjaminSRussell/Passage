@@ -28,6 +28,7 @@ import { Details } from "./Details";
 import { dash, formatDateTime, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const logColumns: DataTableColumn<CaseLogEntry & { id: string }>[] = [
   { key: "at", header: "When", mono: true, render: (row) => formatDateTime(row.at) },
@@ -77,7 +78,7 @@ export function GenericCaseDetailPage() {
           live="alert"
           action={<Button size="sm" onClick={state.reload}>Try again</Button>}
         >
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -262,7 +263,7 @@ export function GenericCaseDetailPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title={failureTitle} live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
 

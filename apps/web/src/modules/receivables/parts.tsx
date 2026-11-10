@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Alert, Button } from "../../shell/ui";
 import { ReceivablesApiError, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One term and value in a details list (`<dl className={styles.details}>`). */
 export function Detail({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
@@ -18,7 +19,7 @@ export function Detail({ term, children, mono }: { term: string; children: React
 export function LoadFailure({ title, problem, retry }: { title: string; problem: Problem; retry(): void }) {
   return (
     <Alert tone="danger" title={title} live="alert" action={<Button size="sm" onClick={retry}>Try again</Button>}>
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }
@@ -27,7 +28,7 @@ export function LoadFailure({ title, problem, retry }: { title: string; problem:
 export function CommandFailure({ title, problem }: { title: string; problem: Problem }) {
   return (
     <Alert tone="danger" title={title} live="alert">
-      {problem.message} ({problem.code})
+      <ProblemMessage problem={problem} />
     </Alert>
   );
 }

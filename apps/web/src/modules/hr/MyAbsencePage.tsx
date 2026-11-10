@@ -3,6 +3,7 @@ import { AbsenceCard } from "./AbsenceCard";
 import { getMyProfile } from "./api/selfService";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** ESS: the signed-in employee's balances and requests, and the leave request form. The worker comes from the sign-in. */
 export function MyAbsencePage() {
@@ -18,7 +19,7 @@ export function MyAbsencePage() {
           </Card>
         ) : (
           <Alert tone="danger" title="Could not load your record" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         )
       ) : !state.data ? (
