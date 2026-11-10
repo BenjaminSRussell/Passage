@@ -1,8 +1,11 @@
 import { findStatus, findTable } from "../../test-utils";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
+import { WorkContextProvider } from "../../shell/lookup/workContext";
+import { WorkContext } from "../../shell/lookup/workContextState";
 import purchasing from "./module";
 
 const LE = "11111111-1111-4111-8111-111111111111";
@@ -35,19 +38,24 @@ function renderAt(path: string) {
     return null;
   }
   const view = render(
-    <MemoryRouter initialEntries={[path]}>
-      <Probe />
-      <Routes>
-        {purchasing.routes.map((r) => (
-          <Route key={r.path} path={r.path} element={r.element} />
-        ))}
-      </Routes>
-    </MemoryRouter>,
+    <WorkContextProvider identity="tester">
+      <MemoryRouter initialEntries={[path]}>
+        <Probe />
+        <Routes>
+          {purchasing.routes.map((r) => (
+            <Route key={r.path} path={r.path} element={r.element} />
+          ))}
+        </Routes>
+      </MemoryRouter>
+    </WorkContextProvider>,
   );
   return { router, ...view };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+});
 
 // Shell-level rules (one h1, nav, main, skip link) belong to the shell, which
 // these page tests do not mount; everything else must pass.
@@ -137,6 +145,87 @@ describe("new requisition", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("warns on tab close only once the form has unsaved lines", async () => {
+    stubFetch(() => json({}));
+    renderAt("/purchasing/requisitions/new");
+    const description = await screen.findByLabelText("Description");
+    const clean = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
+    fireEvent.change(description, { target: { value: "Laptop" } });
+    const dirty = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirty);
+    expect(dirty.defaultPrevented).toBe(true);
+  });
+
+  it("is not dirty just because the working legal entity was filled in", async () => {
+    window.localStorage.setItem("passage.workContext.tester", JSON.stringify({ legalEntityId: LE, siteId: "" }));
+    stubFetch(() => json({ id: LE, name: "Acme", code: "ACME" }));
+    renderAt("/purchasing/requisitions/new");
+    const description = await screen.findByLabelText("Description");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const untouched = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(untouched);
+    expect(untouched.defaultPrevented).toBe(false);
+    fireEvent.change(description, { target: { value: "Laptop" } });
+    const edited = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(edited);
+    expect(edited.defaultPrevented).toBe(true);
+  });
+
+  it("is not dirty when the working legal entity arrives after the form is open", async () => {
+    stubFetch(() => json({ id: LE, name: "Acme", code: "ACME" }));
+    let choose: (id: string) => void = () => undefined;
+    function Late() {
+      const [legalEntityId, setLegalEntityId] = useState("");
+      choose = setLegalEntityId;
+      return (
+        <WorkContext.Provider value={{ identity: "late", legalEntityId, siteId: "", setLegalEntityId, setSiteId: () => undefined }}>
+          <MemoryRouter initialEntries={["/purchasing/requisitions/new"]}>
+            <Routes>
+              {purchasing.routes.map((r) => (
+                <Route key={r.path} path={r.path} element={r.element} />
+              ))}
+            </Routes>
+          </MemoryRouter>
+        </WorkContext.Provider>
+      );
+    }
+    render(<Late />);
+    const description = await screen.findByLabelText("Description");
+    act(() => choose(LE));
+    await waitFor(() => expect(screen.getByLabelText("Legal entity")).not.toHaveValue(""));
+    const untouched = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(untouched);
+    expect(untouched.defaultPrevented).toBe(false);
+    fireEvent.change(description, { target: { value: "Laptop" } });
+    const edited = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(edited);
+    expect(edited.defaultPrevented).toBe(true);
+  });
+
+  it("opens More options and focuses the operating unit when it is invalid, and sends it when valid", async () => {
+    const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(requisition, 201) : json(requisition, 200, { ETag: '"1"' })));
+    const { container } = renderAt("/purchasing/requisitions/new");
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Laptop" } });
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "IT" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
+    const details = container.querySelector("details")!;
+    expect(details.open).toBe(false);
+    fireEvent.change(screen.getByLabelText("Operating unit id"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
+    await waitFor(() => expect(screen.getByLabelText("Operating unit id")).toHaveFocus());
+    expect(details.open).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("requisitions"), expect.objectContaining({ method: "POST" }));
+
+    fireEvent.change(screen.getByLabelText("Operating unit id"), { target: { value: VENDOR } });
+    fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit)?.method === "POST")).toBe(true));
+    const post = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "POST")!;
+    expect(JSON.parse(String((post[1] as RequestInit).body)).operatingUnitId).toBe(VENDOR);
+  });
+
   it("posts the lines with an Idempotency-Key and opens the new requisition with its warnings", async () => {
     const fetchMock = stubFetch((_url, init) => {
       if (init.method === "POST") {
@@ -145,7 +234,7 @@ describe("new requisition", () => {
       return json(requisition, 200, { ETag: '"1"' });
     });
     const { router } = renderAt("/purchasing/requisitions/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Laptop" } });
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "IT" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
@@ -170,8 +259,8 @@ describe("new requisition", () => {
     });
     renderAt("/purchasing/requisitions/new");
     expect(await screen.findByText(/or the price of the product's last approved order/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: "0197c1f2-0000-7000-8000-0000000000aa" } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "0197c1f2-0000-7000-8000-0000000000aa" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
     expect(await screen.findByText(/taken from the last order of P1, PO-00000042/)).toBeInTheDocument();
@@ -191,7 +280,7 @@ describe("new requisition", () => {
       json({ type: "t", title: "Unprocessable", status: 422, code: "COM-0001", detail: "legalEntityId must be a UUID", errors: { "lines[0].qty": "must be positive" } }, 422),
     );
     renderAt("/purchasing/requisitions/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Pens" } });
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "OFFICE" } });
     fireEvent.click(screen.getByRole("button", { name: "Save requisition" }));
@@ -280,9 +369,9 @@ describe("purchase orders", () => {
   it("creates an order with a trade-agreement-priced line and a charge", async () => {
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(purchaseOrder, 201) : json(purchaseOrder)));
     const { router } = renderAt("/purchasing/purchase-orders/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: "Add charge" }));
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: "25" } });
@@ -306,9 +395,9 @@ describe("purchase orders", () => {
   it("shows PRC-PRICE-001 when no agreement prices the line", async () => {
     stubFetch(() => problem(422, "PRC-PRICE-001", "no trade agreement price; enter a unit price"));
     renderAt("/purchasing/purchase-orders/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
     expect(await screen.findByText(/PRC-PRICE-001/)).toBeInTheDocument();
   });
@@ -322,9 +411,9 @@ describe("purchase orders", () => {
     };
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(released, 201) : json(released)));
     const { router } = renderAt("/purchasing/purchase-orders/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Agreement line id"), { target: { value: "nope" } });
     fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
     expect(await screen.findByText("Agreement line id must be a UUID.")).toBeInTheDocument();

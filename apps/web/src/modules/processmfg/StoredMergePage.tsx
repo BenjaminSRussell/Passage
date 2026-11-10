@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { holdsDuty } from "../../shell/dutyGate";
@@ -202,8 +203,8 @@ export function StoredMergePage({ merge = (req, key) => defaultMerge(req, key), 
       <form className={styles.stack} onSubmit={submit} noValidate>
         <Card title="Merge">
           <div className={styles.form}>
-            <FormField id="sm-item" label="Item id" hint="The batches of this item are listed below." error={errors.itemId}>
-              {(c) => <Input {...c} value={itemId} onChange={(e) => { setItemId(e.target.value); touch(); }} invalid={Boolean(errors.itemId)} />}
+            <FormField id="sm-item" label="Item" hint="The batches of this item are listed below." error={errors.itemId}>
+              {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => { setItemId(e.target.value); touch(); }} invalid={Boolean(errors.itemId)} />}
             </FormField>
             <FormField id="sm-target" label="New batch number" error={errors.target}>
               {(c) => <Input {...c} value={target} onChange={(e) => { setTarget(e.target.value); touch(); }} invalid={Boolean(errors.target)} />}

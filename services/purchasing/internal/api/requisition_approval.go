@@ -209,6 +209,6 @@ func (a *API) listRequisitionApprovals(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) registerRequisitionApprovalRoutes(r chi.Router) {
-	r.With(authz.Require(anyDuty{dutyRequisitionApprove, dutyPurchaseOrderInquire},
-		dutyRequisitionApprove+" or "+dutyPurchaseOrderInquire, "")).Get("/requisition-approvals", a.listRequisitionApprovals)
+	r.With(authz.Require(anyDuty{dutyRequisitionApprove, dutyPurchaseOrderInquire, dutyInboxRead},
+		dutyRequisitionApprove+", "+dutyPurchaseOrderInquire+" or "+dutyInboxRead, "")).Get("/requisition-approvals", a.listRequisitionApprovals)
 }

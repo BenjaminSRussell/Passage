@@ -8,8 +8,21 @@ release may change public APIs.
 
 ## [Unreleased]
 
+### Added
+
+- Web: payables module with vendor open items (filters, paging, hold and release), payment proposals (list, create, detail with totals and held items, approve and cancel with a confirm step and segregation-of-duties messages); payables open items now return `paymentHoldReason` (#528).
+- Billing reports INVOICED to the sales order (#29): posting an invoice that bills order lines queues one report per (invoice, order) in the post transaction (`sales_invoice_report`, migration 0014), and a leased reporter (`SALES_URL`, `BILLING_SALES_REPORT_INTERVAL`; chart `salesUrl`, `salesReportInterval`) sends it to sales' `:record-progress` as `service:billing-sales-report` with only `sales.order.record-invoice` (now `service_only`), key `billing-invoice:{invoiceId}:{orderId}`, retrying with backoff and parking a refused report with its reason; credit notes are not reported (sales has no reversal of an invoice). `SLS-0058`/`SLS-0059` answers are retried as "not yet" until the delivery report arrives; `GET /v1/billing/sales-reports` and `POST /v1/billing/sales-reports/{id}:retry` list and re-queue parked reports, the counter `billing_sales_reports_parked_total` counts them, and a batch is sized to fit the lease. The web record form now says deliveries and invoices are recorded automatically.
+- batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
+  approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
+  source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor). Their owners
+  gain the matching read paths: party `GET /v1/party/pending-changes`, payables `held=true` on `GET /v1/payables/open-items`, and
+  the narrow duties `procurement.inbox.read`, `ledger.inbox.read`, `party.inbox.read` and `payables.inbox.read`.
+- Billing: posted invoices and credit notes book their GL journal without an API request. An auto-book worker (`BILLING_GL_AUTOBOOK_TENANT_IDS`, `BILLING_GL_AUTOBOOK_INTERVAL`; chart `autoBook`) runs the `gl-postings` run per tenant and legal entity, idempotent per document and safe to retry after a lost ledger answer; the `outbox-billing` Debezium connector (CDC migrations 0012-0013, `debezium-cdc-billing` secret, `passage.billing.invoice` ACL) publishes billing's events, with a deploy test that checks the route against the AsyncAPI channel and ACLs (#29).
+
 ### Fixed
 
+- Receivables: an RMA credit now reserves its invoice lines in billing (`credit-reservations`, key `rma-credit:{legalEntity}:{rmaId}`) before it is stored, commits the reservation once the credit posts and releases it when the credit is parked, so an RMA credit and a billing credit note can no longer credit the same invoice line past what was invoiced; sales sends the invoice lines the returned products fall on, split across invoice lines like the tax reversal (#513). Deploy sales before receivables: with `BILLING_URL` set, receivables refuses a credit without `invoiceLines`.
+- Shopfloor: the job-card cost rate on `registration.posted` is the worker's dated rate effective on the day the work started, not the current base rate, so a later raise or back-dated rate no longer reprices past work (#25).
 - Review fixes on the batch-2 lane: the integration hub gains `GET /v1/hub/coexistence` and `POST /v1/hub/coexistence:retry-parked`
   so parked coexistence rows can be seen and retried (`hub.delivery.read`, `hub.subscription.write`); a replayed revrec
   credit-note line is acknowledged from its stored reversal after the contract was cancelled; the migration factory refuses a
@@ -19,6 +32,36 @@ release may change public APIs.
 
 ### Added
 
+- Per-tenant feature enablement (#504): `platform/go/features` holds the feature catalog (module, plain-language name, dependencies) and industry templates (Distribution, Manufacturing, Process manufacturing, Services) as data; identity gains `GET`/`PUT /v1/tenant/features` (tenant administrator only to change, audited, `IDN-FEATURE-DEPENDENCY` when a change would break a dependency, everything on by default) with migration 0012 and duties `identity.feature.view` and `identity.feature.maintain`; a `features.Require` middleware answers a disabled feature with a plain-words `FEAT-0001` problem, fails open and caches 30 s, and is wired in processmfg when `IDENTITY_URL` is set. Also fixes the `warehouse.offline-conflict.resolve` glob in `data.json` that identity's catalogue loader rejected.
+- Web form standard (#505): `FormSection` (More options / Advanced), `FormField required`, shared field help in `copy.fieldHelp`, `FormErrorSummary` that focuses the first problem, and `useUnsavedChanges` (dialog on in-app navigation, warning on tab close); applied to Record payment and New requisition; documented in `apps/web/docs/forms.md`.
+- Product: the web product pages run on the product service instead of built-in sample data: search by number or name with
+  keyset paging, product detail, and create and edit forms with field checks and plain-language errors (#529). `GET
+  /v1/product/products` gains `q`, `limit` (1 to 100, default 50) and `cursor`, and answers `nextCursor` when more follow.
+
+- Web: vendor invoice list (`/ap-invoices`, status and vendor filters, load more) and invoice detail (`/ap-invoices/:id`: lines, hold or rejection reason, ledger entry, links to the receipts and purchase orders) (#533); the detail reads `GET /v1/receiving/invoices/{id}`.
+- Migration factory: `POST /api/v1/migration/runs/{id}/opening-journal` posts the migrated GL balances of a gl_balances run to a legal entity's ledger through the ledger's posting API, one balanced journal per currency, refused whole with the difference named (MIG-1540) when a currency does not balance, idempotent by a fixed key per company, legal entity and currency (`gl_opening_posting`, migration 0024); `GET` lists what was posted, and a fully posted gl_balances pack no longer needs a go/no-go waiver (49-1, #49).
+- Billing credit reservations (#513): `POST /v1/billing/invoices/{id}/credit-reservations` (idempotent per RMA, line-level qty/net/tax) plus `POST /v1/billing/credit-reservations/{id}:commit` and `:release` (service duty `billing.credit-reservation.write` only; a released key can be retried under the bound) hold part of a posted invoice for a credit issued outside billing; reservations count with posted credit notes under the invoice's row lock, so the total credited can no longer exceed the invoiced amount (`BIL-0005`); the invoice read shows `credited.reserved` and `reservedQty`; receivables is granted `billing.credit-reservation.write` (receivables wiring follows).
+- Shared searchable lookup combobox (`EntityLookup`), top-bar legal entity and site context, `EntityName` display, party `:search` endpoints, org `q` search, and a vitest guard that fails on new `label="... id"` raw inputs; 235 existing raw id fields in 134 files are allowlisted for conversion, including helper-built, template and placeholder labels the first version of the guard missed (#500).
+- Budget planning (#38, P4): budgeting plan processes with Draft, Submitted, Reviewed and Approved stages, stage owners per org
+  unit, up to 10 scenarios with copy-from, a plan grid (account x cost center x period) with bulk upsert under ETag and
+  If-Match, even and prior-year-actuals spreading, and RLS on the five new tables. workflow-ts runs the approval as a Temporal
+  workflow per submission; approval posts the scenario as the Original budget register entry that budget control reads.
+- Usability program (#510): persona task scripts, a baseline report template and a release usability gate in
+  `apps/web/docs`, and a "Usability gate" section in the release notes template.
+- Plain-language error messages (#501): the web problem catalog now covers every error code of the party, ledger, tax and
+  product services, and the coverage test reads their Go sources so a new code without a message fails it.
+- Receiving: `GET /v1/receiving/invoices` lists vendor invoices with their lines and ledger entry id, filtered by
+  vendor, receipt, purchase order or status, keyset-paged and scoped to the caller's legal entities
+  (`receiving.ap.inquire`); `GET /v1/receiving/receipts?purchaseOrderId=` already existed and now has an API test (#502).
+- Treasury EBICS wiring (#36): subscriber onboarding routes with split duties (`treasury.ebics.write|keys|approve`; the confirmer is the authenticated user), a statement poller (`TREASURY_EBICS_POLL_WORKERS`), the `ebics` bank channel behind `TREASURY_BANK_CHANNELS`, downloads acknowledged only after import with per-statement account routing, E002 private key wiped after use with its public key stored apart, A006 over the order without CR/LF/Ctrl-Z.
+- EBICS H004 bank connectivity in treasury (#36, FR-36.12): `internal/ebics` replaces the unencrypted upload subset. A
+  subscriber moves NEW, INI_SENT, HIA_SENT, BANK_KEYS_PENDING, READY (migration 0009; bank key hashes must be confirmed by
+  a named person before any order). Keys stay in Vault: A006 (RSASSA-PSS) and X002 (PKCS#1 v1.5) sign in transit, E002 is
+  read from KV for each unwrap. Orders carry the C14N `AuthSignature`, E002 hybrid encryption (AES-128-CBC, RSA key
+  transport), zlib and segmentation; the bank's answers are verified against its X002 key. Upload CCT, CDD, CDB, CIP;
+  download C53, C52, C54, HAC, PTK, STA, VMK; C53 and STA feed the existing statement import. Return codes map to
+  back-off (bounded retries) or park (subscriber refuses orders until a person unparks it). Tested against an in-process
+  fake bank that verifies signatures, decrypts, segments and answers in H004; live bank sandbox and Vault stay with #213.
 - Mobile warehouse execution service (`services/mobile`, wave 32, #32): device sessions with idle timeout, takeover and resume, role- and site-based menus with SSE publish notice, versioned server-driven flows and step runner calling the warehouse work API (new `mobile` service grant), GS1-128/DataMatrix scan parsing, idempotent offline replay with conflict parking and a supervisor resolve queue, chart, migrations with forced RLS, authz routes, OpenAPI and AsyncAPI.
 - Local end-to-end run (#495): `make dev` starts Postgres, Kafka, Keycloak (realm rendered from `deploy/keycloak` with
   seeded admin and clerk users) and OPA in Docker, then ledger, numbering, party, purchasing and receiving, the new

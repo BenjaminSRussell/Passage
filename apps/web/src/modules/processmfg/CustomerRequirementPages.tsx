@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -112,11 +113,11 @@ export function CustomerRequirementsPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="req-filter-item" label="Item id" error={item !== "" && !UUID.test(item) ? "Enter the item id as a UUID." : undefined}>
-          {(c) => <Input {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={item !== "" && !UUID.test(item)} />}
+        <FormField id="req-filter-item" label="Item" error={item !== "" && !UUID.test(item) ? "Enter the item id as a UUID." : undefined}>
+          {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={item !== "" && !UUID.test(item)} />}
         </FormField>
-        <FormField id="req-filter-customer" label="Customer id" error={customer !== "" && !UUID.test(customer) ? "Enter the customer id as a UUID." : undefined}>
-          {(c) => <Input {...c} value={customerId} onChange={(e) => setCustomerId(e.target.value)} invalid={customer !== "" && !UUID.test(customer)} />}
+        <FormField id="req-filter-customer" label="Customer" error={customer !== "" && !UUID.test(customer) ? "Choose a customer." : undefined}>
+          {(c) => <EntityLookup entity="customer" {...c} value={customerId} onChange={(e) => setCustomerId(e.target.value)} invalid={customer !== "" && !UUID.test(customer)} />}
         </FormField>
       </div>
       {state.error ? (
@@ -181,7 +182,7 @@ export function NewCustomerRequirementPage() {
     event.preventDefault();
     const found: Record<string, string> = {};
     if (!UUID.test(itemId.trim())) found.itemId = "Enter the item id as a UUID.";
-    if (scope !== "item" && !UUID.test(partyId.trim())) found.partyId = `Enter the ${scope === "group" ? "customer group" : "customer"} id as a UUID.`;
+    if (scope !== "item" && !UUID.test(partyId.trim())) found.partyId = `Choose a ${scope === "group" ? "customer group" : "customer"}.`;
     const d = days.trim();
     if (d !== "" && (!/^\d{1,4}$/.test(d) || Number(d) > 3650)) found.days = "Enter whole days from 0 to 3650.";
     const name = attribute.trim();
@@ -233,8 +234,8 @@ export function NewCustomerRequirementPage() {
       <PageHeader title="Define requirement" description="A rule is never edited: retire it, or define its successor with a later valid-from date, which takes over from that day. Leave a field empty to leave that decision to a less specific rule." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="req-item" label="Item id" error={errors.itemId}>
-            {(c) => <Input {...c} value={itemId} onChange={(e) => on(setItemId)(e.target.value)} invalid={Boolean(errors.itemId)} />}
+          <FormField id="req-item" label="Item" error={errors.itemId}>
+            {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => on(setItemId)(e.target.value)} invalid={Boolean(errors.itemId)} />}
           </FormField>
           <FormField id="req-scope" label="Applies to">
             {(c) => (
@@ -408,7 +409,7 @@ export function StoredRequirementCheckPage({ check = defaultCheck, list = defaul
     event.preventDefault();
     const found: Record<string, string> = {};
     if (!itemValid) found.itemId = "Enter the item id as a UUID.";
-    if (customerId.trim() !== "" && !UUID.test(customerId.trim())) found.customerId = "Enter the customer id as a UUID.";
+    if (customerId.trim() !== "" && !UUID.test(customerId.trim())) found.customerId = "Choose a customer.";
     if (groupId.trim() !== "" && !UUID.test(groupId.trim())) found.groupId = "Enter the customer group id as a UUID.";
     if (!DATE.test(shipDate.trim())) found.shipDate = "Enter the ship date as yyyy-mm-dd.";
     if (!QUANTITY.test(qty.trim()) || Number(qty) === 0) found.qty = "Enter the line quantity above zero.";
@@ -467,11 +468,11 @@ export function StoredRequirementCheckPage({ check = defaultCheck, list = defaul
       <form className={styles.stack} onSubmit={submit} noValidate>
         <Card title="Line">
           <div className={styles.form}>
-            <FormField id="rc-item" label="Item id" error={errors.itemId}>
-              {(c) => <Input {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={Boolean(errors.itemId)} />}
+            <FormField id="rc-item" label="Item" error={errors.itemId}>
+              {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={Boolean(errors.itemId)} />}
             </FormField>
-            <FormField id="rc-customer" label="Customer id" hint="Leave empty to apply the item default only." error={errors.customerId}>
-              {(c) => <Input {...c} value={customerId} onChange={(e) => setCustomerId(e.target.value)} invalid={Boolean(errors.customerId)} />}
+            <FormField id="rc-customer" label="Customer" hint="Leave empty to apply the item default only." error={errors.customerId}>
+              {(c) => <EntityLookup entity="customer" {...c} value={customerId} onChange={(e) => setCustomerId(e.target.value)} invalid={Boolean(errors.customerId)} />}
             </FormField>
             <FormField id="rc-group" label="Customer group id" error={errors.groupId}>
               {(c) => <Input {...c} value={groupId} onChange={(e) => setGroupId(e.target.value)} invalid={Boolean(errors.groupId)} />}

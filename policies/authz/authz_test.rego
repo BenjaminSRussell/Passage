@@ -107,6 +107,9 @@ segregation_denials := [
 	["platform.release.view", "POST", "/v1/platform/releases"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
+	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],
+	["party.write", "GET", "/v1/party/vendors:search"],
+	["party.vendor-bank.write", "GET", "/v1/party/customers:search"],
 ]
 
 test_narrow_duties_cannot_reach_verb_routes if {
@@ -138,6 +141,8 @@ segregation_grants := [
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/consignment-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/ers-settlements:run"],
 	["receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-captures"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoices"],
+	["receiving.ap.inquire", "GET", "/v1/receiving/invoices/i1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/invoice-captures/c1"],
 	["receiving.ap.inquire", "GET", "/v1/receiving/ers-self-bills/i1"],
 	["receiving.service-entry.maintain", "POST", "/v1/receiving/service-entry-sheets"],
@@ -157,6 +162,9 @@ segregation_grants := [
 	["platform.promotion.approve", "POST", "/v1/platform/releases"],
 	["platform.environment.rollback", "POST", "/v1/platform/releases"],
 	["platform.release.maintain", "POST", "/v1/platform/releases"],
+	["party.read", "GET", "/v1/party/parties:search"],
+	["party.read", "GET", "/v1/party/vendors:search"],
+	["party.read", "GET", "/v1/party/customers:search"],
 ]
 
 test_verb_routes_granted_to_their_own_duty if {
@@ -590,6 +598,45 @@ test_inventory_issue_claim_is_service_only_and_opens_only_its_routes if {
 	not allowed("inventory.read", "POST", "/v1/inventory/issue-claims")
 }
 
+test_credit_reservation_routes_are_service_only if {
+	data.duties["billing.credit-reservation.write"].service_only
+	data.service_grants.receivables.billing == ["billing.invoice.read", "billing.credit-reservation.write"]
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/invoices/i1/credit-reservations")
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-reservations/r1:commit")
+	allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-reservations/r1:release")
+	not allowed("billing.credit-reservation.write", "POST", "/v1/billing/credit-notes")
+	every duty in ["billing.invoice.maintain", "billing.invoice.post", "billing.creditnote.post", "billing.invoice.view"] {
+		not allowed(duty, "POST", "/v1/billing/invoices/i1/credit-reservations")
+		not allowed(duty, "POST", "/v1/billing/credit-reservations/r1:commit")
+		not allowed(duty, "POST", "/v1/billing/credit-reservations/r1:release")
+	}
+}
+
+test_billing_sales_report_holds_only_the_service_only_invoice_duty if {
+	data.service_principals["billing-sales-report"] == ["sales.order.record-invoice"]
+	data.duties["sales.order.record-invoice"].service_only
+	"sales.order.record-invoice" in data.service_grants.billing.sales
+	not "sales.order.record-invoice" in data.service_grants.fulfillment.sales
+	allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:record-progress")
+	not allowed("sales.order.record-invoice", "PATCH", "/v1/sales/orders/o1")
+	not allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:confirm")
+	not allowed("sales.order.record-invoice", "POST", "/v1/sales/orders/o1:cancel")
+	not allowed("sales.order.record-invoice", "GET", "/v1/sales/order-progress")
+	not allowed("sales.order.read", "POST", "/v1/sales/orders/o1:record-progress")
+	not allowed("billing.invoice.post", "POST", "/v1/sales/orders/o1:record-progress")
+}
+
+test_billing_sales_report_operator_routes_split_view_and_post if {
+	allowed("billing.invoice.view", "GET", "/v1/billing/sales-reports")
+	allowed("billing.invoice.post", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.view", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.post", "GET", "/v1/billing/sales-reports")
+	not allowed("billing.invoice.maintain", "POST", "/v1/billing/sales-reports/r1:retry")
+	not allowed("billing.invoice.maintain", "GET", "/v1/billing/sales-reports")
+	not allowed("billing.invoice.post", "POST", "/v1/billing/sales-reports/r1:post")
+	not allowed("sales.order.record-invoice", "POST", "/v1/billing/sales-reports/r1:retry")
+}
+
 test_edi_source_read_duties_open_only_their_get_routes if {
 	data.service_grants.edi == {
 		"fulfillment": ["fulfillment.shipment.read"],
@@ -940,6 +987,51 @@ test_workflow_ts_eco_and_capa_service_duties if {
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances")
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:approve")
 	not allowed("quality.capa.execute", "POST", "/v1/quality/nonconformances/n1:refuse")
+}
+
+test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject if {
+	data.duties["budget.plan.workflow"].service_only
+	data.service_grants["workflow-ts"].budgeting == ["budget.plan.workflow"]
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/stages/review:sign-off")
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/stages/approve:sign-off")
+	allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1:reject")
+	not allowed("budget.plan.workflow", "GET", "/v1/budget/plans/p1")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1:submit")
+	not allowed("budget.plan.workflow", "PUT", "/v1/budget/plans/p1/scenarios/s1/grid")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
+}
+
+test_budget_plan_workflow_routes_are_refused_to_every_person_duty if {
+	routes := [
+		"/v1/budget/plans/p1/stages/review:sign-off",
+		"/v1/budget/plans/p1/stages/approve:sign-off",
+		"/v1/budget/plans/p1:reject",
+	]
+	every route in routes {
+		granting := granting_duties with input as {"action": "POST", "resource": route}
+		granting == {"budget.plan.workflow"}
+		person := person_duties with input as {"action": "POST", "resource": route}
+		person == set()
+		every duty in ["budget.plan.maintain", "budget.plan.decide", "budget.view", "budget.maintain", "budget.override"] {
+			not allowed(duty, "POST", route)
+		}
+	}
+}
+
+test_budget_plan_decide_routes_are_the_workflow_ts_decision_routes_only if {
+	not data.duties["budget.plan.decide"].service_only
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/review:sign-off")
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/approve:sign-off")
+	allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1:reject")
+	not allowed("budget.plan.decide", "GET", "/v1/workflows/budget-plans/p1")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1:submit")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/budget-plans/p1/stages/final:sign-off/extra")
+	not allowed("budget.plan.decide", "POST", "/v1/budget/plans/p1/stages/approve:sign-off")
+	not allowed("budget.plan.decide", "POST", "/v1/budget/plans/p1:reject")
+	not allowed("budget.plan.decide", "POST", "/v1/workflows/eco-approvals/e1:approve")
+	not allowed("budget.plan.maintain", "POST", "/v1/workflows/budget-plans/p1/stages/approve:sign-off")
+	not allowed("budget.plan.maintain", "POST", "/v1/workflows/budget-plans/p1:reject")
 }
 
 test_workflow_ts_transport_service_duty if {
@@ -1423,6 +1515,23 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
 }
 
+test_treasury_ebics_duties_split_ceremony_from_confirmation if {
+	allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers")
+	not allowed("treasury.ebics.write", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:send-hia")
+	allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:fetch-bank-keys")
+	not allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+	not allowed("treasury.ebics.keys", "POST", "/v1/treasury/ebics-subscribers/s-1:unpark")
+	allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+	allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:unpark")
+	not allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers/s-1:send-ini")
+	not allowed("treasury.ebics.approve", "POST", "/v1/treasury/ebics-subscribers")
+	allowed("treasury.view", "GET", "/v1/treasury/ebics-subscribers/s-1")
+	allowed("treasury.view", "GET", "/v1/treasury/ebics-subscribers/s-1/letters/INI")
+	not allowed("treasury.view", "POST", "/v1/treasury/ebics-subscribers/s-1:confirm-bank-keys")
+}
+
 test_payroll_run_duties_split_maintain_finalize_post_and_read if {
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs")
 	allowed("payroll.run.maintain", "POST", "/v1/payroll/runs/r-1/review")
@@ -1776,9 +1885,9 @@ test_mobile_service_routes if {
 dev_seed_assignments := {"tenant-1": {
 	"admin": [
 		"audit.read", "numbering.read", "numbering.sequence.maintain", "numbering.write",
-		"identity.user.maintain", "identity.security-role.maintain",
+		"identity.user.maintain", "identity.security-role.maintain", "identity.feature.view",
 	],
-	"clerk": ["receiving.receipt.maintain", "ledger.journal.read", "party.read"],
+	"clerk": ["receiving.receipt.maintain", "ledger.journal.read", "party.read", "identity.feature.view"],
 }}
 
 dev_seed_decision(user, action, resource) := decision if {
@@ -1813,4 +1922,83 @@ test_dev_seed_clerk_keeps_its_own_routes if {
 
 test_dev_seed_unknown_user_is_denied_everything if {
 	not dev_seed_decision("stranger", "GET", "/v1/ledger/journal-lines").allow
+}
+
+test_tenant_features_view_reads_only if {
+	allowed("identity.feature.view", "GET", "/v1/tenant/features")
+	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.view", "POST", "/v1/tenant/features")
+}
+
+test_tenant_features_maintain_reads_and_replaces if {
+	allowed("identity.feature.maintain", "GET", "/v1/tenant/features")
+	allowed("identity.feature.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "DELETE", "/v1/tenant/features")
+}
+
+test_tenant_features_are_not_reachable_through_other_identity_duties if {
+	not allowed("identity.tenant.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.legal-entity.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.security-role.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "GET", "/v1/tenants")
+	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/features/extra")
+}
+
+test_dev_seed_every_user_reads_features_but_cannot_change_them if {
+	dev_seed_decision("admin", "GET", "/v1/tenant/features").allow
+	dev_seed_decision("clerk", "GET", "/v1/tenant/features").allow
+	not dev_seed_decision("admin", "PUT", "/v1/tenant/features").allow
+	not dev_seed_decision("clerk", "PUT", "/v1/tenant/features").allow
+}
+
+test_processmfg_service_grant_reads_features_only if {
+	data.service_grants.processmfg == {"identity": ["identity.feature.view"]}
+	allowed("identity.feature.view", "GET", "/v1/tenant/features")
+	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.view", "GET", "/v1/tenants")
+	not allowed("identity.feature.view", "GET", "/v1/legal-entities")
+	not allowed("identity.feature.view", "GET", "/v1/authz/assignments")
+	not allowed("identity.feature.view", "POST", "/v1/identity/users")
+	not "identity.feature.maintain" in data.service_grants.processmfg.identity
+}
+
+inbox_routes := {
+	"procurement.inbox.read": "/v1/procurement/requisition-approvals",
+	"party.inbox.read": "/v1/party/pending-changes",
+	"ledger.inbox.read": "/v1/ledger/journal-batches",
+	"payables.inbox.read": "/v1/payables/open-items",
+}
+
+test_inbox_read_duties_are_service_only if {
+	every duty, _ in inbox_routes {
+		data.duties[duty].service_only == true
+	}
+}
+
+test_batch_grants_exactly_the_inbox_and_product_duties if {
+	data.service_grants.batch == {
+		"product": ["product.variants.explode", "product.released.read", "product.jobs.write"],
+		"purchasing": ["procurement.inbox.read"],
+		"party": ["party.inbox.read"],
+		"ledger": ["ledger.inbox.read"],
+		"payables": ["payables.inbox.read"],
+	}
+}
+
+test_inbox_read_duties_reach_only_their_list_route if {
+	every duty, route in inbox_routes {
+		allowed(duty, "GET", route)
+		not allowed(duty, "GET", concat("/", [route, "item-1"]))
+		not allowed(duty, "POST", route)
+		not allowed(duty, "POST", concat("/", [route, "item-1"]))
+		not allowed(duty, "GET", "/v1/inbox")
+	}
+}
+
+test_inbox_read_reaches_only_the_inbox if {
+	allowed("inbox.read", "GET", "/v1/inbox")
+	not allowed("inbox.read", "POST", "/v1/inbox")
+	not allowed("inbox.read", "GET", "/v1/inbox/item-1")
+	not allowed("inbox.read", "GET", "/v1/ledger/journal-batches")
+	not allowed("ledger.journal.read", "GET", "/v1/inbox")
 }

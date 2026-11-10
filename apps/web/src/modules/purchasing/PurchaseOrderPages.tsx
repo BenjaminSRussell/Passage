@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -351,8 +352,8 @@ function LinesCard({
               ) : null}
             </div>
             <div className={styles.grid}>
-              <FormField id={id("product")} label="Product id" optional error={err("productId")}>
-                {(c) => <Input {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
+              <FormField id={id("product")} label="Product" optional error={err("productId")}>
+                {(c) => <EntityLookup entity="product" {...c} value={line.productId} onChange={(e) => update(i, { productId: e.target.value })} />}
               </FormField>
               <FormField id={id("description")} label="Description" optional error={err("description")}>
                 {(c) => <Input {...c} value={line.description} onChange={(e) => update(i, { description: e.target.value })} />}
@@ -408,21 +409,21 @@ function LinesCard({
               </FormField>
               <FormField
                 id={id("site")}
-                label="Deliver to site id"
+                label="Deliver to site"
                 optional
                 hint={destinationHint}
                 error={err("siteId")}
               >
-                {(c) => <Input {...c} value={line.siteId} readOnly={received} onChange={(e) => update(i, { siteId: e.target.value })} />}
+                {(c) => <EntityLookup entity="site" prefill={false} {...c} value={line.siteId} readOnly={received} onChange={(e) => update(i, { siteId: e.target.value })} />}
               </FormField>
               <FormField
                 id={id("warehouse")}
-                label="Deliver to warehouse id"
+                label="Deliver to warehouse"
                 optional
                 hint={destinationHint}
                 error={err("warehouseId")}
               >
-                {(c) => <Input {...c} value={line.warehouseId} readOnly={received} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
+                {(c) => <EntityLookup entity="warehouse" {...c} value={line.warehouseId} readOnly={received} onChange={(e) => update(i, { warehouseId: e.target.value })} />}
               </FormField>
               {existing ? (
                 line.agreementLineId ? (
@@ -648,11 +649,11 @@ export function PurchaseOrderCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Order">
           <div className={styles.grid}>
-            <FormField id="po-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} />}
+            <FormField id="po-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} />}
             </FormField>
-            <FormField id="po-vendor" label="Vendor id" error={errors.vendorId}>
-              {(c) => <Input {...c} value={vendorId} onChange={(e) => setVendorId(e.target.value)} />}
+            <FormField id="po-vendor" label="Vendor" error={errors.vendorId}>
+              {(c) => <EntityLookup entity="vendor" scope={{ legalEntityId: legalEntityId || undefined }} {...c} value={vendorId} onChange={(e) => setVendorId(e.target.value)} />}
             </FormField>
             <FormField id="po-currency" label="Currency" error={errors.currency}>
               {(c) => <Input {...c} value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />}

@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Button, Card, DataTable, FormField, Input, Select, type DataTableColumn } from "../../shell/ui";
 import {
   assessCriticality,
@@ -271,8 +272,8 @@ export function WarrantyCard({ assetId, onSaved }: { assetId: string; onSaved(te
           <FormField id="war-type" label="Warranty type" error={errors.warrantyType}>
             {(control) => <Input {...control} value={values.warrantyType} maxLength={20} invalid={Boolean(errors.warrantyType)} onChange={(e) => update({ warrantyType: e.target.value })} />}
           </FormField>
-          <FormField id="war-vendor" label="Vendor party id" error={errors.vendorPartyId}>
-            {(control) => <Input {...control} value={values.vendorPartyId} invalid={Boolean(errors.vendorPartyId)} onChange={(e) => update({ vendorPartyId: e.target.value })} />}
+          <FormField id="war-vendor" label="Vendor party" error={errors.vendorPartyId}>
+            {(control) => <EntityLookup entity="party" {...control} value={values.vendorPartyId} invalid={Boolean(errors.vendorPartyId)} onChange={(e) => update({ vendorPartyId: e.target.value })} />}
           </FormField>
           <FormField id="war-basis" label="Starts from">
             {(control) => (

@@ -176,6 +176,23 @@ func TestPostgres_ListSitesFiltersAndPages(t *testing.T) {
 	}
 }
 
+func TestPostgres_ListSitesSearchesCodeAndName(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("US01"))
+	plain := mustCreateSite(t, s, ctx, newSite(a.ID, "S1"))
+	named := newSite(a.ID, "HARB")
+	named.Name = "Harbour Depot"
+	harbour := mustCreateSite(t, s, ctx, named)
+	for query, want := range map[string]string{"harbour d": harbour.ID, "harb": harbour.ID, "s1": plain.ID} {
+		if page, err := s.ListSites(ctx, store.SiteFilter{Query: query}, store.SiteKey{}, store.MaxPageSize); err != nil || len(page.Items) != 1 || page.Items[0].ID != want {
+			t.Fatalf("query %q = %+v, %v", query, page, err)
+		}
+	}
+	if page, err := s.ListSites(ctx, store.SiteFilter{Query: "%"}, store.SiteKey{}, store.MaxPageSize); err != nil || len(page.Items) != 0 {
+		t.Fatalf("a bare percent sign must match nothing: %+v, %v", page, err)
+	}
+}
+
 func TestPostgres_UpdateSiteVersionsAndEmitsOneEvent(t *testing.T) {
 	s, ctx, pool := lifecycleStore(t)
 	a := mustCreate(t, s, ctx, newEntity("US01"))

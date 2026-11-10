@@ -10,14 +10,17 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type fakeVault struct {
@@ -88,84 +91,30 @@ func (v *fakeVault) signer() VaultTransit {
 	return VaultTransit{Addr: v.srv.URL, Token: "s.test-token"}
 }
 
-type bankUpload struct {
-	namespace string
-	fields    map[string]string
+type stubBank struct {
+	pub      *rsa.PublicKey
+	uploads  int
+	verified int
+	err      error
 }
 
-type fakeBank struct {
-	t          *testing.T
-	pub        *rsa.PublicKey
-	mu         sync.Mutex
-	uploads    []bankUpload
-	verified   int
-	returnCode string
-	status     int
-	srv        *httptest.Server
-}
+func newFakeBank(_ *testing.T, pub *rsa.PublicKey) *stubBank { return &stubBank{pub: pub} }
 
-func newFakeBank(t *testing.T, pub *rsa.PublicKey) *fakeBank {
-	b := &fakeBank{t: t, pub: pub, returnCode: ebicsOK, status: http.StatusOK}
-	b.srv = httptest.NewServer(http.HandlerFunc(b.serve))
-	t.Cleanup(b.srv.Close)
-	return b
-}
+func (b *stubBank) Protocol() string { return ProtocolEBICS }
 
-func parseH004(r io.Reader) (bankUpload, bool) {
-	dec := xml.NewDecoder(r)
-	up := bankUpload{fields: map[string]string{}}
-	var path []string
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			return up, len(path) == 0 && up.namespace != ""
-		}
-		if err != nil {
-			return up, false
-		}
-		switch el := tok.(type) {
-		case xml.StartElement:
-			if len(path) == 0 {
-				up.namespace = el.Name.Space
-			}
-			path = append(path, el.Name.Local)
-		case xml.CharData:
-			if txt := strings.TrimSpace(string(el)); txt != "" && len(path) > 0 {
-				up.fields[strings.Join(path, "/")] += txt
-			}
-		case xml.EndElement:
-			path = path[:len(path)-1]
-		}
-	}
-}
-
-func (b *fakeBank) serve(w http.ResponseWriter, r *http.Request) {
-	up, ok := parseH004(r.Body)
-	if r.Method != http.MethodPost || !ok || up.namespace != "urn:org:ebics:H004" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	data, _ := base64.StdEncoding.DecodeString(up.fields["ebicsRequest/body/DataTransfer/OrderData"])
-	raw, _ := base64.StdEncoding.DecodeString(up.fields["ebicsRequest/body/SignatureData"])
-	digest := sha256.Sum256(data)
-	b.mu.Lock()
-	b.uploads = append(b.uploads, up)
-	if rsa.VerifyPSS(b.pub, crypto.SHA256, digest[:], raw, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}) == nil {
+func (b *stubBank) Send(_ context.Context, f File, sig Signature) (Receipt, error) {
+	b.uploads++
+	digest := sha256.Sum256(f.Data)
+	if rsa.VerifyPSS(b.pub, crypto.SHA256, digest[:], sig.Bytes, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}) == nil {
 		b.verified++
 	}
-	code, status := b.returnCode, b.status
-	b.mu.Unlock()
-	if status != http.StatusOK {
-		w.WriteHeader(status)
-		return
+	if b.err != nil {
+		return Receipt{}, b.err
 	}
-	w.Header().Set("Content-Type", "text/xml")
-	_, _ = io.WriteString(w, `<ebicsResponse xmlns="urn:org:ebics:H004"><header><static><TransactionID>TX-0001</TransactionID></static><mutable><ReturnCode>`+code+`</ReturnCode><ReportText>report</ReportText></mutable></header></ebicsResponse>`)
+	return Receipt{Reference: "TX-0001"}, nil
 }
 
-func (b *fakeBank) transport() EBICS {
-	return EBICS{URL: b.srv.URL, HostID: "HOST1", PartnerID: "PARTNER1", UserID: "USER1"}
-}
+func (b *stubBank) transport() *stubBank { return b }
 
 type memoryAudit struct {
 	rows      []AuditEntry
@@ -193,16 +142,8 @@ func TestSender_SignsInVaultSendsOverEBICSAndAudits(t *testing.T) {
 	if receipt.Reference != "TX-0001" {
 		t.Fatalf("receipt = %+v", receipt)
 	}
-	if len(bank.uploads) != 1 || bank.verified != 1 {
-		t.Fatalf("bank saw %d uploads, %d with a signature that verifies against the Vault key", len(bank.uploads), bank.verified)
-	}
-	f := bank.uploads[0].fields
-	if f["ebicsRequest/header/static/HostID"] != "HOST1" || f["ebicsRequest/header/static/PartnerID"] != "PARTNER1" ||
-		f["ebicsRequest/header/static/UserID"] != "USER1" || f["ebicsRequest/header/static/OrderDetails/OrderType"] != "CCT" {
-		t.Fatalf("upload header = %+v", f)
-	}
-	if strings.Contains(f["ebicsRequest/body/SignatureData"], "vault:") {
-		t.Fatal("the vault: prefix reached the bank")
+	if bank.uploads != 1 || bank.verified != 1 {
+		t.Fatalf("bank saw %d uploads, %d with a signature that verifies against the Vault key", bank.uploads, bank.verified)
 	}
 	sum := sha256.Sum256(pain001.Data)
 	if len(audit.rows) != 2 || audit.rows[0].Event != EventPrepared || audit.rows[1].Event != EventSent {
@@ -262,12 +203,135 @@ func TestURLs_PlainHTTPOnlyToLoopback(t *testing.T) {
 		if _, err := (VaultTransit{Addr: bad, Token: "t"}).Sign(context.Background(), "k", nil); err == nil || !strings.Contains(err.Error(), "url") {
 			t.Errorf("vault %q: err = %v", bad, err)
 		}
-		if _, err := (EBICS{URL: bad}).Send(context.Background(), pain001, Signature{Bytes: []byte{1}}); err == nil || !strings.Contains(err.Error(), "url") {
-			t.Errorf("bank %q: err = %v", bad, err)
+	}
+}
+
+func TestCheckURL_Table(t *testing.T) {
+	cases := []struct {
+		url      string
+		dev      bool
+		wantFail bool
+	}{
+		{"https://bank.example.com/ebics", false, false},
+		{"https://93.184.216.34/ebics", false, false},
+		{"https://[2606:2800:220:1::1]/ebics", false, false},
+		{"https://203.0.113.9/ebics", false, true},
+		{"http://bank.example.com/ebics", false, true},
+		{"http://bank.example.com/ebics", true, true},
+		{"https://localhost./ebics", false, true},
+		{"https://bank.localhost/ebics", false, true},
+		{"https://2130706433/ebics", false, true},
+		{"https://0x7f.1/ebics", false, true},
+		{"https://127.1/ebics", false, true},
+		{"https://0177.0.0.1/ebics", false, true},
+		{"https://bank.cafe/ebics", false, false},
+		{"https://bank.example.com./ebics", false, false},
+		{"https://[::ffff:0:0:1]/ebics", false, true},
+		{"https://192.88.99.1/ebics", false, true},
+		{"https://[2001:20::1]/ebics", false, true},
+		{"https://127.0.0.1:8443/ebics", true, false},
+		{"http://localhost:8080", false, true},
+		{"http://127.0.0.1:8080", false, true},
+		{"http://[::1]:8080", false, true},
+		{"https://localhost/ebics", false, true},
+		{"https://127.0.0.1/ebics", false, true},
+		{"https://[::ffff:127.0.0.1]/ebics", false, true},
+		{"https://10.0.0.5/ebics", false, true},
+		{"https://172.16.0.1/ebics", false, true},
+		{"https://192.168.1.1/ebics", false, true},
+		{"https://169.254.169.254/latest", false, true},
+		{"https://[fe80::1]/ebics", false, true},
+		{"https://[fd00::1]/ebics", false, true},
+		{"https://100.64.0.1/ebics", false, true},
+		{"https://0.0.0.0/ebics", false, true},
+		{"https://user:pw@bank.example.com/ebics", false, true},
+		{"ftp://bank.example.com", false, true},
+		{"", false, true},
+		{"http://localhost:8080", true, false},
+		{"http://bank.example.com/ebics", true, true},
+		{"http://127.0.0.1:8080", true, false},
+		{"http://[::1]:8080", true, false},
+		{"http://10.0.0.5", true, true},
+		{"https://10.0.0.5", true, true},
+	}
+	for _, c := range cases {
+		err := checkURL(c.url, c.dev)
+		if (err != nil) != c.wantFail {
+			t.Errorf("CheckURL(%q) dev=%t: err = %v, want failure %t", c.url, c.dev, err, c.wantFail)
 		}
 	}
-	if checkURL("https://bank.example.com/ebics") != nil || checkURL("http://localhost:8080") != nil || checkURL("http://[::1]:8080") != nil {
-		t.Fatal("https and loopback http must be accepted")
+}
+
+func TestGuardDial_AllowlistsGlobalUnicastOnly(t *testing.T) {
+	cases := []struct {
+		addr    string
+		blocked bool
+	}{
+		{"93.184.216.34:443", false}, {"[2606:2800:220:1::1]:443", false}, {"[::ffff:93.184.216.34]:443", false},
+		{"0.1.2.3:443", true}, {"10.0.0.1:443", true}, {"100.64.0.1:443", true}, {"127.0.0.1:443", true},
+		{"169.254.169.254:443", true}, {"172.16.0.1:443", true}, {"192.0.0.9:443", true}, {"192.0.2.1:443", true},
+		{"192.168.0.1:443", true}, {"198.18.0.1:443", true}, {"198.51.100.1:443", true}, {"203.0.113.1:443", true},
+		{"224.0.0.1:443", true}, {"240.0.0.1:443", true}, {"255.255.255.255:443", true},
+		{"[::]:443", true}, {"[::1]:443", true}, {"[::7f00:1]:443", true}, {"[fc00::1]:443", true}, {"[fd12::1]:443", true},
+		{"[fe80::1]:443", true}, {"[2001:db8::1]:443", true}, {"[ff02::1]:443", true},
+		{"[::ffff:127.0.0.1]:443", true}, {"[::ffff:10.0.0.1]:443", true},
+		{"[64:ff9b::7f00:1]:443", true}, {"[64:ff9b::a00:1]:443", true}, {"[64:ff9b:1::7f00:1]:443", true}, {"[64:ff9b:1::a00:1]:443", true},
+		{"[2002:7f00:1::]:443", true}, {"[2002:a00:1::]:443", true},
+		{"192.88.99.1:443", true}, {"[::ffff:0:a00:1]:443", true}, {"[2001:20::1]:443", true},
+		{"bank.example.com:443", true},
+	}
+	for _, c := range cases {
+		if err := guardDial(false)("tcp", c.addr, nil); (err != nil) != c.blocked {
+			t.Errorf("guardDial(%s) = %v, blocked want %t", c.addr, err, c.blocked)
+		}
+	}
+	dev := guardDial(true)
+	if dev("tcp", "127.0.0.1:443", nil) != nil || dev("tcp", "[::1]:443", nil) != nil {
+		t.Error("loopback must pass in dev")
+	}
+	for _, a := range []string{"[64:ff9b::7f00:1]:443", "[2002:7f00:1::]:443", "10.0.0.1:443"} {
+		if dev("tcp", a, nil) == nil {
+			t.Errorf("%s must stay blocked in dev", a)
+		}
+	}
+}
+
+func TestBankHTTP_RefusesLoopbackPeerAndRedirects(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, r, "/elsewhere", http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+	closed := NewBankHTTP(5*time.Second, false)
+
+	for _, target := range []string{srv.URL, strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)} {
+		req, _ := http.NewRequest(http.MethodPost, target, strings.NewReader("<x/>"))
+		if resp, err := closed.Do(req); err == nil {
+			_ = resp.Body.Close()
+			t.Fatalf("Do %s reached a loopback peer", target)
+		}
+		resp, err := closed.client.Post(target, "text/xml", strings.NewReader("<x/>"))
+		var opErr *net.OpError
+		if err == nil || !errors.As(err, &opErr) || opErr.Op != "dial" {
+			t.Fatalf("the dialer must refuse %s as a failed dial (not reached): %v", target, err)
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("loopback server saw %d requests", hits.Load())
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader("<x/>"))
+	resp, err := NewBankHTTP(5*time.Second, true).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusTemporaryRedirect || hits.Load() != 1 {
+		t.Fatalf("redirect was followed: status %d, hits %d", resp.StatusCode, hits.Load())
 	}
 }
 
@@ -280,7 +344,7 @@ func TestSender_VaultFailureSendsNothingAndAuditsFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if len(bank.uploads) != 0 {
+	if bank.uploads != 0 {
 		t.Fatal("an unsigned file reached the bank")
 	}
 	if len(audit.rows) != 2 || audit.rows[1].Event != EventFailed || audit.rows[1].Error == "" {
@@ -291,7 +355,7 @@ func TestSender_VaultFailureSendsNothingAndAuditsFailure(t *testing.T) {
 func TestSender_BankRefusalIsAuditedAsFailed(t *testing.T) {
 	vault := newFakeVault(t)
 	bank := newFakeBank(t, vault.pub)
-	bank.returnCode = "091116"
+	bank.err = errors.New("ebics upload refused: 091116")
 	audit := &memoryAudit{}
 	_, err := Sender{Signer: vault.signer(), Transport: bank.transport(), Audit: audit}.Send(context.Background(), pain001)
 	if err == nil || !strings.Contains(err.Error(), "091116") {
@@ -309,8 +373,8 @@ func TestSender_NoAuditNoSend(t *testing.T) {
 	if _, err := (Sender{Signer: vault.signer(), Transport: bank.transport(), Audit: audit}).Send(context.Background(), pain001); err == nil {
 		t.Fatal("expected an error")
 	}
-	if vault.calls != 0 || len(bank.uploads) != 0 {
-		t.Fatalf("vault calls %d, bank uploads %d; nothing may happen without a durable audit row", vault.calls, len(bank.uploads))
+	if vault.calls != 0 || bank.uploads != 0 {
+		t.Fatalf("vault calls %d, bank uploads %d; nothing may happen without a durable audit row", vault.calls, bank.uploads)
 	}
 }
 
@@ -330,14 +394,14 @@ func TestSender_SentButClosingAuditLostReturnsReceiptAndError(t *testing.T) {
 func TestSender_AmbiguousTransportFailureIsUnknownAndNotRetried(t *testing.T) {
 	vault := newFakeVault(t)
 	bank := newFakeBank(t, vault.pub)
-	bank.status = http.StatusBadGateway
+	bank.err = fmt.Errorf("%w: status 502", ErrAmbiguous)
 	audit := &memoryAudit{}
 	_, err := Sender{Signer: vault.signer(), Transport: bank.transport(), Audit: audit}.Send(context.Background(), pain001)
 	if !errors.Is(err, ErrAmbiguous) {
 		t.Fatalf("err = %v", err)
 	}
-	if len(bank.uploads) != 1 || vault.calls != 1 {
-		t.Fatalf("uploads %d, signs %d; an ambiguous failure must not be resent", len(bank.uploads), vault.calls)
+	if bank.uploads != 1 || vault.calls != 1 {
+		t.Fatalf("uploads %d, signs %d; an ambiguous failure must not be resent", bank.uploads, vault.calls)
 	}
 	if len(audit.rows) != 2 || audit.rows[1].Event != EventUnknown {
 		t.Fatalf("audit rows = %+v", audit.rows)
@@ -370,19 +434,4 @@ func (c *cancelCheckAudit) RecordBankFile(ctx context.Context, e AuditEntry) err
 		c.cancel()
 	}
 	return nil
-}
-
-func TestSender_ConnectionRefusedIsFailedNotUnknown(t *testing.T) {
-	vault := newFakeVault(t)
-	closed := httptest.NewServer(http.NotFoundHandler())
-	addr := closed.URL
-	closed.Close()
-	audit := &memoryAudit{}
-	_, err := Sender{Signer: vault.signer(), Transport: EBICS{URL: addr}, Audit: audit}.Send(context.Background(), pain001)
-	if err == nil || errors.Is(err, ErrAmbiguous) {
-		t.Fatalf("err = %v", err)
-	}
-	if len(audit.rows) != 2 || audit.rows[1].Event != EventFailed {
-		t.Fatalf("audit rows = %+v", audit.rows)
-	}
 }

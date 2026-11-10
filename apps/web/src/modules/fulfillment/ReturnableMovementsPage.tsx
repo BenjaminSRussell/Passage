@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -186,8 +187,8 @@ export function ReturnableMovementsPage() {
       />
       <Card title="Filter">
         <form className={styles.form} onSubmit={apply} noValidate>
-          <FormField id="mv-customer" label="Customer id" error={filterErrors.customerId} optional>
-            {(control) => <Input {...control} value={fields.customerId} invalid={Boolean(filterErrors.customerId)} onChange={(event) => setFields({ ...fields, customerId: event.target.value })} />}
+          <FormField id="mv-customer" label="Customer" error={filterErrors.customerId} optional>
+            {(control) => <EntityLookup entity="customer" {...control} value={fields.customerId} invalid={Boolean(filterErrors.customerId)} onChange={(event) => setFields({ ...fields, customerId: event.target.value })} />}
           </FormField>
           <FormField id="mv-type" label="Container type" error={filterErrors.containerType} optional>
             {(control) => <Input {...control} value={fields.containerType} invalid={Boolean(filterErrors.containerType)} onChange={(event) => setFields({ ...fields, containerType: event.target.value })} />}
@@ -241,8 +242,8 @@ export function ReturnableMovementsPage() {
             <p className={styles.note}>
               For an opening balance, a count at the customer or packaging lost in transit. The reason is kept with the movement. A correction that would take the balance below zero is refused (FUL-0015).
             </p>
-            <FormField id="adj-customer" label="Customer id" error={errors.customerId}>
-              {(control) => <Input {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => set({ customerId: event.target.value })} />}
+            <FormField id="adj-customer" label="Customer" error={errors.customerId}>
+              {(control) => <EntityLookup entity="customer" {...control} value={values.customerId} invalid={Boolean(errors.customerId)} onChange={(event) => set({ customerId: event.target.value })} />}
             </FormField>
             <FormField id="adj-type" label="Container type" error={errors.containerType}>
               {(control) => (

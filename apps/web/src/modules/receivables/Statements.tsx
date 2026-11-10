@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import {
@@ -110,11 +111,11 @@ export function StatementPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="st-entity" label="Legal entity id" error={entity !== "" && !entityValid ? "Enter the legal entity id (a UUID)." : undefined}>
-          {(c) => <Input {...c} className={styles.mono} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />}
+        <FormField id="st-entity" label="Legal entity" error={entity !== "" && !entityValid ? "Choose a legal entity." : undefined}>
+          {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />}
         </FormField>
-        <FormField id="st-customer" label="Customer id" error={cust !== "" && !customerValid ? "Enter the customer id (a UUID)." : undefined}>
-          {(c) => <Input {...c} className={styles.mono} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={cust !== "" && !customerValid} />}
+        <FormField id="st-customer" label="Customer" error={cust !== "" && !customerValid ? "Choose a customer." : undefined}>
+          {(c) => <EntityLookup entity="customer" scope={{ legalEntityId: legalEntityId || undefined }} {...c} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={cust !== "" && !customerValid} />}
         </FormField>
         <FormField id="st-as-of" label="Statement date" error={dateValid ? undefined : "Enter a date as YYYY-MM-DD."}>
           {(c) => <Input {...c} type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} invalid={!dateValid} />}
@@ -195,8 +196,8 @@ export function BalanceSnapshotsPage() {
         }
       />
       <div className={styles.toolbar}>
-        <FormField id="bs-entity-snap" label="Legal entity id" error={entity !== "" && !entityValid ? "Enter the legal entity id (a UUID)." : undefined}>
-          {(c) => <Input {...c} className={styles.mono} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />}
+        <FormField id="bs-entity-snap" label="Legal entity" error={entity !== "" && !entityValid ? "Choose a legal entity." : undefined}>
+          {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />}
         </FormField>
         <FormField id="bs-as-of" label="Key date" optional hint="Empty shows the latest snapshot." error={dateValid ? undefined : "Enter a date as YYYY-MM-DD."}>
           {(c) => <Input {...c} type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} invalid={!dateValid} />}

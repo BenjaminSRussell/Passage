@@ -30,8 +30,8 @@ const report: DniReport = {
 const calls = () => server.calls.filter((c) => c.url.pathname === PATH);
 
 function ask(le: string, asOf = "2026-10-21", customer = "") {
-  fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: le } });
-  fireEvent.change(screen.getByLabelText("Customer id", { exact: false }), { target: { value: customer } });
+  fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: le } });
+  fireEvent.change(screen.getByLabelText("Customer", { exact: false }), { target: { value: customer } });
   fireEvent.change(screen.getByLabelText("As of"), { target: { value: asOf } });
   fireEvent.click(screen.getByRole("button", { name: "Show report" }));
 }
@@ -74,7 +74,7 @@ describe("delivered not invoiced", () => {
     renderAt("/fulfillment/delivered-not-invoiced");
     ask("not-a-uuid", "2026-10-21", "nope");
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
-    expect(screen.getByText("Enter the customer id (a UUID), or leave it empty.")).toBeInTheDocument();
+    expect(screen.queryByText("Enter the customer id (a UUID), or leave it empty.")).toBeNull();
     expect(calls()).toHaveLength(0);
   });
 

@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, buttonClassName, type DataTableColumn } from "../../shell/ui";
 import {
@@ -168,8 +169,8 @@ export function ReleaseRunCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Run">
           <div className={styles.grid}>
-            <FormField id="rel-legal-entity" label="Legal entity id" error={errors.legalEntityId}>
-              {(c) => <Input {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} />}
+            <FormField id="rel-legal-entity" label="Legal entity" error={errors.legalEntityId}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} />}
             </FormField>
             <FormField id="rel-window" label="Delivery window (days)" hint="Lines wanted less than this many days apart share an order" error={errors.windowDays}>
               {(c) => <Input {...c} inputMode="numeric" value={windowDays} onChange={(e) => setWindowDays(e.target.value)} />}

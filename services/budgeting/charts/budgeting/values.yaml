@@ -6,3 +6,10 @@ resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 500m, memory: 192Mi }
 serviceMonitor: { enabled: false }
+# The general ledger the prior-year-actuals spreading helper reads; unset, that helper answers 503 BUD-0054.
+ledgerUrl: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+  # workflow-ts's Ed25519 public key ("name[:kid]=base64", comma separated) so budget.plan.workflow service tokens verify.
+  publicKeys: ""

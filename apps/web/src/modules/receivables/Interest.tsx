@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
@@ -77,7 +78,7 @@ export interface InterestDraft {
 
 export function validateInterest(v: InterestDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!DAY.test(v.calculationDate)) errors.calculationDate = "Enter the calculation date.";
   const rate = v.annualRate.trim();
   if (!RATE.test(rate) || /^0(\.0+)?$/.test(rate)) errors.annualRate = "Enter the annual rate as a fraction above 0 and at most 1, such as 0.09 for 9%.";
@@ -172,8 +173,8 @@ export function InterestRunPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={calculate} noValidate>
-          <FormField id="in-entity" label="Legal entity id" error={errors.legalEntityId}>
-            {(c) => <Input {...c} className={styles.mono} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
+          <FormField id="in-entity" label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
           <FormField id="in-date" label="Calculation date" error={errors.calculationDate}>
             {(c) => <Input {...c} type="date" value={values.calculationDate} onChange={(e) => update({ calculationDate: e.target.value })} invalid={Boolean(errors.calculationDate)} />}

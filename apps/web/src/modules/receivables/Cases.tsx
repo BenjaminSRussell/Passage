@@ -1,4 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -139,8 +141,8 @@ export interface CaseDraft {
 /** Client checks that mirror the service validation; the service has the last word. */
 export function validateCase(v: CaseDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (!UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
+  if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer.";
   const owner = v.owner.trim();
   if (owner === "" || owner.length > 120) errors.owner = "Enter who owns the case (up to 120 characters).";
   const reason = v.reason.trim();
@@ -217,10 +219,20 @@ export function NewCasePage() {
     }
   }
 
-  function text(id: string, field: keyof CaseDraft, label: string, opts: { hint?: string; mono?: boolean; optional?: boolean } = {}) {
+  function text(id: string, field: keyof CaseDraft, label: string, opts: { entity?: LookupEntityKey; hint?: string; mono?: boolean; optional?: boolean } = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} error={errors[field]} optional={opts.optional}>
-        {(c) => (
+        {(c) =>
+        opts.entity ? (
+          <EntityLookup
+            {...c}
+            entity={opts.entity}
+            scope={opts.entity === "customer" ? { legalEntityId: values.legalEntityId || undefined } : undefined}
+            value={values[field]}
+            onChange={(e) => update({ [field]: e.target.value } as Partial<CaseDraft>)}
+            invalid={Boolean(errors[field])}
+          />
+        ) : (
           <Input
             {...c}
             className={opts.mono ? styles.mono : undefined}
@@ -238,8 +250,8 @@ export function NewCasePage() {
       <PageHeader title="Open collection case" description={`The SLA follows the category: ${SLA_HOURS[values.category]} hours for ${CASE_CATEGORY_LABELS[values.category].toLowerCase()} cases.`} />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("nc-entity", "legalEntityId", "Legal entity id", { mono: true })}
-          {text("nc-customer", "customerId", "Customer id", { mono: true })}
+          {text("nc-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true })}
+          {text("nc-customer", "customerId", "Customer", { entity: "customer", mono: true })}
           <FormField id="nc-category" label="Category">
             {(c) => (
               <Select {...c} value={values.category} onChange={(e) => update({ category: e.target.value as CaseCategory })}>
