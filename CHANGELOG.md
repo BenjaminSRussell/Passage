@@ -19,6 +19,8 @@ release may change public APIs.
 
 ### Added
 
+- Usability program (#510): persona task scripts, a baseline report template and a release usability gate in
+  `apps/web/docs`, and a "Usability gate" section in the release notes template.
 - Plain-language error messages (#501): the web problem catalog now covers every error code of the party, ledger, tax and
   product services, and the coverage test reads their Go sources so a new code without a message fails it.
 - Receiving: `GET /v1/receiving/invoices` lists vendor invoices with their lines and ledger entry id, filtered by
