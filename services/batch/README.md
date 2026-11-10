@@ -12,6 +12,8 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/batch`. Tes
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
 | `HTTP_ADDR`, `ADMIN_ADDR` | default `:8080`, and `:9090` serving `/metrics` only |
 | `PRODUCT_URL` | base URL of the product service; setting it starts the run dispatcher and then requires `PASSAGE_SERVICE_NAME=batch` and `PASSAGE_SERVICE_SIGNING_KEY` (or `_FILE`), else startup fails |
+| `PURCHASING_URL`, `PARTY_URL`, `LEDGER_URL`, `PAYABLES_URL` | base URLs of the services behind `GET /v1/inbox`; any of them requires `PASSAGE_SERVICE_NAME=batch` and a signing key like `PRODUCT_URL`. A source with no URL is reported as unavailable, not an error |
+| `INBOX_SOURCE_TIMEOUT`, `INBOX_CONCURRENCY` | per-source time limit (default `3s`) and sources read at once (default `4`) |
 | `DISPATCH_INTERVAL`, `DISPATCH_CONCURRENCY` | scan period (default `5s`) and runs executed at once per replica (default `4`) |
 | `DISPATCH_MAX_RUN_ATTEMPTS`, `DISPATCH_RETRY_AFTER` | claims a run may use before the dispatcher leaves it alone (default `5`) and the wait before an `error` run is retried (default `1m`) |
 
@@ -37,6 +39,7 @@ The distributor claims at most as many queued messages as it sends concurrently 
 | `POST /v1/workflows/definitions`, `POST /v1/workflows/instances`, instance actions | `workflow.write` |
 | `GET /v1/workflows/instances/{id}` | `workflow.read` |
 | `GET /v1/workitems`, `POST /v1/workitems/{id}/actions` | `workflow.approve` |
+| `GET /v1/inbox` | `inbox.read`, and per source the caller's approval duty |
 | `POST /v1/batch/jobs`, `POST /v1/batch/jobs/{code}/runs`, `POST /v1/events/replay` | `batch.write` |
 | `GET /v1/batch/jobs/{code}`, `GET /v1/batch/runs/{id}` | `batch.read` |
 | `POST /v1/notify/templates`, preferences, retry | `notify.write` |

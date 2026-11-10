@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
@@ -180,6 +181,10 @@ func supplyDate(t time.Time) any {
 	return t
 }
 
+const invoiceColumns = `SELECT i.id::text, i.legal_entity_id::text, i.vendor_id::text, i.invoice_number, i.invoice_date, i.posting_date, i.currency, i.ledger_id::text,
+	i.fiscal_period_id::text, i.ledger_entry_id, i.total, i.created_at, i.source, i.status, i.posted_by, COALESCE(i.one_time_payee_id::text, ''), i.audit_reason,
+	COALESCE(i.audit_rule_version, 0), COALESCE(i.released_by, ''), i.released_at, COALESCE(i.rejected_by, ''), i.rejected_at, COALESCE(i.reject_reason, '')`
+
 func (s *Postgres) ListInvoices(ctx context.Context, f InvoiceFilter) ([]Invoice, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
@@ -196,9 +201,7 @@ func (s *Postgres) ListInvoices(ctx context.Context, f InvoiceFilter) ([]Invoice
 	}
 	var out []Invoice
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT i.id::text, i.legal_entity_id::text, i.vendor_id::text, i.invoice_number, i.invoice_date, i.posting_date, i.currency, i.ledger_id::text,
-			i.fiscal_period_id::text, i.ledger_entry_id, i.total, i.created_at, i.source, i.status, i.posted_by, COALESCE(i.one_time_payee_id::text, ''), i.audit_reason,
-			COALESCE(i.audit_rule_version, 0), COALESCE(i.released_by, ''), i.released_at, COALESCE(i.rejected_by, ''), i.rejected_at, COALESCE(i.reject_reason, '')
+		rows, err := tx.Query(ctx, invoiceColumns+`
 			FROM receiving_vendor_invoice i
 			WHERE i.tenant_id = $1
 			AND ($2 = '' OR i.vendor_id = $2::uuid)
@@ -228,6 +231,33 @@ func (s *Postgres) ListInvoices(ctx context.Context, f InvoiceFilter) ([]Invoice
 		return loadPageLines(ctx, tx, tenantID, out[:min(len(out), limit)])
 	})
 	return out, err
+}
+
+func (s *Postgres) GetInvoice(ctx context.Context, id string) (Invoice, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return Invoice{}, err
+	}
+	id, ok := ids.Canonical(id)
+	if !ok {
+		return Invoice{}, ErrInvoiceNotFound
+	}
+	var inv Invoice
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, invoiceColumns+`
+			FROM receiving_vendor_invoice i WHERE i.tenant_id = $1 AND i.id = $2`, tenantID, id).
+			Scan(&inv.ID, &inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID,
+				&inv.FiscalPeriodID, &inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy, &inv.OneTimePayeeID, &inv.AuditReason,
+				&inv.AuditRuleVersion, &inv.ReleasedBy, &inv.ReleasedAt, &inv.RejectedBy, &inv.RejectedAt, &inv.RejectReason)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvoiceNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return loadInvoiceLines(ctx, tx, tenantID, &inv)
+	})
+	return inv, err
 }
 
 func loadPageLines(ctx context.Context, tx pgx.Tx, tenantID string, page []Invoice) error {

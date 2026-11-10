@@ -2,10 +2,12 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/party/internal/api"
@@ -20,6 +22,8 @@ type fakeCredit struct {
 	approve    bool
 	replayed   bool
 	configured string
+	listed     int
+	listAfter  string
 	err        error
 }
 
@@ -78,6 +82,16 @@ func (f *fakeCredit) GetPendingChange(_ context.Context, changeID string) (domai
 	return domain.PendingChange{ID: changeID, Status: domain.ChangePending}, nil
 }
 
+func (f *fakeCredit) ListPendingChanges(_ context.Context, limit int, afterAt time.Time, afterID string) ([]domain.PendingChange, error) {
+	f.listed, f.listAfter = limit, afterID
+	if f.err != nil {
+		return nil, f.err
+	}
+	at := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+	out := []domain.PendingChange{{ID: knownID, Status: domain.ChangePending, RequestedAt: at}, {ID: otherKnownID, Status: domain.ChangePending, RequestedAt: at.Add(-time.Hour)}}
+	return out[:min(limit, len(out))], nil
+}
+
 func (f *fakeCredit) DecidePendingChange(_ context.Context, changeID string, approve bool, _ string) (domain.PendingChange, error) {
 	f.decided, f.approve = changeID, approve
 	if f.err != nil {
@@ -100,10 +114,45 @@ func (f *fakeCredit) SetProtectedFields(_ context.Context, legalEntityID string,
 	return fields, f.err
 }
 
+const otherKnownID = "00000000-0000-0000-0000-0000000000ab"
+
 func creditRouter(f *fakeCredit) http.Handler {
 	r := httpx.NewRouter()
 	api.New(&stubChecker{}, stubPinger{}, &fakeParties{}, &fakeSequencer{}).WithCredit(f).Register(r)
 	return r
+}
+
+func TestCreditRoutes_ListPendingChanges(t *testing.T) {
+	f := &fakeCredit{}
+	r := creditRouter(f)
+	rec := do(r, http.MethodGet, "/v1/party/pending-changes?limit=1", "", "party.inbox.read", true)
+	if rec.Code != http.StatusOK || f.listed != 2 || !strings.Contains(rec.Body.String(), `"nextCursor":"`) || strings.Contains(rec.Body.String(), otherKnownID) {
+		t.Fatalf("first page: %d %s listed=%d", rec.Code, rec.Body, f.listed)
+	}
+	var page struct{ NextCursor string }
+	_ = json.Unmarshal(rec.Body.Bytes(), &page)
+	if rec := do(r, http.MethodGet, "/v1/party/pending-changes?cursor="+page.NextCursor, "", "party.read", true); rec.Code != http.StatusOK || f.listAfter != knownID || strings.Contains(rec.Body.String(), "nextCursor") {
+		t.Fatalf("second page: %d %s after=%q", rec.Code, rec.Body, f.listAfter)
+	}
+	for _, tc := range []struct {
+		name, target, duties string
+		tenant               bool
+		want                 int
+	}{
+		{"approve alone cannot list", "/v1/party/pending-changes", "party.approve", true, http.StatusForbidden},
+		{"inbox duty reads no single change", "/v1/party/pending-changes/" + knownID, "party.inbox.read", true, http.StatusForbidden},
+		{"limit above the maximum", "/v1/party/pending-changes?limit=201", "party.read", true, http.StatusBadRequest},
+		{"cursor not from the list", "/v1/party/pending-changes?cursor=zz", "party.read", true, http.StatusBadRequest},
+		{"no principal", "/v1/party/pending-changes", "", false, http.StatusUnauthorized},
+	} {
+		if rec := do(r, http.MethodGet, tc.target, "", tc.duties, tc.tenant); rec.Code != tc.want {
+			t.Errorf("%s: %d %s", tc.name, rec.Code, rec.Body)
+		}
+	}
+	f.err = httpx.NewProblem(http.StatusInternalServerError, "X", "down")
+	if rec := do(r, http.MethodGet, "/v1/party/pending-changes", "", "party.read", true); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("store failure: %d", rec.Code)
+	}
 }
 
 func TestCreditRoutes_IncreaseIs202AndDecreaseIs200(t *testing.T) {

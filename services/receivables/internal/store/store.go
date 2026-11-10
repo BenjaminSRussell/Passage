@@ -219,6 +219,7 @@ type Postgres struct {
 	taxAccounts map[string]map[string]string
 	tax         taxclient.Recorder
 	billing     billingclient.Reader
+	reserver    billingclient.Reserver
 }
 
 // New returns a Postgres store over pool.

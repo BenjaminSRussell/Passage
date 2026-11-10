@@ -19,6 +19,14 @@ func (u unreachableStore) PostCompensations(context.Context, ledgerclient.Ledger
 	u.fail()
 	return store.CompensationReport{}, nil
 }
+func (u unreachableStore) PostOpeningJournal(context.Context, ledgerclient.Ledger, store.OpeningJournalRequest) (store.OpeningJournalResult, error) {
+	u.fail()
+	return store.OpeningJournalResult{}, nil
+}
+func (u unreachableStore) OpeningPostings(context.Context, string) ([]store.OpeningPosting, error) {
+	u.fail()
+	return nil, nil
+}
 func (u unreachableStore) CompensationReport(context.Context, string) (store.CompensationReport, error) {
 	u.fail()
 	return store.CompensationReport{}, nil

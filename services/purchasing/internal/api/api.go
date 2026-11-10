@@ -51,6 +51,7 @@ const (
 	dutyRequisitionCreate      = "procurement.requisition.create"
 	dutyPurchaseOrderMaintain  = "procurement.purchase-order.maintain"
 	dutyPurchaseOrderInquire   = "procurement.purchase-order.inquire"
+	dutyInboxRead              = "procurement.inbox.read"
 	dutyTradeAgreementMaintain = "procurement.trade-agreement.maintain"
 	dutyAgreementMaintain      = "procurement.agreement.maintain"
 	dutyPlanRowSettle          = "procurement.invoicing-plan.settle"

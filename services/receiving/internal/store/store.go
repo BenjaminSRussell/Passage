@@ -334,6 +334,7 @@ type Store interface {
 	ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error)
 	ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)
 	ListInvoices(ctx context.Context, f InvoiceFilter) ([]Invoice, error)
+	GetInvoice(ctx context.Context, id string) (Invoice, error)
 	ReservePosting(ctx context.Context, p PendingPosting) (string, error)
 	ReleasePosting(ctx context.Context, key string) error
 	EnsureNoPending(ctx context.Context, subject string) error

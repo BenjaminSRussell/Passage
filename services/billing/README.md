@@ -165,13 +165,23 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 - The PRD's `passage.billing.credit-note.posted.v1` is published as
   `dev.passage.billing.creditnote.posted.v1` (the platform type grammar has no hyphens).
 - `journal_posting_id` holds the ledger entry of the document's invoice journal (FR-29.3)
-  once `POST /v1/billing/gl-postings` booked it; the event carries null because the journal
+  once `POST /v1/billing/gl-postings` or the auto-book worker booked it; the event carries null because the journal
   follows the post. `BILLING_GL_PROFILES` (a JSON array, one profile per entity: `legalEntityId`, `ledgerId`,
   `receivableAccount`, `taxAccount`, `chargeAccount`, `deferredRevenueAccounts`, `contractAssetAccount` (1250 Contract Asset when
   omitted; open it in the ledger chart); chart value `glProfiles`) is required when `LEDGER_URL` is set; the deferred account and
   the contract liability are 2400. `REVREC_URL` (chart value `revrecUrl`, required with `LEDGER_URL`) names the revrec service whose
   contract allocation splits the invoice journal; the call is signed with the `revrec.allocation.read` grant. The
   profile's ledger is checked against its entity at each call. `invoice.posted` carries `intercompany=false` until wave 40.
+- Auto-book (#29): with `BILLING_GL_AUTOBOOK_TENANT_IDS` (chart `autoBook.tenantIds`) set, a worker in every replica runs the same
+  posting run as `gl-postings` each `BILLING_GL_AUTOBOOK_INTERVAL` (default 1m, at least 5s; chart `autoBook.interval`) for each
+  legal entity of `BILLING_GL_PROFILES` whose profile names that tenant (`tenantId`, optional otherwise; startup fails for a listed tenant no profile names), under a system principal scoped to that tenant and entity, so a posted invoice or credit
+  note books without an API request. Idempotency is the run's: ledger key `billing-invoice-<id>` / `billing-credit-note-<id>`, the
+  held booking an unanswered call leaves, `journal_posting_id` set once, and the per-entity advisory lock (a replica that finds the
+  run held skips the tick). Refusals, backoff and parking apply as for the API call. Unset, nothing books until the API is called.
+- The `outbox-billing` Debezium connector (`deploy/kafka/connect.yaml`, database `passage_billing`, role `debezium_cdc_billing`,
+  publication `passage_outbox_billing`, migrations 0012 and 0013) relays the outbox to `passage.billing.invoice`, the one channel
+  billing's AsyncAPI declares; billing enqueues a single aggregate type (`invoice`), so the connector routes by aggregate type
+  without a filter, and a deploy test fails when a second type appears.
 - Booking a credit note's journal writes `dev.passage.billing.creditnote.booked.v1` to the outbox in the same transaction (#29):
   per line the order and product of the credited original line, the credited net, and the allocated amount and its deferred part
   the journal debited (the deferred part is the Dr 2400). `creditnote.posted` cannot carry them: it is published at the post,
