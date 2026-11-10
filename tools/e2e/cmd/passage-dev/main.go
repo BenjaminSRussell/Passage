@@ -201,6 +201,7 @@ func startGateway(ctx context.Context, root string, stk *stack.Stack, seed deven
 		}
 		env["PASSAGE_SVC_"+strings.ToUpper(route)+"_URL"] = stk.URL(name)
 	}
+	env["PASSAGE_SVC_INBOX_URL"] = stk.URL("batch")
 	if err := stk.Spawn("devgateway", "", env, binary); err != nil {
 		return err
 	}
