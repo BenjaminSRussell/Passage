@@ -57,6 +57,10 @@ type config struct {
 	CertDir         string
 	EnrollTokenFile string
 	ServerCAFile    string // PEM roots for the shopfloor server; the system roots when empty
+	// Writer switches control recipe execution on (25-5). simulator is the only writer built: an OPC-UA
+	// client is not. RecipeAutoComplete reports a recipe completed after its writes (the demo plant).
+	Writer             string
+	RecipeAutoComplete bool
 }
 
 // loadConfig reads and validates the environment. Invalid configuration is an
@@ -115,6 +119,11 @@ func loadConfig(getenv func(string) string) (config, error) {
 		if cfg.CertDir == "" && (cfg.EnrollTokenFile != "" || cfg.ServerCAFile != "") {
 			problems = append(problems, "EDGE_ENROLLMENT_TOKEN_FILE and EDGE_SERVER_CA_FILE need EDGE_CERT_DIR")
 		}
+		cfg.Writer = getenv("EDGE_WRITER")
+		if cfg.Writer != "" && cfg.Writer != "simulator" {
+			problems = append(problems, "EDGE_WRITER must be simulator (an OPC-UA writer is not built)")
+		}
+		cfg.RecipeAutoComplete = getenv("EDGE_RECIPE_AUTO_COMPLETE") == "true"
 		if cfg.Source != "simulator" {
 			problems = append(problems, "EDGE_SOURCE must be simulator when EDGE_SHOPFLOOR_URL is set (OPC-UA and MQTT adapters are not built)")
 		}
@@ -217,6 +226,9 @@ func newRuntime(ctx context.Context, cfg config) (*runtime.Runtime, error) {
 		o.Certs = store
 		o.Renew = func(ctx context.Context) error { return client.Renew(ctx, store) }
 	}
+	if cfg.Writer == "simulator" {
+		o.Recipes, o.Writer, o.AutoComplete = client, &runtime.SimWriter{}, cfg.RecipeAutoComplete
+	}
 	if cfg.SeqStateFile != "" {
 		o.State = runtime.FileSeqState{Path: cfg.SeqStateFile}
 	}
@@ -290,6 +302,8 @@ func metricsHandler(rt *runtime.Runtime) http.HandlerFunc {
 			{"iotedge_send_failures_total", float64(s.SendFailures), "Sends that failed and left events buffered."},
 			{"iotedge_seq_gaps_total", float64(s.SeqGaps), "Sequence gaps the server reported (SF-0008)."},
 			{"iotedge_heartbeat_failures_total", float64(s.HeartbeatFailures), "Heartbeats that failed."},
+			{"iotedge_recipes_executed_total", float64(s.RecipesExecuted), "Control recipes whose setpoints were written (BR-25.15)."},
+			{"iotedge_readback_deviations_total", float64(s.ReadbackDeviations), "Setpoint writes whose readback differed from the value written."},
 			{"iotedge_cert_renewals_total", float64(s.CertRenewals), "Client certificate renewals that succeeded."},
 			{"iotedge_cert_renew_failures_total", float64(s.CertRenewFailures), "Client certificate renewals that failed."},
 			{"iotedge_buffer_events", float64(s.BufferLen), "Events waiting in the buffer."},

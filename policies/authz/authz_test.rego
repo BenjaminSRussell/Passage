@@ -1391,6 +1391,22 @@ test_shopfloor_edge_duties_open_only_their_routes if {
 	not allowed("shopfloor.edge.configure", "POST", "/v1/shopfloor/edge-nodes/n1:renew-certificate")
 	not allowed("shopfloor.view", "POST", "/v1/shopfloor/edge-nodes/n1:enrollment-token")
 	not allowed("shopfloor.edge.connect", "POST", "/v1/shopfloor/edge-nodes/n1:enroll")
+	allowed("shopfloor.edge.connect", "GET", "/v1/shopfloor/edge-nodes/n1/control-recipes")
+	allowed("shopfloor.edge.connect", "POST", "/v1/shopfloor/edge-nodes/n1/control-recipes/r1:report")
+	not allowed("shopfloor.edge.configure", "GET", "/v1/shopfloor/edge-nodes/n1/control-recipes")
+}
+
+test_shopfloor_control_recipe_duties_open_only_their_routes if {
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes")
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes/r1:resend")
+	not allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes/r1:report")
+	not allowed("shopfloor.controlrecipe.create", "GET", "/v1/shopfloor/control-recipes")
+	allowed("shopfloor.controlrecipe.execute", "POST", "/v1/shopfloor/control-recipes/r1:report")
+	not allowed("shopfloor.controlrecipe.execute", "POST", "/v1/shopfloor/control-recipes")
+	not allowed("shopfloor.controlrecipe.execute", "POST", "/v1/shopfloor/control-recipes/r1:resend")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/control-recipes")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/control-recipes/r1")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/control-recipes/r1:resend")
 	allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes")
 	allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes/n1")
 	allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes/n1/config-versions")

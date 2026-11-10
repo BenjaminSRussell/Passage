@@ -37,6 +37,10 @@ shopfloor:
   # must be a claim. serverCaSecret holds the CA of the shopfloor server (key ca.crt) when it is private.
   enrollmentSecret: ""
   serverCaSecret: ""
+  # Control recipes (25-5): `simulator` runs them against an in-memory process control system (the demo
+  # plant). An OPC-UA writer is not built. recipeAutoComplete reports a recipe completed after its writes.
+  writer: ""
+  recipeAutoComplete: false
   simMachines: 2
   bufferCapacity: 200000
 

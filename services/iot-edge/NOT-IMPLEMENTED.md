@@ -20,7 +20,7 @@ as JSON and published.
 | Token enrollment and mTLS client certificate issuance (cert-manager, 90-day) | connector side built (25-4); the cluster issuer is open | Needs the platform certificate issuer and the enrollment endpoint. Enrollment must also set the shopfloor node's `connectorSubject` from the issued certificate: since slice 14 the configuration pull and heartbeat accept only the identity bound to the node, and that binding is set by hand until then. The renewal decision (BR-25.14, `DecideCert`) is built; the renewal call and the SF-0018 page are not. |
 | Versioned configuration: the document, validation and apply rule are built (`EdgeConfig`, `NextApplied`); the runtime pulls a newer version when the heartbeat answer names one and applies it (25-3) | built (25-3) | The shopfloor `GET edge-nodes/{id}/config` endpoint exists since slice 14 (versioned, validated like `EdgeConfig`); the connector does not pull it yet. |
 | Ringed rollout and automatic rollback: ring order, 24 h promotion and the 5 min rollback rule are built (`NextRing`, `CanPromote`, `RollbackDue`); A/B binary swap and the fleet API are not | later slice of PSG-25 | Needs heartbeat and the fleet API. The chart pins `ring` as a label only. |
-| Allowlisted write-back for control recipe setpoints: guard and readback check are built (`CheckWrite`, `ReadbackMatches`); transport and per-write audit row are not | later slice of PSG-25 | Needs control recipes (D6) and the OPC-UA client. |
+| Allowlisted write-back for control recipe setpoints: guard and readback check (`CheckWrite`, `ReadbackMatches`), the pull, acknowledge, start, guarded write, readback and per-write report to the audit (25-5) are built against a `Writer`; the OPC-UA transport is not | partial | The OPC-UA client needs a real server (#213). |
 | Local admin page for diagnostics on localhost | partial | `/healthz` and, with the runtime on, `/metrics` (dropped-event, seq-gap, send-failure and buffer metrics) exist on the loopback admin address. The diagnostics page is not built. |
 | Static single binary for Windows and Linux industrial PCs | later slice of PSG-25 | Build targets and signing are in the deployment pipeline (not in this owned path). |
 | Signed OCI image (amd64/arm64) | handoff | Image build and cosign signing belong to the deployment-cicd pipeline (not in this owned path). Chart references `ghcr.io/benjaminsrussell/passage/iot-edge`. |
@@ -73,3 +73,13 @@ publishing while events keep buffering. Tests run against a TLS test server with
 refused token, BR-25.14 actions, expired certificate). The shopfloor side and its gaps are in
 [../shopfloor/NOT-IMPLEMENTED.md](../shopfloor/NOT-IMPLEMENTED.md). Open: a rollback of a bad certificate (the old pair is
 replaced in place), enrollment on Windows service installs (no installer is built), and the gateway terminating the client CA.
+
+## Control recipe execution (25-5)
+
+`internal/runtime/recipes.go`: with `EDGE_WRITER=simulator` the connector pulls its active recipes every 5 s, acknowledges a sent
+recipe (received), starts it (in-execution), and writes each setpoint once after `CheckWrite` (allowlist, limits, recipe in
+execution), reads the value back, and reports every write, made or refused, with the readback. A refused or failed write sends
+the recipe to error with the reason; a `pcs-mqtt` recipe is reported as an error (no MQTT publisher). A readback that differs
+is counted (`iotedge_readback_deviations_total`) and the server records the deviation. A recipe the connector already wrote is
+not written again in the same process; after a restart an in-execution recipe is written again (setpoints are idempotent and
+the audit shows both). Open: the OPC-UA `Writer`, completion driven by the PCS, MQTT publishing.

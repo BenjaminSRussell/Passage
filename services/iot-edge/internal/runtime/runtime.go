@@ -81,8 +81,15 @@ type Options struct {
 	Control          ControlPlane
 	// Certs and Renew run the mTLS certificate life (BR-25.14): Beat starts a renewal when fewer than
 	// 30 days remain, reports the serial and expiry, and publishing stops when the certificate expired.
-	Certs           *CertStore
-	Renew           func(ctx context.Context) error
+	Certs *CertStore
+	Renew func(ctx context.Context) error
+	// Recipes and Writer run control recipes (FR-25.15): the connector pulls its recipes and writes their
+	// setpoints to the process control system under BR-25.15. Both are needed; without either the runtime
+	// does not touch recipes. AutoComplete reports a recipe completed after its writes (the demo plant).
+	Recipes         RecipePlane
+	Writer          Writer
+	AutoComplete    bool
+	RecipeEvery     time.Duration // default 5 s
 	State           SeqState
 	BufferAge       time.Duration
 	BufferCapacity  int
@@ -101,6 +108,7 @@ type Stats struct {
 	Sent, ServerAccepted, ServerDropped, Rejected              int64
 	SendFailures, SeqGaps, HeartbeatFailures                   int64
 	CertRenewals, CertRenewFailures                            int64
+	RecipesExecuted, ReadbackDeviations                        int64
 	BufferLen                                                  int
 	BufferFillPct                                              float64
 	AppliedConfigVersion                                       int
@@ -120,11 +128,13 @@ type Runtime struct {
 	hasPrev map[string]bool
 	states  map[string]string
 	seqs    *seqAllocator
+	written map[string]bool // recipes whose setpoints this process already wrote
 
 	accepted, dupDropped, staleDropped, invalid atomic.Int64
 	sent, srvAccepted, srvDropped, rejected     atomic.Int64
 	sendFailures, seqGaps, heartbeatFailures    atomic.Int64
 	certRenewals, certRenewFailures             atomic.Int64
+	recipesExecuted, deviations                 atomic.Int64
 	intervalNanos                               atomic.Int64
 }
 
@@ -160,6 +170,9 @@ func New(o Options) (*Runtime, error) {
 	if o.RetryBackoffMax <= 0 {
 		o.RetryBackoffMax = 30 * time.Second
 	}
+	if o.RecipeEvery <= 0 {
+		o.RecipeEvery = 5 * time.Second
+	}
 	if o.Now == nil {
 		o.Now = time.Now
 	}
@@ -171,7 +184,7 @@ func New(o Options) (*Runtime, error) {
 		return nil, err
 	}
 	r := &Runtime{o: o, buf: domain.NewBuffer(o.BufferAge, o.BufferCapacity), log: o.Log, seqr: domain.NewSequencer(),
-		prev: map[string]uint32{}, hasPrev: map[string]bool{}, states: map[string]string{}, seqs: seqs}
+		prev: map[string]uint32{}, hasPrev: map[string]bool{}, states: map[string]string{}, seqs: seqs, written: map[string]bool{}}
 	r.intervalNanos.Store(int64(o.HeartbeatEvery))
 	return r, nil
 }
@@ -402,9 +415,12 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errs := make(chan error, 2)
+	errs := make(chan error, 3)
 	go func() { errs <- r.publishLoop(ctx) }()
 	go func() { errs <- r.heartbeatLoop(ctx) }()
+	if r.o.Recipes != nil && r.o.Writer != nil {
+		go func() { errs <- r.recipeLoop(ctx) }()
+	}
 	if r.o.Source == nil {
 		<-ctx.Done()
 		return nil
@@ -473,6 +489,6 @@ func (r *Runtime) Stats() Stats {
 	return Stats{Accepted: r.accepted.Load(), DroppedDuplicate: r.dupDropped.Load(), DroppedStale: r.staleDropped.Load(),
 		Invalid: r.invalid.Load(), Evicted: int64(r.buf.Evicted()), Sent: r.sent.Load(), ServerAccepted: r.srvAccepted.Load(),
 		ServerDropped: r.srvDropped.Load(), Rejected: r.rejected.Load(), SendFailures: r.sendFailures.Load(),
-		SeqGaps: r.seqGaps.Load(), HeartbeatFailures: r.heartbeatFailures.Load(), CertRenewals: r.certRenewals.Load(), CertRenewFailures: r.certRenewFailures.Load(), BufferLen: r.buf.Len(),
+		SeqGaps: r.seqGaps.Load(), HeartbeatFailures: r.heartbeatFailures.Load(), CertRenewals: r.certRenewals.Load(), CertRenewFailures: r.certRenewFailures.Load(), RecipesExecuted: r.recipesExecuted.Load(), ReadbackDeviations: r.deviations.Load(), BufferLen: r.buf.Len(),
 		BufferFillPct: r.buf.FillPct(now), AppliedConfigVersion: r.Applied()}
 }

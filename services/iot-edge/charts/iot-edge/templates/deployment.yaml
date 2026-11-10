@@ -50,6 +50,12 @@ spec:
               value: {{ required "shopfloor.nodeId is required with shopfloor.url" .Values.shopfloor.nodeId | quote }}
             - name: EDGE_SOURCE
               value: {{ .Values.shopfloor.source | quote }}
+{{- if .Values.shopfloor.writer }}
+            - name: EDGE_WRITER
+              value: {{ .Values.shopfloor.writer | quote }}
+            - name: EDGE_RECIPE_AUTO_COMPLETE
+              value: {{ .Values.shopfloor.recipeAutoComplete | quote }}
+{{- end }}
             - name: EDGE_SIM_MACHINES
               value: {{ .Values.shopfloor.simMachines | quote }}
             - name: IOT_BUFFER_CAPACITY

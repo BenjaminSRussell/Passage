@@ -110,6 +110,13 @@ type Store interface {
 	ListEdgeConfigs(ctx context.Context, edgeID string, limit int) ([]store.EdgeConfigVersion, error)
 	CurrentEdgeConfig(ctx context.Context, edgeID, subject string) (store.EdgeConfigVersion, error)
 	Heartbeat(ctx context.Context, edgeID, subject string, in store.HeartbeatInput) (store.HeartbeatResult, error)
+	CreateControlRecipe(ctx context.Context, in store.ControlRecipeInput, createdBy string, idem store.Idem) (store.ControlRecipe, error)
+	ListControlRecipes(ctx context.Context, f store.RecipeFilter) ([]store.ControlRecipe, error)
+	GetControlRecipe(ctx context.Context, id string) (store.ControlRecipeDetail, error)
+	ReportControlRecipe(ctx context.Context, id, to string, errText *string, actor string) (store.ControlRecipe, error)
+	ResendControlRecipe(ctx context.Context, id string, force bool, reason, actor string, idem store.Idem) (store.ControlRecipe, error)
+	EdgeControlRecipes(ctx context.Context, edgeID, subject string) ([]store.ControlRecipe, error)
+	EdgeReportControlRecipe(ctx context.Context, edgeID, subject, id string, rep store.EdgeRecipeReport) (store.ControlRecipe, error)
 	IssueEnrollmentToken(ctx context.Context, edgeID, createdBy string, now time.Time) (store.EnrollmentToken, error)
 	Enroll(ctx context.Context, token, csrPEM string, issuer pki.Issuer, now time.Time) (store.EdgeCertificate, error)
 	RenewCertificate(ctx context.Context, edgeID, subject, csrPEM string, issuer pki.Issuer, now time.Time) (store.EdgeCertificate, error)
@@ -204,7 +211,9 @@ type API struct {
 	jobsReopened atomic.Int64
 	// enrollTokens, enrolled and certRenewed count edge enrollment tokens minted, redeemed and certificates renewed.
 	enrollTokens, enrolled, certRenewed atomic.Int64
-	issuer                              pki.Issuer
+	// recipesSent and recipesResent count control recipes generated and sent again.
+	recipesSent, recipesResent atomic.Int64
+	issuer                     pki.Issuer
 	// corrections counts registration corrections; revisedDays approved days revised with reversal.
 	corrections atomic.Int64
 	revisedDays atomic.Int64
@@ -299,6 +308,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerProcessCategories(r)
 	a.registerEdge(r)
 	a.registerEnrollment(r)
+	a.registerControlRecipes(r)
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers", a.createWorker)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers", a.listWorkers)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers/{id}", a.getWorker)
@@ -350,6 +360,8 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_edge_enrollment_tokens_total", "Edge enrollment tokens minted.", a.enrollTokens.Load())
 		counter("shopfloor_edge_enrollments_total", "Edge nodes enrolled with a token (certificate issued).", a.enrolled.Load())
 		counter("shopfloor_edge_certificates_renewed_total", "Edge client certificates renewed.", a.certRenewed.Load())
+		counter("shopfloor_control_recipes_sent_total", "Control recipes generated and sent (FR-25.15).", a.recipesSent.Load())
+		counter("shopfloor_control_recipes_resent_total", "Control recipes in error sent again (BR-25.11).", a.recipesResent.Load())
 		counter("shopfloor_failed_total", "Requests that failed in the store.", a.failed.Load())
 	})
 }

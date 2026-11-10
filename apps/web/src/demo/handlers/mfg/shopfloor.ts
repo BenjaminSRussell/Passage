@@ -1,9 +1,10 @@
 // Shop floor service (/api/v1/shopfloor) for the demo: machines, the andon board and OEE.
 // Resources and sites carry the real ids of company.ts; the screens show their names.
-import type { Andon, Downtime, Job, Machine, OeeBucket, OeeTile } from "../../../modules/shopfloor/api/client";
+import type { Andon, ControlRecipeDetail, Downtime, Job, Machine, OeeBucket, OeeTile } from "../../../modules/shopfloor/api/client";
 import { reply, route } from "../../backend";
 import { PLANT, resourceByCode } from "../../company";
 import { at, table, uid } from "../../store";
+import { orders } from "./production";
 
 const BASE = "/api/v1/shopfloor";
 const KIND_ANDON = 230;
@@ -188,3 +189,115 @@ route("GET", `${BASE}/jobs`, (req) => {
 route("GET", `${BASE}/jobs/{id}/reopenings`, () => ({ items: [] }));
 route("GET", `${BASE}/jobs/{id}`, (req) => jobs.get(req.params.id) ?? reply.problem(404, "SF-0404", "Job not found."));
 
+
+// Control recipes (FR-25.15): the recipe of a released order sent to a kiosk or to a process control system.
+const orderId = (number: string): string => orders.all().find((o) => o.orderNumber === number)?.id ?? uid(234, 99);
+const recipeDoc = (setpoint?: { node: string; value: number }): ControlRecipeDetail["recipe"] => ({
+  procedure: {
+    name: "Impeller balancing",
+    unitProcedures: [
+      {
+        name: "Balancer",
+        operations: [
+          {
+            name: "Balance",
+            phases: [
+              {
+                name: "Spin-up",
+                instructions: [
+                  { seq: 1, category: "instruction-text", text: "Mount the impeller on the arbor and check the runout." },
+                  ...(setpoint ? [{ seq: 2, category: "process-parameter-setpoint", node: setpoint.node, value: setpoint.value }] : []),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+});
+const recipeBase = { topic: null, version: 3, createdBy: "Maya Okafor", createdAt: at(-0.5), updatedAt: at(-0.2) };
+const recipes = table<ControlRecipeDetail>([
+  {
+    ...recipeBase,
+    id: uid(234, 1),
+    orderId: orderId("MO-24618"),
+    resourceId: resourceByCode("BAL-01").id,
+    destination: "pcs-opcua",
+    edgeId: uid(235, 1),
+    status: "in-execution",
+    recipe: recipeDoc({ node: "ns=2;s=Balancer1.SpeedSP", value: 1800 }),
+    sendCount: 1,
+    lastSentAt: at(-0.5),
+    lastError: null,
+    history: [
+      { id: uid(236, 1), fromStatus: null, toStatus: "sent", actor: "Maya Okafor", note: null, forced: false, at: at(-0.5) },
+      { id: uid(236, 2), fromStatus: "sent", toStatus: "received", actor: "edge:plant-gateway", note: null, forced: false, at: at(-0.49) },
+      { id: uid(236, 3), fromStatus: "received", toStatus: "in-execution", actor: "edge:plant-gateway", note: null, forced: false, at: at(-0.48) },
+    ],
+    writes: [
+      { id: uid(237, 1), phasePath: "Impeller balancing/Balancer/Balance/Spin-up", node: "ns=2;s=Balancer1.SpeedSP", value: "1800", readback: "1800", written: true, deviation: false, reason: null, at: at(-0.48) },
+    ],
+  },
+  {
+    ...recipeBase,
+    id: uid(234, 2),
+    orderId: orderId("MO-24627"),
+    resourceId: resourceByCode("ASM-01").id,
+    destination: "kiosk",
+    edgeId: null,
+    status: "sent",
+    recipe: recipeDoc(),
+    sendCount: 1,
+    lastSentAt: at(-0.1),
+    lastError: null,
+    history: [{ id: uid(236, 4), fromStatus: null, toStatus: "sent", actor: "Maya Okafor", note: null, forced: false, at: at(-0.1) }],
+    writes: [],
+  },
+  {
+    ...recipeBase,
+    id: uid(234, 3),
+    orderId: orderId("MO-24611"),
+    resourceId: resourceByCode("TST-01").id,
+    destination: "pcs-opcua",
+    edgeId: uid(235, 1),
+    status: "error",
+    recipe: recipeDoc({ node: "ns=2;s=Test1.PressureSP", value: 480 }),
+    sendCount: 2,
+    lastSentAt: at(-0.3),
+    lastError: "1 of 1 setpoints were refused or failed; see the write audit",
+    history: [
+      { id: uid(236, 5), fromStatus: null, toStatus: "sent", actor: "Maya Okafor", note: null, forced: false, at: at(-0.6) },
+      { id: uid(236, 6), fromStatus: "sent", toStatus: "error", actor: "edge:plant-gateway", note: "1 of 1 setpoints were refused or failed; see the write audit", forced: false, at: at(-0.55) },
+      { id: uid(236, 7), fromStatus: "error", toStatus: "sent", actor: "Maya Okafor", note: "Test stand node added to the allowlist", forced: false, at: at(-0.3) },
+    ],
+    writes: [
+      { id: uid(237, 2), phasePath: "Impeller balancing/Balancer/Balance/Spin-up", node: "ns=2;s=Test1.PressureSP", value: "480", readback: null, written: false, deviation: false, reason: "node is not on the write allowlist", at: at(-0.55) },
+    ],
+  },
+]);
+const asRow = ({ history: _history, writes: _writes, ...row }: ControlRecipeDetail) => row;
+route("GET", `${BASE}/control-recipes`, (req) => {
+  const status = req.query.get("status");
+  const destination = req.query.get("destination");
+  const rows = recipes
+    .all()
+    .filter((r) => (!status || r.status === status) && (!destination || r.destination === destination))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+  return { items: rows.map(asRow) };
+});
+route("GET", `${BASE}/control-recipes/{id}`, (req) => recipes.get(req.params.id) ?? reply.problem(404, "SF-0174", "Control recipe not found."));
+route("POST", `${BASE}/control-recipes/{id}:resend`, (req) => {
+  const row = recipes.get(req.params.id);
+  if (!row) return reply.problem(404, "SF-0174", "Control recipe not found.");
+  if (row.status !== "error") return reply.problem(409, "SF-0175", "Only a control recipe in error can be sent again.");
+  const body = (req.body ?? {}) as { reason?: string; force?: boolean };
+  const next = recipes.update(row.id, {
+    status: "sent",
+    sendCount: row.sendCount + 1,
+    lastError: null,
+    lastSentAt: new Date().toISOString(),
+    history: [...row.history, { id: crypto.randomUUID(), fromStatus: "error", toStatus: "sent", actor: "Jordan Avery", note: body.reason?.trim() || null, forced: Boolean(body.force), at: new Date().toISOString() }],
+  });
+  return reply.ok(next ? asRow(next) : row);
+});

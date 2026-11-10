@@ -604,6 +604,24 @@ export MIGRATE_ON_START=true   # dev only; stage/prod run migrations as an Argo 
 go run ./cmd/shopfloor
 ```
 
+### Control recipes (25-5)
+
+`POST control-recipes` (duty `shopfloor.controlrecipe.create`) generates and sends the ISA-88 recipe of an order for one
+destination: `kiosk` (found by resource and reported by the operator with `shopfloor.controlrecipe.execute`), `pcs-opcua`
+(setpoints written by the connector of `edgeId`) or `pcs-mqtt` (`topic`, through that connector). The body is validated
+before anything is stored: names unique per level, instructions numbered from 1 with one of the eight categories, a setpoint
+with a numeric characteristic, a finite value inside its limits and the node it is written to. Status runs sent, received,
+in-execution, completed, with error possible from any active status (`controlrecipe.statuschanged`, history in
+`control_recipe_event`, migration `0025`). The monitor is `GET control-recipes` with status, destination, order, resource and
+edge filters; `GET control-recipes/{id}` adds the history and the write audit. `:resend` sends a recipe in error again, at most
+five times (SF-0176) and, once a process message for the order exists, only with `force` and a reason (SF-0177), because the
+process control system may have started it (BR-25.11); the forced resend is flagged in the history. The connector pulls its
+active recipes (`GET edge-nodes/{id}/control-recipes`) and reports status and writes
+(`POST edge-nodes/{id}/control-recipes/{rid}:report`): a write must be a setpoint of the recipe at its value and is accepted only
+while the recipe is in-execution (BR-25.15), each write goes to `edge_write_audit` with the value read back, and a missing
+readback or one more than 0.001 away is a deviation (`controlrecipe.deviation`). Codes `SF-0174` to `SF-0178`. The web monitor
+is `/shopfloor/control-recipes`.
+
 ### Edge enrollment and certificate binding (25-4)
 
 A supervisor with `shopfloor.edge.configure` mints a one-time token for an edge node (`POST edge-nodes/{id}:enrollment-token`,
@@ -764,6 +782,11 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0171` | 401 | The enrollment token is not valid (unknown, used, replaced, expired or the node is switched off) |
 | `SF-0172` | 422 | The certificate request cannot be signed (not PEM, bad signature, weak key) |
 | `SF-0173` | 503 | Certificate issuing is not configured on this service |
+| `SF-0174` | 404 | Control recipe not found |
+| `SF-0175` | 409 | The control recipe cannot take that status from where it is, or a write outside in-execution, or a resend of a recipe not in error |
+| `SF-0176` | 422 | The control recipe was already sent again five times |
+| `SF-0177` | 422 | Process messages exist for the order: resend with force and a reason |
+| `SF-0178` | 422 | The control recipe cannot go to that destination, or a write is not a setpoint of the recipe |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

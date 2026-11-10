@@ -121,6 +121,16 @@ channels:
         $ref: "#/components/messages/EdgeConfigPublished"
       edgeConfigApplied:
         $ref: "#/components/messages/EdgeConfigApplied"
+  controlRecipe:
+    address: passage.shopfloor.control-recipe
+    description: |
+      Control recipes (FR-25.15): every status change of a recipe, and a setpoint readback that differs from
+      the value written (BR-25.15). Not in the PRD event table. The Kafka key is the recipe id.
+    messages:
+      controlRecipeStatusChanged:
+        $ref: "#/components/messages/ControlRecipeStatusChanged"
+      controlRecipeDeviation:
+        $ref: "#/components/messages/ControlRecipeDeviation"
   paydayExported:
     address: passage.shopfloor.pay-export
     messages:
@@ -349,6 +359,22 @@ operations:
       $ref: "#/channels/edgeConfig"
     messages:
       - $ref: "#/channels/edgeConfig/messages/edgeConfigApplied"
+  publishControlRecipeStatusChanged:
+    action: send
+    summary: Control recipe status changed
+    description: Sends the control recipe status event through the outbox.
+    channel:
+      $ref: "#/channels/controlRecipe"
+    messages:
+      - $ref: "#/channels/controlRecipe/messages/controlRecipeStatusChanged"
+  publishControlRecipeDeviation:
+    action: send
+    summary: Setpoint readback deviation
+    description: Sends the control recipe deviation event through the outbox.
+    channel:
+      $ref: "#/channels/controlRecipe"
+    messages:
+      - $ref: "#/channels/controlRecipe/messages/controlRecipeDeviation"
 components:
   messages:
     JobReported:
@@ -452,6 +478,20 @@ components:
       description: Published when a heartbeat reports a configuration version other than the one applied before; previousVersion is null for the first. The Kafka key is the edge id.
       payload:
         $ref: "#/components/schemas/EdgeConfigAppliedData"
+    ControlRecipeStatusChanged:
+      name: dev.passage.shopfloor.controlrecipe.statuschanged.v1
+      contentType: application/cloudevents+json
+      summary: Control recipe generated, sent, reported or sent again
+      description: Published in the transaction that stores a control recipe (from is null), changes its status or sends it again after an error (sendCount raised, forced true when BR-25.11 force was used, with its reason in note).
+      payload:
+        $ref: "#/components/schemas/ControlRecipeStatusChangedData"
+    ControlRecipeDeviation:
+      name: dev.passage.shopfloor.controlrecipe.deviation.v1
+      contentType: application/cloudevents+json
+      summary: Setpoint readback differs from the value written
+      description: Published when the edge connector reports a write whose readback does not match the value written (BR-25.15), or a write it made but could not read back.
+      payload:
+        $ref: "#/components/schemas/ControlRecipeDeviationData"
     WorkerAssigned:
       name: dev.passage.shopfloor.worker.assigned.v1
       contentType: application/cloudevents+json
@@ -1163,6 +1203,60 @@ components:
             type: string
         publishedBy:
           type: string
+    ControlRecipeStatusChangedData:
+      type: object
+      required: [recipeId, orderId, resourceId, destination, from, to, sendCount, forced, note, actor]
+      additionalProperties: false
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        resourceId:
+          type: string
+          format: uuid
+        destination:
+          type: string
+          enum: [kiosk, pcs-opcua, pcs-mqtt]
+        from:
+          type: [string, "null"]
+          enum: [sent, received, in-execution, completed, error, null]
+        to:
+          type: string
+          enum: [sent, received, in-execution, completed, error]
+        sendCount:
+          type: integer
+          minimum: 1
+        forced:
+          type: boolean
+        note:
+          type: [string, "null"]
+        actor:
+          type: string
+    ControlRecipeDeviationData:
+      type: object
+      required: [recipeId, orderId, edgeId, phasePath, node, written, readback]
+      additionalProperties: false
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        edgeId:
+          type: string
+          format: uuid
+        phasePath:
+          type: string
+        node:
+          type: string
+        written:
+          type: string
+        readback:
+          type: [string, "null"]
     EdgeConfigAppliedData:
       type: object
       required: [edgeId, version, previousVersion]
