@@ -265,17 +265,25 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 		return RMACreditNote{}, err
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var err error
-		row, err = loadRMACredit(ctx, tx, `legal_entity_id = $2 and rma_id = $3`, p.TenantID, in.LegalEntityID, in.RMAID)
-		if err == nil {
-			if row.requestHash != hash {
-				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "this RMA was already credited with different amounts or references")
+		// existing reports whether this RMA already has its credit, which a repeat replays.
+		existing := func() (bool, error) {
+			var err error
+			row, err = loadRMACredit(ctx, tx, `legal_entity_id = $2 and rma_id = $3`, p.TenantID, in.LegalEntityID, in.RMAID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
 			}
-			return nil
+			if err != nil {
+				return false, err
+			}
+			if row.requestHash != hash {
+				return false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "this RMA was already credited with different amounts or references")
+			}
+			return true, nil
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
+		if found, err := existing(); found || err != nil {
 			return err
 		}
+		var err error
 		if taxAccounts, err = s.rmaTaxAccountsFor(in); err != nil {
 			return err
 		}
@@ -284,6 +292,11 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 		}
 		invoice, itemIDs, invoiceAmount, err := lockInvoiceItems(ctx, tx, p.TenantID, in)
 		if err != nil {
+			return err
+		}
+		// A concurrent repeat may have committed this RMA's credit while we waited for the invoice lock; replay it
+		// rather than counting it against the invoice or meeting its credit note's document number.
+		if found, err := existing(); found || err != nil {
 			return err
 		}
 		// The invoice row locks above serialize RMA credits of one invoice, so this sum sees every earlier credit.
