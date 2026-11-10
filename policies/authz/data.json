@@ -3379,6 +3379,11 @@
       {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
     ]},
+    "inbox.read": {"permissions": [{"resource": "/v1/inbox", "methods": ["GET"]}]},
+    "procurement.inbox.read": {"permissions": [{"resource": "/v1/procurement/requisition-approvals", "methods": ["GET"]}]},
+    "party.inbox.read": {"permissions": [{"resource": "/v1/party/pending-changes", "methods": ["GET"]}]},
+    "ledger.inbox.read": {"permissions": [{"resource": "/v1/ledger/journal-batches", "methods": ["GET"]}]},
+    "payables.inbox.read": {"permissions": [{"resource": "/v1/payables/open-items", "methods": ["GET"]}]},
     "workflow.approve": {"permissions": [
       {"resource": "/v1/workitems", "methods": ["GET"]},
       {"resource": "/v1/workitems/*/actions", "methods": ["POST"]}
@@ -3418,7 +3423,11 @@
       "carrier-gateway": ["carrier.rate.quote", "carrier.tracking.read"]
     },
     "batch": {
-      "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
+      "product": ["product.variants.explode", "product.released.read", "product.jobs.write"],
+      "purchasing": ["procurement.inbox.read"],
+      "party": ["party.inbox.read"],
+      "ledger": ["ledger.inbox.read"],
+      "payables": ["payables.inbox.read"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],

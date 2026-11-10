@@ -8,6 +8,12 @@ release may change public APIs.
 
 ## [Unreleased]
 
+### Added
+
+- batch: `GET /v1/inbox` merges what waits for the caller across requisition approvals, customer pending changes, journal batches in
+  approval and payment holds (#499). Each source is read as the caller with a narrow `*.inbox.read` service token, a slow or failing
+  source is named in `unavailable` instead of failing the page, and pages are stable (newest first, keyset cursor).
+
 ### Fixed
 
 - Review fixes on the batch-2 lane: the integration hub gains `GET /v1/hub/coexistence` and `POST /v1/hub/coexistence:retry-parked`
