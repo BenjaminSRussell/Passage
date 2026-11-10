@@ -19,7 +19,8 @@ import { useTenantSettings } from "../../shell/tenant/TenantSettings";
 import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, EmptyState, PageHeader, Skeleton, type BadgeTone } from "../../shell/ui";
 import { z } from "zod";
 import { checks, hasRows } from "./checks";
-import { stepGuides } from "./guides";
+import { IMPORT_STEP, stepGuides } from "./guides";
+import { ImportStep } from "./ImportStep";
 import styles from "./pages.module.css";
 
 const SETUP_KEY = ["setup", "state"];
@@ -109,11 +110,15 @@ export function SetupWizardPage() {
                   <li key={line}>{line}</li>
                 ))}
               </ul>
-              <p>
-                <Link to={guide.to} className={buttonClassName()}>
-                  {guide.linkLabel}
-                </Link>
-              </p>
+              {open.key === IMPORT_STEP ? (
+                <ImportStep />
+              ) : (
+                <p>
+                  <Link to={guide.to} className={buttonClassName()}>
+                    {guide.linkLabel}
+                  </Link>
+                </p>
+              )}
             </>
           ) : null}
           {change.isError ? (

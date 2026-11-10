@@ -1,10 +1,11 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { PrincipalProvider } from "../../shell/principal";
 import { json, pageViolations, renderRoutes, server, useFakeServer } from "../../shell/testing/fakeServer";
 import module from "./module";
 import { hasRows } from "./checks";
+import { templateColumns } from "./ImportStep";
 import { currentStep } from "./pages";
 import type { SetupStep } from "../../shell/tenant/api";
 
@@ -209,3 +210,94 @@ describe("demo company page", () => {
   });
 });
 
+describe("setup wizard import step", () => {
+  const IMPORT_DUTIES = ["migration.run", "migration.connection.write"];
+  const importSetup = { steps: [{ key: "import", name: "Import your first records", description: "Bring in vendors, customers and products from a spreadsheet.", status: "todo" }], total: 1, finished: 0, complete: false };
+  const connection = { id: "c1", name: "Spreadsheets", kind: "file", sourceSystem: "custom_files", config: {}, status: "active", version: 1 };
+  const binding = (entity: string) => ({ id: `b-${entity}`, connectionProfileId: "c1", entity, source: { file: `${entity}s.csv` }, keyFields: ["number"], mappingSpecId: `s-${entity}`, status: "active", version: 1, createdBy: "u", createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z" });
+  const spec = (entity: string) => ({ id: `s-${entity}`, entity, version: 1, checksum: "x", fieldCount: 2, testCount: 0, naturalKey: ["number"], createdAt: "2026-11-01T00:00:00Z", mapping: { entity, version: 1, fields: [{ source: "number", target: "number", type: "string" }, { source: "name", target: "name", type: "string" }] } });
+  const preview = {
+    ok: true,
+    durationMs: 12,
+    mapping: { entity: "vendor", version: 1, mappingSpecId: "s-vendor" },
+    columns: ["number", "name"],
+    more: false,
+    mapped: 1,
+    rejected: 1,
+    rows: [
+      { index: 1, sourceKey: "V-1", source: { number: "V-1", name: "Acme" }, target: { number: "V-1", name: "Acme" } },
+      { index: 2, sourceKey: "V-2", source: { number: "V-2", name: "" }, rejects: [{ field: "name", code: "MIG-MAP-REQUIRED", detail: "a name is required" }] },
+    ],
+  };
+
+  function migrationServer(withBindings: boolean) {
+    server.handler = (url, init) => {
+      if (url.pathname === "/api/v1/tenant/setup") return json(200, importSetup);
+      const entity = url.searchParams.get("entity") ?? "";
+      if (url.pathname === "/api/v1/integration/entity-bindings") return json(200, { items: withBindings ? [binding(entity)] : [] });
+      if (url.pathname === "/api/v1/integration/connection-profiles") return json(200, { items: [connection] });
+      if (url.pathname === "/api/v1/integration/mapping-specs") return json(200, { items: [spec(entity)] });
+      if (url.pathname.endsWith(":preview") && init.method === "POST") return json(200, preview);
+      return undefined;
+    };
+  }
+
+  it("checks a chosen file with the migration service and lists what is wrong with each row", async () => {
+    migrationServer(true);
+    render("/setup", IMPORT_DUTIES);
+    const upload = await screen.findByLabelText(/^Try a file/);
+    expect(screen.getByLabelText("What to import")).toHaveValue("vendor");
+    const file = new File(["number,name\nV-1,Acme\nV-2,\n"], "vendors.csv", { type: "text/csv" });
+    Object.defineProperty(file, "arrayBuffer", { value: async () => new TextEncoder().encode("number,name\nV-1,Acme\nV-2,\n").buffer });
+    fireEvent.change(upload, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preview rows" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Preview rows" }));
+    expect(await screen.findByText(/name: a name is required/)).toBeInTheDocument();
+    const sent = server.calls.find((c) => c.url.pathname === "/api/v1/integration/entity-bindings/b-vendor:preview")?.body as { upload?: { name: string } };
+    expect(sent.upload?.name).toBe("vendors.csv");
+    expect(screen.getByRole("link", { name: "Start the import" })).toHaveAttribute("href", "/migration/runs/new");
+    expect(screen.queryByRole("link", { name: "Open import" })).not.toBeInTheDocument();
+  });
+
+  it("switches between vendors, customers and products", async () => {
+    const user = userEvent.setup();
+    migrationServer(true);
+    render("/setup", IMPORT_DUTIES);
+    await screen.findByLabelText(/^Try a file/);
+    await user.selectOptions(screen.getByLabelText("What to import"), "product");
+    await waitFor(() => expect(server.calls.some((c) => c.url.pathname === "/api/v1/integration/entity-bindings" && c.url.searchParams.get("entity") === "product")).toBe(true));
+    expect(within(screen.getByLabelText("What to import")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Vendors", "Customers", "Products"]);
+  });
+
+  it("says what to set up when no file import exists for the records yet", async () => {
+    migrationServer(false);
+    const { container } = render("/setup", IMPORT_DUTIES);
+    expect(await screen.findByText("No file import is set up for vendors yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Create a file connection" })).toHaveAttribute("href", "/migration/connections/new");
+    expect(screen.getByRole("link", { name: "Create a binding for vendors" })).toHaveAttribute("href", "/migration/bindings/new");
+    expect(screen.queryByRole("button", { name: "Preview rows" })).not.toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("explains a missing duty and asks the migration service for nothing", async () => {
+    migrationServer(true);
+    render("/setup", []);
+    expect(await screen.findByText("Your account can't import files")).toBeInTheDocument();
+    expect(server.calls.filter((c) => c.url.pathname.startsWith("/api/v1/integration"))).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeInTheDocument();
+  });
+
+  it("lets a person who can run imports but not check files start the import", async () => {
+    migrationServer(true);
+    render("/setup", ["migration.run"]);
+    expect(await screen.findByText("Your account can't check files here")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start the import" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview rows" })).not.toBeInTheDocument();
+  });
+
+  it("builds the template header from the columns the mapping reads", () => {
+    expect(templateColumns({ fields: [{ source: "number" }, { sources: ["first", "last"], target: "name" }, { source: "number" }, { source: "", value: "x" }, { source: "changed", timeSource: "tz" }] })).toEqual(["number", "first", "last", "changed", "tz"]);
+    expect(templateColumns(undefined)).toEqual([]);
+    expect(templateColumns({ fields: "no" })).toEqual([]);
+  });
+});
