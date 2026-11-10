@@ -7,6 +7,7 @@ import styles from "./pages.module.css";
 import { scopeLabels } from "./RunsPage";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceName } from "../mfg-shared/resources";
 
 const skipLabels: Record<string, string> = {
   firmed: "firmed, so it stays where it is",
@@ -139,7 +140,6 @@ export function RunDetailPage() {
   }
 
   const facts: [string, ReactNode][] = [
-    ["Run", run.id],
     ["Scope", scopeLabels[run.scope] ?? run.scope],
     ["Mode", sentence(run.mode)],
     ["Direction", sentence(run.direction)],
@@ -168,7 +168,7 @@ export function RunDetailPage() {
       ]
     : [];
   const kpiColumns: DataTableColumn<RunResourceKpi>[] = [
-    { key: "resourceCode", header: "Resource", mono: true },
+    { key: "resourceCode", header: "Resource", render: (row) => <ResourceName id={row.resourceId} fallback={row.resourceCode} /> },
     { key: "jobs", header: "Jobs", align: "end" },
     { key: "bookedMinutes", header: "Booked", align: "end", render: (row) => formatMinutes(row.bookedMinutes) },
     { key: "openMinutes", header: "Open", align: "end", render: (row) => formatMinutes(row.openMinutes) },
@@ -198,7 +198,7 @@ export function RunDetailPage() {
           {facts.map(([term, value]) => (
             <div key={term} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
-              <dd className={term === "Run" ? `${styles.value} ${styles.mono}` : styles.value}>{value}</dd>
+              <dd className={styles.value}>{value}</dd>
             </div>
           ))}
         </dl>

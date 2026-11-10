@@ -60,7 +60,8 @@ func handle(t *testing.T, s Applier, evt events.Event) error {
 }
 
 func TestHandlersCoverEverySubscribedEventType(t *testing.T) {
-	for _, typ := range []string{PartyCreatedType, PartyUpdatedType, PartyMergedType, ProductCreatedType, ProductUpdatedType, PurchaseOrderConfirmed, PurchaseOrderCancelled} {
+	for _, typ := range []string{PartyCreatedType, PartyUpdatedType, PartyMergedType, ProductCreatedType, ProductUpdatedType, PurchaseOrderConfirmed, PurchaseOrderCancelled,
+		ReceiptPostedType, ReceiptCorrectedType, VendorInvoicePostedType, SalesOrderConfirmedType, PackingSlipPostedType, PackingSlipCancelledType, CustomerInvoicePostedType, CreditNotePostedType} {
 		if _, ok := Handlers(&fakeStore{})[typ]; !ok {
 			t.Errorf("no handler for %s", typ)
 		}
@@ -84,6 +85,22 @@ func TestIndexesEachRecordKindFromItsEvent(t *testing.T) {
 			store.Record{Type: store.TypePurchaseOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-5", Title: "PO-5", Status: "CANCELLED", Version: 2, At: eventTime}, entityID},
 		{"po draft cancelled", event(t, PurchaseOrderCancelled, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-5", "legal_entity_id": entityID, "version_no": 1, "prior_status": "DRAFT"}),
 			store.Record{Type: store.TypePurchaseOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-5", Title: "PO-5", Status: "CANCELLED", Version: 1, UpdateOnly: true, At: eventTime}, entityID},
+		{"receipt posted", event(t, ReceiptPostedType, receivingSource, map[string]any{"receipt_id": recordID, "receipt_number": "RC-7", "legal_entity_id": entityID, "posting_date": "2026-03-01"}),
+			store.Record{Type: store.TypeReceipt, ID: recordID, LegalEntityID: entityID, Number: "RC-7", Title: "RC-7", Subtitle: "2026-03-01", Status: "POSTED", At: eventTime}, entityID},
+		{"receipt cancelled", event(t, ReceiptCorrectedType, receivingSource, map[string]any{"receipt_id": recordID, "receipt_number": "RC-7", "legal_entity_id": entityID, "kind": "CANCELLATION"}),
+			store.Record{Type: store.TypeReceipt, ID: recordID, LegalEntityID: entityID, Number: "RC-7", Status: "CANCELLED", UpdateOnly: true, At: eventTime}, entityID},
+		{"vendor invoice posted", event(t, VendorInvoicePostedType, receivingSource, map[string]any{"invoice_id": recordID, "invoice_number": "VI-3", "legal_entity_id": entityID, "currency": "EUR", "total": "99.00"}),
+			store.Record{Type: store.TypeVendorInvoice, ID: recordID, LegalEntityID: entityID, Number: "VI-3", Title: "VI-3", Subtitle: "EUR 99.00", Status: "POSTED", At: eventTime}, entityID},
+		{"sales order confirmed", event(t, SalesOrderConfirmedType, salesSource, map[string]any{"order_id": recordID, "order_number": "SO-11", "legal_entity_id": entityID, "currency": "USD", "net_total": "5.00", "version": 2}),
+			store.Record{Type: store.TypeSalesOrder, ID: recordID, LegalEntityID: entityID, Number: "SO-11", Title: "SO-11", Subtitle: "USD 5.00", Status: "CONFIRMED", Version: 2, At: eventTime}, entityID},
+		{"packing slip posted", event(t, PackingSlipPostedType, fulfillmentSource, map[string]any{"packing_slip_id": recordID, "packing_slip_number": "PS-2", "legal_entity_id": entityID, "posting_date": "2026-03-02"}),
+			store.Record{Type: store.TypePackingSlip, ID: recordID, LegalEntityID: entityID, Number: "PS-2", Title: "PS-2", Subtitle: "2026-03-02", Status: "POSTED", At: eventTime}, entityID},
+		{"packing slip cancelled", event(t, PackingSlipCancelledType, fulfillmentSource, map[string]any{"packing_slip_id": recordID, "packing_slip_number": "PS-2", "legal_entity_id": entityID}),
+			store.Record{Type: store.TypePackingSlip, ID: recordID, LegalEntityID: entityID, Number: "PS-2", Status: "CANCELLED", UpdateOnly: true, At: eventTime}, entityID},
+		{"customer invoice posted", event(t, CustomerInvoicePostedType, billingSource, map[string]any{"invoice_id": recordID, "number": "INV-8", "legal_entity_id": entityID, "currency": "USD", "totals": map[string]any{"gross": "10.00"}}),
+			store.Record{Type: store.TypeCustomerInvoice, ID: recordID, LegalEntityID: entityID, Number: "INV-8", Title: "INV-8", Subtitle: "USD 10.00", Status: "POSTED", At: eventTime}, entityID},
+		{"credit note posted", event(t, CreditNotePostedType, billingSource, map[string]any{"credit_note_id": recordID, "number": "CN-1", "legal_entity_id": entityID, "currency": "USD", "totals": map[string]any{"gross": "1.00"}}),
+			store.Record{Type: store.TypeCustomerInvoice, ID: recordID, LegalEntityID: entityID, Number: "CN-1", Title: "CN-1", Subtitle: "USD 1.00", Status: "POSTED", At: eventTime}, entityID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeStore{}
@@ -144,6 +161,11 @@ func TestEverySubscribedTopicMatchesTheSourceOutboxAggregate(t *testing.T) {
 		{ProductTopic, "../../../product/internal/store/store.go", `emit\(ctx, tx, pevents\.ProductUpdated, "([a-z_]+)"`},
 		{PurchaseOrderTopic, "../../../purchasing/internal/store/po_lifecycle.go", `enqueue\(ctx, tx, "([a-z_]+)", po\.ID, purchasingevents\.POConfirmed`},
 		{PurchaseOrderTopic, "../../../purchasing/internal/store/po_lifecycle.go", `enqueue\(ctx, tx, "([a-z_]+)", cur\.ID, purchasingevents\.POCancelled`},
+		{ReceiptTopic, "../../../receiving/internal/store/receipts.go", `receiptAggregate\s*=\s*"([a-z_]+)"`},
+		{VendorInvoiceTopic, "../../../receiving/internal/store/invoices.go", `invoiceAggregate\s*=\s*"([a-z_]+)"`},
+		{SalesOrderTopic, "../../../sales/internal/store/store.go", `enqueue\(ctx, tx, "([a-z_]+)", o\.ID, salesevents\.OrderConfirmed`},
+		{ShipmentTopic, "../../../fulfillment/internal/store/store.go", `enqueueFor\(ctx, tx, "([a-z_]+)", aggregateID`},
+		{BillingInvoiceTopic, "../../../billing/internal/store/store.go", `outbox\.Enqueue\(ctx, tx, "([a-z_]+)", inv\.ID, evt\)`},
 	} {
 		src, err := os.ReadFile(tc.file)
 		if err != nil {
@@ -174,6 +196,8 @@ func TestMalformedEventsAreDeadLettered(t *testing.T) {
 		"merge bad survivor": event(t, PartyMergedType, partySource, map[string]any{"survivorPartyId": "x", "mergedPartyIds": []string{recordID}}),
 		"merge bad id":      event(t, PartyMergedType, partySource, mergeData("x")),
 		"po no entity":      event(t, PurchaseOrderConfirmed, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-1"}),
+		"receipt no entity": event(t, ReceiptPostedType, receivingSource, map[string]any{"receipt_id": recordID, "receipt_number": "RC-1"}),
+		"slip wrong source": event(t, PackingSlipPostedType, "billing", map[string]any{"packing_slip_id": recordID, "packing_slip_number": "PS", "legal_entity_id": entityID}),
 		"po no number":      event(t, PurchaseOrderCancelled, purchasingSource, map[string]any{"po_id": recordID, "legal_entity_id": entityID}),
 	} {
 		f := &fakeStore{}

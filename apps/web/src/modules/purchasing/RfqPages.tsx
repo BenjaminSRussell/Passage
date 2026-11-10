@@ -57,9 +57,11 @@ import {
   decimalPattern,
   money,
   statusLabel,
+  useEntityNames,
   useResource,
   uuidPattern,
   type Failure,
+  Named,
 } from "./parts";
 import { AmendmentsPanel, EditDraftForm } from "./RfqAmend";
 import styles from "./pages.module.css";
@@ -71,7 +73,7 @@ export { formatInstant, rankingLabels };
 
 /** What a line asks for: its description, else the product id. */
 function lineItem(l: { productId?: string; description?: string }) {
-  return l.description ? l.description : <ShortId id={l.productId} />;
+  return l.description ? l.description : <Named entity="product" id={l.productId} />;
 }
 
 const listColumns: DataTableColumn<RFQSummary>[] = [
@@ -474,14 +476,14 @@ const lineColumns: DataTableColumn<RFQLine>[] = [
 ];
 
 const invitationColumns: DataTableColumn<RFQInvitation>[] = [
-  { key: "vendorId", header: "Vendor", mono: true },
+  { key: "vendorId", header: "Vendor", render: (i) => <Named entity="vendor" id={i.vendorId} /> },
   { key: "status", header: "Status", render: (i) => <StatusBadge status={i.status} /> },
   { key: "sentAt", header: "Sent", mono: true, render: (i) => formatInstant(i.sentAt) },
 ];
 
 const replyColumns = (rfq: RFQ): DataTableColumn<RFQReply>[] => [
   { key: "line", header: "Line", align: "end", render: (r) => rfq.lines.find((l) => l.id === r.lineId)?.lineNo ?? "—" },
-  { key: "vendorId", header: "Vendor", render: (r) => <ShortId id={r.vendorId} /> },
+  { key: "vendorId", header: "Vendor", render: (r) => <Named entity="vendor" id={r.vendorId} /> },
   { key: "unitPrice", header: "Price", align: "end", render: (r) => `${money(r.unitPrice, r.currency)} / ${r.priceUnit}` },
   { key: "leadTimeDays", header: "Lead time", align: "end", render: (r) => `${r.leadTimeDays} d` },
   { key: "validUntil", header: "Valid until", mono: true, render: (r) => r.validUntil ?? "—" },
@@ -633,7 +635,7 @@ export function RFQDetailPage() {
                   {po.number}
                 </Link>{" "}
                 <span className={styles.muted}>
-                  vendor <ShortId id={po.vendorId} />, {money(po.total, po.currency)}
+                  vendor <Named entity="vendor" id={po.vendorId} />, {money(po.total, po.currency)}
                 </span>
               </li>
             ))}
@@ -643,7 +645,7 @@ export function RFQDetailPage() {
       <Card title="Summary">
         <Details
           items={[
-            { label: "Legal entity", value: rfq.legalEntityId, mono: true },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={rfq.legalEntityId} /> },
             { label: "Reply deadline", value: formatInstant(rfq.replyDeadline), mono: true },
             { label: "Ranking", value: rankingLabels[rfq.rankingRule] ?? rfq.rankingRule },
             { label: "Bidding", value: biddingLabel(rfq) },
@@ -741,7 +743,7 @@ export function RFQDetailPage() {
           onScored={(r, vendorId) => {
             setChanged(r);
             setFailure(null);
-            setNotice(`Scores saved for vendor ${vendorId.slice(0, 8)}.`);
+            setNotice(`Scores saved${vendorId ? " for the vendor" : ""}.`);
           }}
         />
       ) : null}
@@ -763,7 +765,7 @@ export function RFQDetailPage() {
 /** How the RFQ takes bids: open, sealed until the deadline, or sealed and opened (with the opening log). */
 export function biddingLabel(rfq: RFQ): string {
   if (!rfq.sealed) return "Open: replies are visible as they arrive";
-  if (rfq.openedAt) return `Sealed, opened ${formatInstant(rfq.openedAt)} by ${rfq.openedBy ? rfq.openedBy.slice(0, 8) : "the service"}`;
+  if (rfq.openedAt) return `Sealed, opened ${formatInstant(rfq.openedAt)} by ${rfq.openedBy ? "a buyer" : "the service"}`;
   if (rfq.repliesSealed) return `Sealed until ${formatInstant(rfq.replyDeadline)}`;
   return "Sealed, opens at the deadline";
 }
@@ -798,6 +800,7 @@ const SCORE_VALUES = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 function ScoreForm({ rfq, onScored }: { rfq: RFQ; onScored(rfq: RFQ, vendorId: string): void }) {
   const criteria = rfq.criteria ?? [];
   const [vendorId, setVendorId] = useState(rfq.invitations[0]?.vendorId ?? "");
+  const vendorName = useEntityNames("vendor", rfq.invitations.map((i) => i.vendorId), "Vendor");
   const current = (vendor: string) =>
     Object.fromEntries(criteria.map((c) => [c.id, String(rfq.scores?.find((s) => s.vendorId === vendor && s.criterionId === c.id)?.score ?? "")]));
   const [values, setValues] = useState<Record<string, string>>(() => current(vendorId));
@@ -825,7 +828,7 @@ function ScoreForm({ rfq, onScored }: { rfq: RFQ; onScored(rfq: RFQ, vendorId: s
   const scoreOf = (vendor: string, criterionId: string) =>
     rfq.scores?.find((s) => s.vendorId === vendor && s.criterionId === criterionId)?.score;
   const scoreColumns: DataTableColumn<RFQInvitation>[] = [
-    { key: "vendorId", header: "Vendor", render: (i) => <ShortId id={i.vendorId} /> },
+    { key: "vendorId", header: "Vendor", render: (i) => <Named entity="vendor" id={i.vendorId} /> },
     ...criteria.map((c) => ({
       key: c.id,
       header: c.name,
@@ -851,7 +854,7 @@ function ScoreForm({ rfq, onScored }: { rfq: RFQ; onScored(rfq: RFQ, vendorId: s
               >
                 {rfq.invitations.map((inv) => (
                   <option key={inv.vendorId} value={inv.vendorId}>
-                    {inv.vendorId}
+                    {vendorName(inv.vendorId)}
                   </option>
                 ))}
               </Select>
@@ -946,6 +949,7 @@ export function validateReply(vendorId: string, currency: string, drafts: ReplyL
 /** Records one invited vendor's prices; lines left without a price are not quoted. */
 function ReplyForm({ rfq, onRecorded }: { rfq: RFQ; onRecorded(rfq: RFQ): void }) {
   const [vendorId, setVendorId] = useState(rfq.invitations[0]?.vendorId ?? "");
+  const vendorName = useEntityNames("vendor", rfq.invitations.map((i) => i.vendorId), "Vendor");
   const [currency, setCurrency] = useState("USD");
   const [drafts, setDrafts] = useState<ReplyLineDraft[]>(() => rfq.lines.map(blankReplyLine));
   const [errors, setErrors] = useState<Errors>({});
@@ -998,7 +1002,7 @@ function ReplyForm({ rfq, onRecorded }: { rfq: RFQ; onRecorded(rfq: RFQ): void }
               <Select {...c} value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
                 {rfq.invitations.map((inv) => (
                   <option key={inv.vendorId} value={inv.vendorId}>
-                    {inv.vendorId}
+                    {vendorName(inv.vendorId)}
                   </option>
                 ))}
               </Select>
@@ -1113,7 +1117,11 @@ function CompareAndAward({ rfq, onAwarded }: { rfq: RFQ; onAwarded(rfq: RFQ, ord
     }
   }
 
-  const vendorLabel = (vendorId: string) => vendorId.slice(0, 8);
+  const vendorLabel = useEntityNames(
+    "vendor",
+    rfq.replies.map((r) => r.vendorId),
+    "vendor",
+  );
   return (
     <Card title="Compare and award">
       <form className={styles.form} onSubmit={onSubmit} noValidate>

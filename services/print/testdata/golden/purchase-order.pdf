@@ -1,0 +1,67 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 1615 >>
+stream
+BT /F2 14.0 Tf 50.00 784.00 Td (Cedar Ridge Pumps, Inc.) Tj ET
+BT /F1 9.0 Tf 50.00 768.00 Td (400 Industrial Way) Tj ET
+BT /F1 9.0 Tf 50.00 756.00 Td (Cedar Rapids, IA 52404) Tj ET
+BT /F2 16.0 Tf 432.60 784.00 Td (Purchase order) Tj ET
+BT /F1 11.0 Tf 483.82 766.00 Td (PO-000123) Tj ET
+BT /F2 8.0 Tf 50.00 734.00 Td (VENDOR) Tj ET
+BT /F2 10.0 Tf 50.00 722.00 Td (Ironbridge Foundry) Tj ET
+BT /F1 9.0 Tf 50.00 710.00 Td (88 Foundry Rd) Tj ET
+BT /F1 9.0 Tf 50.00 698.00 Td (Birmingham, AL) Tj ET
+BT /F2 9.0 Tf 50.00 682.00 Td (Order date) Tj ET
+BT /F1 9.0 Tf 170.00 682.00 Td (2026-11-10) Tj ET
+BT /F2 9.0 Tf 50.00 670.00 Td (Currency) Tj ET
+BT /F1 9.0 Tf 170.00 670.00 Td (USD) Tj ET
+0.5 w 50.00 659.00 m 545.00 659.00 l S
+BT /F2 9.0 Tf 52.00 648.00 Td (Item) Tj ET
+BT /F2 9.0 Tf 327.23 648.00 Td (Qty) Tj ET
+BT /F2 9.0 Tf 401.57 648.00 Td (Unit price) Tj ET
+BT /F2 9.0 Tf 508.40 648.00 Td (Amount) Tj ET
+0.5 w 50.00 644.00 m 545.00 644.00 l S
+BT /F1 9.0 Tf 52.00 630.00 Td (Impeller casting \(CST-100\) \(rev B\)) Tj ET
+BT /F1 9.0 Tf 330.99 630.00 Td (40) Tj ET
+BT /F1 9.0 Tf 412.46 630.00 Td (112.50) Tj ET
+BT /F1 9.0 Tf 503.94 630.00 Td (4,500.00) Tj ET
+BT /F1 9.0 Tf 52.00 616.00 Td (Volute casting) Tj ET
+BT /F1 9.0 Tf 330.99 616.00 Td (12) Tj ET
+BT /F1 9.0 Tf 417.46 616.00 Td (98.00) Tj ET
+BT /F1 9.0 Tf 503.94 616.00 Td (1,176.00) Tj ET
+0.5 w 50.00 610.00 m 545.00 610.00 l S
+BT /F2 10.0 Tf 345.00 592.00 Td (Total) Tj ET
+BT /F1 10.0 Tf 477.14 592.00 Td (5,676.00 USD) Tj ET
+BT /F1 9.0 Tf 50.00 570.00 Td (Deliver to dock 2.) Tj ET
+BT /F1 8.0 Tf 50.00 30.00 Td (Purchase order PO-000123 - page 1 of 1) Tj ET
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000212 00000 n 
+0000000314 00000 n 
+0000000450 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+2116
+%%EOF

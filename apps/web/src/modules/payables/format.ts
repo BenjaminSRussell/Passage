@@ -1,4 +1,4 @@
-import type { OpenItem, OpenItemStatus, PaymentMethod, ProposalStatus } from "./api/client";
+import type { OpenItem, OpenItemStatus, PaymentMethod, ProposalStatus, RunStatus } from "./api/client";
 
 export const OPEN_ITEM_LABELS: Record<OpenItemStatus, string> = {
   OPEN: "Open",
@@ -42,6 +42,8 @@ function minorUnits(currency: string): number {
 }
 
 export function formatAmount(value: string, currency: string): string {
+  if (typeof value !== "string" || !/^-?\d+(\.\d*)?$/.test(value.trim())) return "Not available";
+  value = value.trim();
   const digits = minorUnits(currency);
   const negative = value.startsWith("-");
   const [whole, fraction = ""] = (negative ? value.slice(1) : value).split(".");
@@ -66,4 +68,13 @@ export function isOverdue(item: Pick<OpenItem, "dueDate" | "status">, day: strin
 
 export function holdText(item: Pick<OpenItem, "paymentHoldReason">): string {
   return item.paymentHoldReason ? `On hold: ${item.paymentHoldReason}` : "On hold, no reason recorded";
+}
+
+export const RUN_LABELS: Record<RunStatus, string> = { RUNNING: "Running", COMPLETED: "Paid", FAILED: "Failed" };
+
+/** The user ids the services record are not names; say "You" for the signed-in user and keep other ids out of sight. */
+export function personLabel(id: string | undefined, me: string): string {
+  if (!id) return "Not recorded";
+  if (id === me) return "You";
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) ? "Another user" : id;
 }

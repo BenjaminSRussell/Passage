@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the fulfillment service (services/fulfillment/api/openapi.yaml).
 // Browser calls use /api/v1/fulfillment/..., which the web BFF routes to the service.
 // Commands send an Idempotency-Key; shipment commands also send If-Match with the
@@ -627,7 +628,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }
@@ -887,7 +888,7 @@ export function recordTracking(id: string, event: Omit<TrackingEvent, "descripti
 
 /** The container's GS1-128 SSCC label as a ZPL program (text). */
 export async function containerLabel(shipmentId: string, containerId: string): Promise<string> {
-  const res = await fetch(`${base}${shipmentPath(shipmentId)}/containers/${encodeURIComponent(containerId)}/label`, {
+  const res = await apiFetch(`${base}${shipmentPath(shipmentId)}/containers/${encodeURIComponent(containerId)}/label`, {
     headers: { Accept: "application/zpl" },
     credentials: "same-origin",
   });

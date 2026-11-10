@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the party service (services/party/api/openapi.yaml). Browser
 // calls use /api/v1/party/..., which the web BFF rewrites to the service.
 
@@ -128,7 +129,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${base}${path}`, {
+  const res = await apiFetch(`${base}${path}`, {
     ...init,
     headers,
     credentials: "same-origin",
@@ -203,6 +204,30 @@ export function setCreditLimit(customerId: string, creditLimit: string): Promise
 
 export function getParty(partyId: string, signal?: AbortSignal): Promise<Party> {
   return send<Party>(`/parties/${id(partyId)}`, {}, signal);
+}
+
+/** One customer or vendor role found by name or number (GET /customers:search, /vendors:search). */
+export interface RoleHit {
+  id: string;
+  partyId: string;
+  legalEntityId?: string;
+  accountNumber: string;
+  name: string;
+  role: "customer" | "vendor";
+}
+
+/** Customers and vendors by name or number, for browsing; the service caps one page at 50 per role. */
+export async function searchRoles(kind: "all" | "customer" | "vendor", q: string, signal?: AbortSignal): Promise<RoleHit[]> {
+  const kinds = kind === "all" ? (["customer", "vendor"] as const) : ([kind] as const);
+  const pages = await Promise.all(
+    kinds.map(async (role) => {
+      const query = new URLSearchParams({ limit: "50" });
+      if (q.trim() !== "") query.set("q", q.trim());
+      const body = await send<{ items?: Omit<RoleHit, "role">[] }>(`/${role}s:search?${query}`, {}, signal);
+      return (body.items ?? []).map((hit): RoleHit => ({ ...hit, role }));
+    }),
+  );
+  return pages.flat().sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function listPartyVendors(partyId: string, signal?: AbortSignal): Promise<Vendor[]> {

@@ -1,4 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, getNetPriceList, getPriceList, type ConditionType, type NetPriceList, type PriceList, type PriceListItem, type PriceListQuery, type PriceListScope, type Problem } from "./api/client";
 import { DAY, describePercent, describeProduct, netPriceLines, netPricesCsv, today, TYPE_LABELS, UUID, winningQuantities, type NetPriceLine } from "./format";
@@ -82,8 +84,8 @@ export function PriceListPage() {
   async function load(event: FormEvent) {
     event.preventDefault();
     const found: Record<string, string> = {};
-    if (!UUID.test(f.legalEntityId.trim())) found.legalEntityId = "Enter the legal entity id (a UUID).";
-    if (f.customerId.trim() === "") found.customerId = "Enter the customer.";
+    if (!UUID.test(f.legalEntityId.trim())) found.legalEntityId = "Choose the legal entity.";
+    if (f.customerId.trim() === "") found.customerId = "Choose the customer.";
     if (!/^[A-Z]{3}$/.test(f.currency)) found.currency = "Use a three-letter ISO 4217 code, such as USD.";
     if (!DAY.test(f.asOf)) found.asOf = "Enter the date.";
     setErrors(found);
@@ -126,9 +128,15 @@ export function PriceListPage() {
     }
   }
 
-  const text = (id: string, name: "legalEntityId" | "customerId" | "customerGroupId" | "currency" | "asOf" | "productId" | "productGroupId" | "salesChannel", label: string, extra: { optional?: boolean; type?: string; mono?: boolean; hint?: string } = {}) => (
+  const text = (id: string, name: "legalEntityId" | "customerId" | "customerGroupId" | "currency" | "asOf" | "productId" | "productGroupId" | "salesChannel", label: string, extra: { optional?: boolean; type?: string; mono?: boolean; hint?: string; lookup?: LookupEntityKey } = {}) => (
     <FormField id={id} label={label} optional={extra.optional} hint={extra.hint} error={errors[name]}>
-      {(c) => <Input {...c} type={extra.type ?? "text"} className={extra.mono ? styles.mono : undefined} value={f[name]} onChange={(e) => set({ [name]: e.target.value })} invalid={Boolean(errors[name])} />}
+      {(c) =>
+        extra.lookup ? (
+          <EntityLookup entity={extra.lookup} {...c} scope={{ legalEntityId: f.legalEntityId || undefined }} value={f[name]} onChange={(e) => set({ [name]: e.target.value })} invalid={Boolean(errors[name])} />
+        ) : (
+          <Input {...c} type={extra.type ?? "text"} className={extra.mono ? styles.mono : undefined} value={f[name]} onChange={(e) => set({ [name]: e.target.value })} invalid={Boolean(errors[name])} />
+        )
+      }
     </FormField>
   );
 
@@ -137,12 +145,12 @@ export function PriceListPage() {
       <PageHeader title="Price list by customer" description="The active agreements that apply to a customer on a date, the customer's own first. Price simulation decides which one wins for a line." />
       <Card>
         <form className={styles.form} onSubmit={load} noValidate>
-          {text("pl-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
-          {text("pl-customer", "customerId", "Customer")}
+          {text("pl-legal-entity", "legalEntityId", "Legal entity", { lookup: "legalEntity" })}
+          {text("pl-customer", "customerId", "Customer", { lookup: "customer" })}
           {text("pl-group", "customerGroupId", "Customer group", { optional: true })}
           {text("pl-currency", "currency", "Currency")}
           {text("pl-date", "asOf", "As of", { type: "date" })}
-          {text("pl-product", "productId", "Product", { optional: true, hint: "Narrows the list and the net prices to this product." })}
+          {text("pl-product", "productId", "Product", { optional: true, lookup: "product", hint: "Narrows the list and the net prices to this product." })}
           {text("pl-product-group", "productGroupId", "Product group", { optional: true, hint: "Narrows the list and the net prices to this group's own records." })}
           {text("pl-channel", "salesChannel", "Sales channel", { optional: true, hint: "Prices with the procedure assigned to the channel." })}
           <FormField id="pl-type" label="Condition">
@@ -212,7 +220,7 @@ export function PriceListPage() {
           title="Net price per quantity break"
           actions={
             lines.length > 0 ? (
-              <Button variant="secondary" onClick={() => download(`price-list-${asked.customerId}-${asked.asOf}.csv`, netPricesCsv(lines, asked.currency))}>
+              <Button variant="secondary" onClick={() => download(`price-list-${asked.asOf}.csv`, netPricesCsv(lines, asked.currency))}>
                 Export CSV
               </Button>
             ) : undefined

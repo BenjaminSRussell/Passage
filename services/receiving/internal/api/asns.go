@@ -204,6 +204,11 @@ func (a *API) createAsn(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, poProblem(http.StatusUnprocessableEntity, "RCV-PO-003", "purchase order belongs to another legal entity"))
 		return
 	}
+	if v := vendorFrom(r.Context()); v != "" && !strings.EqualFold(po.VendorID, v) {
+		// A purchase order of another vendor reads as missing, so a vendor cannot probe for order ids.
+		writeError(w, r, store.ErrAsnNotFound)
+		return
+	}
 	byNo := map[int]domain.PurchaseOrderLine{}
 	for _, l := range po.Lines {
 		byNo[l.LineNo] = l
@@ -239,6 +244,9 @@ func (a *API) getAsn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	asn, err := a.store.GetAsn(r.Context(), id)
+	if err == nil && vendorFrom(r.Context()) != "" && !strings.EqualFold(asn.VendorID, vendorFrom(r.Context())) {
+		err = store.ErrAsnNotFound
+	}
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -250,6 +258,9 @@ func (a *API) listAsns(w http.ResponseWriter, r *http.Request) {
 	q := query{values: r.URL.Query(), fields: map[string]string{}}
 	f := store.AsnFilter{VendorID: q.uuid("vendorId"), PurchaseOrderID: q.uuid("purchaseOrderId"), Limit: q.limit()}
 	f.CursorCreatedAt, f.CursorID = q.cursor()
+	if v := vendorFrom(r.Context()); v != "" {
+		f.VendorID = v
+	}
 	if len(q.fields) > 0 {
 		httpx.Fail(w, r, validationProblem(q.fields))
 		return

@@ -7,13 +7,16 @@ import type {
   NearLimitLine,
   OpenOrderLine,
   OverdueLine,
+  PurchaseAgreement,
   PurchaseAgreementSummary,
   PurchaseOrder,
   PurchaseOrderCharge,
+  PurchaseOrderInput,
   PurchaseOrderLine,
   PurchaseOrderSummary,
   PurchaseOrderVersion,
   Requisition,
+  RequisitionInput,
   RequisitionApproval,
   RequisitionHistory,
   RequisitionLine,
@@ -179,6 +182,35 @@ route("GET", `${BASE}/requisitions`, ({ query }) => {
     .filter((r) => !status || r.status === status)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return { items: rows.map(reqSummary) };
+});
+
+route("POST", `${BASE}/requisitions`, ({ body }) => {
+  const input = body as RequisitionInput;
+  const n = requisitions.all().length + 1;
+  const lines: RequisitionLine[] = input.lines.map((l, i) => {
+    const it = ITEMS.find((x) => x.id === l.productId);
+    const price = l.estimatedUnitPrice ? Number(l.estimatedUnitPrice) : (it?.cost ?? 0);
+    return {
+      id: uid(K_REQ_LINE, 1000 + n * 20 + i),
+      lineNo: i + 1,
+      productId: l.productId,
+      description: l.description || it?.name || "",
+      category: l.category || (it ? categoryOf(it.number) : ""),
+      qty: dec(Number(l.qty), 0),
+      unit: l.unit,
+      estimatedUnitPrice: dec(price),
+      amount: dec(price * Number(l.qty)),
+      requestedDate: l.requestedDate,
+      siteId: l.siteId,
+      warehouseId: l.warehouseId,
+      preferredVendorId: l.preferredVendorId || (it?.vendor !== undefined ? VENDORS[it.vendor].id : undefined),
+      status: "OPEN",
+    };
+  });
+  const made = req(n, "DRAFT", 0, lines, 0, []);
+  const created: Requisition = { ...made, legalEntityId: input.legalEntityId, currency: input.currency, requesterId: requester(0) };
+  requisitions.insert(created);
+  return reply.versioned(created, created.version, 201);
 });
 
 route("GET", `${BASE}/requisition-approvals`, () => {
@@ -380,6 +412,48 @@ function poSummary(p: PoRow): PurchaseOrderSummary {
   return { id: p.id, number: p.number, legalEntityId: p.legalEntityId, vendorId: p.vendorId, currency: p.currency, approvalStatus: p.approvalStatus, documentStatus: p.documentStatus, total: p.total, lineCount: p.lines.length, rowVersion: p.rowVersion, createdAt: p.createdAt };
 }
 
+route("POST", `${BASE}/purchase-orders`, ({ body }) => {
+  const input = body as PurchaseOrderInput;
+  if (!input.vendorId) return reply.problem(422, "PRC-PO-VALIDATION", "Choose a vendor", { vendorId: "Choose a vendor." });
+  const n = pos.all().length + 1;
+  const lines: PurchaseOrderLine[] = input.lines.map((l, i) => {
+    const it = ITEMS.find((x) => x.id === l.productId);
+    const qty = Number(l.qty);
+    const price = l.unitPrice ? Number(l.unitPrice) : (it?.cost ?? 0);
+    const gross = price * qty;
+    const discount = gross * (Number(l.discountPct || 0) / 100);
+    return {
+      id: uid(K_PO_LINE, 1000 + n * 20 + i),
+      lineNo: i + 1,
+      productId: l.productId,
+      description: l.description || it?.name || "",
+      category: l.category || (it ? categoryOf(it.number) : ""),
+      siteId: l.siteId || input.siteId || PLANT.id,
+      warehouseId: l.warehouseId || input.warehouseId || WH_RAW.id,
+      qty: dec(qty, 0),
+      unit: l.unit,
+      unitPrice: dec(price),
+      priceUnit: l.priceUnit || "1",
+      discountPct: dec(Number(l.discountPct || 0)),
+      grossAmount: dec(gross),
+      discountAmount: dec(discount),
+      lineAmount: dec(gross - discount),
+      taxAmount: dec(Number(l.taxAmount || 0)),
+      deliveryDate: l.deliveryDate,
+      priceSource: l.unitPrice ? "MANUAL" : "TRADE_AGREEMENT",
+      receivedQty: "0",
+      invoicedQty: "0",
+      status: "OPEN",
+    };
+  });
+  const charges = (input.charges ?? []).map((c, i): PurchaseOrderCharge => ({ seq: i + 1, calc: c.calc ?? "FIXED", value: c.value ?? "0", amount: c.value ?? "0", chargeCode: "FREIGHT", debitType: "ITEM", creditType: "VENDOR", allocationRule: "AMOUNT" }));
+  const vendor = Math.max(0, VENDORS.findIndex((v) => v.id === input.vendorId));
+  const made = po(n, vendor, "DRAFT", "DRAFT", 0, lines, charges);
+  const created: PoRow = { ...made, legalEntityId: input.legalEntityId, vendorId: input.vendorId, currency: input.currency, siteId: input.siteId ?? PLANT.id, warehouseId: input.warehouseId ?? WH_RAW.id };
+  pos.insert(created);
+  return reply.versioned(stripVersions(created), created.rowVersion, 201);
+});
+
 route("GET", `${BASE}/purchase-orders`, ({ query }) => {
   const status = query.get("approvalStatus");
   const vendor = query.get("vendorId");
@@ -512,19 +586,53 @@ route("GET", `${BASE}/inquiries/change-orders`, () => {
   return { items };
 });
 
+const agreementSummaries = (): PurchaseAgreementSummary[] => [
+  { id: uid(K_AGR, 1), number: "PA-2026-002", legalEntityId: LEGAL_ENTITY.id, vendorId: VENDORS[0].id, currency: "USD", validFrom: day(-200), validTo: day(150), status: "EFFECTIVE", lineCount: 2, maxPctReleased: "94.00", version: 3, createdAt: at(-200) },
+  { id: uid(K_AGR, 2), number: "PA-2026-004", legalEntityId: LEGAL_ENTITY.id, vendorId: VENDORS[3].id, currency: "USD", validFrom: day(-340), validTo: day(21), status: "EFFECTIVE", lineCount: 1, maxPctReleased: "61.00", version: 2, createdAt: at(-340) },
+  { id: uid(K_AGR, 3), number: "PA-2026-006", legalEntityId: LEGAL_ENTITY.id, vendorId: VENDORS[1].id, currency: "USD", validFrom: day(-90), validTo: day(275), status: "EFFECTIVE", lineCount: 2, maxPctReleased: "38.00", version: 1, createdAt: at(-90) },
+];
+
 route("GET", `${BASE}/agreements`, ({ query }) => {
   const status = query.get("status");
-  const all: PurchaseAgreementSummary[] = [
-    { id: uid(K_AGR, 1), number: "PA-2026-002", legalEntityId: LEGAL_ENTITY.id, vendorId: VENDORS[0].id, currency: "USD", validFrom: day(-200), validTo: day(150), status: "EFFECTIVE", lineCount: 2, maxPctReleased: "94.00", version: 3, createdAt: at(-200) },
-    { id: uid(K_AGR, 2), number: "PA-2026-004", legalEntityId: LEGAL_ENTITY.id, vendorId: VENDORS[3].id, currency: "USD", validFrom: day(-340), validTo: day(21), status: "EFFECTIVE", lineCount: 1, maxPctReleased: "61.00", version: 2, createdAt: at(-340) },
-    { id: uid(K_AGR, 3), number: "PA-2026-006", legalEntityId: LEGAL_ENTITY.id, vendorId: VENDORS[1].id, currency: "USD", validFrom: day(-90), validTo: day(275), status: "EFFECTIVE", lineCount: 2, maxPctReleased: "38.00", version: 1, createdAt: at(-90) },
-  ];
-  return { items: all.filter((a) => !status || a.status === status) };
+  return { items: agreementSummaries().filter((a) => !status || a.status === status) };
 });
 
-route("GET", `${BASE}/trade-agreements`, ({ query }) => {
-  const status = query.get("status");
-  const rows: TradeAgreement[] = ITEMS.filter((i) => i.vendor !== undefined).map((it, n) => ({
+route("GET", `${BASE}/agreements/{id}`, ({ params }) => {
+  const sum = agreementSummaries().find((a) => a.id === params.id);
+  if (!sum) return reply.problem(404, "PRC-AGR-NOT-FOUND", "Agreement not found");
+  const { lineCount: _l, maxPctReleased: _m, ...head } = sum;
+  const products = sum.vendorId === VENDORS[0].id ? ["CST-IMP-06", "CST-VOL-04"] : sum.vendorId === VENDORS[3].id ? ["FST-KIT-A"] : ["MTR-5HP-TEFC", "MTR-15HP-TEFC"];
+  const lines = products.slice(0, sum.lineCount).map((n, i): PurchaseAgreement["lines"][number] => {
+    const it = itemByNumber(n);
+    const committed = Math.round(Number(sum.maxPctReleased) > 90 ? 60000 : 40000);
+    const released = (committed * Number(sum.maxPctReleased)) / 100;
+    return {
+      id: uid(K_AGR, 10 + i + 1),
+      lineNo: i + 1,
+      commitmentType: "VALUE",
+      productId: it.id,
+      category: categoryOf(n),
+      unit: it.unit,
+      committedQty: "0",
+      committedAmount: dec(committed),
+      unitPrice: dec(it.cost),
+      discountPct: "0.00",
+      maxEnforced: "SOFT",
+      priceOverride: false,
+      releasedQty: "0",
+      releasedAmount: dec(released),
+      pctReleased: dec(Number(sum.maxPctReleased)),
+      remaining: dec(committed - released),
+    };
+  });
+  const agreement: PurchaseAgreement = { ...head, lines, releases: [], updatedAt: sum.createdAt };
+  return reply.versioned(agreement, agreement.version);
+});
+
+route("GET", `${BASE}/rfq-types`, () => ({ items: [] }));
+
+const tradeAgreementRows = (): TradeAgreement[] =>
+  ITEMS.filter((i) => i.vendor !== undefined).map((it, n) => ({
     id: uid(K_TA, n + 1),
     relation: "PRICE",
     accountCode: "VENDOR",
@@ -541,11 +649,18 @@ route("GET", `${BASE}/trade-agreements`, ({ query }) => {
     consignment: false,
     status: "ACTIVE",
   }));
-  return { items: rows.filter((r) => !status || r.status === status) };
+
+route("GET", `${BASE}/trade-agreements`, ({ query }) => {
+  const status = query.get("status");
+  return { items: tradeAgreementRows().filter((r) => !status || r.status === status) };
 });
 
-route("GET", `${BASE}/rfqs`, () => ({ items: [] }));
+route("GET", `${BASE}/trade-agreements/{id}`, ({ params }) => {
+  const row = tradeAgreementRows().find((r) => r.id === params.id);
+  return row ? reply.versioned(row, 1) : reply.problem(404, "PRC-TA-NOT-FOUND", "Price row not found");
+});
 
 // Exported for the receiving handler: purchase orders are the source of what arrives.
 export const purchaseOrders = pos;
+export { po as newPurchaseOrder, pline as newPurchaseLine };
 export { etagOf };

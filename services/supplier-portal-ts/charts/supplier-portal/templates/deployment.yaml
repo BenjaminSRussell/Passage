@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: supplier-portal
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    # Never two pods at once: sessions are per process.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: supplier-portal
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: supplier-portal
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's node user; numeric so the kubelet can check runAsNonRoot.
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: supplier-portal
+          image: {{ include "supplier-portal.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: HTTP_ADDR
+              value: ":8080"
+            - name: OIDC_ISSUER
+              value: {{ required "oidc.issuer is required" .Values.oidc.issuer | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.oidc.clientId | quote }}
+            - name: OIDC_REDIRECT_URI
+              value: {{ required "oidc.redirectUri is required" .Values.oidc.redirectUri | quote }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ .Values.oidc.clientSecretName | quote }}, key: client-secret } }
+            - name: APP_ORIGIN
+              value: {{ required "appOrigin is required" .Values.appOrigin | quote }}
+            - name: PURCHASING_URL
+              value: {{ .Values.upstreams.purchasing | quote }}
+            - name: RECEIVING_URL
+              value: {{ .Values.upstreams.receiving | quote }}
+            - name: PARTY_URL
+              value: {{ .Values.upstreams.party | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: supplier-portal
+            - name: PASSAGE_SERVICE_SIGNING_KEY
+              valueFrom: { secretKeyRef: { name: {{ .Values.serviceSigningSecretName | quote }}, key: signing-key } }
+          ports:
+            - { name: http, containerPort: 8080 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

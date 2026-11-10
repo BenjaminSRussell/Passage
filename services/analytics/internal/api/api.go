@@ -51,6 +51,7 @@ func (a *API) Register(r *chi.Mux) {
 	r.With(authz.RequireDuty(DutyFinance)).Get("/v1/analytics/reconciliation", a.reconciliation)
 	a.registerSlice2(r)
 	a.registerSlice4(r)
+	a.registerUX(r)
 }
 
 // MetricsResponse lists published metrics.

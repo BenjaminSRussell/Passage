@@ -1,20 +1,8 @@
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
-import { Button, DataTable, FormField, Input, StatusPill, WorkspacePlaceholder } from "./index";
+import { Button, DataTable, FormField, Input, StatusPill } from "./index";
 
 describe("design-system primitives", () => {
-  it("WorkspacePlaceholder explains the workspace and links back home", () => {
-    render(
-      <MemoryRouter>
-        <WorkspacePlaceholder title="Tax" icon="percent" description="Tax configuration is coming." />
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("heading", { level: 2, name: "Tax" })).toBeInTheDocument();
-    expect(screen.getByText("This workspace isn't available yet")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Browse workspaces" })).toHaveAttribute("href", "/");
-  });
-
   it("a loading Button stays focusable and ignores clicks and submits", async () => {
     const user = userEvent.setup();
     const clicks: string[] = [];

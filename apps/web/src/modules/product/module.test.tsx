@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { PrincipalProvider } from "../../shell/principal";
+import { TenantSettingsProvider, type TenantSettings } from "../../shell/tenant/TenantSettings";
 import { loadModules } from "../registry";
 import product from "./module";
 import { validate } from "./ProductForms";
@@ -268,6 +269,29 @@ describe("create product", () => {
       batchTracked: true,
       catchWeight: true,
     });
+  });
+
+  it("hides the tracking fields of a feature the tenant switched off", async () => {
+    handler = (call) => (isGroups(call) ? json(200, groupList) : undefined);
+    const settings: TenantSettings = { features: { "catch-weight": false, "batch-tracking": false }, catalog: undefined, setup: undefined, workspaceOverride: undefined, refresh: () => undefined };
+    render(
+      <PrincipalProvider duties={["product.read", "product.write"]}>
+        <TenantSettingsProvider value={settings}>
+          <MemoryRouter initialEntries={["/product/items/new"]}>
+            <Routes>
+              {product.routes.map((route) => (
+                <Route key={route.path} path={route.path} element={route.element} />
+              ))}
+            </Routes>
+          </MemoryRouter>
+        </TenantSettingsProvider>
+      </PrincipalProvider>,
+    );
+    await screen.findByRole("option", { name: "Raw material (RAW)" });
+    fireEvent.click(screen.getByText("More options"));
+    expect(screen.queryByLabelText("Catch weight")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Batch tracking")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Serial number tracking")).toBeInTheDocument();
   });
 
   it("does not offer tracking on a service and never sends it", async () => {

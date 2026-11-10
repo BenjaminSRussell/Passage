@@ -48,6 +48,10 @@ Use **Cancel order** to cancel. Agreement releases and requisition lines are ret
 
 The invoice clerk takes it from here: [Enter and pay a vendor invoice](ap-clerk.md).
 
+## Follow an order to payment
+
+Open **Procure to pay** in the Purchasing menu to see the steps with how many orders wait for receipt and how many receipts wait for an invoice. A purchase order, receipt or vendor invoice page also shows a **Document flow** panel: the documents before and after it with their status, and a **Next** button for what to do now.
+
 ## What the statuses mean
 
 | Status | Meaning |

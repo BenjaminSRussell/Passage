@@ -115,7 +115,7 @@ func TestEntityANeverSeesEntityBRecords(t *testing.T) {
 		"no entity": {"", nil},
 	} {
 		got := field(h.results(q, tc.scopes, dutyPO), "number")
-		if !slices.Equal(got, tc.want) && !(len(got) == 0 && len(tc.want) == 0) {
+		if !slices.Equal(got, tc.want) && (len(got) != 0 || len(tc.want) != 0) {
 			t.Errorf("%s sees %v, want %v", name, got, tc.want)
 		}
 	}

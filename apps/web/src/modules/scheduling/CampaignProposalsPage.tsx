@@ -199,7 +199,7 @@ export function CampaignProposalsPage() {
     return { proposals, resources };
   }, `${from}|${windowDays}|${resourceId}`);
   const resources = state.data?.resources ?? [];
-  const codes: Record<string, string> = Object.fromEntries(resources.map((r) => [r.id, r.code]));
+  const codes: Record<string, string> = Object.fromEntries(resources.map((r) => [r.id, `${r.name} (${r.code})`]));
   const items = state.data?.proposals.items ?? [];
 
   let body;

@@ -5,11 +5,12 @@ import { describeReps } from "./commissionFormat";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const columns: DataTableColumn<SalesGroup>[] = [
   { key: "name", header: "Sales group" },
   { key: "reps", header: "Reps and shares", mono: true, render: (row) => describeReps(row.reps) },
-  { key: "legalEntityId", header: "Legal entity", mono: true },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
 ];
 
 /** Sales groups (FR-26.18; AX CommissionSalesGroup): the reps who share the commission of an order. */

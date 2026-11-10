@@ -6,6 +6,7 @@ import { DECIMAL, dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const columns: DataTableColumn<AllocationConsumption>[] = [
   { key: "consumedAt", header: "Drawn", render: (c) => formatDateTime(c.consumedAt) },
@@ -71,16 +72,16 @@ export function AllocationQuotaDetailPage() {
   }
 
   const facts: [string, ReactNode][] = [
-    ["Product", quota.productId],
+    ["Product", <EntityName entity="product" id={quota.productId} />],
     ["Customer", quota.customerId ?? "Every customer"],
-    ["Legal entity", quota.legalEntityId],
+    ["Legal entity", <EntityName entity="legalEntity" id={quota.legalEntityId} />],
     ["Period", `${quota.periodStart} to ${quota.periodEnd}`],
     ["Quota", quota.quotaQty],
     ["Consumed", quota.consumedQty],
     ["Remaining", quota.remainingQty],
     ["Set", `${formatDateTime(quota.createdAt)} by ${quota.createdBy}`],
   ];
-  const mono = new Set(["Product", "Customer", "Legal entity"]);
+  const mono = new Set<string>();
 
   return (
     <div className={styles.stack}>

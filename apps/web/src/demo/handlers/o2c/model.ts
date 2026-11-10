@@ -9,7 +9,7 @@ import { CUSTOMERS, ITEMS, LEGAL_ENTITY, PLANT, WH_FG, itemByNumber, type Party 
 import { at, day, dec, table, uid } from "../../store";
 
 // uid() kinds claimed by this area (100-102 are the sales order, line and hold ids).
-export const K = { order: 100, line: 101, hold: 102, schedule: 103, progress: 104, shipment: 105, shipLine: 106, container: 107, slip: 108, invoice: 109, condition: 110, change: 111 } as const;
+export const K = { order: 100, line: 101, hold: 102, schedule: 103, progress: 104, shipment: 105, shipLine: 106, container: 107, slip: 108, invoice: 109, condition: 110, change: 111, quotation: 112 } as const;
 
 export const r2 = (n: number): number => Math.round(n * 100) / 100;
 export const customerById = (id: string): Party | undefined => CUSTOMERS.find((c) => c.id === id);
@@ -24,7 +24,7 @@ let condSeq = 0;
 function cond(partial: Partial<ConditionRecord> & Pick<ConditionRecord, "type">): ConditionRecord {
   const n = ++condSeq;
   return {
-    id: uid(K.condition, n),
+    id: `PRC-${String(n).padStart(4, "0")}`,
     legalEntityId: LEGAL_ENTITY.id,
     customerKind: "all",
     customerKey: "",
@@ -48,7 +48,7 @@ function cond(partial: Partial<ConditionRecord> & Pick<ConditionRecord, "type">)
 }
 const priceOf = (number: string) => dec(itemByNumber(number).price ?? 0);
 const listPrice = (number: string, extra: Partial<ConditionRecord> = {}) => cond({ type: "PRICE", productKey: number, amount: priceOf(number), unit: itemByNumber(number).unit, ...extra });
-const forCustomer = (index: number): Partial<ConditionRecord> => ({ customerKind: "customer", customerKey: CUSTOMERS[index].number });
+const forCustomer = (index: number): Partial<ConditionRecord> => ({ customerKind: "customer", customerKey: CUSTOMERS[index].id });
 
 export const conditions = table<ConditionRecord>([
   listPrice("CP-200"),

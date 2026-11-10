@@ -16,6 +16,12 @@ function workspaceOf(module: PassageModule): { title: string; to: string } {
 }
 
 export function resolvePage(pathname: string, modules: PassageModule[], shellNav: NavItem[]): PageMeta {
+  if (pathname === "/whats-new") {
+    return { title: copy.whatsNew.pageTitle };
+  }
+  if (pathname === "/design-system") {
+    return { title: "Component catalog" };
+  }
   const shellEntry = shellNav.find((n) => isExact(n.to, pathname));
   if (shellEntry) {
     return { title: shellEntry.label };

@@ -201,6 +201,12 @@ func (s *Stack) ensureDatabase(name string, fresh bool) error {
 	return s.psql("-c", fmt.Sprintf(`CREATE DATABASE "%s"`, db))
 }
 
+// ensureAppRole creates the passage_app role the service migrations grant to. Roles are cluster-wide, so a fresh
+// Postgres (the compose one) has none, and a CI database already has it from .github/postgres-test-setup.sql.
+func (s *Stack) ensureAppRole() error {
+	return s.psql("-c", `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'passage_app'; END IF; END $$`)
+}
+
 func (s *Stack) Build(ctx context.Context) error {
 	if err := os.MkdirAll(s.binDir(), 0o755); err != nil {
 		return err
@@ -363,6 +369,9 @@ func (s *Stack) LogTail(name string) string {
 // that receiving posts to.
 func (s *Stack) Start(ctx context.Context, freshDatabases bool) error {
 	if err := s.Build(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureAppRole(); err != nil {
 		return err
 	}
 	byName := map[string]service{}

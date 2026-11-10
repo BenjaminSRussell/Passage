@@ -1,12 +1,30 @@
 # supplier-portal
 
-Vendor-facing portal for wave 20 (ticket PSG-20, "Inventory Costing & Supplier Collaboration"),
-served at `supplier.<env>.passage.dev`.
+Vendor-facing portal for wave 20 (PSG-20, issue #511), served at `supplier.<env>.passage.dev`. A standalone Vite + React 19 app
+(like `apps/warehouse-mobile`), not a shell module: suppliers are external users who must never reach the buyer shell. It talks only
+to its BFF, `services/supplier-portal-ts`.
 
-**Status: not built in slice 1.** This directory holds the scope record only. The PRD (`docs/prd/phase-3-procure-to-pay.md` §3.20) defines the screens, APIs and realm:
+## Screens
 
-- Portal APIs under `/portal/v1` (purchase orders and acknowledgements, ASNs, invoices, payments, users invitation). Built on the wave 17, 18 and 19 APIs with their own Keycloak realm `suppliers`, its own database `supplier-db`, and a TypeScript BFF.
-- Screens: home, PO acknowledgement, ASN, invoices and payments, users, plus the FR-20.18 to FR-20.22 pages.
-- Intended stack, per ADR-0001: a Vite + React app served by the shell, with a Fastify/zod BFF in `services/supplier-portal-ts` (that BFF is outside this wave's owned paths and needs its own wave or an owner decision).
+| Route | What a supplier does |
+|---|---|
+| `/purchase-orders`, `/purchase-orders/:id` | Read the orders sent to them; accept, reject with a reason, or propose quantity, price or delivery date changes per line (sends the version on screen, so a stale answer is refused) |
+| `/shipments`, `/shipments/new`, `/shipments/:id` | Advance ship notices built from the open lines of an order (carrier, tracking, dates, quantity, batch, expiry) |
+| `/invoices` | Send an invoice document (UBL XML, or PDF or image for OCR); see documents waiting for review and posted invoices with a vendor status (accepted, in review, rejected) |
+| `/requests`, `/requests/:id` | Ask the buyer for a change; complete the onboarding questionnaire the buyer opened; withdraw a request |
+| `/documents` | Download controlled documents the buyer distributed and acknowledge them; exchange files with the buyer (up to 5 MB) |
 
-See [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md) for each deliverable and its reason.
+The vendor is never in a request: the BFF takes it from the session. The page holds no token, only a CSRF token from `/bff/me`.
+A legal-entity selector appears when the user belongs to several buyer entities (sent as `X-Legal-Entity`).
+
+## Run and test
+
+```
+npm ci && npm run dev        # :5175, proxies /bff and /api to the BFF on :8080 (run it with COOKIE_SECURE=false)
+npx tsc --noEmit && npx vitest --run && npx vite build
+```
+
+Tests cover the answer, notice, invoice, document and questionnaire flows (payloads, client-side checks, CSRF and legal entity
+headers) and run axe on the main pages. Authorization (a supplier sees only its own rows) is tested in the services and the BFF.
+
+See [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).

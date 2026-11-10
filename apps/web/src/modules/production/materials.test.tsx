@@ -98,8 +98,8 @@ describe("material filter check", () => {
     const base = { view: "items" as const, itemId: "", siteId: "", orderStatus: "" as const, dueFrom: "", dueTo: "", all: false };
     expect(validateMaterialFilter(base)).toEqual({});
     expect(validateMaterialFilter({ ...base, itemId: "x", siteId: "Plant", dueFrom: "2026-12-01", dueTo: "2026-11-01" })).toEqual({
-      itemId: "Enter the component's id (a UUID), or leave it empty.",
-      siteId: "Enter the site's id (a UUID), or leave it empty.",
+      itemId: "Choose a component, or leave it empty.",
+      siteId: "Choose a site, or leave it empty.",
       dueTo: "The end of the due range must not be before its start.",
     });
   });
@@ -173,9 +173,10 @@ describe("material requirements page (4.21.14)", () => {
     renderAt(page);
     await findTable({ name: "Components" });
     const form = screen.getByRole("form", { name: "Filter the material requirements" });
-    await userEvent.type(within(form).getByLabelText(/Component/), "ACME");
+    fireEvent.change(within(form).getByLabelText(/Due from/), { target: { value: "2026-12-01" } });
+    fireEvent.change(within(form).getByLabelText(/Due to/), { target: { value: "2026-11-01" } });
     await userEvent.click(within(form).getByRole("button", { name: "Show" }));
-    expect(await screen.findByText("Enter the component's id (a UUID), or leave it empty.")).toBeInTheDocument();
+    expect(await screen.findByText("The end of the due range must not be before its start.")).toBeInTheDocument();
     expect(calls(fetchMock)).toHaveLength(1);
   });
 

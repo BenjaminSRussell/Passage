@@ -35,7 +35,6 @@ import {
 import {
   Details,
   LoadError,
-  ShortId,
   StatusBadge,
   currencyPattern,
   datePattern,
@@ -46,6 +45,7 @@ import {
   useResource,
   uuidPattern,
   type Failure,
+  Named,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -84,7 +84,7 @@ export function ReleaseLevel({ pct }: { pct: string }) {
 const listColumns: DataTableColumn<PurchaseAgreementSummary>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "status", header: "Status", render: (a) => <StatusBadge status={a.status} /> },
-  { key: "vendorId", header: "Vendor", render: (a) => <ShortId id={a.vendorId} /> },
+  { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
   { key: "validity", header: "Validity", mono: true, render: validity },
   { key: "lineCount", header: "Lines", align: "end" },
   { key: "maxPctReleased", header: "Highest release", align: "end", render: (a) => <ReleaseLevel pct={a.maxPctReleased} /> },
@@ -425,7 +425,7 @@ export function PurchaseAgreementCreatePage() {
 
 /** What a line commits: the product, category or "all spend". */
 function lineItem(l: PurchaseAgreementLine) {
-  if (l.productId) return <ShortId id={l.productId} />;
+  if (l.productId) return <Named entity="product" id={l.productId} />;
   if (l.category) return l.category;
   return "All spend";
 }
@@ -590,8 +590,8 @@ export function PurchaseAgreementDetailPage() {
       <Card title="Summary">
         <Details
           items={[
-            { label: "Vendor", value: agreement.vendorId, mono: true },
-            { label: "Legal entity", value: agreement.legalEntityId, mono: true },
+            { label: "Vendor", value: <Named entity="vendor" id={agreement.vendorId} /> },
+            { label: "Legal entity", value: <Named entity="legalEntity" id={agreement.legalEntityId} /> },
             { label: "Currency", value: agreement.currency, mono: true },
             { label: "Validity", value: validity(agreement), mono: true },
             { label: "Version", value: String(agreement.version), mono: true },

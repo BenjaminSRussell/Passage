@@ -76,7 +76,11 @@ func TestServiceGrantForTheFactoryIsSeeded(t *testing.T) {
 			t.Errorf("the grant for migration-factory -> ledger lacks %s: %v", duty, ledger)
 		}
 	}
-	if other := tenant.ServiceGrantTable()[target.ServiceName]; len(other) != 2 {
-		t.Errorf("migration-factory is granted only receivables and ledger (replay, compensations), got %v", other)
+	payables := tenant.ServiceGrantTable()[target.ServiceName]["payables"]
+	if want := []string{"opening-item.import", "opening-item.import.read"}; !slices.Equal(slices.Sorted(slices.Values(payables)), want) {
+		t.Errorf("the grant for migration-factory -> payables must hold exactly %v (opening-item import, #565), got %v", want, payables)
+	}
+	if other := tenant.ServiceGrantTable()[target.ServiceName]; len(other) != 3 {
+		t.Errorf("migration-factory is granted only receivables, payables (opening items) and ledger (replay, compensations), got %v", other)
 	}
 }

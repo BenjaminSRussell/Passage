@@ -2,8 +2,9 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listTransferLines, TRANSFER_STATUSES, type TransferLineItem, type TransferStatus } from "./api/client";
-import { dash, describeDimensions, sentence, shortId, UUID } from "./format";
+import { dash, describeDimensions, sentence, UUID } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert, stateTones } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -18,7 +19,7 @@ const columns: DataTableColumn<TransferLineItem>[] = [
   },
   { key: "lineNo", header: "Line", align: "end", render: (row) => String(row.lineNo) },
   { key: "orderStatus", header: "Status", render: (row) => <Badge tone={stateTones[row.orderStatus] ?? "neutral"}>{sentence(row.orderStatus)}</Badge> },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
   { key: "route", header: "Route", mono: true, render: (row) => `${row.fromWarehouseId} → ${row.toWarehouseId}` },
   { key: "shipDate", header: "Ship date", mono: true },

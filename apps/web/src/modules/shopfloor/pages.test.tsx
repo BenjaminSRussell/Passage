@@ -151,7 +151,7 @@ describe("New worker", () => {
     const { container } = renderAt("/shopfloor/workers/new");
     expect(pageViolations(container)).toEqual([]);
     fill("Name", "Ana Silva");
-    fill("Party id", PARTY);
+    fill("Employee", PARTY);
     fill("Badge", "B-1");
     fill("Cost rate per hour", "20");
     fireEvent.click(screen.getByRole("button", { name: "Create worker" }));
@@ -165,7 +165,7 @@ describe("New worker", () => {
     renderAt("/shopfloor/workers/new");
     fireEvent.click(screen.getByRole("button", { name: "Create worker" }));
     expect(await screen.findByText("Enter a name of up to 120 characters.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the employee's party id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByText("Choose the employee.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
   });
 
@@ -173,7 +173,7 @@ describe("New worker", () => {
     handler = () => json(409, { code: "SF-0105", detail: "badge is already assigned to another worker" });
     renderAt("/shopfloor/workers/new");
     fill("Name", "Ana Silva");
-    fill("Party id", PARTY);
+    fill("Employee", PARTY);
     fill("Badge", "B-1");
     fill("Cost rate per hour", "20");
     fireEvent.click(screen.getByRole("button", { name: "Create worker" }));

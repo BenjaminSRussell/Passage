@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createOrder, describeProblem, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem, type Proposal } from "./api/client";
 import { sentence, today, UUID } from "./format";
@@ -34,10 +35,10 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** Checks that mirror the service (api/orders.go buildOrder). Keys are the service's field paths. */
 export function validateOrder(values: OrderValues): { errors: Errors; input?: NewOrder } {
   const errors: Errors = {};
-  if (!UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity's UUID.";
-  if (!UUID.test(values.customerId.trim())) errors.customerId = "Enter the customer's UUID.";
+  if (!UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Choose the selling legal entity.";
+  if (!UUID.test(values.customerId.trim())) errors.customerId = "Choose the customer.";
   const invoice = values.invoiceAccountId.trim() || values.customerId.trim();
-  if (!UUID.test(invoice)) errors.invoiceAccountId = "Enter the invoice account's UUID, or leave it empty to invoice the customer.";
+  if (!UUID.test(invoice)) errors.invoiceAccountId = "Choose the invoice account, or leave it empty to invoice the customer.";
   if (!/^[A-Z]{3}$/.test(values.currency)) errors.currency = "Enter a three-letter ISO currency code, such as USD.";
   if (!DATE.test(values.requestedShipDate)) errors.requestedShipDate = "Choose the requested ship date.";
   const ref = values.externalRef.trim();
@@ -131,6 +132,21 @@ export function NewOrderPage() {
     </FormField>
   );
 
+  const lookup = (name: "legalEntityId" | "customerId" | "invoiceAccountId", entity: "legalEntity" | "customer", label: string, hint: string, scope: { legalEntityId?: string } = {}, optional = false) => (
+    <FormField id={`order-${name}`} label={label} hint={hint} error={errors[name]} optional={optional}>
+      {(control) => (
+        <EntityLookup
+          entity={entity}
+          {...control}
+          scope={scope}
+          value={values[name]}
+          onChange={(e) => update({ [name]: e.target.value })}
+          invalid={Boolean(errors[name])}
+        />
+      )}
+    </FormField>
+  );
+
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -139,9 +155,9 @@ export function NewOrderPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New sales order">
-          {header("legalEntityId", "Legal entity", "UUID of the selling legal entity.", { mono: true })}
-          {header("customerId", "Customer", "UUID of the customer party.", { mono: true })}
-          {header("invoiceAccountId", "Invoice account", "Leave empty to invoice the customer.", { mono: true, optional: true })}
+          {lookup("legalEntityId", "legalEntity", "Legal entity", "The selling legal entity.")}
+          {lookup("customerId", "customer", "Customer", "Search by name or account number.", { legalEntityId: values.legalEntityId || undefined })}
+          {lookup("invoiceAccountId", "customer", "Invoice account", "Leave empty to invoice the customer.", { legalEntityId: values.legalEntityId || undefined }, true)}
           <FormField id="order-orderType" label="Order type" hint="Legal entity default uses the type set in Sales parameters." error={errors.orderType}>
             {(control) => (
               <Select {...control} value={values.orderType} onChange={(e) => update({ orderType: e.target.value as OrderType | "" })}>
@@ -169,7 +185,7 @@ export function NewOrderPage() {
             )}
           </FormField>
           {values.oneTime ? <OneTimeFields values={values.oneTime} errors={errors} onChange={(oneTime) => update({ oneTime })} /> : null}
-          <LinesEditor lines={values.lines} errors={errors} newLineDate={values.requestedShipDate} onChange={(lines) => update({ lines })} withDeliveryControl />
+          <LinesEditor lines={values.lines} errors={errors} legalEntityId={values.legalEntityId} newLineDate={values.requestedShipDate} onChange={(lines) => update({ lines })} withDeliveryControl />
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0011" ? "A product is not listed for this customer" : failure.code === "SLS-0016" ? "The order is over the one-time order limit" : "Could not save the order"} live="alert">

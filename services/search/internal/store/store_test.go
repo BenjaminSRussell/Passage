@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -362,6 +363,30 @@ func TestIndexedQueriesAvoidSequentialScans(t *testing.T) {
 		}
 		if joined := strings.Join(lines, "\n"); strings.Contains(joined, "Seq Scan on search_record") {
 			t.Errorf("query %q scans a whole table:\n%s", text, joined)
+		}
+	}
+}
+
+// Every document type is limited to the caller's legal entities (#506-2).
+func TestDocumentTypesAreScopedToTheCallersLegalEntities(t *testing.T) {
+	st := setup(t)
+	tid := testkit.TenantID(1)
+	types := []string{TypeReceipt, TypeVendorInvoice, TypeSalesOrder, TypePackingSlip, TypeCustomerInvoice}
+	for i, typ := range types {
+		for _, le := range []string{entityA, entityB} {
+			r := Record{Type: typ, ID: ids.New(), LegalEntityID: le, Number: fmt.Sprintf("DOC-%d-%s", i, le[len(le)-1:]), Title: "doc", Status: "POSTED", At: t0}
+			if _, err := st.Apply(asScope(tid, le), r); err != nil {
+				t.Fatalf("apply %s: %v", typ, err)
+			}
+		}
+	}
+	hits, err := st.Search(asScope(tid, entityA), Query{Text: "doc-", Types: types, Limit: 20})
+	if err != nil || len(hits) != len(types) {
+		t.Fatalf("entity A sees %v (err %v), want one of each type", numbers(hits), err)
+	}
+	for _, h := range hits {
+		if h.LegalEntityID != entityA {
+			t.Errorf("entity A sees %s of %s", h.Number, h.LegalEntityID)
 		}
 	}
 }

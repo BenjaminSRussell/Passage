@@ -1,21 +1,19 @@
 import { Link } from "react-router-dom";
 import { copy } from "../copy";
-import { holdsDuty } from "../dutyGate";
 import { ProblemMessage } from "../errors";
-import { INBOX_DUTY, sourceList } from "../inbox/inbox";
-import { useInbox } from "../inbox/useInbox";
-import { useWorkContext } from "../lookup/workContextState";
-import { usePrincipalDuties } from "../principal";
-import { Alert, Button, Card, EmptyState, Skeleton } from "../ui";
+import { MY_WORK_PATH, sourceList } from "../inbox/inbox";
+import { countInbox, useSharedInbox } from "../inbox/InboxProvider";
+import { Alert, Button, Card, EmptyState, Skeleton, StatGroup, StatTile } from "../ui";
 import styles from "./pages.module.css";
 
-export const MY_WORK_PATH = "/workflow/inbox";
+export { MY_WORK_PATH };
 export const MY_WORK_PREVIEW_COUNT = 5;
 
 function Summary() {
-  const { legalEntityId } = useWorkContext();
-  const inbox = useInbox(legalEntityId, true);
+  const inbox = useSharedInbox();
+  if (inbox === null) return null;
   const preview = inbox.items.slice(0, MY_WORK_PREVIEW_COUNT);
+  const counts = countInbox(inbox.items, inbox.hasMore || inbox.truncated.length > 0);
 
   if (inbox.status === "loading") {
     return (
@@ -41,11 +39,17 @@ function Summary() {
       ) : null}
       {inbox.items.length === 0 ? (
         inbox.unavailable.length === 0 ? (
-          <EmptyState compact title={copy.myWork.emptyTitle} description={copy.myWork.emptyDescription} />
+          <EmptyState compact title={copy.myWork.emptyTitle} description={`${copy.myWork.emptyDescription} ${copy.myWork.getStarted}`} />
         ) : null
       ) : (
         <>
-          <p role="status">{copy.myWork.summary(inbox.items.length, inbox.hasMore || inbox.truncated.length > 0)}</p>
+          <p role="status">{copy.myWork.summary(inbox.items.length, counts.more)}</p>
+          <StatGroup label={copy.myWork.tilesLabel}>
+            <StatTile label={copy.myWork.tileWaiting} value={`${counts.total}${counts.more ? "+" : ""}`} />
+            <StatTile label={copy.myWork.tileApprovals} value={counts.approvals} />
+            <StatTile label={copy.myWork.tileOverdue} value={counts.overdue} tone="danger" />
+            <StatTile label={copy.myWork.tileOldest} value={counts.oldestDays} />
+          </StatGroup>
           <ul className={styles.links} aria-label={copy.myWork.title}>
             {preview.map((item) => (
               <li key={`${item.source}:${item.id}`}>
@@ -67,7 +71,7 @@ function Summary() {
 }
 
 export function MyWorkSummary() {
-  if (!holdsDuty(usePrincipalDuties(), INBOX_DUTY)) return null;
+  if (useSharedInbox() === null) return null;
   return (
     <Card title={copy.myWork.title} headingLevel={2}>
       <Summary />

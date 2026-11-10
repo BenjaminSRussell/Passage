@@ -219,7 +219,7 @@ func inflate(data []byte, limit int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	out, err := io.ReadAll(io.LimitReader(r, int64(limit)+1))
 	if err != nil {
 		return nil, err
@@ -256,13 +256,13 @@ func showStrings(data []byte) []string {
 			flush()
 			return out
 		}
-		switch {
-		case c == '(':
+		switch c {
+		case '(':
 			flush()
 			if lit := literal(r); pending.Len()+len(lit) <= maxLineBytes+1 {
 				pending.WriteString(lit)
 			}
-		case c == '[' || c == ']' || c == ' ' || c == '\t' || c == '\r' || c == '\n':
+		case '[', ']', ' ', '\t', '\r', '\n':
 			flush()
 		default:
 			word = append(word, c)

@@ -25,11 +25,12 @@ import {
 } from "./processLabels";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../mfg-shared/orders";
 
 const columns: DataTableColumn<ProcessMessage>[] = [
   { key: "receivedAt", header: "Received", render: (row) => formatDateTime(row.receivedAt) },
   { key: "categoryCode", header: "Category", render: (row) => categoryLabel(row.categoryCode) },
-  { key: "orderId", header: "Order", mono: true },
+  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
   { key: "phasePath", header: "Phase", mono: true, render: (row) => row.phasePath || dash },
   { key: "source", header: "Source", render: (row) => `${row.source} ${row.sourceMessageId}` },
   {

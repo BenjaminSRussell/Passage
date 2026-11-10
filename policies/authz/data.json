@@ -52,6 +52,8 @@
     "identity.legal-entity.maintain": {"permissions": [{"resource": "/v1/legal-entities{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.feature.view": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET"]}]},
     "identity.feature.maintain": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET", "PUT"]}]},
+    "identity.setup.view": {"permissions": [{"resource": "/v1/tenant/setup", "methods": ["GET"]}, {"resource": "/v1/tenant/workspace-config", "methods": ["GET"]}]},
+    "identity.setup.maintain": {"permissions": [{"resource": "/v1/tenant/setup{,/**}", "methods": ["GET", "PUT"]}, {"resource": "/v1/tenant/workspace-config", "methods": ["GET", "PUT"]}]},
     "platform.saved-view.maintain": {"permissions": [{"resource": "/v1/saved-views{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "hello.ledger.maintain": {"permissions": [{"resource": "/v1/hello-ledger{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "product.product.view": {"permissions": [{"resource": "/v1/product{,/**}", "methods": ["GET"]}]},
@@ -686,6 +688,7 @@
       {"resource": "/v1/receiving/ers-vendors/*", "methods": ["PUT"]}
     ]},
     "receiving.receipt.maintain": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/receiving/arrivals", "methods": ["POST"]},
       {"resource": "/v1/receiving/receipts", "methods": ["GET", "POST"]},
       {"resource": "/v1/receiving/receipts/*", "methods": ["GET"]},
@@ -727,10 +730,24 @@
       {"resource": "/v1/receiving/asns/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/asns/*:start-receipt", "methods": ["POST"]}
     ]},
+    "receiving.vendor-portal.asn": {"service_only": true, "permissions": [
+      {"resource": "/v1/receiving/vendor/asns", "methods": ["POST", "GET"]},
+      {"resource": "/v1/receiving/vendor/asns/*", "methods": ["GET"]}
+    ]},
+    "receiving.vendor-portal.invoice": {"service_only": true, "permissions": [
+      {"resource": "/v1/receiving/vendor/invoice-captures", "methods": ["POST", "GET"]},
+      {"resource": "/v1/receiving/vendor/invoice-captures/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoices", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoices/*", "methods": ["GET"]}
+    ]},
     "receiving.ers-price.confirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
     ]},
+    "receiving.document-flow.read": {"permissions": [
+      {"resource": "/v1/receiving/related-documents", "methods": ["GET"]}
+    ]},
     "receiving.ap.inquire": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/receiving/grir", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoices/*", "methods": ["GET"]},
@@ -790,7 +807,12 @@
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]},
-      {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]}
+      {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-questionnaires", "methods": ["POST"]},
+      {"resource": "/v1/party/vendors/*/onboarding", "methods": ["POST"]},
+      {"resource": "/v1/party/vendors/*/documents", "methods": ["POST"]},
+      {"resource": "/v1/party/controlled-documents", "methods": ["POST"]},
+      {"resource": "/v1/party/controlled-documents/*:distribute", "methods": ["POST"]}
     ]},
     "party.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/party/parties", "methods": ["POST"]},
@@ -818,6 +840,14 @@
       {"resource": "/v1/party/vendor-groups", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-groups/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-questionnaires", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-requests", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-requests/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-documents", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-documents/*/content", "methods": ["GET"]},
+      {"resource": "/v1/party/controlled-documents", "methods": ["GET"]},
+      {"resource": "/v1/party/controlled-documents/*/distributions", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-audit", "methods": ["GET"]},
       {"resource": "/v1/party/merge-requests/*", "methods": ["GET"]},
       {"resource": "/v1/party/customers/*", "methods": ["GET"]},
       {"resource": "/v1/party/parties:search", "methods": ["GET"]},
@@ -845,6 +875,25 @@
     "party.approve": {"permissions": [
       {"resource": "/v1/party/pending-changes/*:approve", "methods": ["POST"]},
       {"resource": "/v1/party/pending-changes/*:reject", "methods": ["POST"]}
+    ]},
+    "party.vendor-request.decide": {"permissions": [
+      {"resource": "/v1/party/vendor-requests/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-requests/*:reject", "methods": ["POST"]}
+    ]},
+    "party.vendor-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/requests", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/requests/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/documents", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/documents/*/content", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/distributions", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/distributions/*/content", "methods": ["GET"]}
+    ]},
+    "party.vendor-portal.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/requests", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/requests/*:submit", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/requests/*:withdraw", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/documents", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]}
     ]},
     "party.approval-policy.write": {"permissions": [
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
@@ -923,6 +972,11 @@
       {"resource": "/v1/analytics/dashboards/*", "methods": ["GET"]},
       {"resource": "/v1/analytics/metrics", "methods": ["GET"]},
       {"resource": "/v1/analytics/query", "methods": ["POST"]}
+    ]},
+    "analytics.ux.record": {"permissions": [{"resource": "/v1/analytics/ux-events", "methods": ["POST"]}]},
+    "analytics.ux.view": {"permissions": [
+      {"resource": "/v1/analytics/ux-funnels", "methods": ["GET"]},
+      {"resource": "/v1/analytics/ux-signals", "methods": ["GET"]}
     ]},
     "analytics.archive.admin": {"permissions": [
       {"resource": "/v1/archive/partitions", "methods": ["GET"]},
@@ -1863,6 +1917,9 @@
       {"resource": "/print/v1/printers/status", "methods": ["GET"]},
       {"resource": "/print/v1/routing-rules", "methods": ["GET"]}
     ]},
+    "print.document.render": {"permissions": [
+      {"resource": "/print/v1/documents:render", "methods": ["POST"]}
+    ]},
     "print.admin": {"permissions": [
       {"resource": "/print/v1/jobs:purge", "methods": ["POST"]},
       {"resource": "/print/v1/printers", "methods": ["POST"]},
@@ -1914,6 +1971,7 @@
       {"resource": "/v1/fulfillment/manifests/*:cancel", "methods": ["POST"]}
     ]},
     "fulfillment.warehouse.view": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/backorders", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/sales-delivery-reports", "methods": ["GET"]},
       {"resource": "/v1/fulfillment/container-types", "methods": ["GET"]},
@@ -1985,6 +2043,7 @@
       {"resource": "/v1/billing/tax-reports:backfill", "methods": ["POST"]}
     ]},
     "billing.invoice.view": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*/trace", "methods": ["GET"]},
@@ -2476,6 +2535,7 @@
       {"resource": "/v1/org/teams/*/members/*:end", "methods": ["POST"]},
       {"resource": "/v1/org/operating-units/*/translations/*", "methods": ["PUT", "DELETE"]}
     ]},
+    "org.demo-company.manage": {"permissions": [{"resource": "/v1/org/demo-company", "methods": ["POST"]}]},
     "org.package.manage": {"permissions": [
       {"resource": "/v1/org/export", "methods": ["POST"]},
       {"resource": "/v1/org/import", "methods": ["POST"]}
@@ -3086,6 +3146,7 @@
       {"resource": "/v1/sales/orders/*/holds/*:release", "methods": ["POST"]}
     ]},
     "sales.order.read": {"permissions": [
+      {"resource": "/v1/search", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements/*", "methods": ["GET"]},
       {"resource": "/v1/sales/agreements/*/schedule-releases", "methods": ["GET"]},
@@ -3656,6 +3717,11 @@
     },
     "processmfg": {
       "identity": ["identity.feature.view"]
+    },
+    "supplier-portal": {
+      "purchasing": ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],
+      "receiving": ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"],
+      "party": ["party.vendor-portal.read", "party.vendor-portal.write"]
     }
   },
   "service_principals": {

@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listPayments, PAYMENT_STATUSES, type Payment, type PaymentStatus } from "./api/client";
-import { MODE_LABELS, money, shortId, STATUS_LABELS, STATUS_TONES } from "./format";
+import { MODE_LABELS, money, STATUS_LABELS, STATUS_TONES } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
 
@@ -13,7 +14,7 @@ const columns: DataTableColumn<Payment>[] = [
   { key: "receivedDate", header: "Received", mono: true },
   { key: "paymentMode", header: "Mode", render: (row) => MODE_LABELS[row.paymentMode] ?? row.paymentMode },
   { key: "sourceRef", header: "Reference", mono: true, render: (row) => row.sourceRef ?? "None" },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId ?? undefined}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId ?? ""} fallback="Unassigned" /> },
   { key: "amount", header: "Amount", mono: true, align: "end", render: (row) => money(row.amount, row.currency) },
   { key: "unappliedAmount", header: "Unapplied", mono: true, align: "end", render: (row) => money(row.unappliedAmount, row.currency) },
   { key: "status", header: "Status", render: (row) => <Badge tone={STATUS_TONES[row.status] ?? "neutral"}>{STATUS_LABELS[row.status] ?? row.status}</Badge> },

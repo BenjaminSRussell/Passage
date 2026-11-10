@@ -44,7 +44,7 @@ func (s *Stack) SeedLedger(ctx context.Context) (string, error) {
 		id = resp.String("id")
 	}
 	for _, a := range seedAccounts {
-		if _, err := admin.Must(ctx, http.MethodPut, "/v1/ledger/charts/"+ChartCode+"/accounts/"+a.Number, map[string]any{"name": a.Name, "accountType": a.Type}, nil, http.StatusCreated, http.StatusPreconditionRequired); err != nil {
+		if _, err := admin.Must(ctx, http.MethodPut, "/v1/ledger/charts/"+ChartCode+"/accounts/"+a.Number, map[string]any{"name": a.Name, "accountType": a.Type}, nil, http.StatusCreated, http.StatusOK, http.StatusPreconditionRequired); err != nil {
 			return "", err
 		}
 	}

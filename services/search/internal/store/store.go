@@ -19,16 +19,25 @@ import (
 )
 
 const (
-	TypeParty         = "party"
-	TypeProduct       = "product"
-	TypePurchaseOrder = "purchase_order"
+	TypeParty           = "party"
+	TypeProduct         = "product"
+	TypePurchaseOrder   = "purchase_order"
+	TypeReceipt         = "receipt"
+	TypeVendorInvoice   = "vendor_invoice"
+	TypeSalesOrder      = "sales_order"
+	TypePackingSlip     = "packing_slip"
+	TypeCustomerInvoice = "customer_invoice"
 
 	wordSimilarityThreshold = "0.4"
 )
 
 var errNoPrincipal = errors.New("search: no principal in context")
 
-func LegalEntityScoped(recordType string) bool { return recordType == TypePurchaseOrder }
+// LegalEntityScoped reports whether records of the type belong to one legal
+// entity (every type except party and product).
+func LegalEntityScoped(recordType string) bool {
+	return recordType != TypeParty && recordType != TypeProduct
+}
 
 type Record struct {
 	Type          string

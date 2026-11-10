@@ -85,7 +85,7 @@ describe("Capacity load by day", () => {
     const { container } = renderAt("/scheduling/load");
     let table = await findTable({ name: "Capacity load" });
     await waitFor(() => expect(table).toHaveTextContent("Bottleneck"));
-    expect(screen.getByRole("link", { name: "Jobs of MIX-1 from 2027-03-01" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Jobs of Mixing vessel (MIX-1) from 2027-03-01" })).toHaveAttribute(
       "href",
       `/scheduling/load/jobs?${new URLSearchParams({ resourceId: MIX, from: "2027-03-01T00:00:00Z", to: "2027-03-08T00:00:00Z" })}`,
     );
@@ -97,7 +97,7 @@ describe("Capacity load by day", () => {
     expect(table).toHaveTextContent("50.0");
     expect(table).not.toHaveTextContent("Bottleneck");
     expect(screen.getByLabelText("Days")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Jobs of MIX-1 from 2027-03-02" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Jobs of Mixing vessel (MIX-1) from 2027-03-02" })).toHaveAttribute(
       "href",
       `/scheduling/load/jobs?${new URLSearchParams({ resourceId: MIX, from: "2027-03-01T15:00:00Z", to: "2027-03-02T15:00:00Z" })}`,
     );

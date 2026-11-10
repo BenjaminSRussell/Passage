@@ -15,10 +15,11 @@ import {
   type CommitmentType,
   type Problem,
 } from "./api/client";
-import { commitmentText, dash, DECIMAL, money, PERCENT, sentence, shortId, UUID } from "./format";
+import { commitmentText, dash, DECIMAL, money, PERCENT, sentence, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const PRICE = /^\d+(\.\d{1,4})?$/;
@@ -89,8 +90,8 @@ export function validateAgreement(values: AgreementValues): { errors: Errors; in
 
 const columns: DataTableColumn<Agreement>[] = [
   { key: "agreementNumber", header: "Agreement", mono: true },
-  { key: "customerId", header: "Customer", mono: true, render: (a) => shortId(a.customerId) },
-  { key: "productId", header: "Product", mono: true, render: (a) => shortId(a.productId) },
+  { key: "customerId", header: "Customer", render: (a) => <EntityName entity="customer" id={a.customerId} /> },
+  { key: "productId", header: "Product", render: (a) => <EntityName entity="product" id={a.productId} /> },
   { key: "unitPrice", header: "Price", align: "end", render: (a) => `${money(a.unitPrice, a.currency)} / ${a.unit}` },
   { key: "commitmentQty", header: "Committed", align: "end", render: (a) => commitmentText(a, a.commitmentQty) },
   { key: "releasedQty", header: "Released", align: "end", render: (a) => commitmentText(a, a.releasedQty) },

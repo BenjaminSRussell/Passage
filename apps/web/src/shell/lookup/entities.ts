@@ -1,3 +1,4 @@
+import { apiFetch } from "../api/http";
 export type LookupEntityKey =
   | "legalEntity"
   | "site"
@@ -44,7 +45,7 @@ type Raw = Record<string, unknown>;
 
 export type LookupFetcher = (url: string, init: RequestInit) => Promise<Response>;
 
-const browserFetcher: LookupFetcher = (url, init) => fetch(url, init);
+const browserFetcher: LookupFetcher = (url, init) => apiFetch(url, init);
 let lookupFetcher: LookupFetcher = browserFetcher;
 
 export function setLookupFetcher(fetcher: LookupFetcher | null): void {

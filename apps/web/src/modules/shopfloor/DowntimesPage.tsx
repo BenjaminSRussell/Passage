@@ -6,6 +6,7 @@ import { dash, durationMinutes, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { ResourceName, formatResource, useResources } from "../mfg-shared/resources";
 
 const REASON = /^\S.{0,31}$/;
 
@@ -16,6 +17,11 @@ export function DowntimesPage() {
   const selectedId = params.get("downtime") ?? "";
   const state = useLoad((signal) => listDowntimes({ open: openOnly || undefined }, signal), `downtimes|${openOnly}`);
   const rows = state.data ?? [];
+  const resources = useResources();
+  const resourceText = (id: string) => {
+    const found = resources.find((r) => r.id === id || r.code === id);
+    return found ? formatResource(found) : "the resource";
+  };
   const selected = rows.find((d) => d.id === selectedId) ?? null;
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -28,7 +34,7 @@ export function DowntimesPage() {
   }
 
   const columns: DataTableColumn<Downtime>[] = [
-    { key: "resourceId", header: "Resource", mono: true },
+    { key: "resourceId", header: "Resource", render: (row) => <ResourceName id={row.resourceId} /> },
     { key: "startedAt", header: "Started", render: (row) => formatDateTime(row.startedAt) },
     { key: "duration", header: "Duration", align: "end", render: (row) => durationMinutes(row.startedAt, row.endedAt) },
     { key: "state", header: "State", render: (row) => (row.endedAt ? <Badge tone="neutral">Ended</Badge> : row.cause === "idle" ? <Badge tone="warning">Idle</Badge> : <Badge tone="danger">Down</Badge>) },
@@ -39,7 +45,7 @@ export function DowntimesPage() {
       key: "action",
       header: "Action",
       render: (row) => (
-        <Button size="sm" aria-label={`Code reason for downtime on ${row.resourceId} from ${formatDateTime(row.startedAt)}`} onClick={() => select(row.id)}>
+        <Button size="sm" aria-label={`Code reason for downtime on ${resourceText(row.resourceId)} from ${formatDateTime(row.startedAt)}`} onClick={() => select(row.id)}>
           {row.reasonCode ? "Recode" : "Code reason"}
         </Button>
       ),
@@ -80,7 +86,7 @@ export function DowntimesPage() {
           key={selected.id}
           downtime={selected}
           onDone={(saved) => {
-            select("", `Downtime on ${saved.resourceId} is coded ${saved.reasonCode ?? ""}. An open andon stays until the machine has run for 5 minutes.`);
+            select("", `Downtime on ${resourceText(saved.resourceId)} is coded ${saved.reasonCode ?? ""}. An open andon stays until the machine has run for 5 minutes.`);
             state.reload();
           }}
           onCancel={() => select("")}

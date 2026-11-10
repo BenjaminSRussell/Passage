@@ -130,7 +130,7 @@ describe("Co-product forms (FR-21.14)", () => {
     await userEvent.selectOptions(type, "by-product");
     expect(type.value).toBe("by-product");
     await userEvent.click(within(form).getByRole("button", { name: "Create production order" }));
-    expect(await within(form).findAllByText("Enter the item id (a UUID).")).not.toHaveLength(0);
+    expect(await within(form).findAllByText("Choose an item.")).not.toHaveLength(0);
     expect(calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     await userEvent.click(within(form).getByRole("button", { name: "Remove co-product 1" }));
     expect(within(form).queryByText("Co-product 1")).not.toBeInTheDocument();

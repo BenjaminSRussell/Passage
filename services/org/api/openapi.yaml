@@ -1393,6 +1393,25 @@ paths:
           description: COM-0413 when the body exceeds 8 MiB; the limit applies while the body is read.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/demo-company:
+    post:
+      operationId: loadDemoCompany
+      summary: Load the demo company
+      description: Loads the demo manufacturer (three legal entities with their sites, warehouses, operating units and teams) into the caller's tenant, the same package ORG_SEED_PACKAGE seeds at start. Rows that exist are left alone and missing ones are added; nothing is deleted, so it can be repeated and does not wipe data. 403 ORG-0403 unless the caller holds tenant.administer and has no legal-entity claim.
+      x-passage-duty: org.demo-company.manage
+      responses:
+        '200':
+          description: How many rows were created and how many were already there.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [package, created, present]
+                properties:
+                  package: { type: string }
+                  created: { type: integer }
+                  present: { type: integer }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/uom/convert:
     get:
       operationId: convertUnit

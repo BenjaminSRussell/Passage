@@ -23,16 +23,18 @@ type Capture struct {
 	Reasons        []string
 	CreatedBy      string
 	CreatedAt      time.Time
-	Invoice        domain.ExtractedInvoice
+	// VendorID is the vendor that submitted the document through the supplier portal; empty for a document keyed by AP.
+	VendorID string
+	Invoice  domain.ExtractedInvoice
 }
 
-const captureColumns = `id, legal_entity_id, source, status, document_sha256, vendor_tax_id, invoice_number, invoice_date, currency, total, confidence, review_reasons, lines, created_by, created_at`
+const captureColumns = `id, legal_entity_id, source, status, document_sha256, vendor_tax_id, invoice_number, invoice_date, currency, total, confidence, review_reasons, lines, created_by, created_at, coalesce(vendor_id::text, '')`
 
 func scanCapture(row pgx.Row) (Capture, error) {
 	var c Capture
 	var reasons, lines []byte
 	err := row.Scan(&c.ID, &c.LegalEntityID, &c.Source, &c.Status, &c.DocumentSHA256, &c.Invoice.VendorTaxID, &c.Invoice.InvoiceNumber, &c.Invoice.InvoiceDate,
-		&c.Invoice.Currency, &c.Invoice.Total, &c.Invoice.Confidence, &reasons, &lines, &c.CreatedBy, &c.CreatedAt)
+		&c.Invoice.Currency, &c.Invoice.Total, &c.Invoice.Confidence, &reasons, &lines, &c.CreatedBy, &c.CreatedAt, &c.VendorID)
 	if err != nil {
 		return Capture{}, err
 	}
@@ -56,10 +58,10 @@ func (s *Postgres) CreateCapture(ctx context.Context, in Capture) (out Capture, 
 		return Capture{}, false, err
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `INSERT INTO receiving_invoice_capture (tenant_id, id, legal_entity_id, source, status, document_sha256, vendor_tax_id, invoice_number, invoice_date, currency, total, confidence, review_reasons, lines, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) ON CONFLICT (tenant_id, legal_entity_id, document_sha256) DO NOTHING`,
+		tag, err := tx.Exec(ctx, `INSERT INTO receiving_invoice_capture (tenant_id, id, legal_entity_id, source, status, document_sha256, vendor_tax_id, invoice_number, invoice_date, currency, total, confidence, review_reasons, lines, created_by, vendor_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, nullif($16, '')::uuid) ON CONFLICT (tenant_id, legal_entity_id, document_sha256) DO NOTHING`,
 			tenantID, in.ID, in.LegalEntityID, in.Source, in.Status, in.DocumentSHA256, in.Invoice.VendorTaxID, in.Invoice.InvoiceNumber, in.Invoice.InvoiceDate,
-			in.Invoice.Currency, in.Invoice.Total, in.Invoice.Confidence, reasons, lines, in.CreatedBy)
+			in.Invoice.Currency, in.Invoice.Total, in.Invoice.Confidence, reasons, lines, in.CreatedBy, in.VendorID)
 		if err != nil {
 			return err
 		}
@@ -122,12 +124,12 @@ func (s *Postgres) ListCaptures(ctx context.Context, f CaptureFilter) ([]Capture
 	var out []Capture
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+captureColumns+` FROM receiving_invoice_capture c
-			WHERE tenant_id = $1 AND ($2 = '' OR status = $2)
+			WHERE tenant_id = $1 AND ($2 = '' OR status = $2) AND ($6 = '' OR vendor_id::text = $6)
 			AND NOT EXISTS (SELECT 1 FROM receiving_vendor_invoice i WHERE i.tenant_id = c.tenant_id AND i.legal_entity_id = c.legal_entity_id
 				AND lower(i.invoice_number) = lower(c.invoice_number) AND i.invoice_date = c.invoice_date AND i.currency = c.currency
 				AND i.total = c.total)
 			AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::uuid))
-			ORDER BY created_at DESC, id DESC LIMIT $5`, tenantID, f.Status, nullTime(f.CursorCreatedAt), cursorID, limit+1)
+			ORDER BY created_at DESC, id DESC LIMIT $5`, tenantID, f.Status, nullTime(f.CursorCreatedAt), cursorID, limit+1, f.VendorID)
 		if err != nil {
 			return err
 		}

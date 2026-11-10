@@ -1,4 +1,7 @@
 import { useRef, useState } from "react";
+import { DownloadPdfButton } from "../../shell/documents/pdfDocument";
+import { packingSlipDocument } from "./packingSlipDocument";
+import { OrderFlowPanel } from "../sales/documentFlow";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { cancelPackingSlip, describeProblem, getPackingSlip, newKey, type JournalEntry, type PackagingFeeLine, type PackingSlip, type Problem } from "./api/client";
@@ -7,6 +10,7 @@ import { fixed, formatDate, formatMoney, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../sales/OrderNumber";
 
 type SlipLine = PackingSlip["lines"][number];
 
@@ -96,6 +100,7 @@ export function PackingSlipDetailPage() {
         meta={<SlipStatusBadge status={slip.status} reversal={reversal} />}
         actions={
           <>
+            <DownloadPdfButton build={() => packingSlipDocument(slip)} filename={`packing-slip-${slip.packingSlipNumber}.pdf`} />
             {cancellable && !confirming ? (
               <Button variant="danger" onClick={() => setConfirming(true)}>
                 Cancel packing slip
@@ -141,16 +146,17 @@ export function PackingSlipDetailPage() {
           <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
+      <OrderFlowPanel anchor={{ kind: "slip", id: slip.id }} refreshKey={slip.status} />
       <Card>
         <dl className={styles.details}>
           {[
-            ["Order", slip.orderId],
+            ["Order", <OrderNumber id={slip.orderId} />],
             ["Shipment", slip.shipmentId],
             ["Posting date", formatDate(slip.postingDate)],
             ["Total cost", formatMoney(slip.totalCost, slip.currency)],
             ...(reversal ? [["Reverses", slip.reversalOfId ?? ""]] : []),
           ].map(([term, value]) => (
-            <div key={term} className={styles.entry}>
+            <div key={String(term)} className={styles.entry}>
               <dt className={styles.term}>{term}</dt>
               <dd className={`${styles.value} ${styles.mono}`}>
                 {term === "Reverses" ? <Link to={`/fulfillment/packing-slips/${value}`}>{value}</Link> : value}

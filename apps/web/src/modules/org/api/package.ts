@@ -1,4 +1,5 @@
 import { base, OrgApiError } from "./client";
+import { apiFetch } from "../../../shell/api/http";
 
 // The organization model package (FR-6.12): POST /v1/org/export and /v1/org/import. Both routes are
 // tenant-level (no legal-entity header) and need org.package.manage with tenant.administer.
@@ -44,7 +45,7 @@ export class PackageError extends OrgApiError {
 }
 
 async function send<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(`${base}${path}`, init);
+  const res = await apiFetch(`${base}${path}`, init);
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { code?: unknown; detail?: unknown; title?: unknown; errors?: unknown } | null;
     const fields =

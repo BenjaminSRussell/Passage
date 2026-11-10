@@ -286,6 +286,16 @@ func (s *Postgres) PostRMACredit(ctx context.Context, in RMACredit) (RMACreditNo
 		if err != nil {
 			return err
 		}
+		// A concurrent repeat of this RMA may have committed while we waited for the invoice lock: replay it here, not as a
+		// duplicate open item or an over-credit.
+		if row, err = loadRMACredit(ctx, tx, `legal_entity_id = $2 and rma_id = $3`, p.TenantID, in.LegalEntityID, in.RMAID); err == nil {
+			if row.requestHash != hash {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "this RMA was already credited with different amounts or references")
+			}
+			return nil
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		// The invoice row locks above serialize RMA credits of one invoice, so this sum sees every earlier credit.
 		var creditedText string
 		if err := tx.QueryRow(ctx, `select coalesce(sum(gross + tax), 0)::text from rma_credit where tenant_id = $1 and invoice_open_item_id = any($2::uuid[])`,

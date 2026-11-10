@@ -1,9 +1,13 @@
+import { activeLocale } from "./i18n/locale";
+import { localizeCopy } from "./i18n/localize";
+
 const isMac = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platform);
 
 export const shortcutHint = isMac ? "⌘K" : "Ctrl K";
 
-export const copy = {
-  nav: { home: "Home", notes: "Notes", general: "General", allFeatures: "All features" },
+/** The English source text. Other languages live in shell/i18n and are applied by localizeCopy below. */
+const english = {
+  nav: { home: "Home", general: "General", allFeatures: "All features", myWork: "My work", glossary: "Glossary" },
   workspaces: {
     switcherLabel: "Workspace",
     chooseSummary: "Choose my workspaces",
@@ -32,6 +36,14 @@ export const copy = {
     browseWorkspaces: "Browse workspaces",
     goHome: "Go to home",
   },
+  account: {
+    menuLabel: "Account",
+    signedInAs: "Signed in as",
+    signOut: "Sign out",
+    expiredTitle: "Your session has ended",
+    expiredBody: "Sign in again to keep working. Anything you have not saved on this page may be lost.",
+    signIn: "Sign in",
+  },
   announce: {
     searchOpened: "Search opened",
     offline: "You're offline",
@@ -40,6 +52,8 @@ export const copy = {
     oneResult: "1 result",
     results: (count: number) => `${count} results`,
     opened: (label: string) => `Opened ${label}`,
+    favouriteAdded: (number: string) => `${number} added to favourites`,
+    favouriteRemoved: (number: string) => `${number} removed from favourites`,
     workspaceSwitched: (label: string) => `Workspace changed to ${label}`,
   },
   forms: {
@@ -117,8 +131,14 @@ export const copy = {
   palette: {
     title: "Search",
     inputLabel: "Find a page",
-    placeholder: "Search pages and workspaces",
-    help: "Use the up and down arrows to move through results, then press Enter to open a page.",
+    placeholder: "Search pages, documents and partners",
+    help: "Type a document number or a name. Use the up and down arrows to move through results, then press Enter to open one. Press Alt and F to favourite a record.",
+    favourites: "Favourite records",
+    recent: "Recent records",
+    favouriteState: "Favourite",
+    favourite: (number: string) => `Favourite ${number}`,
+    unfavourite: (number: string) => `Remove ${number} from favourites`,
+    recordsUnavailable: "Documents and partners can't be searched right now. Pages still work.",
     noResults: (query: string) => `No pages match “${query}”.`,
     noResultsHint: "Try a workspace name, like Admin or Tax.",
     listLabel: "Pages",
@@ -129,6 +149,14 @@ export const copy = {
     topTasks: "Top tasks",
     current: "Current workspace",
     seeAll: "See all features",
+    shortcutsLabel: "Common actions",
+    switchTo: (label: string) => `Switch to ${label}`,
+    otherWorkspaces: "Your other workspaces",
+    recentTitle: "Recent",
+    recentEmpty: "Pages you open show up here, so you can get back to them quickly.",
+    setupTitle: "Finish setting up your company",
+    setupBody: (finished: number, total: number) => `${finished} of ${total} setup steps are finished.`,
+    setupLink: "Continue setup",
     emptyTitle: "No workspaces yet",
     emptyDescription: "Workspaces appear here once your account has access to their features.",
   },
@@ -146,12 +174,38 @@ export const copy = {
     loadMore: "Load more",
     needEntity: "Choose a legal entity at the top of the page to see your work.",
     seeAll: "See all my work",
+    tilesLabel: "My work at a glance",
+    tileWaiting: "Waiting for me",
+    tileApprovals: "To approve",
+    tileOverdue: "Overdue",
+    tileOldest: "Oldest, in days",
+    badgeHint: (text: string) => `, ${text} waiting`,
+    getStarted: "Approvals, holds and other tasks assigned to you will appear here, with a button to deal with each one.",
     summary: (count: number, more: boolean) => (count === 0 ? "Nothing is waiting for you." : `${count}${more ? "+" : ""} ${count === 1 && !more ? "item is" : "items are"} waiting for you.`),
   },
-  notes: {
-    title: "Notes",
-    description: "A preview of a form generated from entity metadata.",
-    saved: (title: string) => `${title} saved`,
+  format: {
+    today: "Today",
+    days: (count: number) => (count === 1 ? "1 day" : `${count} days`),
+  },
+  help: {
+    button: "Help for this page",
+    panelLabel: "Help",
+    close: "Close help",
+    purposeHeading: "What this page is for",
+    tasksHeading: "Common tasks",
+    guideLink: "Read the full guide",
+    noEntry: "There is no help for this page yet.",
+    whatsNew: "What's new",
+    announceOpened: "Help opened",
+    shareUsage: "Share anonymous usage data",
+    language: "Language",
+    opensInNewTab: "(opens in a new tab)",
+    shareUsageHint: "Which steps people finish and where forms fail, so we can make them easier. It holds no names or record details.",
+  },
+  whatsNew: {
+    pageTitle: "What's new",
+    description: "Changes to Passage in plain language, newest first.",
+    empty: "No release notes yet.",
   },
   notFound: {
     title: "We couldn't find that page",
@@ -162,13 +216,14 @@ export const copy = {
     title: "This page isn't available to you",
     description: "Your account doesn't have the duty this page needs. Ask an administrator if you should have access.",
     pageTitle: "Page not available",
+    featureOffTitle: "This isn't turned on for your company",
+    featureOffDescription: "Your company doesn't use this feature. An administrator can turn it on under Company setup, then Features.",
   },
   errorBoundary: {
     title: "This page couldn't load",
     body: "Something went wrong while showing this page. Your other workspaces still work.",
   },
-  placeholder: {
-    title: "This workspace isn't available yet",
-    badge: "Coming soon",
-  },
 } as const;
+
+export const copyEnglish = english;
+export const copy = localizeCopy(english, activeLocale, { shortcut: shortcutHint });
