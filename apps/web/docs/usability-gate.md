@@ -12,13 +12,13 @@ Measured against the latest baseline or milestone report (`usability-baseline-re
 
 | Measure | The release passes when |
 |---|---|
-| Task success | Not lower than the reference by more than 10 percentage points for any in-scope task, and no in-scope task that passed for at least 4 of 5 participants now passes for fewer than 3. |
+| Task success | Not lower than the reference by more than 20 percentage points (one participant of five) for any in-scope task. |
 | Time on task | The median time for an in-scope task is not more than 25% above the reference. |
 | Errors | The mean errors per attempt for an in-scope task do not rise by more than 0.5. |
 | SUS | The persona's mean SUS is not more than 5 points below the reference, and not below 68 (the usual "average" mark) where the reference was above 68. |
 | Blockers | No open *blocker* finding on an in-scope flow. |
 
-With five participants one person is 20 points of success, so the success rule allows one more failure than the reference and no more. A result that fails one measure is not waved through by passing the others.
+With five participants one person is 20 points of success, so the success rule allows one more failure than the reference and no more (a drop of more than 20 points fails). A result that fails one measure is not waved through by passing the others.
 
 ## How it is checked
 
