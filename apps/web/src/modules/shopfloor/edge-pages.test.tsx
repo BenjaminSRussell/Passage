@@ -231,6 +231,30 @@ describe("Edge node detail", () => {
     expect(header(put, "If-Match")).toBe('"3"');
   });
 
+  it("mints an enrollment token without a key, shows it once and refuses a switched-off node", async () => {
+    serve((url, init) =>
+      init.method === "POST" && url.pathname.endsWith(":enrollment-token")
+        ? json(201, { edgeId: EDGE, token: "tenant.edge.secret-value", expiresAt: "2026-11-11T08:00:00Z" })
+        : undefined,
+    );
+    renderAt(`/shopfloor/edge-nodes/${EDGE}`);
+    await screen.findByRole("heading", { name: "Plant 1 gateway" });
+    fireEvent.click(screen.getByRole("button", { name: "Create enrollment token" }));
+    expect(await screen.findByLabelText("Enrollment token")).toHaveTextContent("tenant.edge.secret-value");
+    expect(screen.getByText(/it is not shown again/)).toBeInTheDocument();
+    const [mint] = posts(":enrollment-token");
+    expect(mint.body).toEqual({});
+    expect(header(mint, "Idempotency-Key")).toBeNull();
+  });
+
+  it("does not offer a token for a switched-off node and shows the service's refusal", async () => {
+    serve((url, init) => (init.method === "POST" && url.pathname.endsWith(":enrollment-token") ? json(409, { code: "SF-0152", detail: "edge node is switched off" }) : undefined));
+    renderAt(`/shopfloor/edge-nodes/${EDGE}`);
+    await screen.findByRole("heading", { name: "Plant 1 gateway" });
+    fireEvent.click(screen.getByRole("button", { name: "Create enrollment token" }));
+    expect(await screen.findByText("Could not create an enrollment token")).toBeInTheDocument();
+  });
+
   it("parses the document before sending and publishes with an Idempotency-Key", async () => {
     expect(parseDocument("[1]").error).toBeDefined();
     expect(parseDocument("{").error).toBeDefined();

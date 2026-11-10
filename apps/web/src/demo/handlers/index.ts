@@ -3,6 +3,8 @@ import "./mfg";
 import "./supply";
 import "./o2c";
 import "./treasury";
+import "./consolidation";
+import "./intercompany";
 import "./budgeting";
 import "./documents";
 import "./tax";

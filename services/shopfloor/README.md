@@ -604,6 +604,53 @@ export MIGRATE_ON_START=true   # dev only; stage/prod run migrations as an Argo 
 go run ./cmd/shopfloor
 ```
 
+### Control recipes (25-5)
+
+`POST control-recipes` (duty `shopfloor.controlrecipe.create`) generates and sends the ISA-88 recipe of an order for one
+destination: `kiosk` (found by resource and reported by the operator with `shopfloor.controlrecipe.execute`), `pcs-opcua`
+(setpoints written by the connector of `edgeId`) or `pcs-mqtt` (`topic`, through that connector). The body is validated
+before anything is stored: names unique per level, instructions numbered from 1 with one of the eight categories, a setpoint
+with a numeric characteristic, a finite value inside its limits and the node it is written to. Status runs sent, received,
+in-execution, completed, with error possible from any active status (`controlrecipe.statuschanged`, history in
+`control_recipe_event`, migration `0025`). The monitor is `GET control-recipes` with status, destination, order, resource and
+edge filters; `GET control-recipes/{id}` adds the history and the write audit. `:resend` sends a recipe in error again, at most
+five times (SF-0176) and, once a process message for the order exists, only with `force` and a reason (SF-0177), because the
+process control system may have started it (BR-25.11); the forced resend is flagged in the history. The connector pulls its
+active recipes (`GET edge-nodes/{id}/control-recipes`) and reports status and writes
+(`POST edge-nodes/{id}/control-recipes/{rid}:report`): a write must be a setpoint of the recipe at its value and is accepted only
+while the recipe is in-execution (BR-25.15), each write goes to `edge_write_audit` with the value read back, and a missing
+readback or one more than 0.001 away is a deviation (`controlrecipe.deviation`). Codes `SF-0174` to `SF-0178`. The web monitor
+is `/shopfloor/control-recipes`.
+
+### Edge enrollment and certificate binding (25-4)
+
+A supervisor with `shopfloor.edge.configure` mints a one-time token for an edge node (`POST edge-nodes/{id}:enrollment-token`,
+24 hours, only the hash of its secret is stored, one live token per node). The connector redeems it with a PEM certificate
+request (`POST edge-nodes/{id}:enroll`, no session: the token names its tenant and node and is the credential). The service
+signs for the subject `edge:<node id>`, ignoring any name in the request, binds that subject to the node as
+`connectorSubject`, stamps `certSerial` and `certExpiresAt`, records the certificate in `edge_certificate` (migration `0024`) and
+publishes `edgenode.saved`. The certificate lasts 90 days (BR-25.14). The connector renews with its bound identity
+(`POST edge-nodes/{id}:renew-certificate`, duty `shopfloor.edge.connect`) and the subject does not change. Problem codes:
+`SF-0171` (a token that is unknown, used, replaced, expired or for a switched-off node, all alike, 401), `SF-0172` (a request
+that cannot be signed: not PEM, bad signature, ECDSA below P-256 or RSA below 2048, 422) and `SF-0173` (no issuer configured,
+503). The issuer is `internal/pki.LocalCA`, loaded from `SHOPFLOOR_EDGE_CA_CERT_FILE` and `SHOPFLOOR_EDGE_CA_KEY_FILE` (chart
+`edgeCa.secret`), the dev and demo plant issuer; the platform certificate issuer (cert-manager) would sit behind the same
+`pki.Issuer` interface and is not built. Because the redeem route has no identity, `cmd/shopfloor` mounts it on a router without
+the tenant middleware and everything else behind it; the gateway must let that one route through without a session.
+
+### Tenant sweeper
+
+`go run ./cmd/shopfloor sweep` runs the scheduled jobs in process, so no external scheduler has to call them: the andon
+sweep (every minute, same as `andon:sweep`), the OEE rollup (every 15 minutes over the last four completed 15 minute
+buckets, same as `oee:rollup`), the auto clock-out (hourly, same as `registrations:auto-clock-out`) and the process
+message retry (every minute, same as `process-messages:retry-due`). Settings: `SWEEP_TENANT_IDS` (comma-separated tenant
+UUIDs, required), `SWEEP_ANDON_INTERVAL`, `SWEEP_ROLLUP_INTERVAL`, `SWEEP_AUTO_CLOCK_INTERVAL`, `SWEEP_RETRY_INTERVAL`
+(Go durations of at least 10s, `0` switches a job off) and `SWEEP_AUTO_CLOCK_AFTER_HOURS` (4 to 24, default 16). Each job
+runs per tenant under that tenant's row-level security as `system:shopfloor-sweeper` with its own 2 minute timeout; a
+failing tenant is logged and counted (`shopfloor_sweep_failures_total{job}`) and the others still run. The Helm chart
+starts it with `sweeper.enabled` and `sweeper.tenantIds`, as one replica. Listing tenants is by configuration; a tenant
+directory to read them from is not built.
+
 Ports: `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`).
 
 ## Test
@@ -732,6 +779,14 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0168` | 409 | The worker is already active |
 | `SF-0169` | 422 | The worker's currency cannot change once a day of the worker is approved |
 | `SF-0170` | 409 | The worker already has a cost rate effective on that date; set the change from a later date |
+| `SF-0171` | 401 | The enrollment token is not valid (unknown, used, replaced, expired or the node is switched off) |
+| `SF-0172` | 422 | The certificate request cannot be signed (not PEM, bad signature, weak key) |
+| `SF-0173` | 503 | Certificate issuing is not configured on this service |
+| `SF-0174` | 404 | Control recipe not found |
+| `SF-0175` | 409 | The control recipe cannot take that status from where it is, or a write outside in-execution, or a resend of a recipe not in error |
+| `SF-0176` | 422 | The control recipe was already sent again five times |
+| `SF-0177` | 422 | Process messages exist for the order: resend with force and a reason |
+| `SF-0178` | 422 | The control recipe cannot go to that destination, or a write is not a setpoint of the recipe |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

@@ -2564,9 +2564,8 @@ paths:
         node's configuration or report its heartbeat, and a node without one refuses both
         (SF-0154). The node has status `pending` until its first heartbeat. A name, or a connector
         identity bound to another node, already used is SF-0153. Publishes
-        `dev.passage.shopfloor.edgenode.saved.v1`. Token enrollment and the mTLS certificate are
-        not part of this service yet: the binding is set here by hand, and the certificate serial
-        and expiry the connector reports in its heartbeat are stored as reported.
+        `dev.passage.shopfloor.edgenode.saved.v1`. The binding can be set here by hand, or by token enrollment
+        (`:enrollment-token`, `:enroll`), which binds the subject of the certificate it issues.
       x-passage-duty: shopfloor.edge.configure
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -2818,6 +2817,368 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "409":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/control-recipes:
+    post:
+      operationId: createControlRecipe
+      summary: Generate and send a control recipe
+      description: |
+        Stores the ISA-88 recipe of one order (procedure, unit procedures, operations, phases, ordered process
+        instructions) for one destination and sends it (FR-25.15): `kiosk` (rendered as a PI sheet, found by
+        resource), `pcs-opcua` (setpoints written to allowlisted nodes by the connector of `edgeId`) or
+        `pcs-mqtt` (published to `topic` through that connector). The body is validated against its destination:
+        names unique per level, instructions numbered from 1, a setpoint with a numeric characteristic, a finite
+        value inside its limits and, for a process control destination, the node it is written to. A process
+        control destination whose edge node does not exist or is switched off is SF-0178 (422). Status starts
+        `sent`; publishes `dev.passage.shopfloor.controlrecipe.statuschanged.v1`.
+      x-passage-duty: shopfloor.controlrecipe.create
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ControlRecipeInput"
+      responses:
+        "201":
+          description: Generated and sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ControlRecipe"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listControlRecipes
+      summary: Control recipe monitor
+      description: Lists recipes newest first with their status, send count and last error, filtered by status, destination, order, resource or edge node.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [sent, received, in-execution, completed, error] } }
+        - { name: destination, in: query, schema: { type: string, enum: [kiosk, pcs-opcua, pcs-mqtt] } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: resourceId, in: query, schema: { type: string, format: uuid } }
+        - { name: edgeId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: The recipes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ControlRecipe"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/control-recipes/{id}:
+    get:
+      operationId: getControlRecipe
+      summary: One control recipe with its history and write audit
+      x-passage-duty: shopfloor.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The recipe, every status change, and every setpoint write with its readback (BR-25.15).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ControlRecipe"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/control-recipes/{id}:report:
+    post:
+      operationId: reportControlRecipe
+      summary: Report the status of a kiosk control recipe
+      description: |
+        A kiosk operator reports received, in-execution, completed or error (with what went wrong). The order is
+        received, in-execution, completed; error can follow any of them; a status out of order is SF-0175 (409).
+        Repeating the status the recipe already has changes nothing. A recipe for a process control system is
+        reported by its connector, so this is SF-0178 (422) for it.
+      x-passage-duty: shopfloor.controlrecipe.execute
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ControlRecipeReport"
+      responses:
+        "200":
+          description: The recipe.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ControlRecipe"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/control-recipes/{id}:resend:
+    post:
+      operationId: resendControlRecipe
+      summary: Send a control recipe in error again
+      description: |
+        Only a recipe in error (SF-0175, 409 otherwise), at most five times (SF-0176, 422), and once a process
+        message for the order has been received only with `force` true and a `reason`, because the process
+        control system may have started it (SF-0177, 422; BR-25.11). The status goes back to `sent` and the
+        send count rises; the history keeps who forced it and why.
+      x-passage-duty: shopfloor.controlrecipe.create
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                reason:
+                  type: string
+                  maxLength: 1000
+      responses:
+        "200":
+          description: Sent again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ControlRecipe"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}/control-recipes:
+    get:
+      operationId: pullEdgeControlRecipes
+      summary: A connector pulls its active control recipes
+      description: The recipes sent to this node that are not completed or in error (sent, received, in-execution), oldest first. Only the connector bound to the node may pull (SF-0154, 403).
+      x-passage-duty: shopfloor.edge.connect
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      responses:
+        "200":
+          description: The recipes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ControlRecipe"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}/control-recipes/{rid}:report:
+    post:
+      operationId: reportEdgeControlRecipe
+      summary: A connector reports a control recipe's status and its writes
+      description: |
+        The connector moves its recipe through received, in-execution, completed or error and reports each
+        setpoint write it made (`written` true, with the value read back) or refused (`written` false, with the
+        reason). A write must be a setpoint of the recipe at its value (SF-0178, 422) and is accepted only while the
+        recipe is in-execution (SF-0175, 409; BR-25.15). Each write is stored in the write audit; a missing readback
+        or one differing by more than 0.001 is a deviation and publishes
+        `dev.passage.shopfloor.controlrecipe.deviation.v1`. Only the bound connector may report (SF-0154).
+      x-passage-duty: shopfloor.edge.connect
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+        - { name: rid, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EdgeControlRecipeReport"
+      responses:
+        "200":
+          description: The recipe.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ControlRecipe"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}:enrollment-token:
+    post:
+      operationId: mintEdgeEnrollmentToken
+      summary: Mint a one-time enrollment token for an edge node
+      description: |
+        Returns a token a connector redeems once with `:enroll` to receive its client certificate
+        (FR-25.19). The token is shown only in this answer (only the hash of its secret is stored),
+        is good for 24 hours and replaces the node's earlier unredeemed tokens. A node that does
+        not exist is SF-0150 (404) and a switched-off node SF-0152 (409). Not keyed: each call
+        mints a new token.
+      x-passage-duty: shopfloor.edge.configure
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      responses:
+        "201":
+          description: The token, once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeEnrollmentToken"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}:enroll:
+    post:
+      operationId: enrollEdgeNode
+      summary: Redeem an enrollment token for a client certificate
+      description: |
+        The connector's first call. It carries no session: the token is the credential and names its
+        own tenant and node. The service signs the PEM certificate request (ECDSA P-256 or stronger,
+        RSA 2048 or more, signature checked) for the subject `edge:<node id>`, ignoring any name in
+        the request, binds that subject to the node as its connector identity, records the
+        certificate (serial, validity) and publishes `dev.passage.shopfloor.edgenode.saved.v1`.
+        The certificate lasts 90 days (BR-25.14). A token that is unknown, used, replaced, expired
+        or for a switched-off node is SF-0171 (401), all alike. A request that cannot be signed is
+        SF-0172 (422) and leaves the token usable. Without a configured issuer the answer is
+        SF-0173 (503).
+      x-passage-public: true
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, csr]
+              properties:
+                token:
+                  type: string
+                csr:
+                  type: string
+                  description: PEM certificate request, at most 16 KiB.
+      responses:
+        "200":
+          description: The certificate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeCertificate"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}:renew-certificate:
+    post:
+      operationId: renewEdgeCertificate
+      summary: Renew an edge node's client certificate
+      description: |
+        The connector, authenticated by its current certificate identity, sends a new certificate
+        request (renewal starts when fewer than 30 days remain, BR-25.14). The subject does not
+        change; the node's serial and expiry are updated and the old certificate stays valid until
+        it expires. Only the identity bound to the node may renew (SF-0154, 403); a switched-off
+        node is SF-0152 (409).
+      x-passage-duty: shopfloor.edge.connect
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [csr]
+              properties:
+                csr:
+                  type: string
+      responses:
+        "200":
+          description: The new certificate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeCertificate"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
   /v1/shopfloor/edge-nodes/{id}:heartbeat:
     post:
@@ -3897,6 +4258,178 @@ components:
           minLength: 1
           maxLength: 200
         certExpiresAt:
+          type: string
+          format: date-time
+    ControlRecipeInput:
+      type: object
+      required: [orderId, resourceId, destination, recipe]
+      properties:
+        orderId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        destination: { type: string, enum: [kiosk, pcs-opcua, pcs-mqtt] }
+        edgeId: { type: string, format: uuid }
+        topic: { type: string, maxLength: 300 }
+        recipe:
+          type: object
+          required: [procedure]
+          properties:
+            procedure:
+              type: object
+              required: [name, unitProcedures]
+              properties:
+                name: { type: string }
+                unitProcedures:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, operations]
+                    properties:
+                      name: { type: string }
+                      operations:
+                        type: array
+                        items:
+                          type: object
+                          required: [name, phases]
+                          properties:
+                            name: { type: string }
+                            phases:
+                              type: array
+                              items:
+                                type: object
+                                required: [name, instructions]
+                                properties:
+                                  name: { type: string }
+                                  instructions:
+                                    type: array
+                                    items:
+                                      $ref: "#/components/schemas/ProcessInstruction"
+    ProcessInstruction:
+      type: object
+      required: [seq, category]
+      properties:
+        seq: { type: integer, minimum: 1 }
+        category:
+          type: string
+          enum: [instruction-text, process-parameter-setpoint, process-data-request, calculation, inspection-characteristic, material-list, signature-request, sequence-definition]
+        text: { type: string, maxLength: 4000 }
+        node: { type: string, maxLength: 300, description: OPC-UA node id or topic of a setpoint or data request. }
+        value: { type: number, description: The setpoint, scaled to the batch. }
+        characteristic:
+          type: object
+          required: [name, type]
+          properties:
+            name: { type: string }
+            type: { type: string, enum: [numeric, text, boolean] }
+            unit: { type: string }
+            min: { type: number }
+            max: { type: number }
+    ControlRecipe:
+      type: object
+      required: [id, orderId, resourceId, destination, status, recipe, sendCount, lastSentAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        destination: { type: string, enum: [kiosk, pcs-opcua, pcs-mqtt] }
+        edgeId: { type: [string, "null"], format: uuid }
+        topic: { type: [string, "null"] }
+        status: { type: string, enum: [sent, received, in-execution, completed, error] }
+        recipe: { type: object }
+        sendCount: { type: integer, minimum: 1 }
+        lastSentAt: { type: string, format: date-time }
+        lastError: { type: [string, "null"] }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        history:
+          type: array
+          description: Only on the single-recipe read.
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              fromStatus: { type: [string, "null"] }
+              toStatus: { type: string }
+              actor: { type: string }
+              note: { type: [string, "null"] }
+              forced: { type: boolean }
+              at: { type: string, format: date-time }
+        writes:
+          type: array
+          description: Only on the single-recipe read; the write audit of BR-25.15.
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              phasePath: { type: string }
+              node: { type: string }
+              value: { type: string }
+              readback: { type: [string, "null"] }
+              written: { type: boolean }
+              deviation: { type: boolean }
+              reason: { type: [string, "null"] }
+              at: { type: string, format: date-time }
+    ControlRecipeReport:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [received, in-execution, completed, error] }
+        error: { type: string, maxLength: 1000, description: Required with status error. }
+    EdgeControlRecipeReport:
+      type: object
+      properties:
+        status: { type: string, enum: [received, in-execution, completed, error] }
+        error: { type: string, maxLength: 1000 }
+        writes:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [phasePath, node, value, written]
+            properties:
+              phasePath: { type: string, description: "procedure/unit procedure/operation/phase" }
+              node: { type: string }
+              value: { type: number }
+              readback: { type: number }
+              written: { type: boolean }
+              reason: { type: string }
+              at: { type: string, format: date-time }
+    EdgeEnrollmentToken:
+      type: object
+      required: [edgeId, token, expiresAt]
+      properties:
+        edgeId:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: "<tenant id>.<edge id>.<secret>; shown once."
+        expiresAt:
+          type: string
+          format: date-time
+    EdgeCertificate:
+      type: object
+      required: [edgeId, subject, certificate, caChain, serial, notBefore, notAfter]
+      properties:
+        edgeId:
+          type: string
+          format: uuid
+        subject:
+          type: string
+          description: The connector identity bound to the node, the certificate's common name.
+        certificate:
+          type: string
+          description: PEM leaf certificate.
+        caChain:
+          type: string
+          description: PEM CA certificate(s) the connector trusts the gateway's client CA by.
+        serial:
+          type: string
+        notBefore:
+          type: string
+          format: date-time
+        notAfter:
           type: string
           format: date-time
     EdgeHeartbeatResult:

@@ -33,9 +33,11 @@ import (
 // steps of a consolidation run, so they need consolidation.run; the top-side
 // journal check needs consolidation.journal.maintain, the duty that posts group journals.
 const (
-	DutyView    = "consolidation.view"
-	DutyRun     = "consolidation.run"
-	DutyJournal = "consolidation.journal.maintain"
+	DutyView = "consolidation.view"
+	DutyRun  = "consolidation.run"
+	// DutyConfigure maintains the group structure: groups, units, ownership and the chart mapping.
+	DutyConfigure = "consolidation.configure"
+	DutyJournal   = "consolidation.journal.maintain"
 )
 
 const validationDetail = "request failed validation"
@@ -50,6 +52,9 @@ var (
 // API serves the consolidation routes and counts what it computes for /metrics.
 type API struct {
 	runs                 RunStore
+	groups               GroupStore
+	ledger               LedgerBalances
+	collections          atomic.Int64
 	runsCompleted        atomic.Int64
 	eliminationPreviews  atomic.Int64
 	translationPreviews  atomic.Int64
@@ -84,6 +89,17 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/consol/dividends:preview", DutyRun, a.previewDividends},
 		{http.MethodPost, "/v1/consol/reclassification-runs:preview", DutyRun, a.previewReclassification},
 		{http.MethodPost, "/v1/consol/group-journals:preview", DutyJournal, a.previewGroupJournal},
+		{http.MethodPost, "/v1/consol/groups", DutyConfigure, a.createGroup},
+		{http.MethodGet, "/v1/consol/groups", DutyView, a.listGroups},
+		{http.MethodGet, "/v1/consol/groups/{id}", DutyView, a.getGroup},
+		{http.MethodPost, "/v1/consol/groups/{id}/units", DutyConfigure, a.addUnit},
+		{http.MethodPost, "/v1/consol/groups/{id}/units/{unitId}/ownership", DutyConfigure, a.addOwnership},
+		{http.MethodPut, "/v1/consol/groups/{id}/account-map", DutyConfigure, a.setMapping},
+		{http.MethodGet, "/v1/consol/groups/{id}/account-map", DutyView, a.getMapping},
+		{http.MethodPost, "/v1/consol/groups/{id}/collections", DutyRun, a.collect},
+		{http.MethodGet, "/v1/consol/groups/{id}/collections", DutyView, a.listCollections},
+		{http.MethodGet, "/v1/consol/collections/{id}", DutyView, a.getCollection},
+		{http.MethodGet, "/v1/consol/collections/{id}/trial-balance", DutyView, a.getTrialBalance},
 		{http.MethodPost, "/v1/consol/runs", DutyRun, a.startRun},
 		{http.MethodGet, "/v1/consol/runs", DutyView, a.listRuns},
 		{http.MethodGet, "/v1/consol/runs/{id}", DutyView, a.getRun},
@@ -106,6 +122,7 @@ func (a *API) Metrics() http.Handler {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, v)
 		}
 		counter("consolidation_runs_completed_total", "Consolidation runs stored.", a.runsCompleted.Load())
+		counter("consolidation_collections_total", "Collections of unit ledger balances stored.", a.collections.Load())
 		counter("consolidation_elimination_previews_total", "Elimination previews computed.", a.eliminationPreviews.Load())
 		counter("consolidation_translation_previews_total", "Unit translation previews computed.", a.translationPreviews.Load())
 		counter("consolidation_profit_in_inventory_previews_total", "Unrealized profit layer previews computed.", a.profitPreviews.Load())
@@ -352,6 +369,10 @@ func problemFrom(err error) error {
 			status = http.StatusNotFound
 		case domain.CodeIdempotencyReuse:
 			status = http.StatusConflict
+		default:
+			if st, ok := codeStatus(de.Code); ok {
+				status = st
+			}
 		}
 		return httpx.NewProblem(status, de.Code, de.Detail)
 	}

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage Intercompany
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Wave 40, slices 1 to 4. Trading partners (FR-40.1) are stored: create a
     pairing with an Idempotency-Key, change its policy with If-Match (each
@@ -18,9 +18,13 @@ info:
     BR-40.12), the centralized payment legs (FR-40.12) and their bank-return
     reversal (BR-40.11), the planning group run sequence with IC demand
     (FR-40.15, BR-40.13), the postings of a direct-delivery packing slip
-    (FR-40.3) or the transfer-pricing evidence file (FR-40.4). Mirror sagas,
-    persisted links, reconciliation runs, stored setups, charge posting and the
-    planning run are later slices of PSG-40 (see NOT-IMPLEMENTED.md). Browser
+    (FR-40.3) or the transfer-pricing evidence file (FR-40.4).
+
+    Journals and charges are posted to the ledgers of both entities, with the
+    first side reversed when the second is refused (FR-40.5, FR-40.13).
+    Reconciliation runs are stored and their flagged items resolved (FR-40.6).
+    Mirror sagas, persisted links, stored setups and the planning run are later
+    slices of PSG-40 (see NOT-IMPLEMENTED.md). Browser
     calls go through the web BFF at /api/v1/interco/..., which rewrites to
     these paths and sets the tenant and duty headers.
 servers:
@@ -547,6 +551,297 @@ paths:
       responses:
         '200':
           description: Readiness
+  /v1/interco/journals:
+    post:
+      operationId: postIntercompanyJournal
+      summary: Derive the IC journal of one line and post both sides to their ledgers (FR-40.5)
+      description: |
+        Derives the same legs as the journal preview, then posts one ledger
+        entry per entity, each in that entity's currency, in the order the
+        entities appear. When a later side is refused (a closed period, a
+        rejected account) the sides already posted are reversed and the journal
+        is stored as compensated (422 IC-0845). When the ledger cannot be
+        reached the journal stays pending (503 IC-0846) and the same request
+        with the same Idempotency-Key resumes it without posting twice. Every
+        entity needs its legal entity and ledger in entities; a ledger that does
+        not belong to the entity is 422 IC-0847. Publishes
+        dev.passage.interco.journal.posted.v1 (or journal.compensated.v1)
+        through the outbox. Posting needs LEDGER_URL; without it the route
+        answers 503.
+      x-passage-duty: intercompany.post
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostJournalRequest' }
+      responses:
+        '201':
+          description: The posted journal, or the stored one for a retry with the same key (Idempotent-Replayed true)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostedJournal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listIntercompanyJournals
+      summary: List posted journals, newest first
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - { name: status, in: query, schema: { type: string, enum: [pending, posted, compensated] } }
+        - { name: source, in: query, schema: { type: string, enum: [journal, charge] } }
+        - { name: after, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of journals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PostedJournal' } }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/journals/{id}:
+    get:
+      operationId: getIntercompanyJournal
+      summary: One posted journal with the ledger entry of each entity
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+      responses:
+        '200':
+          description: The journal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostedJournal' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/charges:
+    post:
+      operationId: postIntercompanyCharge
+      summary: Price an IC charge from its transfer prices and post it to both entities (FR-40.13)
+      description: |
+        Stored per sourceId and version: the same pair sent again replays the
+        stored result, and the same pair with another request is 422 IC-0841.
+        The transfer price in force on the transaction date prices the charge
+        (cost, cost plus a markup, or a table price) and the Journal-mode legs
+        post to the borrower and the lender through the same two-sided posting
+        as a journal. A source with no applicable price is kept on suspense
+        (202, failureCode IC-0821) and nothing is posted (BR-40.12); submit the
+        source again with the next version and the missing price to post it.
+        Publishes dev.passage.interco.charge.posted.v1 for a posted charge.
+      x-passage-duty: intercompany.post
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostChargeRequest' }
+      responses:
+        '201':
+          description: The charge, posted to both entities
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeRecord' }
+        '202':
+          description: The charge is on suspense; no transfer price applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeRecord' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listIntercompanyCharges
+      summary: List IC charges, newest first
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - { name: status, in: query, schema: { type: string, enum: [pending, posted, compensated, suspense] } }
+        - { name: sourceId, in: query, schema: { type: string } }
+        - { name: after, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of charges
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ChargeRecord' } }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/charges/{id}:
+    get:
+      operationId: getIntercompanyCharge
+      summary: One IC charge
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+      responses:
+        '200':
+          description: The charge
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeRecord' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/reconciliations/run:
+    post:
+      operationId: runIntercompanyReconciliation
+      summary: Classify the entity pairs of a period and store the run (FR-40.6)
+      description: |
+        Classifies every item as Matched, Timing or Mismatch with the rules of
+        the classify route (within a cent, FX tolerance, next-period
+        counterpart) and stores the run and its items as immutable rows. An
+        item that is not Matched starts open. A run that leaves Timing or
+        Mismatch items publishes dev.passage.interco.reconciliation.flagged.v1.
+        blocking is true while the run holds a Mismatch: the period-end
+        summary must be free of Mismatch before consolidation (CNS-0901).
+      x-passage-duty: intercompany.reconcile
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReconRunRequest' }
+      responses:
+        '201':
+          description: The stored run with its counts
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/interco/reconciliations:
+    get:
+      operationId: listIntercompanyReconciliations
+      summary: List stored reconciliation runs, newest first
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - { name: after, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page of runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ReconRun' } }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/reconciliations/{id}:
+    get:
+      operationId: getIntercompanyReconciliation
+      summary: A stored run with its items, optionally only those with one status
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+        - { name: status, in: query, schema: { type: string, enum: [Matched, Timing, Mismatch] } }
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ReconRun'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/ReconItem' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/reconciliations/items/{id}/resolve:
+    post:
+      operationId: resolveIntercompanyReconciliationItem
+      summary: Resolve an open Timing or Mismatch item with a note
+      description: A matched item has nothing to resolve and a resolved item is final; both are 409 IC-0852.
+      x-passage-duty: intercompany.reconcile
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, maxLength: 1000 }
+      responses:
+        '200':
+          description: The resolved item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     TenantHeader:
@@ -587,6 +882,148 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    EntityTarget:
+      type: object
+      required: [entity, legalEntityId, ledgerId]
+      properties:
+        entity: { type: string, description: The entity code used in the matrix and the line }
+        legalEntityId: { type: string, format: uuid }
+        ledgerId: { type: string, description: The ledger of that legal entity the entry posts to }
+    PostJournalRequest:
+      description: The journal preview request plus the posting date and where each entity posts
+      allOf:
+        - $ref: '#/components/schemas/JournalPreviewRequest'
+        - type: object
+          required: [postingDate, entities]
+          properties:
+            postingDate: { type: string, format: date }
+            entities: { type: array, items: { $ref: '#/components/schemas/EntityTarget' } }
+    PostedJournal:
+      type: object
+      required: [id, pairId, source, sourceRef, postingDate, status, entries, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        pairId: { type: string, format: uuid }
+        source: { type: string, enum: [journal, charge] }
+        sourceRef: { type: string }
+        postingDate: { type: string, format: date }
+        status: { type: string, enum: [pending, posted, compensated] }
+        failureCode: { type: string }
+        failureDetail: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              entity: { type: string }
+              legalEntityId: { type: string, format: uuid }
+              ledgerId: { type: string }
+              currency: { type: string }
+              ledgerEntryId: { type: string }
+              reversalEntryId: { type: string }
+              legs:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    account: { type: string }
+                    side: { type: string, enum: [debit, credit] }
+                    amount: { type: string }
+    PostChargeRequest:
+      description: The charge preview request plus the source it is stored under, the posting date and where each entity posts
+      allOf:
+        - $ref: '#/components/schemas/ChargePreviewRequest'
+        - type: object
+          required: [sourceId, version, postingDate, entities]
+          properties:
+            sourceId: { type: string, maxLength: 128 }
+            version: { type: integer, minimum: 1 }
+            postingDate: { type: string, format: date }
+            entities: { type: array, items: { $ref: '#/components/schemas/EntityTarget' } }
+    ChargeRecord:
+      type: object
+      required: [id, sourceId, version, status, currency, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        sourceId: { type: string }
+        version: { type: integer }
+        lendingEntity: { type: string }
+        borrowingEntity: { type: string }
+        category: { type: string }
+        resourceRole: { type: string }
+        transactionDate: { type: string, format: date }
+        quantity: { type: string }
+        unitCost: { type: string }
+        currency: { type: string }
+        status: { type: string, enum: [pending, posted, compensated, suspense] }
+        transferPriceMethod: { type: string }
+        cost: { type: string }
+        price: { type: string }
+        margin: { type: string }
+        journalId: { type: string, format: uuid }
+        failureCode: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    ReconRunRequest:
+      type: object
+      required: [period, currency, items]
+      properties:
+        period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        fxTolerancePct: { type: string, description: Decimal from 0 to 5, default '0.5' }
+        items:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            required: [entityA, entityB, amountA, amountB]
+            properties:
+              icPairId: { type: string, description: The IC pair reference shown with the item }
+              entityA: { type: string }
+              entityB: { type: string }
+              amountA: { type: string }
+              amountB: { type: string }
+              nextPeriodA: { type: string }
+              nextPeriodB: { type: string }
+              fxApplies: { type: boolean }
+    ReconRun:
+      type: object
+      required: [id, period, currency, fxTolerancePct, matched, timing, mismatch, open, blocking, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        period: { type: string }
+        currency: { type: string }
+        fxTolerancePct: { type: string }
+        matched: { type: integer }
+        timing: { type: integer }
+        mismatch: { type: integer }
+        open: { type: integer, description: Items still to resolve }
+        blocking: { type: boolean, description: True while the run holds a Mismatch }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    ReconItem:
+      type: object
+      required: [id, runId, entityA, entityB, amountA, amountB, difference, status, resolution]
+      properties:
+        id: { type: string, format: uuid }
+        runId: { type: string, format: uuid }
+        ref: { type: string }
+        entityA: { type: string }
+        entityB: { type: string }
+        amountA: { type: string }
+        amountB: { type: string }
+        nextPeriodA: { type: string }
+        nextPeriodB: { type: string }
+        fxApplies: { type: boolean }
+        difference: { type: string }
+        status: { type: string, enum: [Matched, Timing, Mismatch] }
+        toleranceApplied: { type: boolean }
+        resolution: { type: string, enum: [none, open, resolved] }
+        note: { type: string }
+        resolvedBy: { type: string }
+        resolvedAt: { type: string, format: date-time }
     Decimal:
       type: string
       pattern: '^-?[0-9]+(\.[0-9]{1,6})?$'

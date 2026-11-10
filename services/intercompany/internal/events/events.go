@@ -42,3 +42,57 @@ type PartnerUpdatedData struct {
 	ChangedFields []string `json:"changedFields"`
 	Version       int      `json:"version"`
 }
+
+// Events of the posting, charge and reconciliation slices. JournalCompensated
+// is not in the PRD 7.40.5 event table: it tells consumers that an IC journal
+// whose second side was refused has been reversed.
+var (
+	JournalPosted         = events.Type(Context, "journal", "posted", 1)
+	JournalCompensated    = events.Type(Context, "journal", "compensated", 1)
+	ChargePosted          = events.Type(Context, "charge", "posted", 1)
+	ReconciliationFlagged = events.Type(Context, "reconciliation", "flagged", 1)
+)
+
+// JournalEntryData is the ledger entry one entity's side made.
+type JournalEntryData struct {
+	Entity          string `json:"entity"`
+	LegalEntityID   string `json:"legalEntityId"`
+	LedgerEntryID   string `json:"ledgerEntryId,omitempty"`
+	ReversalEntryID string `json:"reversalEntryId,omitempty"`
+}
+
+// JournalData is the payload of JournalPosted and JournalCompensated.
+type JournalData struct {
+	ID          string             `json:"id"`
+	PairID      string             `json:"pairId"`
+	Source      string             `json:"source"`
+	SourceRef   string             `json:"sourceRef"`
+	PostingDate string             `json:"postingDate"`
+	Status      string             `json:"status"`
+	FailureCode string             `json:"failureCode,omitempty"`
+	Entries     []JournalEntryData `json:"entries"`
+}
+
+// ChargePostedData is the payload of ChargePosted.
+type ChargePostedData struct {
+	ID        string `json:"id"`
+	SourceID  string `json:"sourceId"`
+	Version   int    `json:"version"`
+	Lender    string `json:"lender"`
+	Borrower  string `json:"borrower"`
+	Currency  string `json:"currency"`
+	Cost      string `json:"cost"`
+	Price     string `json:"price"`
+	Margin    string `json:"margin"`
+	JournalID string `json:"journalId"`
+}
+
+// ReconciliationFlaggedData is the payload of ReconciliationFlagged: one event
+// per run that left items to act on.
+type ReconciliationFlaggedData struct {
+	RunID    string `json:"runId"`
+	Period   string `json:"period"`
+	Currency string `json:"currency"`
+	Timing   int    `json:"timing"`
+	Mismatch int    `json:"mismatch"`
+}

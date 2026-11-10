@@ -99,6 +99,25 @@ statement layout; the wave-15 designer renders printed statements.
 Remaining deliverables and acceptance criteria are listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
+## Group structure and collection (issue 40, subtasks 40-1 and 40-2)
+
+A group is stored with its units, effective-dated ownership and chart mapping,
+and each unit's ledger balances are collected into a consolidated trial
+balance. All of these routes need all-entity scope.
+
+| Area | Code | Status |
+|---|---|---|
+| Groups, units, ownership history (a new interval closes the holder's open one; holders together stay at or below 100.00 %, CNS-0904) and chart mapping, migration `0003_groups.sql` | `internal/store/groups.go`, `internal/domain/group.go` | built, tests over Postgres |
+| `POST/GET /v1/consol/groups`, `GET /v1/consol/groups/{id}`, `POST .../units`, `POST .../units/{unitId}/ownership`, `PUT/GET .../account-map` (duties `consolidation.configure` / `consolidation.view`) | `internal/api/groups.go` | built, tests |
+| `POST /v1/consol/groups/{id}/collections` (duty `consolidation.run`, `Idempotency-Key` required): reads each unit's ledger through `platform/ledgerclient`, maps and translates at the closing rate (balance sheet) or average rate (income), stores an immutable version | `internal/api/collections.go`, `internal/domain/collect.go`, `internal/store/collections.go` | built, tests with the ledger fake |
+| `GET /v1/consol/groups/{id}/collections`, `GET /v1/consol/collections/{id}`, `GET /v1/consol/collections/{id}/trial-balance`: the consolidated trial balance before eliminations with each unit's contribution, the unmapped balances and each unit's translation difference | `internal/api/collections.go` | built, tests |
+| Web: `/consolidation/groups`, `/consolidation/groups/:id`, `/consolidation/collections/:id` | `apps/web/src/modules/consolidation` | built, vitest, demo data |
+
+Collection needs `LEDGER_URL` and the service signing key (`PASSAGE_SERVICE_SIGNING_KEY_FILE`,
+`PASSAGE_SERVICE_NAME=consolidation`); the Helm chart takes them from `ledgerUrl` and
+`serviceIdentity.signingKeySecret`. The service is granted `ledger.balance.read` on the ledger
+(`policies/authz/data.json`, `platform/go/tenant/service.go`).
+
 ## Run
 
 ```
@@ -141,6 +160,8 @@ Problem details use `type: https://passage.dev/problems/<code>`.
 | CNS-0908 | Group cost unknown for some layers; margin fallback used (warning in the profit-in-inventory preview) |
 | CNS-0909 | Top-side journal at or above the approval threshold needs approval (warning in the group journal check) |
 | CNS-0910 | Move from an existing equity interest to control is a step acquisition, not supported (domain guard) |
+| CNS-0924 / CNS-0925 / CNS-0926 | No group or unit with that id (404) / a group with that code exists (409) / the entity is already a unit of the group (409). Not in the PRD catalog |
+| CNS-0927 / CNS-0928 / CNS-0929 | A collection needs a rate for a foreign unit or has no units (422) / no collection with that id (404) / a unit's ledger could not be read (502). Not in the PRD catalog |
 | CNS-0921 / CNS-0922 / CNS-0923 | No run with that id for the tenant (404) / Idempotency-Key reused with different inputs (409) / run routes need all-entity scope (403). Not in the PRD catalog; proposed for the catalog owner |
 | AUTH-0001 / AUTH-0003 | Missing tenant / missing duty |
 | CNS-0920 | Bargain purchase: investment cost below the subsidiary's net assets at acquisition. Not in the PRD catalog; proposed for the catalog owner |

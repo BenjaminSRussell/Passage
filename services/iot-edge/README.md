@@ -41,6 +41,12 @@ Pure decision logic the connector and the fleet will run. No I/O yet.
   healthy, a placeholder the PRD does not set; see NOT-IMPLEMENTED.md) and `RollbackDue`
   (no heartbeat within 5 minutes of an upgrade).
 
+## Runtime (25-3)
+
+`internal/runtime` is the running connector: source readings to counter deltas to events with seq, through the buffer
+to the shopfloor ingest with `Peek` and `Ack`, plus heartbeat, configuration pull and the `/metrics` endpoint. See
+NOT-IMPLEMENTED.md for what is open (OPC-UA and MQTT adapters, persistent ring, Kafka).
+
 ## Configuration
 
 | Variable | Default | Rule |
@@ -51,6 +57,13 @@ Pure decision logic the connector and the fleet will run. No I/O yet.
 | `IOT_BUFFER_HOURS` | `24` | integer 1 to 168 |
 | `PASSAGE_ENV` | `dev` | |
 | `SERVICE_NAME` | `iot-edge` | |
+| `EDGE_SHOPFLOOR_URL` | none | switches the runtime on; https (http only when `PASSAGE_ENV=dev`) |
+| `EDGE_NODE_ID` | none | the shopfloor edge node UUID; required with the URL |
+| `EDGE_SOURCE` | none | `simulator` is the only source built; required with the URL |
+| `EDGE_TOKEN_FILE` | none | bearer token file for dev, until enrollment issues certificates |
+| `EDGE_SEQ_STATE_FILE` | none (memory) | sequence state; use a persistent path |
+| `IOT_BUFFER_CAPACITY` | `200000` | events in the in-memory ring, 1000 to 5000000 |
+| `EDGE_SIM_MACHINES` | `2` | simulator machines `SIM-1..n` on tags `sim/<n>/count` and `sim/<n>/state`, 1 to 50 |
 
 ## Run and test
 
