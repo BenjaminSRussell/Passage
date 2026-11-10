@@ -100,7 +100,7 @@ components:
                 due_date: { type: string, format: date }
           journal_posting_id:
             type: [string, "null"]
-            description: Always null on the event; the journal is booked after the post by POST /v1/billing/gl-postings and its ledger entry id is kept in invoice.journal_posting_id.
+            description: Always null on the event; the journal is booked after the post by the auto-book worker or POST /v1/billing/gl-postings and its ledger entry id is kept in invoice.journal_posting_id.
           intercompany: { type: boolean }
     CreditNotePosted:
       name: dev.passage.billing.creditnote.posted.v1
@@ -154,7 +154,7 @@ components:
               gross: { type: string }
           journal_posting_id:
             type: [string, "null"]
-            description: Always null on the event; the journal is booked after the post by POST /v1/billing/gl-postings and its ledger entry id is kept in invoice.journal_posting_id.
+            description: Always null on the event; the journal is booked after the post by the auto-book worker or POST /v1/billing/gl-postings and its ledger entry id is kept in invoice.journal_posting_id.
     CreditNoteBooked:
       name: dev.passage.billing.creditnote.booked.v1
       contentType: application/cloudevents+json

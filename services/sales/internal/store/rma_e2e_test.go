@@ -91,7 +91,7 @@ func newRMAEnv(t *testing.T) *rmaEnv {
 		product: ids.New(), site: ids.New(), wh: ids.New(), now: time.Date(2027, 3, 1, 12, 0, 0, 0, time.UTC), createdBy: "cs-rep", authorizer: "returns-mgr"}
 	cost := decimal.RequireFromString("60.00")
 	e.src = &fakeSources{original: &cost, invoice: Invoice{ID: ids.New(), Number: "INV-2027-0000042", LegalEntityID: e.le, CustomerID: e.customer,
-		Currency: "USD", Returnable: true, Lines: []InvoiceLine{{LineNo: 1, ProductID: e.product, OrderLineID: ids.New(), PackingSlipID: ids.New(),
+		Currency: "USD", Returnable: true, Lines: []InvoiceLine{{LineNo: 3, ProductID: e.product, OrderLineID: ids.New(), PackingSlipID: ids.New(),
 			Qty: d(10), Net: decimal.RequireFromString("1000.00")}}}}
 	s.WithInventory(e.inv).WithAR(e.ar).WithReturnSources(e.src, e.src)
 	return e
@@ -169,7 +169,8 @@ func TestRMA_ReturnToStockCreditsInventoryAndAR(t *testing.T) {
 	}
 	c := e.ar.credits
 	if len(c) != 1 || !c[0].Gross.Equal(d(400)) || !c[0].Restocking.Equal(d(60)) || !c[0].Net.Equal(d(340)) || c[0].InvoiceNumber != "INV-2027-0000042" ||
-		c[0].PostingDate != "2027-03-01" || c[0].RMAID != rma.ID || c[0].LegalEntityID != e.le {
+		c[0].PostingDate != "2027-03-01" || c[0].RMAID != rma.ID || c[0].LegalEntityID != e.le ||
+		len(c[0].InvoiceLines) != 1 || c[0].InvoiceLines[0].LineNo != 3 || !c[0].InvoiceLines[0].Qty.Equal(d(4)) {
 		t.Fatalf("AR credit sent: %+v", c)
 	}
 	postings := domain.CreditNoteAmounts{Gross: credited.Gross, Restocking: credited.Restocking, Net: credited.Net}.Postings()

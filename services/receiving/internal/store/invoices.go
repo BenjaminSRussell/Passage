@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
@@ -178,4 +179,109 @@ func supplyDate(t time.Time) any {
 		return nil
 	}
 	return t
+}
+
+const invoiceColumns = `SELECT i.id::text, i.legal_entity_id::text, i.vendor_id::text, i.invoice_number, i.invoice_date, i.posting_date, i.currency, i.ledger_id::text,
+	i.fiscal_period_id::text, i.ledger_entry_id, i.total, i.created_at, i.source, i.status, i.posted_by, COALESCE(i.one_time_payee_id::text, ''), i.audit_reason,
+	COALESCE(i.audit_rule_version, 0), COALESCE(i.released_by, ''), i.released_at, COALESCE(i.rejected_by, ''), i.rejected_at, COALESCE(i.reject_reason, '')`
+
+func (s *Postgres) ListInvoices(ctx context.Context, f InvoiceFilter) ([]Invoice, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	limit := f.Limit
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+	limit = min(limit, maxListLimit)
+	var cursorID any
+	if !f.CursorCreatedAt.IsZero() {
+		cursorID = f.CursorID
+	}
+	var out []Invoice
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, invoiceColumns+`
+			FROM receiving_vendor_invoice i
+			WHERE i.tenant_id = $1
+			AND ($2 = '' OR i.vendor_id = $2::uuid)
+			AND ($3 = '' OR i.status = $3)
+			AND ($4 = '' OR EXISTS (SELECT 1 FROM receiving_vendor_invoice_line l WHERE l.tenant_id = i.tenant_id AND l.invoice_id = i.id AND l.receipt_id = $4::uuid))
+			AND ($5 = '' OR EXISTS (SELECT 1 FROM receiving_vendor_invoice_line l JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
+				WHERE l.tenant_id = i.tenant_id AND l.invoice_id = i.id AND r.purchase_order_id = $5::uuid))
+			AND ($6::timestamptz IS NULL OR (i.created_at, i.id) < ($6::timestamptz, $7::uuid))
+			ORDER BY i.created_at DESC, i.id DESC LIMIT $8`,
+			tenantID, f.VendorID, f.Status, f.ReceiptID, f.PurchaseOrderID, nullTime(f.CursorCreatedAt), cursorID, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var inv Invoice
+			if err := rows.Scan(&inv.ID, &inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID,
+				&inv.FiscalPeriodID, &inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy, &inv.OneTimePayeeID, &inv.AuditReason,
+				&inv.AuditRuleVersion, &inv.ReleasedBy, &inv.ReleasedAt, &inv.RejectedBy, &inv.RejectedAt, &inv.RejectReason); err != nil {
+				return err
+			}
+			out = append(out, inv)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return loadPageLines(ctx, tx, tenantID, out[:min(len(out), limit)])
+	})
+	return out, err
+}
+
+func (s *Postgres) GetInvoice(ctx context.Context, id string) (Invoice, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return Invoice{}, err
+	}
+	id, ok := ids.Canonical(id)
+	if !ok {
+		return Invoice{}, ErrInvoiceNotFound
+	}
+	var inv Invoice
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, invoiceColumns+`
+			FROM receiving_vendor_invoice i WHERE i.tenant_id = $1 AND i.id = $2`, tenantID, id).
+			Scan(&inv.ID, &inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID,
+				&inv.FiscalPeriodID, &inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy, &inv.OneTimePayeeID, &inv.AuditReason,
+				&inv.AuditRuleVersion, &inv.ReleasedBy, &inv.ReleasedAt, &inv.RejectedBy, &inv.RejectedAt, &inv.RejectReason)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvoiceNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return loadInvoiceLines(ctx, tx, tenantID, &inv)
+	})
+	return inv, err
+}
+
+func loadPageLines(ctx context.Context, tx pgx.Tx, tenantID string, page []Invoice) error {
+	if len(page) == 0 {
+		return nil
+	}
+	index := make(map[string]int, len(page))
+	invoiceIDs := make([]string, len(page))
+	for i, inv := range page {
+		index[inv.ID], invoiceIDs[i] = i, inv.ID
+	}
+	rows, err := tx.Query(ctx, `SELECT invoice_id::text, receipt_id::text, receipt_line_no, qty, unit_price, amount, standard_cost, COALESCE(grir_cleared, 0), service
+		FROM receiving_vendor_invoice_line WHERE tenant_id = $1 AND invoice_id = ANY($2::uuid[]) ORDER BY invoice_id, line_no`, tenantID, invoiceIDs)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var invoiceID string
+		var l InvoiceLine
+		if err := rows.Scan(&invoiceID, &l.ReceiptID, &l.ReceiptLineNo, &l.Qty, &l.UnitPrice, &l.Amount, &l.StandardCost, &l.GrirCleared, &l.Service); err != nil {
+			return err
+		}
+		page[index[invoiceID]].Lines = append(page[index[invoiceID]].Lines, l)
+	}
+	return rows.Err()
 }

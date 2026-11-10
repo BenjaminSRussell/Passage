@@ -97,11 +97,11 @@ describe("Bank statements", () => {
       url.pathname.endsWith("/bank-statements/imports") && init.method === "POST" ? json(201, { ...statement, payments: [payment] }) : undefined;
     const { container } = renderAt("/receivables/bank-statements/new");
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a legal entity.")).toBeInTheDocument();
     expect(screen.getByText("Choose the camt.053 file or paste its XML.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
 
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Statement XML", "<Document/>");
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
     const status = await findStatus();
@@ -117,14 +117,14 @@ describe("Bank statements", () => {
   it("names a duplicate file and shows a malformed line", async () => {
     server.handler = () => json(409, { code: "AR-0003", detail: "File already imported (bbbb)" });
     const first = renderAt("/receivables/bank-statements/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Statement XML", "<Document/>");
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
     expect(await findAlert()).toHaveTextContent("This file was already imported");
     first.unmount();
     server.handler = () => json(400, { code: "AR-0004", detail: "Line 12: Amt must be a positive decimal" });
     renderAt("/receivables/bank-statements/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Statement XML", "<Document/>");
     fireEvent.click(screen.getByRole("button", { name: "Import statement" }));
     const alert = await findAlert();

@@ -32,19 +32,24 @@ type PostedLine struct {
 	Tax decimal.Decimal
 }
 
-// Credited is what posted credit notes already took from one original line.
+// Credited is what posted credit notes and active reservations already took
+// from one original line; ReservedQty and ReservedTax are the reserved share.
 type Credited struct {
-	Qty decimal.Decimal
-	Net decimal.Decimal
-	Tax decimal.Decimal
+	Qty         decimal.Decimal
+	Net         decimal.Decimal
+	Tax         decimal.Decimal
+	ReservedQty decimal.Decimal
+	ReservedTax decimal.Decimal
 }
 
-// CreditUsage is what posted credit notes already took from an original
-// invoice: per original line number, the header charges and the gross.
+// CreditUsage is what posted credit notes and active credit reservations
+// already took from an original invoice: per original line number, the header
+// charges and the gross. Reserved is the gross share held by reservations.
 type CreditUsage struct {
-	Lines   map[int]Credited
-	Charges decimal.Decimal
-	Gross   decimal.Decimal
+	Lines    map[int]Credited
+	Charges  decimal.Decimal
+	Gross    decimal.Decimal
+	Reserved decimal.Decimal
 }
 
 func (u CreditUsage) line(no int) Credited {

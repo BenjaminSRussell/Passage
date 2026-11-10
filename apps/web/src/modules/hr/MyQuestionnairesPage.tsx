@@ -5,7 +5,7 @@ import { getSchedule, openSchedules, submitAnswers, type AnswerValue, type Quest
 import { DATE, UUID, formatUtc } from "./format";
 import styles from "./pages.module.css";
 import { getMyProfile } from "./api/selfService";
-import { BackLink, CheckField, FormActions, ListPage, Loaded, SelectField, TextAreaField, TextField, useSubmit } from "./parts";
+import { BackLink, CheckField, FormActions, ListPage, Loaded, LookupField, SelectField, TextAreaField, TextField, useSubmit } from "./parts";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -151,10 +151,11 @@ function AnswerForm({ view, workerId }: { view: ScheduleView; workerId?: string 
   return (
     <form className={styles.stack} onSubmit={submit} noValidate aria-label={`Answer ${view.questionnaire.name}`}>
       {workerId === undefined ? (
-        <TextField
+        <LookupField
+          entity="worker"
           id="answer-worker"
-          label="Your worker id"
-          hint="Your sign-in can't look up your worker record, so enter your own worker id."
+          label="Your worker record"
+          hint="Your sign-in can't look up your worker record, so choose your own."
           value={manualWorker}
           error={form.errors.worker}
           onChange={setManualWorker}

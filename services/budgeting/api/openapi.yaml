@@ -296,6 +296,163 @@ paths:
           description: The released residual.
           content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseResult' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans:
+    get:
+      operationId: listBudgetPlans
+      x-passage-duty: budget.view
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Plans, newest fiscal year first., content: { application/json: { schema: { $ref: '#/components/schemas/PlanList' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createBudgetPlan
+      x-passage-duty: budget.plan.maintain
+      description: Opens a planning process (FR-38.2) on a control rule version with a Baseline scenario. Name is unique per legal entity and fiscal year (BUD-0041).
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [legalEntityId, ruleVersionId, name, fiscalYear], properties: { legalEntityId: { type: string, format: uuid }, ruleVersionId: { type: string, format: uuid }, ledgerId: { type: string, format: uuid, description: Names the ledger the prior-year-actuals helper reads. }, name: { type: string }, fiscalYear: { type: integer }, fiscalYearStartMonth: { type: integer, enum: [1], description: Only January is supported; any other value is refused with BUD-0058. } } } } }
+      responses:
+        '201': { description: The plan with its Baseline scenario., content: { application/json: { schema: { $ref: '#/components/schemas/PlanView' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}:
+    get:
+      operationId: getBudgetPlan
+      x-passage-duty: budget.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The plan with scenarios (totals and ETag versions) and stage owners with their sign-offs., content: { application/json: { schema: { $ref: '#/components/schemas/PlanView' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/stage-owners:
+    put:
+      operationId: setBudgetPlanStageOwners
+      x-passage-duty: budget.plan.maintain
+      description: Replaces the owners of the Review and Approve stages per org unit on a Draft plan. One person cannot own both stages (BUD-0044).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [owners], properties: { owners: { type: array, maxItems: 200, items: { type: object, required: [stage, orgUnitId, owner], properties: { stage: { type: string, enum: [Review, Approve] }, orgUnitId: { type: string, format: uuid }, owner: { type: string } } } } } } } }
+      responses:
+        '200': { description: The plan., content: { application/json: { schema: { $ref: '#/components/schemas/PlanView' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/scenarios:
+    post:
+      operationId: createBudgetPlanScenario
+      x-passage-duty: budget.plan.maintain
+      description: Adds a scenario to a Draft plan, up to 10 (BUD-0051). copyFromScenarioId copies that scenario's cells, scaled by adjustmentPct.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name, kind], properties: { name: { type: string }, kind: { type: string, enum: [Baseline, Optimistic, Pessimistic, Custom] }, copyFromScenarioId: { type: string, format: uuid }, adjustmentPct: { type: string, description: Above -100 and at most 1000; with a copy only. } } } } }
+      responses:
+        '201': { description: The scenario., content: { application/json: { schema: { $ref: '#/components/schemas/PlanScenario' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/scenarios/{sid}/grid:
+    get:
+      operationId: getBudgetPlanGrid
+      x-passage-duty: budget.view
+      description: Cells of one scenario (account x cost center x period), filterable. The ETag header is the version a write must send in If-Match.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: sid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: account, in: query, required: false, schema: { type: string } }
+        - { name: costCenter, in: query, required: false, schema: { type: string } }
+        - { name: period, in: query, required: false, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+      responses:
+        '200': { description: The cells (at most 10000; truncated says more matched) and the total of every matching cell., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGrid' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: upsertBudgetPlanGrid
+      x-passage-duty: budget.plan.maintain
+      description: >-
+        Bulk upserts up to 5000 cells of a Draft plan under optimistic concurrency. A missing If-Match is 428; a stale one is
+        412 BUD-0050 and nothing is written. The response carries the new ETag.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: sid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, description: The grid ETag read from the last GET or write (the scenario version)., schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [cells], properties: { cells: { type: array, minItems: 1, maxItems: 5000, items: { type: object, required: [account, costCenter, period, amount], properties: { account: { type: string }, costCenter: { type: string }, period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }, amount: { type: string, description: Not negative; at most 4 decimal places. } } } } } } } }
+      responses:
+        '200': { description: Cells written and the scenario total. A spread by prior-year-actuals that found no actuals sets priorYearFallback., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGridWritten' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/scenarios/{sid}:spread:
+    post:
+      operationId: spreadBudgetPlanGrid
+      x-passage-duty: budget.plan.maintain
+      description: >-
+        Allocates a total over cost centers by weight and spreads each share over the 12 periods, evenly or in the
+        proportions of the account's posted balances in the prior fiscal year read from the ledger (net per month, absolute).
+        The rounding remainder goes to the heaviest weight so the cells add up to the total. Writes the cells like the grid PUT
+        (If-Match required). The ledger balance is per account, so the weights do not distinguish cost centers. The plan must be a Draft (BUD-0042),
+        a cost center may appear once, and the cost center weights must not sum to zero (422 BUD-0060). When the prior year holds no net debit for the account
+        the periods are weighted evenly and the response says so with priorYearFallback true.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: sid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, description: The grid ETag read from the last GET or write (the scenario version)., schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [account, total, method, costCenters], properties: { account: { type: string }, total: { type: string }, method: { type: string, enum: [even, prior-year-actuals] }, costCenters: { type: array, items: { type: object, required: [costCenter, weight], properties: { costCenter: { type: string }, weight: { type: string } } } } } } } }
+      responses:
+        '200': { description: Cells written and the scenario total. A spread by prior-year-actuals that found no actuals sets priorYearFallback., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGridWritten' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}:submit:
+    post:
+      operationId: submitBudgetPlan
+      x-passage-duty: budget.plan.maintain
+      description: Draft to Submitted once both stages have owners and some scenario holds an amount (BUD-0045). Emits dev.passage.budget.plan.submitted.v1.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      responses:
+        '200': { description: The plan., content: { application/json: { schema: { $ref: '#/components/schemas/PlanView' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/stages/{stage}:sign-off:
+    post:
+      operationId: signOffBudgetPlanStage
+      x-passage-duty: budget.plan.workflow
+      description: >-
+        Service-only; called by workflow-ts with the deciding person as the acting user. That person must own the stage for the
+        org unit (BUD-0043), not have submitted the plan and, for Approve, not have reviewed it (BUD-0044). submission must be the
+        current one (BUD-0046). When the last org unit signed Review the plan is Reviewed; when the last signed Approve the
+        scenarioId is posted as an Original register entry and the plan is Approved. The approver must not have created the plan, set its owners or
+        edited the scenario (or the scenario it was copied from) (BUD-0044); an Original entry for the fiscal year already on the rule version refuses
+        the approval (409 BUD-0059), as does another approved plan for the rule version and year (409 BUD-0057).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: stage, in: path, required: true, schema: { type: string, enum: [review, approve] } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [orgUnitId, submission], properties: { orgUnitId: { type: string, format: uuid }, scenarioId: { type: string, format: uuid, description: Required for approve; not allowed for review. }, submission: { type: integer, minimum: 1 } } } } }
+      responses:
+        '200': { description: The plan., content: { application/json: { schema: { $ref: '#/components/schemas/PlanView' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}:reject:
+    post:
+      operationId: rejectBudgetPlan
+      x-passage-duty: budget.plan.workflow
+      description: Service-only. An owner of the open stage sends the plan back to Draft and the sign-offs are cleared. Emits dev.passage.budget.plan.rejected.v1.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason, submission], properties: { reason: { type: string, maxLength: 500 }, submission: { type: integer, minimum: 1 } } } } }
+      responses:
+        '200': { description: The plan., content: { application/json: { schema: { $ref: '#/components/schemas/PlanView' } } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/budget/investment-programs:
     get:
       operationId: listInvestmentPrograms
@@ -425,6 +582,82 @@ components:
     Money:
       type: string
       description: Decimal string, never a JSON number in responses.
+    PlanScenario:
+      type: object
+      required: [id, name, kind, version, total]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string, enum: [Baseline, Optimistic, Pessimistic, Custom] }
+        copiedFromId: { type: string, format: uuid }
+        version: { type: integer, format: int64, description: The grid ETag. }
+        total: { $ref: '#/components/schemas/Money' }
+    PlanStageOwner:
+      type: object
+      required: [stage, orgUnitId, owner]
+      properties:
+        stage: { type: string, enum: [Review, Approve] }
+        orgUnitId: { type: string, format: uuid }
+        owner: { type: string }
+        signedBy: { type: string }
+        signedAt: { type: string }
+    Plan:
+      type: object
+      required: [id, legalEntityId, ruleVersionId, name, fiscalYear, currency, status, submission, version, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        ruleVersionId: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        name: { type: string }
+        fiscalYear: { type: integer }
+        currency: { type: string }
+        status: { type: string, enum: [Draft, Submitted, Reviewed, Approved] }
+        submission: { type: integer, description: Counts submissions; signals carry the one they were started for. }
+        submittedBy: { type: string }
+        approvedScenarioId: { type: string, format: uuid }
+        registerEntryId: { type: string, format: uuid }
+        version: { type: integer, format: int64 }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    PlanView:
+      allOf:
+        - { $ref: '#/components/schemas/Plan' }
+        - type: object
+          required: [scenarios, stageOwners]
+          properties:
+            scenarios: { type: array, items: { $ref: '#/components/schemas/PlanScenario' } }
+            stageOwners: { type: array, items: { $ref: '#/components/schemas/PlanStageOwner' } }
+    PlanList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Plan' } }
+    PlanCell:
+      type: object
+      required: [account, costCenter, period, amount]
+      properties:
+        account: { type: string }
+        costCenter: { type: string }
+        period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        amount: { $ref: '#/components/schemas/Money' }
+    PlanGrid:
+      type: object
+      required: [scenario, cells, total, truncated]
+      properties:
+        scenario: { $ref: '#/components/schemas/PlanScenario' }
+        cells: { type: array, maxItems: 10000, items: { $ref: '#/components/schemas/PlanCell' } }
+        total: { $ref: '#/components/schemas/Money' }
+        truncated: { type: boolean, description: More than 10000 cells matched; narrow the filter to see the rest. total still covers every match. }
+    PlanGridWritten:
+      type: object
+      required: [scenarioId, version, cells, total]
+      properties:
+        scenarioId: { type: string, format: uuid }
+        version: { type: integer, format: int64, description: The new grid ETag. }
+        cells: { type: integer }
+        total: { $ref: '#/components/schemas/Money' }
+        priorYearFallback: { type: boolean, description: A prior-year-actuals spread found no actuals and weighted the periods evenly. }
     CreateRule:
       type: object
       required: [legalEntityId, code, warnPct, blockPct, currency, effectiveFrom]

@@ -120,6 +120,14 @@ func TestHoldAndVendorBlock_EmitAuditedEventsOnlyOnChange(t *testing.T) {
 			}); err != nil || reason != "bank query" || by != "hana" {
 				t.Fatalf("stored reason=%q by=%q err=%v", reason, by, err)
 			}
+			if got, err := s.Get(ctx, item.ID); err != nil || !got.PaymentHold || got.PaymentHoldReason != "bank query" {
+				t.Fatalf("read back hold=%v reason=%q err=%v", got.PaymentHold, got.PaymentHoldReason, err)
+			}
+		}
+		if i == 2 {
+			if got, err := s.Get(ctx, item.ID); err != nil || got.PaymentHold || got.PaymentHoldReason != "" {
+				t.Fatalf("released item hold=%v reason=%q err=%v", got.PaymentHold, got.PaymentHoldReason, err)
+			}
 		}
 	}
 	held, released := outboxPayloads(t, s, ctx, OpenItemHeldType), outboxPayloads(t, s, ctx, OpenItemReleasedType)
@@ -248,6 +256,26 @@ func TestSetPaymentHold_RefusesSettledItems(t *testing.T) {
 		if _, err := s.SetPaymentHold(ctx, item.ID, held, ""); !errors.Is(err, ErrItemClosed) {
 			t.Fatalf("hold=%v on a settled item = %v, want ErrItemClosed", held, err)
 		}
+	}
+}
+
+func TestList_HeldOnlyReturnsUnsettledHeldItems(t *testing.T) {
+	s := setup(t)
+	ctx := ctxAs(1, leA, "hana")
+	held := seed(t, s, ctx, leA, vendor1, 1, "2027-03-01", "USD", "100.00")
+	seed(t, s, ctx, leA, vendor1, 2, "2027-03-02", "USD", "200.00")
+	if _, err := s.SetPaymentHold(ctx, held.ID, true, "dispute"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.List(ctx, Filter{LegalEntityID: leA, HeldOnly: true, OpenOnly: true}, 10)
+	if err != nil || len(got) != 1 || got[0].ID != held.ID {
+		t.Fatalf("held items = %v err=%v, want only %s", got, err, held.ID)
+	}
+	if _, err := s.SetPaymentHold(ctx, held.ID, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.List(ctx, Filter{LegalEntityID: leA, HeldOnly: true, OpenOnly: true}, 10); err != nil || len(got) != 0 {
+		t.Fatalf("a released item still listed as held: %v err=%v", got, err)
 	}
 }
 

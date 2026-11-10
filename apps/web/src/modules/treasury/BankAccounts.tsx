@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -58,7 +59,7 @@ export function BankAccountsPage() {
     event.preventDefault();
     const value = draft.trim();
     if (!UUID.test(value)) {
-      setError("Enter the legal entity id (a UUID).");
+      setError("Choose a legal entity.");
       return;
     }
     setError(undefined);
@@ -84,8 +85,8 @@ export function BankAccountsPage() {
       />
       <Card>
         <form className={styles.toolbar} onSubmit={choose} noValidate>
-          <FormField id="ba-entity" label="Legal entity id" error={error}>
-            {(c) => <Input {...c} className={styles.mono} value={draft} onChange={(e) => setDraft(e.target.value)} invalid={Boolean(error)} />}
+          <FormField id="ba-entity" label="Legal entity" error={error}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={draft} onChange={(e) => setDraft(e.target.value)} invalid={Boolean(error)} />}
           </FormField>
           <Button type="submit">Show accounts</Button>
         </form>
@@ -124,7 +125,7 @@ export interface AccountDraft {
 /** The same checks the service applies (COM-0001, TRS-0401), so most mistakes are caught before the round trip. */
 export function validateAccount(v: AccountDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!ACCOUNT_CODE.test(v.accountCode.trim())) errors.accountCode = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
   if (!validIban(v.iban)) errors.iban = "Enter a valid IBAN; the check digits do not match.";
   const statementAccount = normalizeIban(v.statementAccount);

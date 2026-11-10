@@ -8,7 +8,8 @@ import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { demoNote } from "./metadata";
 import { NotAvailablePage } from "./pages/NotAvailablePage";
 import { resolvePage } from "./pageMeta";
-import { devDuties, PrincipalProvider } from "./principal";
+import { WorkContextProvider } from "./lookup/workContext";
+import { devDuties, devIdentity, PrincipalProvider } from "./principal";
 import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import styles from "./Shell.module.css";
@@ -31,6 +32,7 @@ function isShown(el: HTMLElement): boolean {
 export interface ShellProps {
   modules: PassageModule[];
   duties?: readonly string[];
+  identity?: string;
   workspaceConfig?: WorkspaceConfig;
 }
 
@@ -45,7 +47,7 @@ function PageSkeleton() {
   );
 }
 
-export function Shell({ modules: allModules, duties, workspaceConfig }: ShellProps) {
+export function Shell({ modules: allModules, duties, identity, workspaceConfig }: ShellProps) {
   const principalDuties = useMemo(() => duties ?? devDuties(), [duties]);
   const modules = useMemo(() => visibleModules(allModules, principalDuties), [allModules, principalDuties]);
   const navigate = useNavigate();
@@ -251,6 +253,7 @@ export function Shell({ modules: allModules, duties, workspaceConfig }: ShellPro
 
   return (
     <PrincipalProvider duties={principalDuties}>
+      <WorkContextProvider identity={identity ?? devIdentity()} enabled={principalDuties.includes("org.read")}>
       <WorkspaceNavProvider entries={navEntries} config={config}>
       <div className={styles.root} data-density={density}>
         <a href="#main" className="skip-link">
@@ -273,6 +276,7 @@ export function Shell({ modules: allModules, duties, workspaceConfig }: ShellPro
               menuRef={menuRef}
               drawerOpen={drawerOpen}
               compact={density === "compact"}
+              showContext={principalDuties.includes("org.read")}
               onOpenDrawer={() => setDrawerOpen(true)}
               onApplyView={applySavedView}
               onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
@@ -302,6 +306,7 @@ export function Shell({ modules: allModules, duties, workspaceConfig }: ShellPro
         {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
       </div>
       </WorkspaceNavProvider>
+      </WorkContextProvider>
     </PrincipalProvider>
   );
 }

@@ -39,7 +39,7 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 | `POST /v1/receiving/matching:evaluate`, `PUT /v1/receiving/audit-policy`, `PUT /v1/receiving/ers-vendors/{vendorId}` | `receiving.matching-policy.maintain` |
 | `POST /v1/receiving/arrivals`, `POST /v1/receiving/receipts` (direct receipt), `POST /v1/receiving/receipts/{id}:register`, `GET /v1/receiving/receipts`, `GET /v1/receiving/receipts/{id}` | `receiving.receipt.maintain` |
 | `POST /v1/receiving/receipts/{id}:post`, `:correct`, `:cancel` | `receiving.receipt.post` |
-| `GET /v1/receiving/grir` | `receiving.ap.inquire` |
+| `GET /v1/receiving/grir`, `GET /v1/receiving/invoices`, `GET /v1/receiving/invoices/{id}` | `receiving.ap.inquire` |
 | `GET /v1/receiving/pending-postings`, `POST /v1/receiving/pending-postings/{key}/resolve` | `receiving.admin` |
 | `GET /v1/receiving/invoice-captures/{id}`, `GET /v1/receiving/ers-self-bills/{id}` | `receiving.ap.inquire` |
 | `POST /v1/receiving/service-entry-sheets` | `receiving.service-entry.maintain` |

@@ -5,7 +5,7 @@ import { describeProblem, type Problem } from "./api/client";
 import { getWorksheet, saveWorksheet, submitWorksheet, type WorksheetInput, type WorksheetRow } from "./api/recruitment";
 import { UUID, compareDecimal, dash, validSigned } from "./format";
 import styles from "./pages.module.css";
-import { BackLink, ConfirmAction, Loaded, ProblemAlert, Status, TextField } from "./parts";
+import { BackLink, ConfirmAction, Loaded, LookupField, ProblemAlert, Status, TextField } from "./parts";
 import { useLoad } from "./useLoad";
 
 interface Line {
@@ -136,7 +136,7 @@ export function WorksheetPage() {
                 {errors[-1] ? <p role="alert">{errors[-1]}</p> : null}
                 {lines.map((line, i) => (
                   <div key={i} className={styles.optionRow} role="group" aria-label={`Proposal ${i + 1}`}>
-                    <TextField id={`ws-${i}-worker`} label="Worker id" value={line.workerId} error={where[i] === "workerId" ? errors[i] : undefined} onChange={(v) => update(i, { workerId: v })} />
+                    <LookupField entity="worker" id={`ws-${i}-worker`} label="Worker" value={line.workerId} error={where[i] === "workerId" ? errors[i] : undefined} onChange={(v) => update(i, { workerId: v })} />
                     <TextField id={`ws-${i}-rating`} label="Rating (1 to 5)" value={line.rating} error={where[i] === "rating" ? errors[i] : undefined} onChange={(v) => update(i, { rating: v })} />
                     <TextField id={`ws-${i}-pct`} label="Raise (%)" value={line.proposedPct} error={where[i] === "proposedPct" ? errors[i] : undefined} onChange={(v) => update(i, { proposedPct: v })} />
                     <TextField id={`ws-${i}-why`} label="Justification" optional value={line.justification} error={where[i] === "justification" ? errors[i] : undefined} onChange={(v) => update(i, { justification: v })} />

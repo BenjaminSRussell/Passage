@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useBlocker } from "react-router-dom";
-import { Alert, Badge, Button, ConfirmDialog, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, ConfirmDialog, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, useUnsavedChanges, type DataTableColumn } from "../../shell/ui";
 import { ALL, describeProblem, listOperatingUnits, type Problem } from "./api/client";
 import {
   compareHierarchyVersions,
@@ -86,12 +85,19 @@ function downloadFile(filename: string, parts: BlobPart[], type: string) {
 // Type codes are A-Z, 0-9, _ and - today; anything else would be a path separator or space in the saved file name.
 const fileSafe = (text: string) => text.replace(/[^A-Za-z0-9_-]/g, "_");
 
+const DISCARD_DIALOG = {
+  title: "Discard your unsaved changes?",
+  description: "You have unsaved edits to this draft. Leaving now loses them.",
+  confirmLabel: "Discard changes",
+  cancelLabel: "Keep editing",
+};
+
 export function HierarchyDesignerPage() {
   const { entities, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy } = useLegalEntity();
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<(() => void) | null>(null);
   const noticeRef = useRef<HTMLDivElement>(null);
-  const blocker = useBlocker(dirty);
+  const { prompt } = useUnsavedChanges(dirty, DISCARD_DIALOG);
   const [typeId, setTypeId] = useState("");
   const [chosenDate, setChosenDate] = useState<string | null>(null);
   const [showDraft, setShowDraft] = useState(false);
@@ -152,31 +158,10 @@ export function HierarchyDesignerPage() {
 
   const guard = (action: () => void) => (dirty ? setPending(() => action) : action());
   const confirmLeave = () => {
-    if (blocker.state === "blocked") {
-      blocker.proceed();
-    } else {
-      pending?.();
-      setPending(null);
-    }
-  };
-  const keepEditing = () => {
-    if (blocker.state === "blocked") {
-      blocker.reset();
-    }
+    pending?.();
     setPending(null);
   };
-
-  useEffect(() => {
-    if (!dirty) {
-      return;
-    }
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  const keepEditing = () => setPending(null);
 
   useEffect(() => {
     if (notice !== "") {
@@ -453,12 +438,10 @@ export function HierarchyDesignerPage() {
           )}
         </>
       )}
-      {pending !== null || blocker.state === "blocked" ? (
+      {prompt}
+      {pending !== null ? (
         <ConfirmDialog
-          title="Discard your unsaved changes?"
-          description="You have unsaved edits to this draft. Leaving now loses them."
-          confirmLabel="Discard changes"
-          cancelLabel="Keep editing"
+          {...DISCARD_DIALOG}
           onConfirm={confirmLeave}
           onCancel={keepEditing}
         />

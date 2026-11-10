@@ -21,6 +21,10 @@ func withTax(body, lines string) string {
 	return strings.Replace(body, `"net":`, `"taxLines":`+lines+`,"net":`, 1)
 }
 
+func withLines(body, lines string) string {
+	return strings.Replace(body, `"net":`, `"invoiceLines":`+lines+`,"net":`, 1)
+}
+
 func TestPostRMACredit_Validation(t *testing.T) {
 	h := router(&fakeStore{})
 	tests := []struct {
@@ -44,6 +48,10 @@ func TestPostRMACredit_Validation(t *testing.T) {
 		{"tax lines without the billing invoice id", withTax(strings.Replace(rmaBody(testLE, "400.00", "60.00", "340.00"), rmaInvoiceID, "", 1), `[{"code":"DE19","amount":"57.00"}]`), "ar.rmacredit.post", http.StatusBadRequest, "invoiceId"},
 		{"tax line without amount", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"0"}]`), "ar.rmacredit.post", http.StatusUnprocessableEntity, "taxLines"},
 		{"tax code listed twice", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"1"},{"code":"DE19","amount":"2"}]`), "ar.rmacredit.post", http.StatusUnprocessableEntity, "taxLines"},
+		{"valid with invoice lines", withLines(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"lineNo":1,"qty":"2"}]`), "ar.rmacredit.post", http.StatusCreated, ""},
+		{"invoice lines without the billing invoice id", withLines(strings.Replace(rmaBody(testLE, "400.00", "60.00", "340.00"), rmaInvoiceID, "", 1), `[{"lineNo":1,"qty":"2"}]`), "ar.rmacredit.post", http.StatusBadRequest, "invoiceId"},
+		{"invoice line listed twice", withLines(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"lineNo":1,"qty":"1"},{"lineNo":1,"qty":"2"}]`), "ar.rmacredit.post", http.StatusUnprocessableEntity, "invoiceLines"},
+		{"invoice line without a quantity", withLines(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"lineNo":1,"qty":"0"}]`), "ar.rmacredit.post", http.StatusUnprocessableEntity, "invoiceLines"},
 		{"tax line with an unknown field", withTax(rmaBody(testLE, "400.00", "60.00", "340.00"), `[{"code":"DE19","amount":"1","rate":"19"}]`), "ar.rmacredit.post", http.StatusBadRequest, ""},
 	}
 	for _, tc := range tests {

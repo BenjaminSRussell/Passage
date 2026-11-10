@@ -99,7 +99,7 @@ describe("New sales group", () => {
       return undefined;
     };
     renderAt("/pricing/commission/sales-groups/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Sales group name", "SG-East");
     fill("Rep id", "R1");
     fill("Share %", "60");
@@ -117,7 +117,7 @@ describe("New sales group", () => {
 
   it("refuses shares that do not add up to 100", async () => {
     renderAt("/pricing/commission/sales-groups/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Sales group name", "x");
     fill("Rep id", "R1");
     fill("Share %", "60");

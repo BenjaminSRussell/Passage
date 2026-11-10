@@ -306,6 +306,12 @@ func TestListRequisitionApprovals_FiltersAndHidesTheCallersOwn(t *testing.T) {
 	if code := list("", dutyPurchaseOrderInquire); code != http.StatusOK {
 		t.Fatalf("inquire duty: %d", code)
 	}
+	if code := list("", dutyInboxRead); code != http.StatusOK {
+		t.Fatalf("inbox duty: %d", code)
+	}
+	if got := h.fake.approval.filter; got.ExcludeRequesterID != userApprover {
+		t.Fatalf("inbox read must still hide the caller's own requisitions: %+v", got)
+	}
 }
 
 func TestGetRequisition_ApproversMayRead(t *testing.T) {

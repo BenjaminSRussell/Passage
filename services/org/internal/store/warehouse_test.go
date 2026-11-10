@@ -189,6 +189,7 @@ func TestPostgres_ListWarehousesFiltersAndPages(t *testing.T) {
 		"site":         {store.WarehouseFilter{SiteID: w.s1.ID}, []string{w.wh1.ID, transitWarehouse.ID}},
 		"type":         {store.WarehouseFilter{Type: "transit"}, []string{transitWarehouse.ID}},
 		"legal entity": {store.WarehouseFilter{LegalEntityID: w.demf.ID}, []string{w.wh1De.ID}},
+		"code search":  {store.WarehouseFilter{Query: "wh2"}, []string{transitWarehouse.ID}},
 	} {
 		page, err := w.s.ListWarehouses(w.ctx, tc.filter, store.SiteKey{}, store.MaxPageSize)
 		var got []string
