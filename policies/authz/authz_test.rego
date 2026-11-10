@@ -2404,3 +2404,16 @@ test_receiving_document_flow_is_read_only_and_separate if {
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
 }
+
+# Agent runtime surface (#47): starting a run, reading runs and the copilot chat are separate duties.
+test_agent_run_duties_open_only_their_routes if {
+	allowed("agents.invoke", "POST", "/api/v1/agents/ap_coding/runs")
+	not allowed("agents.invoke", "GET", "/api/v1/agents/runs/r1")
+	allowed("agents.run.read", "GET", "/api/v1/agents/runs/r1")
+	allowed("agents.run.read", "GET", "/api/v1/agents/runs/r1/actions")
+	not allowed("agents.run.read", "POST", "/api/v1/agents/ap_coding/runs")
+	not allowed("agents.run.read", "POST", "/api/v1/agents/runs/r1/actions/a1/decision")
+	allowed("mcp.copilot.use", "POST", "/api/v1/copilot/chat")
+	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
+	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
+}

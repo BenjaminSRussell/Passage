@@ -1,0 +1,30 @@
+# The edge gateway (listed in networkPolicy.ingressNamespaces) reaches the API; Prometheus reaches
+# only the admin port. The runtime itself needs egress to Postgres, the MCP gateway and the model
+# provider, which the cluster's egress policy grants.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: agent-runtime
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agent-runtime
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+        {{- range .Values.networkPolicy.ingressNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace }}
+      ports:
+        - { protocol: TCP, port: 9090 }

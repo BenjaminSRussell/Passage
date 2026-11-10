@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: agent-runtime
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-runtime
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-runtime
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent-runtime
+          image: {{ include "agent-runtime.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          envFrom:
+            - secretRef:
+                name: {{ .Values.providerSecret }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseSecret }}
+                  key: DATABASE_URL
+            - name: MIGRATE_ON_START
+              value: {{ .Values.migrateOnStart | quote }}
+            - name: MCP_URL
+              value: {{ .Values.mcpUrl | quote }}
+            - name: HTTP_ADDR
+              value: "0.0.0.0:8080"
+            - name: ADMIN_ADDR
+              value: "0.0.0.0:9090"
+            - name: SERVICE_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            - name: AGENTS_PROVIDER
+              value: {{ .Values.model.provider | quote }}
+            - name: AGENTS_MODEL
+              value: {{ .Values.model.default | quote }}
+            {{- if .Values.model.copilot }}
+            - name: AGENTS_COPILOT_MODEL
+              value: {{ .Values.model.copilot | quote }}
+            {{- end }}
+            {{- if .Values.model.overrides }}
+            - name: AGENTS_MODEL_OVERRIDES
+              value: {{ .Values.model.overrides | quote }}
+            {{- end }}
+            {{- if .Values.openai.baseUrl }}
+            - name: AGENTS_OPENAI_BASE_URL
+              value: {{ .Values.openai.baseUrl | quote }}
+            - name: AGENTS_OPENAI_AUTH
+              value: {{ .Values.openai.auth | quote }}
+            {{- end }}
+            {{- if .Values.openai.apiVersion }}
+            - name: AGENTS_OPENAI_API_VERSION
+              value: {{ .Values.openai.apiVersion | quote }}
+            {{- end }}
+            {{- if .Values.bedrock.region }}
+            - name: AWS_REGION
+              value: {{ .Values.bedrock.region | quote }}
+            {{- end }}
+            - name: AGENTS_RUN_TOKEN_CAP
+              value: {{ .Values.runTokenCap | quote }}
+            - name: AGENTS_COPILOT_TOKEN_CAP
+              value: {{ .Values.copilot.tokenCap | quote }}
+            - name: AGENTS_COPILOT_MAX_TURNS
+              value: {{ .Values.copilot.maxTurns | quote }}
+            {{- if .Values.approvalExpiryHours }}
+            - name: AGENTS_APPROVAL_EXPIRY_H
+              value: {{ .Values.approvalExpiryHours | quote }}
+            {{- end }}
+            - name: AGENTS_SELF_APPROVAL_LIMIT
+              value: {{ .Values.selfApprovalLimit.amount | quote }}
+            - name: AGENTS_SELF_APPROVAL_CURRENCY
+              value: {{ .Values.selfApprovalLimit.currency | quote }}
+            - name: AGENTS_EVAL_PASSED
+              value: {{ .Values.evalPassed | quote }}
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
