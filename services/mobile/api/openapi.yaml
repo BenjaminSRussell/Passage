@@ -293,7 +293,7 @@ components:
       type: object
       required: [deviceId, warehouseId]
       properties:
-        deviceId: { type: string, maxLength: 80, description: Without ':'. }
+        deviceId: { type: string, maxLength: 80, description: "Without a colon." }
         warehouseId: { type: string, format: uuid }
         menuKey: { type: string, default: default }
     SessionResponse:

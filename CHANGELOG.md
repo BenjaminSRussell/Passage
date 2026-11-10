@@ -10,6 +10,8 @@ release may change public APIs.
 
 ### Added
 
+- Mobile warehouse execution service (`services/mobile`, wave 32, #32): device sessions with idle timeout, takeover and resume, role- and site-based menus with SSE publish notice, versioned server-driven flows and step runner calling the warehouse work API (new `mobile` service grant), GS1-128/DataMatrix scan parsing, idempotent offline replay with conflict parking and a supervisor resolve queue, chart, migrations with forced RLS, authz routes, OpenAPI and AsyncAPI.
+
 - Batches and serials in the inventory postings (#480): the postings consumer books a receipt line's `batch` as the
   batch dimension and a serial-tracked receipt line as one registration per serial (one inventory unit each, an
   equal share of the document quantity and value, the rounding remainder on the last), each under its own origin
