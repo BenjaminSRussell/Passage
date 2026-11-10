@@ -53,9 +53,14 @@ func TestEnvOverlaysArePinnedByDigestAndHoldNoSecrets(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
-		for _, banned := range []string{"postgres://", "tag:"} {
-			if strings.Contains(string(b), banned) {
-				t.Errorf("%s contains %q: overlays pin digests and hold no secret values", path, banned)
+		if strings.Contains(string(b), "tag:") {
+			t.Errorf("%s contains %q: overlays pin digests and hold no secret values", path, "tag:")
+		}
+		// A connection URL is allowed only when its password is an ExternalSecret template placeholder
+		// (eam-database, transport-db); a literal DSN would carry the secret.
+		for _, line := range strings.Split(string(b), "\n") {
+			if strings.Contains(line, "postgres://") && !strings.Contains(line, "{{ .password }}@") {
+				t.Errorf("%s contains a literal postgres:// URL: overlays hold no secret values", path)
 			}
 		}
 		if hasLiteralPassword(string(b)) {

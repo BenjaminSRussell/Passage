@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
+import { Named } from "../purchasing/Named";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchOnHand, ON_HAND_GROUPS, type OnHandGroup, type OnHandRow } from "./api/client";
 import { onHandCsv, downloadText } from "./csvExport";
@@ -51,6 +54,9 @@ const amountColumns: DataTableColumn<OnHandRow>[] = [
     render: (row) => (row.negative ? <Badge tone="danger">Negative stock</Badge> : dash),
   },
 ];
+
+/** The dimensions whose group values are ids of an entity with a name. */
+const GROUP_ENTITY: Partial<Record<OnHandGroup, LookupEntityKey>> = { product: "product", legal_entity: "legalEntity", site: "site", warehouse: "warehouse", owner: "vendor" };
 
 /** The on-hand groups the transaction inquiry can be narrowed to, with the query parameter each one fills. */
 const DRILL_PARAMS: Partial<Record<OnHandGroup, string>> = {
@@ -119,8 +125,12 @@ export function OnHandPage() {
     ...shown.map((group) => ({
       key: `group-${group}`,
       header: GROUP_LABELS[group],
-      mono: group === "product" || group === "legal_entity",
-      render: (row: OnHandRow) => row.group[group] || dash,
+      mono: !(group in GROUP_ENTITY),
+      render: (row: OnHandRow) => {
+        const value = row.group[group];
+        const entity = GROUP_ENTITY[group];
+        return entity && value && UUID.test(value) ? <Named entity={entity} id={value} /> : value || dash;
+      },
     })),
     ...(shown.some((g) => g in DRILL_PARAMS)
       ? [
@@ -166,19 +176,19 @@ export function OnHandPage() {
             {(control) => <Input {...control} type="date" {...field("asOf")} />}
           </FormField>
           <FormField id="onhand-product" label="Product" optional error={productError}>
-            {(control) => <Input {...control} {...field("product")} placeholder="Product id" />}
+            {(control) => <EntityLookup entity="product" {...control} {...field("product")} />}
           </FormField>
           <FormField id="onhand-site" label="Site" optional>
-            {(control) => <Input {...control} {...field("site")} />}
+            {(control) => <EntityLookup entity="site" prefill={false} {...control} {...field("site")} />}
           </FormField>
           <FormField id="onhand-warehouse" label="Warehouse" optional>
-            {(control) => <Input {...control} {...field("warehouse")} />}
+            {(control) => <EntityLookup entity="warehouse" {...control} {...field("warehouse")} />}
           </FormField>
           <FormField id="onhand-batch" label="Batch" optional>
             {(control) => <Input {...control} {...field("batch")} />}
           </FormField>
           <FormField id="onhand-owner" label="Owner (vendor)" optional hint="Vendor-owned consignment stock only.">
-            {(control) => <Input {...control} {...field("owner")} />}
+            {(control) => <EntityLookup entity="vendor" {...control} {...field("owner")} />}
           </FormField>
           <FormField id="onhand-segment" label="Segment" optional hint="SALES_ORDER:reference or PROJECT:reference.">
             {(control) => <Input {...control} {...field("segment")} />}

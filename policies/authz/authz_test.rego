@@ -1728,6 +1728,14 @@ test_reporting_balance_verification_routes if {
 	not allowed("reporting.audit.view", "POST", "/v1/reporting/balance-verifications")
 }
 
+test_org_demo_company_manage_reaches_only_the_demo_load if {
+	allowed("org.demo-company.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "GET", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/import")
+	not allowed("org.package.manage", "POST", "/v1/org/demo-company")
+	not allowed("org.read", "POST", "/v1/org/demo-company")
+}
+
 test_org_package_manage_reaches_only_export_and_import if {
 	allowed("org.package.manage", "POST", "/v1/org/export")
 	allowed("org.package.manage", "POST", "/v1/org/import")
@@ -2059,6 +2067,22 @@ test_tenant_features_are_not_reachable_through_other_identity_duties if {
 	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/features/extra")
 }
 
+test_tenant_setup_view_reads_only if {
+	allowed("identity.setup.view", "GET", "/v1/tenant/setup")
+	allowed("identity.setup.view", "GET", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.view", "PUT", "/v1/tenant/workspace-config")
+}
+
+test_tenant_setup_maintain_reads_and_writes_setup_only if {
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	allowed("identity.setup.maintain", "PUT", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "DELETE", "/v1/tenant/workspace-config")
+	not allowed("identity.setup.maintain", "PUT", "/v1/tenant/features")
+	not allowed("identity.feature.maintain", "PUT", "/v1/tenant/setup/steps/company")
+	not allowed("identity.setup.maintain", "GET", "/v1/tenants")
+}
+
 test_dev_seed_every_user_reads_features_but_cannot_change_them if {
 	dev_seed_decision("admin", "GET", "/v1/tenant/features").allow
 	dev_seed_decision("clerk", "GET", "/v1/tenant/features").allow
@@ -2137,4 +2161,18 @@ test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
 test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
+}
+
+test_print_document_render_is_its_own_duty if {
+	allowed("print.document.render", "POST", "/print/v1/documents:render")
+	not allowed("print.document.render", "POST", "/print/v1/jobs")
+	not allowed("print.job.submit", "POST", "/print/v1/documents:render")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}
+
+test_receiving_document_flow_is_read_only_and_separate if {
+	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
+	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
+	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
+	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
 }

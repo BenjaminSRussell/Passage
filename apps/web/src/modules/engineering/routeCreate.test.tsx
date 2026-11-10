@@ -14,9 +14,12 @@ function stub(handler: (url: string, init?: RequestInit) => unknown) {
   return fetchMock;
 }
 
+const BIKE = "11111111-1111-4111-8111-111111111111";
+const SITE = "55555555-5555-4555-8555-555555555555";
+
 function fill() {
-  fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: "BIKE" } });
-  fireEvent.change(screen.getByLabelText(/^Site/), { target: { value: "S1" } });
+  fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: BIKE } });
+  fireEvent.change(screen.getByLabelText(/^Site/), { target: { value: SITE } });
   fireEvent.change(screen.getByLabelText(/^Route code/), { target: { value: "R1" } });
   fireEvent.change(screen.getByLabelText(/Effective from/), { target: { value: "2026-07-01" } });
 }
@@ -38,7 +41,7 @@ describe("RouteVersionCreatePage", () => {
     expect(url).toBe("/api/v1/engineering/route-versions");
     expect(new Headers(init?.headers).get("Idempotency-Key")).toBeTruthy();
     const body = JSON.parse(init?.body as string);
-    expect(body).toMatchObject({ productId: "BIKE", siteId: "S1", routeCode: "R1", effectiveFrom: "2026-07-01" });
+    expect(body).toMatchObject({ productId: BIKE, siteId: SITE, routeCode: "R1", effectiveFrom: "2026-07-01" });
     expect(body.operations.map((o: { no: number; nextNo: number }) => [o.no, o.nextNo])).toEqual([[10, 20], [20, 0]]);
     expect(body.operations[0].requirements).toEqual([{ kind: "capability", refId: "weld", level: 1, quantity: 1 }]);
     expect(body.operations[1]).toMatchObject({ runH: "1.5" });

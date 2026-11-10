@@ -81,7 +81,7 @@ describe("Planned order maintenance", () => {
     fireEvent.change(within(form).getByLabelText(/Vendor/), { target: { value: vendor } });
     fireEvent.click(within(form).getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Changes saved."));
+    await waitFor(() => expect(screen.getAllByRole("status").map((e) => e.textContent).join(" ")).toContain("Changes saved."));
     const [patch] = callsOf(fetchMock, "PATCH");
     expect(patch[0]).toBe(`/api/v1/planning/planned-orders/${order.id}`);
     expect(ifMatchOf(patch[1])).toBe('"1"');
@@ -98,7 +98,7 @@ describe("Planned order maintenance", () => {
     );
     renderAt(`/planning/planned-orders/${order.id}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Order approved. The next plan run firms it"));
+    await waitFor(() => expect(screen.getAllByRole("status").map((e) => e.textContent).join(" ")).toContain("Order approved. The next plan run firms it"));
     expect(JSON.parse(callsOf(fetchMock, "PATCH")[0][1]?.body as string)).toEqual({ status: "approved" });
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
@@ -230,7 +230,7 @@ describe("Forecast page", () => {
     fillCell(form, { Item: cell.itemId, Site: cell.siteId, "Period start": "2026-11-02", "Period end": "2026-11-08", "Forecast quantity": "100", "Open sales quantity": "30" });
     fireEvent.click(within(form).getByRole("button", { name: "Save cell" }));
 
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Cell saved. Forecast model BASE is at version 1."));
+    await waitFor(() => expect(screen.getAllByRole("status").map((e) => e.textContent).join(" ")).toContain("Cell saved. Forecast model BASE is at version 1."));
     const put = callsOf(fetchMock, "PUT")[0];
     expect(ifMatchOf(put[1])).toBe('"0"');
     expect(JSON.parse(put[1]?.body as string)).toEqual({
@@ -250,7 +250,7 @@ describe("Forecast page", () => {
     await waitFor(() => expect(within(table).getByText("70.000000")).toBeInTheDocument());
     fireEvent.click(within(table).getByText("70.000000"));
     const form = screen.getByRole("form", { name: "Forecast cell" });
-    expect(within(form).getByLabelText(/^Item/)).toHaveValue(cell.itemId);
+    expect(within(form).getByLabelText(/^Item/)).toHaveAttribute("data-value", cell.itemId);
     fireEvent.change(within(form).getByLabelText(/^Reduction principle/), { target: { value: "percent" } });
     fillCell(form, { "Reduction percent": "20", "Forecast quantity": "90" });
     fireEvent.click(within(form).getByRole("button", { name: "Save cell" }));

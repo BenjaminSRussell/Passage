@@ -23,6 +23,7 @@ import { OpenSupplyPage } from "./OpenSupplyPage";
 import { PolicyDetailPage, PolicyListPage } from "./PolicyPages";
 import { PriceLookupPage } from "./PricingPage";
 import { ReleaseRunCreatePage, ReleaseRunDetailPage, ReleaseRunsPage } from "./ReleasePages";
+import { ProcureToPayPage } from "./ProcureToPayPage";
 import { PurchaseOrderCreatePage, PurchaseOrderDetailPage, PurchaseOrderEditPage, PurchaseOrdersPage } from "./PurchaseOrderPages";
 import { RepricePage, RepriceRunPage } from "./RepricePages";
 import { RequisitionCreatePage, RequisitionDetailPage, RequisitionEditPage, RequisitionsPage } from "./RequisitionPages";
@@ -77,6 +78,7 @@ const purchasing: PassageModule = {
     { path: "/purchasing/rfq-types", element: createElement(RFQTypesPage) },
     { path: "/purchasing/rfq-types/new", element: createElement(RFQTypeCreatePage), handle: { title: "New RFQ type" } },
     { path: "/purchasing/rfq-types/:id", element: createElement(RFQTypeDetailPage), handle: { title: "RFQ type" } },
+    { path: "/purchasing/procure-to-pay", element: createElement(ProcureToPayPage), handle: { title: "Procure to pay", duty: "procurement.purchase-order.inquire" } },
     { path: "/purchasing/purchase-orders", element: createElement(PurchaseOrdersPage) },
     { path: "/purchasing/purchase-orders/new", element: createElement(PurchaseOrderCreatePage), handle: { title: "New purchase order" } },
     { path: "/purchasing/purchase-orders/:id", element: createElement(PurchaseOrderDetailPage), handle: { title: "Purchase order" } },
@@ -146,6 +148,7 @@ const purchasing: PassageModule = {
   ],
   nav: [
     { label: "Overview", to: "/purchasing", duty: "procurement.purchase-order.inquire" },
+    { label: "Procure to pay", to: "/purchasing/procure-to-pay", duty: "procurement.purchase-order.inquire" },
     { label: "Requisitions", to: "/purchasing/requisitions", duty: "procurement.requisition.create" },
     { label: "Requisition approvals", to: "/purchasing/approvals", duty: "procurement.purchase-order.inquire" },
     { label: "Consolidation", to: "/purchasing/consolidation", duty: "procurement.purchase-order.maintain" },

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { apiFetch } from "../api/http";
 
 /** The record types the search service indexes (services/search). */
 export const RECORD_TYPES = ["party", "product", "purchase_order", "receipt", "vendor_invoice", "sales_order", "packing_slip", "customer_invoice"] as const;
@@ -66,7 +67,7 @@ export const isAppPath = (link: string): boolean => link.startsWith("/") && !lin
 /** GET /api/v1/search: records of the caller's tenant and legal entities, ranked by the service. */
 export const searchRecords: RecordSearch = async (query, signal) => {
   const params = new URLSearchParams({ q: query.trim(), limit: String(RESULT_LIMIT) });
-  const res = await fetch(`/api/v1/search?${params.toString()}`, { headers: { Accept: "application/json" }, signal });
+  const res = await apiFetch(`/api/v1/search?${params.toString()}`, { headers: { Accept: "application/json" }, signal });
   if (!res.ok) {
     throw new Error(`record search failed with status ${res.status}`);
   }

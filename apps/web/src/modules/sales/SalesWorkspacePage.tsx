@@ -16,6 +16,7 @@ import { dash, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 export const WINDOWS = [30, 90, 365] as const;
 export const EXPIRY_WINDOWS = [7, 30, 90] as const;
@@ -119,7 +120,7 @@ export function SalesWorkspacePage() {
       <form className={styles.toolbar} onSubmit={apply} noValidate aria-label="Filter the workspace">
         <FormField id="ws-le" label="Legal entity" error={errors.legalEntity} optional>
           {(control) => (
-            <Input {...control} className={styles.mono} value={draft.legalEntity} onChange={(e) => set("legalEntity", e.target.value)} invalid={Boolean(errors.legalEntity)} />
+            <EntityLookup entity="legalEntity" {...control} prefill={false} placeholder="All legal entities" value={draft.legalEntity} onChange={(e) => set("legalEntity", e.target.value)} invalid={Boolean(errors.legalEntity)} />
           )}
         </FormField>
         <FormField id="ws-window" label="Conversion period">

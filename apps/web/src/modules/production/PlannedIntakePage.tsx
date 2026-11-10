@@ -4,6 +4,7 @@ import { INTAKE_STATUSES, describeProblem, listPlannedIntake, type IntakePage, t
 import { intakeStatusLabel, intakeStatusTone } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 export interface PlannedIntakePageProps {
   /** Opens a planned order from its row. */
@@ -12,11 +13,11 @@ export interface PlannedIntakePageProps {
 
 const columns: DataTableColumn<PlannedIntake>[] = [
   { key: "status", header: "Status", render: (row) => <Badge tone={intakeStatusTone[row.status]}>{intakeStatusLabel[row.status]}</Badge> },
-  { key: "productId", header: "Product", mono: true },
+  { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} fallback={row.productId} /> },
   { key: "quantity", header: "Quantity", align: "end" },
   { key: "deliveryDate", header: "Delivery", render: (row) => <time dateTime={row.deliveryDate}>{row.deliveryDate}</time> },
-  { key: "siteId", header: "Site", mono: true },
-  { key: "warehouseId", header: "Warehouse", mono: true, render: (row) => row.warehouseId ?? "Site scope" },
+  { key: "siteId", header: "Site", render: (row) => <EntityName entity="site" id={row.siteId} fallback={row.siteId} /> },
+  { key: "warehouseId", header: "Warehouse", render: (row) => (row.warehouseId ? <EntityName entity="warehouse" id={row.warehouseId} fallback={row.warehouseId} /> : "Site scope") },
   { key: "receivedAt", header: "Firmed", render: (row) => <time dateTime={row.receivedAt}>{row.receivedAt.slice(0, 10)}</time> },
 ];
 

@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, HOLD_TYPES, listOrders, ORDER_STATUSES, type HoldType, type OrderStatus, type OrderSummary, type Problem } from "./api/client";
-import { money, sentence, shortId } from "./format";
+import { money, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 /** Active holds as badges: CREDIT and FRAUD block confirmation, so they show as danger. */
 export function HoldBadges({ holds }: { holds: HoldType[] }) {
@@ -23,7 +24,7 @@ export function HoldBadges({ holds }: { holds: HoldType[] }) {
 
 const columns: DataTableColumn<OrderSummary>[] = [
   { key: "orderNumber", header: "Order", mono: true },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "orderType", header: "Type", render: (row) => sentence(row.orderType) },
   { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
   { key: "activeHolds", header: "Holds", render: (row) => <HoldBadges holds={row.activeHolds} /> },

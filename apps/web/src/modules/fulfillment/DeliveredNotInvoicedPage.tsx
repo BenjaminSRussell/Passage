@@ -3,10 +3,12 @@ import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useNavigate } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { deliveredNotInvoiced, type DniLine, type DniReport } from "./api/client";
-import { formatDate, formatMoney, shortId, today, UUID } from "./format";
+import { formatDate, formatMoney, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { OrderNumber } from "../sales/OrderNumber";
 
 /** How many slips the page lists; the totals always cover every open slip. */
 export const DNI_LINES = 500;
@@ -15,8 +17,8 @@ const columns: DataTableColumn<DniLine>[] = [
   { key: "packingSlipNumber", header: "Packing slip", mono: true },
   { key: "postingDate", header: "Posting date", render: (row) => formatDate(row.postingDate) },
   { key: "daysOutstanding", header: "Days outstanding", align: "end" },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => shortId(row.customerId) },
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
+  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
   { key: "amount", header: "Open on 1405", align: "end", render: (row) => formatMoney(row.amount, row.currency) },
 ];
 

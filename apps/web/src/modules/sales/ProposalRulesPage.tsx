@@ -20,6 +20,7 @@ import { reasonBadge } from "./OrderProposals";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 type Errors = Record<string, string>;
 
@@ -178,9 +179,9 @@ export function ProposalRulesPage() {
     { key: "orderedProductId", header: "Ordered product", mono: true },
     { key: "proposedProductId", header: "Proposed product", mono: true },
     { key: "reason", header: "Reason", render: (r) => reasonBadge(r.reason) },
-    { key: "customerId", header: "Customer", mono: true, render: (r) => (r.customerId ? shortId(r.customerId) : "Every customer") },
+    { key: "customerId", header: "Customer", render: (r) => (r.customerId ? <EntityName entity="customer" id={r.customerId} /> : "Every customer") },
     { key: "acceptance", header: "Accepted", align: "end", render: (r) => acceptanceRate(r) },
-    { key: "legalEntityId", header: "Legal entity", mono: true, render: (r) => shortId(r.legalEntityId) },
+    { key: "legalEntityId", header: "Legal entity", render: (r) => <EntityName entity="legalEntity" id={r.legalEntityId} /> },
     {
       key: "actions",
       header: "Action",

@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 // Client for the scheduling service (services/scheduling/api/openapi.yaml).
 // Browser calls use /api/v1/scheduling/..., which the web BFF rewrites to the service.
 
@@ -371,7 +372,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }
@@ -1271,7 +1272,7 @@ export function createPeg(input: NewOrderPeg, key: string = newKey()): Promise<O
 
 /** Removes a peg; the service answers 204 with no body. */
 export async function deletePeg(id: string): Promise<void> {
-  const res = await fetch(`${base}/order-pegs/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`${base}/order-pegs/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { Accept: "application/json" },
     credentials: "same-origin",
@@ -1326,7 +1327,7 @@ export function createCapacityOverride(resourceId: string, input: NewCapacityOve
 
 /** Removes an override; the service answers 204 with no body. */
 export async function deleteCapacityOverride(resourceId: string, id: string): Promise<void> {
-  const res = await fetch(`${base}/resources/${encodeURIComponent(resourceId)}/capacity-overrides/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`${base}/resources/${encodeURIComponent(resourceId)}/capacity-overrides/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { Accept: "application/json" },
     credentials: "same-origin",

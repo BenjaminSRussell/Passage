@@ -15,6 +15,7 @@ import {
 } from "./api/client";
 import { dash, describeDimensions, sentence, shortId, UUID } from "./format";
 import { ALL_DIMENSIONS, money, ProblemAlert } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -56,7 +57,7 @@ const columns: DataTableColumn<Transaction>[] = [
     ),
   },
   { key: "physicalDate", header: "Physical date", mono: true },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
   { key: "qty", header: "Quantity", align: "end", mono: true, render: (row) => `${row.qty} ${row.enteredUnit}` },
   {

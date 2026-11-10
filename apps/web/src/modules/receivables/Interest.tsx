@@ -20,13 +20,14 @@ import { DAY, EXCLUSION_LABELS, money, shortId, today, UUID } from "./format";
 import { CommandFailure, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
 const RATE = /^(0(\.\d{1,6})?|1(\.0{1,6})?)$/;
 
 const noteColumns: DataTableColumn<InterestNote>[] = [
   { key: "documentNumber", header: "Document", mono: true },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "period", header: "Period", mono: true },
   { key: "calculationDate", header: "Calculated to", mono: true },
   { key: "days", header: "Days", mono: true, align: "end" },
@@ -98,15 +99,15 @@ function toInput(v: InterestDraft): InterestInput {
 
 const candidateColumns: DataTableColumn<InterestCandidate>[] = [
   { key: "documentNumber", header: "Document", mono: true },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "principal", header: "Open amount", mono: true, align: "end", render: (row) => money(row.principal, row.currency) },
   { key: "days", header: "Days", mono: true, align: "end" },
   { key: "amount", header: "Interest", mono: true, align: "end", render: (row) => money(row.amount, row.currency) },
 ];
 
 const exclusionColumns: DataTableColumn<Exclusion>[] = [
-  { key: "openItemId", header: "Open item", mono: true, render: (row) => <span title={row.openItemId}>{shortId(row.openItemId)}</span> },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "openItemId", header: "Open item", mono: true, render: (row) => shortId(row.openItemId) },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "reason", header: "Why no interest", render: (row) => (row.reason === "BELOW_MINIMUM" ? "Below the 5.00 minimum" : EXCLUSION_LABELS[row.reason] ?? row.reason) },
 ];
 

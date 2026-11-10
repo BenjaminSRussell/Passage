@@ -33,10 +33,11 @@ import {
   type Problem,
   type Resolution,
 } from "./api/client";
-import { dateTime, DECIMAL, DISPUTE_LABELS, DISPUTE_TONES, money, RESOLUTION_LABELS, shortId, UUID } from "./format";
+import { dateTime, DECIMAL, DISPUTE_LABELS, DISPUTE_TONES, money, RESOLUTION_LABELS, UUID } from "./format";
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
 const REASON = /^[A-Z][A-Z_]{1,31}$/;
@@ -54,7 +55,7 @@ function statusBadge(status: DisputeStatus) {
 
 const columns: DataTableColumn<Dispute>[] = [
   { key: "documentNumber", header: "Document", mono: true },
-  { key: "customerId", header: "Customer", mono: true, render: (row) => <span title={row.customerId}>{shortId(row.customerId)}</span> },
+  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "reasonCode", header: "Reason", mono: true },
   { key: "disputedAmount", header: "Disputed", mono: true, align: "end", render: (row) => money(row.disputedAmount, row.currency) },
   { key: "owner", header: "Owner" },

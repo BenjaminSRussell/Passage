@@ -34,15 +34,15 @@ describe("engineering detail client calls", () => {
   it("encodes ids and cursor", async () => {
     const fetchMock = stub(() => ok({ items: [] }));
     await getResourceGroup("g/1");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resource-groups/g%2F1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/resource-groups/g%2F1", expect.anything());
     await getCapability("c/1");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities/c%2F1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities/c%2F1", expect.anything());
     await getCalendar("k/1");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars/k%2F1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars/k%2F1", expect.anything());
     await listCalendars("c9");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars?cursor=c9");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars?cursor=c9", expect.anything());
     await listCalendars();
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars", expect.anything());
   });
 });
 
@@ -146,7 +146,7 @@ describe("CalendarsPage", () => {
     const table = await findTable({ name: "Work calendars" });
     await waitFor(() => expect(table).toHaveTextContent("NIGHT"));
     expect(table).toHaveTextContent("Not generated");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars?cursor=c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/calendars?cursor=c1", expect.anything());
   });
 
   it("shows the empty state and the error with Retry", async () => {

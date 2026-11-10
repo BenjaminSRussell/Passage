@@ -14,4 +14,6 @@ Seeded users (dev only, never reuse these passwords): `admin` / `passage-admin-d
 
 Without Docker: `cd tools/e2e && PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...` runs the same flow against the real binaries and, with `opa` on PATH, through the gateway.
 
-Not proven on CI: the compose bring-up itself (images, Keycloak realm import, healthchecks) and the Playwright spec `apps/web/e2e/login.live.spec.ts` (`PASSAGE_E2E_LIVE_URL=http://localhost:5173`).
+`make e2e-local` (stack running) gets real Keycloak tokens for `admin` and `clerk` through the realm's password grant (dev realm only), then runs the vendor, purchase order, receipt, AP invoice and ledger flow through the gateway and OPA (`TestLiveStackFlow`). `make dev` also creates the `passage_app` Postgres role the migrations grant to.
+
+Proven by hand on a laptop (2026-11-10) but not on CI: the compose bring-up itself (images, Keycloak realm import, healthchecks) and the Playwright spec `apps/web/e2e/login.live.spec.ts` (`PASSAGE_E2E_LIVE_URL=http://localhost:5173`).

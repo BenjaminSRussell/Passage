@@ -7,6 +7,7 @@ import { validateRelease } from "./AgreementDetailPage";
 import { validateAgreement } from "./AgreementsPage";
 import sales from "./module";
 import { validateListing } from "./ProductListingsPage";
+import { nameLookups } from "./testLookup";
 
 const LE = "11111111-0000-4000-8000-000000000001";
 const CUSTOMER = "22222222-0000-4000-8000-000000000002";
@@ -122,9 +123,10 @@ function fill(label: string | RegExp, value: string) {
 describe("Product listings", () => {
   it("lists entries and passes the filter to the inquiry", async () => {
     handler = () => ({ status: 200, body: { items: [listing] } });
+    nameLookups({ [PRODUCT]: "Hex bolt" });
     const { container } = renderAt("/sales/product-listings");
     const table = await findTable({ name: "Product listings" });
-    await waitFor(() => expect(within(table).getByText(PRODUCT)).toBeInTheDocument());
+    await waitFor(() => expect(within(table).getByText("Hex bolt")).toBeInTheDocument());
     expect(within(table).getByText("Deny")).toBeInTheDocument();
     expect(within(table).getByText("Always")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -150,11 +152,12 @@ describe("Product listings", () => {
   it("shows loading, then the problem code with a retry", async () => {
     let fail = true;
     handler = () => (fail ? { status: 503, body: { code: "COM-0503", detail: "store unavailable" } } : { status: 200, body: { items: [listing] } });
+    nameLookups({ [PRODUCT]: "Hex bolt" });
     renderAt("/sales/product-listings");
     expect(await screen.findByText(/COM-0503/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByText(PRODUCT)).toBeInTheDocument();
+    expect(await screen.findByText("Hex bolt")).toBeInTheDocument();
   });
 
   it("asks before removing an entry, then deletes it and reloads", async () => {

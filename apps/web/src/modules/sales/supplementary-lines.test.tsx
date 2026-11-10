@@ -12,7 +12,9 @@ const ORDER_ID = "77777777-0000-4000-8000-000000000007";
 const LE = "11111111-0000-4000-8000-000000000001";
 const CUSTOMER = "22222222-0000-4000-8000-000000000002";
 const FG100 = "33333333-0000-4000-8000-000000000003";
-const MANUAL = "44444444-0000-4000-8000-000000000004";
+import { nameLookups } from "./testLookup";
+
+const MANUAL ="44444444-0000-4000-8000-000000000004";
 const SITE = "55555555-0000-4000-8000-000000000005";
 const WAREHOUSE = "66666666-0000-4000-8000-000000000006";
 const shellRules = new Set(["page-has-heading-one", "landmark-unique", "region", "bypass"]);
@@ -101,6 +103,7 @@ describe("Mandatory supplementary lines on a new order (FR-27.14, AC-27.10)", ()
   it("opens the created order and says which supplementary items were added", async () => {
     const warnings = [{ code: "SLS-0012", lineNo: 2, message: `Mandatory supplementary item ${MANUAL} added (2 EA)` }];
     handler = (_url, init) => (init.method === "POST" ? { status: 201, body: order({ warnings }), etag: '"1"' } : { status: 200, body: order(), etag: '"1"' });
+    nameLookups({ [MANUAL]: "Manual kit" });
     renderAt("/sales/orders/new");
     const set = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
     set("Legal entity", LE);
@@ -116,7 +119,7 @@ describe("Mandatory supplementary lines on a new order (FR-27.14, AC-27.10)", ()
     expect(screen.getByText("Supplementary items added")).toBeInTheDocument();
     expect(screen.getByText(new RegExp(`${MANUAL} added \\(2 EA\\)`))).toBeInTheDocument();
     const lines = screen.getByRole("table", { name: "Order lines" });
-    const row = within(lines).getByText(MANUAL).closest("tr") as HTMLElement;
+    const row = (await within(lines).findByText("Manual kit")).closest("tr") as HTMLElement;
     expect(within(row).getByText("For line 1")).toBeInTheDocument();
   });
 

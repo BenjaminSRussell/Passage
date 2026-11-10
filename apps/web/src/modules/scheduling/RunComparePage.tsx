@@ -7,6 +7,7 @@ import styles from "./pages.module.css";
 import { scopeLabels } from "./RunsPage";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { OrderNumber } from "../mfg-shared/orders";
 
 function signed(minutes: number): string {
   if (minutes === 0) return "0 min";
@@ -14,7 +15,7 @@ function signed(minutes: number): string {
 }
 
 const jobColumns: DataTableColumn<RunCompareJob>[] = [
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+  { key: "orderId", header: "Order", mono: true, render: (row) => <OrderNumber id={row.orderId} /> },
   { key: "operNumber", header: "Operation", align: "end" },
   { key: "resourceId", header: "Resource", mono: true, render: (row) => shortId(row.resourceId) },
   { key: "start", header: "Start", render: (row) => formatDateTime(row.start) },
@@ -23,7 +24,7 @@ const jobColumns: DataTableColumn<RunCompareJob>[] = [
 ];
 
 const changeColumns: DataTableColumn<RunCompareChange>[] = [
-  { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+  { key: "orderId", header: "Order", mono: true, render: (row) => <OrderNumber id={row.orderId} /> },
   { key: "operNumber", header: "Operation", align: "end" },
   {
     key: "fromResourceId",

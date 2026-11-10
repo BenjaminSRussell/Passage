@@ -2,15 +2,16 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { getCountVariance, type CountVarianceLine, type CountVarianceTotals } from "./api/client";
-import { dash, describeDimensions, formatDateTime, sentence, shortId, signed, UUID } from "./format";
+import { dash, describeDimensions, formatDateTime, sentence, signed, UUID } from "./format";
 import { ALL_DIMENSIONS, ProblemAlert, stateTones } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const columns: DataTableColumn<CountVarianceLine>[] = [
   { key: "sheetNumber", header: "Count sheet", mono: true, render: (row) => <Link to={`/inventory/count-sheets/${row.sheetId}`}>{row.sheetNumber}</Link> },
   { key: "sheetStatus", header: "Status", render: (row) => <Badge tone={stateTones[row.sheetStatus] ?? "neutral"}>{sentence(row.sheetStatus)}</Badge> },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
   { key: "expectedQty", header: "Expected", align: "end", mono: true },
   { key: "countedQty", header: "Counted", align: "end", mono: true },

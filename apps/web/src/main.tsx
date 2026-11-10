@@ -10,7 +10,6 @@ import { bootstrapAuth } from "./shell/auth/auth";
 import { AllFeaturesPage } from "./shell/pages/AllFeaturesPage";
 import { HomePage } from "./shell/pages/HomePage";
 import { GlossaryPage } from "./shell/glossary/GlossaryPage";
-import { NotesPage } from "./shell/pages/NotesPage";
 import { NotFoundPage } from "./shell/pages/NotFoundPage";
 import "./shell/theme.css";
 
@@ -31,7 +30,6 @@ function App({ duties, identity, banner }: { duties?: readonly string[]; identit
             element: <Shell modules={modules} duties={duties} identity={identity} />,
             children: [
               { index: true, element: <HomePage /> },
-              { path: "notes", element: <NotesPage /> },
               { path: "features", element: <AllFeaturesPage /> },
               { path: "glossary", element: <GlossaryPage /> },
               ...modules.flatMap((m) => m.routes),

@@ -1,5 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type BadgeTone, type DataTableColumn } from "../../shell/ui";
@@ -93,7 +94,7 @@ export function GrirPage() {
     },
     { key: "receiptNumber", header: "Receipt", mono: true },
     { key: "lineNo", header: "Line", align: "end" },
-    { key: "vendorId", header: "Vendor", mono: true },
+    { key: "vendorId", header: "Vendor", render: (g) => <EntityName entity="vendor" id={g.vendorId} fallback="Unknown vendor" /> },
     { key: "receivedQty", header: "Received", align: "end" },
     { key: "invoicedQty", header: "Invoiced", align: "end" },
     { key: "openAmount", header: "Open amount", align: "end", render: (g) => `${g.openAmount} ${g.currency}` },

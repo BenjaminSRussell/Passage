@@ -27,7 +27,7 @@ export class ShellPage {
     this.drawer = page.getByRole("dialog", { name: "Navigation" });
     this.palette = page.getByRole("dialog", { name: "Search" });
     this.paletteInput = page.getByRole("combobox", { name: "Find a page" });
-    this.paletteOptions = page.getByRole("option");
+    this.paletteOptions = this.palette.getByRole("option");
   }
 
   async goto(path: string): Promise<void> {

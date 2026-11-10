@@ -92,7 +92,7 @@ describe("sealed bids and scoring rules", () => {
   it("describes how the RFQ takes bids", () => {
     expect(biddingLabel({ ...sealedBefore, sealed: false })).toBe("Open: replies are visible as they arrive");
     expect(biddingLabel(sealedBefore)).toBe("Sealed until 2026-11-01 17:00 UTC");
-    expect(biddingLabel(opened)).toBe("Sealed, opened 2026-11-01 17:00 UTC by 44444444");
+    expect(biddingLabel(opened)).toBe("Sealed, opened 2026-11-01 17:00 UTC by a buyer");
   });
 
   it("offers the weighted score only with criteria, and scoring only once sealed replies are open", () => {
@@ -174,15 +174,15 @@ describe("sealed RFQ pages", () => {
       return json(opened, 200, { ETag: '"5"' });
     });
     const { container } = renderAt(`/purchasing/rfqs/${RFQ_ID}`);
-    expect(await screen.findByText("Sealed, opened 2026-11-01 17:00 UTC by 44444444")).toBeInTheDocument();
+    expect(await screen.findByText("Sealed, opened 2026-11-01 17:00 UTC by a buyer")).toBeInTheDocument();
     const award = await screen.findByRole("group", { name: /Line 1: Pump/ });
-    expect(await within(award).findByLabelText(/#1 vendor 22222222: 10 USD each, 5 days, total 100 USD, score 6.3333/)).toBeChecked();
+    expect(await within(award).findByLabelText(/#1 vendor Vendor 22222222: 10 USD each, 5 days, total 100 USD, score 6.3333/)).toBeChecked();
     expect(within(screen.getByRole("table", { name: "Vendor scores" })).getByText("8")).toBeInTheDocument();
     expect(screen.getByLabelText("Quality (weight 2)")).toHaveValue("8");
     fireEvent.change(screen.getByLabelText("Delivery (weight 1)"), { target: { value: "3" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Save scores" }));
-    expect(await screen.findByText("Scores saved for vendor 22222222.")).toBeInTheDocument();
+    expect(await screen.findByText("Scores saved for the vendor.")).toBeInTheDocument();
     const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit).method === "PUT") as [string, Init];
     expect(put[0]).toBe(`/api/v1/procurement/rfqs/${RFQ_ID}/scores/${VENDOR_A}`);
     expect(put[1].headers?.["If-Match"]).toBe('"5"');

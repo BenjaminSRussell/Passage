@@ -51,7 +51,7 @@ describe("RouteVersionsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await screen.findByText("RT-b");
     expect(screen.getByText("RT-a")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions?cursor=c1");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions?cursor=c1", expect.anything());
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
 
@@ -60,10 +60,10 @@ describe("RouteVersionsPage", () => {
     render(<RouteVersionsPage />);
     await screen.findByText("RT-a");
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "active" } });
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions?status=active"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions?status=active", expect.anything()));
     fireEvent.change(screen.getByLabelText("Product"), { target: { value: "P1" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions?productId=P1&status=active"));
+    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/route-versions?productId=P1&status=active", expect.anything()));
   });
 
   it("discards a late Load more page after the filter changes", async () => {
@@ -150,7 +150,7 @@ describe("RouteVersionPage activation", () => {
     expect(live).toHaveTextContent("");
     fireEvent.click(screen.getByRole("button", { name: "Activate" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Activate" })).toBeDisabled());
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a:activate", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a:activate", expect.objectContaining({ method: "POST" }));
     finish(ok({ ...draftDetail, status: "active" }));
     await waitFor(() => expect(activateButton()).toBeNull());
     expect(screen.getByText("Active")).toBeInTheDocument();

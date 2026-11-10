@@ -1,3 +1,4 @@
+import { apiFetch } from "../../../shell/api/http";
 export const base = "/api/v1/org";
 
 export const ALL = "ALL";
@@ -124,7 +125,7 @@ export async function orgFetch<T>(path: string, init: RequestInit, scope: Scope)
   } else {
     headers.set("X-Passage-LegalEntity", scope);
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers });
+  const res = await apiFetch(`${base}${path}`, { ...init, headers });
   if (!res.ok) {
     throw await toError(res);
   }

@@ -13,8 +13,9 @@ import {
   type TransferLine,
   type TransferOrder,
 } from "./api/client";
-import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, shortId, today } from "./format";
+import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, today } from "./format";
 import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
+import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { TransferEditForm } from "./TransferEditForm";
 import { useLoad } from "./useLoad";
@@ -22,7 +23,7 @@ import { ProblemMessage } from "../../shell/errors";
 
 const lineColumns: DataTableColumn<TransferLine>[] = [
   { key: "lineNo", header: "Line", align: "end" },
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, ALL_DIMENSIONS) },
   { key: "qty", header: "Ordered", align: "end", mono: true, render: (row) => `${row.qty} ${row.unit}` },
   { key: "shippedQty", header: "Shipped", align: "end", mono: true },

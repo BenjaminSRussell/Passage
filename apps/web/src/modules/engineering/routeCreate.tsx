@@ -2,6 +2,7 @@ import { Fragment, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { ApiError, createRouteVersion, type RouteVersionInput, type RouteVersionOperation } from "./api/client";
 import styles from "./pages.module.css";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 interface OperationDraft {
   key: number;
@@ -118,12 +119,12 @@ export function RouteVersionCreatePage({ onCreated, onCancel }: { onCreated?: (i
         <form className={styles.form} onSubmit={submit}>
           <div className={styles.field}>
             <FormField id="new-route-product" label="Product" error={errors.fields.productId}>
-              {(control) => <Input {...control} value={productId} onChange={(e) => setProductId(e.target.value)} required maxLength={64} />}
+              {(control) => <EntityLookup {...control} entity="product" prefill={false} value={productId} onChange={(e) => setProductId(e.target.value)} />}
             </FormField>
           </div>
           <div className={styles.field}>
             <FormField id="new-route-site" label="Site" error={errors.fields.siteId}>
-              {(control) => <Input {...control} value={siteId} onChange={(e) => setSiteId(e.target.value)} required maxLength={64} />}
+              {(control) => <EntityLookup {...control} entity="site" prefill={false} value={siteId} onChange={(e) => setSiteId(e.target.value)} />}
             </FormField>
           </div>
           <div className={styles.field}>

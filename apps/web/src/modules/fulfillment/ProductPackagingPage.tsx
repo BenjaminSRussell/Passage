@@ -7,9 +7,10 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { PlainName } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<ProductPackaging>[] = [
-  { key: "productId", header: "Product", mono: true, render: (row) => shortId(row.productId) },
+  { key: "productId", header: "Product", render: (row) => <PlainName short entity="product" id={row.productId} /> },
   { key: "materialCode", header: "Material", mono: true },
   { key: "weightPerUnitKg", header: "kg per unit", align: "end" },
 ];

@@ -11,6 +11,7 @@ import {
 import { describeError, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const dash = "—";
 
@@ -99,7 +100,7 @@ function newKey(): string {
 const groupColumns: DataTableColumn<FirmedGroup>[] = [
   { key: "targetType", header: "Becomes", render: (g) => <Badge tone="success">{targetLabel[g.targetType]}</Badge> },
   { key: "targetId", header: "Order id", mono: true },
-  { key: "vendorId", header: "Vendor", mono: true, render: (g) => g.vendorId ?? dash },
+  { key: "vendorId", header: "Vendor", render: (g) => (g.vendorId ? <EntityName entity="vendor" id={g.vendorId} fallback={g.vendorId} /> : dash) },
   { key: "deliveryDate", header: "Delivery date" },
   { key: "qty", header: "Quantity", align: "end" },
   { key: "plannedOrderIds", header: "Planned orders", align: "end", render: (g) => g.plannedOrderIds.length },

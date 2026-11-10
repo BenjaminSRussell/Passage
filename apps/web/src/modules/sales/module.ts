@@ -26,6 +26,7 @@ import { IntakeErrorDetailPage } from "./IntakeErrorDetailPage";
 import { IntakeErrorsPage } from "./IntakeErrorsPage";
 import { HoldQueuePage } from "./HoldQueuePage";
 import { OrdersPage } from "./OrdersPage";
+import { OrderToCashPage } from "./OrderToCashPage";
 import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPage";
 import { AlternativeItemsPage, NewAlternativeRulePage } from "./AlternativeItemsPage";
 import { NewProposalRulePage, ProposalRulesPage } from "./ProposalRulesPage";
@@ -46,6 +47,7 @@ const sales: PassageModule = {
     "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, approve or reject changes of customers that need change approval, apply holds and work the release queue, maintain credit profiles and rank customers by credit limit used, the per legal entity sales parameters, product listings, customer delivery terms, delivery tolerances and partial delivery policies, supplementary items, product proposals, allocation quotas and sales agreements, record deliveries and invoices against orders, close invoiced orders, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
+    { path: "/sales/order-to-cash", element: createElement(OrderToCashPage), handle: { title: "Order to cash", duty: "sales.order.read" } },
     { path: "/sales/workspace", element: createElement(SalesWorkspacePage), handle: { title: "Sales workspace", duty: "sales.order.read" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
     { path: "/sales/orders/new", element: createElement(NewOrderPage), handle: { title: "New sales order" } },
@@ -101,6 +103,7 @@ const sales: PassageModule = {
     { path: "/sales/product-proposals/new", element: createElement(NewProposalRulePage), handle: { title: "New product proposal rule" } },
   ],
   nav: [
+    { label: "Order to cash", to: "/sales/order-to-cash", duty: "sales.order.read" },
     { label: "Sales workspace", to: "/sales/workspace", duty: "sales.order.read" },
     { label: "Sales orders", to: "/sales/orders", duty: "sales.order.read" },
     { label: "New order", to: "/sales/orders/new", duty: "sales.order.write" },

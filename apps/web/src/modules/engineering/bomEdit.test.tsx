@@ -9,6 +9,11 @@ afterEach(() => vi.unstubAllGlobals());
 
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 const problem = (status: number, code: string, detail: string, errors?: Record<string, string>) => ({ ok: false, status, json: async () => ({ code, title: "Err", detail, errors }) });
+const WHEEL = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const FRAME = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const HUB = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const RIM = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const TYRE = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const line = (lineNo: number, component: string, quantity = "2") => ({ lineNo, componentProductId: component, quantity, scrapConst: "0", scrapVarPct: "5", series: "1", lineType: "item" });
 const draft = (version = 3, lines = [line(1, "WHEEL"), line(2, "FRAME")], status = "draft") => ({
   id: "v1", productId: "BIKE", siteId: "S1", effectiveFrom: "2026-01-01", status, version, lines,
@@ -51,22 +56,22 @@ describe("diffLines", () => {
 
 describe("BomVersionEditPage", () => {
   it("shows a loading skeleton, then the loaded header and lines", async () => {
-    stub(() => ok(draft()));
+    stub(() => ok(draft(3, [line(1, WHEEL), line(2, FRAME)])));
     render(<BomVersionEditPage id="v1" />);
     expect(screen.queryByLabelText("Component 1")).toBeNull();
-    expect(await screen.findByLabelText("Component 1")).toHaveValue("WHEEL");
-    expect(screen.getByLabelText("Component 2")).toHaveValue("FRAME");
-    expect(screen.getByLabelText("Site")).toHaveValue("S1");
+    expect(await screen.findByLabelText("Component 1")).toHaveAttribute("data-value", WHEEL);
+    expect(screen.getByLabelText("Component 2")).toHaveAttribute("data-value", FRAME);
+    expect(screen.getByLabelText("Site")).toHaveAttribute("data-value", "S1");
   });
 
   it("saves every line with the loaded version, keeping fields the form does not edit", async () => {
     const onSaved = vi.fn();
-    const fetchMock = stub((_url, init) => (init?.method === "PUT" ? ok(draft(4)) : ok(draft())));
+    const fetchMock = stub((_url, init) => (init?.method === "PUT" ? ok(draft(4)) : ok(draft(3, [line(1, WHEEL), line(2, FRAME)]))));
     render(<BomVersionEditPage id="v1" onSaved={onSaved} />);
     fireEvent.change(await screen.findByLabelText("Quantity 1"), { target: { value: "6" } });
     fireEvent.click(screen.getByRole("button", { name: "Remove line 2" }));
     fireEvent.click(screen.getByRole("button", { name: "Add line" }));
-    fireEvent.change(screen.getByLabelText("Component 2"), { target: { value: "HUB" } });
+    fireEvent.change(screen.getByLabelText("Component 2"), { target: { value: HUB } });
     fireEvent.change(screen.getByLabelText("Quantity 2"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith("v1"));
@@ -74,8 +79,8 @@ describe("BomVersionEditPage", () => {
     expect(body.version).toBe(3);
     expect(body.productId).toBe("BIKE");
     expect(body.lines).toEqual([
-      { ...line(1, "WHEEL", "6") },
-      { lineNo: 3, componentProductId: "HUB", quantity: "1", scrapConst: "0", scrapVarPct: "0" },
+      { ...line(1, WHEEL, "6") },
+      { lineNo: 3, componentProductId: HUB, quantity: "1", scrapConst: "0", scrapVarPct: "0" },
     ]);
   });
 
@@ -159,11 +164,11 @@ describe("BomVersionEditPage", () => {
     let served = draft(3);
     stub((_url, init) => (init?.method === "PUT" ? problem(409, "ENG-BOM-VERSION-CONFLICT", "stale") : ok(served)));
     render(<BomVersionEditPage id="v1" />);
-    fireEvent.change(await screen.findByLabelText("Component 1"), { target: { value: "RIM" } });
-    served = draft(4, [line(1, "TYRE")]);
+    fireEvent.change(await screen.findByLabelText("Component 1"), { target: { value: RIM } });
+    served = draft(4, [line(1, TYRE)]);
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
     fireEvent.click(await screen.findByRole("button", { name: "Discard my edits and load version 4" }));
-    expect(await screen.findByLabelText("Component 1")).toHaveValue("TYRE");
+    expect(await screen.findByLabelText("Component 1")).toHaveAttribute("data-value", TYRE);
     expect(screen.queryByLabelText("Component 2")).toBeNull();
   });
 

@@ -2,6 +2,8 @@ import { useRef, type RefObject } from "react";
 import { Link, matchPath, NavLink, useLocation } from "react-router-dom";
 import { copy, shortcutHint } from "./copy";
 import { useFocusTrap } from "./hooks/useFocusTrap";
+import { MY_WORK_PATH } from "./inbox/inbox";
+import { badgeText, countInbox, useSharedInbox } from "./inbox/InboxProvider";
 import styles from "./Shell.module.css";
 import type { ShellNavItem } from "./shellNav";
 import { Button, Icon } from "./ui";
@@ -21,6 +23,8 @@ export function Sidebar({ shellNav, drawerOpen, announce, searchRef, onOpenSearc
   const asideRef = useRef<HTMLElement>(null);
   const { active, entries } = useWorkspaceNav();
   const { pathname } = useLocation();
+  const inbox = useSharedInbox();
+  const counts = inbox !== null && inbox.status === "ready" ? countInbox(inbox.items, inbox.hasMore || inbox.truncated.length > 0) : undefined;
   const covers = (to: string) => matchPath({ path: to, end: false }, pathname) !== null;
   const outsideWorkspace =
     shellNav.some((n) => matchPath({ path: n.to, end: true }, pathname) !== null) || active?.entries.some((e) => covers(e.to))
@@ -85,6 +89,22 @@ export function Sidebar({ shellNav, drawerOpen, announce, searchRef, onOpenSearc
               </NavLink>
             </li>
           ))}
+          {inbox !== null ? (
+            <li>
+              <NavLink to={MY_WORK_PATH} className={styles.item} onClick={onCloseDrawer}>
+                <Icon name="inbox" />
+                {copy.nav.myWork}
+                {counts !== undefined && counts.total > 0 ? (
+                  <>
+                    <span className={styles.badge} aria-hidden="true">
+                      {badgeText(counts)}
+                    </span>
+                    <span className="visually-hidden">{copy.myWork.badgeHint(badgeText(counts))}</span>
+                  </>
+                ) : null}
+              </NavLink>
+            </li>
+          ) : null}
         </ul>
         {active ? (
           <div className={styles.group}>

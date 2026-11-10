@@ -11,6 +11,7 @@ export interface Session {
   idToken: string | undefined;
   expiresAt: number;
   subject: string;
+  name?: string;
   tenantId: string;
   duties: readonly string[];
 }
@@ -82,6 +83,7 @@ export function sessionFrom(response: TokenResponse, now: number): Session {
     idToken: response.id_token,
     expiresAt: now + response.expires_in * 1000,
     subject: text("sub"),
+    name: text("name") || text("preferred_username") || text("email") || undefined,
     tenantId: text("tid"),
     duties: parseDuties(text("duties")),
   };

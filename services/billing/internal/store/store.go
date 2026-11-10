@@ -60,8 +60,12 @@ type ListFilter struct {
 	Type              string
 	CustomerID        string
 	OriginalInvoiceID string
-	After             string
-	Limit             int
+	// OrderID and PackingSlipID keep invoices with a line billed from that sales order or
+	// packing slip (the document flow, issue #534).
+	OrderID       string
+	PackingSlipID string
+	After         string
+	Limit         int
 }
 
 // InvoicePage is one page of invoice headers; NextAfter is the id to pass as
@@ -523,8 +527,10 @@ func (s *Postgres) ListInvoices(ctx context.Context, f ListFilter) (InvoicePage,
 		rows, err := tx.Query(ctx, `select `+invoiceColumns+` from invoice
 			where ($1 = '' or status = $1) and ($2 = '' or customer_id::text = $2)
 			  and ($4 = '' or invoice_type = $4) and ($5 = '' or original_invoice_id::text = $5)
+			  and ($7 = '' or exists (select 1 from invoice_line l where l.invoice_id = invoice.id and l.order_id::text = $7))
+			  and ($8 = '' or exists (select 1 from invoice_line l where l.invoice_id = invoice.id and l.packing_slip_id::text = $8))
 			  and ($6 = '' or (created_at, id) < (select a.created_at, a.id from invoice a where a.id = nullif($6, '')::uuid))
-			order by created_at desc, id desc limit $3`, f.Status, f.CustomerID, f.Limit+1, f.Type, f.OriginalInvoiceID, f.After)
+			order by created_at desc, id desc limit $3`, f.Status, f.CustomerID, f.Limit+1, f.Type, f.OriginalInvoiceID, f.After, f.OrderID, f.PackingSlipID)
 		if err != nil {
 			return err
 		}

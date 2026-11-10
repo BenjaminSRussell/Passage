@@ -14,6 +14,8 @@ import {
 import { dash, statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -41,7 +43,7 @@ interface FilterErrors {
 }
 
 const itemColumns: DataTableColumn<MaterialItemRow>[] = [
-  { key: "itemId", header: "Component", mono: true },
+  { key: "itemId", header: "Component", render: (row) => <EntityName entity="product" id={row.itemId} fallback={row.itemId} /> },
   { key: "orders", header: "Orders", align: "end" },
   { key: "lines", header: "Lines", align: "end" },
   { key: "qtyRequired", header: "Required", align: "end" },
@@ -54,7 +56,7 @@ const lineColumns: DataTableColumn<MaterialLineRow>[] = [
   { key: "orderNumber", header: "Order", mono: true },
   { key: "orderStatus", header: "Order status", render: (row) => <Badge tone={statusTone[row.orderStatus]}>{statusLabel[row.orderStatus] ?? row.orderStatus}</Badge> },
   { key: "lineNumber", header: "Line", mono: true },
-  { key: "itemId", header: "Component", mono: true },
+  { key: "itemId", header: "Component", render: (row) => <EntityName entity="product" id={row.itemId} fallback={row.itemId} /> },
   { key: "qtyRequired", header: "Required", align: "end" },
   { key: "qtyIssued", header: "Issued", align: "end" },
   { key: "qtyOutstanding", header: "Outstanding", align: "end" },
@@ -89,10 +91,10 @@ const query = (f: Filter): MaterialQuery => ({
 export function validateMaterialFilter(f: Filter): FilterErrors {
   const errors: FilterErrors = {};
   if (f.itemId.trim() !== "" && !uuidPattern.test(f.itemId.trim())) {
-    errors.itemId = "Enter the component's id (a UUID), or leave it empty.";
+    errors.itemId = "Choose a component, or leave it empty.";
   }
   if (f.siteId.trim() !== "" && !uuidPattern.test(f.siteId.trim())) {
-    errors.siteId = "Enter the site's id (a UUID), or leave it empty.";
+    errors.siteId = "Choose a site, or leave it empty.";
   }
   if (f.dueFrom !== "" && f.dueTo !== "" && f.dueFrom > f.dueTo) {
     errors.dueTo = "The end of the due range must not be before its start.";
@@ -187,10 +189,10 @@ export function MaterialRequirementsPage({ onOpenOrder }: MaterialRequirementsPa
             )}
           </FormField>
           <FormField id="mat-item" label="Component" optional error={errors.itemId}>
-            {(control) => <Input {...control} value={draft.itemId} onChange={(e) => setDraft({ ...draft, itemId: e.target.value })} />}
+            {(control) => <EntityLookup {...control} entity="product" value={draft.itemId} onChange={(e) => setDraft({ ...draft, itemId: e.target.value })} />}
           </FormField>
           <FormField id="mat-site" label="Site" optional error={errors.siteId}>
-            {(control) => <Input {...control} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
+            {(control) => <EntityLookup {...control} entity="site" prefill={false} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })} />}
           </FormField>
           <FormField id="mat-order-status" label="Order status">
             {(control) => (

@@ -16,6 +16,8 @@ import {
 import { describeError, PLAN_CODE, useLoad, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const LIST = "/planning/allocation-keys";
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -232,8 +234,8 @@ function AllocationKeyForm({ allocationKey, onSaved, onReload }: FormProps) {
         <fieldset key={i} className={`${styles.fieldset} ${styles.wide}`}>
           <legend className={styles.legend}>Item {i + 1}</legend>
           <div className={styles.form}>
-            <FormField id={`ak-l${i}-item`} label="Item" hint="Item id (UUID)." error={errors[`lines.${i}.itemId`]}>
-              {(a11y) => <Input {...a11y} className={styles.mono} value={l.itemId} onChange={(e) => setLine(i, "itemId", e.target.value)} />}
+            <FormField id={`ak-l${i}-item`} label="Item" error={errors[`lines.${i}.itemId`]}>
+              {(a11y) => <EntityLookup {...a11y} entity="product" value={l.itemId} onChange={(e) => setLine(i, "itemId", e.target.value)} />}
             </FormField>
             <FormField id={`ak-l${i}-share`} label="Share (%)" error={errors[`lines.${i}.share`]}>
               {(a11y) => <Input {...a11y} inputMode="decimal" value={l.share} onChange={(e) => setLine(i, "share", e.target.value)} />}
@@ -379,8 +381,8 @@ function AllocateCard({ allocationKey, onDone }: { allocationKey: AllocationKey;
           <FormField id="al-model" label="Forecast model" hint="Created when it does not exist yet." error={errors.modelCode}>
             {(a11y) => <Input {...a11y} className={styles.mono} value={draft.modelCode} onChange={(e) => set("modelCode", e.target.value)} />}
           </FormField>
-          <FormField id="al-site" label="Site" hint="Site id (UUID)." error={errors.siteId}>
-            {(a11y) => <Input {...a11y} className={styles.mono} value={draft.siteId} onChange={(e) => set("siteId", e.target.value)} />}
+          <FormField id="al-site" label="Site" error={errors.siteId}>
+            {(a11y) => <EntityLookup {...a11y} entity="site" value={draft.siteId} onChange={(e) => set("siteId", e.target.value)} />}
           </FormField>
           <FormField id="al-first" label="First month" error={errors.firstMonth}>
             {(a11y) => <Input {...a11y} type="date" value={draft.firstMonth} onChange={(e) => set("firstMonth", e.target.value)} />}
@@ -400,7 +402,7 @@ function AllocateCard({ allocationKey, onDone }: { allocationKey: AllocationKey;
 }
 
 const lineColumns: DataTableColumn<AllocationKey["lines"][number]>[] = [
-  { key: "item", header: "Item", mono: true, render: (l) => l.itemId },
+  { key: "item", header: "Item", render: (l) => <EntityName entity="product" id={l.itemId} fallback={l.itemId} /> },
   { key: "share", header: "Share (%)", align: "end", render: (l) => l.share },
   { key: "factor", header: "Inventory units per forecast unit", align: "end", render: (l) => l.uomFactor },
 ];
