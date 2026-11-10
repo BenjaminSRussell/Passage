@@ -78,7 +78,7 @@ describe("ReceiptsPage", () => {
     renderAt("/warehouse/receipts?warehouse=");
     expect(screen.getByText("Choose a warehouse")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
-    fill("Warehouse id", WH);
+    fill("Warehouse", WH);
     expect(await screen.findByText("No receipts")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "OPEN" } });
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("OPEN"));

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { useSearchParams } from "react-router-dom";
-import { Card, EmptyState, FormField, Input, type BadgeTone } from "../../shell/ui";
+import { Card, EmptyState, FormField, type BadgeTone } from "../../shell/ui";
 import type { Capacity, LineStatus, Location, LocationStatus, WorkStatus } from "./api/client";
 import styles from "./pages.module.css";
 
@@ -44,8 +45,8 @@ export function useWarehouse(): [string, (id: string) => void] {
 export function WarehouseField({ value, onChange, id = "wh-warehouse", error }: { value: string; onChange(id: string): void; id?: string; error?: string }) {
   const invalid = error ?? (value.trim() !== "" && !UUID.test(value.trim()) ? "Enter the warehouse id, a UUID." : undefined);
   return (
-    <FormField id={id} label="Warehouse id" hint="The warehouse's UUID, as listed under Organization › Warehouses." error={invalid}>
-      {(c) => <Input {...c} className={styles.mono} value={value} onChange={(e) => onChange(e.target.value)} invalid={Boolean(invalid)} spellCheck={false} />}
+    <FormField id={id} label="Warehouse" hint="The warehouse's UUID, as listed under Organization › Warehouses." error={invalid}>
+      {(c) => <EntityLookup entity="warehouse" {...c} value={value} onChange={(e) => onChange(e.target.value)} invalid={Boolean(invalid)} />}
     </FormField>
   );
 }

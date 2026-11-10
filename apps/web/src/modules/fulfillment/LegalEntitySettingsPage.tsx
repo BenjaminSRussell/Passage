@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
@@ -141,8 +142,8 @@ export function LegalEntitySettingsPage() {
       )}
       <Card title="Change the posting settings">
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="le-id" label="Legal entity id" error={error}>
-            {(control) => <Input {...control} value={legalEntityId} invalid={Boolean(error)} onChange={(event) => { setLegalEntityId(event.target.value); setVersion(0); key.renew(); }} />}
+          <FormField id="le-id" label="Legal entity" error={error}>
+            {(control) => <EntityLookup entity="legalEntity" {...control} value={legalEntityId} invalid={Boolean(error)} onChange={(event) => { setLegalEntityId(event.target.value); setVersion(0); key.renew(); }} />}
           </FormField>
           <FormField
             id="le-cogs"

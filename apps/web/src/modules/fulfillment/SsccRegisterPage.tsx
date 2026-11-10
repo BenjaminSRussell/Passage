@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { ssccRegister, type SsccRow } from "./api/client";
@@ -108,8 +109,8 @@ export function SsccRegisterPage() {
           <FormField id="sscc-prefix" label="GS1 company prefix" error={errors.companyPrefix} optional>
             {(control) => <Input {...control} {...field("companyPrefix")} inputMode="numeric" />}
           </FormField>
-          <FormField id="sscc-customer" label="Customer id" error={errors.customerId} optional>
-            {(control) => <Input {...control} {...field("customerId")} />}
+          <FormField id="sscc-customer" label="Customer" error={errors.customerId} optional>
+            {(control) => <EntityLookup entity="customer" {...control} {...field("customerId")} />}
           </FormField>
           <FormField id="sscc-from" label="Issued from" error={errors.from} optional>
             {(control) => <Input {...control} {...field("from")} type="date" />}

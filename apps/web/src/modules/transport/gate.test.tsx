@@ -128,7 +128,7 @@ describe("gate log", () => {
 
     fill("Carrier SCAC", "abcd");
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("carrierScac")).toBe("ABCD"));
-    fill("Site id", SITE);
+    fill("Site", SITE);
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("siteId")).toBe(SITE));
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "" } });
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.has("status")).toBe(false));
@@ -342,7 +342,7 @@ describe("goods in transit", () => {
     };
     renderAt(`/transport/goods-in-transit/new?voyageId=${VOYAGE}`);
     expect(screen.getByLabelText("Voyage id")).toHaveValue(VOYAGE);
-    fill("Destination site id", SITE);
+    fill("Destination site", SITE);
     fill("Receipt lines", "1");
     fireEvent.click(screen.getByRole("button", { name: "Open order" }));
     expect(await screen.findByText(/already on goods-in-transit order x \(TMS-0119\)/)).toBeInTheDocument();

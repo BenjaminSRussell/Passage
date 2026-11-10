@@ -71,7 +71,7 @@ describe("Short picks and backorders", () => {
     renderAt("/fulfillment/backorders");
     expect(await screen.findByText("No open backorders")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Warehouse id", { exact: false }), { target: { value: WAREHOUSE } });
+    fireEvent.change(screen.getByLabelText("Warehouse", { exact: false }), { target: { value: WAREHOUSE } });
     fireEvent.change(screen.getByLabelText("Show"), { target: { value: "all" } });
     fireEvent.change(screen.getByLabelText("Short-picked from", { exact: false }), { target: { value: "2026-10-01" } });
     fireEvent.change(screen.getByLabelText("Short-picked to", { exact: false }), { target: { value: "2026-10-31" } });
@@ -108,13 +108,11 @@ describe("Short picks and backorders", () => {
     await screen.findByText("No open backorders");
     const before = calls(BACKORDERS).length;
 
-    fireEvent.change(screen.getByLabelText("Warehouse id", { exact: false }), { target: { value: "WH-1" } });
     fireEvent.change(screen.getByLabelText("Short-picked from", { exact: false }), { target: { value: "2026-10-31" } });
     fireEvent.change(screen.getByLabelText("Short-picked to", { exact: false }), { target: { value: "2026-10-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
 
-    expect(await screen.findByText("Enter the warehouse id (a UUID), or leave it empty.")).toBeInTheDocument();
-    expect(screen.getByText("The last date cannot be before the first.")).toBeInTheDocument();
+    expect(await screen.findByText("The last date cannot be before the first.")).toBeInTheDocument();
     expect(calls(BACKORDERS)).toHaveLength(before);
   });
 
@@ -200,7 +198,7 @@ describe("Returnable packaging aging", () => {
     renderAt("/fulfillment/returnable-aging");
     expect(await screen.findByText("No returnable packaging outstanding")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Customer id", { exact: false }), { target: { value: CUSTOMER } });
+    fireEvent.change(screen.getByLabelText("Customer", { exact: false }), { target: { value: CUSTOMER } });
     fireEvent.change(screen.getByLabelText("Charge after days"), { target: { value: "120" } });
     fireEvent.change(screen.getByLabelText("Show"), { target: { value: "due" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
@@ -222,12 +220,10 @@ describe("Returnable packaging aging", () => {
     await screen.findByText("No returnable packaging outstanding");
     const before = calls(AGING).length;
 
-    fireEvent.change(screen.getByLabelText("Customer id", { exact: false }), { target: { value: "C1" } });
     fireEvent.change(screen.getByLabelText("Charge after days"), { target: { value: "29" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
 
-    expect(await screen.findByText("Enter the customer id (a UUID), or leave it empty.")).toBeInTheDocument();
-    expect(screen.getByText("Enter a whole number of days from 30 to 365, or leave it empty.")).toBeInTheDocument();
+    expect(await screen.findByText("Enter a whole number of days from 30 to 365, or leave it empty.")).toBeInTheDocument();
     expect(calls(AGING)).toHaveLength(before);
   });
 

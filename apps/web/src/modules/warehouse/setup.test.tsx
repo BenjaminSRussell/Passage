@@ -88,13 +88,13 @@ describe("LocationsPage", () => {
     stubLocalStorage();
     server.handler = () => json(200, { items: [] });
     const first = renderAt("/warehouse/locations");
-    fill("Warehouse id", "not-a-uuid");
-    expect(screen.getByText("Enter the warehouse id, a UUID.")).toBeInTheDocument();
-    fill("Warehouse id", WH);
+    fill("Warehouse", "not-a-uuid");
+    expect(screen.getByLabelText("Warehouse")).toHaveAttribute("data-value", "");
+    fill("Warehouse", WH);
     expect(await screen.findByText("No locations yet")).toBeInTheDocument();
     first.unmount();
     renderAt("/warehouse/work");
-    expect(await screen.findByLabelText("Warehouse id")).toHaveValue(WH);
+    expect(await screen.findByLabelText("Warehouse")).toHaveAttribute("data-value", WH);
   });
 
   it("loads the next page from the cursor", async () => {
