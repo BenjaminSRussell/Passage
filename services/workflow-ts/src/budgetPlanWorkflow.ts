@@ -1,4 +1,4 @@
-import { ActivityFailure, condition, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler } from "@temporalio/workflow";
+import { ActivityFailure, condition, continueAsNew, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler } from "@temporalio/workflow";
 import type { BudgetPlanActivities } from "./budgetPlanActivities.js";
 
 export interface BudgetPlanInput {
@@ -7,7 +7,10 @@ export interface BudgetPlanInput {
   planId: string;
   submission: number;
   requester: string;
+  status?: BudgetPlanState["status"];
 }
+
+export const REFUSED_DECISIONS_BEFORE_RESTART = 100;
 
 export type BudgetPlanStage = "review" | "approve";
 
@@ -109,7 +112,7 @@ export async function budgetPlanWorkflow(input: BudgetPlanInput): Promise<Budget
     legalEntityId: input.legalEntityId,
     submission: input.submission,
     requester: input.requester,
-    status: "awaiting_review",
+    status: input.status ?? "awaiting_review",
     refusedDecisions: 0,
   };
   const decisions: BudgetPlanDecision[] = [];
@@ -152,6 +155,9 @@ export async function budgetPlanWorkflow(input: BudgetPlanInput): Promise<Budget
     } catch (error) {
       if (!(error instanceof ActivityFailure)) throw error;
       state.refusedDecisions += 1;
+      if (state.refusedDecisions >= REFUSED_DECISIONS_BEFORE_RESTART && decisions.length === 0) {
+        return continueAsNew<typeof budgetPlanWorkflow>({ ...input, status: state.status });
+      }
     }
   }
 }

@@ -11,6 +11,7 @@ import {
   budgetPlanStateQuery,
   budgetPlanWorkflow,
   budgetPlanWorkflowId,
+  REFUSED_DECISIONS_BEFORE_RESTART,
   validateBudgetPlanInput,
   type BudgetPlanDecision,
   type BudgetPlanInput,
@@ -100,7 +101,7 @@ describe("budget plan approval workflow", () => {
     return worker.runUntil(async () => {
       const handle = await start(taskQueue, { ...input, ...override });
       await drive(handle);
-      return handle.result();
+      return environment.client.workflow.getHandle(handle.workflowId).result();
     });
   }
 
@@ -245,6 +246,24 @@ describe("budget plan approval workflow", () => {
     expect(result.status).toBe("approved");
     expect(fake.calls["sign-off"]).toBe(5);
   }, 60_000);
+
+  it("restarts its history after a run of refused decisions and keeps the stage it was in", async () => {
+    const fake = new FakeBudgeting();
+    const result = await run(fake, async (handle) => {
+      await review(handle, "rev-a", UNIT_A);
+      await review(handle, "rev-b", UNIT_B);
+      for (let i = 0; i < REFUSED_DECISIONS_BEFORE_RESTART; i += 1) await review(handle, "mallory", UNIT_A);
+      for (let i = 0; i < 400; i += 1) {
+        const state = await handle.query(budgetPlanStateQuery);
+        if (state.refusedDecisions === 0 && fake.calls["sign-off"] >= 2 + REFUSED_DECISIONS_BEFORE_RESTART) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect((await handle.query(budgetPlanStateQuery)).status).toBe("awaiting_approval");
+      await approve(handle, "boss");
+    });
+    expect(result).toMatchObject({ status: "approved", refusedDecisions: 0 });
+    expect(fake.effects).toBe(1);
+  }, 120_000);
 
   it("exposes the awaiting state to a query", async () => {
     const fake = new FakeBudgeting();
