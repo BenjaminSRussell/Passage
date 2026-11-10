@@ -81,6 +81,7 @@ func run() error {
 		return err
 	}
 	a.WithReconciliations(pg)
+	a.WithCashPositions(pg)
 	ledger, err := ledgerclient.FromEnv(os.Getenv, "treasury")
 	if err != nil {
 		return fmt.Errorf("ledger client: %w", err)

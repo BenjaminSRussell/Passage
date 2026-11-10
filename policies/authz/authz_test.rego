@@ -1109,6 +1109,17 @@ test_budget_plan_workflow_is_service_only_and_reaches_only_sign_off_and_reject i
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/register-entries")
 }
 
+test_budget_check_converts_a_pre_encumbrance_and_view_cannot if {
+	allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
+	not allowed("budget.view", "POST", "/v1/budget/encumbrances/e1:convert")
+}
+
+test_budget_view_reads_the_scenario_comparison_and_cannot_write_it if {
+	allowed("budget.view", "GET", "/v1/budget/plans/p1/scenarios:compare")
+	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios:compare")
+	not allowed("budget.plan.workflow", "GET", "/v1/budget/plans/p1/scenarios:compare")
+}
+
 test_budget_plan_workflow_routes_are_refused_to_every_person_duty if {
 	routes := [
 		"/v1/budget/plans/p1/stages/review:sign-off",
@@ -1497,6 +1508,32 @@ test_hub_subscription_write_reaches_test_send_and_delivery_replay if {
 	not allowed("hub.delivery.read", "POST", "/v1/hub/deliveries/d-1:replay")
 }
 
+test_tax_configuration_vat_and_intrastat_duties_reach_only_their_routes if {
+	allowed("tax.config.read", "GET", "/v1/tax/jurisdictions")
+	allowed("tax.config.read", "GET", "/v1/tax/groups/party")
+	allowed("tax.config.read", "GET", "/v1/tax/vat-boxes")
+	not allowed("tax.config.read", "PUT", "/v1/tax/codes/VAT19")
+	allowed("tax.config.manage", "PUT", "/v1/tax/jurisdictions/US-OH")
+	allowed("tax.config.manage", "DELETE", "/v1/tax/codes/VAT19")
+	allowed("tax.config.manage", "PUT", "/v1/tax/groups/item/STANDARD")
+	allowed("tax.config.manage", "PUT", "/v1/tax/vat-boxes")
+	not allowed("tax.config.manage", "GET", "/v1/tax/vat-return")
+	allowed("tax.vatreturn.read", "GET", "/v1/tax/vat-return")
+	allowed("tax.vatreturn.read", "GET", "/v1/tax/esl")
+	not allowed("tax.vatreturn.read", "PUT", "/v1/tax/vat-boxes")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/master/commodity")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/journals/j-1")
+	not allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/journals/j-1/export")
+	allowed("tax.intrastatmaster.manage", "PUT", "/v1/tax/intrastat/master/commodity/84137030")
+	not allowed("tax.intrastatmaster.manage", "POST", "/v1/tax/intrastat/journals")
+	allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/journals")
+	allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/journals/j-1/validate")
+	allowed("tax.intrastat.manage", "PUT", "/v1/tax/intrastat/journals/j-1/lines/2")
+	not allowed("tax.intrastat.manage", "GET", "/v1/tax/intrastat/journals/j-1/export")
+	allowed("tax.intrastat.export", "GET", "/v1/tax/intrastat/journals/j-1/export")
+	not allowed("tax.intrastat.export", "POST", "/v1/tax/intrastat/journals/j-1/validate")
+}
+
 test_tax_duties_reach_only_their_routes if {
 	allowed("tax.transaction.record", "POST", "/v1/tax/transactions")
 	allowed("tax.settlement.run", "POST", "/v1/tax/settlements:run")
@@ -1628,6 +1665,13 @@ test_treasury_reconciliation_write_reaches_only_its_post_routes if {
 	not allowed("treasury.view", "POST", "/v1/treasury/reconciliation-matches/m-1:unmatch")
 	not allowed("treasury.view", "POST", "/v1/treasury/reconciliation-rules/r-1:deactivate")
 	not allowed("treasury.statement.import", "POST", "/v1/treasury/reconciliation-runs")
+}
+
+test_treasury_cash_position_import_and_read_are_separate if {
+	allowed("treasury.statement.import", "POST", "/v1/treasury/intraday-reports/import")
+	not allowed("treasury.view", "POST", "/v1/treasury/intraday-reports/import")
+	allowed("treasury.view", "GET", "/v1/treasury/cash-position")
+	not allowed("treasury.statement.import", "GET", "/v1/treasury/cash-position")
 }
 
 test_treasury_bank_reconciliation_duties_are_distinct if {

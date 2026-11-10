@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Passage Tax
-  version: 0.2.0
+  version: 0.3.0
   description: >-
     Tax determination, calculation, withholding, provider failover, settlement reconciliation to the
     general ledger and a SAF-T tax extract. Amounts are decimal strings with at most 6 decimal places,
@@ -195,10 +195,564 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
         "502": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/jurisdictions:
+    get:
+      operationId: listJurisdictions
+      x-passage-duty: tax.config.read
+      summary: The jurisdiction tree as a flat list with parent codes
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfJurisdiction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/jurisdictions/{code}:
+    put:
+      operationId: putJurisdiction
+      x-passage-duty: tax.config.manage
+      summary: Create or replace a jurisdiction; refuses a parent that loops the tree
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Jurisdiction" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Jurisdiction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteJurisdiction
+      x-passage-duty: tax.config.manage
+      summary: Delete a jurisdiction with no children and no tax codes (TAX-0013 otherwise)
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/codes:
+    get:
+      operationId: listTaxCodes
+      x-passage-duty: tax.config.read
+      summary: Stored tax codes with their effective-dated rates
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfConfigCode" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/codes/{code}:
+    put:
+      operationId: putTaxCode
+      x-passage-duty: tax.config.manage
+      summary: Create or replace a tax code and its rate history
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfigCode" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigCode" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteTaxCode
+      x-passage-duty: tax.config.manage
+      summary: Delete a tax code that no group or return box uses (TAX-0013 otherwise)
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/groups/{kind}:
+    get:
+      operationId: listTaxGroups
+      x-passage-duty: tax.config.read
+      summary: Party tax groups (kind party) or item tax groups (kind item)
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfGroup" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/groups/{kind}/{code}:
+    put:
+      operationId: putTaxGroup
+      x-passage-duty: tax.config.manage
+      summary: Create or replace a tax group and the tax codes it selects
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Group" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteTaxGroup
+      x-passage-duty: tax.config.manage
+      summary: Delete a tax group
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/config:
+    get:
+      operationId: getTaxConfig
+      x-passage-duty: tax.config.read
+      summary: The stored configuration in the shape calculate takes inline; send stored_config true to use it
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredConfig" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/entity-settings:
+    get:
+      operationId: getEntitySettings
+      x-passage-duty: tax.config.read
+      summary: Country and VAT number of the request's legal entity
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntitySetting" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: putEntitySettings
+      x-passage-duty: tax.config.manage
+      summary: Set the country and VAT number of the request's legal entity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EntitySetting" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntitySetting" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/vat-boxes:
+    get:
+      operationId: listVatBoxes
+      x-passage-duty: tax.config.read
+      summary: VAT return box definitions and the tax codes each box sums
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfBox" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: putVatBoxes
+      x-passage-duty: tax.config.manage
+      summary: Replace the whole box set
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BoxesRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfBox" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/vat-return:
+    get:
+      operationId: getVatReturn
+      x-passage-duty: tax.vatreturn.read
+      summary: Box totals of the request's legal entity over a period, computed from recorded tax transactions
+      parameters:
+        - { name: period_from, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
+        - { name: period_to, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VatReturn" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/esl:
+    get:
+      operationId: getEuSalesList
+      x-passage-duty: tax.vatreturn.read
+      summary: EU sales list: supplies to other member states grouped by country, VAT number and kind of supply
+      parameters:
+        - { name: period_from, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
+        - { name: period_to, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Esl" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/master/{kind}:
+    get:
+      operationId: listIntrastatMaster
+      x-passage-duty: tax.intrastat.read
+      summary: Intrastat master data of one kind (commodity, transaction_code, transport_mode, port, country or delivery_terms)
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfMaster" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/master/{kind}/{code}:
+    put:
+      operationId: putIntrastatMaster
+      x-passage-duty: tax.intrastatmaster.manage
+      summary: Create or replace one master data entry
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MasterEntry" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MasterEntry" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteIntrastatMaster
+      x-passage-duty: tax.intrastatmaster.manage
+      summary: Delete one master data entry
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals:
+    get:
+      operationId: listIntrastatJournals
+      x-passage-duty: tax.intrastat.read
+      summary: Intrastat journals of the request's legal entity, newest period first
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfJournal" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createIntrastatJournal
+      x-passage-duty: tax.intrastat.manage
+      summary: Open a draft journal for one flow and month
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateJournalRequest" }
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Journal" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}:
+    get:
+      operationId: getIntrastatJournal
+      x-passage-duty: tax.intrastat.read
+      summary: One journal with its lines and their validation problems
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Journal" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}/transfer:
+    post:
+      operationId: transferIntrastatLines
+      x-passage-duty: tax.intrastat.manage
+      summary: Add shipment or receipt lines to an open journal; a source_ref already transferred is skipped
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransferRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}/validate:
+    post:
+      operationId: validateIntrastatJournal
+      x-passage-duty: tax.intrastat.manage
+      summary: Check every line against the master data; the journal becomes validated when none has a problem
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Journal" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}/compress:
+    post:
+      operationId: compressIntrastatJournal
+      x-passage-duty: tax.intrastat.manage
+      summary: Merge lines that share every classifying field; the journal returns to draft
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Journal" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}/correct:
+    post:
+      operationId: correctIntrastatJournal
+      x-passage-duty: tax.intrastat.manage
+      summary: Open a correction draft of an exported journal
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Journal" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}/lines/{lineNo}:
+    put:
+      operationId: putIntrastatLine
+      x-passage-duty: tax.intrastat.manage
+      summary: Replace one line of an open journal; the journal returns to draft
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: lineNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntrastatLine" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntrastatLine" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteIntrastatLine
+      x-passage-duty: tax.intrastat.manage
+      summary: Remove one line of an open journal and renumber the rest
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: lineNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}/export:
+    get:
+      operationId: exportIntrastatJournal
+      x-passage-duty: tax.intrastat.export
+      summary: CSV declaration of a validated journal; locks it. An exported journal downloads again unchanged
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The CSV declaration, content: { text/csv: { schema: { type: string } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   responses:
     Problem:
-      description: RFC 7807 problem (COM-0001, COM-0500, COM-0502, COM-0503, AUTH-0001, AUTH-0003, TAX-0001 to TAX-0009, TAX-0011, TAX-0012)
+      description: RFC 7807 problem (COM-0001, COM-0500, COM-0502, COM-0503, AUTH-0001, AUTH-0003, TAX-0001 to TAX-0009, TAX-0011 to TAX-0013)
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -238,6 +792,7 @@ components:
         tax_date: { $ref: "#/components/schemas/Date" }
         ship_from_country: { type: string }
         provider: { type: string, description: External provider name; empty uses the internal engine. }
+        stored_config: { type: boolean, description: Use the persisted tax configuration (GET /v1/tax/config) instead of an inline config. }
         party:
           type: object
           properties:
@@ -386,6 +941,10 @@ components:
               direction: { type: string, enum: [output, input, use] }
               tax_date: { $ref: "#/components/schemas/Date" }
               amount: { $ref: "#/components/schemas/Decimal" }
+              base_amount: { $ref: "#/components/schemas/Decimal" }
+              counterparty_country: { type: string, pattern: '^[A-Z]{2}$' }
+              counterparty_vat_id: { type: string, maxLength: 20 }
+              supply_kind: { type: string, enum: [goods, services, triangular] }
     SettleRequest:
       type: object
       required: [period_from, period_to]
@@ -429,3 +988,197 @@ components:
         processed: { type: integer }
         completed: { type: integer }
         failed: { type: integer }
+    StoredConfig:
+      type: object
+      description: The engine configuration (groups, item_groups, codes) assembled from what is stored.
+      additionalProperties: true
+    ItemsOfJurisdiction:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Jurisdiction" } }
+    ItemsOfConfigCode:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ConfigCode" } }
+    ItemsOfGroup:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Group" } }
+    ItemsOfBox:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Box" } }
+    ItemsOfMaster:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MasterEntry" } }
+    ItemsOfJournal:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Journal" } }
+    Jurisdiction:
+      type: object
+      required: [name, kind, country]
+      properties:
+        code: { type: string, pattern: '^[A-Za-z0-9._-]{1,32}$' }
+        name: { type: string, maxLength: 120 }
+        kind: { type: string, enum: [country, state, county, city, district] }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+        parent_code: { type: string, description: Empty for a root; must exist and not loop the tree. }
+    ConfigCode:
+      type: object
+      required: [name, jurisdiction]
+      properties:
+        code: { type: string }
+        name: { type: string, maxLength: 120 }
+        jurisdiction: { type: string, description: Code of a stored jurisdiction. }
+        mechanism: { type: string, enum: [standard, reverse_charge, use_tax] }
+        calc_basis: { type: string, enum: [line, document] }
+        rounding: { type: string, enum: [per_line, per_document] }
+        compound_sequence: { type: integer, minimum: 0 }
+        recoverable_pct: { $ref: "#/components/schemas/Decimal" }
+        rates:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [valid_from, rate_pct]
+            properties:
+              valid_from: { $ref: "#/components/schemas/Date" }
+              valid_to: { $ref: "#/components/schemas/Date" }
+              rate_pct: { $ref: "#/components/schemas/Decimal" }
+              from_amount: { $ref: "#/components/schemas/Decimal" }
+              to_amount: { $ref: "#/components/schemas/Decimal" }
+              min_tax: { $ref: "#/components/schemas/Decimal" }
+              max_tax: { $ref: "#/components/schemas/Decimal" }
+    Group:
+      type: object
+      required: [name]
+      properties:
+        kind: { type: string, enum: [party, item] }
+        code: { type: string }
+        name: { type: string }
+        tax_codes: { type: array, items: { type: string } }
+    EntitySetting:
+      type: object
+      required: [home_country]
+      properties:
+        home_country: { type: string, pattern: '^[A-Z]{2}$' }
+        vat_id: { type: string, maxLength: 20 }
+    Box:
+      type: object
+      required: [box, label, kind]
+      properties:
+        box: { type: string, pattern: '^[A-Za-z0-9._-]{1,16}$' }
+        label: { type: string }
+        kind: { type: string, enum: [base, tax, payable] }
+        sort: { type: integer }
+        codes:
+          type: array
+          items:
+            type: object
+            required: [code, direction]
+            properties:
+              code: { type: string }
+              direction: { type: string, enum: [output, input, use] }
+    BoxesRequest:
+      type: object
+      required: [boxes]
+      properties:
+        boxes: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/Box" } }
+    VatReturn:
+      type: object
+      properties:
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date" }
+        boxes:
+          type: array
+          items:
+            type: object
+            properties:
+              box: { type: string }
+              label: { type: string }
+              kind: { type: string }
+              amount: { $ref: "#/components/schemas/Decimal" }
+        transactions: { type: integer }
+        missing_base: { type: integer, description: Transactions feeding a base box without a base amount; the box is understated. }
+        unmapped: { type: integer, description: Transactions whose code and direction feed no box. }
+    Esl:
+      type: object
+      properties:
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date" }
+        home_country: { type: string }
+        vat_id: { type: string }
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              country: { type: string }
+              vat_id: { type: string }
+              indicator: { type: string, enum: [L, S, T] }
+              supply_kind: { type: string, enum: [goods, services, triangular] }
+              base: { $ref: "#/components/schemas/Decimal" }
+              transactions: { type: integer }
+        total: { $ref: "#/components/schemas/Decimal" }
+        missing_vat_id: { type: integer }
+        missing_base: { type: integer }
+    MasterEntry:
+      type: object
+      required: [description]
+      properties:
+        kind: { type: string, enum: [commodity, transaction_code, transport_mode, port, country, delivery_terms] }
+        code: { type: string }
+        description: { type: string, maxLength: 200 }
+        attrs:
+          type: object
+          description: supplementary_unit on commodities; eu_member and intrastat_code on countries; country on ports.
+          additionalProperties: { type: string, maxLength: 20 }
+    CreateJournalRequest:
+      type: object
+      required: [flow, period_from]
+      properties:
+        flow: { type: string, enum: [arrival, dispatch] }
+        period_from: { $ref: "#/components/schemas/Date" }
+    IntrastatLine:
+      type: object
+      properties:
+        line_no: { type: integer }
+        source_ref: { type: string, maxLength: 64 }
+        partner_country: { type: string }
+        commodity_code: { type: string }
+        transaction_code: { type: string }
+        transport_mode: { type: string }
+        delivery_terms: { type: string }
+        port: { type: string }
+        origin_country: { type: string }
+        net_mass: { $ref: "#/components/schemas/Decimal" }
+        supplementary_qty: { $ref: "#/components/schemas/Decimal" }
+        invoice_value: { $ref: "#/components/schemas/Decimal" }
+        statistical_value: { $ref: "#/components/schemas/Decimal" }
+        compressed_from: { type: integer }
+        errors: { type: array, items: { type: string } }
+    TransferRequest:
+      type: object
+      required: [lines]
+      properties:
+        lines: { type: array, minItems: 1, maxItems: 5000, items: { $ref: "#/components/schemas/IntrastatLine" } }
+    TransferResult:
+      type: object
+      properties:
+        added: { type: integer }
+        skipped: { type: integer }
+    Journal:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        flow: { type: string, enum: [arrival, dispatch] }
+        period_from: { $ref: "#/components/schemas/Date" }
+        status: { type: string, enum: [draft, validated, exported] }
+        correction_of: { type: string }
+        created_at: { type: string, format: date-time }
+        exported_at: { type: string, format: date-time, nullable: true }
+        line_count: { type: integer }
+        error_count: { type: integer }
+        lines: { type: array, items: { $ref: "#/components/schemas/IntrastatLine" } }

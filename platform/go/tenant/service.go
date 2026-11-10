@@ -99,7 +99,7 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
 		"fx":     {"fx.rate.lookup"},
 		"tax":    {"tax.withholding.calculate"},
-		"party":  {"party.vendor-bank.reveal", "party.import.read"},
+		"party":  {"party.vendor-bank.reveal", "party.vendor.lookup"},
 	},
 	"close": {
 		"ledger": {"ledger.ledger.lookup", "ledger.entry.post", "ledger.journal.reverse", "ledger.balance.read", "ledger.account.lookup", "ledger.period.postclosed"},
