@@ -240,3 +240,95 @@ func TestUpstreamsFromReadsPassageSvcVariables(t *testing.T) {
 		t.Fatal("empty upstream set accepted")
 	}
 }
+
+func TestGatewayKeepsIdentityHeadersNamedInTheConnectionHeader(t *testing.T) {
+	f := newFixture(t)
+	named := "close, X-Passage-Legal-Entity, X-Passage-Tenant, X-Passage-User, X-Passage-Duties, X-Passage-Tier"
+	resp := f.get(t, "/api/v1/numbering/sequences", f.token(t, adminUser, nil), map[string]string{"Connection": named})
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status %d, want 204", resp.StatusCode)
+	}
+	seen := <-f.seen
+	for _, h := range []string{"X-Passage-Legal-Entity", "X-Passage-Tenant", "X-Passage-User", "X-Passage-Duties", "X-Passage-Tier"} {
+		if seen.Get(h) == "" {
+			t.Errorf("%s was dropped by a Connection header naming it", h)
+		}
+	}
+}
+
+func TestGatewayRefusesPathsThatAreNotCanonical(t *testing.T) {
+	f := newFixture(t)
+	token := f.token(t, adminUser, nil)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for _, path := range []string{
+		"/api/v1/party/../numbering/sequences", "/api/v1/party/./x", "/api/v1/party//x", "/api/v1/party/x/",
+		"/api/v1/party%2Fx", "/api/v1/party/%2e%2e/numbering", "/api/v1/party/%2E/x",
+	} {
+		req, err := http.NewRequest(http.MethodGet, f.gateway.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", path, resp.StatusCode)
+		}
+	}
+	select {
+	case <-f.seen:
+		t.Fatal("a non-canonical path reached the upstream")
+	default:
+	}
+}
+
+func TestGatewayForwardsLegalEntitySelectionOnlyWhenTheTokenHoldsIt(t *testing.T) {
+	f := newFixture(t)
+	own := "00000000-0000-0000-0000-0000000000e1"
+	ok := f.get(t, "/api/v1/party/parties", f.token(t, adminUser, nil), map[string]string{"X-Passage-LegalEntity": own, "X-Passage-LegalEntity-Scope": "all"})
+	if ok.StatusCode != http.StatusNoContent {
+		t.Fatalf("own legal entity: status %d, want 204", ok.StatusCode)
+	}
+	seen := <-f.seen
+	if seen.Get("X-Passage-LegalEntity") != own {
+		t.Errorf("selection = %q, want %q", seen.Get("X-Passage-LegalEntity"), own)
+	}
+	if seen.Get("X-Passage-LegalEntity-Scope") != "all" {
+		t.Errorf("scope = %q: like the Envoy gateway, the scope request passes through for the service to gate on org.switcher.all-scope", seen.Get("X-Passage-LegalEntity-Scope"))
+	}
+	other := f.get(t, "/api/v1/party/parties", f.token(t, adminUser, nil), map[string]string{"X-Passage-LegalEntity": "00000000-0000-0000-0000-0000000000e2"})
+	if other.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign legal entity: status %d, want 403", other.StatusCode)
+	}
+}
+
+func TestDevGuardsRefuseNonLoopbackUnlessOverridden(t *testing.T) {
+	base := map[string]string{
+		"DEVGATEWAY_ISSUER": testIssuer, "DEVGATEWAY_JWKS_URL": "http://127.0.0.1:1/jwks", "DEVGATEWAY_TENANT_ID": testTenant, "DEVGATEWAY_OPA_URL": "http://127.0.0.1:2",
+	}
+	build := func(extra map[string]string, upstream string) error {
+		env := map[string]string{}
+		for k, v := range base {
+			env[k] = v
+		}
+		for k, v := range extra {
+			env[k] = v
+		}
+		_, err := buildHandler(func(k string) string { return env[k] }, []string{"PASSAGE_SVC_PARTY_URL=" + upstream})
+		return err
+	}
+	if err := build(nil, "http://10.0.0.5:8080"); err == nil {
+		t.Fatal("a non-loopback upstream was accepted")
+	}
+	if err := build(map[string]string{"DEVGATEWAY_ALLOW_NONLOCAL": "1"}, "http://10.0.0.5:8080"); err != nil {
+		t.Fatalf("override refused: %v", err)
+	}
+	for addr, want := range map[string]bool{"127.0.0.1:8088": true, "localhost:8088": true, "[::1]:8088": true, ":8088": false, "0.0.0.0:8088": false, "10.0.0.5:8088": false} {
+		if loopback(addr) != want {
+			t.Errorf("loopback(%q) = %v, want %v", addr, !want, want)
+		}
+	}
+}

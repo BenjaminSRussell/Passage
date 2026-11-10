@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +19,8 @@ const (
 	defaultAudience = "passage-api"
 	upstreamPrefix  = "PASSAGE_SVC_"
 	upstreamSuffix  = "_URL"
+
+	allowNonLocalEnv = "DEVGATEWAY_ALLOW_NONLOCAL"
 )
 
 func main() {
@@ -35,6 +38,9 @@ func run(getenv func(string) string, environ []string) error {
 	addr := getenv("DEVGATEWAY_ADDR")
 	if addr == "" {
 		addr = defaultAddr
+	}
+	if !loopback(addr) && getenv(allowNonLocalEnv) != "1" {
+		return fmt.Errorf("refusing to bind %s: the dev gateway is for one machine; set %s=1 to override", addr, allowNonLocalEnv)
 	}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	slog.Info("devgateway listening", "addr", addr)
@@ -58,7 +64,26 @@ func buildHandler(getenv func(string) string, environ []string) (http.Handler, e
 	if err != nil {
 		return nil, err
 	}
+	if getenv(allowNonLocalEnv) != "1" {
+		for name, target := range upstreams {
+			if !loopback(target.Host) {
+				return nil, fmt.Errorf("upstream %s is %s, which is not loopback; set %s=1 to override", name, target.Host, allowNonLocalEnv)
+			}
+		}
+	}
 	return newGateway(verifier, opa, upstreams), nil
+}
+
+func loopback(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func upstreamsFrom(environ []string) (map[string]*url.URL, error) {
