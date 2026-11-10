@@ -4,6 +4,12 @@ export interface PreferenceStorage {
   remove(key: string): void;
 }
 
+export const noPreferenceStorage: PreferenceStorage = {
+  read: () => null,
+  write: () => false,
+  remove: () => undefined,
+};
+
 export const localPreferenceStorage: PreferenceStorage = {
   read(key) {
     try {

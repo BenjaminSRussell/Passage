@@ -161,7 +161,7 @@ function ChipText({ def, values }: { def: ListFilterDef; values: FilterValues })
   const entityId = def.kind === "entity" ? (values[def.key] ?? "") : "";
   const entityText = useEntityText(def.kind === "entity" ? def.entity : "vendor", entityId);
   if (def.kind === "entity") {
-    return <>{`${def.label}: ${entityText || copy.lists.anyValue}`}</>;
+    return <>{`${def.label}: ${entityText || "…"}`}</>;
   }
   if (def.kind === "select") {
     const chosen = def.options.find((o) => o.value === values[def.key]);
@@ -180,11 +180,13 @@ export function FilterChips({
   applied,
   onChange,
   onClearAll,
+  onEmptied,
 }: {
   defs: ListFilterDef[];
   applied: FilterValues;
   onChange(values: FilterValues): void;
   onClearAll(): void;
+  onEmptied(): void;
 }) {
   const active = activeFilters(defs, applied);
   if (active.length === 0) {
@@ -198,7 +200,16 @@ export function FilterChips({
             <span>
               <ChipText def={def} values={values} />
             </span>
-            <button type="button" className={styles.chipRemove} aria-label={copy.lists.removeFilter(def.label)} onClick={() => onChange(withoutFilter(applied, def))}>
+            <button type="button" className={styles.chipRemove} aria-label={copy.lists.removeFilter(def.label)} onClick={(event) => {
+                const item = event.currentTarget.closest("li");
+                const next = (item?.nextElementSibling ?? item?.previousElementSibling)?.querySelector("button");
+                if (next) {
+                  next.focus();
+                } else {
+                  onEmptied();
+                }
+                onChange(withoutFilter(applied, def));
+              }}>
               ×
             </button>
           </li>

@@ -31,14 +31,21 @@ function NavigationPrompt({ shouldBlock, dialog }: { shouldBlock: () => boolean;
   );
 }
 
-const FORM_EDIT_EVENTS = ["input", "change", "click"] as const;
+const FORM_EDIT_EVENTS = ["input", "change", "click", "keydown"] as const;
+const EDIT_KEYS = new Set(["Enter", " ", "Delete"]);
 
 function isEditInsideForm(event: Event): boolean {
   const target = event.target;
   if (!(target instanceof Element) || !target.closest("form")) {
     return false;
   }
-  return event.type !== "click" || target.closest("[role='option']") !== null;
+  if (event.type === "click") {
+    return target.closest("button, [role='option']") !== null;
+  }
+  if (event.type === "keydown") {
+    return EDIT_KEYS.has((event as KeyboardEvent).key);
+  }
+  return true;
 }
 
 export function useFormBaseline(values: unknown): boolean {

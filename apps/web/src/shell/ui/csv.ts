@@ -1,4 +1,5 @@
-const FORMULA_START = /^[=+\-@\t\r]/;
+const BOM = "\uFEFF";
+const FORMULA_START = /^[\s'"]*[=+\-@]/;
 const PLAIN_NUMBER = /^[+-]?\d+(\.\d+)?$/;
 const NEEDS_QUOTES = /[",\r\n]/;
 
@@ -10,7 +11,7 @@ export function csvCell(value: string | number | null | undefined): string {
 
 export function toCsv(header: string[], records: (string | number | null | undefined)[][]): string {
   const lines = [header, ...records].map((record) => record.map(csvCell).join(","));
-  return `﻿${lines.join("\r\n")}\r\n`;
+  return `${BOM}${lines.join("\r\n")}\r\n`;
 }
 
 export function downloadCsv(filename: string, content: string): void {
@@ -21,5 +22,5 @@ export function downloadCsv(filename: string, content: string): void {
   document.body.append(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

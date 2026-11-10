@@ -5,9 +5,11 @@ export type Density = "comfortable" | "compact";
 const densityKey = (identity: string) => `passage.density.v1.${identity}`;
 
 export function readDensity(identity: string, storage: PreferenceStorage = localPreferenceStorage): Density {
-  return storage.read(densityKey(identity)) === "compact" ? "compact" : "comfortable";
+  return identity !== "" && storage.read(densityKey(identity)) === "compact" ? "compact" : "comfortable";
 }
 
 export function writeDensity(identity: string, density: Density, storage: PreferenceStorage = localPreferenceStorage): void {
-  storage.write(densityKey(identity), density);
+  if (identity !== "") {
+    storage.write(densityKey(identity), density);
+  }
 }

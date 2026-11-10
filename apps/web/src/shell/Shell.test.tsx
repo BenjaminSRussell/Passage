@@ -197,6 +197,10 @@ describe("command palette", () => {
   it("does not re-announce Search opened when it is already open", async () => {
     const user = userEvent.setup();
     renderShell();
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("You're offline");
     await user.keyboard("{Control>}k{/Control}");
     expect(screen.getByRole("status")).toHaveTextContent("Search opened");
     await user.keyboard("{Control>}k{/Control}");

@@ -92,6 +92,7 @@ export const copy = {
       `Exported the ${count} ${noun} loaded so far. More exist that are not in the file; use Load more first to include them.`,
     exportNothing: "There are no rows to export.",
     loadMore: (noun: string) => `Load more ${noun}`,
+    loading: (noun: string) => `Loading ${noun}…`,
     loaded: (count: number, noun: string, more: boolean) => `${count} ${noun} loaded${more ? ", more available" : ""}`,
     sortedLoadedOnly: (count: number) => `Sorted within the ${count} rows loaded so far. Load more to include the rest.`,
     retry: "Try again",

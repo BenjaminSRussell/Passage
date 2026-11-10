@@ -78,6 +78,7 @@ function renderList(storage: MemoryStorage = memory(), props: Partial<Parameters
           id="invoices"
           title="Invoices"
           noun="invoices"
+          singular="invoice"
           columns={columns}
           filters={filters}
           useRows={useFake}
@@ -147,7 +148,25 @@ describe("ListPage sorting", () => {
     renderList();
     expect(screen.queryByText(/Sorted within/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Number" }));
-    expect(screen.getByText("Sorted within the 3 rows loaded so far. Load more to include the rest.")).toBeInTheDocument();
+    const note = screen.getByText("Sorted within the 3 rows loaded so far. Load more to include the rest.");
+    expect(note.closest("[role='status']")).toHaveTextContent("3 invoices loaded, more available");
+    expect(screen.getByRole("button", { name: "Number" })).toHaveAccessibleDescription(note.textContent ?? "");
+  });
+
+  it("clears the sort when its column is hidden", async () => {
+    const user = userEvent.setup();
+    renderList();
+    await user.click(screen.getByRole("button", { name: "Amount" }));
+    expect(last().sort).toEqual({ key: "amount", direction: "ascending" });
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("checkbox", { name: "Amount" }));
+    expect(last().sort).toBeNull();
+  });
+
+  it("shows a loading message while rows load", () => {
+    source = { loading: true, rows: [] };
+    renderList();
+    expect(screen.getByText("Loading invoices…")).toHaveAttribute("role", "status");
   });
 
   it("hands a server-side sort to the data source and leaves the row order alone", async () => {
@@ -336,7 +355,7 @@ describe("ListPage states", () => {
     source = { hasMore: false, rows: rows.slice(0, 1) };
     rerender(tree());
     expect(status).toBeInTheDocument();
-    expect(status).toHaveTextContent("1 invoices loaded");
+    expect(status).toHaveTextContent("1 invoice loaded");
   });
 });
 
@@ -491,13 +510,13 @@ describe("ListPage CSV export", () => {
   it("follows the current sort and columns, and uses a column's own export value", async () => {
     const user = userEvent.setup();
     renderList(memory(), { columns: columns.map((c) => (c.key === "status" ? { ...c, csv: (r: Row) => r.status.toLowerCase() } : c)) });
-    await user.click(screen.getByRole("button", { name: "Amount" }));
+    await user.click(screen.getByRole("button", { name: "Number" }));
     await user.click(screen.getByRole("button", { name: "Columns" }));
     await user.click(screen.getByRole("checkbox", { name: "Amount" }));
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Export CSV" }));
     await waitFor(() => expect(blob).toBeDefined());
-    expect((await text()).slice(1).split("\r\n").slice(0, 3)).toEqual(["Number,Status", "'=EVIL(),\"open, late\"", "INV-10,open"]);
+    expect((await text()).slice(1).split("\r\n").slice(0, 3)).toEqual(["Number,Status", "'=EVIL(),\"open, late\"", "INV-9,paid"]);
   });
 
   it("says plainly when more rows exist than were exported", async () => {
@@ -507,6 +526,19 @@ describe("ListPage CSV export", () => {
     await user.click(screen.getByRole("button", { name: "Export CSV" }));
     await waitFor(() => expect(blob).toBeDefined());
     expect(screen.getAllByRole("status").some((s) => s.textContent === "Exported the 3 invoices loaded so far. More exist that are not in the file; use Load more first to include them.")).toBe(true);
+  });
+
+  it("always exports the currency column beside an amount that names it, even while hidden", async () => {
+    const withCurrency: ListColumn<Row>[] = [
+      { key: "number", header: "Number" },
+      { key: "amount", header: "Amount", csvWith: "currency" },
+      { key: "currency", header: "Currency", defaultHidden: true, sortValue: () => "USD", csv: () => "USD" },
+    ];
+    const user = userEvent.setup();
+    renderList(memory(), { columns: withCurrency });
+    await user.click(screen.getByRole("button", { name: "Export CSV" }));
+    await waitFor(() => expect(blob).toBeDefined());
+    expect((await text()).slice(1).split("\r\n")[0]).toBe("Number,Amount,Currency");
   });
 
   it("downloads nothing when there are no rows", async () => {

@@ -125,6 +125,10 @@ function Baseline() {
             Pick me
           </li>
         </ul>
+        <button type="button" onClick={() => setValue("")}>
+          Remove line
+        </button>
+        <div role="combobox" aria-label="Lookup" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setValue("keyboard pick")} />
       </form>
       <output>{dirty ? "dirty" : "clean"}</output>
     </>
@@ -155,6 +159,26 @@ describe("form baseline", () => {
     render(<Baseline />);
     await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
     await user.click(screen.getByRole("option", { name: "Pick me" }));
+    expect(screen.getByRole("status")).toHaveTextContent("dirty");
+  });
+
+  it("counts removing a line with a button inside the form as an edit", async () => {
+    const user = userEvent.setup();
+    render(<Baseline />);
+    await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
+    await user.click(screen.getByRole("button", { name: "Remove line" }));
+    expect(screen.getByRole("status")).toHaveTextContent("dirty");
+  });
+
+  it("counts a keyboard pick as an edit but not Tab", async () => {
+    const user = userEvent.setup();
+    render(<Baseline />);
+    await waitFor(() => expect(screen.getByLabelText("Field")).toHaveValue("filled in by the system"));
+    screen.getByRole("combobox", { name: "Lookup" }).focus();
+    await user.keyboard("{Tab}");
+    expect(screen.getByRole("status")).toHaveTextContent("clean");
+    screen.getByRole("combobox", { name: "Lookup" }).focus();
+    await user.keyboard("{Enter}");
     expect(screen.getByRole("status")).toHaveTextContent("dirty");
   });
 });

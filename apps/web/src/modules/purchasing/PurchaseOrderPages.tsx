@@ -92,7 +92,7 @@ const listColumns: ListColumn<PurchaseOrderSummary>[] = [
     csv: (row) => entityText("vendor", row.vendorId),
   },
   { key: "lineCount", header: "Lines", align: "end" },
-  { key: "total", header: "Total", align: "end", render: (row) => money(row.total, row.currency), csv: (row) => row.total },
+  { key: "total", header: "Total", align: "end", render: (row) => money(row.total, row.currency), csv: (row) => row.total, csvWith: "currency" },
   { key: "currency", header: "Currency", defaultHidden: true },
   { key: "createdAt", header: "Created", mono: true, render: (row) => row.createdAt.slice(0, 10), csv: (row) => row.createdAt.slice(0, 10) },
 ];
@@ -102,19 +102,30 @@ const listFilters: ListFilterDef[] = [
   { kind: "entity", key: "vendorId", label: "Vendor", entity: "vendor" },
 ];
 
+interface PagedRows {
+  key: string;
+  rows: PurchaseOrderSummary[];
+  cursor?: string;
+  nextCursor?: string;
+  ready: boolean;
+}
+
 function usePurchaseOrderRows(query: ListQuery): ListData<PurchaseOrderSummary> {
   const status = (query.filters.approvalStatus ?? "") as ApprovalStatus | "";
   const vendorId = query.filters.vendorId ?? "";
   const key = `${status}|${vendorId}`;
-  const [paging, setPaging] = useState<{ key: string; cursor?: string }>({ key });
-  const cursor = paging.key === key ? paging.cursor : undefined;
-  const [rows, setRows] = useState<PurchaseOrderSummary[]>([]);
+  const [paged, setPaged] = useState<PagedRows>({ key, rows: [], ready: false });
+  const current: PagedRows = paged.key === key ? paged : { key, rows: [], ready: false };
   const [forbidden, setForbidden] = useState(false);
+  const cursor = current.cursor;
   const page = useResource(
     async (signal) => {
       try {
         const result = await listPurchaseOrders({ approvalStatus: status, vendorId: vendorId || undefined }, { cursor, signal });
-        setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
+        setPaged((s) => {
+          const base: PagedRows = s.key === key ? s : { key, rows: [], ready: false };
+          return { ...base, cursor, rows: cursor ? [...base.rows, ...result.items] : result.items, nextCursor: result.nextCursor, ready: true };
+        });
         setForbidden(false);
         return result;
       } catch (error) {
@@ -125,13 +136,13 @@ function usePurchaseOrderRows(query: ListQuery): ListData<PurchaseOrderSummary> 
     [status, vendorId, cursor],
   );
   return {
-    rows: page.error ? [] : rows,
-    loading: page.loading && rows.length === 0,
-    loadingMore: page.loading && rows.length > 0,
+    rows: page.error ? [] : current.rows,
+    loading: (cursor === undefined && page.loading) || (!current.ready && !page.error),
+    loadingMore: cursor !== undefined && page.loading,
     error: page.error ?? undefined,
     forbidden,
-    hasMore: Boolean(page.data?.nextCursor) && !page.error,
-    loadMore: () => setPaging({ key, cursor: page.data?.nextCursor }),
+    hasMore: current.ready && Boolean(current.nextCursor) && !page.error,
+    loadMore: () => setPaged((s) => (s.key === key ? { ...s, cursor: s.nextCursor } : s)),
     retry: page.reload,
   };
 }
@@ -144,6 +155,7 @@ export function PurchaseOrdersPage() {
       title="Purchase orders"
       description="Orders to vendors with lines, charges and totals that always balance to the cent."
       noun="purchase orders"
+      singular="purchase order"
       actions={
         <Link className={buttonClassName("primary")} to="/purchasing/purchase-orders/new">
           New purchase order

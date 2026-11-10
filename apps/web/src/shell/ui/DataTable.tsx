@@ -25,6 +25,7 @@ export interface DataTableProps<T> {
   empty?: { title: string; description?: string };
   onRowOpen?(row: T): void;
   sort?: { key: string; direction: SortDirection } | null;
+  sortDescribedBy?: string;
   onSortChange?(key: string): void;
 }
 
@@ -38,7 +39,7 @@ function cellValue<T>(column: DataTableColumn<T>, row: T): ReactNode {
   return value === undefined || value === null ? "" : (value as ReactNode);
 }
 
-export function DataTable<T>({ label, columns, rows, getRowKey, loading = false, empty, onRowOpen, sort, onSortChange }: DataTableProps<T>) {
+export function DataTable<T>({ label, columns, rows, getRowKey, loading = false, empty, onRowOpen, sort, onSortChange, sortDescribedBy }: DataTableProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
 
@@ -82,7 +83,7 @@ export function DataTable<T>({ label, columns, rows, getRowKey, loading = false,
                   aria-sort={sortable ? (direction ?? "none") : undefined}
                 >
                   {sortable ? (
-                    <button type="button" className={styles.sortButton} onClick={() => onSortChange?.(column.key)}>
+                    <button type="button" className={styles.sortButton} aria-describedby={direction ? sortDescribedBy : undefined} onClick={() => onSortChange?.(column.key)}>
                       {column.header}
                       <span className={cx(styles.sortMark, direction === "ascending" && styles.ascending, direction && styles.sorted)} aria-hidden="true">
                         <Icon name="chevronDown" />

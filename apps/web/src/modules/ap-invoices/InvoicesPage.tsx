@@ -15,7 +15,7 @@ const columns: ListColumn<Invoice>[] = [
     csv: (i) => entityText("vendor", i.vendorId),
   },
   { key: "invoiceDate", header: "Invoice date" },
-  { key: "total", header: "Amount", align: "end", render: (i) => `${i.total} ${i.currency}`, csv: (i) => i.total },
+  { key: "total", header: "Amount", align: "end", render: (i) => `${i.total} ${i.currency}`, csv: (i) => i.total, csvWith: "currency" },
   { key: "currency", header: "Currency", defaultHidden: true },
   {
     key: "status",
@@ -58,6 +58,7 @@ export function InvoicesPage() {
       title="Vendor invoices"
       description="Vendor invoices that have been posted, held for audit or rejected after audit."
       noun="vendor invoices"
+      singular="vendor invoice"
       actions={
         <Link className={buttonClassName("primary")} to="/ap-invoices/post">
           Post vendor invoice
