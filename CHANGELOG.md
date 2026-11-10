@@ -19,6 +19,14 @@ release may change public APIs.
 
 ### Added
 
+- Product costing: activation revaluation report and mass roll by stored-BOM selection (#39). `GET
+  /v1/product-costing/activations/{id}/revaluation-report` (duty `productcost.view`) sets each stored activation line
+  beside the inventory on-hand read again from the inventory service for the posting date (the existing
+  `inventory.read`-only grant) and reports `tiedToJournal` (lines, total and booked journal agree) and `tiedToOnHand`.
+  `POST /v1/product-costing/versions/{id}/roll` takes `"selection": "allActive"` instead of `itemIds`: the roots are
+  every item with an active material BOM at the site on `asOf`, listed from engineering (`ActiveBOMProducts`), up to
+  50,000, so the request stays small against the 4 MiB body cap (tested with 30,000 BOMs whose equivalent body is over
+  4 MiB).
 - Wave 10 proof P4a (#10): the demo manufacturer's seven AX tables now migrate through the real `target.Loader`
   (signed service tokens over HTTP to the owning services' import routes, read-back reconciliation) with the
   cross-reference in Postgres, instead of the in-memory `MemLoader`

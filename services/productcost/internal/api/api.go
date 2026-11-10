@@ -140,6 +140,7 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/product-costing/versions/{id}/transition", dutyMaintain, a.transitionStoredVersion},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/activate", dutyActivate, a.activateStoredVersion},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/roll", dutyCalculate, a.rollStoredVersion},
+		{http.MethodGet, "/v1/product-costing/activations/{id}/revaluation-report", dutyView, a.revaluationReport},
 		{http.MethodGet, "/v1/product-costing/activation-attempts", dutyResolveAttempt, a.listActivationAttempts},
 		{http.MethodPost, "/v1/product-costing/versions/{id}/activation-attempt/resolve", dutyResolveAttempt, a.resolveActivationAttempt},
 		{http.MethodGet, "/v1/product-costing/posting-accounts/{legalEntityId}", dutyView, a.getPostingAccounts},
