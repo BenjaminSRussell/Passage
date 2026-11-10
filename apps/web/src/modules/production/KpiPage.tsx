@@ -3,6 +3,7 @@ import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, S
 import { describeProblem, getOrderKpis, type KpiGroupBy, type OrderKpiGroup, type OrderKpis, type Problem } from "./api/client";
 import { dash } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -147,7 +148,7 @@ export function KpiPage() {
       </Card>
       {state.error ? (
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The production KPIs are not available" live="alert">
-          {state.error.status === 403 ? "You need the View production orders duty to see the KPIs." : `${state.error.message} (${state.error.code})`}
+          {state.error.status === 403 ? "You need the View production orders duty to see the KPIs." : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>

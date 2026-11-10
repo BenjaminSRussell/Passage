@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export const ruleLabel: Record<AuditRuleType, string> = {
   DUPLICATE: "Duplicate vendor invoice",
@@ -340,7 +341,7 @@ export function AuditRunPage() {
         </form>
       </Card>
       <Alert tone="danger" title={failure ? "The rule could not be run" : undefined} live="alert">
-        {failure ? `${failure.message} (${failure.code})` : null}
+        {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <Alert tone={result && result.count > 0 ? "warning" : "success"} live="status">
         {summary}

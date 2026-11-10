@@ -108,7 +108,7 @@ describe("Commodity cost basis types", () => {
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty pricing.view" });
     renderAt("/pricing/commodity/bases");
-    expect(await findAlert()).toHaveTextContent("(AUTH-0003)");
+    expect(await findAlert()).toHaveTextContent("AUTH-0003");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -151,7 +151,7 @@ describe("Commodity cost basis types", () => {
     fill("Name", "LME copper cash");
     fill("Quoted per", "MT");
     fireEvent.click(screen.getByRole("button", { name: "Save cost basis type" }));
-    expect(await findAlert()).toHaveTextContent("(PRC-0054)");
+    expect(await findAlert()).toHaveTextContent("PRC-0054");
   });
 
   it("records an index quote and reloads the quotes", async () => {
@@ -205,7 +205,7 @@ describe("Commodity price calculations", () => {
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "boom" });
     renderAt("/pricing/commodity/calculations");
-    expect(await findAlert()).toHaveTextContent("(COM-0500)");
+    expect(await findAlert()).toHaveTextContent("COM-0500");
   });
 
   it("validates like the service", () => {
@@ -266,7 +266,7 @@ describe("Commodity price calculations", () => {
     fill("Product", "ROD");
     fill("Unit", "EA");
     fireEvent.click(screen.getByRole("button", { name: "Save calculation" }));
-    expect(await findAlert()).toHaveTextContent("(PRC-0050)");
+    expect(await findAlert()).toHaveTextContent("PRC-0050");
   });
 });
 
@@ -347,7 +347,7 @@ describe("Commodity calculation detail", () => {
     await screen.findByRole("heading", { name: "Copper rod EA" });
     fill("Run date", "2026-06-10");
     fireEvent.click(screen.getByRole("button", { name: "Preview run" }));
-    expect(await findAlert()).toHaveTextContent("(PRC-0052)");
+    expect(await findAlert()).toHaveTextContent("PRC-0052");
   });
 
   it("checks the run date before calling the service", async () => {
@@ -374,7 +374,7 @@ describe("Commodity calculation detail", () => {
   it("shows the load error with a retry", async () => {
     server.handler = () => json(404, { code: "PRC-0051", detail: "no commodity price calculation x" });
     renderAt(`/pricing/commodity/calculations/${CALC}`);
-    expect(await findAlert()).toHaveTextContent("(PRC-0051)");
+    expect(await findAlert()).toHaveTextContent("PRC-0051");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

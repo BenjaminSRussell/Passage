@@ -9,6 +9,7 @@ import { ProblemAlert, useCommandKey } from "./forms";
 import { DropShipStatusBadge } from "./DropShipsPage";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Section 5.28.5: the vendor confirmation is a purchasing duty (seeded as procurement.purchase-order.confirm). */
 const DUTY_CONFIRM = "procurement.purchase-order.confirm";
@@ -208,7 +209,7 @@ export function DropShipDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Drop-ship" />
         <Alert tone="danger" title="Could not load the drop-ship" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

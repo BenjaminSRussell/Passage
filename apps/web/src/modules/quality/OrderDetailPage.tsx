@@ -10,6 +10,7 @@ import { ResultsEntry } from "./ResultsEntry";
 import { SamplesPanel } from "./SamplesPage";
 import { UsageDecisionForm } from "./UsageDecisionForm";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Detail {
   order: OrderView;
@@ -48,7 +49,7 @@ export function OrderDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Quality order" />
         <Alert tone="danger" title="Could not load the quality order" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

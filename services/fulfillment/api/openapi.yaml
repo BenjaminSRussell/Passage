@@ -204,6 +204,33 @@ components:
         resolvedAt: { type: [string, "null"], format: date-time }
         resolvedBy: { type: [string, "null"] }
         resolutionNote: { type: [string, "null"] }
+    SalesDeliveryReport:
+      type: object
+      required: [id, legalEntityId, packingSlipId, sourceRef, orderId, status, attempts, createdAt]
+      description: >
+        The report of one posted packing slip to sales' POST /v1/sales/orders/{id}:record-progress
+        (kind DELIVERED, #496), made after the post commits: sourceRef is the slip number, each
+        line names the sales order line by id with the slip's quantity, the catch weight as
+        actualWeight and the slip's batch and serial entries as tracking; the Idempotency-Key is
+        stable per (slip, order). PENDING waits for its next attempt; REPORTED sales took it;
+        PARKED sales refused it (4xx) or the attempts ran out, see lastStatus and lastError, and
+        :retry queues it again; WITHDRAWN the slip was cancelled before it was reported. A slip
+        cancelled after it was reported stays REPORTED with cancelledAt: sales has no reversal
+        of a delivery.
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        packingSlipId: { type: string, format: uuid }
+        sourceRef: { type: string, description: The packing slip number sent as sourceRef. }
+        orderId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, REPORTED, PARKED, WITHDRAWN] }
+        attempts: { type: integer, minimum: 0 }
+        nextAttemptAt: { type: string, format: date-time, description: "PENDING only: when the reporter tries next." }
+        lastStatus: { type: integer, description: "Sales' HTTP status on the last attempt; absent when it gave none." }
+        lastError: { type: string }
+        reportedAt: { type: string, format: date-time }
+        cancelledAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
     ReleaseRule:
       type: object
       required: [warehouseId, legalEntityId, horizonDays, requireFullAtp, waveMaxLines, waveMaxOrders, version]
@@ -1864,6 +1891,55 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/sales-delivery-reports:
+    get:
+      operationId: listSalesDeliveryReports
+      summary: Reports of posted packing slips to sales (#496)
+      description: >
+        What each posted packing slip reported, or is waiting to report, to sales'
+        :record-progress, newest first. The reporter runs when SALES_URL is configured.
+      x-passage-duty: fulfillment.warehouse.view
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, REPORTED, PARKED, WITHDRAWN] } }
+        - { name: packingSlipId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        "200":
+          description: Reports, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/SalesDeliveryReport" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/fulfillment/sales-delivery-reports/{id}:retry:
+    post:
+      operationId: retrySalesDeliveryReport
+      summary: Queue a parked sales delivery report again
+      description: >
+        A PARKED report becomes PENDING, due now, with its attempts counted from zero; the body
+        and Idempotency-Key sent to sales do not change. A PENDING report is returned as it is.
+        Fix the cause first (for a 4xx, usually in sales): the same body is sent again.
+      x-passage-duty: fulfillment.packing-slip.post
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "200":
+          description: The report, PENDING
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SalesDeliveryReport" }
+        "400": { description: "FUL-0051 Idempotency-Key", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0080 report not found, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0081 the report is REPORTED or WITHDRAWN", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/release-rules:
     get:
       operationId: listReleaseRules

@@ -179,6 +179,10 @@ func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
 		err = problem
 	case errors.As(err, &pe):
 		err = httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeValidation, fmt.Sprintf("provider rejected the document with status %d", pe.Status))
+	case errors.Is(err, ledger.ErrNotConfigured):
+		err = httpx.NewProblem(http.StatusServiceUnavailable, codeNotConfigured, "the general ledger is not configured for this service")
+	case errors.Is(err, ledger.ErrBadData):
+		err = httpx.NewProblem(http.StatusBadGateway, domain.CodeLedgerDataUnexportable, "the general ledger data does not form a valid SAF-T extract")
 	case errors.Is(err, ledger.ErrRead):
 		err = httpx.NewProblem(http.StatusBadGateway, codeLedgerUnavailable, "the general ledger could not be read")
 	case errors.Is(err, store.ErrNoLegalEntity):

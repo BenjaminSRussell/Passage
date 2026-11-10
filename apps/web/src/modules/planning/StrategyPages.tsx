@@ -4,6 +4,7 @@ import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Inpu
 import { createStrategy, getStrategy, listStrategies, updateStrategy, type ConsumptionMode, type StrategySettings, type StrategySetup } from "./api/client";
 import { describeError, useLoad, type LoadError } from "./hooks";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const LIST = "/planning/strategies";
 
@@ -94,7 +95,7 @@ export function StrategiesPage() {
         description="How forecast and sales demand interact for an item. An item takes the strategy of its item coverage; a run nets the forecast model accordingly."
       />
       <Alert tone="danger" title={state.error ? "Could not load planning strategies" : undefined} live="alert">
-        {state.error ? `${state.error.message} (${state.error.code})` : null}
+        {state.error ? <ProblemMessage problem={state.error} /> : null}
       </Alert>
       {state.error ? null : (
         <DataTable
@@ -174,7 +175,7 @@ function StrategyForm({ strategy, onSaved, onReload }: FormProps) {
             ) : undefined
           }
         >
-          {failure ? `${failure.message} (${failure.code})` : null}
+          {failure ? <ProblemMessage problem={failure} /> : null}
         </Alert>
       </div>
       <FormField
@@ -246,7 +247,7 @@ export function StrategyPage() {
         }
       />
       <Alert tone="danger" title={state.error ? `Could not load planning strategy ${code}` : undefined} live="alert">
-        {state.error ? `${state.error.message} (${state.error.code})` : null}
+        {state.error ? <ProblemMessage problem={state.error} /> : null}
       </Alert>
       <Alert tone="success" live="status">
         {saved ? `Saved. Version ${saved.version}.` : null}

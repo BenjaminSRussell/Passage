@@ -5,6 +5,7 @@ import { Fields, type FieldSpec } from "./Fields";
 import { isPositive } from "./format";
 import { usePreview, type Checked } from "./usePreview";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type HeadKey = "chainId" | "sellerEntity" | "buyerEntity" | "active" | "shippedQuantity";
 type LegName = "customerOrder" | "icPurchase" | "icSales";
@@ -132,7 +133,7 @@ export function ChainsPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The chain was not accepted" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -164,7 +165,7 @@ export function ChainsPage() {
             icon="workflow"
             headingLevel={3}
             title="No chain checked yet"
-            description="The form holds acceptance example AC-40.3. Preview it, or enter your own chain."
+            description="The form is filled in with an example. Preview it, or enter your own chain."
           />
         </Card>
       )}

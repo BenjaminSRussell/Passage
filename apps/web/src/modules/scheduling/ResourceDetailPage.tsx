@@ -5,6 +5,7 @@ import { describeCondition } from "./CapacityBlocksPage";
 import { clock, dayStart, formatDateTime, formatMinutes, today, WEEK_ORDER, WEEKDAYS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Detail {
   resource: Resource;
@@ -35,7 +36,7 @@ export function BlockUtilizationCard({ resourceId, from, to }: { resourceId: str
     >
       {state.error ? (
         <Alert tone="danger" title="Could not load the block windows" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <div className={styles.stack}>
@@ -80,7 +81,7 @@ export function ResourceDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Resource" />
         <Alert tone="danger" title="Could not load the resource" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

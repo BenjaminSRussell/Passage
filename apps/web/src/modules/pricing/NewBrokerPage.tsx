@@ -5,6 +5,7 @@ import { createBrokerContract, describeProblem, newKey, type BrokerContractInput
 import { DEFAULT_CONTRACT_ACCOUNTS, RATE_KIND_LABELS } from "./contractFormat";
 import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface BrokerDraft {
   legalEntityId: string;
@@ -190,7 +191,7 @@ export function NewBrokerPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the contract" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

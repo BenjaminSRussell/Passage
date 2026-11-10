@@ -6,6 +6,7 @@ import { today } from "./format";
 import { CODE, CURRENCY, DATE, decimalText, mapFields, wholeNumber, WEEK_MINUTES } from "./forms";
 import styles from "./pages.module.css";
 import { ResourceGate } from "./ResourceGate";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Values {
   resourceId: string;
@@ -141,7 +142,7 @@ export function NewSetupMatrixPage() {
               {failure ? (
                 <div className={styles.formActions}>
                   <Alert tone="danger" title="Could not save the matrix" live="alert">
-                    {failure.message} ({failure.code})
+                    <ProblemMessage problem={failure} />
                   </Alert>
                 </div>
               ) : null}

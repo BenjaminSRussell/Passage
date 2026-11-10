@@ -5,6 +5,7 @@ import { changeAllocationQuota, describeProblem, getAllocationQuota, type Alloca
 import { DECIMAL, dash, formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<AllocationConsumption>[] = [
   { key: "consumedAt", header: "Drawn", render: (c) => formatDateTime(c.consumedAt) },
@@ -30,7 +31,7 @@ export function AllocationQuotaDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Allocation quota" />
         <Alert tone="danger" title="Could not load the quota" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -109,7 +110,7 @@ export function AllocationQuotaDetailPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0036" ? "The quota cannot go below what is consumed" : "Could not change the quota"} live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -3,6 +3,7 @@ import { Alert, Button, Input, FormField, Select } from "../../shell/ui";
 import type { CharacteristicDefinition, CharacteristicType, NewProcessCategory, ProcessDestination, Problem } from "./api/client";
 import { DESTINATIONS, DESTINATION_LABELS } from "./processLabels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DECIMAL = /^-?\d+(\.\d+)?$/;
 const CODE = /^[a-z0-9][a-z0-9-]*$/;
@@ -206,7 +207,7 @@ export function ProcessCategoryForm({ initial, creating, submitLabel, failureTit
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title={failureTitle} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}

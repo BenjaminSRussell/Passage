@@ -14,6 +14,7 @@ import {
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { useCategoryOptions } from "./processLabels";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface ValueRow {
   name: string;
@@ -252,7 +253,7 @@ export function NewProcessMessagePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not record the message" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

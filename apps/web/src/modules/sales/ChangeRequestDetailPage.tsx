@@ -9,6 +9,7 @@ import { ChangeStatusBadge } from "./ChangeRequestsPage";
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Approving or rejecting a change needs this duty (SalesOrderApprove); the service enforces it. */
 export const DUTY_ORDER_APPROVE = "sales.order.approve";
@@ -46,7 +47,7 @@ export function ChangeRequestDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Change request" />
         <Alert tone="danger" title="Could not load the change request" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -135,7 +136,7 @@ export function ChangeRequestDetailPage() {
             ) : undefined
           }
         >
-          {outcome.problem.message} ({outcome.problem.code})
+          <ProblemMessage problem={outcome.problem} />
         </Alert>
       ) : null}
       <Alert tone="success" live="status">

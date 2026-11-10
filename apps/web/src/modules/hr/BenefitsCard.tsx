@@ -19,6 +19,7 @@ import {
 import { DATE, dayOf, endReasonLabel, enrollmentStatusLabel, formatRate, lastDay, lifeEventLabel, rateBasisLabel, todayIso } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface EnrollValues {
   planId: string;
@@ -180,7 +181,7 @@ function EnrollForm({
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title={failure.code === "HCM-BEN-002" ? "Not eligible for this plan" : "Could not enroll"} live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}
@@ -263,7 +264,7 @@ function LifeEventForm({ workerId, onDone, onCancel }: { workerId: string; onDon
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title="Could not record the event" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}
@@ -335,7 +336,7 @@ function EndForm({ enrollment, onDone, onCancel }: { enrollment: BenefitEnrollme
       {failure ? (
         <div className={styles.formActions}>
           <Alert tone="danger" title="Could not end the coverage" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         </div>
       ) : null}
@@ -435,7 +436,7 @@ export function BenefitsCard({ workerId }: { workerId: string }) {
         </Alert>
         {state.error ? (
           <Alert tone="danger" title="Could not load benefits" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-            {state.error.message} ({state.error.code})
+            <ProblemMessage problem={state.error} />
           </Alert>
         ) : !state.data ? (
           <div aria-busy="true">

@@ -73,6 +73,15 @@ spec:
             - name: CARRIER_GATEWAY_URL
               value: {{ .Values.carrierGatewayUrl | quote }}
             {{- end }}
+            {{- if .Values.salesUrl }}
+            {{- if not .Values.serviceIdentity.signingKeySecret }}
+            {{- fail "salesUrl needs serviceIdentity.signingKeySecret: fulfillment signs its :record-progress calls" }}
+            {{- end }}
+            - name: SALES_URL
+              value: {{ .Values.salesUrl | quote }}
+            - name: SALES_REPORT_INTERVAL
+              value: {{ .Values.salesReportInterval | quote }}
+            {{- end }}
             {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key

@@ -5,6 +5,7 @@ import { listBackorders, type BackorderFilter, type BackorderItem } from "./api/
 import { dash, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -111,7 +112,7 @@ export function BackordersPage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load the backorders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>

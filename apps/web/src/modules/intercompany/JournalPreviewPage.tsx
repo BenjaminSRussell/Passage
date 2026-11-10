@@ -5,6 +5,7 @@ import { isCurrency, isPositive } from "./format";
 import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey } from "./matrix";
 import { RowGrid } from "./RowGrid";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface JournalValues {
   entity: string;
@@ -154,7 +155,7 @@ export function JournalPreviewPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The journal was not derived" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

@@ -17,6 +17,7 @@ import {
 } from "./api/client";
 import { proposalLabel, splitAllocationLabel, yesNo } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const percentPattern = /^\d{1,4}(\.\d{1,2})?$/;
@@ -212,7 +213,7 @@ export function ParametersPage() {
       </Alert>
       {state.error ? (
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="Could not load the parameters" live="alert">
-          {state.error.status === 403 ? "You need the View production setup duty to see the parameters." : `${state.error.message} (${state.error.code})`}
+          {state.error.status === 403 ? "You need the View production setup duty to see the parameters." : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <DataTable
@@ -229,7 +230,7 @@ export function ParametersPage() {
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Production parameters">
           {failure ? (
             <Alert tone="danger" live="alert" title="The parameters were not saved">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           ) : null}
           <div className={styles.fields}>

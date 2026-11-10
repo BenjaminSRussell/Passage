@@ -4,6 +4,7 @@ import { Alert, Badge, Button, buttonClassName, DataTable, PageHeader, type Data
 import { describeProblem, listDowntimeReasons, updateDowntimeReason, type DowntimeReason, type Problem } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** The downtime reason code master: the codes a supervisor chooses when coding a downtime (FR-25.11). */
 export function DowntimeReasonsPage() {
@@ -55,12 +56,12 @@ export function DowntimeReasonsPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not change the reason" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load downtime reasons" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

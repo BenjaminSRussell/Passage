@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -34,6 +34,7 @@ import {
 import { CURRENCY, DAY, DECIMAL, splitProblem } from "./format";
 import { amount, useActionKeys, usePaged, useRecord, UUID, type Failure } from "./persisted";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -106,7 +107,7 @@ export function AdvancesPage() {
       </Card>
       {list.failure ? (
         <Alert tone="danger" title="The cash advances could not be loaded" live="alert" action={<Button size="sm" onClick={list.retry}>Try again</Button>}>
-          {list.failure.message} ({list.failure.code})
+          <ProblemMessage problem={list.failure} />
         </Alert>
       ) : null}
       <DataTable
@@ -238,7 +239,7 @@ export function NewAdvancePage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="The advance was not requested" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -263,7 +264,7 @@ export function AdvanceDetailPage() {
   const { record: adv, setRecord, failure: loadFailure, reload } = useRecord(() => getAdvance(id), id);
   const keyFor = useActionKeys();
   const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<{ title: string; message: string } | null>(null);
+  const [failure, setFailure] = useState<{ title: string; message: ReactNode } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [prepayment, setPrepayment] = useState("");
   const [returned, setReturned] = useState("");
@@ -280,7 +281,7 @@ export function AdvanceDetailPage() {
       return true;
     } catch (err) {
       const p = describeProblem(err);
-      setFailure({ title, message: `${p.message} (${p.code})` });
+      setFailure({ title, message: <ProblemMessage problem={p} /> });
       if (p.code === "EXP-ADV-008") reload();
       return false;
     } finally {
@@ -342,7 +343,7 @@ export function AdvanceDetailPage() {
     }
     return (
       <Alert tone="danger" title="The cash advance could not be loaded" live="alert" action={<Button size="sm" onClick={reload}>Try again</Button>}>
-        {loadFailure.message} ({loadFailure.code})
+        <ProblemMessage problem={loadFailure} />
       </Alert>
     );
   }

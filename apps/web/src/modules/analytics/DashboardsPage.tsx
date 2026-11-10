@@ -34,6 +34,7 @@ import {
 import { dateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const periodLabels: Record<Tile["period"], string> = {
   MTD: "Month to date",
@@ -68,7 +69,7 @@ export function DashboardsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load dashboards" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -281,7 +282,7 @@ function LoadFailed({ title, problem, retry }: { title: string; problem: Problem
     <div className={styles.stack}>
       <PageHeader title={title} />
       <Alert tone="danger" title={`Could not load the ${title.toLowerCase()}`} live="alert" action={<Button size="sm" onClick={retry}>Try again</Button>}>
-        {problem?.message} ({problem?.code})
+        <ProblemMessage problem={problem} />
       </Alert>
     </div>
   );

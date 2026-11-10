@@ -26,6 +26,7 @@ import styles from "./pages.module.css";
 import { SourceSystemField } from "./SourceSystemField";
 import { useLoad } from "./useLoad";
 import { usePaged } from "./usePaged";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Enforced by the service; not in policies/authz/data.json for the nav, so it gates the buttons only. */
 export const DUTY_OUTBOUND_WRITE = "migration.project.write";
@@ -81,7 +82,7 @@ export function OutboundListPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load outbound mappings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -164,7 +165,7 @@ export function NewOutboundPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the mapping" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -201,7 +202,7 @@ export function OutboundDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Outbound mapping" />
         <Alert tone="danger" title="Could not load this outbound mapping" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link className={buttonClassName("ghost")} to="/migration/outbound">
           Back to outbound mappings
@@ -278,7 +279,7 @@ export function OutboundDetailPage() {
       />
       {failure ? (
         <Alert tone="danger" title="Could not change the mapping" live="alert" action={<Button size="sm" onClick={state.reload}>Reload</Button>}>
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {mapping.status === "archived" ? (
@@ -317,7 +318,7 @@ export function OutboundDetailPage() {
       )}
       {versions.error ? (
         <Alert tone="danger" title="Could not load the version history" live="alert" action={<Button size="sm" onClick={versions.reload}>Try again</Button>}>
-          {versions.error.message} ({versions.error.code})
+          <ProblemMessage problem={versions.error} />
         </Alert>
       ) : (
         <DataTable label="Versions" columns={versionColumns} rows={versions.data ?? []} getRowKey={(row) => String(row.version)} loading={versions.loading} empty={{ title: "No versions", description: "A mapping always has at least version 1." }} />

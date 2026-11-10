@@ -14,6 +14,7 @@ import {
 import { CURRENCY, lastMonth, PERIOD, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 type Errors = Record<string, string>;
 
@@ -137,7 +138,7 @@ export function DeferredRevenuePage() {
           </Alert>
           {runFailure ? (
             <Alert tone="danger" title={runFailure.code === "REV-0007" ? "That month has not ended yet" : "The recognition run failed"} live="alert">
-              {runFailure.message} ({runFailure.code})
+              <ProblemMessage problem={runFailure} />
             </Alert>
           ) : null}
           <Card
@@ -150,7 +151,7 @@ export function DeferredRevenuePage() {
           >
             {rollForward.error ? (
               <Alert tone="danger" title="Could not load the roll-forward" live="alert" action={<Button size="sm" onClick={rollForward.reload}>Try again</Button>}>
-                {rollForward.error.message} ({rollForward.error.code})
+                <ProblemMessage problem={rollForward.error} />
               </Alert>
             ) : rollForward.data ? (
               <div className={styles.stack}>
@@ -169,7 +170,7 @@ export function DeferredRevenuePage() {
           <Card title="Recognition runs">
             {runs.error ? (
               <Alert tone="danger" title="Could not load the recognition runs" live="alert" action={<Button size="sm" onClick={runs.reload}>Try again</Button>}>
-                {runs.error.message} ({runs.error.code})
+                <ProblemMessage problem={runs.error} />
               </Alert>
             ) : (
               <DataTable

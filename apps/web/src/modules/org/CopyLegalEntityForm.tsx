@@ -6,6 +6,7 @@ import { copyLegalEntity, type LegalEntityCopy } from "./api/structure";
 import { codeProblems, validateLegalEntity, type LegalEntityErrors, type LegalEntityValues } from "./legalEntityValues";
 import styles from "./pages.module.css";
 import { useRows } from "./referenceParts";
+import { ProblemMessage } from "../../shell/errors";
 
 interface Include {
   sites: boolean;
@@ -123,12 +124,12 @@ export function CopyLegalEntityForm({ source, onCopied, onCancel }: Props) {
         </fieldset>
         {loadFailure ? (
           <Alert tone="danger" title="Could not load the country and currency lists" live="alert">
-            {loadFailure.message} ({loadFailure.code})
+            <ProblemMessage problem={loadFailure} />
           </Alert>
         ) : null}
         {failure ? (
           <Alert tone="danger" title="Could not copy the legal entity" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div className={styles.rowActions}>

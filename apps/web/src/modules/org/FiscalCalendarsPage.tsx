@@ -20,6 +20,7 @@ import { useLegalEntity } from "./legalEntityContext";
 import styles from "./pages.module.css";
 import { downloadCsv, periodScheduleCsv, periodScheduleFilename } from "./periodSchedule";
 import { StatusAction, useRows } from "./referenceParts";
+import { ProblemMessage } from "../../shell/errors";
 
 const codePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,9}$/;
 type Errors = Partial<Record<"code" | "name", string>>;
@@ -125,7 +126,7 @@ function CreateCalendarForm({ onCreated }: { onCreated(): void }) {
         </FormField>
         {failure ? (
           <Alert tone="danger" title="Could not add the fiscal calendar" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <div>
@@ -222,7 +223,7 @@ function CalendarDetail({ calendar, canWrite, onGenerated, onChanged }: { calend
             </FormField>
             {renameFailure ? (
               <Alert tone="danger" title="Could not rename the fiscal calendar" live="alert">
-                {renameFailure.message} ({renameFailure.code})
+                <ProblemMessage problem={renameFailure} />
               </Alert>
             ) : null}
             <div>
@@ -279,12 +280,12 @@ function CalendarDetail({ calendar, canWrite, onGenerated, onChanged }: { calend
         ) : null}
         {failure ? (
           <Alert tone="danger" title="Could not generate the fiscal year" live="alert">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         {periods.error ? (
           <Alert tone="danger" title="Could not load the periods" live="alert">
-            {periods.error.message} ({periods.error.code})
+            <ProblemMessage problem={periods.error} />
           </Alert>
         ) : null}
         <DataTable
@@ -344,7 +345,7 @@ export function FiscalCalendarsPage() {
       {canWrite ? <CreateCalendarForm onCreated={state.reload} /> : null}
       {state.error ? (
         <Alert tone="danger" title="Could not load fiscal calendars" live="alert">
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : null}
       <DataTable label="Fiscal calendars" columns={columns} rows={state.rows} getRowKey={(row) => row.id} loading={state.loading} empty={{ title: "No fiscal calendars" }} />

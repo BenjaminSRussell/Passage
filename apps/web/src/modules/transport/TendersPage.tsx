@@ -5,6 +5,7 @@ import { describeProblem, expireTenders, listTenders, TENDER_STATUSES, type Prob
 import { dash, formatDateTime, shortId, stateTone, statusLabel } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<Tender>[] = [
   { key: "id", header: "Tender", mono: true, render: (row) => shortId(row.id) },
@@ -81,7 +82,7 @@ export function TendersPage() {
       </Alert>
       {failure ? (
         <Alert tone="danger" title="Could not cascade overdue tenders" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       <div className={styles.toolbar}>
@@ -100,7 +101,7 @@ export function TendersPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load tenders" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

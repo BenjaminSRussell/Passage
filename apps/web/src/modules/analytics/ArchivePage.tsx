@@ -31,6 +31,7 @@ import {
 import { count, dateTime, enumLabel, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Restored side tables live for 30 days (archive.restore_ttl_days default). */
 const RESTORE_DAYS = 30;
@@ -138,7 +139,7 @@ export function ArchivePage() {
       </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load archive partitions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <>
@@ -232,7 +233,7 @@ export function ArchivePartitionPage() {
       <div className={styles.stack}>
         <PageHeader title="Archive partition" />
         <Alert tone="danger" title="Could not load the partition" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error?.message} ({state.error?.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );
@@ -259,7 +260,7 @@ export function ArchivePartitionPage() {
       </p>
       {failure ? (
         <Alert tone="danger" title="The partition was not restored" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {p.status === "RESTORED" && !restorable ? (

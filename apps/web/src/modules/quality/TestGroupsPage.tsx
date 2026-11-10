@@ -5,6 +5,7 @@ import { createTestGroup, describeProblem, listTestGroups, newKey, type NewTestG
 import { CODE, SIGNED_DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<TestGroup>[] = [
   { key: "code", header: "Code", mono: true },
@@ -41,7 +42,7 @@ export function TestGroupsPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load test groups" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable
@@ -189,7 +190,7 @@ export function NewTestGroupPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the test group" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

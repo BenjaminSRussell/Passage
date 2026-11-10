@@ -217,7 +217,7 @@ describe("cost roll-up page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mass roll" }));
     const alert = await screen.findByText("The roll was refused");
     const box = alert.closest("[role=alert]") as HTMLElement;
-    expect(box).toHaveTextContent("request failed validation (COM-0001)");
+    expect(box).toHaveTextContent("request failed validation");
     expect(box).toHaveTextContent("items[3].sheet[0].type must be Surcharge or Rate");
   });
 
@@ -296,7 +296,7 @@ describe("production variance page", () => {
     renderAt("/productcost/variances");
     fireEvent.click(screen.getByRole("button", { name: "Compute variance" }));
     const title = await screen.findByText("The variance does not close");
-    expect(title.closest("[role=alert]")).toHaveTextContent("DM residual 0.05 (CST-0720)");
+    expect(title.closest("[role=alert]")).toHaveTextContent("DM residual 0.05");
     expect(screen.queryByRole("table", { name: "Variance by component" })).not.toBeInTheDocument();
   });
 
@@ -352,7 +352,7 @@ describe("activation preview page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview revaluation" }));
     await waitFor(() => expect(screen.getByText("The preview was not computed")).toBeInTheDocument());
     expect(screen.getByText("The preview was not computed").closest("[role=alert]")).toHaveTextContent(
-      "missing duty productcost.activate (AUTH-0003)",
+      "missing duty productcost.activate",
     );
     expect(screen.getByLabelText("New standard")).toHaveValue("11.00");
   });
@@ -477,7 +477,7 @@ describe("mixed cost page", () => {
     renderAt("/productcost/mixed-cost");
     fireEvent.click(screen.getByRole("button", { name: "Compute mixed cost" }));
     const title = await screen.findByText("The mixed cost was not computed");
-    expect(title.closest("[role=alert]")).toHaveTextContent("mixing ratios total 99.99 (CST-0741)");
+    expect(title.closest("[role=alert]")).toHaveTextContent("mixing ratios total 99.99");
   });
 });
 
@@ -712,6 +712,6 @@ describe("standard cost reconciliation page", () => {
     renderAt("/productcost/reconciliation");
     fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
     const title = await screen.findByText("The reconciliation was not computed");
-    expect(title.closest("[role=alert]")).toHaveTextContent("missing duty productcost.view (AUTH-0003)");
+    expect(title.closest("[role=alert]")).toHaveTextContent("missing duty productcost.view");
   });
 });

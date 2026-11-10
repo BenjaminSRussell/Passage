@@ -4,6 +4,7 @@ import { getInvoiceTrace, type InvoiceTrace, type TraceLine } from "./api/client
 import { invoiceName, STATUS_LABELS, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const dash = (v?: string) => v || "—";
 
@@ -42,7 +43,7 @@ export function InvoiceTracePage() {
       <div className={styles.stack}>
         <PageHeader title="Invoice trace" />
         <Alert tone="danger" title="Could not load the trace" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       </div>
     );

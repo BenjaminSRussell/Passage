@@ -4,6 +4,7 @@ import { getPayExport } from "./api/client";
 import { formatDateTime } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** One payroll export batch with its CSV file. */
 export function PayExportDetailPage() {
@@ -27,7 +28,7 @@ export function PayExportDetailPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the export batch" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : !batch ? (
         <Card>

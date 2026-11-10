@@ -173,7 +173,7 @@ describe("projects list", () => {
   it("shows an alert when the list cannot load", async () => {
     handler = () => problem(403, "AUTH-0003", "missing duty projects.inquire");
     renderAt("/projects/list");
-    expect(await screen.findByText(/missing duty projects.inquire \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/missing duty projects.inquire/)).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Projects" })).not.toBeInTheDocument();
   });
 });
@@ -216,7 +216,7 @@ describe("project detail", () => {
       init.method === "POST" ? problem(422, "PROJ-STAGE-001", "Project cannot move from CREATED to FINISHED") : { status: 200, body: project({ stage: "CREATED", version: 1 }) };
     renderAt("/projects/ES-1001");
     fireEvent.click(await screen.findByRole("button", { name: "Start work" }));
-    expect(await screen.findByText(/\(PROJ-STAGE-001\)/)).toBeInTheDocument();
+    expect(await screen.findByText("PROJ-STAGE-001")).toBeInTheDocument();
   });
 
   it("offers no moves on a finished project", async () => {

@@ -5,6 +5,7 @@ import { fetchCapacityLoad, fetchDailyLoad, listResources, type LoadItem, type L
 import { dash, hours, shortId, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const WEEK_OPTIONS = [2, 4, 8, 13] as const;
 const DAY_OPTIONS = [7, 14, 31] as const;
@@ -92,7 +93,7 @@ export function CapacityLoadPage() {
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load capacity" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

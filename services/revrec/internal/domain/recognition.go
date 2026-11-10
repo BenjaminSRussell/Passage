@@ -42,23 +42,35 @@ func FullyRecognized(methods, lineStatuses []string) bool {
 }
 
 // RollForward is the deferred revenue movement of one currency over one period
-// (FR-29.9). Closing = Opening + Additions + Adjustments − Recognized.
+// (FR-29.9). Closing = Opening + Additions − Recognized + Reversed + Adjustments.
+// Adjustments are the credit notes' reductions of deferred revenue (negative: the
+// deferred part billing debits to 2400 for the credited lines, BR-29.6) and
+// Reversed the recognized revenue those credit notes reversed back through 2400.
 type RollForward struct {
 	Opening     decimal.Decimal
 	Additions   decimal.Decimal
 	Recognized  decimal.Decimal
+	Reversed    decimal.Decimal
 	Adjustments decimal.Decimal
 	Closing     decimal.Decimal
 }
 
-// NewRollForward closes a period. Adjustments are zero until credit notes
-// reverse schedules (BR-29.6, a later slice).
+// NewRollForward closes a period without credit notes.
 func NewRollForward(opening, additions, recognized decimal.Decimal) RollForward {
 	return RollForward{
 		Opening:     opening,
 		Additions:   additions,
 		Recognized:  recognized,
+		Reversed:    decimal.Zero,
 		Adjustments: decimal.Zero,
 		Closing:     opening.Add(additions).Sub(recognized),
 	}
+}
+
+// WithCredits adds the period's credit-note movements: reversed (recognized revenue
+// reversed, positive) and adjustments (deferred revenue reduced, negative).
+func (r RollForward) WithCredits(reversed, adjustments decimal.Decimal) RollForward {
+	r.Reversed, r.Adjustments = reversed, adjustments
+	r.Closing = r.Opening.Add(r.Additions).Sub(r.Recognized).Add(reversed).Add(adjustments)
+	return r
 }

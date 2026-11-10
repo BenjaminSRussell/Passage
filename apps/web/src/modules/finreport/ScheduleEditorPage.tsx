@@ -17,6 +17,7 @@ import {
 } from "./api/client";
 import { CURRENCY_TYPE_LABELS, DEFINITION_CODE, MONTH_NAMES, parseReferences, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Form state: lists stay text while the user types. */
 export interface ScheduleValues {
@@ -172,7 +173,7 @@ export function ScheduleEditorPage() {
           live="alert"
           action={missing ? undefined : <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>}
         >
-          {loadError.message} ({loadError.code})
+          <ProblemMessage problem={loadError} />
         </Alert>
         <Link to="/finreport/schedules">Back to schedules</Link>
       </div>
@@ -357,7 +358,7 @@ export function ScheduleEditorPage() {
             ) : undefined
           }
         >
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
     </div>

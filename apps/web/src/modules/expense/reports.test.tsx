@@ -137,7 +137,7 @@ describe("expense report list", () => {
     const fetchMock = stubFetch([503, { code: "COM-0503", detail: "report persistence is not configured" }], [200, { items: [report()], nextCursor: "" }]);
     renderAt("/expense/reports");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("report persistence is not configured (COM-0503)");
+    expect(alert).toHaveTextContent("report persistence is not configured");
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Client visit Boston")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -171,7 +171,7 @@ describe("new expense report", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.click(screen.getByRole("button", { name: "Create report" }));
-    expect(await findAlert()).toHaveTextContent("legal entity is outside the caller's scope (AUTH-0004)");
+    expect(await findAlert()).toHaveTextContent("legal entity is outside the caller's scope");
     expect(screen.getByTestId("where")).toHaveTextContent("/expense/reports/new");
     const firstKey = call(fetchMock, 0).headers["Idempotency-Key"];
     fireEvent.click(screen.getByRole("button", { name: "Create report" }));
@@ -287,7 +287,7 @@ describe("expense report detail", () => {
     stubFetch([500, { code: "COM-0500", detail: "internal error" }], [200, flagged]);
     renderAt(`/expense/reports/${REPORT_ID}`);
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("internal error (COM-0500)");
+    expect(alert).toHaveTextContent("internal error");
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "Client visit Boston" })).toBeInTheDocument();
   });

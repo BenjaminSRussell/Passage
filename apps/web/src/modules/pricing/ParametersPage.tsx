@@ -19,6 +19,7 @@ import {
 import { CALC_LABELS } from "./freeGoodsFormat";
 import { UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const DUTY_ADMIN = "pricing.admin";
 
@@ -186,7 +187,7 @@ export function ParametersPage() {
       </Card>
       {failure ? (
         <Alert tone="danger" title="Could not complete the request" live="alert">
-          {failure.message} ({failure.code})
+          <ProblemMessage problem={failure} />
         </Alert>
       ) : null}
       {loading ? <Skeleton height="tile" /> : null}

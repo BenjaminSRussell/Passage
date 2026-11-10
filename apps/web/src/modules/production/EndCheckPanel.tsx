@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Badge, Button, Card, Skeleton } from "../../shell/ui";
 import { describeProblem, getEndCheck, type EndCheck, type Problem } from "./api/client";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface EndCheckPanelProps {
   orderId: string;
@@ -60,7 +61,7 @@ export function EndCheckPanel({ orderId, version, status }: EndCheckPanelProps) 
         </div>
       ) : error ? (
         <Alert tone="danger" live="alert" title="The end check could not be read">
-          {error.message} ({error.code})
+          <ProblemMessage problem={error} />
         </Alert>
       ) : check ? (
         <div className={styles.stack}>

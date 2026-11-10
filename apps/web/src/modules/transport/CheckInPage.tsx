@@ -4,6 +4,7 @@ import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Sel
 import { checkIn, describeProblem, newKey, VISIT_DIRECTIONS, type NewCheckIn, type Problem, type VisitDirection } from "./api/client";
 import { statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 export interface CheckInValues {
   siteId: string;
@@ -181,7 +182,7 @@ export function CheckInPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not check in" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}

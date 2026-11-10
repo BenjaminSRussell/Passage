@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { instant, jobTypeLabel, statusLabel, statusTone } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -195,7 +196,7 @@ export function JobsPage({ onOpenOrder }: JobsPageProps) {
       </Card>
       {state.error ? (
         <Alert tone={state.error.status === 403 ? "info" : "danger"} title="The jobs are not available" live="alert">
-          {state.error.status === 403 ? "You need the View production orders duty to see the jobs." : `${state.error.message} (${state.error.code})`}
+          {state.error.status === 403 ? "You need the View production orders duty to see the jobs." : <ProblemMessage problem={state.error} />}
         </Alert>
       ) : (
         <>
@@ -219,7 +220,7 @@ export function JobsPage({ onOpenOrder }: JobsPageProps) {
           />
           {state.moreError ? (
             <Alert tone="danger" title="More jobs could not be loaded" live="alert">
-              {`${state.moreError.message} (${state.moreError.code})`}
+              {<ProblemMessage problem={state.moreError} />}
             </Alert>
           ) : null}
           {state.page?.nextCursor && !state.loading ? (

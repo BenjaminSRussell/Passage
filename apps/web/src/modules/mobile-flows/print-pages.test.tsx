@@ -304,7 +304,7 @@ describe("print jobs", () => {
   it("shows a load error on the detail page", async () => {
     handler = () => json(404, { code: "PRN-0005", detail: "print job not found" });
     renderAt(`/mobile-flows/print-jobs/${JOB}`);
-    expect(await findAlert()).toHaveTextContent("print job not found (PRN-0005)");
+    expect(await findAlert()).toHaveTextContent("print job not found");
   });
 
   it("validates label data like the template renderer", () => {
@@ -384,7 +384,7 @@ describe("print jobs", () => {
     fireEvent.change(screen.getByLabelText("SSCC"), { target: { value: "340123456789012340" } });
     fireEvent.change(screen.getByLabelText("Ship-to name"), { target: { value: "ACME DC" } });
     fireEvent.click(screen.getByRole("button", { name: "Print label" }));
-    expect(await findAlert()).toHaveTextContent("AI 01: check digit invalid (PRN-0001)");
+    expect(await findAlert()).toHaveTextContent("AI 01: check digit invalid");
   });
 
   it("prints a location label and opens the recorded job", async () => {
@@ -410,7 +410,7 @@ describe("print jobs", () => {
     fireEvent.change(screen.getByLabelText("Printer selection"), { target: { value: "rule" } });
     fireEvent.change(screen.getByLabelText("Location"), { target: { value: "A-01-02" } });
     fireEvent.click(screen.getByRole("button", { name: "Print label" }));
-    expect(await findAlert()).toHaveTextContent("no printer is routed for LOCATION_LABEL (MOB-0112)");
+    expect(await findAlert()).toHaveTextContent("no printer is routed for LOCATION_LABEL");
   });
 });
 

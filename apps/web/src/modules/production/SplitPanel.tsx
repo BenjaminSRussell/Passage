@@ -12,6 +12,7 @@ import {
 } from "./api/client";
 import { addDecimals, isZero, negate } from "./labels";
 import styles from "./pages.module.css";
+import { ProblemMessage } from "../../shell/errors";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
 
@@ -132,7 +133,7 @@ export function SplitPanel({ order, onSplit, onOpenOrder }: SplitPanelProps) {
         </Alert>
         {failure ? (
           <Alert tone="danger" live="alert" title="The split was refused">
-            {failure.message} ({failure.code})
+            <ProblemMessage problem={failure} />
           </Alert>
         ) : null}
         <form className={styles.commandForm} onSubmit={submit} noValidate aria-label="Split order">

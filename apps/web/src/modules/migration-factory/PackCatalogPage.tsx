@@ -4,6 +4,7 @@ import { listPackCatalog, type CatalogEntry } from "./api/client";
 import { SOURCE_LABELS, type Pack } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 /** Where a run of an available pack is started. */
 const startPath: Partial<Record<Pack, string>> = {
@@ -18,7 +19,7 @@ const startPath: Partial<Record<Pack, string>> = {
 const columns: DataTableColumn<CatalogEntry>[] = [
   { key: "pack", header: "Pack", mono: true },
   { key: "sourceSystems", header: "Legacy systems", render: (row) => row.sourceSystems.map((s) => SOURCE_LABELS[s] ?? s).join(", ") },
-  { key: "controlTotals", header: "Control totals (FR-49.2)" },
+  { key: "controlTotals", header: "Control totals" },
   {
     key: "available",
     header: "This release",
@@ -54,7 +55,7 @@ export function PackCatalogPage() {
       />
       {state.error ? (
         <Alert tone="danger" title="Could not load the pack catalog" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
       ) : (
         <DataTable

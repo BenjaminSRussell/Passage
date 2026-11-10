@@ -133,7 +133,7 @@ describe("Process message monitor", () => {
     };
     renderAt("/shopfloor/process-messages");
     fireEvent.click(await screen.findByRole("button", { name: "Load more messages" }));
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Process messages" })).getAllByRole("link")).toHaveLength(1);
     fill("Status", "error");
     await waitFor(() => expect(calls.at(-1)?.url.search).toBe("?status=error"));
@@ -145,7 +145,7 @@ describe("Process message monitor", () => {
     let fail = true;
     handler = () => (fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [] }));
     renderAt("/shopfloor/process-messages");
-    expect(await screen.findByText(/Service unavailable \(COM-0503\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Service unavailable/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No process messages yet")).toBeInTheDocument();
@@ -195,7 +195,7 @@ describe("Process message detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reprocess Quality results" }));
     fill("Reason", "retry");
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
-    expect(await screen.findByText(/only a destination in error can be reprocessed \(SF-0116\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/only a destination in error can be reprocessed/)).toBeInTheDocument();
   });
 
   it("deletes a message with a destination in error, with a reason and an Idempotency-Key", async () => {
@@ -232,7 +232,7 @@ describe("Process message detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete message" }));
     fill("Reason for deleting", "duplicate");
     fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
-    expect(await screen.findByText(/only a message with a destination in error can be deleted \(SF-0119\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/only a message with a destination in error can be deleted/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("button", { name: "Delete message" })).toBeInTheDocument();
   });
@@ -257,7 +257,7 @@ describe("Process message detail", () => {
   it("shows a missing message as an error", async () => {
     handler = () => json(404, { code: "SF-0117", detail: "process message not found" });
     renderAt(`/shopfloor/process-messages/${MSG}`);
-    expect(await screen.findByText(/process message not found \(SF-0117\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/process message not found/)).toBeInTheDocument();
   });
 });
 

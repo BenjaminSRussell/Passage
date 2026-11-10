@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, FormField, Input, PageHeader, Skeleton, Textarea } from "../../shell/ui";
 import { fetchLookupTable, putLookupTable, type LookupRow, type LookupTable, type LookupTableInput } from "./api/client";
@@ -88,7 +88,7 @@ function LookupForm({ ledgerId, tableId, initial, existing }: { ledgerId: string
   const queryClient = useQueryClient();
   const [values, setValues] = useState(initial);
   const [errors, setErrors] = useState<Errors>({});
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ReactNode>(null);
   const [busy, setBusy] = useState(false);
   const update = (patch: Partial<LookupDraft>) => setValues((prev) => ({ ...prev, ...patch }));
 

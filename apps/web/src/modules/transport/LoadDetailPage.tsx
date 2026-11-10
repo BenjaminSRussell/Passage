@@ -24,6 +24,7 @@ import { AMOUNT, checkTone, dash, fixed, formatDateTime, stateTone, statusLabel 
 import styles from "./pages.module.css";
 import { RowsEditor, type RowField } from "./RowsEditor";
 import { useLoad } from "./useLoad";
+import { ProblemMessage } from "../../shell/errors";
 
 const findingColumns: DataTableColumn<DGFinding>[] = [
   { key: "severity", header: "Severity", render: (row) => <Badge tone={checkTone(row.severity)}>{statusLabel(row.severity)}</Badge> },
@@ -162,7 +163,7 @@ function DGCheckCard({ loadId, onChecked }: { loadId: string; onChecked(): void 
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not check the load" live="alert">
-              {failure.message} ({failure.code})
+              <ProblemMessage problem={failure} />
             </Alert>
           </div>
         ) : null}
@@ -226,7 +227,7 @@ function ScreeningCard({ loadId }: { loadId: string }) {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not screen the load" live="alert">
-                {failure.message} ({failure.code})
+                <ProblemMessage problem={failure} />
               </Alert>
             </div>
           ) : null}
@@ -282,7 +283,7 @@ export function LoadDetailPage() {
       <div className={styles.stack}>
         <PageHeader title="Load" />
         <Alert tone="danger" title="Could not load the load" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          {state.error.message} ({state.error.code})
+          <ProblemMessage problem={state.error} />
         </Alert>
         <Link to="/transport/loads">Back to loads</Link>
       </div>
