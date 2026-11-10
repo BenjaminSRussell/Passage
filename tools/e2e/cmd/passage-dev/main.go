@@ -141,6 +141,9 @@ func up(ctx context.Context, root string) error {
 	if err := stk.Start(ctx, false); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(devDir(root), "ledger-id"), []byte(stk.LedgerID), 0o644); err != nil {
+		return err
+	}
 	if err := grantLimits(ctx, root, stk, seed); err != nil {
 		return err
 	}
