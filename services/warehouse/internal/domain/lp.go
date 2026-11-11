@@ -83,3 +83,44 @@ func allDigits(s string) bool {
 	}
 	return true
 }
+
+// Codes of the GS1 settings and of generated pallet identity.
+const (
+	// CodeGS1NotSet is a receipt that needs an SSCC or a license plate id the warehouse must generate, before the
+	// tenant's GS1 company prefix is set (422).
+	CodeGS1NotSet = "WMS-GS1-NOT-SET"
+	// CodeGS1Locked is a change of the company prefix after SSCCs were issued under the old one (409).
+	CodeGS1Locked = "WMS-GS1-LOCKED"
+	// CodeGS1Exhausted is a prefix whose serial references are all used (409).
+	CodeGS1Exhausted = "WMS-GS1-EXHAUSTED"
+)
+
+// ValidCompanyPrefix reports whether s is a GS1 company prefix: 7 to 11 digits.
+func ValidCompanyPrefix(s string) bool { return len(s) >= 7 && len(s) <= 11 && allDigits(s) }
+
+// SerialCapacity is how many serial references a company prefix has: the SSCC's 16 digits after the extension are the
+// prefix and the serial, so a 7-digit prefix has 10^9 serials and an 11-digit one 10^5.
+func SerialCapacity(companyPrefix string) int64 {
+	n := int64(1)
+	for i := 0; i < 16-len(companyPrefix); i++ {
+		n *= 10
+	}
+	return n
+}
+
+// SSCCForSerial builds the SSCC of the n-th pallet of a company prefix (n from 1): the extension digit, the prefix,
+// the serial reference padded with zeros to fill 16 digits, and the check digit.
+func SSCCForSerial(extension int, companyPrefix string, n int64) (string, error) {
+	if !ValidCompanyPrefix(companyPrefix) {
+		return "", errorf(CodeGS1NotSet, "the GS1 company prefix is not valid")
+	}
+	if n < 1 || n >= SerialCapacity(companyPrefix) {
+		return "", errorf(CodeGS1Exhausted, "the GS1 company prefix %s has no serial reference left", companyPrefix)
+	}
+	serial := strconv.FormatInt(n, 10)
+	width := 16 - len(companyPrefix)
+	for len(serial) < width {
+		serial = "0" + serial
+	}
+	return SSCC18(extension, companyPrefix, serial)
+}

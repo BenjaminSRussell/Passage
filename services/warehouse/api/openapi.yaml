@@ -299,6 +299,8 @@ paths:
               required: [qty]
               properties:
                 qty: { $ref: "#/components/schemas/Decimal" }
+                lot: { type: string, maxLength: 40, description: What was counted; replaces the ASN's lot on the pallet's label. }
+                expiryDate: { type: string, format: date, description: What was counted; replaces the ASN's expiry date. }
       responses:
         "200":
           description: The work after the confirmation (or replayed).
@@ -511,11 +513,19 @@ paths:
                   items:
                     type: object
                     additionalProperties: false
-                    required: [lineNo, itemId, lpId, expectedQty]
+                    required: [lineNo, itemId, expectedQty]
                     properties:
                       lineNo: { type: integer, minimum: 1 }
                       itemId: { type: string, minLength: 1, maxLength: 60 }
-                      lpId: { type: string, pattern: "^[A-Za-z0-9._-]{1,40}$" }
+                      lpId:
+                        type: string
+                        pattern: "^[A-Za-z0-9._-]{1,40}$"
+                        description: >
+                          The pallet's license plate. Left out, the warehouse names it when the pallet is received:
+                          the SSCC it generates from the tenant's GS1 company prefix (PUT /v1/warehouse/gs1-settings).
+                          An 18-digit SSCC here is also the pallet's SSCC.
+                      lot: { type: string, maxLength: 40, description: The lot the label shows; the receive command may replace it. }
+                      expiryDate: { type: string, format: date, description: The expiry date the label shows; the receive command may replace it. }
                       poLineRef: { type: string, maxLength: 100 }
                       expectedQty: { $ref: "#/components/schemas/Decimal" }
                       weight: { $ref: "#/components/schemas/Decimal" }
@@ -587,7 +597,12 @@ paths:
         location when the put-away is confirmed. Emits
         dev.passage.wms.work.created.v1 and dev.passage.wms.receipt.registered.v1.
         A pallet already received is 409 WMS-RECEIPT-LINE-RECEIVED. The user is
-        X-Passage-User.
+        X-Passage-User. The warehouse gives the pallet its identity (#32): the
+        ASN's license plate stays, an SSCC in it is the pallet's SSCC, and a
+        pallet with neither gets the next SSCC of the tenant's GS1 company prefix,
+        which is also its license plate id; the put-away work line carries lpId,
+        sscc, lot and expiry, so a device prints the label from the work with no
+        second scan. 422 WMS-GS1-NOT-SET when it must generate one and no prefix is set.
       x-passage-duty: warehouse.receipt.register
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -645,6 +660,227 @@ paths:
       operationId: readyz
       responses:
         "200": { description: Process is ready to serve }
+  /v1/warehouse/gs1-settings:
+    put:
+      operationId: putGS1Settings
+      summary: Set the GS1 company prefix SSCCs are generated from (#32)
+      description: >
+        The prefix is 7 to 11 digits, the extension digit 0 to 9. Once SSCCs were issued the prefix cannot change
+        (409 WMS-GS1-LOCKED); the extension digit can.
+      x-passage-duty: warehouse.setup.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [companyPrefix]
+              properties:
+                companyPrefix: { type: string, pattern: "^[0-9]{7,11}$" }
+                extension: { type: integer, minimum: 0, maximum: 9 }
+      responses:
+        "200":
+          description: The settings.
+          content: { application/json: { schema: { $ref: "#/components/schemas/GS1Settings" } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: WMS-GS1-LOCKED }
+    get:
+      operationId: getGS1Settings
+      summary: The GS1 company prefix and how many SSCCs were issued
+      x-passage-duty: warehouse.setup.view
+      responses:
+        "200":
+          description: The settings.
+          content: { application/json: { schema: { $ref: "#/components/schemas/GS1Settings" } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: WMS-GS1-NOT-SET, no prefix is set yet. }
+  /v1/warehouse/rfid-reads:ingest:
+    post:
+      operationId: ingestRFIDReads
+      summary: Post the reads of an RFID reader or portal (FR-32.9)
+      description: >
+        Up to 500 reads. Each EPC (24 hexadecimal characters, 96 bits) is decoded: SGTIN-96, SSCC-96, SGLN-96,
+        GRAI-96, GIAI-96, GSRN-96 and GDTI-96. A read that cannot be decoded is listed in `rejected` with its position
+        (WMS-EPC-INVALID) and the rest are stored. A tag read again at the same reader within five seconds is counted
+        in `duplicates`. A tag that is an SSCC the warehouse labelled names its receipt and pallet.
+      x-passage-duty: warehouse.rfid.ingest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reads]
+              properties:
+                reads:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [readerId, epc, readAt]
+                    properties:
+                      readerId: { type: string, minLength: 1, maxLength: 64 }
+                      antenna: { type: integer, minimum: 0, maximum: 255 }
+                      locationCode: { type: string, maxLength: 60 }
+                      epc: { type: string, pattern: "^[0-9A-Fa-f]{24}$" }
+                      rssi: { type: integer, minimum: -200, maximum: 0 }
+                      readAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: What was stored.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RFIDIngest" } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/rfid-reads:
+    get:
+      operationId: listRFIDReads
+      summary: Stored RFID reads, newest first
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - { name: key, in: query, required: false, description: A GS1 key, an SSCC for example., schema: { type: string } }
+        - { name: readerId, in: query, required: false, schema: { type: string } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, required: false, schema: { type: integer } }
+      responses:
+        "200":
+          description: The reads.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { type: object, additionalProperties: true } } } } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/automation/transport-orders:
+    post:
+      operationId: createTransportOrder
+      summary: Give one line of a work to a PLC station as a MOVE order (FR-32.12)
+      description: >
+        The load unit is the line's pallet SSCC (or `loadUnit`). The line has the location it goes to or comes from; the
+        other end, the PLC's infeed or outfeed point, is given as `fromLocation` or `toLocation`. Locations are at most
+        12 characters, the width of a telegram's field (WMS-AUTO-LOCATION, 422). The work is assigned to the station's
+        identity (`automation:<station>`), so the PLC's arrival confirms the line. 409 WMS-AUTO-ORDER-EXISTS when the line
+        has an order.
+      x-passage-duty: warehouse.work.supervise
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [workId, lineNo, station]
+              properties:
+                workId: { type: string, format: uuid }
+                lineNo: { type: integer, minimum: 1 }
+                station: { type: string, pattern: "^[A-Za-z0-9._-]{1,8}$" }
+                loadUnit: { type: string, pattern: "^[0-9]{18}$" }
+                fromLocation: { type: string, maxLength: 12 }
+                toLocation: { type: string, maxLength: 12 }
+      responses:
+        "201":
+          description: The order, PENDING.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutomationOrder" } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: WMS-AUTO-ORDER-EXISTS, or the work is in a state it cannot be given to a PLC from. }
+        "422": { description: WMS-AUTO-LOCATION or WMS-AUTO-LOAD-UNIT. }
+    get:
+      operationId: listTransportOrders
+      summary: Transport orders, oldest first
+      description: The connector of a station reads its PENDING orders; people read all of them.
+      x-passage-duty: warehouse.inquiry.view or warehouse.automation.execute
+      parameters:
+        - { name: station, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, SENT, REFUSED, ARRIVED, DIVERTED, FAULT, CANCELLED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer } }
+      responses:
+        "200":
+          description: The orders.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/AutomationOrder" } } } } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/automation/transport-orders/{id}:report:
+    post:
+      operationId: reportTransportOrder
+      summary: The connector reports a PENDING order sent to the PLC, or refused by it
+      description: Repeating the status it has changes nothing. Any other state is 409 WMS-AUTO-ORDER-STATE.
+      x-passage-duty: warehouse.automation.execute
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [SENT, REFUSED] }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: The order.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutomationOrder" } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: WMS-AUTO-ORDER-NOT-FOUND }
+        "409": { description: WMS-AUTO-ORDER-STATE }
+  /v1/warehouse/automation/events:
+    post:
+      operationId: ingestAutomationEvents
+      summary: The PLC's events: arrived, diverted, fault (FR-32.12)
+      description: >
+        Each event is stored once by station and sequence, so a telegram the PLC repeats is a duplicate. An arrival of a
+        load unit with an order SENT to the station marks the order ARRIVED and confirms its work line as the station's
+        identity, so the stock moves; `confirmed` counts those. A confirmation that fails leaves the order ARRIVED with
+        the reason in `confirmError`.
+      x-passage-duty: warehouse.automation.execute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [station, events]
+              properties:
+                station: { type: string, pattern: "^[A-Za-z0-9._-]{1,8}$" }
+                events:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [kind, seq, at]
+                    properties:
+                      kind: { type: string, enum: [arrived, diverted, fault] }
+                      seq: { type: integer, minimum: 0 }
+                      loadUnit: { type: string, pattern: "^[0-9]{18}$" }
+                      location: { type: string }
+                      lane: { type: string }
+                      code: { type: string }
+                      text: { type: string }
+                      at: { type: string, format: date-time }
+      responses:
+        "200":
+          description: What was stored and confirmed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, duplicates, confirmed, unmatched]
+                properties:
+                  accepted: { type: integer }
+                  duplicates: { type: integer }
+                  confirmed: { type: integer }
+                  unmatched: { type: integer }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 components:
   parameters:
     IdempotencyKey:
@@ -721,6 +957,61 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    GS1Settings:
+      type: object
+      required: [companyPrefix, extension, nextSerial, issued, updatedBy, updatedAt]
+      properties:
+        companyPrefix: { type: string }
+        extension: { type: integer }
+        nextSerial: { type: integer, format: int64 }
+        issued: { type: integer, format: int64, description: How many SSCCs were issued. }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    RFIDIngest:
+      type: object
+      required: [accepted, duplicates, rejected, reads]
+      properties:
+        accepted: { type: integer }
+        duplicates: { type: integer }
+        rejected:
+          type: array
+          items:
+            type: object
+            required: [index, code, reason]
+            properties:
+              index: { type: integer }
+              code: { type: string }
+              reason: { type: string }
+        reads:
+          type: array
+          items:
+            type: object
+            required: [index, id, epc]
+            properties:
+              index: { type: integer }
+              id: { type: string, format: uuid }
+              epc: { type: object, additionalProperties: true }
+              receiptId: { type: string, format: uuid }
+              lineNo: { type: integer }
+    AutomationOrder:
+      type: object
+      required: [id, workId, lineNo, station, loadUnit, fromLocation, toLocation, priority, status, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        workId: { type: string, format: uuid }
+        lineNo: { type: integer }
+        station: { type: string }
+        loadUnit: { type: string }
+        fromLocation: { type: string }
+        toLocation: { type: string }
+        priority: { type: integer, minimum: 1, maximum: 9 }
+        status: { type: string, enum: [PENDING, SENT, REFUSED, ARRIVED, DIVERTED, FAULT, CANCELLED] }
+        reason: { type: string }
+        confirmError: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        sentAt: { type: string, format: date-time }
+        doneAt: { type: string, format: date-time }
     WorkType:
       type: string
       enum: [PURCHASE_PUTAWAY, SALES_PICK, TRANSFER_ISSUE, TRANSFER_RECEIPT, PRODUCTION_PICK, RAF_PUTAWAY, REPLENISHMENT, MOVEMENT, COUNT, RETURN]
@@ -917,7 +1208,10 @@ components:
       properties:
         lineNo: { type: integer }
         itemId: { type: string }
-        lpId: { type: string }
+        lpId: { type: string, description: The ASN's license plate, or the SSCC the warehouse generated when the pallet was received. }
+        sscc: { type: string, pattern: "^[0-9]{18}$", description: The pallet's SSCC; empty while the pallet has none (not received, no GS1 prefix set, a non-SSCC license plate). }
+        lot: { type: string }
+        expiryDate: { type: string, format: date }
         poLineRef: { type: string }
         expectedQty: { $ref: "#/components/schemas/Decimal" }
         weight: { $ref: "#/components/schemas/Decimal" }

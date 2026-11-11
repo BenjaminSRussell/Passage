@@ -2587,3 +2587,22 @@ test_pi_sheet_duties if {
 	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
 	not allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
 }
+
+# RFID ingest and warehouse automation (#32): readers and the PLC connector hold their own duties, people read, and
+# a supervisor gives transport work to a PLC.
+test_warehouse_rfid_and_automation_duties if {
+	allowed("warehouse.rfid.ingest", "POST", "/v1/warehouse/rfid-reads:ingest")
+	not allowed("warehouse.rfid.ingest", "GET", "/v1/warehouse/rfid-reads")
+	not allowed("warehouse.inquiry.view", "POST", "/v1/warehouse/rfid-reads:ingest")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/rfid-reads")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.automation.execute", "GET", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:report")
+	allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/events")
+	not allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/transport-orders")
+	not allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/events")
+	allowed("warehouse.setup.maintain", "PUT", "/v1/warehouse/gs1-settings")
+	allowed("warehouse.setup.view", "GET", "/v1/warehouse/gs1-settings")
+	not allowed("warehouse.setup.view", "PUT", "/v1/warehouse/gs1-settings")
+}

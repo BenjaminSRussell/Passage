@@ -52,6 +52,8 @@ func (a *API) registerReceiving(r chi.Router) {
 	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/receipts", a.listReceipts)
 	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/receipts/{id}", a.getReceipt)
 	r.With(authz.RequireDuty(dutyReceive)).Post("/v1/warehouse/receipts/{id}/lines/{n}:receive", a.receiveLine)
+	r.With(authz.RequireDuty(dutySetupMaintain)).Put("/v1/warehouse/gs1-settings", a.putGS1)
+	r.With(authz.RequireDuty(dutySetupView)).Get("/v1/warehouse/gs1-settings", a.getGS1)
 }
 
 // anyDuty allows a principal holding at least one of its duties. Booking a
@@ -239,9 +241,12 @@ func (a *API) listAppointments(w http.ResponseWriter, r *http.Request) {
 }
 
 type asnLineInput struct {
-	LineNo      int             `json:"lineNo"`
-	ItemID      string          `json:"itemId"`
+	LineNo int    `json:"lineNo"`
+	ItemID string `json:"itemId"`
+	// LPID may be left out: the warehouse then uses the SSCC it generates when the pallet is received (#32).
 	LPID        string          `json:"lpId"`
+	Lot         string          `json:"lot"`
+	ExpiryDate  string          `json:"expiryDate"`
 	POLineRef   string          `json:"poLineRef"`
 	ExpectedQty decimal.Decimal `json:"expectedQty"`
 	Weight      decimal.Decimal `json:"weight"`
@@ -300,12 +305,25 @@ func (a *API) registerASN(w http.ResponseWriter, r *http.Request) {
 		}
 		lp := strings.TrimSpace(l.LPID)
 		switch {
+		case lp == "":
+			// the warehouse names the license plate when the pallet is received
 		case !domain.ValidLPID(lp):
 			fields[p+".lpId"] = fmt.Sprintf("must be 1 to %d letters, digits, '.', '_' or '-'", domain.MaxLPIDLength)
 		case seenLP[lp]:
 			fields[p+".lpId"] = "is used by another pallet in this ASN"
 		}
-		seenLP[lp] = true
+		if lp != "" {
+			seenLP[lp] = true
+		}
+		lot, expiry := strings.TrimSpace(l.Lot), strings.TrimSpace(l.ExpiryDate)
+		if len(lot) > 40 {
+			fields[p+".lot"] = "must be at most 40 characters"
+		}
+		if expiry != "" {
+			if _, err := time.Parse("2006-01-02", expiry); err != nil {
+				fields[p+".expiryDate"] = "must be a date, YYYY-MM-DD"
+			}
+		}
 		po := strings.TrimSpace(l.POLineRef)
 		if len(po) > maxReference {
 			fields[p+".poLineRef"] = fmt.Sprintf("must be at most %d characters", maxReference)
@@ -319,7 +337,7 @@ func (a *API) registerASN(w http.ResponseWriter, r *http.Request) {
 		if l.Volume.IsNegative() || !fineScale(l.Volume, qtyScale) {
 			fields[p+".volume"] = "must not be negative, at most 6 decimals"
 		}
-		lines = append(lines, domain.ReceiptLine{LineNo: l.LineNo, ItemID: item, LPID: lp, POLineRef: po,
+		lines = append(lines, domain.ReceiptLine{LineNo: l.LineNo, ItemID: item, LPID: lp, POLineRef: po, Lot: lot, ExpiryDate: expiry,
 			ExpectedQty: l.ExpectedQty, Weight: l.Weight, Volume: l.Volume})
 	}
 	if len(fields) > 0 {
@@ -385,6 +403,9 @@ func (a *API) getReceipt(w http.ResponseWriter, r *http.Request) {
 
 type receiveInput struct {
 	Qty decimal.Decimal `json:"qty"`
+	// Lot and ExpiryDate, when given, replace what the ASN said (the label shows what was counted).
+	Lot        string `json:"lot"`
+	ExpiryDate string `json:"expiryDate"`
 }
 
 // receiveLine receives one ASN pallet with the quantity that arrived and
@@ -409,13 +430,22 @@ func (a *API) receiveLine(w http.ResponseWriter, r *http.Request) {
 	if !in.Qty.IsPositive() || !fineScale(in.Qty, qtyScale) {
 		fields["qty"] = "must be greater than zero, at most 6 decimals"
 	}
+	lot, expiry := strings.TrimSpace(in.Lot), strings.TrimSpace(in.ExpiryDate)
+	if len(lot) > 40 {
+		fields["lot"] = "must be at most 40 characters"
+	}
+	if expiry != "" {
+		if _, err := time.Parse("2006-01-02", expiry); err != nil {
+			fields["expiryDate"] = "must be a date, YYYY-MM-DD"
+		}
+	}
 	version := ifMatchVersion(r, fields, "receipt")
 	who := user(r, fields)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
-	out, replayed, err := a.st.ReceiveLine(r.Context(), idem, store.ReceiveInput{ReceiptID: id, LineNo: n, Qty: in.Qty, User: who,
+	out, replayed, err := a.st.ReceiveLine(r.Context(), idem, store.ReceiveInput{ReceiptID: id, LineNo: n, Qty: in.Qty, Lot: lot, ExpiryDate: expiry, User: who,
 		IfMatch: version, Now: time.Now()})
 	if err != nil {
 		fail(w, r, err, codeReceiptNotFound)
@@ -428,4 +458,47 @@ func (a *API) receiveLine(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	answer(w, http.StatusOK, replayed, out)
+}
+
+type gs1Input struct {
+	CompanyPrefix string `json:"companyPrefix"`
+	Extension     int    `json:"extension"`
+}
+
+// putGS1 sets the tenant's GS1 company prefix and extension digit, the number space of the SSCCs the warehouse
+// generates when pallets are received (#32). The prefix cannot change once SSCCs were issued.
+func (a *API) putGS1(w http.ResponseWriter, r *http.Request) {
+	var in gs1Input
+	if err := httpx.Decode(r, &in); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	in.CompanyPrefix = strings.TrimSpace(in.CompanyPrefix)
+	if !domain.ValidCompanyPrefix(in.CompanyPrefix) {
+		fields["companyPrefix"] = "must be a GS1 company prefix: 7 to 11 digits"
+	}
+	if in.Extension < 0 || in.Extension > 9 {
+		fields["extension"] = "must be one digit, 0 to 9"
+	}
+	who := user(r, fields)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	out, err := a.st.PutGS1Company(r.Context(), in.CompanyPrefix, in.Extension, who)
+	if err != nil {
+		fail(w, r, err, codeReceiptNotFound)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (a *API) getGS1(w http.ResponseWriter, r *http.Request) {
+	out, err := a.st.GetGS1Company(r.Context())
+	if err != nil {
+		fail(w, r, err, codeReceiptNotFound)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }

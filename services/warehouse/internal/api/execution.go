@@ -85,6 +85,14 @@ type Store interface {
 	ListReceipts(ctx context.Context, f store.ReceiptFilter) ([]domain.ReceiptSummary, error)
 	GetReceipt(ctx context.Context, id string) (domain.Receipt, error)
 	ReceiveLine(ctx context.Context, idem store.Idem, in store.ReceiveInput) (store.Received, bool, error)
+	IngestRFID(ctx context.Context, reads []store.RFIDRead) (store.RFIDIngest, error)
+	ListRFIDReads(ctx context.Context, f store.RFIDFilter) ([]store.RFIDReadRow, error)
+	CreateAutomationOrder(ctx context.Context, in store.OrderInput) (store.AutomationOrder, error)
+	ListAutomationOrders(ctx context.Context, f store.OrderFilter) ([]store.AutomationOrder, error)
+	ReportAutomationOrder(ctx context.Context, id, status, reason string, now time.Time) (store.AutomationOrder, error)
+	IngestAutomationEvents(ctx context.Context, station string, events []store.AutomationEvent, now time.Time) (store.AutomationIngest, error)
+	GetGS1Company(ctx context.Context) (store.GS1Company, error)
+	PutGS1Company(ctx context.Context, prefix string, extension int, by string) (store.GS1Company, error)
 }
 
 // registerPersisted mounts the routes that read and write warehouse state.
@@ -99,6 +107,7 @@ func (a *API) registerPersisted(r chi.Router) {
 		r.With(authz.RequireDuty(dutyWorkSupervise)).Post("/v1/warehouse/work", a.createWork)
 		r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/work", a.listWork)
 		r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/work/{id}", a.getWork)
+		a.registerAutomation(r)
 		r.With(authz.RequireDuty(dutyWorkExecute)).Post("/v1/warehouse/work:assign", a.assignWork)
 		r.With(authz.RequireDuty(dutyWorkExecute)).Post("/v1/warehouse/work/{id}/lines/{n}:confirm", a.confirmLine)
 		r.With(authz.RequireDuty(dutyWorkExecute)).Post("/v1/warehouse/work/{id}:exception", a.exceptWork)
@@ -125,7 +134,7 @@ func fail(w http.ResponseWriter, r *http.Request, err error, notFound string) {
 	case errors.As(err, &de):
 		status := http.StatusUnprocessableEntity
 		switch de.Code {
-		case domain.CodeLineConfirmed, domain.CodeIllegalTransition, domain.CodeDoorOverlap, domain.CodeLineReceived:
+		case domain.CodeLineConfirmed, domain.CodeIllegalTransition, domain.CodeDoorOverlap, domain.CodeLineReceived, domain.CodeGS1Locked, domain.CodeGS1Exhausted:
 			status = http.StatusConflict
 		}
 		httpx.Fail(w, r, httpx.NewProblem(status, de.Code, de.Detail))
@@ -135,6 +144,8 @@ func fail(w http.ResponseWriter, r *http.Request, err error, notFound string) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, codeLineNotFound, "the receipt has no such line"))
 	case errors.Is(err, domain.ErrReceivedQty):
 		validationFailed(w, r, map[string]string{"qty": "must be greater than zero"})
+	case errors.Is(err, store.ErrGS1NotSet):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodeGS1NotSet, "no GS1 company prefix is set"))
 	case errors.Is(err, store.ErrNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, notFound, "not found"))
 	case errors.Is(err, store.ErrConflict):

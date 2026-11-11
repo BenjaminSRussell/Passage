@@ -3665,7 +3665,15 @@
       {"resource": "/v1/warehouse/receipts", "methods": ["GET"]},
       {"resource": "/v1/warehouse/receipts/*", "methods": ["GET"]},
       {"resource": "/v1/warehouse/work", "methods": ["GET"]},
-      {"resource": "/v1/warehouse/work/*", "methods": ["GET"]}
+      {"resource": "/v1/warehouse/work/*", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/rfid-reads", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]}
+    ]},
+    "warehouse.rfid.ingest": {"permissions": [{"resource": "/v1/warehouse/rfid-reads:ingest", "methods": ["POST"]}]},
+    "warehouse.automation.execute": {"permissions": [
+      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/automation/transport-orders/*:report", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/automation/events", "methods": ["POST"]}
     ]},
     "warehouse.receipt.register": {"permissions": [
       {"resource": "/v1/warehouse/dock-appointments", "methods": ["POST"]},
@@ -3674,10 +3682,12 @@
     ]},
     "warehouse.setup.maintain": {"permissions": [
       {"resource": "/v1/warehouse/dock-doors", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/gs1-settings", "methods": ["PUT"]},
       {"resource": "/v1/warehouse/location-directives", "methods": ["POST"]},
       {"resource": "/v1/warehouse/locations:bulk", "methods": ["POST"]}
     ]},
     "warehouse.setup.view": {"permissions": [
+      {"resource": "/v1/warehouse/gs1-settings", "methods": ["GET"]},
       {"resource": "/v1/warehouse/location-directives", "methods": ["GET"]},
       {"resource": "/v1/warehouse/location-directives:simulate", "methods": ["POST"]},
       {"resource": "/v1/warehouse/locations", "methods": ["GET"]}
@@ -3700,6 +3710,7 @@
     ]},
     "warehouse.work.supervise": {"permissions": [
       {"resource": "/v1/warehouse/work", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions", "methods": ["GET"]},
       {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
