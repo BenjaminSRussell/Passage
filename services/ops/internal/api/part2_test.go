@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/ops/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/ops/internal/store"
@@ -248,5 +249,61 @@ func TestForcedFenceNeedsASecondOperatorsApprovalAndIsAuditedInTheScorecard(t *t
 	rec = e2.do("PUT", "/v1/ops/failovers/evt-plain/steps/fence-old-primary", "alice", DutyFailover, "", forced(1, "us-east", "DONE", "region lost", true))
 	if rec.Code != http.StatusUnprocessableEntity || code(t, rec) != domain.CodeApprovalRequired {
 		t.Fatalf("unapproved forced fence: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func policyEnv(t *testing.T, p store.LagPolicy) *env {
+	t.Helper()
+	e := newEnv(t, "us-east")
+	r := httpx.NewRouterWithoutTenant()
+	New(store.New(e.pool).WithLagPolicy(p), Config{Region: "us-east", MaxLagSeconds: 300, OperatorTenantID: e.tenant}).Register(r)
+	e.router = r
+	return e
+}
+
+func TestAStaleLagReadingIsUnknownAndBlocksAFailover(t *testing.T) {
+	e := policyEnv(t, store.LagPolicy{StaleAfter: 90 * time.Second})
+	if rec := e.do("PUT", "/v1/ops/regions/eu-west/lag", "mon", DutyReport, "", `{"lagSeconds":5}`); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	if rec := e.do("GET", "/v1/ops/regions", "alice", DutyView, "", ""); strings.Contains(rec.Body.String(), "lagStale") || !strings.Contains(rec.Body.String(), `"lagSeconds":5`) {
+		t.Fatalf("a fresh reading is used as it is: %s", rec.Body)
+	}
+	// the reporter stops: the reading ages past three intervals
+	if _, err := e.admin.Exec(context.Background(), `update ops_region set lag_reported_at = now() - interval '10 minutes' where name = 'eu-west'`); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.do("GET", "/v1/ops/regions", "alice", DutyView, "", "")
+	if !strings.Contains(rec.Body.String(), `"lagStale":true`) || !strings.Contains(rec.Body.String(), `"lagSeconds":1073741824`) {
+		t.Fatalf("a stale reading is unknown: %s", rec.Body)
+	}
+	rec = e.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-stale", `{"to":"eu-west"}`)
+	if rec.Code != http.StatusUnprocessableEntity || code(t, rec) != domain.CodeLagExceeded || !strings.Contains(rec.Body.String(), "unknown") {
+		t.Fatalf("stale lag must refuse the failover: %d %s", rec.Code, rec.Body)
+	}
+	// a fresh report makes it usable again
+	if rec := e.do("PUT", "/v1/ops/regions/eu-west/lag", "mon", DutyReport, "", `{"lagSeconds":7}`); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	if rec := e.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-fresh", `{"to":"eu-west"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("a fresh reading: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestNeverReportedLagIsUnknownOnlyWhenReportsAreRequired(t *testing.T) {
+	lenient := policyEnv(t, store.LagPolicy{StaleAfter: 90 * time.Second})
+	if rec := lenient.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-1", `{"to":"eu-west"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("without a reporter the seeded lag stands: %d %s", rec.Code, rec.Body)
+	}
+	strict := policyEnv(t, store.LagPolicy{StaleAfter: 90 * time.Second, RequireReports: true})
+	if rec := strict.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-1", `{"to":"eu-west"}`); rec.Code != http.StatusUnprocessableEntity || code(t, rec) != domain.CodeLagExceeded {
+		t.Fatalf("with a reporter required a region that never reported is unknown: %d %s", rec.Code, rec.Body)
+	}
+	off := policyEnv(t, store.LagPolicy{})
+	if _, err := off.admin.Exec(context.Background(), `update ops_region set lag_reported_at = now() - interval '1 day'`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := off.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-1", `{"to":"eu-west"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("StaleAfter 0 turns the check off: %d %s", rec.Code, rec.Body)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -105,7 +106,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
-	st := store.New(pool)
+	lagPolicy := store.LagPolicy{StaleAfter: 90 * time.Second, RequireReports: getenv("OPS_REQUIRE_LAG_REPORTS") == "true"}
+	if v := getenv("OPS_LAG_STALE_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("OPS_LAG_STALE_S must be a number of seconds (0 turns the check off), got %q", v)
+		}
+		lagPolicy.StaleAfter = time.Duration(n) * time.Second
+	}
+	st := store.New(pool).WithLagPolicy(lagPolicy)
 	if len(seed) > 0 {
 		if err := st.Seed(ctx, seed); err != nil {
 			return fmt.Errorf("seed regions: %w", err)

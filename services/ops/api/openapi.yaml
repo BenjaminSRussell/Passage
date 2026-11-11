@@ -322,6 +322,7 @@ components:
         name: { type: string }
         role: { type: string, enum: [PRIMARY, PASSIVE, FENCED] }
         lagSeconds: { type: integer, minimum: 0 }
+        lagStale: { type: boolean, description: "True when no lag report arrived within OPS_LAG_STALE_S (or none ever, with OPS_REQUIRE_LAG_REPORTS); lagSeconds is then 1073741824 (unknown)." }
         version: { type: integer }
     RegionList:
       type: object

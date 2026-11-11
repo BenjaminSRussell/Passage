@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,11 +27,10 @@ const (
 	// ModePrimary runs against the primary and reads pg_stat_replication for the standby clients.
 	ModePrimary = "primary"
 
-	standbyLagSQL = `select case
-		when not pg_is_in_recovery() then null
-		when pg_last_wal_receive_lsn() is null then null
-		when pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() then 0
-		else extract(epoch from now() - pg_last_xact_replay_timestamp()) end`
+	// receiptMaxAgeSeconds is how recent the WAL receiver's last message from the primary must be. An idle primary still sends
+	// keepalives well inside it (wal_sender_timeout / 2, 30 s by default).
+	receiptMaxAgeSeconds = 90
+
 	primaryLagSQL = `select count(*), coalesce(max(extract(epoch from coalesce(replay_lag, flush_lag, write_lag, interval '0'))), 0)
 		from pg_stat_replication where application_name like $1`
 )
@@ -68,6 +68,13 @@ func pgLagSource(ctx context.Context, getenv func(string) string) (LagSource, er
 
 func (p *pgLag) Close(ctx context.Context) error { return p.conn.Close(ctx) }
 
+// failedSource stands in for a source that could not connect: every reading is that error, so the reporter reports the
+// unknown value (and reconnects on the next interval) instead of exiting.
+type failedSource struct{ err error }
+
+func (f failedSource) Lag(context.Context) (int, error) { return 0, f.err }
+func (failedSource) Close(context.Context) error        { return nil }
+
 func (p *pgLag) Lag(ctx context.Context) (int, error) {
 	if p.mode == ModePrimary {
 		var clients int
@@ -86,10 +93,20 @@ func (p *pgLag) Lag(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	if secs == nil {
-		return 0, errors.New("this server is not a streaming standby (not in recovery, or no WAL received)")
+		return 0, errors.New("this server is not a streaming standby (not in recovery, or its WAL receiver is not streaming and recently heard from the primary)")
 	}
 	return roundLag(*secs), nil
 }
+
+// "Everything received is replayed" means caught up only while the WAL receiver is streaming and recently heard from the primary:
+// with the receiver disconnected, received == replayed is just a standby that stopped receiving, and the lag is unknown. Reading
+// pg_stat_wal_receiver needs a role with pg_monitor (others see NULL columns, which also reads as unknown).
+var standbyLagSQL = `select case
+		when not pg_is_in_recovery() then null
+		when not exists (select 1 from pg_stat_wal_receiver where status = 'streaming'
+		                 and last_msg_receipt_time > now() - make_interval(secs => ` + strconv.Itoa(receiptMaxAgeSeconds) + `)) then null
+		when pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() then 0
+		else extract(epoch from now() - pg_last_xact_replay_timestamp()) end`
 
 func roundLag(secs float64) int {
 	if secs < 0 || math.IsNaN(secs) {
@@ -142,17 +159,33 @@ func runLagReport(ctx context.Context, args []string, out io.Writer, getenv func
 	if d.lagSource == nil {
 		return errors.New("no lag source configured")
 	}
-	src, err := d.lagSource(ctx, getenv)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = src.Close(context.Background()) }()
+	var src LagSource
+	defer func() {
+		if src != nil {
+			_ = src.Close(context.Background())
+		}
+	}()
 	sleep := d.sleep
 	if sleep == nil {
 		sleep = sleepCtx
 	}
 	for {
-		lag, err := reportOnce(ctx, c, src, region, unknown)
+		// (Re)connect every interval while there is no working connection; a connect failure is a measurement failure.
+		current := src
+		if current == nil {
+			opened, cerr := d.lagSource(ctx, getenv)
+			if cerr != nil {
+				current = failedSource{cerr}
+			} else {
+				src, current = opened, opened
+			}
+		}
+		lag, err := reportOnce(ctx, c, current, region, unknown)
+		if err != nil && src != nil {
+			// the connection may be what broke: drop it and reconnect next time
+			_ = src.Close(context.Background())
+			src = nil
+		}
 		if err != nil {
 			slog.Error("lag report", "region", region, "err", err)
 		} else {

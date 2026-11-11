@@ -50,6 +50,10 @@ spec:
               value: {{ .Values.failoverMaxLagSeconds | quote }}
             - name: OPS_OPERATOR_TENANT_ID
               value: {{ .Values.operatorTenantId | quote }}
+            - name: OPS_LAG_STALE_S
+              value: {{ .Values.lagStaleSeconds | quote }}
+            - name: OPS_REQUIRE_LAG_REPORTS
+              value: {{ .Values.lagReporter.enabled | quote }}
             - name: RTO_TARGET_MIN
               value: {{ .Values.rtoTargetMinutes | quote }}
             - name: RPO_TARGET_S

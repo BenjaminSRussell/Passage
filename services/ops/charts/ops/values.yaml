@@ -5,6 +5,9 @@ migrateOnStart: false
 region: { name: "", registered: "" }
 # PRD 9.50.5: a failover to a passive region lagging more than this needs acceptDataLoss and a second approver.
 failoverMaxLagSeconds: 300
+# A lag reading older than this is unknown (about three reporting intervals): a stopped reporter blocks a failover instead of
+# leaving the last number in place. 0 turns the check off. With lagReporter.enabled a region that never reported is unknown too.
+lagStaleSeconds: 90
 # Game-day targets (PRD 9.50.5): the scorecard of a failover is measured against them.
 rtoTargetMinutes: 60
 rpoTargetSeconds: 300

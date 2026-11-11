@@ -394,3 +394,78 @@ func TestFenceUnreachableFlag(t *testing.T) {
 		t.Fatalf("err=%v log=%v", err, rec2.log)
 	}
 }
+
+func TestLagReporterReportsUnknownOnAConnectFailureAndReconnects(t *testing.T) {
+	api := newFakeAPI(0)
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	d := testDeps(&recorder{})
+	attempts := 0
+	d.lagSource = func(context.Context, func(string) string) (LagSource, error) {
+		attempts++
+		if attempts <= 2 {
+			return nil, errors.New("connection refused")
+		}
+		return fakeLag{secs: 4}, nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	var seen []int
+	n := 0
+	d.sleep = func(context.Context, time.Duration) error {
+		seen = append(seen, api.lag)
+		n++
+		if n == 3 {
+			cancel()
+			return ctx.Err()
+		}
+		return nil
+	}
+	if err := run(ctx, []string{"lag-report", "--region", "eu-central", "--interval", "1s", "--unknown-lag-s", "7200"}, &bytes.Buffer{}, env(srv), d); err != nil {
+		t.Fatalf("a connect failure must not exit the reporter: %v", err)
+	}
+	if len(seen) != 3 || seen[0] != 7200 || seen[1] != 7200 || seen[2] != 4 || attempts != 3 {
+		t.Fatalf("reported %v after %d connection attempts: want unknown, unknown, then the real lag", seen, attempts)
+	}
+	// --once with an unreachable database reports unknown and still fails the command
+	d.lagSource = func(context.Context, func(string) string) (LagSource, error) { return nil, errors.New("refused") }
+	api.lag = 1
+	if err := run(t.Context(), []string{"lag-report", "--region", "eu-central", "--once", "--unknown-lag-s", "500"}, &bytes.Buffer{}, env(srv), d); err == nil || api.lag != 500 {
+		t.Fatalf("err=%v lag=%d", err, api.lag)
+	}
+}
+
+type flaky struct {
+	calls  *int
+	closed *int
+}
+
+func (f flaky) Lag(context.Context) (int, error) {
+	*f.calls++
+	return 0, errors.New("connection reset")
+}
+func (f flaky) Close(context.Context) error { *f.closed++; return nil }
+
+func TestLagReporterDropsABrokenConnectionAndReconnects(t *testing.T) {
+	api := newFakeAPI(0)
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	d := testDeps(&recorder{})
+	calls, closed, opened := 0, 0, 0
+	d.lagSource = func(context.Context, func(string) string) (LagSource, error) {
+		opened++
+		return flaky{&calls, &closed}, nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	n := 0
+	d.sleep = func(context.Context, time.Duration) error {
+		if n++; n == 2 {
+			cancel()
+			return ctx.Err()
+		}
+		return nil
+	}
+	_ = run(ctx, []string{"lag-report", "--region", "eu-central", "--interval", "1s", "--unknown-lag-s", "900"}, &bytes.Buffer{}, env(srv), d)
+	if opened != 2 || closed < 1 || api.lag != 900 {
+		t.Fatalf("opened %d closed %d lag %d: a failed read must close the connection and reconnect", opened, closed, api.lag)
+	}
+}

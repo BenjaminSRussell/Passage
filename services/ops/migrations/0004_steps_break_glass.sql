@@ -1,6 +1,10 @@
 -- Failover step results and break-glass for ops.failover.execute (PSG-50, part 2). Platform state, not tenant data: no
 -- tenant_id and no RLS (allowlisted in tools/rlscheck), like the other ops tables.
 
+-- When a region's lag was last reported. A reading older than OPS_LAG_STALE_S is treated as unknown (very large), so a stopped
+-- reporter blocks a failover instead of leaving the last, now stale, number in place.
+ALTER TABLE ops_region ADD COLUMN lag_reported_at timestamptz;
+
 -- One row per executed step of a failover plan, written by the runner (passage-ops failover) as each step finishes, so a
 -- crashed run resumes at the first step that is not DONE and the record shows who ran what.
 CREATE TABLE ops_failover_step (
