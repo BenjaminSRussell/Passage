@@ -77,6 +77,49 @@ func (s *Store) PutMaster(ctx context.Context, e domain.MasterEntry) error {
 	})
 }
 
+// ImportMaster adds the entries a tenant does not have yet; an existing entry is kept as the tenant edited it unless overwrite is
+// true. It returns how many entries were added or replaced and how many were left alone.
+func (s *Store) ImportMaster(ctx context.Context, entries []domain.MasterEntry, overwrite bool) (res ImportResult, err error) {
+	p, err := tenantOf(ctx)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	conflict := "do nothing"
+	if overwrite {
+		conflict = "do update set description = excluded.description, attrs = excluded.attrs, updated_at = now()"
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		res = ImportResult{}
+		for _, e := range entries {
+			attrs, err := json.Marshal(e.Attrs)
+			if err != nil {
+				return err
+			}
+			if e.Attrs == nil {
+				attrs = []byte("{}")
+			}
+			tag, err := tx.Exec(ctx, `insert into tax_intrastat_master (tenant_id, kind, code, description, attrs) values ($1, $2, $3, $4, $5)
+				on conflict (tenant_id, kind, code) `+conflict, p.TenantID, e.Kind, e.Code, e.Description, attrs)
+			if err != nil {
+				return fmt.Errorf("import intrastat master entry: %w", err)
+			}
+			if tag.RowsAffected() == 1 {
+				res.Added++
+			} else {
+				res.Skipped++
+			}
+		}
+		return nil
+	})
+	return res, err
+}
+
+// ImportResult counts a master data import.
+type ImportResult struct {
+	Added   int `json:"added"`
+	Skipped int `json:"skipped"`
+}
+
 func (s *Store) DeleteMaster(ctx context.Context, kind, code string) error {
 	p, err := tenantOf(ctx)
 	if err != nil {

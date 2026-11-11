@@ -28,6 +28,13 @@ type fakeConfig struct {
 	putCodes  []domain.ConfigCode
 	putGroups []domain.Group
 	putCerts  []domain.Certificate
+	imported  []domain.MasterEntry
+	overwrite bool
+}
+
+func (f *fakeConfig) ImportMaster(_ context.Context, e []domain.MasterEntry, overwrite bool) (store.ImportResult, error) {
+	f.imported, f.overwrite = e, overwrite
+	return store.ImportResult{Added: len(e)}, f.err
 }
 
 func (f *fakeConfig) PutCertificate(_ context.Context, c domain.Certificate) error {
@@ -264,5 +271,28 @@ func TestCertificateRoutes(t *testing.T) {
 	rec := do(r, http.MethodGet, "/v1/tax/exemption-certificates", ``, tenantOne, "tax.config.read")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"number":"C-1"`) {
 		t.Errorf("list: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMasterSeedAndImportRoutes(t *testing.T) {
+	fc := &fakeConfig{}
+	r := configRouter(fc)
+	post := func(path, body string) *httptest.ResponseRecorder {
+		return do(r, http.MethodPost, path, body, tenantOne, "tax.intrastatmaster.manage")
+	}
+	if rec := post("/v1/tax/intrastat/master:seed", `{"kinds":["sideways"]}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("an unknown kind: %d", rec.Code)
+	}
+	if rec := post("/v1/tax/intrastat/master:seed", `{"kinds":["transport_mode"]}`); rec.Code != http.StatusOK || len(fc.imported) != 8 || fc.overwrite {
+		t.Errorf("seed: %d, %d rows, overwrite %v", rec.Code, len(fc.imported), fc.overwrite)
+	}
+	if rec := post("/v1/tax/intrastat/master:seed", ``); rec.Code != http.StatusOK || len(fc.imported) < 50 {
+		t.Errorf("seed with no body: %d, %d rows", rec.Code, len(fc.imported))
+	}
+	if rec := post("/v1/tax/intrastat/master:import", `{"entries":[{"kind":"commodity","code":"8413","description":"Pumps"}]}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("a short commodity code: %d", rec.Code)
+	}
+	if rec := post("/v1/tax/intrastat/master:import", `{"overwrite":true,"entries":[{"kind":"commodity","code":"84131100","description":"Pumps"}]}`); rec.Code != http.StatusOK || !fc.overwrite || len(fc.imported) != 1 {
+		t.Errorf("import: %d overwrite %v rows %d", rec.Code, fc.overwrite, len(fc.imported))
 	}
 }

@@ -47,6 +47,7 @@ type ConfigStore interface {
 	ListMaster(ctx context.Context, kind string) ([]domain.MasterEntry, error)
 	PutMaster(ctx context.Context, e domain.MasterEntry) error
 	DeleteMaster(ctx context.Context, kind, code string) error
+	ImportMaster(ctx context.Context, entries []domain.MasterEntry, overwrite bool) (store.ImportResult, error)
 	CreateJournal(ctx context.Context, flow string, periodFrom domain.Date) (store.Journal, error)
 	ListJournals(ctx context.Context) ([]store.Journal, error)
 	GetJournal(ctx context.Context, id string) (store.Journal, error)

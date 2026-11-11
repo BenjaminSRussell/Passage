@@ -454,3 +454,36 @@ func TestStoredCertificatesExemptACalculationAndProtectTheirCodes(t *testing.T) 
 		t.Errorf("deleting twice: %v", err)
 	}
 }
+
+func TestSeededMasterDataKeepsTenantEditsAndDrivesAJournal(t *testing.T) {
+	s, _, ctx := setup(t)
+	if err := s.PutMaster(ctx, domain.MasterEntry{Kind: "transport_mode", Code: "3", Description: "Lorry"}); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := domain.SeedEntries([]string{"transport_mode", "country", "delivery_terms"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.ImportMaster(ctx, seed, false)
+	if err != nil || res.Skipped != 1 || res.Added != len(seed)-1 {
+		t.Fatalf("seed = %+v, %v; want one entry skipped (the edited one)", res, err)
+	}
+	modes, _ := s.ListMaster(ctx, "transport_mode")
+	for _, m := range modes {
+		if m.Code == "3" && m.Description != "Lorry" {
+			t.Errorf("the seed overwrote the tenant's edit: %+v", m)
+		}
+	}
+	if again, err := s.ImportMaster(ctx, seed, false); err != nil || again.Added != 0 || again.Skipped != len(seed) {
+		t.Errorf("a repeated seed = %+v, %v", again, err)
+	}
+	if over, err := s.ImportMaster(ctx, seed, true); err != nil || over.Added != len(seed) {
+		t.Errorf("an overwriting import = %+v, %v", over, err)
+	}
+	modes, _ = s.ListMaster(ctx, "transport_mode")
+	for _, m := range modes {
+		if m.Code == "3" && m.Description != "Road transport" {
+			t.Errorf("overwrite kept the old text: %+v", m)
+		}
+	}
+}

@@ -317,3 +317,49 @@ func TestValidateTransferLinesAndMasterEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestSeedEntriesAreValidAndComplete(t *testing.T) {
+	all, err := domain.SeedEntries(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]int{}
+	for _, e := range all {
+		kinds[e.Kind]++
+	}
+	for _, k := range domain.MasterKinds {
+		if kinds[k] == 0 {
+			t.Errorf("no seed rows for %s", k)
+		}
+	}
+	// 27 member states plus the partner countries; the seeded countries drive a journal's EU check.
+	if kinds[domain.MasterCountry] < 27 {
+		t.Errorf("only %d countries seeded", kinds[domain.MasterCountry])
+	}
+	m := domain.NewMaster(all)
+	if !m.Countries["DE"].EUMember || m.Countries["US"].EUMember || !m.TransportModes["3"] || !m.DeliveryTerms["DAP"] || !m.TransactionCodes["11"] {
+		t.Errorf("seeded master data misses what a journal validates against: %+v", m.Countries["DE"])
+	}
+	if one, err := domain.SeedEntries([]string{"transport_mode", "transport_mode"}); err != nil || len(one) != 8 {
+		t.Errorf("a repeated kind: %d rows, %v", len(one), err)
+	}
+	if _, err := domain.SeedEntries([]string{"sideways"}); err == nil {
+		t.Error("an unknown kind was accepted")
+	}
+}
+
+func TestValidateMasterImport(t *testing.T) {
+	ok := domain.MasterEntry{Kind: "commodity", Code: "84131100", Description: "Pumps"}
+	if err := domain.ValidateMasterImport([]domain.MasterEntry{ok}); err != nil {
+		t.Fatal(err)
+	}
+	for name, in := range map[string][]domain.MasterEntry{
+		"empty":     {},
+		"bad code":  {{Kind: "commodity", Code: "8413", Description: "Pumps"}},
+		"duplicate": {ok, ok},
+	} {
+		if err := domain.ValidateMasterImport(in); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}
