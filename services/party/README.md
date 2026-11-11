@@ -49,12 +49,12 @@ Protected fields per legal entity (FR-7.10, `party.protected_fields`): `GET /v1/
 
 A caller holding only `party.import.write` (no `party.read` or `party.write`) gets a write receipt (`id`, `partyNumber`, `partyType`, `status`, `version`) from `POST` and `PATCH /v1/party/parties`, not the party record, because that duty opens no read route; role creates answer with the role, which carries no personal data.
 
-## Setup records of a customer role (#500, migration `0016`)
+## Setup records of a customer role (#500, migration `0017`)
 
 `GET /v1/party/payment-terms[/{id}]` and `GET /v1/party/posting-profiles[/{id}]` (`?legalEntityId=`, row security keeps the
 caller's legal entities) read the terms and profiles a customer role names, and `/v1/party/customer-groups` registers and reads
 customer groups (code and name, the same rules as vendor groups; `POST` with `party.write` or `party.import.write`, an optional
-`id` registers a group id roles already carry). Migration `0016` creates `customer_group` and backfills a group for every
+`id` registers a group id roles already carry). Migration `0017` creates `customer_group` and backfills a group for every
 `customer_group_id` already on a customer role (`CG` + the first 8 hex digits, the vendor group collision rule), under a role
 that bypasses row-level security only. The web forms pick these records by name. Payment terms and posting profiles have no
 create route yet: they are loaded with the master data.

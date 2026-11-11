@@ -86,7 +86,7 @@ func TestSetup_CustomerGroupCreateReplayAndTenant(t *testing.T) {
 	}
 }
 
-// Customer group ids already on customer roles become groups on migration 0016.
+// Customer group ids already on customer roles become groups on migration 0017.
 func TestSetup_CustomerGroupBackfill(t *testing.T) {
 	admin, app := testkit.DBWithApp(t)
 	ctx := principalContext(1, "")
@@ -96,7 +96,7 @@ func TestSetup_CustomerGroupBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".sql") && e.Name() < "0016" {
+		if strings.HasSuffix(e.Name(), ".sql") && e.Name() < "0017" {
 			data, err := fs.ReadFile(migrations.FS, e.Name())
 			if err != nil {
 				t.Fatal(err)
