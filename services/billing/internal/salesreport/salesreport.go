@@ -206,35 +206,53 @@ func (r *Reporter) RunOnce(ctx context.Context) (int, error) {
 	var failed []error
 	for _, tid := range tenants {
 		tctx := store.SalesReportSystemContext(ctx, tid)
-		claimed, err := r.Store.ClaimSalesReports(tctx, batch, lease)
-		if err != nil {
-			failed = append(failed, fmt.Errorf("tenant %s: %w", tid, err))
-			continue
-		}
-		for _, c := range claimed {
-			o := r.attempt(ctx, tid, c)
-			err := r.Store.FinishSalesReport(tctx, c.ID, c.Attempts, o)
-			if errors.Is(err, store.ErrStaleSalesReport) {
-				slog.WarnContext(ctx, "sales invoice report lease lost; the newer attempt records the outcome", "tenant", tid, "report", c.ID, "attempt", c.Attempts)
-				continue
-			}
+		// A batch is sized to finish inside its lease, so a backlog is drained one batch after another within the
+		// tick (at most maxBatchesPerTick) instead of one batch per interval; a claimed report is out of reach of the
+		// next claim (its next attempt moves past the lease), so no report is taken twice.
+		for page := 0; page < maxBatchesPerTick && ctx.Err() == nil; page++ {
+			claimed, err := r.Store.ClaimSalesReports(tctx, batch, lease)
 			if err != nil {
-				failed = append(failed, fmt.Errorf("tenant %s report %s: %w", tid, c.ID, err))
-				continue
+				failed = append(failed, fmt.Errorf("tenant %s: %w", tid, err))
+				break
 			}
-			level := slog.LevelInfo
-			if o.Status != store.SalesReportReported {
-				level = slog.LevelWarn
+			n += r.sendClaimed(ctx, tctx, tid, claimed, &failed)
+			if len(claimed) < batch {
+				break
 			}
-			if o.Status == store.SalesReportParked {
-				r.parked.Add(1)
-			}
-			slog.Log(ctx, level, "sales invoice report", "tenant", tid, "report", c.ID, "order", c.OrderID, "sourceRef", c.SourceRef,
-				"attempt", c.Attempts, "status", o.Status, "httpStatus", o.HTTPStatus, "err", o.Error)
-			n++
 		}
 	}
 	return n, errors.Join(failed...)
+}
+
+// maxBatchesPerTick bounds how long one tick spends on one tenant's backlog.
+const maxBatchesPerTick = 50
+
+// sendClaimed attempts each claimed report, records its outcome and returns how many attempts it made.
+func (r *Reporter) sendClaimed(ctx, tctx context.Context, tid string, claimed []store.ClaimedSalesReport, failed *[]error) int {
+	n := 0
+	for _, c := range claimed {
+		o := r.attempt(ctx, tid, c)
+		err := r.Store.FinishSalesReport(tctx, c.ID, c.Attempts, o)
+		if errors.Is(err, store.ErrStaleSalesReport) {
+			slog.WarnContext(ctx, "sales invoice report lease lost; the newer attempt records the outcome", "tenant", tid, "report", c.ID, "attempt", c.Attempts)
+			continue
+		}
+		if err != nil {
+			*failed = append(*failed, fmt.Errorf("tenant %s report %s: %w", tid, c.ID, err))
+			continue
+		}
+		level := slog.LevelInfo
+		if o.Status != store.SalesReportReported {
+			level = slog.LevelWarn
+		}
+		if o.Status == store.SalesReportParked {
+			r.parked.Add(1)
+		}
+		slog.Log(ctx, level, "sales invoice report", "tenant", tid, "report", c.ID, "order", c.OrderID, "sourceRef", c.SourceRef,
+			"attempt", c.Attempts, "status", o.Status, "httpStatus", o.HTTPStatus, "err", o.Error)
+		n++
+	}
+	return n
 }
 
 // attempt sends one claimed report and says what to record: REPORTED on 2xx; PARKED on a refusal (4xx other than a refused

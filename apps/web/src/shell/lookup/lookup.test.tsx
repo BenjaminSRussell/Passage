@@ -255,6 +255,30 @@ describe("EntityLookup", () => {
     expect(calls).toContain(`/api/v1/party/vendors:search?q=con&limit=20&legalEntityId=${LE}`);
   });
 
+  it("does not ask again for a legal entity the caller may not read, one row at a time", async () => {
+    const LE = "44444444-4444-4444-8444-444444444444";
+    handler = (url) => {
+      if (url.pathname === "/api/v1/party/vendors:search") return json({ items: [{ ...vendors[0], legalEntityId: LE }] });
+      if (url.pathname === `/api/v1/org/legal-entities/${LE}`) return json({}, 403);
+      return json({ items: [] });
+    };
+    await lookupDefs.vendor.search("con", {});
+    await lookupDefs.vendor.search("con", {});
+    await lookupDefs.vendor.search("co", {});
+    expect(calls.filter((c) => c === `/api/v1/org/legal-entities/${LE}`)).toHaveLength(1);
+  });
+
+  it("clears a choice made under another legal entity when the form switches legal entity", async () => {
+    const seen: string[] = [];
+    const LE1 = "55555555-5555-4555-8555-555555555555";
+    const LE2 = "66666666-6666-4666-8666-666666666666";
+    const { rerender } = render(<Harness initial={VENDOR_ID} scope={{ legalEntityId: LE1 }} onValue={(v) => seen.push(v)} />);
+    await waitFor(() => expect(screen.getByRole("combobox")).toHaveValue("Contoso Ltd (V-00042)"));
+    rerender(<Harness initial={VENDOR_ID} scope={{ legalEntityId: LE2 }} onValue={(v) => seen.push(v)} />);
+    await waitFor(() => expect(seen).toEqual([""]));
+    expect(screen.getByRole("combobox")).toHaveValue("");
+  });
+
   it("offers a create-new link only where asked", async () => {
     const { rerender } = render(<Harness />);
     expect(screen.queryByRole("link")).toBeNull();
@@ -360,6 +384,32 @@ describe("work context", () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getByLabelText("context")).toHaveTextContent("le-1|"));
+  });
+
+  it("keeps the remembered legal entity through a server error and drops it only when it is gone", async () => {
+    const remember = () => window.localStorage.setItem(`passage.workContext.${IDENTITY}`, JSON.stringify({ legalEntityId: "le-9", siteId: "" }));
+    const mount = () =>
+      render(
+        <MemoryRouter>
+          <WorkContextProvider identity={IDENTITY}>
+            <ContextPicker />
+            <Reader />
+          </WorkContextProvider>
+        </MemoryRouter>,
+      );
+    remember();
+    handler = () => json({}, 500);
+    const first = mount();
+    await waitFor(() => expect(calls.some((c) => c.includes("/api/v1/org/legal-entities/le-9"))).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByLabelText("context")).toHaveTextContent("le-9|");
+    first.unmount();
+
+    clearResolvedOptions();
+    handler = (url) => (url.pathname === "/api/v1/org/legal-entities/le-9" ? json({}, 404) : json({ items: [] }));
+    mount();
+    await waitFor(() => expect(screen.getByLabelText("context")).toHaveTextContent("|"));
+    expect(screen.getByLabelText("context").textContent).toBe("|");
   });
 
   it("starts from the remembered choice", () => {

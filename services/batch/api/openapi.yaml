@@ -86,6 +86,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '409': { description: The sources that answered differ from those of the first page, so the cursor no longer fits (WFL-0412). Reload from the first page. }
   /v1/workitems/{id}/actions:
     post:
       operationId: actOnWorkItem

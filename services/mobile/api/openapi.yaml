@@ -280,7 +280,9 @@ paths:
         emits offline.resolved.v1; the mobile service does not move it. action
         reject ends the transaction, and also closes a PENDING one that holds a device queue. Either unblocks the device's queue.
         If-Match is the conflict version (required); a mismatch, or a conflict
-        already resolved, is 412.
+        already resolved, is 412. Rejecting a PENDING transaction a replay is applying at the warehouse
+        right now (a lease of two minutes) is 409 MOB-APPLY-IN-PROGRESS with Retry-After: wait for the
+        apply to settle, then reject it if it is still open (#522).
       x-passage-duty: warehouse.offline-conflict.resolve
       parameters:
         - { name: key, in: path, required: true, schema: { type: string }, description: "device_id:seq" }
@@ -292,6 +294,7 @@ paths:
       responses:
         "200": { description: The resolved transaction. }
         "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
   /v1/mobile/events:
     get:

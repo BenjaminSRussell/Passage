@@ -149,6 +149,13 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 		if journals, err = domain.BuildOpeningJournals(rows, run.SourceSystem, run.SourceCompany, in.LegalEntityID, in.LedgerID, in.PostingDate); err != nil {
 			return err
 		}
+		mapped, err := readOpeningMapping(ctx, tx, string(run.SourceSystem), run.SourceCompany)
+		if err != nil {
+			return err
+		}
+		if mapped != nil && (mapped.legalEntityID != in.LegalEntityID || mapped.ledgerID != in.LedgerID) {
+			return openingTargetMapped(run.SourceCompany)
+		}
 		pin, err := readOpeningTarget(ctx, tx, string(run.SourceSystem), run.SourceCompany)
 		if err != nil {
 			return err
@@ -260,6 +267,18 @@ func (s *Postgres) releaseOpeningTarget(ctx context.Context, run domain.PackRun,
 // pinOpeningTarget reports whether this call created the pin.
 func (s *Postgres) pinOpeningTarget(ctx context.Context, run domain.PackRun, in OpeningJournalRequest) (created bool, err error) {
 	err = s.tx(ctx, func(tx pgx.Tx) error {
+		// Under the company's lock the cutover plan's mapping is read again: a mapping recorded after this call's
+		// first check must still decide the target, not the pin this call is about to create (#549).
+		if err := lockOpeningCompany(ctx, tx, string(run.SourceSystem), run.SourceCompany); err != nil {
+			return err
+		}
+		mapped, err := readOpeningMapping(ctx, tx, string(run.SourceSystem), run.SourceCompany)
+		if err != nil {
+			return err
+		}
+		if mapped != nil && (mapped.legalEntityID != in.LegalEntityID || mapped.ledgerID != in.LedgerID) {
+			return openingTargetMapped(run.SourceCompany)
+		}
 		tag, err := tx.Exec(ctx, `insert into gl_opening_target (tenant_id, source_system, source_company, target_legal_entity_id, ledger_id, pinned_by)
 			values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5) on conflict do nothing`,
 			string(run.SourceSystem), run.SourceCompany, in.LegalEntityID, in.LedgerID, in.By)

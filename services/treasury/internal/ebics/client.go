@@ -699,7 +699,7 @@ func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx
 		return err
 	}
 	if r.txID == "" || r.numSegments < 1 {
-		return errors.New("ebics download: bank gave no transaction id or segment count")
+		return fmt.Errorf("ebics download: %w: bank gave no transaction id or segment count", ErrProtocol)
 	}
 	own, _, err := keys.Public(ctx, UsageE002)
 	if err != nil {
@@ -717,7 +717,7 @@ func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx
 	sb.WriteString(encoded)
 	for seg := 1; ; seg++ {
 		if r.segment != seg || (seg == r.numSegments) != r.last {
-			return fmt.Errorf("ebics download: expected segment %d of %d, bank sent %d (last=%t)", seg, r.numSegments, r.segment, r.last)
+			return fmt.Errorf("ebics download: %w: expected segment %d of %d, bank sent %d (last=%t)", ErrProtocol, seg, r.numSegments, r.segment, r.last)
 		}
 		if seg == r.numSegments {
 			break
@@ -731,7 +731,7 @@ func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx
 			return err
 		}
 		if next.txID != "" && next.txID != r.txID {
-			return errors.New("ebics download: transaction id changed mid-transfer")
+			return fmt.Errorf("ebics download: %w: transaction id changed mid-transfer", ErrProtocol)
 		}
 		next.numSegments, next.txID = r.numSegments, r.txID
 		more, err := orderDataOf(next.root.child("body"))
@@ -752,6 +752,11 @@ func (c *Client) downloadOnce(ctx context.Context, sub Subscriber, keys Keys, bx
 	receipt := phaseRequest(sub, r.txID, "Receipt", 0, false, `<TransferReceipt authenticate="true"><ReceiptCode>`+code+`</ReceiptCode></TransferReceipt>`)
 	_, rerr := c.exchange(ctx, sub, keys, bx, signable{doc: receipt})
 	if procErr != nil {
+		// Processing that stopped because the call's own deadline or cancellation ran out (a slow or unreachable bank ate
+		// the budget) is not a fault of the delivered data: it is retried at the next tick and never counted toward parking.
+		if ctx.Err() != nil {
+			return errors.Join(fmt.Errorf("ebics download: interrupted: %w", procErr), rerr)
+		}
 		return errors.Join(fmt.Errorf("ebics download: %w: %w", ErrLocal, procErr), rerr)
 	}
 	if rerr != nil {

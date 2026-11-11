@@ -3052,6 +3052,36 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/return-orders:backfill-reservations:
+    post:
+      summary: Give the RMA credits posted before billing reservations existed the reservation they never took (#557)
+      description: |
+        Works through the credited return orders of the legal entity that have not been backfilled: for each it
+        takes the credit's stored invoice lines (worked out first for a credit stored before migration 0048) and
+        asks receivables to reserve and commit them in billing, so billing's invoice limit counts the credit. An
+        order is marked once receivables holds the reservation (also when it already did); one that fails is
+        listed in `failed` and taken up by the next call. `more` is true while orders are left after `limit`.
+      operationId: backfillReturnReservations
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        "200":
+          description: What the run did
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backfilled: {type: integer}
+                  alreadyHeld: {type: integer}
+                  more: {type: boolean}
+                  skipped: {type: array, items: {type: object, properties: {rmaNumber: {type: string}, reason: {type: string}}}}
+                  failed: {type: array, items: {type: object, properties: {rmaNumber: {type: string}, reason: {type: string}}}}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
   /v1/sales/return-orders:
     get:
       summary: List return orders (RMA), newest first (FR-30.11)
@@ -3263,6 +3293,16 @@ paths:
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - $ref: "#/components/parameters/IfMatch"
+        - name: recompute
+          in: query
+          required: false
+          description: |
+            `true` on a CREDITED return whose credit note receivables never confirmed: works the credit out again
+            (tax reversal, invoice lines, repricing, totals) from the invoice as billing holds it now, bumps the
+            version, and sends it under the same RMA key. Use it after an operator released the credit in
+            receivables with `:cancel`; while receivables still holds the old credit it refuses the new amounts. Not
+            for a lost answer that may have posted the credit: check receivables first.
+          schema: {type: boolean}
       responses:
         "200":
           description: credited and closed

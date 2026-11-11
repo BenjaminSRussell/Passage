@@ -610,6 +610,10 @@ func TestPlan_AnExistingOriginalEntryForTheYearBlocksApproval(t *testing.T) {
 		{"fiscal year span", "FY2027", true},
 		{"month span in the year", "2027-03", true},
 		{"another year", "FY2026", false},
+		{"quarter span of the fiscal year", "FY2027-Q1", true},
+		{"bare year", "2027", true},
+		{"year and quarter", "2027Q2", true},
+		{"another year sharing the digits", "FY20270", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -633,6 +637,47 @@ func TestPlan_AnExistingOriginalEntryForTheYearBlocksApproval(t *testing.T) {
 				t.Fatalf("approving with an Original entry for another year: %v", err)
 			}
 		})
+	}
+}
+
+// #520: the guard works from both sides. Once a plan is approved, a manual Original entry for its fiscal year (in any span
+// format) is refused; a Revision and an Original for another year are not.
+func TestPlan_AnApprovedPlanBlocksAManualOriginalEntryForTheYear(t *testing.T) {
+	f := newPlanFixture(t)
+	base := f.scenario(t, "Baseline")
+	f.writeAs(t, "author", base, cell("6000", "CC1", "2027-01", "10"))
+	unit := f.reviewedWith(t, "boss")
+	if err := f.signOff("boss", SignOffRequest{Stage: domain.StageApprove, OrgUnitID: unit, ScenarioID: base.ID, Submission: 1}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	post := func(entry domain.EntryType, span string) error {
+		_, _, err := f.st.PostRegisterEntry(asUser("setup"), ids.New(), "h", RegisterRequest{RuleVersionID: f.rule.ID, EntryType: entry,
+			Lines: []domain.RegisterLine{{DimensionKey: "d9", SpanKey: span, Amount: d("5")}}})
+		return err
+	}
+	for _, span := range []string{"FY2027", "2027-06", "FY2027-Q2", "2027"} {
+		if err := post(domain.EntryOriginal, span); !hasCode(err, CodePlanYearApproved) {
+			t.Errorf("Original %s over the approved plan: %v, want %s", span, err, CodePlanYearApproved)
+		}
+	}
+	if err := post(domain.EntryOriginal, "FY2028"); err != nil {
+		t.Errorf("Original for another year: %v", err)
+	}
+	if err := post(domain.EntryRevision, "FY2027"); err != nil {
+		t.Errorf("a Revision of the approved year: %v", err)
+	}
+}
+
+func TestSpanKeyYear(t *testing.T) {
+	for span, want := range map[string]int{"FY2027": 2027, "FY2027-Q1": 2027, "2027": 2027, "2027-03": 2027, "2027Q4": 2027, "2027-..": 2027} {
+		if got, ok := spanKeyYear(span); !ok || got != want {
+			t.Errorf("%q: %d %v, want %d", span, got, ok, want)
+		}
+	}
+	for _, span := range []string{"", "FY20270", "Q1", "FY27", "x2027", "20270"} {
+		if _, ok := spanKeyYear(span); ok {
+			t.Errorf("%q must not name a year", span)
+		}
 	}
 }
 
