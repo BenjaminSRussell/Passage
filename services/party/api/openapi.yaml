@@ -675,6 +675,263 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/vendor-portal/prospects:
+    post:
+      operationId: registerVendorProspect
+      summary: "Record a supplier's own registration from the public portal page"
+      x-passage-duty: party.vendor-portal.register
+      description: >-
+        Called only by the supplier portal BFF with a vendorless supplier-portal service token whose only duty is this one; any other
+        caller is refused with PTY-SUP-SCOPE. The registration lands in vendor_prospect for a buyer to accept or reject. The answer is
+        the same 202 whether or not the email already waits for review, so it never tells a stranger who has registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewVendorProspect' }
+      responses:
+        '202':
+          description: Received.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [RECEIVED] }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON, or a body over 16 KiB.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE: not the supplier portal acting for no vendor.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID with per-field errors.' }
+        '429': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-LIMIT: too many registrations are waiting for review.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/invites:
+    get:
+      operationId: listVendorInvites
+      summary: "List the calling vendor's user invitations"
+      x-passage-duty: party.vendor-portal.read
+      description: The invitations of the vendor in the verified supplier-portal service token, newest first. Tokens are never returned.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: The invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/VendorInvite' } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE: not a supplier account.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+    post:
+      operationId: createVendorInvite
+      summary: "Invite a user to the calling vendor's supplier portal account"
+      x-passage-duty: party.vendor-portal.write
+      description: >-
+        Stores the invitation with a hash of its token and an expiry and emits the created event without the token; a pending
+        invitation of the same vendor for the same email is revoked. The token is in this answer only; nothing stores it. The supplier portal BFF lets only the vendor's administrator call this.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                displayName: { type: string, maxLength: 140 }
+      responses:
+        '201':
+          description: Created; the token is shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invite, token]
+                properties:
+                  invite: { $ref: '#/components/schemas/VendorInvite' }
+                  token: { type: string }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE: not a supplier account.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID with per-field errors.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/invites/{id}:revoke:
+    post:
+      operationId: revokeVendorInvite
+      summary: "Revoke an open invitation of the calling vendor"
+      x-passage-duty: party.vendor-portal.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorInvite' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE: not a supplier account.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND: unknown, or another vendor''s.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-STATE: the invitation was already accepted.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/invites/{id}:verify:
+    post:
+      operationId: verifyVendorInvite
+      summary: "Check an invitation token without using it"
+      x-passage-duty: party.vendor-portal.invite-accept
+      description: The token must name the invitation in the path and the vendor in the verified token, and its secret must match.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InviteToken' }
+      responses:
+        '200':
+          description: Valid; who to create and for which vendor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorInviteDetails' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON, or a body over 2 KiB.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-INVITE-INVALID: not valid, expired or already used.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/invites/{id}:accept:
+    post:
+      operationId: acceptVendorInvite
+      summary: "Use an invitation token"
+      x-passage-duty: party.vendor-portal.invite-accept
+      description: As verify, then marks the invitation accepted (once) and emits the accepted event without the token.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InviteToken' }
+      responses:
+        '200':
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorInviteDetails' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON, or a body over 2 KiB.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-INVITE-INVALID: not valid, expired or already used.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-prospects:
+    get:
+      operationId: listVendorProspects
+      summary: "List supplier registrations for review"
+      x-passage-duty: party.read
+      description: Registrations from the public portal page in the caller's tenant, newest first, optionally of one status.
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [NEW, ACCEPTED, REJECTED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: The registrations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/VendorProspect' } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: unknown status.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-prospects/{id}:
+    get:
+      operationId: getVendorProspect
+      summary: "Get one supplier registration"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The registration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorProspect' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-NOT-FOUND.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-prospects/{id}:accept:
+    post:
+      operationId: acceptVendorProspect
+      summary: "Accept a supplier registration as a vendor"
+      x-passage-duty: party.write
+      description: >-
+        Claims the registration, then creates the party (organization, legal name and registration number from the registration), a
+        vendor role blocked until the onboarding is approved by someone other than the accepting buyer, and the onboarding
+        questionnaire request. Every step is idempotent on the registration id, so repeating a call that stopped part-way finishes it.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountNumber, vendorGroupId, currencyCode, questionnaireId]
+              properties:
+                accountNumber: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+                vendorGroupId: { type: string, format: uuid }
+                paymentTermId: { type: string, format: uuid }
+                currencyCode: { type: string, pattern: '^[A-Z]{3}$' }
+                questionnaireId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Accepted, with the party, vendor and onboarding request ids.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorProspect' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-NOT-FOUND, or the questionnaire is unknown.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-STATE: already rejected, or accepted into another party; PTY-VENDOR-EXISTS: the account number is taken.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID or PTY-PARTY-INVALID with per-field errors.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-prospects/{id}:reject:
+    post:
+      operationId: rejectVendorProspect
+      summary: "Reject a supplier registration with a note"
+      x-passage-duty: party.vendor-request.decide
+      description: Closes a NEW registration as REJECTED with the note; nothing is created.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        '200':
+          description: Rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorProspect' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-NOT-FOUND.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-STATE: already decided.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the note is missing or too long.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
   /healthz:
     get:
       operationId: liveness
@@ -958,6 +1215,65 @@ components:
         serviceCode: { type: string }
         traceId: { type: string }
         errors: { type: object, additionalProperties: { type: string } }
+    NewVendorProspect:
+      type: object
+      required: [companyName, contactName, email, country]
+      properties:
+        companyName: { type: string, minLength: 1, maxLength: 200 }
+        contactName: { type: string, minLength: 1, maxLength: 140 }
+        email: { type: string, format: email }
+        phone: { type: string, maxLength: 40 }
+        country: { type: string, pattern: '^[A-Za-z]{2}$' }
+        taxId: { type: string, maxLength: 40 }
+        website: { type: string, maxLength: 200 }
+        message: { type: string, maxLength: 2000 }
+    VendorProspect:
+      type: object
+      required: [id, companyName, contactName, email, country, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        companyName: { type: string }
+        contactName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        country: { type: string }
+        taxId: { type: string }
+        website: { type: string }
+        message: { type: string }
+        status: { type: string, enum: [NEW, ACCEPTED, REJECTED] }
+        createdAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+        decisionNote: { type: string }
+        partyId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        requestId: { type: string, format: uuid, description: The onboarding questionnaire request. }
+    VendorInvite:
+      type: object
+      required: [id, vendorId, email, role, status, expiresAt, invitedBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        email: { type: string }
+        displayName: { type: string }
+        role: { type: string }
+        status: { type: string }
+        expiresAt: { type: string, format: date-time }
+        invitedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        acceptedAt: { type: string, format: date-time }
+    VendorInviteDetails:
+      allOf:
+        - { $ref: '#/components/schemas/VendorInvite' }
+        - type: object
+          required: [legalEntityId, vendorName]
+          properties:
+            legalEntityId: { type: string, format: uuid }
+            vendorName: { type: string }
+    InviteToken:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, maxLength: 2048 }
   responses:
     Problem:
       description: RFC 9457 problem details.
