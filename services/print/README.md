@@ -92,6 +92,27 @@ from this pod; nothing connects inbound to the cluster.
     address lines 200 characters, a table cell 500, the notes 2000, 8 address lines per party, 20
     header fields, 20 totals, 8 columns. More than 500 lines is refused with PRN-0009. Fields and
     limits added after the first release are optional or wider, so earlier callers keep working.
+- **Docgen: templates, text blocks, correspondence and output routing** (issue #46;
+  `internal/domain/docgen.go`, `output.go`, migration `0007`). All of it only changes the data the
+  renderer lays out, so the output stays deterministic and the golden PDFs pin it.
+  - **Templates** (`PUT /print/v1/document-templates/{code}`, print.admin; `GET` list and one, print.job.submit): per
+    document type a tenant sets the title, a footer line, renamed columns and hidden columns (by the header the caller
+    sends, with their cells), the text block that is the letter body and text blocks appended to the notes (form notes).
+    Each save raises the version; one template per type can be the default and is used when `documentType` has no
+    `templateCode`. A request's own `title`, `footerText` and `body` win over the template.
+  - **Text blocks** (`PUT /print/v1/text-blocks/{code}/{language}`, `GET /print/v1/text-blocks`): wording with
+    `{{placeholders}}`, one version per language tag (`en`, `de-CH`). A render picks the requested language, then
+    its base language, then English. `documentNumber`, `legalEntityName` and `counterpartyName` are filled in; the
+    request's `values` give the rest, and a placeholder without a value is refused (PRN-0014) rather than printed.
+  - **Correspondence**: `documentType` may be `PERIODIC_STATEMENT`, `PAYMENT_NOTICE` or `BALANCE_CONFIRMATION`: a letter
+    with a required `body` (or a `bodyBlock` text block) printed after the parties, and an optional table and totals.
+    `render` takes `templateCode`, `language`, `bodyBlock` and `values` besides the document data.
+  - **Output rules** (`POST/GET /print/v1/output-rules`, `DELETE /print/v1/output-rules/{id}`, print.admin to change):
+    a rule sends the ORIGINAL or a COPY of a document type to a `PRINTER` queue (1 to 9 copies), an `EMAIL` address, the
+    `EINVOICE` network, the `ARCHIVE` or the `PORTAL`, optionally for one legal entity and/or account.
+    `GET /print/v1/output-plan?documentType=&legalEntityId=&accountId=` returns, for each copy kind and channel, the
+    rules of the most specific scope that matches (entity and account, then account, then entity, then the default).
+    The service only answers where a document goes; sending it there is the caller's job (see NOT-IMPLEMENTED.md).
 - **Queue management** (print.admin): `PATCH /print/v1/printers/{id}` edits a printer or moves it to
   another queue or failover rank (PRN-0006 when the rank is held; the code and device type never
   change); `POST /print/v1/printers/{id}:retire` takes it out of its queue (the row stays for the
@@ -157,7 +178,7 @@ for byte in `gs1label_test.go`. Transport tests decode the IPP request independe
 an `httptest` server and send PCL 6 to a local TCP listener. `migrations/rls_test.go` is the
 static RLS check: every table has `tenant_id`, ENABLE and FORCE row-level security and the
 `passage.tenant_id` policy. API tests use an in-memory store.
-The document renderer has three golden PDFs in `testdata/golden`: `purchase-order.pdf`,
+The document renderer has golden PDFs in `testdata/golden` (also `statement-of-account.pdf`, `balance-confirmation.pdf` and `invoice-with-template.pdf` for docgen), among them: `purchase-order.pdf`,
 `invoice-unicode.pdf` (Polish, Czech, Greek and Cyrillic names, a wrapped description, an
 additional party, and CJK text the fonts lack) and `packing-slip-3-pages.pdf` (page breaks with
 repeated headers). `UPDATE_GOLDEN=1 go test ./internal/domain` rewrites them after an intended
@@ -183,6 +204,11 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a role without BYPASSRLS).
 | PRN-0007 | 201 (job FAILED) | The label does not fit the media of any device in the queue |
 | PRN-0008 | 422 | A business document cannot be rendered; the detail names the field |
 | PRN-0009 | 422 | A business document has more than 500 lines |
+| PRN-0012 | 404 | Document template not found |
+| PRN-0013 | 404 | Text block not found, or it has no version for the language and none in English |
+| PRN-0014 | 422 | A text block has a placeholder the document gave no value for |
+| PRN-0015 | 404 | Output rule not found |
+| PRN-0016 | 503 | Templates, text blocks and output rules are not available (no store configured) |
 | MOB-0111 | 201 (job FAILED) | Printer unreachable after the attempts |
 | MOB-0112 | 422 / 201 (job FAILED) | No routing rule matches the document, or the queue has no devices |
 | idempotency_key_reuse | 422 | Same Idempotency-Key with a different request body |

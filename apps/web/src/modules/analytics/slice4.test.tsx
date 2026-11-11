@@ -158,6 +158,43 @@ describe("dashboards", () => {
     expect(screen.getByRole("heading", { name: "Finance", level: 2 })).toBeInTheDocument();
   });
 
+  it("shows each tile's value, and why a tile has none", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/analytics/metrics") return json(200, catalog);
+      if (url.pathname === "/api/v1/analytics/dashboards/finance_overview/values") {
+        return json(200, {
+          dashboardId: "finance_overview",
+          title: "Finance overview",
+          refreshSeconds: 60,
+          computedAt: "2026-11-11T09:00:00Z",
+          tiles: [
+            { title: "Revenue this month", metric: "revenue", metricName: "Revenue", period: "MTD", from: "2026-11-01", to: "2026-11-11", status: "OK", value: "1250500.5" },
+            { title: "COGS this year", metric: "cogs", metricName: "Cost of goods sold", period: "YTD", from: "2026-01-01", to: "2026-11-11", status: "NOT_MODELLED", value: null },
+          ],
+        });
+      }
+      return json(200, finance);
+    };
+    const { container } = render("/analytics/dashboards/finance_overview");
+    const tiles = await screen.findByLabelText("Tiles");
+    expect(await within(tiles).findByText("1,250,500.50")).toBeInTheDocument();
+    expect(within(tiles).getByText("Not modelled yet")).toBeInTheDocument();
+    expect(within(tiles).getByText(/does not calculate it yet/)).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("keeps the dashboard usable when the tile values cannot be loaded", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/analytics/metrics") return json(200, catalog);
+      if (url.pathname.endsWith("/values")) return json(503, { code: "ANA-0120", detail: "the semantic layer did not answer" });
+      return json(200, finance);
+    };
+    render("/analytics/dashboards/finance_overview");
+    expect(await screen.findByText("Could not load the tile values")).toBeInTheDocument();
+    const tiles = await screen.findByLabelText("Tiles");
+    expect(within(tiles).getByRole("heading", { name: "Revenue this month" })).toBeInTheDocument();
+  });
+
   it("explains a concurrent change (ANA-0113) and maps server field errors onto the tiles", async () => {
     let puts = 0;
     server.handler = (url, init) => {

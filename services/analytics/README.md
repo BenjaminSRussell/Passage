@@ -79,7 +79,7 @@ on the existing endpoints:
   current version; the version is the `ETag`). A dashboard has 1 to 12 tiles,
   each bound to a published governed metric and a period (MTD, QTD, YTD,
   TRAILING_12M), and a refresh interval of 15 to 600 s (default 60). Tiles show
-  their metric definition; tile values need Cube execution (later slice).
+  their metric definition; tile values come from Cube (see Cube execution below).
 - **Explorer exports (FR-46.9, BR-46.7).** `POST /v1/analytics/exports` with
   `Idempotency-Key` plans the query with the caller's scope exactly like
   `POST /v1/analytics/query` and stores the plan in `export_job` (QUEUED). Above
@@ -103,6 +103,21 @@ on the existing endpoints:
   edges both ways in SQL and returns each asset with its distance in hops.
 - **Web.** Dashboard list, detail and editor; export log and export request;
   deliveries on the schedule detail; lineage view with an add-edge form.
+
+## Cube execution and tile values (#46, 46-3)
+
+- `POST /v1/analytics/query:execute` (duty `analytics.view`) plans the query exactly like `/v1/analytics/query`, then runs it on
+  Cube and returns `rows` (measures as decimal strings, nulls as null; at most 10,000 rows). A caller with no legal-entity scope gets
+  an empty result and Cube is not called. A metric without a measure in the Cube model (`domain.CubeServes`, kept equal to
+  `data/cube/model` by the contract test) is a 400. Cube not configured or not answering is 503 `ANA-0120`.
+- `GET /v1/analytics/dashboards/{id}/values` (duty `analytics.view`) gives each tile its value for its period (MTD, QTD, YTD,
+  trailing 12 months up to today) in the caller's scope. Each tile has its own status: `OK` (value null when there are no rows),
+  `NO_SCOPE`, `NOT_MODELLED` (the metric has no Cube measure yet: dso_days, dpo_days, inventory_turns, otif_pct, oee_pct) or
+  `UNAVAILABLE`. One tile that fails never fails the dashboard.
+- Scope: the service signs a 2-minute HS256 token (`internal/cube`) with `tenantId`, `legalEntityIds` and `unrestricted` from the
+  caller's principal, which `data/cube/cube.js` turns into filters on every cube; the plan's filters are also in the query itself.
+- Config: `SEMANTIC_LAYER_URL` (Cube base URL) and `SEMANTIC_LAYER_SECRET` (Cube's `CUBEJS_API_SECRET`); chart values
+  `semanticLayer.url` and `semanticLayer.secret`. Both are separate from the reconciliation job's `CUBE_URL` and `CUBE_API_TOKEN`.
 
 ## UX events and funnels (#510)
 

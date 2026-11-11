@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -19,6 +19,7 @@ import {
   DASHBOARD_ID,
   describeProblem,
   getDashboard,
+  getDashboardValues,
   listDashboards,
   listMetrics,
   MAX_REFRESH_SECONDS,
@@ -31,7 +32,7 @@ import {
   type Problem,
   type Tile,
 } from "./api/client";
-import { dateTime } from "./format";
+import { dateTime, tileStatusHint, tileValueText } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -324,6 +325,14 @@ export function DashboardDetailPage() {
     },
     `dashboard/${id}`,
   );
+  // Tile values refresh on the dashboard's own interval (FR-46.8); a failed refresh keeps the last values.
+  const values = useLoad((signal) => getDashboardValues(id, undefined, signal), `dashboard-values/${id}`);
+  const refreshMs = (state.data?.dashboard.refreshSeconds ?? 60) * 1000;
+  const reloadValues = values.reload;
+  useEffect(() => {
+    const timer = setInterval(reloadValues, refreshMs);
+    return () => clearInterval(timer);
+  }, [reloadValues, refreshMs]);
 
   if (state.loading && !state.data) return <Loading title="Dashboard" text={`Loading dashboard ${id}…`} />;
   if (state.error?.code === "ANA-0112") {
@@ -357,14 +366,21 @@ export function DashboardDetailPage() {
       <p role="status" className={styles.muted}>
         {saved ? `Dashboard saved as version ${saved.version}.` : ""}
       </p>
-      <Alert tone="info" title="Tile values are not shown yet">
-        Tiles show the governed metric they are bound to. Values, sparklines and the freshness badge appear once the semantic layer runs queries.
-      </Alert>
+      {values.error ? (
+        <Alert tone="warning" title="Could not load the tile values" live="status" action={<Button size="sm" onClick={values.reload}>Try again</Button>}>
+          <ProblemMessage problem={values.error} />
+        </Alert>
+      ) : null}
       <CardGrid label="Tiles">
         {dashboard.tiles.map((t, i) => {
           const metric = metricOf(t.metric);
+          const tv = values.data?.tiles[i]?.metric === t.metric ? values.data.tiles[i] : undefined;
           return (
             <Card key={`${i}-${t.metric}`} title={t.title}>
+              <p className={styles.tileValue} aria-live="off">
+                {tv ? tileValueText(tv) : values.loading ? "Loading…" : "Unavailable"}
+              </p>
+              {tv ? <p className={styles.muted}>{tileStatusHint(tv)}{tv.status === "OK" ? `, ${tv.from} to ${tv.to}` : ""}</p> : null}
               <dl className={styles.details}>
                 <div className={styles.entry}>
                   <dt className={styles.term}>Metric</dt>

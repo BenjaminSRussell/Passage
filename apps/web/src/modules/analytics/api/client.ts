@@ -405,6 +405,28 @@ const dashboardSchema = z.object({
   updatedAt: z.string().optional(),
 });
 
+export const TILE_STATUSES = ["OK", "NO_SCOPE", "NOT_MODELLED", "UNAVAILABLE"] as const;
+
+const tileValueSchema = z.object({
+  title: z.string(),
+  metric: z.string(),
+  metricName: z.string(),
+  period: z.enum(TILE_PERIODS),
+  from: z.string(),
+  to: z.string(),
+  status: z.enum(TILE_STATUSES),
+  value: z.string().nullable(),
+  unit: z.enum(["REPORTING_CURRENCY", "RATIO"]).optional(),
+});
+
+const dashboardValuesSchema = z.object({
+  dashboardId: z.string(),
+  title: z.string(),
+  refreshSeconds: z.number().int(),
+  computedAt: z.string(),
+  tiles: z.array(tileValueSchema),
+});
+
 const deliverySchema = z.object({
   deliveryId: z.string(),
   scheduleId: z.string(),
@@ -447,6 +469,8 @@ const lineageSchema = z.object({
 
 export type Tile = z.infer<typeof tileSchema>;
 export type Dashboard = z.infer<typeof dashboardSchema>;
+export type TileValue = z.infer<typeof tileValueSchema>;
+export type DashboardValues = z.infer<typeof dashboardValuesSchema>;
 export type Delivery = z.infer<typeof deliverySchema>;
 export type ExportJob = z.infer<typeof exportSchema>;
 export type LineageAsset = z.infer<typeof lineageAssetSchema>;
@@ -476,6 +500,11 @@ export async function listDashboards(fetchImpl: Fetch = defaultFetch, signal?: A
 /** One dashboard with its version, which a later save sends back as If-Match. */
 export async function getDashboard(id: string, fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<Dashboard> {
   return dashboardSchema.parse(await call(fetchImpl, `/dashboards/${encodeURIComponent(id)}`, {}, signal));
+}
+
+/** The current value of every tile of a dashboard, in the caller's data scope (46-3). */
+export async function getDashboardValues(id: string, fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<DashboardValues> {
+  return dashboardValuesSchema.parse(await call(fetchImpl, `/dashboards/${encodeURIComponent(id)}/values`, {}, signal));
 }
 
 /**
