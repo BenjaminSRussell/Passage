@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ApprovalRequest, ApprovalStore, RecordedDecision } from "../api/decision.js";
 import type { Money } from "../domain/money.js";
+import { approvalRequestedEvent } from "../domain/events.js";
 import type { PgAgentStore } from "./pg.js";
 
 /** What the runtime stores when a run reaches the approval gate (FR-47.8). */
@@ -16,6 +17,9 @@ export interface NewApproval {
   expiryHours?: number;
   /** The PII-free proposal shown in the inbox: tool, arguments with pseudonyms, confidence. */
   proposalJson: string;
+  /** With these the request is announced to the shared inbox (`agent.approval.requested`) in the same transaction. */
+  confidence?: number;
+  riskScore?: number;
 }
 
 export interface PendingApproval {
@@ -75,7 +79,23 @@ export class PgApprovalStore implements ApprovalStore {
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [a.tenantId, actionId, a.runId, a.seq, a.tool, a.invokerUserId, a.approvalDuty, a.amount.amount, a.amount.currency,
           a.selfApprovalLimit.amount, a.selfApprovalLimit.currency, a.expiryHours ?? null, a.proposalJson],
-      ),
+      ).then(async () => {
+        if (a.confidence === undefined) return;
+        // The announcement is written with the request, so the inbox never misses a request that was stored (transactional outbox).
+        const event = approvalRequestedEvent({
+          tenantId: a.tenantId,
+          runId: a.runId,
+          actionId,
+          toolName: a.tool,
+          proposalRedacted: a.proposalJson,
+          confidence: a.confidence,
+          riskScore: a.riskScore ?? 0,
+        });
+        await c.query(
+          "insert into outbox (id, tenant_id, aggregate_type, aggregate_id, type, payload) values ($1, $2, 'approval_request', $3, $4, $5::jsonb)",
+          [randomUUID(), a.tenantId, actionId, event.type, JSON.stringify(event.data)],
+        );
+      }),
     );
     return actionId;
   }

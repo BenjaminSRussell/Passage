@@ -100,6 +100,8 @@ export interface ApprovalRequest {
   tool: string;
   args: Record<string, unknown>;
   confidence: number;
+  /** 0 to 1: 1 for a high-risk vendor or a segregation-of-duties conflict, else how unsure the model is. */
+  riskScore?: number;
   amount: Money;
   /** The model's explanation with real values restored; shown in the inbox only (FR-47.8). */
   rationale: string;
@@ -581,6 +583,7 @@ async function executeRun(
         tool: p.tool,
         args,
         confidence: p.confidence,
+        riskScore: risk.vendorHighRisk || risk.sodConflict ? 1 : Math.min(1, Math.max(0, 1 - p.confidence)),
         amount,
         rationale: displayText,
       });
