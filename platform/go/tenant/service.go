@@ -256,6 +256,12 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"processmfg": {
 		"identity": {"identity.feature.view"},
+		// A released batch order generates its control recipe (#25, 25-5): the token carries the releasing user as act.
+		"shopfloor": {"shopfloor.controlrecipe.create"},
+	},
+	// The shopfloor sweeper reads the active tenants from the identity registry instead of a configured list (#25).
+	"shopfloor": {
+		"identity": {"identity.tenant-registry.read"},
 	},
 	// The supplier portal BFF acts for one vendor user at a time (#511). Every token it signs carries the vendor id (vnd) from the
 	// user's verified session, and the target service scopes every read and write to that vendor. Only vendor-portal duties,
@@ -294,11 +300,11 @@ func serviceGrant(iss, aud string) []string { return serviceGrants[iss][aud] }
 // (a party merge moves roles in every entity). A token carrying one names no
 // legal entity and carries no other duty, and every other token names one
 // entity, so a tenant-level duty never rides in an entity-scoped token (#450).
-var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}}
+var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}, "identity.tenant-registry.read": {}}
 
 // tenantReadDuties are tenant-level duties that only read tenant settings, so any signed-in user's service call may
 // carry them; the rest of tenantLevelDuties need a tenant administrator.
-var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}}
+var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}, "identity.tenant-registry.read": {}}
 
 func tenantLevelToken(duties []string) (tenantLevel, mixed bool) {
 	n := 0

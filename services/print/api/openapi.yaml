@@ -183,6 +183,137 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /print/v1/document-templates:
+    get:
+      operationId: listDocumentTemplates
+      summary: List the tenant's document templates (46-1)
+      x-passage-duty: print.job.submit
+      parameters:
+        - { name: documentType, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: Templates by code
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DocumentTemplate' } } } }
+  /print/v1/document-templates/{code}:
+    get:
+      operationId: getDocumentTemplate
+      summary: Read one document template
+      x-passage-duty: print.job.submit
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The template, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentTemplate' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: putDocumentTemplate
+      summary: Create or replace a document template (46-1)
+      description: >-
+        A template changes the title, footer line, column names and visible columns of a document type, and names the text
+        blocks that supply the letter body and form notes. Every save raises the version. At most one template of a document
+        type is the default; saving one as the default clears the flag on the previous one. The document type of an
+        existing template cannot change.
+      x-passage-duty: print.admin
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z][A-Z0-9_-]{1,39}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentTemplateRequest' }
+      responses:
+        '200': { description: Template saved, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentTemplate' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /print/v1/text-blocks:
+    get:
+      operationId: listTextBlocks
+      summary: List every language version of every text block (46-4)
+      x-passage-duty: print.job.submit
+      responses:
+        '200':
+          description: Text blocks by code and language
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/TextBlock' } } } }
+  /print/v1/text-blocks/{code}/{language}:
+    put:
+      operationId: putTextBlock
+      summary: Create or replace one language version of a standard text (46-4)
+      description: The body may hold placeholders written {{name}}. A render that gives no value for a placeholder is refused with PRN-0014, so a letter never prints a raw placeholder.
+      x-passage-duty: print.admin
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z][A-Z0-9_-]{1,39}$' } }
+        - { name: language, in: path, required: true, schema: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [body], properties: { body: { type: string, minLength: 1, maxLength: 4000 } } }
+      responses:
+        '200': { description: Text block saved, content: { application/json: { schema: { $ref: '#/components/schemas/TextBlock' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /print/v1/output-rules:
+    get:
+      operationId: listOutputRules
+      summary: List the output rules (46-2)
+      x-passage-duty: print.job.submit
+      responses:
+        '200':
+          description: Rules by sequence
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/OutputRule' } } } }
+    post:
+      operationId: createOutputRule
+      summary: Add an output rule (46-2)
+      description: >-
+        Every rule is for one legal entity, which must be in the caller's scope (403 otherwise; row-level security enforces it too), or for
+        every legal entity, which only a tenant administrator (no legal-entity claim, tenant.administer, print.admin) may add or delete.
+        A rule sends one kind of copy (ORIGINAL or COPY) of a document type to a destination channel: a print queue of the
+        site print agent, an e-mail address, the e-invoice network, the archive or the portal. It may be limited to a legal
+        entity, an account (customer or vendor) or both. The rule says where; delivery is done by the caller or a later
+        slice (see NOT-IMPLEMENTED.md).
+      x-passage-duty: print.admin
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OutputRuleRequest' }
+      responses:
+        '201': { description: Rule created, content: { application/json: { schema: { $ref: '#/components/schemas/OutputRule' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /print/v1/output-rules/{id}:
+    delete:
+      operationId: deleteOutputRule
+      summary: Delete an output rule
+      x-passage-duty: print.admin
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Rule deleted }
+        '404': { $ref: '#/components/responses/Problem' }
+  /print/v1/output-plan:
+    get:
+      operationId: resolveOutputPlan
+      summary: Where the original and the copies of one document go (46-2)
+      description: For each copy kind (original, copy), every rule of the most specific matching scope that has a rule for it (legal entity and account, then account, then legal entity, then the document type's default), whatever its channel, so an account's own original replaces the default original instead of adding to it. Original first.
+      x-passage-duty: print.job.submit
+      parameters:
+        - { name: documentType, in: query, required: true, schema: { type: string } }
+        - { name: legalEntityId, in: query, required: false, schema: { type: string } }
+        - { name: accountId, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The destinations
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/OutputRule' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
   /print/v1/jobs:purge:
     post:
       operationId: purgePrintJobs
@@ -374,7 +505,7 @@ components:
       required: [documentType, number, legalEntity, columns, lines]
       description: Text is Unicode. Control characters are refused; only table cells and notes may hold line breaks.
       properties:
-        documentType: { type: string, enum: [PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP, REMITTANCE_ADVICE], description: 'REMITTANCE_ADVICE (#528) is one payment of a payment run: the vendor as counterparty, one line per invoice the payment settled (invoice, date, amount open, discount, tax withheld, paid) and the total paid.' }
+        documentType: { type: string, enum: [PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP, REMITTANCE_ADVICE, PERIODIC_STATEMENT, PAYMENT_NOTICE, BALANCE_CONFIRMATION], description: 'PERIODIC_STATEMENT, PAYMENT_NOTICE and BALANCE_CONFIRMATION are correspondence (46-4): a letter whose body comes from a text block, with an optional table. REMITTANCE_ADVICE (#528) is one payment of a payment run: the vendor as counterparty, one line per invoice the payment settled (invoice, date, amount open, discount, tax withheld, paid) and the total paid.' }
         number: { type: string, minLength: 1, maxLength: 200 }
         legalEntity: { $ref: '#/components/schemas/DocumentParty' }
         counterparty:
@@ -388,8 +519,9 @@ components:
         fields: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/DocumentField' } }
         columns:
           type: array
-          minItems: 1
+          minItems: 0
           maxItems: 8
+          description: At least one column, except for correspondence documents, which may have none.
           items:
             type: object
             required: [header]
@@ -407,6 +539,68 @@ components:
           items: { $ref: '#/components/schemas/DocumentField' }
           description: Printed at the right below the table; the last entry is the grand total, in bold under a rule.
         notes: { type: string, maxLength: 2000 }
+        title: { type: string, maxLength: 60, description: Replaces the standard title; a template sets it. }
+        body: { type: string, maxLength: 4000, description: The letter text of a correspondence document (required for them, refused for the others); a text block can supply it. }
+        footerText: { type: string, maxLength: 200, description: A line at the foot of every page. }
+        templateCode: { type: string, description: 'A saved document template (46-1). Without one, the default template of the document type is used, if there is one.' }
+        language: { type: string, description: 'Language tag of the text blocks, such as en or de-CH. A block falls back to its base language, then to English.' }
+        bodyBlock: { type: string, description: The text block that is the letter body; overrides the template's body block. }
+        values: { type: object, additionalProperties: { type: string }, description: 'Values of the text blocks'' placeholders. documentNumber, legalEntityName and counterpartyName are filled in.' }
+    DocumentTemplateConfig:
+      type: object
+      properties:
+        title: { type: string, maxLength: 60 }
+        footerText: { type: string, maxLength: 200 }
+        renameColumns: { type: object, additionalProperties: { type: string }, description: 'Column header the caller sends to the header to print.' }
+        hideColumns: { type: array, items: { type: string }, description: Column headers to leave out, with their cells. }
+        bodyBlock: { type: string, description: Text block code; correspondence documents only. }
+        noteBlocks: { type: array, maxItems: 8, items: { type: string }, description: Text blocks appended to the notes (form notes). }
+    DocumentTemplateRequest:
+      type: object
+      required: [name, documentType]
+      properties:
+        name: { type: string, maxLength: 200 }
+        documentType: { type: string }
+        default: { type: boolean }
+        config: { $ref: '#/components/schemas/DocumentTemplateConfig' }
+    DocumentTemplate:
+      type: object
+      required: [code, name, documentType, default, version, config]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        documentType: { type: string }
+        default: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        config: { $ref: '#/components/schemas/DocumentTemplateConfig' }
+    TextBlock:
+      type: object
+      required: [code, language, body, placeholders, version]
+      properties:
+        code: { type: string }
+        language: { type: string }
+        body: { type: string }
+        placeholders: { type: array, items: { type: string } }
+        version: { type: integer, minimum: 1 }
+    OutputRuleRequest:
+      type: object
+      required: [documentType, copyKind, channel, sequence]
+      properties:
+        documentType: { type: string }
+        legalEntityId: { type: string, format: uuid, description: 'Only within the caller''s legal-entity scope (403 otherwise).' }
+        accountId: { type: string, format: uuid, description: The customer or vendor party. }
+        copyKind: { type: string, enum: [ORIGINAL, COPY] }
+        channel: { type: string, enum: [PRINTER, EMAIL, EINVOICE, ARCHIVE, PORTAL] }
+        destination: { type: string, description: 'A queue code for PRINTER, one address for EMAIL; empty for the other channels.' }
+        copies: { type: integer, minimum: 1, maximum: 9, default: 1, description: Only a printer takes more than one. }
+        sequence: { type: integer, minimum: 1 }
+    OutputRule:
+      allOf:
+        - { $ref: '#/components/schemas/OutputRuleRequest' }
+        - type: object
+          required: [id, copies]
+          properties:
+            id: { type: string, format: uuid }
     PrinterRequest:
       type: object
       required: [code, name, deviceType, dpi, host, queueCode, failoverRank]

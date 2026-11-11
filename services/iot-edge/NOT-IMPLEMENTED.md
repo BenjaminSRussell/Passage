@@ -57,9 +57,9 @@ rejected batch, heartbeat plus configuration application and a simulator end to 
 
 | Item | Status | Reason |
 |---|---|---|
-| OPC-UA and MQTT `Source` adapters | open | The runtime takes any `Source`; only the simulator exists. Real adapters need `gopcua` and an MQTT client approved for the edge image and a real machine or broker to test against (#213). |
+| OPC-UA and MQTT `Source` adapters | built, live proof open (#213) | `OPCUASource` (gopcua subscription, reconnect, security policies, user name) and `MQTTSource` (the connector's own MQTT 3.1.1 client, wildcards, reconnect) are tested against an in-process gopcua server and an in-process broker. Not done: a run against a real plant's OPC-UA server and broker (#213), MQTT 5, OPC-UA certificate trust lists and Basic256Sha256 against a real server. The MQTT client was not tested against a third-party broker. |
 | Sequence gap replay by seq range | open | The server's gaps are counted (`iotedge_seq_gaps_total`) and logged; replaying from the buffer needs the persistent ring. |
-| Persistent ring | open | Events wait in memory (capacity `IOT_BUFFER_CAPACITY`, default 200,000); a connector restart loses what was unsent. Only the sequence state is on disk. |
+| Persistent ring | built | `EDGE_BUFFER_FILE` keeps unsent events in an append-only journal (`FileBuffer`), rewritten at start and when it has grown to several times the live data; a torn last line is ignored, events older than the age limit are not brought back. A power cut can lose what the last fsync (at most one second) did not cover. Without the setting the ring is in memory as before. |
 | Kafka producer | open | Events go to the shopfloor ingest over HTTPS, the option FR-25.9 names; Kafka stays with the client decision above. |
 
 ## Enrollment and certificate (25-4)
@@ -79,8 +79,8 @@ replaced in place), enrollment on Windows service installs (no installer is buil
 `internal/runtime/recipes.go`: with `EDGE_WRITER=simulator` the connector pulls its active recipes every 5 s, acknowledges a sent
 recipe (received), starts it (in-execution), and writes each setpoint once after `CheckWrite` (allowlist, limits, recipe in
 execution), reads the value back, and reports every write, made or refused, with the readback. A refused or failed write sends
-the recipe to error with the reason; a `pcs-mqtt` recipe is reported as an error (no MQTT publisher). A readback that differs
+the recipe to error with the reason; a recipe for a destination with no writer is reported as an error. A readback that differs
 is counted (`iotedge_readback_deviations_total`) and the server records the deviation. A recipe the connector already wrote is
 not written again in the same process; after a restart an in-execution recipe is written again (setpoints are idempotent and
-the audit shows both). Open: the OPC-UA `Writer`, completion driven by the PCS, MQTT publishing.
-| MFS automation adapter (FR-32.12): wiring and vendor profiles | later slice of PSG-32 | The telegram codec, framer, reliable link and event mapping are built and tested against a fake PLC (`internal/mfs`). Not built: the runtime dialling a configured PLC address (TCP, per-machine config in `EdgeConfig`), forwarding `dev.passage.warehouse.automation.event.v1` to the warehouse (there is no ingest route for it yet), the warehouse issuing MOVE telegrams from transport work, and mapping a real vendor's telegram layout (Siemens, Vanderlande, Dematic) onto profile v1. A real PLC is needed for the last one (#213). |
+the audit shows both). `EDGE_WRITER` takes `simulator`, `opcua` and `mqtt`, comma separated. The OPC-UA writer reads a node's type first and writes in that type (an integer node refuses a fraction); the MQTT writer publishes the recipe document to the recipe topic and each allowlisted setpoint to its topic at QoS 1, retained, and reports that MQTT has no readback. Completion driven by the PCS is built on the shopfloor side (process messages end a recipe). Open: a live OPC-UA write and readback (#213).
+| MFS automation adapter (FR-32.12): vendor profiles | later slice of PSG-32 | Built: the codec, framer and link, the runtime dialling a configured PLC (`EDGE_PLC_ADDR`, or `simulator` for a simulated PLC in this process), pulling the warehouse's transport orders and sending MOVE telegrams, and forwarding arrived, diverted and fault events to the warehouse ingest (a failed delivery NACKs busy so the PLC resends). Not built: mapping a real vendor's telegram layout (Siemens, Vanderlande, Dematic) onto profile v1, which needs a PLC (#213). An order whose MOVE got no acknowledgement ends the session and is offered again after reconnect, so the PLC must treat a repeated MOVE for a load unit it already holds as a duplicate. |

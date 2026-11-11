@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/api"
+	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/registry"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
 )
 
@@ -22,6 +24,22 @@ func sweepConfig(getenv func(string) string) (api.SweepConfig, error) {
 		return api.SweepConfig{}, fmt.Errorf("SWEEP_TENANT_IDS: %w", err)
 	}
 	cfg := api.DefaultSweepConfig(tenants)
+	switch src := getenv("SWEEP_TENANT_SOURCE"); src {
+	case "", "config":
+	case "identity":
+		// The tenants come from the identity service's registry (plus SWEEP_TENANT_IDS, when set).
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return api.SweepConfig{}, err
+		}
+		reg, err := registry.New(getenv("IDENTITY_URL"), getenv("SWEEP_OPERATOR_TENANT_ID"), signer, nil)
+		if err != nil {
+			return api.SweepConfig{}, err
+		}
+		cfg.Registry = reg
+	default:
+		return api.SweepConfig{}, fmt.Errorf("SWEEP_TENANT_SOURCE must be config or identity, got %q", src)
+	}
 	for key, dst := range map[string]*time.Duration{
 		"SWEEP_ANDON_INTERVAL": &cfg.AndonEvery, "SWEEP_ROLLUP_INTERVAL": &cfg.RollupEvery,
 		"SWEEP_AUTO_CLOCK_INTERVAL": &cfg.AutoClockEvery, "SWEEP_RETRY_INTERVAL": &cfg.RetryEvery,
@@ -76,7 +94,7 @@ func runSweeper(ctx context.Context, getenv func(string) string, s *store.Postgr
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	go func() {
-		slog.Info("shopfloor sweeper started", "tenants", len(cfg.TenantIDs))
+		slog.Info("shopfloor sweeper started", "configuredTenants", len(cfg.TenantIDs), "registry", cfg.Registry != nil)
 		sw.Run(ctx)
 		errs <- errors.New("sweeper stopped")
 	}()

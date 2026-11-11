@@ -77,6 +77,16 @@ func TestCubeContract_FinJournalLineMatchesCatalog(t *testing.T) {
 	if _, column := modelScopeColumns("fin_journal_line"); !column || !slices.Contains(dims, "legal_entity_id") {
 		t.Error("fin_journal_line must carry the legal_entity_id scope dimension")
 	}
+	for _, id := range measures {
+		if !CubeServes(id) {
+			t.Errorf("Cube has a measure %s that CubeServes does not list", id)
+		}
+	}
+	for id := range cubeMeasures {
+		if !slices.Contains(measures, id) {
+			t.Errorf("CubeServes lists %s, which the Cube model has no measure for", id)
+		}
+	}
 	// cube.js filters every cube on tenant_id; the mart holds every tenant.
 	if !slices.Contains(dims, "tenant_id") {
 		t.Error("fin_journal_line must carry the tenant_id dimension that cube.js filters on")

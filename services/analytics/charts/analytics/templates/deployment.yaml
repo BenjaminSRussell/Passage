@@ -56,6 +56,15 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.secretName }}
                   key: {{ .Values.database.secretKey }}
+{{- if .Values.semanticLayer.url }}
+            - name: SEMANTIC_LAYER_URL
+              value: {{ .Values.semanticLayer.url | quote }}
+            - name: SEMANTIC_LAYER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.semanticLayer.secret.name }}
+                  key: {{ .Values.semanticLayer.secret.key }}
+{{- end }}
 {{- if .Values.reconciliation.tenantId }}
             - name: PASSAGE_SERVICE_NAME
               value: analytics

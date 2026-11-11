@@ -206,6 +206,12 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "PRN-0006": { message: "That queue already has a printer at this failover position.", action: "Pick a free position in the queue, or move the other printer first." },
   "PRN-0010": { message: "That printer wasn't found, or it was already retired.", action: "Reload the printers page to see the current list." },
   "PRN-0011": { message: "That routing rule wasn't found.", action: "Reload the routing rules to see the current list." },
+  "ANA-0120": { message: "The analytics engine isn't answering, so these figures can't be shown right now.", action: "Try again in a minute. If it keeps failing, contact support with the details below." },
+  "PRN-0012": { message: "That document template wasn't found.", action: "Check the template code, or save the template first." },
+  "PRN-0013": { message: "A text block this document uses doesn't exist, or has no English version to fall back on.", action: "Add the text block (and its English version) under text blocks, then try again." },
+  "PRN-0014": { message: "A text block has a placeholder that the document gave no value for.", action: "Open Details to see which values are missing and send them with the document." },
+  "PRN-0015": { message: "That output rule wasn't found.", action: "Reload the output rules to see the current list." },
+  "PRN-0016": { message: "Document templates, text blocks and output rules aren't available right now.", action: "Try again in a few minutes. If it keeps failing, contact support with the details below." },
   "MOB-0112": { message: "No printer queue is set up for this document.", action: "Add a routing rule for the document type, or choose a queue." },
   "AP-OPN-001": { message: "A settled or reversed open item can't be held or released.", action: "Reload the page to see the item's current state." },
   "INV-OPB-001": { message: "Some opening stock rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
@@ -1007,6 +1013,11 @@ const treasury: Record<string, ProblemCatalogEntry> = {
 
 const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0143": { message: "Someone else changed the worker after you opened it.", action: RELOAD_AND_REDO },
+  "SF-0180": { message: "That PI sheet does not exist.", action: "Go back to the list of PI sheets and open it from there." },
+  "SF-0181": { message: "That change is not possible in the sheet's current state: only a draft can be edited or released, and only a released sheet can get a new version or be retired.", action: "Make a new version of the released sheet and edit that." },
+  "SF-0182": { message: "Someone else changed this PI sheet after you opened it.", action: RELOAD_AND_REDO },
+  "SF-0183": { message: "A PI sheet with this code exists, or the sheet already has a draft in progress.", action: "Open the existing sheet or its draft, or use another code." },
+  "SF-0184": { message: "A control recipe can only be made from a released PI sheet whose steps fit where the recipe goes.", action: "Release the sheet, or give each setpoint the node it is written to when the recipe goes to a process control system." },
 };
 
 const companySetup: Record<string, ProblemCatalogEntry> = {
@@ -1076,6 +1087,14 @@ const b2b: Record<string, ProblemCatalogEntry> = {
   "EINV-0150": { message: "This e-invoice format isn't set up for your country yet.", action: "Ask an administrator to install the country's e-invoicing pack." },
 };
 
+/** Process manufacturing: batch orders and their control recipes (#25). */
+const processManufacturing: Record<string, ProblemCatalogEntry> = {
+  "PMF-0506": {
+    message: "This batch order can't be rescaled: its control recipe is already on the shop floor with the current quantities, and a recipe can't be replaced once it is sent.",
+    action: "Keep the current batch size. To make a different quantity, create another batch order for the difference.",
+  },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -1104,6 +1123,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...shared,
   ...fieldService,
   ...b2b,
+  ...processManufacturing,
 });
 
 /** The catalog entry for a problem code, if there is one. */
