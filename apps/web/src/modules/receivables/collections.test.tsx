@@ -183,7 +183,7 @@ describe("Disputes", () => {
       return undefined;
     };
     const { container } = renderAt(`/receivables/disputes/new?legalEntity=${LE}&openItem=${ITEM}&amount=1000.00`);
-    expect(screen.getByLabelText("Open item id")).toHaveValue(ITEM);
+    expect(screen.getByLabelText("Open item")).toHaveAttribute("data-value", ITEM);
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Open dispute" }));
     expect(await screen.findByText("Use an upper-case code such as PRICE or DAMAGE.")).toBeInTheDocument();

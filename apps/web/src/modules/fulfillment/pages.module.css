@@ -146,3 +146,37 @@
   align-items: center;
   gap: var(--space-2, 0.5rem);
 }
+
+/*
+ * Tablet layout (#508): a warehouse or shop-floor screen on a touch tablet (a coarse pointer, 600px to 1279px wide).
+ * Controls keep the 44px touch target even in compact density, a form is two columns instead of as many as fit,
+ * the form's actions stay in reach at the bottom of the screen, and wide tables scroll inside their own box rather
+ * than widening the page. Phones keep the single column and desktops are unchanged.
+ */
+@media (pointer: coarse) and (min-width: 600px) and (max-width: 1279px) {
+  .stack {
+    --control-height: 48px;
+    --cell-padding-inline: var(--space-4);
+  }
+
+  .form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .formActions {
+    position: sticky;
+    inset-block-end: 0;
+    z-index: 2;
+    padding-block: var(--space-3);
+    background: var(--color-bg-surface);
+    border-block-start: 1px solid var(--color-border);
+  }
+
+  .toolbar {
+    gap: var(--space-4);
+  }
+
+  .checkRow {
+    min-block-size: var(--control-height);
+  }
+}

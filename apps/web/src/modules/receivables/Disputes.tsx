@@ -220,7 +220,7 @@ export function NewDisputePage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {text("nd-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true })}
-          {text("nd-item", "openItemId", "Open item id", { mono: true })}
+          {text("nd-item", "openItemId", "Open item", { entity: "openItem" })}
           {text("nd-reason", "reasonCode", "Reason code", { mono: true, hint: "For example PRICE, QUANTITY, DAMAGE or DELIVERY." })}
           {text("nd-amount", "disputedAmount", "Disputed amount", { mono: true, decimal: true, hint: "At most the item's open amount." })}
           {text("nd-owner", "owner", "Owner")}

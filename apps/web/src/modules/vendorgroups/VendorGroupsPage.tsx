@@ -77,7 +77,7 @@ export function VendorGroupsPage() {
           <FormField id="vendor-group-name" label="Name" error={errors.name}>
             {(c) => <Input {...c} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} invalid={Boolean(errors.name)} />}
           </FormField>
-          <FormField id="vendor-group-id" label="Existing group ID" hint="Optional. The vendor group ID vendors already carry, to give that group a code; leave empty for a new group." error={errors.id}>
+          <FormField id="vendor-group-id" label="Existing group UUID" hint="Optional. The vendor group ID vendors already carry, to give that group a code; leave empty for a new group." error={errors.id}>
             {(c) => <Input {...c} className={styles.mono} value={draft.id} onChange={(e) => setDraft({ ...draft, id: e.target.value })} invalid={Boolean(errors.id)} />}
           </FormField>
           {failure ? (

@@ -130,7 +130,7 @@ export function NewClientPage() {
       <PageHeader title="Register API client" description="Record a Keycloak client with the duties it may use and its request quota. The secret stays in Keycloak." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("clientId", "Client id", "The Keycloak client id the gateway sees in the token, such as acme-erp.", false, { spellCheck: false, maxLength: 64 })}
+          {text("clientId", "Client identifier", "The Keycloak client id the gateway sees in the token, such as acme-erp.", false, { spellCheck: false, maxLength: 64 })}
           {text("name", "Name", undefined, false, { maxLength: 200 })}
           <FormField id="client-scopes" label="Scopes" hint="Duties the client may use, one per line, such as sales.order.read. You can grant only duties you hold yourself." error={errors.scopes}>
             {(control) => <Textarea {...control} rows={4} mono value={values.scopes} onChange={(event) => update({ scopes: event.target.value })} invalid={Boolean(errors.scopes)} spellCheck={false} />}

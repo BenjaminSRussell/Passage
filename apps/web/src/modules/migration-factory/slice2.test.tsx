@@ -430,7 +430,7 @@ describe("Legacy reference", () => {
     fireEvent.click(screen.getByRole("button", { name: "Look up" }));
     expect(await screen.findByText(/Enter the legacy id/)).toBeInTheDocument();
     expect(calls).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Legacy id"), { target: { value: " CIV-00123 " } });
+    fireEvent.change(screen.getByLabelText("Legacy identifier"), { target: { value: " CIV-00123 " } });
     fireEvent.click(screen.getByRole("button", { name: "Look up" }));
     const table = await findTable({ name: "Legacy references" });
     await waitFor(() => expect(table).toHaveTextContent("CIV-00123"));
@@ -443,7 +443,7 @@ describe("Legacy reference", () => {
     handler = () => json(200, { items: [] });
     renderAt("/migration-factory/xref");
     fireEvent.change(screen.getByLabelText("Company"), { target: { value: "DEMF" } });
-    fireEvent.change(screen.getByLabelText("Legacy id"), { target: { value: "X-1" } });
+    fireEvent.change(screen.getByLabelText("Legacy identifier"), { target: { value: "X-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Look up" }));
     expect(await screen.findByText("No legacy reference")).toBeInTheDocument();
     expect(calls[0].url.searchParams.get("company")).toBe("DEMF");

@@ -1,5 +1,6 @@
 // Flow designer API client. Paths follow the mobile service OpenAPI (wave 32, §6.32.5)
 // as exposed to the browser through the BFF at /api/v1/mobile.
+import { problemSummary } from "../../../shell/errors";
 import type { FlowDraft } from "../domain/flowGraph";
 import { apiFetch } from "../../../shell/api/http";
 
@@ -213,7 +214,7 @@ export function subscribePublishes(onEvent: (event: FlowPublished) => void, deps
 export function describeFlowError(error: unknown): string {
   if (error instanceof FlowApiError) {
     if (error.status === 404 && !error.code) return "The mobile flow service is not available yet.";
-    return error.code ? `${error.message} (${error.code})` : error.message;
+    return problemSummary(error, error.message);
   }
   return error instanceof Error ? error.message : "Request failed";
 }

@@ -180,7 +180,7 @@ describe("Deductions", () => {
       return undefined;
     };
     const { container } = renderAt(`/receivables/deductions/new?legalEntity=${LE}&openItem=${ITEM}&amount=300.00`);
-    expect(screen.getByLabelText("Open item id")).toHaveValue(ITEM);
+    expect(screen.getByLabelText("Open item")).toHaveAttribute("data-value", ITEM);
     fill("Amount", "300.01");
     fireEvent.click(screen.getByRole("button", { name: "Record deduction" }));
     expect(await screen.findByText("At most 300.00 is open on the item.")).toBeInTheDocument();
@@ -190,7 +190,7 @@ describe("Deductions", () => {
 
     fill("Amount", "300.00");
     fill("Customer's reason", " promo spring ");
-    fill("Payment id", PAY);
+    fill("Payment", PAY);
     fireEvent.change(screen.getByLabelText("Type"), { target: { value: "PROMO" } });
     fireEvent.click(screen.getByRole("button", { name: "Record deduction" }));
     expect(await screen.findByRole("heading", { name: "Deduction 300.00 USD" })).toBeInTheDocument();

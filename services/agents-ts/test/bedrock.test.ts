@@ -87,7 +87,7 @@ describe("Bedrock adapter (FR-47.13)", () => {
       toolConfig: { toolChoice: unknown; tools: Array<{ toolSpec: { inputSchema: { json: { properties: { tool: { enum: string[] } } } } } }> };
     };
     expect(body.toolConfig.toolChoice).toEqual({ tool: { name: "propose_action" } });
-    expect(body.toolConfig.tools[0]?.toolSpec.inputSchema.json.properties.tool.enum).toEqual(ALLOWED);
+    expect(body.toolConfig.tools[0]?.toolSpec.inputSchema.json.properties.tool.enum).toEqual(["", ...ALLOWED]);
   });
 
   it("caps Converse maxTokens at the run's remaining hold, never above its own configured limit", async () => {

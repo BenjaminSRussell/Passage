@@ -179,7 +179,7 @@ func (s *Postgres) CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, id
 			out, err = loadPurchaseOrder(ctx, tx, existing)
 			return err
 		}
-		out, err = insertPurchaseOrder(ctx, tx, in)
+		out, err = insertPurchaseOrder(ctx, tx, in, s.queueBudget)
 		return err
 	})
 	if err == nil {
@@ -193,7 +193,7 @@ func (s *Postgres) CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, id
 // orders and releases its lines against their agreement lines (FR-17.5), so a
 // PRC-AGR or PRC-REQ error rolls the whole document back; after writing it links
 // the requisition lines to their PO lines (FR-17.3).
-func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (PurchaseOrder, error) {
+func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder, queueBudget bool) (PurchaseOrder, error) {
 	p, _ := tenant.FromContext(ctx)
 	reqIDs, err := claimRequisitionLines(ctx, tx, in)
 	if err != nil {
@@ -239,8 +239,11 @@ func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (Purc
 		return PurchaseOrder{}, err
 	}
 	out, err := loadPurchaseOrder(ctx, tx, in.ID)
+	if err != nil {
+		return out, err
+	}
 	out.Warnings = warnings
-	return out, err
+	return out, enqueueBudgetConvert(ctx, tx, out, queueBudget)
 }
 
 // GetPurchaseOrder returns one PO with its lines and charges.
@@ -342,6 +345,8 @@ type PurchaseOrderSummary struct {
 type PurchaseOrderFilter struct {
 	ApprovalStatus string
 	VendorID       string
+	// Q keeps the orders whose number contains it, ignoring case.
+	Q string
 }
 
 // ListPurchaseOrders returns PO headers newest first, after the cursor id.
@@ -356,7 +361,8 @@ func (s *Postgres) ListPurchaseOrders(ctx context.Context, f PurchaseOrderFilter
 			from purchase_order o
 			where o.tenant_id = $1 and ($2 = '' or o.approval_status = $2) and ($3 = '' or o.vendor_id::text = $3)
 			and ($4::uuid is null or o.id < $4::uuid)
-			order by o.id desc limit $5`, p.TenantID, f.ApprovalStatus, f.VendorID, nullable(after), limit+1)
+			and ($6 = '' or strpos(lower(o.number), lower($6)) > 0)
+			order by o.id desc limit $5`, p.TenantID, f.ApprovalStatus, f.VendorID, nullable(after), limit+1, f.Q)
 		if err != nil {
 			return err
 		}

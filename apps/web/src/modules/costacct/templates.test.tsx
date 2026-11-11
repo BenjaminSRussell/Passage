@@ -152,7 +152,7 @@ describe("MeasuresPage", () => {
         mode === "fail" ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: mode === "ok" ? [measure] : [] }),
     });
     const { container } = at("/costacct/measures");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     mode = "empty";
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No statistical measures yet")).toBeInTheDocument();
@@ -216,7 +216,7 @@ describe("TemplatesPage", () => {
     let fail = true;
     stubRoutes({ "GET /api/v1/controlling/allocation-templates": () => (fail ? json(503, { title: "down", code: "COM-0500" }) : json(200, { items: [] })) });
     at("/costacct/templates");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No allocation templates yet")).toBeInTheDocument();
@@ -265,7 +265,7 @@ describe("TemplateEditorPage", () => {
     expect(await screen.findByRole("heading", { name: "Edit TPL-INSP" })).toBeInTheDocument();
     await screen.findAllByRole("option", { name: "ORDER-1 Order 1" });
     fireEvent.click(screen.getByRole("button", { name: "Save version 2" }));
-    expect(await screen.findByText(/CST-0018: template TPL-INSP is at version 2/)).toBeInTheDocument();
+    expect(await screen.findByText(/template TPL-INSP is at version 2/)).toBeInTheDocument();
     expect(JSON.parse(calls(fetchMock, "POST", "allocation-templates")[0][1].body as string)).toMatchObject({ expectedVersion: 1, code: "TPL-INSP" });
   });
 });
@@ -307,7 +307,7 @@ describe("TemplateDetailPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dry run" }));
     expect(await screen.findByText(/CO-0622: a divisor is zero/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Run for 2026-09" }));
-    expect(await screen.findByText(/CST-0002: this template already has a completed run/)).toBeInTheDocument();
+    expect(await screen.findByText(/this template already has a completed run/)).toBeInTheDocument();
   });
 });
 
@@ -324,7 +324,7 @@ describe("TemplateRunDetailPage", () => {
   it("shows a load error", async () => {
     stubRoutes({ [`GET /api/v1/controlling/template-allocations/runs/${RUN}`]: () => json(404, { title: "not found", code: "CST-0019", detail: "template allocation run not found" }) });
     at(`/costacct/template-runs/${RUN}`);
-    expect(await findAlert()).toHaveTextContent("CST-0019");
+    expect(await findAlert()).toHaveTextContent("template allocation run not found");
   });
 });
 

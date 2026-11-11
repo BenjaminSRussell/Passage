@@ -84,7 +84,7 @@ describe("legacy key cross-reference", () => {
     handler = (url) => json(200, url.pathname.endsWith("/summary") ? summary : { items: [entry("C1")] });
     renderPage();
     await findTable({ name: "Legacy key cross-reference" });
-    const field = screen.getByLabelText("Passage id");
+    const field = screen.getByLabelText("Passage identifier");
     fireEvent.change(field, { target: { value: "0195f0a0-0000" } });
     expect(await screen.findByText("Enter a full Passage id (UUID).")).toBeInTheDocument();
     expect(field).toHaveAttribute("aria-invalid", "true");

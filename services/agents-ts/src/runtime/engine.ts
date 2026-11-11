@@ -44,14 +44,25 @@ export interface ModelResponse {
 }
 
 /** Provider layer (FR-47.13). Only pseudonymized text reaches this port. */
+export interface ModelRequest {
+  system: string;
+  user: string;
+  allowedTools: readonly string[];
+  /** Hard ceiling on generated tokens, so one call cannot spend past the run's hold. */
+  maxOutputTokens?: number;
+  /** Aborts the call when the caller is gone; a provider that streams passes it to the request. */
+  signal?: AbortSignal;
+}
+
 export interface ModelProvider {
-  complete(req: {
-    system: string;
-    user: string;
-    allowedTools: readonly string[];
-    /** Hard ceiling on generated tokens, so one call cannot spend past the run's hold. */
-    maxOutputTokens?: number;
-  }): Promise<ModelResponse>;
+  complete(req: ModelRequest): Promise<ModelResponse>;
+  /**
+   * Same answer as `complete`, but `onText` gets the answer text as the model writes it, only for a turn that proposes no tool (the
+   * text of a turn that calls a tool is never passed on: it is not the answer) (FR-47.3: first-token
+   * latency is the model's, not the whole answer's). The text is pseudonymized like every other text at this port.
+   * Optional: a provider without it is called with `complete` and the caller shows the answer when it is whole.
+   */
+  stream?(req: ModelRequest, onText: (delta: string) => void): Promise<ModelResponse>;
 }
 
 export interface ToolDescriptor {
@@ -92,6 +103,8 @@ export interface ApprovalRequest {
   tool: string;
   args: Record<string, unknown>;
   confidence: number;
+  /** 0 to 1: 1 for a high-risk vendor or a segregation-of-duties conflict, else how unsure the model is. */
+  riskScore?: number;
   amount: Money;
   /** The model's explanation with real values restored; shown in the inbox only (FR-47.8). */
   rationale: string;
@@ -573,6 +586,7 @@ async function executeRun(
         tool: p.tool,
         args,
         confidence: p.confidence,
+        riskScore: risk.vendorHighRisk || risk.sodConflict ? 1 : Math.min(1, Math.max(0, 1 - p.confidence)),
         amount,
         rationale: displayText,
       });

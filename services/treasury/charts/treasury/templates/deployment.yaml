@@ -87,6 +87,17 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- if .Values.ledgerUrl }}
+            {{- if not .Values.serviceIdentity.signingKeySecret }}
+            {{- fail "ledgerUrl needs serviceIdentity.signingKeySecret: the ledger only accepts service-signed postings" }}
+            {{- end }}
+            - name: LEDGER_URL
+              value: {{ .Values.ledgerUrl | quote }}
+            {{- if .Values.glProfiles }}
+            - name: TREASURY_GL_PROFILES
+              value: {{ .Values.glProfiles | quote }}
+            {{- end }}
+            {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

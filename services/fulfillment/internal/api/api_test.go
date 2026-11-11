@@ -384,12 +384,15 @@ func TestPackingSlips_ListAndGet(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
 	sh := ids.New()
-	rec := do(t, h, http.MethodGet, "/v1/fulfillment/packing-slips?shipmentId="+sh, "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/packing-slips?q=+ps-7+&shipmentId="+sh, "", nil)
 	if rec.Code != http.StatusOK || rec.Body.String() != "{\"items\":[]}\n" {
 		t.Fatalf("status = %d body = %q, want an empty items list", rec.Code, rec.Body.String())
 	}
-	if fs.slipFilter.ShipmentID != sh || fs.slipFilter.Limit != 100 {
+	if fs.slipFilter.ShipmentID != sh || fs.slipFilter.Limit != 100 || fs.slipFilter.Q != "ps-7" {
 		t.Fatalf("filter = %+v", fs.slipFilter)
+	}
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/packing-slips?q="+strings.Repeat("x", 101), "", nil); rec.Code != http.StatusBadRequest && rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a long q: status = %d", rec.Code)
 	}
 	rec = do(t, h, http.MethodGet, "/v1/fulfillment/packing-slips/"+ids.New(), "", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"journal":[{"account":"1405","amount":"125","currency":"USD"`) {

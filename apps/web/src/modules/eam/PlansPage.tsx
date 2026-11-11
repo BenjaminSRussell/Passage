@@ -24,7 +24,7 @@ import { CODE, CURRENCY, dash, dayOf, kindLabel, PLAN_CODE, sentence } from "./f
 import { Failure, PagedTable } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad, usePaged } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 function interval(line: PlanLine): string {
   const parts: string[] = [];
@@ -192,7 +192,7 @@ export function validatePlan(values: PlanValues): { errors: PlanErrors; input?: 
 export function CounterSelect({ id, assetId, value, error, onChange }: { id: string; assetId: string; value: string; error?: string; onChange(next: string): void }) {
   const state = useLoad<Counter[]>(async (signal) => (assetId ? (await getAsset(assetId, signal)).counters : []), `counters|${assetId}`);
   return (
-    <FormField id={id} label="Counter" error={error ?? (state.error ? `Could not load counters (${state.error.code}).` : undefined)}>
+    <FormField id={id} label="Counter" error={error ?? (state.error ? `Could not load counters. ${problemSummary(state.error)}` : undefined)}>
       {(control) => (
         <Select {...control} value={value} invalid={Boolean(error)} disabled={!assetId || state.loading} onChange={(e) => onChange(e.target.value)}>
           <option value="">{assetId ? (state.data?.length === 0 ? "This asset has no counters" : "Choose a counter") : "Choose the asset first"}</option>
@@ -392,7 +392,7 @@ export function NewPlanPage() {
                 errors={errors.lines[i] ?? {}}
                 assets={assets.data!.items}
                 rounds={rounds.data?.items ?? []}
-                roundsError={rounds.error ? `Could not load the rounds (${rounds.error.code}).` : undefined}
+                roundsError={rounds.error ? `Could not load the rounds. ${problemSummary(rounds.error)}` : undefined}
                 canRemove={values.lines.length > 1}
                 onChange={(patch) => updateLine(i, patch)}
                 onRemove={() => {

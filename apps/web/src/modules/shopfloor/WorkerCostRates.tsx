@@ -9,14 +9,14 @@ import { ProblemMessage } from "../../shell/errors";
 const NOTE_MAX = 500;
 const RATE_PATTERN = /^\d{1,14}(\.\d{1,6})?$/;
 
-function explain(problem: Problem): string {
+function explain(problem: Problem): string | undefined {
   switch (problem.code) {
     case "SF-0170":
       return "The worker already has a rate from this date. Rates are never changed; set the new rate from a later date.";
     case "SF-0106":
       return "You can't set your own cost rate. Ask another supervisor.";
     default:
-      return problem.message;
+      return undefined;
   }
 }
 
@@ -116,7 +116,7 @@ export function WorkerCostRates({ worker }: { worker: Worker }) {
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not set the cost rate" live="alert">
-              {explain(failure)} ({failure.code})
+              <ProblemMessage problem={failure} message={explain(failure)} />
             </Alert>
           </div>
         ) : null}

@@ -3,7 +3,7 @@
 import type { OperationRule, PackingSlipSummary, TrackingEvent } from "../../../modules/fulfillment/api/client";
 import { LEGAL_ENTITY } from "../../company";
 import { reply, route } from "../../backend";
-import { at } from "../../store";
+import { at, matchesQ } from "../../store";
 import { shipments, slips } from "./model";
 
 const BASE = "/api/v1/fulfillment";
@@ -49,7 +49,7 @@ function slipSummary(s: ReturnType<typeof slips.all>[number]): PackingSlipSummar
 route("GET", `${BASE}/packing-slips`, ({ query }) => {
   const rows = slips
     .all()
-    .filter((s) => (!query.get("shipmentId") || s.shipmentId === query.get("shipmentId")) && (!query.get("orderId") || s.orderId === query.get("orderId")) && (!query.get("status") || s.status === query.get("status")))
+    .filter((s) => (!query.get("shipmentId") || s.shipmentId === query.get("shipmentId")) && (!query.get("orderId") || s.orderId === query.get("orderId")) && (!query.get("status") || s.status === query.get("status")) && matchesQ(query, s.packingSlipNumber))
     .sort((a, b) => b.postingDate.localeCompare(a.postingDate))
     .map(slipSummary);
   return { items: rows };

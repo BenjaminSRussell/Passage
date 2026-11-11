@@ -313,6 +313,14 @@ func TestPurchaseOrder_CreateReadListAndTotalIdentityTrigger(t *testing.T) {
 	if err != nil || len(page.Items) != 1 || page.Items[0].LineCount != 1 || !page.Items[0].Total.Equal(dec("126.5")) {
 		t.Fatalf("list = %+v, %v", page, err)
 	}
+	// q finds an order by part of its number, ignoring case.
+	part := strings.ToLower(got.Number[len(got.Number)-3:])
+	if found, err := s.ListPurchaseOrders(ctx, store.PurchaseOrderFilter{Q: part}, "", 0); err != nil || len(found.Items) != 1 || found.Items[0].ID != po.ID {
+		t.Fatalf("search %q = %+v, %v", part, found, err)
+	}
+	if none, err := s.ListPurchaseOrders(ctx, store.PurchaseOrderFilter{Q: "no-such-number"}, "", 0); err != nil || len(none.Items) != 0 {
+		t.Fatalf("search for nothing = %+v, %v", none, err)
+	}
 
 	broken := purchaseOrder(t)
 	broken.Total = broken.Total.Add(dec("0.01"))

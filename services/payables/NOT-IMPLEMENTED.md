@@ -42,3 +42,4 @@ Slice A ships the settlement engine, the preview endpoint, the service skeleton 
 ## Line-cap note
 
 PR #62 added 1768 lines against the 1500-line cap. The overshoot was accepted at merge: the excess is the 300-scenario oracle grid, the Helm chart, `api/openapi.yaml` and `go.sum`, none of which can be split from the slice without leaving the preview endpoint untestable, undeployable or undocumented. No placeholders or essay blocks were flagged. Issue #72 closes the deferred review findings and stays well under the cap.
+| Supplier payment status read (#511) | built | `GET /v1/payables/vendor/payments` (README). Open: remittance advices to the supplier (needs a document or notification channel), payment dates before the settlement date (the bank file date and the value date are not read), discounts taken shown to the vendor |

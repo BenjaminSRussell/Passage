@@ -105,9 +105,9 @@ describe("rework order list", () => {
 
 describe("create a rework order", () => {
   function fillForm() {
-    fill("Rework formula id", FORMULA);
+    fill("Rework formula", FORMULA);
     fill("Batch size", "80");
-    fill("Batch id", BATCH);
+    fill("Batch", BATCH);
     fill("Quantity of the batch", "100");
     fill("Quantity to rework", "80");
     fill("Planned output", "78");

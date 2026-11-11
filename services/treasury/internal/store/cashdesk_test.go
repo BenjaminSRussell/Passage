@@ -1,12 +1,16 @@
 package store
 
 import (
+	"context"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 )
 
@@ -62,14 +66,14 @@ func TestCashDesk_DayLifecycleCarriesTheCountForward(t *testing.T) {
 	}
 
 	// A count that differs needs a reason and is then kept.
-	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", dec("379"), ""); problemCode(t, err) != domain.CodeDeskDifference {
+	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("379")}); problemCode(t, err) != domain.CodeDeskDifference {
 		t.Fatalf("close without a reason: %v", err)
 	}
-	closed, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", dec("379"), "a coin missing")
+	closed, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("379"), Reason: "a coin missing"})
 	if err != nil || closed.Status != "closed" || closed.Difference == nil || !dec(*closed.Difference).Equal(dec("-0.50")) || closed.DifferenceReason != "a coin missing" {
 		t.Fatalf("closed = %+v, %v", closed, err)
 	}
-	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", dec("379"), ""); problemCode(t, err) != domain.CodeDeskDayClosed {
+	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("379")}); problemCode(t, err) != domain.CodeDeskDayClosed {
 		t.Fatalf("closing twice: %v", err)
 	}
 	// The count, not the book, opens the next day, and a day on or before the last closed one is refused.
@@ -136,4 +140,223 @@ func TestCashDesk_ScopeAndDuplicates(t *testing.T) {
 	if got, err := s.ListCashDesks(ctxFor(1, ""), ids.New()); err != nil || len(got) != 0 {
 		t.Fatalf("other legal entity = %+v, %v", got, err)
 	}
+}
+
+func TestCashDesk_PostingStateBlocksCloseUntilEveryLineIsInTheLedger(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := ctxFor(1, "")
+	desk := newDesk(t, s, ids.New())
+	if _, err := s.OpenCashDeskDay(ctx, desk.ID, "2026-11-02"); err != nil {
+		t.Fatal(err)
+	}
+	bank := ids.New()
+	e, err := s.AddCashDeskEntry(ctx, NewCashDeskEntry{DeskID: desk.ID, Kind: "receipt", Amount: "100", Description: "float", CounterAccount: "8000", PostPending: true}, ids.New())
+	if err != nil || e.PostingStatus != "pending" || e.CounterAccount != "8000" {
+		t.Fatalf("pending line = %+v, %v", e, err)
+	}
+	t2, err := s.AddCashDeskEntry(ctx, NewCashDeskEntry{DeskID: desk.ID, Kind: "payment", Amount: "40", Description: "deposit", BankAccountID: bank, PostPending: true}, ids.New())
+	if err != nil || t2.BankAccountID == nil || *t2.BankAccountID != bank {
+		t.Fatalf("transfer line = %+v, %v", t2, err)
+	}
+	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("60")}); problemCode(t, err) != domain.CodeDeskUnposted {
+		t.Fatalf("close with pending lines: %v", err)
+	}
+	pend, err := s.PendingDeskPostings(ctx, desk.ID, "2026-11-02")
+	if err != nil || len(pend.Entries) != 2 || pend.Entries[0].LineNo != 1 {
+		t.Fatalf("pending = %+v, %v; want both lines in order", pend, err)
+	}
+	for _, p := range pend.Entries {
+		if err := s.MarkDeskEntryPosted(ctx, desk.ID, p.ID, "led-"+p.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.MarkDeskEntryPosted(ctx, desk.ID, e.ID, "other"); err != nil {
+		t.Fatalf("marking a posted line again must change nothing: %v", err)
+	}
+	list, err := s.ListCashDeskEntries(ctx, desk.ID, "2026-11-02")
+	if err != nil || list[0].PostingStatus != "posted" || list[0].LedgerEntryID != "led-"+e.ID || list[0].PostedAt == nil {
+		t.Fatalf("entries = %+v, %v; want the first ledger id kept", list, err)
+	}
+	day, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("59"), Reason: "short", PostDifference: true})
+	if err != nil || day.Status != "closed" || day.DifferencePosting != "pending" {
+		t.Fatalf("close = %+v, %v; want closed with the difference pending", day, err)
+	}
+	pend, err = s.PendingDeskPostings(ctx, desk.ID, "2026-11-02")
+	if err != nil || pend.Difference == nil || !dec(*pend.Difference).Equal(dec("-1")) {
+		t.Fatalf("pending difference = %+v, %v", pend, err)
+	}
+	if err := s.MarkDeskDifferencePosted(ctx, desk.ID, "2026-11-02", "led-diff"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetCashDeskDay(ctx, desk.ID, "2026-11-02"); err != nil || got.DifferencePosting != "posted" || got.DifferenceLedgerEntryID != "led-diff" || !dec(got.BookBalance).Equal(dec("60")) {
+		t.Fatalf("day = %+v, %v", got, err)
+	}
+}
+
+func TestCashDesk_DenominationsAreKeptAndDualControlNeedsAnotherPerson(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := ctxFor(1, "")
+	desk := newDesk(t, s, ids.New())
+	version := desk.Version
+	if _, err := s.UpdateCashDesk(ctx, desk.ID, version, UpdateCashDesk{DualControl: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenCashDeskDay(ctx, desk.ID, "2026-11-02"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddCashDeskEntry(ctx, NewCashDeskEntry{DeskID: desk.ID, Kind: "receipt", Amount: "90", Description: "sale"}, ids.New()); err != nil {
+		t.Fatal(err)
+	}
+	den := []domain.Denomination{{Value: "20", Count: 4}, {Value: "5", Count: 2}}
+	day, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("90"), Denominations: den})
+	if err != nil || day.Status != "closing" || day.ClosedAt != nil || len(day.Denominations) != 2 || day.Denominations[0].Value != "20" {
+		t.Fatalf("close = %+v, %v; want closing with the count lines and no close time", day, err)
+	}
+	// A counted day blocks new lines and the next day, but the desk shows it as the open one.
+	if _, err := s.AddCashDeskEntry(ctx, NewCashDeskEntry{DeskID: desk.ID, Kind: "receipt", Amount: "1", Description: "late"}, ids.New()); problemCode(t, err) != domain.CodeDeskDayClosed {
+		t.Fatalf("entry on a counted day: %v", err)
+	}
+	if _, err := s.OpenCashDeskDay(ctx, desk.ID, "2026-11-03"); problemCode(t, err) != domain.CodeDeskDayOpen {
+		t.Fatalf("next day while closing: %v", err)
+	}
+	if got, err := s.GetCashDesk(ctx, desk.ID); err != nil || got.OpenDate == nil || *got.OpenDate != "2026-11-02" {
+		t.Fatalf("desk = %+v, %v", got, err)
+	}
+	if _, err := s.ApproveCashDeskDay(ctx, desk.ID, "2026-11-02", false); problemCode(t, err) != domain.CodeDeskSameSigner {
+		t.Fatalf("approving your own count: %v", err)
+	}
+	p, _ := tenant.FromContext(ctx)
+	p.UserID = "second-signer"
+	other := tenant.With(ctx, p)
+	approved, err := s.ApproveCashDeskDay(other, desk.ID, "2026-11-02", false)
+	if err != nil || approved.Status != "closed" || approved.ApprovedBy != "second-signer" || approved.ClosedAt == nil {
+		t.Fatalf("approve = %+v, %v", approved, err)
+	}
+	if _, err := s.ApproveCashDeskDay(other, desk.ID, "2026-11-02", false); problemCode(t, err) != domain.CodeDeskNotClosing {
+		t.Fatalf("approving a closed day: %v", err)
+	}
+	next, err := s.OpenCashDeskDay(ctx, desk.ID, "2026-11-03")
+	if err != nil || !dec(next.OpeningBalance).Equal(dec("90")) {
+		t.Fatalf("next day = %+v, %v", next, err)
+	}
+}
+
+func TestCashDesk_RejectSendsACountedDayBackToOpen(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := ctxFor(1, "")
+	desk := newDesk(t, s, ids.New())
+	if _, err := s.UpdateCashDesk(ctx, desk.ID, desk.Version, UpdateCashDesk{DualControl: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenCashDeskDay(ctx, desk.ID, "2026-11-02"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RejectCashDeskDay(ctx, desk.ID, "2026-11-02"); problemCode(t, err) != domain.CodeDeskNotClosing {
+		t.Fatalf("rejecting an open day: %v", err)
+	}
+	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("5"), Reason: "found cash"}); err != nil {
+		t.Fatal(err)
+	}
+	day, err := s.RejectCashDeskDay(ctx, desk.ID, "2026-11-02")
+	if err != nil || day.Status != "open" || day.CountedBalance != nil || day.Difference != nil || len(day.Denominations) != 0 {
+		t.Fatalf("reject = %+v, %v; want an open day with the count cleared", day, err)
+	}
+	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("0")}); err != nil {
+		t.Fatalf("recount after a reject: %v", err)
+	}
+}
+
+func TestCashDesk_EditAndDeactivate(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := ctxFor(1, "")
+	desk := newDesk(t, s, ids.New())
+	if _, err := s.UpdateCashDesk(ctx, desk.ID, desk.Version+5, UpdateCashDesk{Name: ptr("x")}); problemCode(t, err) != CodeVersionConflict {
+		t.Fatalf("stale version: %v", err)
+	}
+	acct := ids.New()
+	got, err := s.UpdateCashDesk(ctx, desk.ID, desk.Version, UpdateCashDesk{Name: ptr("Back desk"), MaxBalance: ptr("2500"), MainAccountID: &acct})
+	if err != nil || got.Name != "Back desk" || got.MainAccountID != acct || !dec(got.MaxBalance).Equal(dec("2500")) || got.Version != desk.Version+1 || got.Code != "FRONT-1" {
+		t.Fatalf("update = %+v, %v", got, err)
+	}
+	if _, err := s.OpenCashDeskDay(ctx, desk.ID, "2026-11-02"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddCashDeskEntry(ctx, NewCashDeskEntry{DeskID: desk.ID, Kind: "receipt", Amount: "800", Description: "cash"}, ids.New()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateCashDesk(ctx, desk.ID, got.Version, UpdateCashDesk{MaxBalance: ptr("500")}); problemCode(t, err) != domain.CodeDeskOverLimit {
+		t.Fatalf("maximum below the open day's cash: %v", err)
+	}
+	if _, err := s.SetCashDeskStatus(ctx, desk.ID, got.Version, "inactive"); problemCode(t, err) != domain.CodeDeskHasOpenDay {
+		t.Fatalf("deactivating with an open day: %v", err)
+	}
+	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("800")}); err != nil {
+		t.Fatal(err)
+	}
+	off, err := s.SetCashDeskStatus(ctx, desk.ID, got.Version, "inactive")
+	if err != nil || off.Status != "inactive" {
+		t.Fatalf("deactivate = %+v, %v", off, err)
+	}
+	if _, err := s.OpenCashDeskDay(ctx, desk.ID, "2026-11-03"); problemCode(t, err) != domain.CodeDeskInactive {
+		t.Fatalf("opening a day on an inactive desk: %v", err)
+	}
+	if _, err := s.AddCashDeskEntry(ctx, NewCashDeskEntry{DeskID: desk.ID, Kind: "receipt", Amount: "1", Description: "x"}, ids.New()); err == nil {
+		t.Fatal("an inactive desk took an entry")
+	}
+	if _, err := s.SetCashDeskStatus(ctx, desk.ID, off.Version, "inactive"); err == nil {
+		t.Fatal("deactivating twice should be refused")
+	}
+	on, err := s.SetCashDeskStatus(ctx, desk.ID, off.Version, "active")
+	if err != nil || on.Status != "active" {
+		t.Fatalf("activate = %+v, %v", on, err)
+	}
+}
+
+func TestCashDesk_PublishesEventsForTheDeskLifecycle(t *testing.T) {
+	s, pool := newStore(t)
+	_ = pool
+	ctx := ctxFor(1, "")
+	desk := newDesk(t, s, ids.New())
+	if _, err := s.UpdateCashDesk(ctx, desk.ID, desk.Version, UpdateCashDesk{Name: ptr("Renamed")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenCashDeskDay(ctx, desk.ID, "2026-11-02"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CloseCashDeskDay(ctx, desk.ID, "2026-11-02", CloseDay{Counted: dec("0")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetCashDeskStatus(ctx, desk.ID, desk.Version+1, "inactive"); err != nil {
+		t.Fatal(err)
+	}
+	got := outboxTypes(t, pool, desk.ID)
+	want := []string{"cashdesk.created", "cashdesk.updated", "cashdeskday.closed", "cashdesk.deactivated"}
+	if len(got) != len(want) {
+		t.Fatalf("events = %v; want %v", got, want)
+	}
+	for i, w := range want {
+		if !strings.Contains(got[i], w) {
+			t.Errorf("event %d = %s; want %s", i, got[i], w)
+		}
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func outboxTypes(t *testing.T, pool *pgxpool.Pool, deskID string) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `select type from outbox where aggregate_id = $1 order by id`, deskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var typ string
+		if err := rows.Scan(&typ); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, typ)
+	}
+	return out
 }

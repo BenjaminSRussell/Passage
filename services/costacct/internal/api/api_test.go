@@ -65,6 +65,12 @@ func (f *fakeStore) EntriesFor(context.Context, string, string) ([]store.Entry, 
 	return nil, nil
 }
 
+func (f *fakeStore) Actuals(_ context.Context, le, from, to, kind string) ([]store.ActualRow, error) {
+	f.calls++
+	f.filter = le + "|" + from + "|" + to + "|" + kind
+	return []store.ActualRow{{Code: "CC-20", Period: from, Currency: "USD"}}, nil
+}
+
 func (f *fakeStore) ListCostObjects(_ context.Context, le, kind string) ([]store.CostObject, error) {
 	f.calls++
 	f.filter = le + "|" + kind
@@ -333,5 +339,30 @@ func TestReconcile_FailsClosedWithoutALedger(t *testing.T) {
 	a := New(st).WithLedger(ledgerclient.NewFake(), map[string]string{})
 	if rec := serveAPI(t, a, http.MethodPost, path, body, DutyView, ""); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != store.CodeLedgerNotMapped || st.calls != 0 {
 		t.Fatalf("unmapped entity: %d", rec.Code)
+	}
+}
+
+func TestCostActuals_ValidatesTheWindowAndPassesItToTheStore(t *testing.T) {
+	st := &fakeStore{}
+	path := "/v1/controlling/cost-actuals?legalEntityId=" + entityID + "&from=2027-01&to=2027-03&kind=CostCenter"
+	if rec := serve(t, st, http.MethodGet, path, "", DutyMaintain, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("without the view duty: %d, want 403", rec.Code)
+	}
+	for _, bad := range []string{
+		"/v1/controlling/cost-actuals?from=2027-01&to=2027-03",
+		"/v1/controlling/cost-actuals?legalEntityId=" + entityID + "&from=2027-13&to=2027-03",
+		"/v1/controlling/cost-actuals?legalEntityId=" + entityID + "&from=2027-04&to=2027-03",
+		"/v1/controlling/cost-actuals?legalEntityId=" + entityID + "&from=2027-01&to=2027-03&kind=Asset",
+	} {
+		if rec := serve(t, st, http.MethodGet, bad, "", DutyView, ""); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", bad, rec.Code)
+		}
+	}
+	if st.calls != 0 {
+		t.Fatalf("rejected reads reached the store %d times", st.calls)
+	}
+	rec := serve(t, st, http.MethodGet, path, "", DutyView, "")
+	if rec.Code != http.StatusOK || st.filter != entityID+"|2027-01|2027-03|CostCenter" || !strings.Contains(rec.Body.String(), "CC-20") {
+		t.Fatalf("actuals: %d filter %q body %s", rec.Code, st.filter, rec.Body.String())
 	}
 }

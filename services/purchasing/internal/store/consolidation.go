@@ -163,7 +163,7 @@ func (s *Postgres) ConsolidateRequisitionLines(ctx context.Context, orders []Pur
 		}
 		for _, o := range orders {
 			o.ID = ids.New()
-			po, err := insertPurchaseOrder(ctx, tx, o)
+			po, err := insertPurchaseOrder(ctx, tx, o, s.queueBudget)
 			if err != nil {
 				return err
 			}

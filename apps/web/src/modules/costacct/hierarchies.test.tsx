@@ -178,7 +178,7 @@ describe("Cost object hierarchies", () => {
     let fail = true;
     stubRoutes({ "GET /api/v1/controlling/cost-object-hierarchies": () => (fail ? json(503, { title: "down", code: "COM-0500" }) : json(200, { items: [] })) });
     at("/costacct/hierarchies");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No hierarchies yet")).toBeInTheDocument();
@@ -242,7 +242,7 @@ describe("Cost object hierarchies", () => {
     fireEvent.change(screen.getAllByLabelText("Cost element")[0], { target: { value: EL } });
     fireEvent.change(screen.getByLabelText("Amount to collect"), { target: { value: "-1000" } });
     fireEvent.click(screen.getByRole("button", { name: "Collect" }));
-    expect(await screen.findByText(/CST-0028/)).toBeInTheDocument();
+    expect(await screen.findByText(/would leave the node at -100.00/)).toBeInTheDocument();
     refuse = false;
     fireEvent.change(screen.getByLabelText("Amount to collect"), { target: { value: "100" } });
     fireEvent.click(screen.getByRole("button", { name: "Collect" }));
@@ -300,6 +300,6 @@ describe("Cost object hierarchies", () => {
   it("shows a load error for a missing run", async () => {
     stubRoutes({ [`GET /api/v1/controlling/hierarchy-distributions/${RUN}`]: () => json(404, { title: "Not found", code: "CST-0027", detail: "hierarchy distribution run not found" }) });
     at(`/costacct/hierarchy-distributions/${RUN}`);
-    expect(await findAlert()).toHaveTextContent("CST-0027");
+    expect(await findAlert()).toHaveTextContent("hierarchy distribution run not found");
   });
 });

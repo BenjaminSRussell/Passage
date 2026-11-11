@@ -1,3 +1,4 @@
+import { ProblemMessage } from "../../shell/errors";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
@@ -245,8 +246,10 @@ export function NewOrderPage() {
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not create the quality order" live="alert">
-                {failure.code === "QM-0100" ? "No quality association matches this trigger, item, party and site. Add an association or create a manual order." : failure.message}{" "}
-                ({failure.code})
+                <ProblemMessage
+                  problem={failure}
+                  message={failure.code === "QM-0100" ? "No quality association matches this trigger, item, party and site. Add an association or create a manual order." : undefined}
+                />
               </Alert>
             </div>
           ) : null}

@@ -85,6 +85,24 @@ func payablesTarget(getenv func(string) string) (*target.Payables, error) {
 	return target.NewPayables(cfg), nil
 }
 
+// inventoryTarget reads INVENTORY_URL (see targetConfig); without it the onhand load answers 503 MIG-1560.
+func inventoryTarget(getenv func(string) string) (*target.Inventory, error) {
+	cfg, err := targetConfig(getenv, "INVENTORY_URL")
+	if err != nil {
+		return nil, err
+	}
+	return target.NewInventory(cfg), nil
+}
+
+// treasuryTarget reads TREASURY_URL (see targetConfig); without it the bank_balances load answers 503 MIG-1560.
+func treasuryTarget(getenv func(string) string) (*target.Treasury, error) {
+	cfg, err := targetConfig(getenv, "TREASURY_URL")
+	if err != nil {
+		return nil, err
+	}
+	return target.NewTreasury(cfg), nil
+}
+
 func run(ctx context.Context, getenv func(string) string) error {
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -95,6 +113,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	payables, err := payablesTarget(getenv)
+	if err != nil {
+		return err
+	}
+	inventory, err := inventoryTarget(getenv)
+	if err != nil {
+		return err
+	}
+	treasury, err := treasuryTarget(getenv)
 	if err != nil {
 		return err
 	}
@@ -118,7 +144,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if addr == "" {
 		addr = ":8080"
 	}
-	srv := api.New(store.New(pool)).WithTarget(receivables).WithPayables(payables)
+	srv := api.New(store.New(pool)).WithTarget(receivables).WithPayables(payables).WithInventory(inventory).WithTreasury(treasury)
 	if ledger != nil {
 		srv = srv.WithLedger(ledger)
 	}

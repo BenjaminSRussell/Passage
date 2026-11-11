@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
 import { createArrival, fetchOpenPurchaseOrders, fetchPurchaseOrderLines, newKey, type ArrivalInput, type PurchaseOrderLine } from "./api/client";
 import { DECIMAL, fieldErrors, UUID } from "../../shell/api/http";
 import styles from "../../shell/pageLayout.module.css";
@@ -134,6 +134,7 @@ export function NewArrivalPage() {
   const updateLine = (index: number, patch: Partial<ArrivalLineDraft>) =>
     setValues((prev) => ({ ...prev, lines: prev.lines.map((l, i) => (i === index ? { ...l, ...patch } : l)) }));
 
+  const { prompt, release } = useUnsavedChanges(useFormBaseline(values));
   async function submit(event: FormEvent) {
     event.preventDefault();
     const found = validateArrival(values);
@@ -145,6 +146,7 @@ export function NewArrivalPage() {
       const receipt = await createArrival(toArrivalInput(values), key.current);
       key.current = newKey();
       await queryClient.invalidateQueries({ queryKey: ["receiving", "receipts"] });
+      release();
       navigate(`/receiving/receipts/${encodeURIComponent(receipt.id)}`);
     } catch (error) {
       setErrors(fieldErrors(error));
@@ -289,6 +291,7 @@ export function NewArrivalPage() {
             </Link>
           </div>
         </form>
+      {prompt}
       </Card>
     </div>
   );

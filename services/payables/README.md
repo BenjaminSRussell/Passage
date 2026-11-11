@@ -42,12 +42,17 @@ XSD validation runs `xmllint` (libxml2-utils) as a subprocess with `--nonet`, a 
 
 The preview settles one credit against open invoices per PRD FR-19.2: priority order, cash discount (pro-rated on partial settlement), realized FX gain or loss, write-off within the limit, and a balanced journal. Amounts, rates and percentages are decimal strings; rates come from the request until the wave 12 rate lookup exists. A cross-currency credit settles in the accounting currency, so its FX difference is zero by construction.
 
+## Payment status for suppliers (#511)
+
+`GET /v1/payables/vendor/payments` (service-only duty `payables.vendor-portal.read`, granted to the `supplier-portal` service; list its public key in `PASSAGE_SERVICE_PUBLIC_KEYS` as `supplier-portal=...`) lists the verified vendor's invoices, newest first, with `status` (`OPEN`, `SCHEDULED` while an approved or running payment proposal holds the item, `PARTIALLY_PAID`, `PAID`, `CANCELLED`), `amount`, `paidAmount`, `openAmount`, `dueDate`, `scheduledFor` (the proposal's run date) and `paidAt` (the run's settlement date, else the last settlement). Query: `status`, `limit` (1 to 200, default 50), `cursor`. The vendor is the token's (`Principal.VendorID`); a caller that is not the supplier portal acting for a vendor is 403 `PAY-VND-001`, and a `vendorId` query is ignored. A payment hold, a vendor block, the proposal and the bank details are not shown (a held item reads `OPEN`). `invoiceId` is the id of the receiving invoice, so it matches `invoiceId` of an invoice submission.
+
 ## Error codes
 
 | Code | Status | Meaning |
 |---|---|---|
 | PAY-0001 | 400 | invalid field: date, decimal string, currency, discount, duplicate or empty invoices |
 | PAY-0002 | 422 | rate missing for a foreign currency, or not 1 for the accounting currency; also an fx service with no rate for the pair and date |
+| PAY-VND-001 | 403 | the caller is not the supplier portal acting for a vendor (payment status read) |
 | AP-RUN-002 | 422 | bank identifier failed validation (`iban`, `bic` or `aba` named in the detail) |
 | AP-FIL-001 | 422 | payment name has a character outside the profile charset after transliteration |
 | AP-PRP-001 | 409 | proposal run id already used with a different request, or items changed, were held or were taken by another proposal while the proposal was built (retry) |

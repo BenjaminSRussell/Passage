@@ -396,7 +396,11 @@ func (a *API) listPayments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := a.store.ListPayments(r.Context(), store.PaymentFilter{Status: status, CustomerID: customer}, limit)
+	search, ok := searchParam(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListPayments(r.Context(), store.PaymentFilter{Status: status, CustomerID: customer, Q: search}, limit)
 	if err != nil {
 		a.fail("list payments", w, r, err)
 		return
@@ -445,12 +449,27 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 		badQuery(w, r, "importSource", "must name a legacy system, as sent to open-items:batch")
 		return
 	}
-	items, err := a.store.ListOpenItems(r.Context(), store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source}, limit)
+	search, ok := searchParam(w, r)
+	if !ok {
+		return
+	}
+	filter := store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source, Q: search}
+	if !openItemWindow(w, r, &filter) {
+		return
+	}
+	// One more than asked for tells whether another page follows without a second query.
+	items, err := a.store.ListOpenItems(r.Context(), filter, limit+1)
 	if err != nil {
 		a.fail("list open items", w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	page := map[string]any{"items": items}
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		page = map[string]any{"items": items, "nextCursor": encodeOpenItemCursor(last.DueDate, last.ID)}
+	}
+	httpx.JSON(w, http.StatusOK, page)
 }
 
 func (a *API) aging(w http.ResponseWriter, r *http.Request) {
@@ -494,6 +513,16 @@ func ifMatch(r *http.Request) (int, error) {
 }
 
 func etag(version int) string { return `"` + strconv.Itoa(version) + `"` }
+
+// searchParam reads the q filter of a list: trimmed, at most 100 characters.
+func searchParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if utf8.RuneCountInString(q) > 100 {
+		badQuery(w, r, "q", "must be at most 100 characters")
+		return "", false
+	}
+	return q, true
+}
 
 func badQuery(w http.ResponseWriter, r *http.Request, field, rule string) {
 	p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)

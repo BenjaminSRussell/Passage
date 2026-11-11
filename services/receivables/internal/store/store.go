@@ -91,12 +91,20 @@ type OpenItemFilter struct {
 	CustomerID   string
 	OpenOnly     bool
 	ImportSource string
+	// Q keeps the items whose document number contains it, ignoring case.
+	Q string
+	// DueFrom and DueTo bound the due date (YYYY-MM-DD, both inclusive, empty for no bound). AfterDue and AfterID continue a
+	// listing after the item with that due date and id (the list is ordered by due date, then id).
+	DueFrom, DueTo    string
+	AfterDue, AfterID string
 }
 
 // PaymentFilter narrows a payment list.
 type PaymentFilter struct {
 	Status     string
 	CustomerID string
+	// Q keeps the payments whose payer name, source reference or amount contains it, ignoring case.
+	Q string
 }
 
 // Payment is a customer payment (§5.30.4 payment).
@@ -361,7 +369,10 @@ func (s *Postgres) ListOpenItems(ctx context.Context, f OpenItemFilter, limit in
 			where ($1::text = '' or customer_id::text = $1::text)
 			and (not $2::bool or status in `+openStatuses+`)
 			and ($4::text = '' or import_source = $4::text)
-			order by due_date, id limit $3`, f.CustomerID, f.OpenOnly, limit, f.ImportSource)
+			and ($5::text = '' or due_date >= nullif($5::text, '')::date) and ($6::text = '' or due_date <= nullif($6::text, '')::date)
+			and ($7::text = '' or (due_date, id) > (nullif($7::text, '')::date, nullif($8::text, '')::uuid))
+			and ($9::text = '' or strpos(lower(document_number), lower($9::text)) > 0)
+			order by due_date, id limit $3`, f.CustomerID, f.OpenOnly, limit, f.ImportSource, f.DueFrom, f.DueTo, f.AfterDue, f.AfterID, f.Q)
 		if err != nil {
 			return err
 		}
@@ -422,7 +433,8 @@ func (s *Postgres) ListPayments(ctx context.Context, f PaymentFilter, limit int)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+paymentColumns+` from payment
 			where ($1::text = '' or status = $1::text) and ($2::text = '' or customer_id::text = $2::text)
-			order by received_date desc, created_at desc, id limit $3`, f.Status, f.CustomerID, limit)
+			and ($4::text = '' or strpos(lower(coalesce(payer_name, '') || ' ' || coalesce(source_ref, '') || ' ' || amount::text), lower($4::text)) > 0)
+			order by received_date desc, created_at desc, id limit $3`, f.Status, f.CustomerID, limit, f.Q)
 		if err != nil {
 			return err
 		}

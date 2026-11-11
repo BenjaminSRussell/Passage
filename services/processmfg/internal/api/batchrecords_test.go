@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/store"
@@ -94,12 +95,15 @@ func TestRegisterBatch_Rejects(t *testing.T) {
 
 func TestListBatches_FiltersAndRejects(t *testing.T) {
 	fs := &fakeStore{}
-	rec := call{method: "GET", path: "/v1/production/batches?disposition=quarantine&itemId=" + itemA, duties: DutyRead}.do(newRouter(fs))
-	if rec.Code != 200 || fs.gotBatches.Disposition != "quarantine" || fs.gotBatches.ItemID != itemA {
+	rec := call{method: "GET", path: "/v1/production/batches?disposition=quarantine&q=+b-7+&itemId=" + itemA, duties: DutyRead}.do(newRouter(fs))
+	if rec.Code != 200 || fs.gotBatches.Disposition != "quarantine" || fs.gotBatches.ItemID != itemA || fs.gotBatches.Q != "b-7" {
 		t.Fatalf("%d %s %+v", rec.Code, rec.Body, fs.gotBatches)
 	}
 	if rec := (call{method: "GET", path: "/v1/production/batches?disposition=lost", duties: DutyRead}).do(newRouter(fs)); rec.Code != 400 {
 		t.Fatalf("bad disposition: %d", rec.Code)
+	}
+	if rec := (call{method: "GET", path: "/v1/production/batches?q=" + strings.Repeat("x", 101), duties: DutyRead}).do(newRouter(fs)); rec.Code != 400 {
+		t.Fatalf("a long q: %d", rec.Code)
 	}
 }
 
