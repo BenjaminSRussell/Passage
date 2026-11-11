@@ -196,3 +196,57 @@ func httpGet(h http.Handler) string {
 }
 
 func ids0() string { return ids.New() }
+
+func TestForcedFenceNeedsASecondOperatorsApprovalAndIsAuditedInTheScorecard(t *testing.T) {
+	e := newEnv(t, "us-east")
+	// lag over the limit: the failover is a request until a second operator approves
+	if rec := e.do("PUT", "/v1/ops/regions/eu-west/lag", "mon", DutyReport, "", `{"lagSeconds":900}`); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	forced := func(order int, region, status, detail string, forcedFlag bool) string {
+		now := time.Now().UTC().Truncate(time.Second)
+		b, _ := json.Marshal(map[string]any{"order": order, "region": region, "status": status, "detail": detail, "forced": forcedFlag, "startedAt": now, "finishedAt": now.Add(time.Second)})
+		return string(b)
+	}
+	// an unapproved, no-loss failover cannot carry a forced fence: use a second failover on a fresh env for that
+	rec := e.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-lost", `{"to":"eu-west","acceptDataLoss":true}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var created struct {
+		Request store.Request `json:"request"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if rec := e.do("POST", "/v1/ops/failover-requests/"+created.Request.ID+":approve", "bob", DutyFailover, "", ""); rec.Code != http.StatusCreated {
+		t.Fatalf("approve: %d %s", rec.Code, rec.Body)
+	}
+	path := "/v1/ops/failovers/evt-lost/steps/fence-old-primary"
+	for name, body := range map[string]string{
+		"no reason":         forced(1, "us-east", "DONE", "", true),
+		"forced and FAILED": forced(1, "us-east", "FAILED", "r", true),
+	} {
+		if rec := e.do("PUT", path, "alice", DutyFailover, "", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	if rec := e.do("PUT", "/v1/ops/failovers/evt-lost/steps/flip-dns", "alice", DutyFailover, "", forced(5, "eu-west", "DONE", "r", true)); rec.Code != http.StatusBadRequest {
+		t.Errorf("only the fence step can be forced: %d", rec.Code)
+	}
+	if rec := e.do("PUT", path, "alice", DutyFailover, "", forced(1, "us-east", "DONE", "region lost, INC-9", true)); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"forced":true`) {
+		t.Fatalf("approved failover: %d %s", rec.Code, rec.Body)
+	}
+	sc := e.get("/v1/ops/failovers/evt-lost/scorecard", "bob", DutyView)
+	if !strings.Contains(sc.Body.String(), `"fenceForced":true`) || !strings.Contains(sc.Body.String(), `"passed":false`) {
+		t.Fatalf("scorecard: %s", sc.Body)
+	}
+
+	// a failover nobody else approved refuses the forced fence
+	e2 := newEnv(t, "us-east")
+	if rec := e2.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-plain", `{"to":"eu-west"}`); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+	rec = e2.do("PUT", "/v1/ops/failovers/evt-plain/steps/fence-old-primary", "alice", DutyFailover, "", forced(1, "us-east", "DONE", "region lost", true))
+	if rec.Code != http.StatusUnprocessableEntity || code(t, rec) != domain.CodeApprovalRequired {
+		t.Fatalf("unapproved forced fence: %d %s", rec.Code, rec.Body)
+	}
+}

@@ -305,3 +305,33 @@ func TestCommandVerifier(t *testing.T) {
 		t.Fatal("no command must fail")
 	}
 }
+
+func TestFenceUnreachableRecordsAForcedFenceAndRunsTheRest(t *testing.T) {
+	c := &calls{fail: map[string]error{ActionFence: errors.New("dial tcp: i/o timeout")}}
+	var reported []StepResult
+	r := Runner{Exec: fakes(c), FenceUnreachable: "region eu-west lost, INC-9", Report: func(_ context.Context, res StepResult) error { reported = append(reported, res); return nil }}
+	res, err := r.Run(t.Context(), plan(t), nil)
+	if err != nil || len(res) != 6 {
+		t.Fatalf("err=%v results=%d", err, len(res))
+	}
+	if !res[0].Forced || res[0].Status != StatusDone || !strings.Contains(res[0].Detail, "FENCE_UNREACHABLE: region eu-west lost, INC-9") || !strings.Contains(res[0].Detail, "i/o timeout") || !strings.Contains(res[0].Detail, "FENCED region file") {
+		t.Fatalf("fence result %+v", res[0])
+	}
+	if !reported[0].Forced || res[1].Forced {
+		t.Fatal("only the fence step is forced")
+	}
+	// without the flag the same failure stops the run, and a reachable region is fenced for real even with the flag
+	if _, err := (Runner{Exec: fakes(&calls{fail: map[string]error{ActionFence: errors.New("x")}})}).Run(t.Context(), plan(t), nil); !errors.Is(err, ErrStepFailed) {
+		t.Fatalf("err %v", err)
+	}
+	ok := &calls{}
+	res, _ = Runner{Exec: fakes(ok), FenceUnreachable: "reason"}.Run(t.Context(), plan(t), nil)
+	if res[0].Forced || res[0].Detail == "" || strings.Contains(res[0].Detail, "FENCE_UNREACHABLE") {
+		t.Fatalf("a reachable fence is applied normally: %+v", res[0])
+	}
+	// other steps are never forced
+	bad := &calls{fail: map[string]error{ActionPromote: errors.New("boom")}}
+	if _, err := (Runner{Exec: fakes(bad), FenceUnreachable: "reason"}).Run(t.Context(), plan(t), nil); !errors.Is(err, ErrStepFailed) {
+		t.Fatalf("a failed promote must still stop: %v", err)
+	}
+}

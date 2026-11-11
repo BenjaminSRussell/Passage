@@ -366,3 +366,31 @@ func TestRoundLag(t *testing.T) {
 		}
 	}
 }
+
+func TestFenceUnreachableFlag(t *testing.T) {
+	api := newFakeAPI(900)
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	var out bytes.Buffer
+	if err := run(t.Context(), []string{"failover", "--to", "eu-central", "--fence-unreachable", "region lost"}, &out, env(srv), testDeps(&recorder{})); err == nil || !strings.Contains(err.Error(), "--accept-data-loss") {
+		t.Fatalf("the flag needs --accept-data-loss: %v", err)
+	}
+	// lag within the limit in the fake so the failover applies at once; the old region's fence fails
+	api2 := newFakeAPI(2)
+	srv2 := httptest.NewServer(api2)
+	defer srv2.Close()
+	rec := &recorder{fail: failover.ActionFence}
+	out.Reset()
+	if err := run(t.Context(), []string{"failover", "--to", "eu-central", "--accept-data-loss", "--fence-unreachable", "region lost, INC-9", "--event", "evt-lost"}, &out, env(srv2), testDeps(rec)); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	st := api2.steps["evt-lost/fence-old-primary"]
+	if !st.Forced || st.Status != "DONE" || !strings.Contains(st.Detail, "FENCE_UNREACHABLE: region lost, INC-9") || len(rec.log) != 6 {
+		t.Fatalf("step %+v log %v", st, rec.log)
+	}
+	// without the flag the same failure stops at the fence
+	rec2 := &recorder{fail: failover.ActionFence}
+	if err := run(t.Context(), []string{"failover", "--to", "eu-central", "--event", "evt-x"}, &bytes.Buffer{}, env(srv2), testDeps(rec2)); err == nil || len(rec2.log) != 1 {
+		t.Fatalf("err=%v log=%v", err, rec2.log)
+	}
+}

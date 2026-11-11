@@ -14,6 +14,7 @@ const (
 type StepTiming struct {
 	Action     string
 	Status     string
+	Forced     bool
 	StartedAt  time.Time
 	FinishedAt time.Time
 }
@@ -29,6 +30,8 @@ type Scorecard struct {
 	RPOMet           bool     `json:"rpoMet"`
 	DataLossAccepted bool     `json:"dataLossAccepted"`
 	ChainVerified    bool     `json:"ledgerHashChainVerified"`
+	// FenceForced is true when the old primary was never reached and the fence was recorded by an operator's decision.
+	FenceForced bool `json:"fenceForced"`
 	// Passed is true when the failover is complete, both targets are met, the hash chain verified and no data loss was accepted.
 	Passed   bool     `json:"passed"`
 	Failures []string `json:"failures"`
@@ -63,6 +66,10 @@ func ScoreFailover(plan Plan, steps []StepTiming, rtoTargetMinutes, rpoTargetSec
 		rto := flip.FinishedAt.Sub(fence.StartedAt).Seconds()
 		sc.RTOSeconds = &rto
 		sc.RTOMet = rto >= 0 && rto <= float64(sc.RTOTargetSeconds)
+	}
+	sc.FenceForced = okF && fence.Forced
+	if sc.FenceForced {
+		sc.Failures = append(sc.Failures, "the old primary was not reachable: its fence was recorded without being applied")
 	}
 	if !sc.Complete {
 		sc.Failures = append(sc.Failures, "not every step of the plan is DONE")

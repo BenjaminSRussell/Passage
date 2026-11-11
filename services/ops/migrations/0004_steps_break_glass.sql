@@ -10,6 +10,8 @@ CREATE TABLE ops_failover_step (
   region      text NOT NULL,
   status      text NOT NULL CHECK (status IN ('DONE', 'FAILED')),
   detail      text NOT NULL DEFAULT '',
+  -- true when the fence step was recorded without reaching the old region (it is lost); needs a second operator's approval.
+  forced      boolean NOT NULL DEFAULT false,
   started_at  timestamptz NOT NULL,
   finished_at timestamptz NOT NULL,
   reported_by text NOT NULL,

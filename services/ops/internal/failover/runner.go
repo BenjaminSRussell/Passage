@@ -74,11 +74,13 @@ type Executors struct {
 
 // StepResult is the outcome of one step, what the CLI reports back to the ops service.
 type StepResult struct {
-	Order      int       `json:"order"`
-	Action     string    `json:"action"`
-	Region     string    `json:"region"`
-	Status     string    `json:"status"`
-	Detail     string    `json:"detail,omitempty"`
+	Order  int    `json:"order"`
+	Action string `json:"action"`
+	Region string `json:"region"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
+	// Forced is true when the fence step could not reach the old region and was recorded as done by an operator's decision.
+	Forced     bool      `json:"forced,omitempty"`
 	StartedAt  time.Time `json:"startedAt"`
 	FinishedAt time.Time `json:"finishedAt"`
 }
@@ -93,6 +95,10 @@ type Runner struct {
 	DryRun bool
 	Now    func() time.Time
 	Report Reporter
+	// FenceUnreachable, when not empty, is the operator's reason for recording the fence step as done if the old region cannot
+	// be reached (it is lost). The fence is still attempted first. A forced fence leaves the old region's cluster unfenced until
+	// its FENCED region file is committed (failover runbook step 1), which stops it accepting writes when it returns.
+	FenceUnreachable string
 }
 
 // ErrStepFailed wraps the error of the step that stopped the run.
@@ -169,7 +175,12 @@ func (r Runner) Run(ctx context.Context, plan domain.Plan, done map[string]bool)
 		case r.DryRun:
 			res.Status, res.Detail = StatusDryRun, Describe(s, plan)
 		default:
-			if runErr = r.do(ctx, s); runErr != nil {
+			runErr = r.do(ctx, s)
+			if runErr != nil && s.Action == ActionFence && r.FenceUnreachable != "" {
+				res.Status, res.Forced = StatusDone, true
+				res.Detail = "FENCE_UNREACHABLE: " + r.FenceUnreachable + " (could not fence: " + runErr.Error() + "); commit the FENCED region file so the old primary cannot accept writes when it returns"
+				runErr = nil
+			} else if runErr != nil {
 				res.Status, res.Detail = StatusFailed, runErr.Error()
 			} else {
 				res.Status, res.Detail = StatusDone, Describe(s, plan)

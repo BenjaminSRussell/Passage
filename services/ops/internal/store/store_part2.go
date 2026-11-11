@@ -21,6 +21,7 @@ type Step struct {
 	Region     string    `json:"region"`
 	Status     string    `json:"status"`
 	Detail     string    `json:"detail,omitempty"`
+	Forced     bool      `json:"forced,omitempty"`
 	StartedAt  time.Time `json:"startedAt"`
 	FinishedAt time.Time `json:"finishedAt"`
 	ReportedBy string    `json:"reportedBy"`
@@ -61,12 +62,26 @@ type Gauges struct {
 // RecordStep records one step result of an existing failover. A step already recorded DONE is kept; a FAILED step is
 // replaced by a later result, which is how a retry shows its success.
 func (s *Postgres) RecordStep(ctx context.Context, eventID string, st Step, reportedBy string) error {
-	_, err := s.pool.Exec(ctx, `insert into ops_failover_step (event_id, action, ord, region, status, detail, started_at, finished_at, reported_by)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	if st.Forced {
+		// A fence recorded without reaching the old region is a decision, not a fact: it needs a failover a second operator approved.
+		var approver *string
+		err := s.pool.QueryRow(ctx, `select approved_by from ops_failover where event_id = $1`, eventID).Scan(&approver)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Problem(&domain.Error{Code: domain.CodeRequestUnknown, Detail: "failover " + eventID + " does not exist"})
+		}
+		if err != nil {
+			return err
+		}
+		if approver == nil || *approver == "" {
+			return Problem(&domain.Error{Code: domain.CodeApprovalRequired, Detail: "fencing a region that cannot be reached needs a failover a second operator approved (start it with --accept-data-loss)"})
+		}
+	}
+	_, err := s.pool.Exec(ctx, `insert into ops_failover_step (event_id, action, ord, region, status, detail, forced, started_at, finished_at, reported_by)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		on conflict (event_id, action) do update set ord = excluded.ord, region = excluded.region, status = excluded.status,
-		  detail = excluded.detail, started_at = excluded.started_at, finished_at = excluded.finished_at, reported_by = excluded.reported_by
+		  detail = excluded.detail, forced = excluded.forced, started_at = excluded.started_at, finished_at = excluded.finished_at, reported_by = excluded.reported_by
 		where ops_failover_step.status <> 'DONE'`,
-		eventID, st.Action, st.Order, st.Region, st.Status, st.Detail, st.StartedAt, st.FinishedAt, reportedBy)
+		eventID, st.Action, st.Order, st.Region, st.Status, st.Detail, st.Forced, st.StartedAt, st.FinishedAt, reportedBy)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
@@ -86,7 +101,7 @@ func (s *Postgres) FailoverByEvent(ctx context.Context, eventID string) (Failove
 	if !found {
 		return FailoverDetail{}, Problem(&domain.Error{Code: domain.CodeRequestUnknown, Detail: "failover " + eventID + " does not exist"})
 	}
-	rows, err := s.pool.Query(ctx, `select ord, action, region, status, detail, started_at, finished_at, reported_by
+	rows, err := s.pool.Query(ctx, `select ord, action, region, status, detail, forced, started_at, finished_at, reported_by
 		from ops_failover_step where event_id = $1 order by ord`, eventID)
 	if err != nil {
 		return FailoverDetail{}, err
@@ -96,7 +111,7 @@ func (s *Postgres) FailoverByEvent(ctx context.Context, eventID string) (Failove
 	done := 0
 	for rows.Next() {
 		var st Step
-		if err := rows.Scan(&st.Order, &st.Action, &st.Region, &st.Status, &st.Detail, &st.StartedAt, &st.FinishedAt, &st.ReportedBy); err != nil {
+		if err := rows.Scan(&st.Order, &st.Action, &st.Region, &st.Status, &st.Detail, &st.Forced, &st.StartedAt, &st.FinishedAt, &st.ReportedBy); err != nil {
 			return FailoverDetail{}, err
 		}
 		if st.Status == "DONE" {

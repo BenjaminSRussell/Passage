@@ -76,6 +76,7 @@ type stepRequest struct {
 	Region     string    `json:"region"`
 	Status     string    `json:"status"`
 	Detail     string    `json:"detail"`
+	Forced     bool      `json:"forced"`
 	StartedAt  time.Time `json:"startedAt"`
 	FinishedAt time.Time `json:"finishedAt"`
 }
@@ -107,16 +108,21 @@ func (a *API) recordStep(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validation("status", "must be DONE or FAILED"))
 	case req.StartedAt.IsZero() || req.FinishedAt.IsZero() || req.FinishedAt.Before(req.StartedAt):
 		httpx.Fail(w, r, validation("finishedAt", "startedAt and finishedAt are required and finishedAt must not be earlier"))
+	case req.Forced && (action != failover.ActionFence || req.Status != failover.StatusDone || req.Detail == ""):
+		httpx.Fail(w, r, validation("forced", "applies only to a DONE fence-old-primary step and needs a detail with the operator's reason"))
 	case len(req.Detail) > 2000:
 		httpx.Fail(w, r, validation("detail", "is limited to 2000 characters"))
 	default:
 		err := a.store.RecordStep(r.Context(), chi.URLParam(r, "eventId"), store.Step{
-			Order: req.Order, Action: action, Region: req.Region, Status: req.Status, Detail: req.Detail,
+			Order: req.Order, Action: action, Region: req.Region, Status: req.Status, Detail: req.Detail, Forced: req.Forced,
 			StartedAt: req.StartedAt, FinishedAt: req.FinishedAt,
 		}, p.UserID)
 		if err != nil {
 			httpx.Fail(w, r, err)
 			return
+		}
+		if req.Forced {
+			slog.Warn("fence recorded without reaching the old region", "event", chi.URLParam(r, "eventId"), "region", req.Region, "by", p.UserID, "reason", req.Detail, "correlationId", middleware.GetReqID(r.Context()))
 		}
 		d, err := a.store.FailoverByEvent(r.Context(), chi.URLParam(r, "eventId"))
 		if err != nil {

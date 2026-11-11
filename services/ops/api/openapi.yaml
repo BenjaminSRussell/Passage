@@ -400,6 +400,7 @@ components:
         region: { type: string }
         status: { type: string, enum: [DONE, FAILED] }
         detail: { type: string }
+        forced: { type: boolean }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
         reportedBy: { type: string }
@@ -420,6 +421,7 @@ components:
         region: { type: string }
         status: { type: string, enum: [DONE, FAILED] }
         detail: { type: string, maxLength: 2000 }
+        forced: { type: boolean, description: "Only for a DONE fence-old-primary step: the old region could not be reached and an operator recorded the fence anyway. Needs a failover a second operator approved (OPS-1702) and a detail with the reason." }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
     BreakGlassRequest:
@@ -456,7 +458,7 @@ components:
         uses: { type: integer }
     Scorecard:
       type: object
-      required: [complete, rtoTargetSeconds, rtoMet, rpoSeconds, rpoTargetSeconds, rpoMet, dataLossAccepted, ledgerHashChainVerified, passed, failures]
+      required: [complete, rtoTargetSeconds, rtoMet, rpoSeconds, rpoTargetSeconds, rpoMet, dataLossAccepted, ledgerHashChainVerified, fenceForced, passed, failures]
       properties:
         complete: { type: boolean }
         rtoSeconds: { type: number }
@@ -467,6 +469,7 @@ components:
         rpoMet: { type: boolean }
         dataLossAccepted: { type: boolean }
         ledgerHashChainVerified: { type: boolean }
+        fenceForced: { type: boolean }
         passed: { type: boolean }
         failures: { type: array, items: { type: string } }
     LicenseInstall:

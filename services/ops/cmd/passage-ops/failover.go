@@ -60,15 +60,20 @@ func runFailover(ctx context.Context, args []string, out io.Writer, getenv func(
 	fs.SetOutput(io.Discard)
 	var to, event string
 	var acceptLoss, dry bool
+	var unreachable string
 	fs.StringVar(&to, "to", "", "the PASSIVE region to promote")
 	fs.StringVar(&event, "event", "", "failover event id (Idempotency-Key); reuse it to resume. Default: generated")
 	fs.BoolVar(&acceptLoss, "accept-data-loss", false, "accept the lag as data loss (needs a second operator's approval)")
+	fs.StringVar(&unreachable, "fence-unreachable", "", "reason: if the old primary's region cannot be reached, record the fence step as done anyway (needs --accept-data-loss and a second operator's approval)")
 	fs.BoolVar(&dry, "dry-run", false, "print the plan and what each step would do; change nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if to == "" {
 		return errors.New("--to <region> is required")
+	}
+	if unreachable != "" && !acceptLoss {
+		return errors.New("--fence-unreachable needs --accept-data-loss: a lost region means the target may miss its last transactions, and a second operator must approve")
 	}
 	c, err := newClient(getenv, d.httpClient)
 	if err != nil {
@@ -94,14 +99,15 @@ func runFailover(ctx context.Context, args []string, out io.Writer, getenv func(
 			applied.Request.LagSeconds, store.RequestTTL, applied.Request.ID)
 		return nil
 	}
-	return execute(ctx, c, event, out, getenv, d)
+	return execute(ctx, c, event, out, getenv, d, unreachable)
 }
 
 func runApprove(ctx context.Context, args []string, out io.Writer, getenv func(string) string, d deps) error {
 	fs := flag.NewFlagSet("failover approve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var id string
+	var id, unreachable string
 	fs.StringVar(&id, "request", "", "the failover request id to approve")
+	fs.StringVar(&unreachable, "fence-unreachable", "", "reason: record the fence step as done if the old primary's region cannot be reached")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -117,14 +123,15 @@ func runApprove(ctx context.Context, args []string, out io.Writer, getenv func(s
 		return err
 	}
 	fmt.Fprintf(out, "approved; failover event %s\n", rec.EventID)
-	return execute(ctx, c, rec.EventID, out, getenv, d)
+	return execute(ctx, c, rec.EventID, out, getenv, d, unreachable)
 }
 
 func runResume(ctx context.Context, args []string, out io.Writer, getenv func(string) string, d deps) error {
 	fs := flag.NewFlagSet("failover resume", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var event string
+	var event, unreachable string
 	fs.StringVar(&event, "event", "", "the failover event id")
+	fs.StringVar(&unreachable, "fence-unreachable", "", "reason: record the fence step as done if the old primary's region cannot be reached (the failover must have been approved by a second operator)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -135,7 +142,7 @@ func runResume(ctx context.Context, args []string, out io.Writer, getenv func(st
 	if err != nil {
 		return err
 	}
-	return execute(ctx, c, event, out, getenv, d)
+	return execute(ctx, c, event, out, getenv, d, unreachable)
 }
 
 // dryRun plans against the live region table and prints each step; it records nothing and calls no executor.
@@ -167,7 +174,7 @@ func printSteps(out io.Writer, res []failover.StepResult) {
 }
 
 // execute reads the recorded failover, runs the steps not yet DONE and reports each one.
-func execute(ctx context.Context, c *client, event string, out io.Writer, getenv func(string) string, d deps) error {
+func execute(ctx context.Context, c *client, event string, out io.Writer, getenv func(string) string, d deps, fenceUnreachable string) error {
 	var rec store.FailoverDetail
 	if _, err := c.do(ctx, http.MethodGet, "/v1/ops/failovers/"+esc(event), nil, nil, &rec); err != nil {
 		return err
@@ -185,11 +192,11 @@ func execute(ctx context.Context, c *client, event string, out io.Writer, getenv
 	if err != nil {
 		return err
 	}
-	r := failover.Runner{Exec: exec, Report: func(ctx context.Context, res failover.StepResult) error {
+	r := failover.Runner{Exec: exec, FenceUnreachable: fenceUnreachable, Report: func(ctx context.Context, res failover.StepResult) error {
 		if res.Status == failover.StatusSkipped {
 			return nil
 		}
-		body := map[string]any{"order": res.Order, "region": res.Region, "status": res.Status, "detail": res.Detail, "startedAt": res.StartedAt, "finishedAt": res.FinishedAt}
+		body := map[string]any{"order": res.Order, "region": res.Region, "status": res.Status, "detail": res.Detail, "forced": res.Forced, "startedAt": res.StartedAt, "finishedAt": res.FinishedAt}
 		_, err := c.do(ctx, http.MethodPut, "/v1/ops/failovers/"+esc(event)+"/steps/"+esc(res.Action), nil, body, nil)
 		return err
 	}}

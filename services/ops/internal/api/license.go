@@ -155,7 +155,7 @@ func (a *API) scorecard(w http.ResponseWriter, r *http.Request) {
 	}
 	steps := make([]domain.StepTiming, 0, len(d.Steps))
 	for _, s := range d.Steps {
-		steps = append(steps, domain.StepTiming{Action: s.Action, Status: s.Status, StartedAt: s.StartedAt, FinishedAt: s.FinishedAt})
+		steps = append(steps, domain.StepTiming{Action: s.Action, Status: s.Status, Forced: s.Forced, StartedAt: s.StartedAt, FinishedAt: s.FinishedAt})
 	}
 	httpx.JSON(w, http.StatusOK, domain.ScoreFailover(d.Plan, steps, a.cfg.RTOTargetMinutes, a.cfg.RPOTargetSeconds))
 }
