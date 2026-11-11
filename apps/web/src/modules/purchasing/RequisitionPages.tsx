@@ -164,9 +164,14 @@ interface LineDraft {
   /** The warehouse the line is wanted in; orders are split by it. */
   warehouseId: string;
   siteId: string;
+  /** The budget dimensions: both, or neither for a line that is not budget controlled. */
+  glAccount: string;
+  costCenter: string;
   /** Set when the line was picked from a catalog; the service fills the item from the entry. */
   catalogEntryId: string;
 }
+
+const dimensionPattern = /^[A-Za-z0-9._-]{1,20}$/;
 
 function emptyLine(): LineDraft {
   return {
@@ -181,6 +186,8 @@ function emptyLine(): LineDraft {
     preferredVendorId: "",
     warehouseId: "",
     siteId: "",
+    glAccount: "",
+    costCenter: "",
     catalogEntryId: "",
   };
 }
@@ -199,6 +206,8 @@ function draftOf(l: RequisitionLine): LineDraft {
     preferredVendorId: l.preferredVendorId ?? "",
     warehouseId: l.warehouseId ?? "",
     siteId: l.siteId ?? "",
+    glAccount: l.glAccount ?? "",
+    costCenter: l.costCenter ?? "",
     catalogEntryId: l.catalogEntryId ?? "",
   };
 }
@@ -230,6 +239,9 @@ export function validateRequisition(legalEntityId: string, currency: string, lin
     if (!decimalPattern.test(l.qty) || Number(l.qty) <= 0) errors[f("qty")] = "Enter a positive quantity.";
     if (!datePattern.test(l.requestedDate)) errors[f("requestedDate")] = "Enter a date.";
     if (l.siteId !== "" && !uuidPattern.test(l.siteId.trim())) errors[f("siteId")] = "Site id must be a UUID.";
+    if (l.glAccount.trim() !== "" && !dimensionPattern.test(l.glAccount.trim())) errors[f("glAccount")] = "Use 1 to 20 letters, digits, dots, hyphens or underscores.";
+    if (l.costCenter.trim() !== "" && !dimensionPattern.test(l.costCenter.trim())) errors[f("costCenter")] = "Use 1 to 20 letters, digits, dots, hyphens or underscores.";
+    if ((l.glAccount.trim() === "") !== (l.costCenter.trim() === "")) errors[f(l.glAccount.trim() === "" ? "glAccount" : "costCenter")] = "Give both the account and the cost center, or neither.";
     if (l.catalogEntryId !== "") return;
     if (l.productId !== "" && !uuidPattern.test(l.productId)) errors[f("productId")] = "Product id must be a UUID.";
     if (l.productId === "" && (l.description.trim() === "" || l.category.trim() === "")) {
@@ -251,7 +263,7 @@ function toInput(legalEntityId: string, currency: string, lines: LineDraft[], op
     currency,
     lines: lines.map((l) =>
       l.catalogEntryId !== ""
-        ? { catalogEntryId: l.catalogEntryId, qty: l.qty.trim(), unit: l.unit.trim(), requestedDate: l.requestedDate, warehouseId: opt(l.warehouseId), siteId: opt(l.siteId) }
+        ? { catalogEntryId: l.catalogEntryId, qty: l.qty.trim(), unit: l.unit.trim(), requestedDate: l.requestedDate, warehouseId: opt(l.warehouseId), siteId: opt(l.siteId), glAccount: opt(l.glAccount), costCenter: opt(l.costCenter) }
         : {
       productId: opt(l.productId),
       description: opt(l.description),
@@ -263,6 +275,8 @@ function toInput(legalEntityId: string, currency: string, lines: LineDraft[], op
       preferredVendorId: opt(l.preferredVendorId),
       warehouseId: opt(l.warehouseId),
       siteId: opt(l.siteId),
+      glAccount: opt(l.glAccount),
+      costCenter: opt(l.costCenter),
     },
     ),
   };
@@ -324,6 +338,8 @@ const LINE_FIELDS: Record<string, [string, string]> = {
   requestedDate: ["date", "Requested date"],
   warehouseId: ["warehouse", "Deliver to warehouse"],
   siteId: ["site", "Site"],
+  glAccount: ["account", "GL account"],
+  costCenter: ["costcenter", "Cost center"],
   productId: ["product", "Product"],
   description: ["description", "Description"],
   estimatedUnitPrice: ["price", "Estimated unit price"],
@@ -524,6 +540,12 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
                   <FormField id={id("site")} label="Site" optional error={err("siteId")}>
                     {(c) => <EntityLookup entity="site" prefill={false} {...c} value={line.siteId} onChange={(e) => update(i, { siteId: e.target.value })} />}
                   </FormField>
+                  <FormField id={id("account")} label="GL account" optional hint="With a cost center, the line is checked against the budget when the last approver approves it." error={err("glAccount")}>
+                    {(c) => <Input {...c} className={styles.mono} value={line.glAccount} onChange={(e) => update(i, { glAccount: e.target.value })} />}
+                  </FormField>
+                  <FormField id={id("costcenter")} label="Cost center" optional error={err("costCenter")}>
+                    {(c) => <Input {...c} className={styles.mono} value={line.costCenter} onChange={(e) => update(i, { costCenter: e.target.value })} />}
+                  </FormField>
                 </div>
                 )}
               </fieldset>
@@ -572,6 +594,7 @@ const lineColumns = (
   { key: "estimatedUnitPrice", header: "Estimate", align: "end", render: (l) => money(l.estimatedUnitPrice, currency) },
   { key: "amount", header: "Amount", align: "end", render: (l) => money(l.amount, currency) },
   { key: "requestedDate", header: "Requested", mono: true },
+  { key: "budget", header: "Budget", mono: true, render: (l) => (l.glAccount && l.costCenter ? `${l.glAccount} / ${l.costCenter}` : "Not controlled") },
   { key: "warehouseId", header: "Warehouse", render: (l) => <Named entity="warehouse" id={l.warehouseId} /> },
   { key: "status", header: "Status", render: (l) => <StatusBadge status={l.status} /> },
   {

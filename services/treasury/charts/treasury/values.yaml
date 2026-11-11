@@ -33,3 +33,11 @@ vault:
   sftpKeyName: ""
   sftpKeyVersion: 0
   bankChannels: []
+# Postings to the general ledger: a bank transaction made from a statement line, and cash desk journal lines and count
+# differences. The ledger accepts them only with a service-signed token, so ledgerUrl needs serviceIdentity.signingKeySecret (add
+# treasury's public key to the ledger's serviceIdentity.publicKeys first). glProfiles is the TREASURY_GL_PROFILES JSON array,
+# one profile per legal entity: [{"legalEntityId": "...", "ledgerId": "...", "bankAccounts": {"<bank account id>": "<ledger account>"},
+# "feeAccount": "...", "interestAccount": "...", "suspenseAccount": "...", "cashAccounts": {"<desk cash account id>": "<ledger account>"},
+# "cashDifferenceAccount": "..."}]. cashAccounts turns posting on for the legal entity's cash desks. Without ledgerUrl nothing is posted.
+ledgerUrl: ""
+glProfiles: ""
