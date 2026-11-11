@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -163,6 +164,40 @@ func (s *Postgres) truckInbound(ctx context.Context, legalEntityID, siteID, ware
 // its maximum (BR-45.7). Trucks that are not short get nothing. The order is created under
 // an idempotency key of the truck, the day and the lines, so a repeated run adds nothing.
 func (s *Postgres) ReplenishTrucks(ctx context.Context, legalEntityID, siteID, warehouseID string, shipDate time.Time) ([]domain.TransferOrder, error) {
+	all, err := s.ListTruckLevels(ctx, legalEntityID, siteID, warehouseID)
+	if err != nil {
+		return nil, err
+	}
+	type truck struct{ site, warehouse string }
+	var trucks []truck
+	seen := map[truck]bool{}
+	for _, l := range all {
+		if k := (truck{l.SiteID, l.WarehouseID}); !seen[k] {
+			seen[k] = true
+			trucks = append(trucks, k)
+		}
+	}
+	var out []domain.TransferOrder
+	for _, k := range trucks {
+		created, err := s.replenishTruck(ctx, legalEntityID, k.site, k.warehouse, shipDate)
+		out = append(out, created...)
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// replenishTruck replenishes one truck while holding that truck's advisory lock. Without it, two runs that read the
+// truck at different moments (a completed work order, the nightly run, a buyer's click) see different shortfalls, get
+// different idempotency keys and both create a DRAFT; under the lock the second run reads the first one's DRAFT as inbound
+// stock and finds nothing short.
+func (s *Postgres) replenishTruck(ctx context.Context, legalEntityID, siteID, warehouseID string, shipDate time.Time) ([]domain.TransferOrder, error) {
+	unlock, err := s.lockTruck(ctx, legalEntityID, siteID, warehouseID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	levels, err := s.ListTruckLevels(ctx, legalEntityID, siteID, warehouseID)
 	if err != nil {
 		return nil, err
@@ -203,4 +238,39 @@ func (s *Postgres) ReplenishTrucks(ctx context.Context, legalEntityID, siteID, w
 		out = append(out, created)
 	}
 	return out, nil
+}
+
+// lockTruck takes a session advisory lock named after the tenant and the truck on a connection of its own and returns the
+// function that releases it. A run that does not get the lock gives its connection back and tries again shortly, so a crowd
+// of waiting runs never holds every pooled connection while the holder needs one; it gives up when its context ends.
+func (s *Postgres) lockTruck(ctx context.Context, legalEntityID, siteID, warehouseID string) (func(), error) {
+	tp, _ := tenant.FromContext(ctx)
+	sum := sha256.Sum256([]byte("truck-replenish|" + tp.TenantID + "|" + legalEntityID + "|" + siteID + "|" + warehouseID))
+	key := int64(binary.BigEndian.Uint64(sum[:8]))
+	for {
+		conn, err := s.pool.Acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var got bool
+		if err := conn.QueryRow(ctx, `select pg_try_advisory_lock($1)`, key).Scan(&got); err != nil {
+			conn.Release()
+			return nil, err
+		}
+		if got {
+			return func() {
+				// A cancelled request must still give the lock back; if the unlock fails the connection is closed, which releases it.
+				if _, err := conn.Exec(context.WithoutCancel(ctx), `select pg_advisory_unlock($1)`, key); err != nil {
+					_ = conn.Conn().Close(context.WithoutCancel(ctx))
+				}
+				conn.Release()
+			}, nil
+		}
+		conn.Release()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
 }

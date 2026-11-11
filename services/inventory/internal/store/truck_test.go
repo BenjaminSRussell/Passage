@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,5 +97,47 @@ func wantTruckQty(t *testing.T, s *store.Postgres, ctx context.Context, product,
 	t.Helper()
 	if q, _ := stockAt(t, s, ctx, product, "truck-1"); !q.Equal(dec(qty)) {
 		t.Fatalf("truck holds %s, want %s", q, qty)
+	}
+}
+
+// Concurrent runs for one truck, even ones that would compute different shortfalls and so different idempotency keys, create
+// one DRAFT transfer order: the truck is locked and the second run reads the first one's DRAFT as inbound stock (#612 review).
+func TestReplenishTrucks_ConcurrentRunsCreateOneDraft(t *testing.T) {
+	s, _, _ := setup(t)
+	le := ids.New()
+	ctx := entityCtx(1, le)
+	product := ids.New()
+	post(t, ctx, s, domain.JournalOpeningBalance, line(product, "50", "2", dims()), line(product, "1", "2", truckDims()))
+	ref := store.TruckRef{LegalEntityID: le, SiteID: "S1", WarehouseID: "truck-1", SourceSiteID: "S1", SourceWarehouseID: "W1"}
+	if err := s.SetTruckLevels(ctx, ref, []domain.TruckLevel{{ProductID: product, Unit: "EA", Min: dec("3"), Max: dec("10")}}); err != nil {
+		t.Fatal(err)
+	}
+	const runs = 6
+	var wg sync.WaitGroup
+	created := make([]int, runs)
+	errs := make([]error, runs)
+	for i := 0; i < runs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// A different ship date per run gives each its own idempotency key, as a run on another day would have.
+			orders, err := s.ReplenishTrucks(ctx, le, "S1", "truck-1", time.Date(2026, 10, 20+i, 0, 0, 0, 0, time.UTC))
+			created[i], errs[i] = len(orders), err
+		}()
+	}
+	wg.Wait()
+	total := 0
+	for i := range created {
+		if errs[i] != nil {
+			t.Fatalf("run %d: %v", i, errs[i])
+		}
+		total += created[i]
+	}
+	if total != 1 {
+		t.Fatalf("%d DRAFT transfer orders for one short truck, want 1", total)
+	}
+	levels, err := s.ListTruckLevels(ctx, le, "S1", "truck-1")
+	if err != nil || len(levels) != 1 || !levels[0].Inbound.Equal(dec("9")) {
+		t.Fatalf("inbound %+v %v, want 9 on its way", levels, err)
 	}
 }
