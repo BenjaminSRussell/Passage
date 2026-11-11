@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -677,8 +679,61 @@ func checkApproverIndependent(ctx context.Context, tx pgx.Tx, tenantID string, p
 	return nil
 }
 
+// lockPlanYear takes the transaction-scoped lock that serialises everything which decides who owns a rule version's budget for a
+// fiscal year: approving a plan and posting an Original register entry. Both take it before looking, so neither can pass the
+// other's check unseen.
+func lockPlanYear(ctx context.Context, tx pgx.Tx, tenantID, ruleVersionID string, year int) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1 || ':' || $2 || ':' || $3, 0))`, tenantID, ruleVersionID, strconv.Itoa(year))
+	return err
+}
+
+// spanKeyYear reads the fiscal year a register span key names: FY2027, FY2027-Q1, 2027, 2027-03, 2027Q1, 2027-.. and the like.
+func spanKeyYear(span string) (int, bool) {
+	m := spanKeyYearRE.FindStringSubmatch(span)
+	if m == nil {
+		return 0, false
+	}
+	year, err := strconv.Atoi(m[1])
+	return year, err == nil
+}
+
+var spanKeyYearRE = regexp.MustCompile(`^(?:FY)?(\d{4})(?:$|[-_/.Qq].*)`)
+
+// spanKeyYearSQL is the same match for a span key expression and a bound year text.
+const spanKeyYearSQL = `~ ('^(FY)?' || $%d || '($|[-_/.Qq].*)')`
+
+// ensureNoApprovedPlanForOriginal refuses a manual Original register entry for a fiscal year whose budget an approved plan already
+// posted: the entry would double it.
+func ensureNoApprovedPlanForOriginal(ctx context.Context, tx pgx.Tx, tenantID, ruleVersionID string, lines []domain.RegisterLine) error {
+	years := map[int]bool{}
+	for _, l := range lines {
+		if y, ok := spanKeyYear(l.SpanKey); ok {
+			years[y] = true
+		}
+	}
+	sorted := make([]int, 0, len(years))
+	for y := range years {
+		sorted = append(sorted, y)
+	}
+	slices.Sort(sorted)
+	for _, y := range sorted {
+		if err := lockPlanYear(ctx, tx, tenantID, ruleVersionID, y); err != nil {
+			return err
+		}
+		var approved bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from budget_plan_process where tenant_id = $1 and rule_version_id = $2 and fiscal_year = $3 and status = 'Approved')`,
+			tenantID, ruleVersionID, y).Scan(&approved); err != nil {
+			return err
+		}
+		if approved {
+			return planProblem(http.StatusConflict, CodePlanYearApproved, fmt.Sprintf("an approved plan is already the budget of this control rule version for fiscal year %d; an Original entry on top would double it, so post a Revision instead", y))
+		}
+	}
+	return nil
+}
+
 func ensureYearNotApproved(ctx context.Context, tx pgx.Tx, tenantID string, plan Plan) error {
-	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1 || ':' || $2 || ':' || $3, 0))`, tenantID, plan.RuleVersionID, strconv.Itoa(plan.FiscalYear)); err != nil {
+	if err := lockPlanYear(ctx, tx, tenantID, plan.RuleVersionID, plan.FiscalYear); err != nil {
 		return err
 	}
 	var taken bool
@@ -691,8 +746,8 @@ func ensureYearNotApproved(ctx context.Context, tx pgx.Tx, tenantID string, plan
 	}
 	var original bool
 	if err := tx.QueryRow(ctx, `select exists (select 1 from budget_register_entry e, jsonb_array_elements(e.lines) l
-		where e.tenant_id = $1 and e.rule_version_id = $2 and e.entry_type = 'Original' and (l->>'spanKey' = $3 or l->>'spanKey' like $4))`,
-		tenantID, plan.RuleVersionID, fmt.Sprintf("FY%d", plan.FiscalYear), fmt.Sprintf("%d-%%", plan.FiscalYear)).Scan(&original); err != nil {
+		where e.tenant_id = $1 and e.rule_version_id = $2 and e.entry_type = 'Original' and l->>'spanKey' `+fmt.Sprintf(spanKeyYearSQL, 3)+`)`,
+		tenantID, plan.RuleVersionID, strconv.Itoa(plan.FiscalYear)).Scan(&original); err != nil {
 		return err
 	}
 	if original {

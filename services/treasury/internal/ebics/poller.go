@@ -21,6 +21,8 @@ const (
 
 	maxLocalFailures = 5
 	CodeLocalFailure = "LOCAL-PROCESSING"
+	// CodeBankDelivery parks a subscriber whose polls keep getting a malformed delivery from the bank.
+	CodeBankDelivery = "BANK-DELIVERY"
 )
 
 // PollableLister lists the subscribers of the principal's tenant that may be
@@ -176,11 +178,18 @@ func (p *Poller) pollOne(ctx context.Context, tenantID string, sub Subscriber) (
 	case errors.Is(err, ErrParked):
 		slog.WarnContext(ctx, "ebics subscriber is parked, not polled", "subscriber", sub.ID)
 		return n, nil
-	case errors.Is(err, ErrLocal):
+	case errors.Is(err, ErrLocal), errors.Is(err, ErrProtocol):
+		// A delivery that cannot be processed here (ErrLocal) and one the bank sends malformed, such as a wrong segment
+		// sequence or a changed transaction id (ErrProtocol), would be fetched again at every tick: both count toward
+		// parking. A bank outage (transport error, back-off answers) is neither and never counts.
+		code, what := CodeLocalFailure, "failed in processing"
+		if !errors.Is(err, ErrLocal) {
+			code, what = CodeBankDelivery, "were answered with a malformed delivery"
+		}
 		if count := p.recordFailure(sub.ID); count >= maxLocalFailures {
-			slog.ErrorContext(ctx, "ebics subscriber parked", "subscriber", sub.ID, "code", CodeLocalFailure, "failures", count)
-			text := fmt.Sprintf("%d statement polls in a row failed in processing: %v", count, err)
-			err = errors.Join(err, p.Client.park(ctx, sub.ID, &ReturnError{Code: CodeLocalFailure, Text: text, Disposition: Park}))
+			slog.ErrorContext(ctx, "ebics subscriber parked", "subscriber", sub.ID, "code", code, "failures", count)
+			text := fmt.Sprintf("%d statement polls in a row %s: %v", count, what, err)
+			err = errors.Join(err, p.Client.park(ctx, sub.ID, &ReturnError{Code: code, Text: text, Disposition: Park}))
 			p.clearFailures(sub.ID)
 		}
 	}

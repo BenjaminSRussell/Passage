@@ -127,11 +127,22 @@ func (s *Store) NextPending(ctx context.Context, deviceID string) (*OfflineTx, e
 		if err != nil {
 			return err
 		}
+		// The replay is about to apply it at the warehouse: hold off a supervisor's reject until it settles.
+		if _, err := tx.Exec(ctx, `update offline_transaction set apply_until = now() + make_interval(secs => $3) where tenant_id = $1 and idempotency_key = $2`,
+			tenantID(ctx), t.IdempotencyKey, ApplyLease.Seconds()); err != nil {
+			return err
+		}
 		out = &t
 		return nil
 	})
 	return out, err
 }
+
+// ApplyLease is how long a replay's apply of one transaction blocks a supervisor's reject of it.
+const ApplyLease = 2 * time.Minute
+
+// ErrApplyInProgress is a supervisor's reject of a PENDING transaction a replay is applying right now.
+var ErrApplyInProgress = errors.New("store: the transaction is being applied")
 
 // Settle moves a PENDING transaction to APPLIED, CONFLICT or REJECTED. A
 // transaction that is no longer PENDING (another replay settled it first) is
@@ -139,7 +150,7 @@ func (s *Store) NextPending(ctx context.Context, deviceID string) (*OfflineTx, e
 func (s *Store) Settle(ctx context.Context, key, status, reason string) (OfflineTx, error) {
 	var out OfflineTx
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		t, err := scanTx(tx.QueryRow(ctx, `update offline_transaction set replay_status = $3, conflict_reason = $4, version = version + 1
+		t, err := scanTx(tx.QueryRow(ctx, `update offline_transaction set replay_status = $3, conflict_reason = $4, version = version + 1, apply_until = null
 			where tenant_id = $1 and idempotency_key = $2 and replay_status = 'PENDING' returning `+txColumns, tenantID(ctx), key, status, reason))
 		if errors.Is(err, pgx.ErrNoRows) {
 			out, err = scanTx(tx.QueryRow(ctx, `select `+txColumns+` from offline_transaction where tenant_id = $1 and idempotency_key = $2`, tenantID(ctx), key))
@@ -220,9 +231,15 @@ func (s *Store) Resolve(ctx context.Context, idem Idem, key, action string, ifMa
 				status = TxRejected
 			}
 			t, err := scanTx(tx.QueryRow(ctx, `update offline_transaction set replay_status = $3, resolution = $4, resolved_by = $5, resolved_at = now(), version = version + 1
-				where tenant_id = $1 and idempotency_key = $2 and ((replay_status = 'CONFLICT' and resolution = '') or (replay_status = 'PENDING' and $4 = 'REJECT')) and ($6 = 0 or version = $6) returning `+txColumns,
+				where tenant_id = $1 and idempotency_key = $2 and ((replay_status = 'CONFLICT' and resolution = '')
+				  or (replay_status = 'PENDING' and $4 = 'REJECT' and (apply_until is null or apply_until <= now()))) and ($6 = 0 or version = $6) returning `+txColumns,
 				tenantID(ctx), key, status, action, userID(ctx), ifMatch))
 			if errors.Is(err, pgx.ErrNoRows) {
+				var applying bool
+				if qerr := tx.QueryRow(ctx, `select true from offline_transaction where tenant_id = $1 and idempotency_key = $2 and replay_status = 'PENDING' and apply_until > now()`,
+					tenantID(ctx), key).Scan(&applying); qerr == nil && applying {
+					return OfflineTx{}, ErrApplyInProgress
+				}
 				var exists bool
 				if qerr := tx.QueryRow(ctx, `select true from offline_transaction where tenant_id = $1 and idempotency_key = $2`, tenantID(ctx), key).Scan(&exists); qerr != nil {
 					return OfflineTx{}, ErrNotFound

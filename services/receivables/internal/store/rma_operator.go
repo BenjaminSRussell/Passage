@@ -72,6 +72,19 @@ func (s *Postgres) CancelRMACredit(ctx context.Context, id string) (RMACreditVie
 // the invoice lines the caller names, so billing counts the credit against the invoice's limit. The reservation is
 // committed at once, because the credit is already posted.
 func (s *Postgres) BackfillRMAReservation(ctx context.Context, id, invoiceID string, lines []RMAInvoiceLine) (RMACreditView, error) {
+	return s.backfillReservation(ctx, `id = $2`, id, invoiceID, lines)
+}
+
+// BackfillRMAReservationFor is BackfillRMAReservation for the credit of one RMA of a legal entity: sales, which knows its
+// RMAs and not receivables' credit ids, drives the backfill of credits posted before billing reservations existed.
+func (s *Postgres) BackfillRMAReservationFor(ctx context.Context, legalEntityID, rmaID, invoiceID string, lines []RMAInvoiceLine) (RMACreditView, error) {
+	if !ids.Valid(legalEntityID) || !ids.Valid(rmaID) {
+		return RMACreditView{}, rmaInvalid("legalEntityId and rmaId must be UUIDs")
+	}
+	return s.backfillReservation(ctx, `legal_entity_id = $2 and rma_id = $3`, legalEntityID, invoiceID, lines, rmaID)
+}
+
+func (s *Postgres) backfillReservation(ctx context.Context, where, key, invoiceID string, lines []RMAInvoiceLine, more ...any) (RMACreditView, error) {
 	if err := ValidateRMAInvoiceLines(lines); err != nil {
 		return RMACreditView{}, err
 	}
@@ -87,7 +100,7 @@ func (s *Postgres) BackfillRMAReservation(ctx context.Context, id, invoiceID str
 	var row rmaCreditRow
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		if row, err = loadRMACredit(ctx, tx, `id = $2`, p.TenantID, id); errors.Is(err, pgx.ErrNoRows) {
+		if row, err = loadRMACredit(ctx, tx, where, append([]any{p.TenantID, key}, more...)...); errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, CodeRMACreditNotFound, "RMA credit not found")
 		} else if err != nil {
 			return err
@@ -116,7 +129,7 @@ func (s *Postgres) BackfillRMAReservation(ctx context.Context, id, invoiceID str
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `update rma_credit set billing_invoice_id = $3::uuid, reservation_lines = $4::jsonb, billing_reservation_id = $5::uuid, reservation_committed = true
-			where tenant_id = $1 and id = $2 and status = 'POSTED' and reservation_lines is null`, p.TenantID, id, invoiceID, linesJSON(lines), res.ID)
+			where tenant_id = $1 and id = $2 and status = 'POSTED' and reservation_lines is null`, p.TenantID, row.id, invoiceID, linesJSON(lines), res.ID)
 		return e
 	})
 	if err != nil {

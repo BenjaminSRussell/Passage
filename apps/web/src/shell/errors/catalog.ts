@@ -24,6 +24,7 @@ const ASK_ADMIN = "Ask an administrator for access if you need it.";
 
 const common: Record<string, ProblemCatalogEntry> = {
   "COM-0000": { message: "Something went wrong.", action: TRY_LATER },
+  "WFL-0412": { message: "Some of your work couldn't be loaded the same way as on the first page.", action: "Reload My work from the start." },
   "COM-0001": { message: "Some of the details you entered aren't valid.", action: "Check the fields marked in the form, correct them and try again." },
   "COM-0002": { message: "The request was missing information the service needs to accept it safely.", action: "Reload the page and try again." },
   "COM-0400": { message: "The service couldn't read the request.", action: "Reload the page and try again. If it keeps happening, contact support with the details below." },
@@ -719,7 +720,7 @@ const product: Record<string, ProblemCatalogEntry> = {
   "PRD-LC-BLOCKED": { message: "This action isn't allowed for the product's lifecycle state.", action: "Change the product's lifecycle state first." },
   "PRD-LC-ILLEGAL": { message: "The lifecycle state can't change that way.", action: "Choose a state allowed from the current one, and not later than the product's own state." },
   "PRD-LC-WARN": { message: "This action is discouraged for the product's lifecycle state.", action: "Check that you really want to continue." },
-  "PRD-NUM-FORMAT": { message: "The product number is already used or doesn't match the required pattern.", action: "Enter an unused number in the format your company uses." },
+  "PRD-NUM-FORMAT": { message: "That number or code is already in use, or it isn't in the allowed format: up to 40 capital letters, digits, dots, hyphens or underscores, starting with a letter or digit.", action: "Enter a number or code that isn't used yet and follows that format." },
   "PRD-NUM-IMMUTABLE": { message: "A product number can't change after the product is released.", action: "Keep the number, or create a new product." },
   "PRD-ORG-SERVICE-CALLER": { message: "This action can only be run by a system service.", action: ASK_ADMIN },
   "PRD-ORG-UNAVAILABLE": { message: "The organisation service didn't respond, so the sites and warehouses couldn't be checked.", action: TRY_LATER },
@@ -742,7 +743,7 @@ const ledgerSetup: Record<string, ProblemCatalogEntry> = {
   LEDGER_ADVANCED_RULE_LIMIT: { message: "This account structure version already has the most advanced rules it can have.", action: "Remove a rule before adding another." },
   LEDGER_ADVANCED_RULE_NAME_DUPLICATE: { message: "An advanced rule with this name already exists.", action: "Choose a different name." },
   LEDGER_ADVANCED_RULE_NOT_FOUND: { message: "We couldn't find that advanced rule.", action: "Go back to the list and open it again." },
-  LEDGER_ADVANCED_RULE_SEGMENT_LIMIT: { message: "The account structure and its advanced rules would have more segments than allowed.", action: "Remove segments from the rule or the structure." },
+  LEDGER_ADVANCED_RULE_SEGMENT_LIMIT: { message: "An account structure and its advanced rules can have at most 20 segments between them, and this change would go over that.", action: "Remove segments from the rule or from the structure until there are 20 or fewer." },
   LEDGER_ATTACHMENT_CONFLICT: { message: "An attachment with this ID already exists.", action: "Add the file with a new attachment ID." },
   LEDGER_ATTACHMENT_INVALID: { message: "The attachment isn't valid.", action: "Check the file name and type, then try again." },
   LEDGER_ATTACHMENT_LIMIT: { message: "A journal batch can have at most 50 attachments.", action: "Remove an attachment before adding another." },

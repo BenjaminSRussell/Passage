@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -203,11 +204,32 @@ func scanSalesReport(row pgx.Row) (SalesReport, error) {
 	return r, err
 }
 
-// ListSalesReports lists the reports newest first; an empty status does not filter.
+// ListSalesReports lists the newest reports; an empty status does not filter. See ListSalesReportsPage for paging.
 func (s *Postgres) ListSalesReports(ctx context.Context, status string, limit int) ([]SalesReport, error) {
-	out := []SalesReport{}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+salesReportCols+` from sales_invoice_report where ($1 = '' or status = $1) order by created_at desc, id limit $2`, status, limit)
+	out, _, err := s.ListSalesReportsPage(ctx, status, limit, "")
+	return out, err
+}
+
+// ErrBadReportCursor is returned for an `after` that is not a cursor a previous page returned.
+var ErrBadReportCursor = errors.New("billing: the cursor is not one a previous page returned")
+
+// ListSalesReportsPage lists up to limit reports newest first, after the cursor of the previous page ("" for the first);
+// an empty status does not filter. next is the cursor of the following page, empty on the last.
+func (s *Postgres) ListSalesReportsPage(ctx context.Context, status string, limit int, after string) (out []SalesReport, next string, err error) {
+	out = []SalesReport{}
+	var cursorAt, cursorID any
+	if after != "" {
+		at, id, ok := strings.Cut(after, "|")
+		ts, terr := time.Parse(time.RFC3339Nano, at)
+		if !ok || terr != nil || !ids.Valid(id) {
+			return out, "", ErrBadReportCursor
+		}
+		cursorAt, cursorID = ts, id
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select `+salesReportCols+` from sales_invoice_report
+			where ($1 = '' or status = $1) and ($3::timestamptz is null or (created_at, id) < ($3::timestamptz, $4::uuid))
+			order by created_at desc, id desc limit $2`, status, limit+1, cursorAt, cursorID)
 		if err != nil {
 			return err
 		}
@@ -221,7 +243,12 @@ func (s *Postgres) ListSalesReports(ctx context.Context, status string, limit in
 		}
 		return rows.Err()
 	})
-	return out, err
+	if err == nil && len(out) > limit {
+		out = out[:limit]
+		last := out[len(out)-1]
+		next = last.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID
+	}
+	return out, next, err
 }
 
 // RetrySalesReport puts a PARKED report back in the queue, due now with its attempts counted from zero; a PENDING one is left

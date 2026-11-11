@@ -660,6 +660,11 @@ func (s *Postgres) PostRegisterEntry(ctx context.Context, key, hash string, req 
 			}
 			return 0, nil, httpx.NewProblem(status, de.Code, de.Detail)
 		}
+		if req.EntryType == domain.EntryOriginal {
+			if err := ensureNoApprovedPlanForOriginal(ctx, tx, p.TenantID, rule.ID, req.Lines); err != nil {
+				return 0, nil, err
+			}
+		}
 		entry, err := postEntry(ctx, tx, p.TenantID, rule, req.EntryType, req.Lines)
 		return http.StatusCreated, entry, err
 	})

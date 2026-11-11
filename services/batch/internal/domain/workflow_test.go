@@ -7,9 +7,9 @@ import (
 
 func TestCompletionPolicies(t *testing.T) {
 	tests := []struct {
-		policy              string
+		policy                         string
 		pct, approved, rejected, total int
-		done, rejectedStep  bool
+		done, rejectedStep             bool
 	}{
 		{PolicySingle, 0, 1, 0, 3, true, false},
 		{PolicySingle, 0, 0, 1, 3, true, true},
