@@ -295,12 +295,13 @@ export interface AcceptProspectInput extends NewVendor {
   questionnaireId: string;
 }
 
-/** GET /vendor-prospects: registrations newest first, optionally of one status. */
-export async function listProspects(status: ProspectStatus | "", signal?: AbortSignal): Promise<Prospect[]> {
-  const query = new URLSearchParams({ limit: "200" });
+/** GET /vendor-prospects: one page of registrations newest first, optionally of one status. */
+export async function listProspects(status: ProspectStatus | "", cursor?: string, signal?: AbortSignal): Promise<{ items: Prospect[]; nextCursor?: string }> {
+  const query = new URLSearchParams({ limit: "100" });
   if (status) query.set("status", status);
-  const body = await send<{ items?: Prospect[] }>(`/vendor-prospects?${query}`, {}, signal);
-  return Array.isArray(body.items) ? body.items : [];
+  if (cursor) query.set("cursor", cursor);
+  const body = await send<{ items?: Prospect[]; nextCursor?: string }>(`/vendor-prospects?${query}`, {}, signal);
+  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor || undefined };
 }
 
 export function getProspect(prospectId: string, signal?: AbortSignal): Promise<Prospect> {

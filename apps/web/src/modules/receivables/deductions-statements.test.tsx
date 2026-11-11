@@ -88,8 +88,8 @@ describe("Bank statements", () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty receivables.view" });
     renderAt("/receivables/bank-statements");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("Could not load bank statement imports");
-    expect(alert).toHaveTextContent("AUTH-0003");
+    expect(alert).toHaveTextContent("You can't view bank statement imports");
+    expect(alert).toHaveTextContent("doesn't have access to this list");
   });
 
   it("checks the form, imports the XML and lists the payments created", async () => {

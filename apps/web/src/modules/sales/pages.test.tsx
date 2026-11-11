@@ -432,7 +432,7 @@ describe("Credit profiles", () => {
     unmount();
     handler = () => ({ status: 403, body: { status: 403, code: "AUTH-0003", detail: "the legal entity is outside the caller's scope" } });
     renderAt("/sales/credit-profiles");
-    expect(await screen.findByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText("You can't view credit profiles")).toBeInTheDocument();
   });
 
   it("edits a profile at its ETag", async () => {

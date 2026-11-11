@@ -90,10 +90,20 @@ export interface LoadedList<T> {
 }
 
 /**
- * ListData for a list the page already loaded in full, such as a setup list it also reloads after a save. Pass it as
- * `useRows={() => loadedRows(state)}`; filters and sort then work on the loaded rows.
+ * Whether a load failed for want of access: an HTTP 403, which the module clients carry as a status or as the problem
+ * code (AUTH-0003 from the duty check, or HTTP-403 when the body had none).
  */
-export function loadedRows<T>(state: LoadedList<T>, forbidden = false): ListData<T> {
+export function isForbidden(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { status, code } = error as { status?: unknown; code?: unknown };
+  return status === 403 || code === "AUTH-0003" || code === "HTTP-403";
+}
+
+/**
+ * ListData for a list the page already loaded in full, such as a setup list it also reloads after a save. Pass it as
+ * `useRows={() => loadedRows(state)}`; filters and sort then work on the loaded rows. A 403 shows the no-access message.
+ */
+export function loadedRows<T>(state: LoadedList<T>, forbidden = isForbidden(state.error)): ListData<T> {
   return {
     rows: state.error ? [] : (state.data ?? []),
     loading: state.loading && !state.data,

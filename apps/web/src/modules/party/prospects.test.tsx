@@ -36,6 +36,20 @@ describe("supplier registrations", () => {
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/party/vendor-prospects/${ID}`));
   });
 
+  it("loads the next page of registrations on request", async () => {
+    api.handler = (call) => {
+      if (call.url.pathname !== "/api/v1/party/vendor-prospects") return undefined;
+      return call.url.searchParams.get("cursor") === "next"
+        ? json(200, { items: [prospect({ id: "p2", companyName: "Northfield Coatings" })] })
+        : json(200, { items: [prospect()], nextCursor: "next" });
+    };
+    renderAt("/party/vendor-prospects");
+    await screen.findByText("Lakeshore Machining LLC");
+    fireEvent.click(screen.getByRole("button", { name: "Load more registrations" }));
+    expect(await screen.findByText("Northfield Coatings")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more registrations" })).toBeNull();
+  });
+
   it("sends the status filter to the service", async () => {
     api.handler = (call) => (call.url.pathname === "/api/v1/party/vendor-prospects" ? json(200, { items: [prospect()] }) : undefined);
     renderAt("/party/vendor-prospects");

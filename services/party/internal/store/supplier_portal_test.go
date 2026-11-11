@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -230,5 +231,28 @@ func TestInvite_AnExpiredInvitationReadsExpiredAndDoesNotVerify(t *testing.T) {
 	}
 	if list, _ := r.s.ListInvites(r.buyer, r.vendorA, 10); len(list) != 1 || list[0].Status != domain.InviteExpired {
 		t.Errorf("list %+v", list)
+	}
+}
+
+// Registrations are read a page at a time, newest first, each page after the last row of the one before.
+func TestProspect_ListPagesAfterTheLastRow(t *testing.T) {
+	r := newSupplierRig(t)
+	for _, email := range []string{"a@one.example", "b@two.example", "c@three.example"} {
+		if _, err := r.s.RegisterProspect(registrar(), prospect(email)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := r.s.ListProspectsAfter(r.buyer, "", 2, time.Time{}, "")
+	if err != nil || len(first) != 2 {
+		t.Fatalf("first page %d, %v", len(first), err)
+	}
+	last := first[1]
+	rest, err := r.s.ListProspectsAfter(r.buyer, "", 2, last.CreatedAt, last.ID)
+	if err != nil || len(rest) != 1 {
+		t.Fatalf("second page %d, %v", len(rest), err)
+	}
+	seen := map[string]bool{first[0].ID: true, first[1].ID: true}
+	if seen[rest[0].ID] {
+		t.Fatalf("a registration is on two pages: %s", rest[0].ID)
 	}
 }

@@ -73,6 +73,7 @@ type InviteDetails struct {
 type PortalStore interface {
 	RegisterProspect(ctx context.Context, in domain.NewProspect) (bool, error)
 	ListProspects(ctx context.Context, status string, limit int) ([]Prospect, error)
+	ListProspectsAfter(ctx context.Context, status string, limit int, afterAt time.Time, afterID string) ([]Prospect, error)
 	GetProspect(ctx context.Context, id string) (Prospect, error)
 	RejectProspect(ctx context.Context, id, note string) (Prospect, error)
 	ClaimProspect(ctx context.Context, id string) (Prospect, error)
@@ -125,9 +126,21 @@ func scanProspect(row pgx.Row) (Prospect, error) {
 }
 
 func (s *Postgres) ListProspects(ctx context.Context, status string, limit int) ([]Prospect, error) {
+	return s.ListProspectsAfter(ctx, status, limit, time.Time{}, "")
+}
+
+// ListProspectsAfter is one page of registrations, newest first; a zero afterAt starts at the newest, otherwise the page
+// starts after the (afterAt, afterID) row of the previous page.
+func (s *Postgres) ListProspectsAfter(ctx context.Context, status string, limit int, afterAt time.Time, afterID string) ([]Prospect, error) {
 	out := []Prospect{}
+	var after *time.Time
+	if !afterAt.IsZero() {
+		after = &afterAt
+	}
 	err := run(ctx, s, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+prospectColumns+` from vendor_prospect where tenant_id = $1 and ($2 = '' or status = $2) order by created_at desc, id limit $3`, tenantOf(ctx), status, limit)
+		rows, err := tx.Query(ctx, `select `+prospectColumns+` from vendor_prospect where tenant_id = $1 and ($2 = '' or status = $2)
+			and ($4::timestamptz is null or (created_at, id) < ($4, nullif($5, '')::uuid))
+			order by created_at desc, id desc limit $3`, tenantOf(ctx), status, limit, after, afterID)
 		if err != nil {
 			return err
 		}

@@ -641,3 +641,15 @@ describe("ListPage search box", () => {
   });
 });
 
+
+describe("loadedRows", () => {
+  it("reads a 403 as no access, whichever way the client carries it", async () => {
+    const { loadedRows, isForbidden } = await import("./ListPage");
+    expect(isForbidden({ status: 403 })).toBe(true);
+    expect(isForbidden({ code: "AUTH-0003", message: "missing duty" })).toBe(true);
+    expect(isForbidden({ code: "HTTP-403" })).toBe(true);
+    expect(isForbidden({ code: "COM-0500" })).toBe(false);
+    expect(loadedRows({ data: null, loading: false, error: { code: "AUTH-0003" }, reload: () => undefined }).forbidden).toBe(true);
+    expect(loadedRows({ data: [1], loading: false, reload: () => undefined })).toMatchObject({ rows: [1], forbidden: false, hasMore: false });
+  });
+});

@@ -38,29 +38,52 @@ const filters: ListFilterDef[] = [
   { kind: "select", key: "status", label: "Status", anyLabel: "Any status", options: PROSPECT_STATUSES.map((s) => ({ value: s, label: prospectStatusLabel[s] })) },
 ];
 
-/** The registrations of the filter; the service answers one page of at most 200, newest first. */
+interface MorePages {
+  status: string;
+  rows: Prospect[];
+  cursor?: string;
+  loading: boolean;
+}
+
+/** The registrations of the filter, newest first, a page at a time. */
 function useProspectRows(query: ListQuery): ListData<Prospect> {
   const status = (query.filters.status ?? "") as ProspectStatus | "";
   const [forbidden, setForbidden] = useState(false);
+  const [more, setMore] = useState<MorePages | null>(null);
   const state = useLoad(async (signal) => {
     try {
-      const rows = await listProspects(status, signal);
+      const page = await listProspects(status, undefined, signal);
       if (!signal.aborted) setForbidden(false);
-      return rows;
+      return page;
     } catch (error) {
       if (!signal.aborted) setForbidden((error as { status?: number }).status === 403);
       throw error;
     }
   }, status);
+  const extra = more && more.status === status ? more : null;
+  const cursor = extra ? extra.cursor : state.data?.nextCursor;
+  async function loadMore() {
+    if (!cursor || extra?.loading) return;
+    setMore({ status, rows: extra?.rows ?? [], cursor, loading: true });
+    try {
+      const page = await listProspects(status, cursor);
+      setMore({ status, rows: [...(extra?.rows ?? []), ...page.items], cursor: page.nextCursor, loading: false });
+    } catch {
+      setMore({ status, rows: extra?.rows ?? [], cursor, loading: false });
+    }
+  }
   return {
-    rows: state.error ? [] : (state.data ?? []),
+    rows: state.error ? [] : [...(state.data?.items ?? []), ...(extra?.rows ?? [])],
     loading: state.loading,
-    loadingMore: false,
+    loadingMore: Boolean(extra?.loading),
     error: state.error ?? undefined,
     forbidden,
-    hasMore: false,
-    loadMore: () => undefined,
-    retry: state.reload,
+    hasMore: Boolean(cursor),
+    loadMore: () => void loadMore(),
+    retry: () => {
+      setMore(null);
+      state.reload();
+    },
   };
 }
 

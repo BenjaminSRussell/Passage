@@ -834,9 +834,10 @@ paths:
       parameters:
         - { name: status, in: query, required: false, schema: { type: string, enum: [NEW, ACCEPTED, REJECTED] } }
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
       responses:
         '200':
-          description: The registrations.
+          description: One page of registrations; nextCursor is present when another page follows.
           content:
             application/json:
               schema:
@@ -844,8 +845,10 @@ paths:
                 required: [items]
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/VendorProspect' } }
+                  nextCursor: { type: string }
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001: cursor is not a nextCursor of this list.' }
         '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: unknown status.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
   /v1/party/vendor-prospects/{id}:

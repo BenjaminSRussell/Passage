@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -91,12 +93,24 @@ func (a *API) listProspects(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, map[string]string{"status": "must be NEW, ACCEPTED or REJECTED"})
 		return
 	}
-	items, err := a.portal.ListProspects(r.Context(), status, pageLimit(r))
+	afterAt, afterID, ok := decodeChangeCursor(r.URL.Query().Get("cursor"))
+	if !ok {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "cursor must be the nextCursor of the previous page"))
+		return
+	}
+	limit := pageLimit(r)
+	items, err := a.portal.ListProspectsAfter(r.Context(), status, limit+1, afterAt, afterID)
 	if err != nil {
 		failParty(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	page := map[string]any{"items": items}
+	if len(items) > limit {
+		last := items[limit-1]
+		page["items"] = items[:limit]
+		page["nextCursor"] = base64.RawURLEncoding.EncodeToString([]byte(last.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID))
+	}
+	httpx.JSON(w, http.StatusOK, page)
 }
 
 func (a *API) getProspect(w http.ResponseWriter, r *http.Request) {
