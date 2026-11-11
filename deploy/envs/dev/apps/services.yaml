@@ -32,6 +32,7 @@ spec:
           - { name: consolidation, path: services/consolidation/charts/consolidation, namespace: hello-ledger }
           - { name: costacct, path: services/costacct/charts/costacct, namespace: hello-ledger }
           - { name: costing, path: services/costing/charts/costing, namespace: hello-ledger }
+          - { name: customer-portal, path: services/customer-portal-ts/charts/customer-portal, namespace: hello-ledger }
           - { name: eam, path: services/eam/charts/eam, namespace: hello-ledger }
           - { name: edi, path: services/edi/charts/edi, namespace: hello-ledger }
           - { name: engineering, path: services/engineering/charts/engineering, namespace: hello-ledger }

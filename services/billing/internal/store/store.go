@@ -64,8 +64,10 @@ type ListFilter struct {
 	// packing slip (the document flow, issue #534).
 	OrderID       string
 	PackingSlipID string
-	After         string
-	Limit         int
+	// PostedOnly leaves out proposals, which are internal until they are posted (the customer portal reads this way).
+	PostedOnly bool
+	After      string
+	Limit      int
 }
 
 // InvoicePage is one page of invoice headers; NextAfter is the id to pass as
@@ -530,7 +532,8 @@ func (s *Postgres) ListInvoices(ctx context.Context, f ListFilter) (InvoicePage,
 			  and ($7 = '' or exists (select 1 from invoice_line l where l.invoice_id = invoice.id and l.order_id::text = $7))
 			  and ($8 = '' or exists (select 1 from invoice_line l where l.invoice_id = invoice.id and l.packing_slip_id::text = $8))
 			  and ($6 = '' or (created_at, id) < (select a.created_at, a.id from invoice a where a.id = nullif($6, '')::uuid))
-			order by created_at desc, id desc limit $3`, f.Status, f.CustomerID, f.Limit+1, f.Type, f.OriginalInvoiceID, f.After, f.OrderID, f.PackingSlipID)
+			  and (not $9::bool or status <> 'PROPOSAL')
+			order by created_at desc, id desc limit $3`, f.Status, f.CustomerID, f.Limit+1, f.Type, f.OriginalInvoiceID, f.After, f.OrderID, f.PackingSlipID, f.PostedOnly)
 		if err != nil {
 			return err
 		}
