@@ -65,3 +65,12 @@ consumer:
     limits:
       cpu: 500m
       memory: 256Mi
+
+# CronJob running `purchasing budget-calls-retry <tenant-id>...` (FR-38.5): repeats the calls to budgeting that failed (a requisition
+# line's pre-encumbrance converted into its PO line's encumbrance, or given back when a requisition was cancelled), the same work as
+# POST /v1/procurement/budget-calls:retry. Needs serviceUrls.budgeting and serviceIdentity.signingKeySecret. Tenants are listed
+# because the app role cannot enumerate them. The job fails while a tenant still has calls budgeting did not accept.
+budgetCallsRetry:
+  enabled: false
+  schedule: "*/15 * * * *"
+  tenantIds: []
