@@ -211,6 +211,17 @@ func (s *Postgres) move(ctx context.Context, id string, version int, to domain.W
 		if requireSignature && to == domain.WOCompleted && !current.SignatureExempt && current.SignedAt == nil {
 			return unprocessable(domain.CodeSignatureRequired, "the customer's signature is required to complete this work order")
 		}
+		if requireSignature && to == domain.WOCompleted {
+			// The office completing by hand meets the same checklist as the device: a required item counts as done only
+			// when the technician ticked it (the action log) at the last applied tick.
+			var st mergeState
+			if err := loadCaptureState(ctx, tx, tid, id, &st); err != nil {
+				return err
+			}
+			if open := domain.ChecklistOpen(current.Checklist, st.checklistDone()); len(open) > 0 {
+				return unprocessable(domain.CodeChecklistOpen, fmt.Sprintf("%d required checklist items are open, first: %s; have the technician tick them, or replace the checklist before completing", len(open), open[0].Text))
+			}
+		}
 		now := time.Now().UTC()
 		if _, err := tx.Exec(ctx, `update service_work_order set status = $3, version = version + 1, updated_at = $4,
 			completed_at = case when $3 = 'COMPLETED' then $4 else completed_at end,

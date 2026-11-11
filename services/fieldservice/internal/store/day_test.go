@@ -229,3 +229,39 @@ func TestStore_ChecklistReplacement(t *testing.T) {
 }
 
 func fp(v float64) *float64 { return &v }
+
+// A manual :transition to COMPLETED meets the same required checklist as the device's COMPLETE (#45): it is refused
+// while a required item is open and goes through once the technician has ticked it or the checklist is replaced.
+func TestStore_ManualCompletionChecksTheRequiredChecklist(t *testing.T) {
+	d := newDispatch(t, 33)
+	must, optional := ids.New(), ids.New()
+	wo, tech := d.dispatchedWith(t, "MAN", nil, []domain.ChecklistItem{{ID: must, Text: "Lock out and tag", Required: true}, {ID: optional, Text: "Photograph the nameplate"}})
+	dev := d.device(tech)
+	if _, err := d.s.RecordActions(dev, wo.ID, tech.ID, []ActionInput{act(domain.ActTravelStart, 1), act(domain.ActWorkStart, 5)}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbx.WithTenantTx(d.ctx, d.s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(d.ctx, `update service_work_order set signature_exempt = true where tenant_id = $1 and id = $2`, tenantOf(d.ctx), wo.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wo, err := d.s.GetWorkOrder(d.ctx, wo.ID)
+	if err != nil || wo.Status != "IN_PROGRESS" {
+		t.Fatalf("setup %+v %v", wo, err)
+	}
+	if _, err := d.s.TransitionWorkOrder(d.ctx, wo.ID, wo.Version, domain.WOCompleted); problemCode(err) != domain.CodeChecklistOpen {
+		t.Fatalf("manual completion with a required item open: %v", err)
+	}
+	if got, _ := d.s.GetWorkOrder(d.ctx, wo.ID); got.Status != "IN_PROGRESS" || got.Version != wo.Version {
+		t.Fatalf("the refused completion changed the order: %+v", got)
+	}
+	// The optional item does not count; the technician's tick of the required one does.
+	if _, err := d.s.RecordActions(dev, wo.ID, tech.ID, []ActionInput{{ID: ids.New(), Kind: domain.ActChecklist, DeviceTime: at(8), ItemID: must, Done: true}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	done, err := d.s.TransitionWorkOrder(d.ctx, wo.ID, wo.Version, domain.WOCompleted)
+	if err != nil || done.Status != "COMPLETED" || done.CompletedAt == nil {
+		t.Fatalf("manual completion after the tick: %+v %v", done, err)
+	}
+}
