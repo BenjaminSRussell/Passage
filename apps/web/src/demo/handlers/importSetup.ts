@@ -1,15 +1,18 @@
 // The migration routes behind the setup guide's import step (/api/v1/integration): one file import each for
 // vendors, customers and products, with a mapping, so a visitor can download the template and check a file.
 // The preview reads the file the visitor chose, in the browser, and rejects rows without a number or a name the
-// way the mapping's required rule does. Nothing is loaded.
-import type { BindingPreview, ConnectionProfile, EntityBinding, MappingSpec, PreviewRow } from "../../modules/migration/api/client";
+// way the mapping's required rule does. Nothing is loaded. The run history is the cutover from the legacy ERP:
+// two rehearsals that turned up bad rows, then the cutover loads.
+import type { BindingPreview, ConnectionProfile, EntityBinding, MappingSpec, MigrationRun, PreviewRow } from "../../modules/migration/api/client";
 import { reply, route } from "../backend";
 import { at, uid } from "../store";
+import { CUTOVER_DAYS_AGO } from "./o2c/arLedger";
 
 const BASE = "/api/v1/integration";
 const KIND_CONNECTION = 480;
 const KIND_BINDING = 481;
 const KIND_SPEC = 482;
+const KIND_RUN = 483;
 const SAMPLE_ROWS = 100;
 
 const kinds = [
@@ -67,8 +70,81 @@ route("GET", `${BASE}/entity-bindings`, ({ query }) => ({ items: bindings.filter
 route("GET", `${BASE}/entity-bindings/{id}`, ({ params }) => bindings.find((b) => b.id === params.id) ?? reply.problem(404, "AUTH-0404", "binding not found"));
 route("GET", `${BASE}/mapping-specs`, ({ query }) => ({ items: specs.filter((s) => !query.get("entity") || s.entity === query.get("entity")).map((s) => ({ ...s, mapping: undefined })) }));
 route("GET", `${BASE}/mapping-specs/{id}`, ({ params }) => specs.find((s) => s.id === params.id) ?? reply.problem(404, "AUTH-0404", "mapping spec not found"));
-// The pages the step links to: no imports have run yet, and there are no projects or data templates.
-for (const list of ["migration-runs", "projects", "data-templates"]) route("GET", `${BASE}/${list}`, () => ({ items: [] }));
+interface RunSpec {
+  entity: string;
+  mode: MigrationRun["mode"];
+  ago: number;
+  extracted: number;
+  rejects?: { sourceKey: string; field: string; code: string; detail: string }[];
+  warnings?: { sourceKey: string; field: string; code: string; detail: string }[];
+  /** The rehearsal this run repeats. */
+  parent?: number;
+}
+const RUN_SPECS: RunSpec[] = [
+  {
+    entity: "customer",
+    mode: "rehearsal",
+    ago: CUTOVER_DAYS_AGO + 21,
+    extracted: 214,
+    rejects: [
+      { sourceKey: "C-1187", field: "name", code: "MIG-REQUIRED", detail: "The name is empty." },
+      { sourceKey: "C-1203", field: "currency", code: "MIG-VALUE", detail: "CAD is not an active currency." },
+      { sourceKey: "C-1240", field: "number", code: "MIG-DUPLICATE", detail: "C-1240 appears twice in the source." },
+    ],
+    warnings: [{ sourceKey: "C-1032", field: "email", code: "MIG-FORMAT", detail: "The email has no domain; it was left empty." }],
+  },
+  {
+    entity: "vendor",
+    mode: "rehearsal",
+    ago: CUTOVER_DAYS_AGO + 21,
+    extracted: 158,
+    rejects: [{ sourceKey: "V-0412", field: "payment_terms", code: "MIG-VALUE", detail: "NET75 is not a payment term in the target." }],
+  },
+  { entity: "product", mode: "rehearsal", ago: CUTOVER_DAYS_AGO + 20, extracted: 1342 },
+  { entity: "customer", mode: "rehearsal", ago: CUTOVER_DAYS_AGO + 8, extracted: 213, parent: 1 },
+  { entity: "vendor", mode: "rehearsal", ago: CUTOVER_DAYS_AGO + 8, extracted: 158, parent: 2 },
+  { entity: "customer", mode: "cutover", ago: CUTOVER_DAYS_AGO + 0.2, extracted: 213 },
+  { entity: "vendor", mode: "cutover", ago: CUTOVER_DAYS_AGO + 0.2, extracted: 158 },
+  { entity: "product", mode: "cutover", ago: CUTOVER_DAYS_AGO + 0.15, extracted: 1342, warnings: [{ sourceKey: "P-4410", field: "description", code: "MIG-TRUNCATED", detail: "The description was cut to 255 characters." }] },
+];
+
+const runs: MigrationRun[] = RUN_SPECS.map((r, i): MigrationRun => {
+  const rejected = r.rejects?.length ?? 0;
+  const loaded = r.extracted - rejected;
+  const spec = specs.find((s) => s.entity === r.entity);
+  return {
+    id: uid(KIND_RUN, i + 1),
+    sourceSystem: "ax2012",
+    mode: r.mode,
+    entity: r.entity,
+    status: rejected ? "partial" : "succeeded",
+    dryRun: r.mode === "rehearsal",
+    mappingVersion: 1,
+    mappingSpecId: spec?.id,
+    parentRunId: r.parent === undefined ? undefined : uid(KIND_RUN, r.parent),
+    counts: { extracted: r.extracted, mapped: loaded, created: r.mode === "cutover" ? loaded : 0, updated: 0, unchanged: r.mode === "cutover" ? 0 : loaded, rejected, warned: r.warnings?.length ?? 0 },
+    rejects: (r.rejects ?? []).map(({ sourceKey, ...issue }) => ({ sourceKey, rejects: [issue] })),
+    warnings: (r.warnings ?? []).map(({ sourceKey, ...issue }) => ({ sourceKey, warnings: [issue] })),
+    absent: [],
+    reconciliation: {
+      source: r.extracted,
+      target: r.mode === "cutover" ? loaded : 0,
+      checks: [
+        { name: "Row count", ok: rejected === 0, detail: rejected ? `${rejected} of ${r.extracted} rows rejected.` : `${r.extracted} rows read, ${loaded} loaded.` },
+        { name: "Natural keys unique", ok: !r.rejects?.some((x) => x.code === "MIG-DUPLICATE"), detail: "Each number appears once." },
+      ],
+    },
+    createdAt: at(-r.ago),
+  };
+}).reverse();
+
+route("GET", `${BASE}/migration-runs`, ({ query }) => ({
+  items: runs.filter((r) => (!query.get("status") || r.status === query.get("status")) && (!query.get("entity") || r.entity.includes(query.get("entity") ?? "")) && !query.get("projectId") && !query.get("bindingId")),
+}));
+route("GET", `${BASE}/migration-runs/{id}/ledger`, () => ({ items: [] }));
+route("GET", `${BASE}/migration-runs/{id}`, ({ params }) => runs.find((r) => r.id === params.id) ?? reply.problem(404, "AUTH-0404", "migration run not found"));
+// There are no migration projects or data templates.
+for (const list of ["projects", "data-templates"]) route("GET", `${BASE}/${list}`, () => ({ items: [] }));
 
 /** Splits CSV text into rows of cells; quoted cells may hold commas, quotes and line breaks. */
 function parseCsv(text: string): string[][] {
