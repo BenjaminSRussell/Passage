@@ -2228,6 +2228,7 @@
       {"resource": "/v1/controlling/allocation-runs/*", "methods": ["GET"]},
       {"resource": "/v1/controlling/allocation-templates", "methods": ["GET"]},
       {"resource": "/v1/controlling/allocation-templates/*", "methods": ["GET"]},
+      {"resource": "/v1/controlling/cost-actuals", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-behavior-rules", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-elements", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-object-hierarchies", "methods": ["GET"]},
