@@ -83,7 +83,7 @@ export function validateAudit(v: AuditValues): AuditErrors {
   const errors: AuditErrors = {};
   const ledger = v.ledger.trim();
   const period = v.period.trim();
-  if (ledger !== "" && !UUID.test(ledger)) errors.ledger = "Enter the ledger id (a UUID), or leave it empty for every ledger.";
+  if (ledger !== "" && !UUID.test(ledger)) errors.ledger = "Choose the ledger, or leave it empty for every ledger.";
   if (period !== "" && !PERIOD.test(period)) errors.period = "Enter the fiscal year and period number, such as 2026-03.";
   const hasFrom = v.fromDate !== "";
   const hasTo = v.toDate !== "";

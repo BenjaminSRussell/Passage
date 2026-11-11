@@ -111,6 +111,7 @@
       {"resource": "/v1/ledger/journal-batches", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches/*/attachments", "methods": ["GET"]},
+      {"resource": "/v1/ledger/ledgers", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledger-sets", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledger-sets/*", "methods": ["GET"]},
       {"resource": "/v1/reporting/runs/*/cells/*/*/lines", "methods": ["GET"]},

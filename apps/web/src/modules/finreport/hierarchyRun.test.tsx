@@ -130,7 +130,7 @@ describe("NewRunPage with hierarchies", () => {
     fireEvent.change(await screen.findByLabelText("Amounts shown as"), { target: { value: "credit" } });
 
     fireEvent.change(screen.getByLabelText("Definition"), { target: { value: "TB-STD" } });
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "3" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Run statement" }));

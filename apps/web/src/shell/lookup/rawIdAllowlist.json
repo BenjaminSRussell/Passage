@@ -8,7 +8,6 @@
     },
     "modules/ap-invoices/PostInvoicePage.tsx": {
       "labels": [
-        "Ledger ID",
         "receipt ID"
       ],
       "reason": "Vendor and legal entity are lookups. The ledger service has no list route to search yet, and receipt lines arrive from the GR/IR selection; neither has a lookup adapter."
@@ -60,12 +59,6 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/costing/ValuationLedgersPage.tsx": {
-      "labels": [
-        "Ledger id"
-      ],
-      "reason": "The ledger service has no list route to search yet."
-    },
     "modules/eam/WorkOrderCare.tsx": {
       "labels": [
         "Production resource id"
@@ -77,18 +70,6 @@
         "Change request ID"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/finreport/NewRunPage.tsx": {
-      "labels": [
-        "Ledger id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/finreport/VerificationsPage.tsx": {
-      "labels": [
-        "Ledger id"
-      ],
-      "reason": "The ledger service has no list route to search yet."
     },
     "modules/fulfillment/ShipmentActions.tsx": {
       "labels": [
@@ -157,30 +138,6 @@
         "Work cell id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/ledger/LedgerLinesPage.tsx": {
-      "labels": [
-        "Ledger id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/ledger/LedgerPicker.tsx": {
-      "labels": [
-        "Ledger id"
-      ],
-      "reason": "The ledger service has no list route to search yet."
-    },
-    "modules/ledger/RecurringJournalPage.tsx": {
-      "labels": [
-        "Ledger id"
-      ],
-      "reason": "The ledger service has no list route to search yet."
-    },
-    "modules/ledger/pages.tsx": {
-      "labels": [
-        "Ledger id"
-      ],
-      "reason": "The ledger service has no list route to search yet."
     },
     "modules/party/PartyWriteCards.tsx": {
       "labels": [

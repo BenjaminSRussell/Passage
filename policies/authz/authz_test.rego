@@ -165,6 +165,7 @@ segregation_grants := [
 	["procurement.purchase-order.confirm", "POST", "/v1/procurement/purchase-orders/p1:approve"],
 	["procurement.rfq.award", "POST", "/v1/procurement/rfqs/q1:award"],
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
+	["ledger.journal.read", "GET", "/v1/ledger/ledgers"],
 	["reporting.definition.maintain", "GET", "/v1/reporting/definitions/d1/export"],
 	["platform.promotion.approve", "POST", "/v1/platform/releases"],
 	["platform.environment.rollback", "POST", "/v1/platform/releases"],

@@ -76,9 +76,8 @@ describe("advanced rules list", () => {
   it("asks for a ledger first, then lists the rules with their structure and opens one", async () => {
     fake();
     const { container } = renderAt("/ledger/advanced-rules");
-    expect(screen.getByText("Enter a ledger id to see its advanced rules.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
+    expect(screen.getByText("Choose a ledger to see its advanced rules.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     const grid = await findTable({ name: "Advanced rules" });
     const open = await screen.findByRole("button", { name: rule.name });
     await waitFor(() => expect((open.closest("tr") as HTMLElement).textContent).toContain("PL v2"));

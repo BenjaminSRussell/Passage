@@ -20,7 +20,8 @@ export type LookupEntityKey =
   | "campaign"
   | "fund"
   | "user"
-  | "load";
+  | "load"
+  | "ledger";
 
 export interface LookupOption {
   id: string;
@@ -486,7 +487,15 @@ function userOption(row: Raw): LookupOption | null {
   return option(row, ["displayName", "email"], ["email"], ["userId", "id"]);
 }
 
+/** A ledger reads "General ledger (GL · USD)": the ledger service lists them per legal entity. */
+function ledgerOption(row: Raw): LookupOption | null {
+  const hit = option(row, ["name"], ["code"]);
+  const currency = text(row, "currency");
+  return hit ? { ...hit, number: [hit.number, currency].filter(Boolean).join(" · ") || undefined, currency } : null;
+}
+
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  ledger: listedEntity("ledger", "/api/v1/ledger/ledgers", ledgerOption, (scope) => ({ legalEntityId: scope.legalEntityId })),
   bankAccount: bankAccountDef,
   position: positionDef,
   compensationPlan: compensationPlanDef,
