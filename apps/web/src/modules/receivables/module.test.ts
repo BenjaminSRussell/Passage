@@ -28,6 +28,8 @@ describe("receivables module", () => {
       "/receivables/payments",
       "/receivables/payments/new",
       "/receivables/payments/:id",
+      "/receivables/remittance-advice",
+      "/receivables/gl-journals",
       "/receivables/lockbox",
       "/receivables/lockbox/new",
       "/receivables/bank-statements",
