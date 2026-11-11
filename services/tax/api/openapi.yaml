@@ -957,7 +957,7 @@ paths:
     get:
       operationId: getVatReclaim
       x-passage-duty: tax.vatreturn.read
-      summary: Input tax of a period per code: what may be reclaimed and what stays in the cost of the purchases
+      summary: "Input tax of a period per code: what may be reclaimed and what stays in the cost of the purchases"
       parameters:
         - { name: period_from, in: query, required: false, schema: { type: string } }
         - { name: period_to, in: query, required: false, schema: { type: string } }
@@ -999,7 +999,7 @@ paths:
     post:
       operationId: runWithholdingRemittance
       x-passage-duty: tax.withholding.remit
-      summary: Remit the withholding of a period: totals per code and currency, and one numbered certificate per payee, code and currency; TAX-0014 when nothing is waiting
+      summary: "Remit the withholding of a period: totals per code and currency, and one numbered certificate per payee, code and currency; TAX-0014 when nothing is waiting"
       requestBody:
         required: true
         content:
@@ -1075,7 +1075,7 @@ paths:
     get:
       operationId: listIntrastatProducts
       x-passage-duty: tax.intrastat.read
-      summary: Intrastat mapping of products: commodity code, origin and mass per unit
+      summary: "Intrastat mapping of products: commodity code, origin and mass per unit"
       responses:
         "200":
           description: OK
