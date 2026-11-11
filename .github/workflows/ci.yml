@@ -47,9 +47,10 @@ jobs:
         with:
           go-version: '1.26'
           cache-dependency-path: '**/go.sum'
-      # The runner's apt mirror has outages; retry so a short one does not fail the job.
+      # The runner's apt mirror has outages: fall back to archive.ubuntu.com and retry.
       - run: |
           for attempt in 1 2 3 4 5; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
             sudo apt-get update -qq && sudo apt-get install -y -qq -o Acquire::Retries=3 libxml2-utils && break
             [ "$attempt" -lt 5 ] || exit 1
             sleep $((attempt * 20))
@@ -103,9 +104,10 @@ jobs:
         with:
           go-version: '1.26'
           cache-dependency-path: '**/go.sum'
-      # The runner's apt mirror has outages; retry so a short one does not fail the job.
+      # The runner's apt mirror has outages: fall back to archive.ubuntu.com and retry.
       - run: |
           for attempt in 1 2 3 4 5; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
             sudo apt-get update -qq && sudo apt-get install -y -qq -o Acquire::Retries=3 libxml2-utils && break
             [ "$attempt" -lt 5 ] || exit 1
             sleep $((attempt * 20))
@@ -154,6 +156,7 @@ jobs:
       - run: |
           npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/playwright" playwright@1.64.1
           for attempt in 1 2 3 4 5; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
             "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium && break
             [ "$attempt" -lt 5 ] || exit 1
             sleep $((attempt * 20))
@@ -218,6 +221,7 @@ jobs:
       - run: npm run build
       - run: |
           for attempt in 1 2 3 4 5; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
             npx playwright install --with-deps chromium && break
             [ "$attempt" -lt 5 ] || exit 1
             sleep $((attempt * 20))
