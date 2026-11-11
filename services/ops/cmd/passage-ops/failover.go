@@ -85,7 +85,7 @@ func runFailover(ctx context.Context, args []string, out io.Writer, getenv func(
 	if event == "" {
 		event = newEventID()
 	}
-	fmt.Fprintf(out, "failover event %s (rerun with --event %s to resume)\n", event, event)
+	_, _ = fmt.Fprintf(out, "failover event %s (rerun with --event %s to resume)\n", event, event)
 	var applied struct {
 		store.Failover
 		Request *store.Request `json:"request"`
@@ -95,7 +95,7 @@ func runFailover(ctx context.Context, args []string, out io.Writer, getenv func(
 		return err
 	}
 	if status == http.StatusAccepted {
-		fmt.Fprintf(out, "target lag %d s is over the limit: a second operator must approve within %s:\n  passage-ops failover approve --request %s\n",
+		_, _ = fmt.Fprintf(out, "target lag %d s is over the limit: a second operator must approve within %s:\n  passage-ops failover approve --request %s\n",
 			applied.Request.LagSeconds, store.RequestTTL, applied.Request.ID)
 		return nil
 	}
@@ -122,7 +122,7 @@ func runApprove(ctx context.Context, args []string, out io.Writer, getenv func(s
 	if _, err := c.do(ctx, http.MethodPost, "/v1/ops/failover-requests/"+esc(id)+":approve", nil, nil, &rec); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "approved; failover event %s\n", rec.EventID)
+	_, _ = fmt.Fprintf(out, "approved; failover event %s\n", rec.EventID)
 	return execute(ctx, c, rec.EventID, out, getenv, d, unreachable)
 }
 
@@ -158,7 +158,7 @@ func dryRun(ctx context.Context, c *client, to string, acceptLoss bool, out io.W
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "dry run: fail over %s -> %s (lag %d s, data loss accepted: %v)\n", plan.From, plan.To, plan.LagSeconds, plan.AcceptDataLoss)
+	_, _ = fmt.Fprintf(out, "dry run: fail over %s -> %s (lag %d s, data loss accepted: %v)\n", plan.From, plan.To, plan.LagSeconds, plan.AcceptDataLoss)
 	res, err := failover.Runner{DryRun: true}.Run(ctx, plan, nil)
 	if err != nil {
 		return err
@@ -169,7 +169,7 @@ func dryRun(ctx context.Context, c *client, to string, acceptLoss bool, out io.W
 
 func printSteps(out io.Writer, res []failover.StepResult) {
 	for _, r := range res {
-		fmt.Fprintf(out, "  %d. %-26s %-8s %s\n", r.Order, r.Action, r.Status, r.Detail)
+		_, _ = fmt.Fprintf(out, "  %d. %-26s %-8s %s\n", r.Order, r.Action, r.Status, r.Detail)
 	}
 }
 
@@ -200,14 +200,14 @@ func execute(ctx context.Context, c *client, event string, out io.Writer, getenv
 		_, err := c.do(ctx, http.MethodPut, "/v1/ops/failovers/"+esc(event)+"/steps/"+esc(res.Action), nil, body, nil)
 		return err
 	}}
-	fmt.Fprintf(out, "executing %s -> %s\n", rec.Plan.From, rec.Plan.To)
+	_, _ = fmt.Fprintf(out, "executing %s -> %s\n", rec.Plan.From, rec.Plan.To)
 	res, err := r.Run(ctx, rec.Plan, done)
 	printSteps(out, res)
 	if err != nil {
-		fmt.Fprintf(out, "stopped; fix the cause and run: passage-ops failover resume --event %s\n", event)
+		_, _ = fmt.Fprintf(out, "stopped; fix the cause and run: passage-ops failover resume --event %s\n", event)
 		return err
 	}
-	fmt.Fprintln(out, "failover complete")
+	_, _ = fmt.Fprintln(out, "failover complete")
 	return nil
 }
 

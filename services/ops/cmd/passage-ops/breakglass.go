@@ -40,17 +40,17 @@ func runBreakGlass(ctx context.Context, args []string, out io.Writer, getenv fun
 		if _, err := c.do(ctx, http.MethodPost, "/v1/ops/break-glass", nil, map[string]any{"reasonCode": reason, "ticketRef": ticket, "minutes": minutes}, &g); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "break-glass window %s open until %s; every use is logged and reviewed\n", g.ID, g.ExpiresAt.Format("15:04:05Z07:00"))
+		_, _ = fmt.Fprintf(out, "break-glass window %s open until %s; every use is logged and reviewed\n", g.ID, g.ExpiresAt.Format("15:04:05Z07:00"))
 	case "revoke":
 		if _, err := c.do(ctx, http.MethodPost, "/v1/ops/break-glass/"+esc(id)+":revoke", nil, nil, &g); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "window %s revoked\n", g.ID)
+		_, _ = fmt.Fprintf(out, "window %s revoked\n", g.ID)
 	case "review":
 		if _, err := c.do(ctx, http.MethodPost, "/v1/ops/break-glass/"+esc(id)+":review", nil, map[string]any{"outcome": outcome, "note": note}, &g); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "window %s reviewed: %s\n", g.ID, g.ReviewOutcome)
+		_, _ = fmt.Fprintf(out, "window %s reviewed: %s\n", g.ID, g.ReviewOutcome)
 	case "list":
 		var list struct {
 			Items []store.BreakGlass `json:"items"`
@@ -67,7 +67,7 @@ func runBreakGlass(ctx context.Context, args []string, out io.Writer, getenv fun
 			if w.ReviewedBy != "" {
 				state = "reviewed by " + w.ReviewedBy + ": " + w.ReviewOutcome
 			}
-			fmt.Fprintf(out, "%s  %s  %s  %s  uses=%d  %s\n", w.ID, w.UserID, w.ReasonCode, w.TicketRef, w.Uses, state)
+			_, _ = fmt.Fprintf(out, "%s  %s  %s  %s  uses=%d  %s\n", w.ID, w.UserID, w.ReasonCode, w.TicketRef, w.Uses, state)
 		}
 	default:
 		return fmt.Errorf("unknown break-glass command %q", args[0])

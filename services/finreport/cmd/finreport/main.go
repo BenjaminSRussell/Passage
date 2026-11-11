@@ -138,7 +138,7 @@ func newHandler(st api.Store, cfg config.Reporting, opts ...func(*api.API)) http
 		o(a)
 	}
 	a.Register(router)
-	public := a.PublicHandler(httpx.ParseTrustedProxies(os.Getenv(httpx.TrustedProxiesEnv)))
+	public := httpx.FenceMiddleware(a.PublicHandler(httpx.ParseTrustedProxies(os.Getenv(httpx.TrustedProxiesEnv))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, api.SharedPathPrefix) {
 			public.ServeHTTP(w, r)

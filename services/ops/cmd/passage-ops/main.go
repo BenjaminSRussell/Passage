@@ -26,7 +26,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Getenv, defaultDeps()); err != nil {
-		fmt.Fprintln(os.Stderr, "passage-ops:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "passage-ops:", err)
 		os.Exit(1)
 	}
 }

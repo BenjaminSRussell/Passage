@@ -29,8 +29,8 @@ until it is re-seeded as PASSIVE.
 ## What the fence does not cover
 The 503 fence is in `platform/go/httpx`, so it covers the HTTP API of every Go service built on it. It does not stop Kafka consumers
 and background workers (outbox relays, schedulers, the finreport and fulfillment consumers), which keep running against whatever
-database they can still reach, and it does not cover finreport's share-link download route, which does not go through the fence
-middleware's router. In a fenced region the database fence (CNPG `fencedInstances` and the NetworkPolicy) is what stops them: scale
+database they can still reach. (finreport's public share-link download is mounted outside the platform router and is wrapped in
+`httpx.FenceMiddleware`, so it answers 503 too.) In a fenced region the database fence (CNPG `fencedInstances` and the NetworkPolicy) is what stops them: scale
 the consumers and workers to zero in step 7 of the old region, as for the application pods.
 
 ## Steps (`passage-ops failover --to eu-central`)

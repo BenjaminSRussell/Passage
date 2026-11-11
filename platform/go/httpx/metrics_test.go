@@ -113,7 +113,10 @@ func TestServeWithMetricsServesTheSharedSeriesOnTheAdminPort(t *testing.T) {
 	}
 	cancel()
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("a clean shutdown returns nil, got %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("ServeWithMetrics did not stop with its context")
 	}
@@ -171,7 +174,10 @@ func TestServeWithMetricsDrainsAnInFlightRequestOnShutdown(t *testing.T) {
 		t.Fatalf("the in-flight request must complete: %s", got)
 	}
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("a clean shutdown returns nil, got %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("ServeWithMetrics did not return after draining")
 	}

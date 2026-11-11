@@ -223,6 +223,10 @@ var (
 // run the rejoin. Call it before the first router is built.
 func DisableFence() { fenceDisabled.Store(true) }
 
+// FenceMiddleware is the process fence for a handler that does not go through NewRouter (finreport's public share-link
+// download), so it answers 503 in a fenced region too. It passes everything through when no fence is configured.
+func FenceMiddleware(next http.Handler) http.Handler { return processFenceMiddleware(next) }
+
 // stopProcessFence ends the process fence's poll; Serve calls it when it returns.
 func stopProcessFence() {
 	if f := processFence.Load(); f != nil {

@@ -21,7 +21,7 @@ const (
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Getenv, time.Now()); err != nil {
-		fmt.Fprintln(os.Stderr, "tenant-restore:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "tenant-restore:", err)
 		os.Exit(1)
 	}
 }

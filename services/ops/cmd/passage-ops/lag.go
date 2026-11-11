@@ -189,7 +189,7 @@ func runLagReport(ctx context.Context, args []string, out io.Writer, getenv func
 		if err != nil {
 			slog.Error("lag report", "region", region, "err", err)
 		} else {
-			fmt.Fprintf(out, "%s lag %d s\n", region, lag)
+			_, _ = fmt.Fprintf(out, "%s lag %d s\n", region, lag)
 		}
 		if once {
 			return err
