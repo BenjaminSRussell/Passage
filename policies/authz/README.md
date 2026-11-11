@@ -28,6 +28,10 @@ The PRD (`docs/prd`, `docs/PRD-full.md`) keeps its own duty identifiers (`WMS_WO
 
 `services/identity/opa_contract_test.go` scans every Go service under `services/` and `tools/migration-factory`. It fails when a duty constant or `RequireDuty`/`HasDuty` string literal is missing from `data.json`, and when a call passes an argument it cannot resolve to a constant or literal. Call sites that pass a looked-up duty (route tables, `anyDuty` loops) are listed with a reason in `dynamicDutyArguments`; an entry that no longer matches a call fails the test.
 
+## Operator-only duties
+
+`"operator_only": true` duties (the `ops.*` duties of the ops control plane) act on platform-wide state, not on one tenant's data. `authz.rego` grants them only when the subject's tenant is `data.operator_tenant_id`, which identity writes into the compiled bundle from `IDENTITY_OPERATOR_TENANT_ID`; without it they grant nothing. Identity also refuses to assign them in another tenant and drops any such assignment from the bundle, and the ops service serves the operator tenant only.
+
 ## Resources
 
 Each permission is a route template matched with `glob.match(pattern, ["/", ":"], path)`:

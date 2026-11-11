@@ -3,6 +3,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -25,6 +26,9 @@ const (
 	CodeRegionUnknown     = "OPS-1710"
 	CodeResyncUnverified  = "OPS-1711"
 	CodeNoPrimary         = "OPS-1712"
+	CodeRequestUnknown    = "OPS-1713"
+	CodeRequestExpired    = "OPS-1714"
+	CodeOperatorOnly      = "OPS-1715"
 )
 
 // Region is one deployed region and its replication state.
@@ -72,7 +76,9 @@ func ValidateTopology(regions []Region) error {
 	return nil
 }
 
-// FailoverRequest is the input of PlanFailover. Approver is the second PlatformAdmin; Caller is the requester.
+// FailoverRequest is the input of PlanFailover. Caller is the requester. Approver is the second operator who approved the
+// failover request: the verified caller of the approve route, never a value from a request body. It is empty on the first
+// call, when a failover that needs data loss accepted becomes a request (IsApprovalRequired).
 type FailoverRequest struct {
 	To             string
 	AcceptDataLoss bool
@@ -129,7 +135,7 @@ func PlanFailover(regions []Region, req FailoverRequest) (Plan, error) {
 			return Plan{}, fail(CodeLagExceeded, "target region lag %d s exceeds %d s. Use acceptDataLoss with a second approver", to.LagSeconds, req.MaxLagSeconds)
 		}
 		if req.Approver == "" || req.Approver == req.Caller {
-			return Plan{}, fail(CodeApprovalRequired, "failover needs a second PlatformAdmin, other than the requester, as approvedBy")
+			return Plan{}, fail(CodeApprovalRequired, "a failover that accepts data loss needs a second operator, other than the requester, to approve the failover request")
 		}
 	}
 	plan := Plan{From: from.Name, To: to.Name, AcceptDataLoss: lossy, LagSeconds: to.LagSeconds}
@@ -140,6 +146,12 @@ func PlanFailover(regions []Region, req FailoverRequest) (Plan, error) {
 		plan.Steps = append(plan.Steps, Step{Order: i + 1, Action: a.action, Region: a.region})
 	}
 	return plan, nil
+}
+
+// IsApprovalRequired reports whether err is the OPS-1702 refusal: the failover is valid but needs a second operator.
+func IsApprovalRequired(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Code == CodeApprovalRequired
 }
 
 // Apply returns the regions after the plan: the old primary FENCED, the target PRIMARY.

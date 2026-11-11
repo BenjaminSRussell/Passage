@@ -33,8 +33,9 @@ func newEnv(t *testing.T, region string) *env {
 		t.Fatal(err)
 	}
 	r := httpx.NewRouterWithoutTenant()
-	New(st, Config{Region: region, MaxLagSeconds: 300}).Register(r)
-	return &env{router: r, tenant: ids.New()}
+	operator := ids.New()
+	New(st, Config{Region: region, MaxLagSeconds: 300, OperatorTenantID: operator}).Register(r)
+	return &env{router: r, tenant: operator}
 }
 
 func (e *env) do(method, path, user, duties, key, body string) *httptest.ResponseRecorder {
@@ -152,13 +153,84 @@ func TestLagGuardOverHTTP(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity || code(t, rec) != domain.CodeLagExceeded {
 		t.Fatalf("lag: %d %s", rec.Code, rec.Body)
 	}
-	rec = e.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-2", `{"to":"eu-west","acceptDataLoss":true,"approvedBy":"alice"}`)
-	if rec.Code != http.StatusUnprocessableEntity || code(t, rec) != domain.CodeApprovalRequired {
-		t.Fatalf("same approver: %d %s", rec.Code, rec.Body)
+	// The approver never comes from the body.
+	if rec := e.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-2", `{"to":"eu-west","acceptDataLoss":true,"approvedBy":"bob"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("approvedBy in body: %d %s", rec.Code, rec.Body)
 	}
-	rec = e.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-3", `{"to":"eu-west","acceptDataLoss":true,"approvedBy":"bob"}`)
-	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"approvedBy":"bob"`) {
+	rec = e.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-3", `{"to":"eu-west","acceptDataLoss":true}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("request: %d %s", rec.Code, rec.Body)
+	}
+	var created struct {
+		Request store.Request `json:"request"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	id := created.Request.ID
+	if !ids.Valid(id) || created.Request.Status != "PENDING" || created.Request.RequestedBy != "alice" {
+		t.Fatalf("request body = %s", rec.Body)
+	}
+	if rec := e.do("GET", "/healthz/region", "", "", "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("a pending request changed the topology: %d", rec.Code)
+	}
+	if rec := e.do("GET", "/v1/ops/failover-requests/"+id, "bob", DutyView, "", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"PENDING"`) {
+		t.Fatalf("read request: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/ops/failover-requests/"+id+":approve", "bob", DutyView, "", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("approve without the failover duty: %d", rec.Code)
+	}
+	rec = e.do("POST", "/v1/ops/failover-requests/"+id+":approve", "alice", DutyFailover, "", "")
+	if rec.Code != http.StatusForbidden || code(t, rec) != domain.CodeApprovalRequired {
+		t.Fatalf("self-approval: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/ops/failover-requests/"+ids.New()+":approve", "bob", DutyFailover, "", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown request: %d", rec.Code)
+	}
+	rec = e.do("POST", "/v1/ops/failover-requests/"+id+":approve", "bob", DutyFailover, "", "")
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"approvedBy":"bob"`) || !strings.Contains(rec.Body.String(), `"requestedBy":"alice"`) {
 		t.Fatalf("approved: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/ops/failover-requests/"+id+":approve", "carol", DutyFailover, "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("approval replay: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/healthz/region", "", "", "", ""); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("us-east still primary after the approved failover: %d", rec.Code)
+	}
+}
+
+func TestOpsRoutesServeTheOperatorTenantOnly(t *testing.T) {
+	e := newEnv(t, "us-east")
+	all := DutyView + "," + DutyFailover + "," + DutyReport
+	operator := e.tenant
+	e.tenant = ids.New()
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/v1/ops/regions", ""},
+		{"GET", "/v1/ops/capacity/estimate", ""},
+		{"PUT", "/v1/ops/regions/eu-west/lag", `{"lagSeconds":1}`},
+		{"POST", "/v1/ops/failover", `{"to":"eu-west"}`},
+		{"POST", "/v1/ops/regions/us-east:rejoin", `{"resyncVerified":true}`},
+		{"GET", "/v1/ops/failover-requests/" + ids.New(), ""},
+		{"POST", "/v1/ops/failover-requests/" + ids.New() + ":approve", ""},
+	} {
+		rec := e.do(c.method, c.path, "mallory", all, "evt-x", c.body)
+		if rec.Code != http.StatusForbidden || code(t, rec) != domain.CodeOperatorOnly {
+			t.Errorf("%s %s from another tenant: %d %s", c.method, c.path, rec.Code, rec.Body)
+		}
+	}
+	e.tenant = operator
+	if rec := e.do("GET", "/v1/ops/regions", "olivia", all, "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("operator: %d %s", rec.Code, rec.Body)
+	}
+	// No operator tenant configured serves no one.
+	r := httpx.NewRouterWithoutTenant()
+	New(nil, Config{Region: "us-east"}).Register(r)
+	req := httptest.NewRequest("GET", "/v1/ops/regions", nil)
+	req.Header.Set("X-Passage-Tenant", operator)
+	req.Header.Set("X-Passage-User", "olivia")
+	req.Header.Set("X-Passage-Duties", all)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("unconfigured operator tenant: %d", rec.Code)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/ops/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/ops/internal/store"
@@ -38,6 +40,9 @@ type Config struct {
 	Region string
 	// MaxLagSeconds is FAILOVER_MAX_LAG_S.
 	MaxLagSeconds int
+	// OperatorTenantID is the platform operator's tenant (OPS_OPERATOR_TENANT_ID). The ops routes act on platform-wide
+	// state, so they serve only principals of this tenant, whatever duties another tenant's role holds. Empty serves no one.
+	OperatorTenantID string
 }
 
 // API is the ops HTTP surface.
@@ -63,11 +68,27 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/healthz/region", a.regionHealth)
 	r.Group(func(g chi.Router) {
 		g.Use(tenant.Middleware)
+		g.Use(a.operatorOnly)
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/regions", a.regions)
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/capacity/estimate", a.capacity)
 		g.With(authz.RequireDuty(DutyReport)).Put("/v1/ops/regions/{name}/lag", a.reportLag)
 		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/failover", a.failover)
 		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/regions/{name}:rejoin", a.rejoin)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/failover-requests/{id}", a.request)
+		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/failover-requests/{id}:approve", a.approve)
+	})
+}
+
+// operatorOnly refuses every caller outside the operator tenant (OPS-1715): a tenant role granted an ops.* duty still
+// cannot reach the platform's regions.
+func (a *API) operatorOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := tenant.FromContext(r.Context())
+		if !ok || a.cfg.OperatorTenantID == "" || !strings.EqualFold(p.TenantID, a.cfg.OperatorTenantID) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, domain.CodeOperatorOnly, "the ops control plane serves the platform operator tenant only"))
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -147,10 +168,11 @@ func (a *API) reportLag(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, region)
 }
 
+// failoverRequest has no approver: a failover that accepts data loss becomes a request, and a second operator approves it
+// with their own verified call (POST /v1/ops/failover-requests/{id}:approve). A body naming approvedBy is refused.
 type failoverRequest struct {
 	To             string `json:"to"`
 	AcceptDataLoss bool   `json:"acceptDataLoss"`
-	ApprovedBy     string `json:"approvedBy"`
 }
 
 func (a *API) failover(w http.ResponseWriter, r *http.Request) {
@@ -173,22 +195,70 @@ func (a *API) failover(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "failover needs a named user"))
 		return
 	}
-	rec, replay, err := a.store.Failover(r.Context(), eventID, domain.FailoverRequest{
-		To: req.To, AcceptDataLoss: req.AcceptDataLoss, Caller: p.UserID, Approver: req.ApprovedBy, MaxLagSeconds: a.cfg.MaxLagSeconds,
+	out, err := a.store.Failover(r.Context(), eventID, domain.FailoverRequest{
+		To: req.To, AcceptDataLoss: req.AcceptDataLoss, Caller: p.UserID, MaxLagSeconds: a.cfg.MaxLagSeconds,
 	})
 	if err != nil {
 		a.rejected.Add(1)
 		httpx.Fail(w, r, err)
 		return
 	}
+	if out.Request != nil {
+		if !out.Replay {
+			slog.Warn("failover approval requested", "event", eventID, "request", out.Request.ID, "to", out.Request.To,
+				"lagSeconds", out.Request.LagSeconds, "requestedBy", out.Request.RequestedBy, "correlationId", middleware.GetReqID(r.Context()))
+		}
+		httpx.JSON(w, http.StatusAccepted, map[string]any{"request": out.Request})
+		return
+	}
+	a.applied(w, r, *out.Failover, out.Replay)
+}
+
+func (a *API) applied(w http.ResponseWriter, r *http.Request, rec store.Failover, replay bool) {
 	status := http.StatusOK
 	if !replay {
 		a.failovers.Add(1)
 		status = http.StatusCreated
-		slog.Warn("failover applied", "event", eventID, "from", rec.Plan.From, "to", rec.Plan.To, "acceptDataLoss", rec.Plan.AcceptDataLoss,
+		slog.Warn("failover applied", "event", rec.EventID, "from", rec.Plan.From, "to", rec.Plan.To, "acceptDataLoss", rec.Plan.AcceptDataLoss,
 			"requestedBy", rec.RequestedBy, "approvedBy", rec.ApprovedBy, "correlationId", middleware.GetReqID(r.Context()))
 	}
 	httpx.JSON(w, status, rec)
+}
+
+func (a *API) request(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodeRequestUnknown, "failover request not found"))
+		return
+	}
+	req, err := a.store.Request(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, req)
+}
+
+// approve applies a pending failover request. The approver is the verified caller, never a value from the body, and the
+// requester cannot approve their own request.
+func (a *API) approve(w http.ResponseWriter, r *http.Request) {
+	p, _ := tenant.FromContext(r.Context())
+	if p.UserID == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "approving a failover needs a named user"))
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodeRequestUnknown, "failover request not found"))
+		return
+	}
+	rec, replay, err := a.store.Approve(r.Context(), id, p.UserID, a.cfg.MaxLagSeconds)
+	if err != nil {
+		a.rejected.Add(1)
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.applied(w, r, rec, replay)
 }
 
 type rejoinRequest struct {

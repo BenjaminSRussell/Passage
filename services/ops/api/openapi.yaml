@@ -40,8 +40,11 @@ paths:
       summary: Fail over to a passive region
       description: >
         Fences the current primary and promotes the target in one transaction (BR-50.1: never two PRIMARY). A target whose lag
-        exceeds the limit is refused (OPS-1701) unless acceptDataLoss is set with a second approver other than the caller (OPS-1702).
-        The Idempotency-Key is the failover event id: a retry returns the first outcome with 200 and changes nothing.
+        exceeds the limit is refused (OPS-1701) unless acceptDataLoss is set. Then nothing is applied: the call answers 202 with a
+        failover request that a second operator, other than the caller, approves with their own call
+        (POST /v1/ops/failover-requests/{id}:approve, OPS-1702). The body names no approver.
+        The Idempotency-Key is the failover event id: a retry returns the first outcome (200, or 202 with the same request) and
+        changes nothing. Every ops route serves the platform operator tenant only (OPS-1715).
       x-passage-duty: ops.failover.execute
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 128 } }
@@ -54,6 +57,40 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Failover' } } }
         '200':
           description: The event id was already recorded; the first outcome.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Failover' } } }
+        '202':
+          description: The failover accepts data loss and waits for a second operator's approval; nothing changed yet.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FailoverRequestAccepted' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failover-requests/{id}:
+    get:
+      operationId: getFailoverRequest
+      summary: Read a failover request that waits for, or received, its second approval
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The request.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FailoverApproval' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failover-requests/{id}:approve:
+    post:
+      operationId: approveFailoverRequest
+      summary: Approve a failover request as the second operator
+      description: >
+        The approver is the verified caller and must not be the requester (403 OPS-1702). The plan is made again under the region
+        locks, so it reflects the topology and lag at approval time. A request older than 5 minutes (the two-person window) is refused (OPS-1714).
+        Approving an approved request returns the applied failover with 200 and changes nothing.
+      x-passage-duty: ops.failover.execute
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201':
+          description: Failover applied with the caller as approver.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Failover' } } }
+        '200':
+          description: The request was already approved; the applied failover.
           content: { application/json: { schema: { $ref: '#/components/schemas/Failover' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/ops/regions/{name}:rejoin:
@@ -158,7 +195,25 @@ components:
       properties:
         to: { type: string, description: The PASSIVE region to promote. }
         acceptDataLoss: { type: boolean, default: false }
-        approvedBy: { type: string, description: The second PlatformAdmin, required with acceptDataLoss when the lag is over the limit. }
+    FailoverApproval:
+      type: object
+      required: [id, eventId, to, lagSeconds, requestedBy, status, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        eventId: { type: string }
+        to: { type: string }
+        lagSeconds: { type: integer }
+        requestedBy: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED] }
+        approvedBy: { type: string }
+        approvedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    FailoverRequestAccepted:
+      type: object
+      required: [request]
+      properties:
+        request: { $ref: '#/components/schemas/FailoverApproval' }
     RejoinRequest:
       type: object
       additionalProperties: false

@@ -5,6 +5,9 @@ migrateOnStart: false
 region: { name: "", registered: "" }
 # PRD 9.50.5: a failover to a passive region lagging more than this needs acceptDataLoss and a second approver.
 failoverMaxLagSeconds: 300
+# The platform operator's tenant (identity's IDENTITY_OPERATOR_TENANT_ID). The ops routes serve this tenant only; the
+# service refuses to start without it.
+operatorTenantId: ""
 replicaCount: 2
 resources:
   requests: { cpu: 50m, memory: 64Mi }

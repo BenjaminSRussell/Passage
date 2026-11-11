@@ -47,6 +47,8 @@ spec:
               value: {{ .Values.region.registered | quote }}
             - name: FAILOVER_MAX_LAG_S
               value: {{ .Values.failoverMaxLagSeconds | quote }}
+            - name: OPS_OPERATOR_TENANT_ID
+              value: {{ .Values.operatorTenantId | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

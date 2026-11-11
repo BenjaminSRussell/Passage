@@ -12,6 +12,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/ops/internal/api"
 	"github.com/BenjaminSRussell/passage/services/ops/internal/domain"
@@ -48,6 +49,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	cfg := api.Config{Region: getenv("REGION_NAME")}
+	operator, ok := ids.Canonical(getenv("OPS_OPERATOR_TENANT_ID"))
+	if !ok || operator == ids.Nil {
+		return errors.New("OPS_OPERATOR_TENANT_ID must be the platform operator's tenant id (a UUID): the ops routes serve that tenant only")
+	}
+	cfg.OperatorTenantID = operator
 	if v := getenv("FAILOVER_MAX_LAG_S"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
