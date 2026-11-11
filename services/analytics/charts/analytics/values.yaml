@@ -29,6 +29,15 @@ reconciliation:
     key: CUBE_API_TOKEN
   ledgerUrl: ""
 
+# Cube semantic layer for query:execute and dashboard tile values (46-3). Off while url is
+# empty: those routes then answer ANA-0120. The secret is Cube's CUBEJS_API_SECRET; the
+# service signs a short-lived token with the caller's tenant and legal-entity scope.
+semanticLayer:
+  url: ""
+  secret:
+    name: analytics-cube
+    key: CUBE_API_SECRET
+
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

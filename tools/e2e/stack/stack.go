@@ -112,6 +112,21 @@ func New(cfg Config) (*Stack, error) {
 		cfg.RunDir = filepath.Join(cfg.Root, ".run")
 	}
 	s := &Stack{cfg: cfg, ports: map[string]int{}, admin: map[string]int{}, seeds: map[string][]byte{}, dbs: map[string]string{}, procs: map[string]*proc{}}
+	// Every picked port stays held until all are picked: a port released at once can come back from the next ":0" listen, and two
+	// services would then be handed the same address (one fails with "address already in use").
+	var held []net.Listener
+	defer func() {
+		for _, l := range held {
+			_ = l.Close()
+		}
+	}()
+	pick := func(offset int) (int, error) {
+		port, l, err := pickPort(cfg.BasePort, offset)
+		if l != nil {
+			held = append(held, l)
+		}
+		return port, err
+	}
 	for i, svc := range services {
 		seed := make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(seed); err != nil {
@@ -119,26 +134,27 @@ func New(cfg Config) (*Stack, error) {
 		}
 		s.seeds[svc.name] = seed
 		var err error
-		if s.ports[svc.name], err = pickPort(cfg.BasePort, i*2); err != nil {
+		if s.ports[svc.name], err = pick(i * 2); err != nil {
 			return nil, err
 		}
-		if s.admin[svc.name], err = pickPort(cfg.BasePort, i*2+1); err != nil {
+		if s.admin[svc.name], err = pick(i*2 + 1); err != nil {
 			return nil, err
 		}
 	}
 	return s, nil
 }
 
-func pickPort(base, offset int) (int, error) {
+// pickPort returns base+offset when a base port is set, otherwise a free loopback port and the listener that holds it; the caller
+// closes the listener once every port is picked, so no two picks return the same port.
+func pickPort(base, offset int) (int, net.Listener, error) {
 	if base > 0 {
-		return base + offset, nil
+		return base + offset, nil, nil
 	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	defer func() { _ = l.Close() }()
-	return l.Addr().(*net.TCPAddr).Port, nil
+	return l.Addr().(*net.TCPAddr).Port, l, nil
 }
 
 func (s *Stack) URL(name string) string { return fmt.Sprintf("http://127.0.0.1:%d", s.ports[name]) }

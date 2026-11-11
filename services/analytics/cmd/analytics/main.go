@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/analytics/internal/api"
+	"github.com/BenjaminSRussell/passage/services/analytics/internal/cube"
 	"github.com/BenjaminSRussell/passage/services/analytics/internal/store"
 	"github.com/BenjaminSRussell/passage/services/analytics/migrations"
 )
@@ -74,7 +75,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
-	api.New(st).Register(router)
+	a := api.New(st)
+	if url, secret := getenv("SEMANTIC_LAYER_URL"), getenv("SEMANTIC_LAYER_SECRET"); url != "" && secret != "" {
+		a.WithExecutor(cube.New(url, secret, nil))
+	} else {
+		slog.Info("semantic layer not configured; query:execute and dashboard tile values answer ANA-0120")
+	}
+	a.Register(router)
 	return httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), tenant.Middleware(router))
 }
 
