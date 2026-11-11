@@ -184,11 +184,11 @@ paths:
         what is recognized is 422 REV-0402 (use a credit note); a prospective change with nothing left is 422 REV-0404; a date before
         the contract date is 422 REV-0401; a contract that credit notes touched is 409 REV-0405. Each modification stores each
         obligation's allocation change on its effective date, and the roll-forward adds it in that period. Adding goods or services is
-        `:allocate`. If-Match, when sent, must carry the contract version the caller reviewed. Emits
+        `:allocate`. If-Match is required and must carry the contract version the caller reviewed. Emits
         dev.passage.revrec.contract.allocated.v1 again, and schedule.recognized for a milestone catch-up.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: If-Match, in: header, required: false, schema: { type: string }, description: 'Contract version as an entity tag, e.g. "1".' }
+        - { name: If-Match, in: header, required: true, schema: { type: string }, description: 'Contract version as an entity tag, e.g. "1". Required (428 without it): the price change is relative, so a repeat of the same call finds the version moved on and is refused with 412 instead of applying twice.' }
       requestBody:
         required: true
         content:
@@ -209,6 +209,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
   /v1/revrec/milestones/{id}:satisfy:
     post:
       operationId: satisfyMilestone

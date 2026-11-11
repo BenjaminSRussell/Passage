@@ -26,6 +26,9 @@ ALTER TABLE settlement ADD COLUMN IF NOT EXISTS item_currency char(3) CHECK (ite
 ALTER TABLE settlement ADD COLUMN IF NOT EXISTS item_amount numeric(20,6) CHECK (item_amount IS NULL OR item_amount > 0);
 ALTER TABLE settlement ADD COLUMN IF NOT EXISTS payment_rate numeric(20,10) CHECK (payment_rate IS NULL OR payment_rate > 0);
 ALTER TABLE settlement ADD COLUMN IF NOT EXISTS item_rate numeric(20,10) CHECK (item_rate IS NULL OR item_rate > 0);
+-- The time a deposit was released, so a backfilled release journal is dated then. Rows released before this column have none; the backfill
+-- dates them by their received date.
+ALTER TABLE down_payment ADD COLUMN IF NOT EXISTS released_at timestamptz;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN

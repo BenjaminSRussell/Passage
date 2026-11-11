@@ -2647,7 +2647,7 @@ components:
               writeOff: { $ref: "#/components/schemas/Money" }
               itemAmount:
                 $ref: "#/components/schemas/Money"
-                description: What the settlement takes off the item in the item's currency; required for an item in another currency than the payment (and then `amount` is the cash in the payment currency, with no discount or write-off).
+                description: What the settlement takes off the item in the item's currency, with at most the currency's decimals; required for an item in another currency than the payment (and then `amount` is the cash in the payment currency, with no discount or write-off). It must be within the BR-30.4 write-off tolerance (the larger of 5.00 and 0.5% of it) of what the cash is worth in the item's currency at the value-date rate, else 422 AR-FX-TOLERANCE.
         onAccount: { $ref: "#/components/schemas/Money" }
     ApplyResult:
       type: object

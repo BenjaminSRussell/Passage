@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/fxclient"
@@ -148,16 +149,98 @@ func (s *Postgres) rate(ctx context.Context, legalEntityID, from, to string, dat
 	}
 }
 
+// CodeFXTolerance: the item amount of a cross-currency settlement is not what the cash is worth in the item's currency.
+const CodeFXTolerance = "AR-FX-TOLERANCE"
+
+// rateBook holds the rates an apply needs, read before any lock is taken.
+type rateBook map[string]decimal.Decimal
+
+func rateKey(from, to string, date time.Time) string {
+	return from + ">" + to + "@" + date.Format(dateLayout)
+}
+
+// rateFor returns a prefetched rate, reading it now when it was not prefetched.
+func (s *Postgres) rateFor(ctx context.Context, book rateBook, legalEntityID, from, to string, date time.Time) (decimal.Decimal, error) {
+	if r, ok := book[rateKey(from, to, date)]; ok {
+		return r, nil
+	}
+	return s.rate(ctx, legalEntityID, from, to, date)
+}
+
+// prefetchRates reads, before the apply transaction takes its locks, the rates a cross-currency apply will need: the payment currency and
+// each foreign item's currency into the functional currency, and the payment currency into the item's at the value date. It reads the
+// payment and items without locking them; anything it cannot know (a missing item, a disabled entity) is left for the transaction to
+// refuse. A rate it cannot read is the apply's answer.
+func (s *Postgres) prefetchRates(ctx context.Context, id string, req ApplyRequest) (rateBook, error) {
+	book := rateBook{}
+	var pay Payment
+	var set FXSetting
+	type itemRef struct{ currency, docDate string }
+	items := map[string]itemRef{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if pay, err = scanPayment(tx.QueryRow(ctx, `select `+paymentColumns+` from payment where id = $1`, id)); err != nil {
+			return nil
+		}
+		if set, err = loadFXSetting(ctx, tx, pay.LegalEntityID); err != nil {
+			return err
+		}
+		for _, a := range req.Allocations {
+			var it itemRef
+			if err := tx.QueryRow(ctx, `select currency::text, document_date::text from open_item where id = $1`, a.OpenItemID).Scan(&it.currency, &it.docDate); err == nil {
+				items[a.OpenItemID] = it
+			}
+		}
+		return nil
+	})
+	if err != nil || pay.ID == "" || !set.CrossCurrencyEnabled {
+		return book, err
+	}
+	for _, a := range req.Allocations {
+		it, ok := items[a.OpenItemID]
+		if !ok || it.currency == pay.Currency || !a.ItemCurrencyAmount.IsPositive() {
+			continue
+		}
+		value := parseDay(pay.ValueDate)
+		for _, q := range []struct {
+			from, to string
+			date     time.Time
+		}{{pay.Currency, set.FunctionalCurrency, value}, {it.currency, set.FunctionalCurrency, parseDay(it.docDate)}, {pay.Currency, it.currency, value}} {
+			if _, done := book[rateKey(q.from, q.to, q.date)]; done {
+				continue
+			}
+			r, err := s.rate(ctx, pay.LegalEntityID, q.from, q.to, q.date)
+			if err != nil {
+				return nil, err
+			}
+			book[rateKey(q.from, q.to, q.date)] = r
+		}
+	}
+	return book, nil
+}
+
 // priceCrossCurrency prices one cross-currency allocation: the cash at the rate of the payment's value date and the settled part of the
-// item at the rate of its document date, both into the functional currency.
-func (s *Postgres) priceCrossCurrency(ctx context.Context, set FXSetting, pay Payment, item OpenItem, a domain.Allocation) (settlementPricing, error) {
-	pr, err := s.rate(ctx, pay.LegalEntityID, pay.Currency, set.FunctionalCurrency, parseDay(pay.ValueDate))
+// item at the rate of its document date, both into the functional currency. It first checks the item amount against what the cash is
+// worth in the item's currency at the value date: a difference above the write-off tolerance of BR-30.4 (the larger of 5.00 and 0.5% of the
+// item amount, in the item's currency) is refused, so a small payment cannot close a large invoice into a realized loss.
+func (s *Postgres) priceCrossCurrency(ctx context.Context, book rateBook, set FXSetting, pay Payment, item OpenItem, a domain.Allocation) (settlementPricing, error) {
+	value, le := parseDay(pay.ValueDate), pay.LegalEntityID
+	pr, err := s.rateFor(ctx, book, le, pay.Currency, set.FunctionalCurrency, value)
 	if err != nil {
 		return settlementPricing{}, err
 	}
-	ir, err := s.rate(ctx, pay.LegalEntityID, item.Currency, set.FunctionalCurrency, parseDay(item.DocumentDate))
+	ir, err := s.rateFor(ctx, book, le, item.Currency, set.FunctionalCurrency, parseDay(item.DocumentDate))
 	if err != nil {
 		return settlementPricing{}, err
+	}
+	cross, err := s.rateFor(ctx, book, le, pay.Currency, item.Currency, value)
+	if err != nil {
+		return settlementPricing{}, err
+	}
+	worth := a.Amount.Mul(cross).Round(money.MinorUnits(item.Currency))
+	if gap, tol := a.ItemCurrencyAmount.Sub(worth).Abs(), domain.WriteOffTolerance(a.ItemCurrencyAmount); gap.GreaterThan(tol) {
+		return settlementPricing{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeFXTolerance,
+			"the cash of "+a.Amount.String()+" "+pay.Currency+" is worth about "+worth.String()+" "+item.Currency+" on the value date, but "+a.ItemCurrencyAmount.String()+" is taken off the item; the difference is more than the "+tol.String()+" allowed")
 	}
 	return settlementPricing{itemCurrency: item.Currency, paymentRate: pr, itemRate: ir,
 		fx: domain.ComputeRealizedFX(set.FunctionalCurrency, a.Amount, pr, a.ItemCurrencyAmount, ir)}, nil
@@ -208,6 +291,13 @@ func (s *Postgres) ReversePayment(ctx context.Context, id string, version int) (
 		}
 		if !appliable(pay.Status) || settlements > 0 || !pay.UnappliedAmount.Equal(pay.Amount) {
 			return httpx.NewProblem(http.StatusConflict, CodePaymentState, "only a payment that was never applied can be reversed (status "+pay.Status+")")
+		}
+		var confirmed int
+		if err := tx.QueryRow(ctx, `select count(*) from payment where tenant_id = $1 and confirmed_by_payment_id = $2`, p.TenantID, pay.ID).Scan(&confirmed); err != nil {
+			return err
+		}
+		if confirmed > 0 {
+			return httpx.NewProblem(http.StatusConflict, CodePaymentState, "this payment confirmed a remittance advice; reversing it would leave the advice confirmed by cash that is gone")
 		}
 		out, err = scanPayment(tx.QueryRow(ctx, `update payment set status = 'REVERSED', unapplied_amount = 0, version = version + 1
 			where tenant_id = $1 and id = $2 returning `+paymentColumns, p.TenantID, pay.ID))

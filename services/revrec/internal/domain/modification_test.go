@@ -194,3 +194,22 @@ func TestModify_ProspectiveSSPRevisionShiftsTheRemainingConsideration(t *testing
 		t.Errorf("a lines = %v", got)
 	}
 }
+
+// Earned lines not yet recognized: two months recognized and March (dated on the effective date) still SCHEDULED. Revenue to date is 330.00,
+// 200.00 is recognized and March's old 100.00 will be recognized anyway, so the catch-up is 30.00, not 130.00; March's line carries the whole
+// 130.00 and no new line is added.
+func TestModify_CatchUpDoesNotCountEarnedLinesThatAreNotRecognizedYet(t *testing.T) {
+	res, err := Modify(ModificationInput{Type: ModCatchUp, EffectiveDate: *day("2027-03-31"), Currency: "USD", TransactionPrice: dec("1200.00"),
+		PriceChange: dec("120.00"), Obligations: []ModObligation{ratable12("a", 2)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := res.Obligations[0]
+	if !c.CatchUp.Equal(dec("30.00")) || !res.CatchUp.Equal(dec("30.00")) || c.NewLine != nil {
+		t.Fatalf("catch-up %s total %s new line %+v", c.CatchUp, res.CatchUp, c.NewLine)
+	}
+	got := amounts(c)
+	if got["a-03"] != "130.00" || got["a-04"] != "110.00" || len(got) != 10 {
+		t.Fatalf("lines = %v", got)
+	}
+}

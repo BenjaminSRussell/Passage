@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS contract_modification (
   effective_date date NOT NULL,
   price_before numeric(20,6) NOT NULL,
   price_after numeric(20,6) NOT NULL CHECK (price_after > 0),
-  catch_up_amount numeric(20,6) NOT NULL DEFAULT 0 CHECK (catch_up_amount >= 0),
+  catch_up_amount numeric(20,6) NOT NULL DEFAULT 0,
   reason text NOT NULL DEFAULT '' CHECK (length(reason) <= 500),
   created_by text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS allocation_delta (
   delta numeric(20,6) NOT NULL,
   ssp_before numeric(20,6) NOT NULL,
   ssp_after numeric(20,6) NOT NULL,
-  catch_up numeric(20,6) NOT NULL DEFAULT 0 CHECK (catch_up >= 0),
+  catch_up numeric(20,6) NOT NULL DEFAULT 0,
   PRIMARY KEY (tenant_id, id),
   FOREIGN KEY (tenant_id, modification_id) REFERENCES contract_modification (tenant_id, id),
   FOREIGN KEY (tenant_id, obligation_id) REFERENCES performance_obligation (tenant_id, id)

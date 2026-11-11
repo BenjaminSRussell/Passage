@@ -24,6 +24,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/billingclient"
@@ -603,6 +604,16 @@ func toDomainItem(o OpenItem) domain.Item {
 func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req ApplyRequest, idempotencyKey string) (ApplyResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ApplyResult
+	var book rateBook
+	for _, a := range req.Allocations {
+		if a.ItemCurrencyAmount.IsPositive() {
+			var err error
+			if book, err = s.prefetchRates(ctx, id, req); err != nil {
+				return out, err
+			}
+			break
+		}
+	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		pay, err := scanPayment(tx.QueryRow(ctx, `select `+paymentColumns+` from payment where id = $1 for update`, id))
 		if err != nil {
@@ -649,6 +660,10 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 					return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,
 						"open item "+a.OpenItemID+" is in "+item.Currency+", the payment in "+pay.Currency+"; give itemAmount, what the settlement takes off the item in "+item.Currency)
 				}
+				if !a.ItemCurrencyAmount.Equal(a.ItemCurrencyAmount.Round(money.MinorUnits(item.Currency))) {
+					return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,
+						"itemAmount for open item "+a.OpenItemID+" has more decimals than "+item.Currency+" has")
+				}
 				crossItems[a.OpenItemID] = item
 			} else if a.ItemCurrencyAmount.IsPositive() {
 				return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,
@@ -676,7 +691,7 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 		var priced []settlementPricing
 		for _, a := range allocs {
 			if item, ok := crossItems[a.OpenItemID]; ok {
-				price, err := s.priceCrossCurrency(ctx, *fxSet, pay, item, a)
+				price, err := s.priceCrossCurrency(ctx, book, *fxSet, pay, item, a)
 				if err != nil {
 					return err
 				}
@@ -709,7 +724,11 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 				return err
 			}
 			out.Settlements = append(out.Settlements, rec)
-			settled = append(settled, rcvevents.SettlementData{OpenItemID: a.OpenItemID, Amount: a.Amount, CashDiscount: a.CashDiscount, WriteOff: a.WriteOff})
+			sd := rcvevents.SettlementData{OpenItemID: a.OpenItemID, Amount: a.Amount, CashDiscount: a.CashDiscount, WriteOff: a.WriteOff}
+			if price, ok := prices[a.OpenItemID]; ok {
+				sd.ItemCurrency, sd.ItemAmount = price.itemCurrency, a.ItemCurrencyAmount
+			}
+			settled = append(settled, sd)
 		}
 		newStatus := "APPLIED"
 		if !req.Residual.IsZero() {

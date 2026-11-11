@@ -97,6 +97,9 @@ func TestModifyContract_CatchUpRecognizesTheCatchUpAndTheRollForwardTiesOut(t *t
 	if !got.TransactionPrice.Equal(decimal.RequireFromString("3000.00")) || got.Version != cur.Version+1 || !mod.CatchUp.Equal(decimal.RequireFromString("550.00")) {
 		t.Fatalf("contract %s v%d catch-up %s", got.TransactionPrice, got.Version, mod.CatchUp)
 	}
+	if _, _, err := s.ModifyContract(ctx, c.ID, req); problemCode(err) != CodeVersion {
+		t.Fatalf("a retry of the same modification: %v, want %s", err, CodeVersion)
+	}
 	gl, gs := got.Obligations[0], got.Obligations[1]
 	if !gl.Allocated.Equal(decimal.RequireFromString("1200.00")) || !gs.Allocated.Equal(decimal.RequireFromString("1800.00")) {
 		t.Fatalf("allocation %s / %s", gl.Allocated, gs.Allocated)

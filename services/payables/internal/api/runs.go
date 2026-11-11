@@ -57,6 +57,7 @@ type RunStore interface {
 	CompleteRun(ctx context.Context, id string) (store.PaymentRun, error)
 	FailRun(ctx context.Context, id, reason string) (store.PaymentRun, error)
 	RunRemittance(ctx context.Context, runID, vendorID string) (store.Remittance, error)
+	SetWithholdingRecordError(ctx context.Context, id, reason string) error
 }
 
 type LedgerPoster interface {
@@ -577,8 +578,26 @@ func (a *API) recordRunWithholding(w http.ResponseWriter, r *http.Request, run s
 		}
 	}
 	if err := a.withholdingRecorder.RecordWithholding(ctx, run.LegalEntityID, entries); err != nil {
+		var ts *tax.StatusError
+		if errors.As(err, &ts) && !retryableStatus(ts.Status) {
+			// A refusal retrying cannot fix: park the run with the reason where an operator sees it, and say so.
+			reason := fmt.Sprintf("the tax service refused the withholding entries with status %d", ts.Status)
+			if perr := a.runs.store.SetWithholdingRecordError(ctx, run.ID, reason); perr != nil {
+				a.fault(w, r, "withholding record park not saved", perr)
+				return false
+			}
+			slog.Error("withholding entries parked", "run", run.ID, "status", ts.Status, "correlationId", middleware.GetReqID(ctx))
+			a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunWithholdingParked, "the run's journal is posted, but the tax service refused its withholding entries ("+reason+"); correct the withholding configuration and repeat post-journal")
+			return false
+		}
 		a.upstreamFailure(w, r, "withholding record", err, false)
 		return false
+	}
+	if run.WithholdingRecordError != nil {
+		if err := a.runs.store.SetWithholdingRecordError(ctx, run.ID, ""); err != nil {
+			a.fault(w, r, "withholding record park not cleared", err)
+			return false
+		}
 	}
 	return true
 }

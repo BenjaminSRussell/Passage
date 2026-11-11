@@ -90,7 +90,9 @@ type ObligationChange struct {
 	SSPAfter        decimal.Decimal
 	// Progress is the share of the obligation transferred at the effective date (CATCH_UP only; zero for PROSPECTIVE).
 	Progress decimal.Decimal
-	// CatchUp is the cumulative catch-up revenue recognized on the effective date.
+	// CatchUp is the cumulative catch-up: revenue to date at the new allocation less what is recognized and less the old amounts of the lines
+	// that were already earned on the effective date but not yet recognized (they are recognized anyway). Negative when the change lowers
+	// those earned lines.
 	CatchUp decimal.Decimal
 	Lines   []LineChange
 	NewLine *NewLine
@@ -273,7 +275,7 @@ func modifyCatchUp(in ModificationInput, price decimal.Decimal, rule string) (Mo
 		if catch.IsNegative() {
 			return res, modErr(CodeModBelowRecognized, "the change would take "+catch.Neg().StringFixed(exp)+" back out of revenue already recognized on one obligation; reverse it with a credit note instead")
 		}
-		ch := ObligationChange{ID: o.ID, AllocatedBefore: o.Allocated, AllocatedAfter: after, SSPBefore: o.SSP, SSPAfter: alloc[i].SSP, Progress: p, CatchUp: catch}
+		ch := ObligationChange{ID: o.ID, AllocatedBefore: o.Allocated, AllocatedAfter: after, SSPBefore: o.SSP, SSPAfter: alloc[i].SSP, Progress: p}
 		var earned, future []ModLine
 		for _, l := range scheduledOf(o) {
 			if l.Date != nil && !dateOnly(*l.Date).After(dateOnly(in.EffectiveDate)) {
@@ -282,6 +284,7 @@ func modifyCatchUp(in ModificationInput, price decimal.Decimal, rule string) (Mo
 				future = append(future, l)
 			}
 		}
+		ch.CatchUp = catch.Sub(sum(earned))
 		ch.Lines = append(ch.Lines, distribute(catch, earned, in.Currency)...)
 		if len(earned) == 0 && catch.IsPositive() {
 			ch.NewLine = &NewLine{Date: dateOnly(in.EffectiveDate), Amount: catch, Recognized: o.Method == MethodMilestone}
@@ -292,7 +295,7 @@ func modifyCatchUp(in ModificationInput, price decimal.Decimal, rule string) (Mo
 		}
 		ch.Lines = append(ch.Lines, distribute(left, future, in.Currency)...)
 		res.Obligations = append(res.Obligations, ch)
-		res.CatchUp = res.CatchUp.Add(catch)
+		res.CatchUp = res.CatchUp.Add(ch.CatchUp)
 	}
 	return res, nil
 }

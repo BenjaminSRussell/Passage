@@ -50,9 +50,15 @@ func TestModifyContract_ValidatesAndForwards(t *testing.T) {
 		"bad ssp":         `{"type":"CATCH_UP","effectiveDate":"2027-06-30","transactionPriceChange":"0","obligations":[{"obligationId":"` + support + `","ssp":"0"}]}`,
 		"bad obligation":  `{"type":"CATCH_UP","effectiveDate":"2027-06-30","transactionPriceChange":"0","obligations":[{"obligationId":"x","ssp":"5"}]}`,
 	} {
-		if rec := callAs(t, h, http.MethodPost, path, body, allDuties, entityID, nil); rec.Code != http.StatusBadRequest {
+		if rec := callAs(t, h, http.MethodPost, path, body, allDuties, entityID, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400 (%s)", name, rec.Code, rec.Body.String())
 		}
+	}
+	if rec := callAs(t, h, http.MethodPost, path, good, allDuties, entityID, nil); rec.Code != http.StatusPreconditionRequired {
+		t.Errorf("without If-Match: %d, want 428", rec.Code)
+	}
+	if rec := callAs(t, h, http.MethodPost, path, good, allDuties, entityID, map[string]string{"If-Match": `"x"`}); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad If-Match: %d, want 400", rec.Code)
 	}
 	rec := callAs(t, h, http.MethodPost, path, good, allDuties, entityID, map[string]string{"If-Match": `"1"`})
 	if rec.Code != http.StatusOK {
@@ -65,7 +71,7 @@ func TestModifyContract_ValidatesAndForwards(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Modification.ID != "m1" || out.Modification.PriceAfter != "10700.00" || out.Modification.EffectiveDate != "2027-06-30" {
 		t.Errorf("response %s (%v)", rec.Body.String(), err)
 	}
-	if rec := callAs(t, h, http.MethodPost, "/v1/revrec/contracts/nope:modify", good, allDuties, entityID, nil); rec.Code != http.StatusNotFound {
+	if rec := callAs(t, h, http.MethodPost, "/v1/revrec/contracts/nope:modify", good, allDuties, entityID, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown contract: %d", rec.Code)
 	}
 }

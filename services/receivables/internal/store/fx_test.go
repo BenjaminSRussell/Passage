@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,13 @@ func TestApplyPayment_CrossCurrencyBooksTheRealizedFXAsItsOwnJournal(t *testing.
 	got := out.Settlements[0]
 	if !got.RealizedFX.Equal(amt("0.80")) || got.ItemCurrency != "USD" || !got.OpenAfter.Equal(amt("900.00")) || out.Payment.Status != "APPLIED" {
 		t.Fatalf("settlement = %+v payment %s", got, out.Payment.Status)
+	}
+	var itemAmount, itemCurrency string
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select payload->'data'->'settlements'->0->>'item_amount', payload->'data'->'settlements'->0->>'item_currency' from outbox
+			where type = 'dev.passage.receivables.payment.applied.v1'`).Scan(&itemAmount, &itemCurrency)
+	}); err != nil || itemAmount != "100" || itemCurrency != "USD" {
+		t.Errorf("payment.applied carries item amount %q %q (%v)", itemAmount, itemCurrency, err)
 	}
 	fxLines := fxJournalLines(t, s, JournalRealizedFX)
 	if len(fxLines) != 2 || fxLines[0].Account != "1200" || fxLines[0].Credit || !fxLines[0].Amount.Equal(amt("0.80")) ||
@@ -267,6 +275,7 @@ func TestBackfill_CollectionPostingsGetTheirJournalsOnce(t *testing.T) {
 	// Everything above posted its journal live except the rows inserted directly; drop the live ones to look like history.
 	execAdmin(t, s, `delete from gl_journal where source_type in ('interest', 'down_payment', 'dunning_fee', 'deduction')`)
 
+	execAdmin(t, s, `update down_payment set released_at = '2027-05-05T10:00:00Z' where id = $1`, dep.ID)
 	first, err := s.BackfillGLJournals(ctx, BackfillRequest{LegalEntityID: legalEntity})
 	if err != nil {
 		t.Fatal(err)
@@ -287,11 +296,123 @@ func TestBackfill_CollectionPostingsGetTheirJournalsOnce(t *testing.T) {
 	if n := len(by[JournalInterest]); n != 1 {
 		t.Errorf("interest journals = %d", n)
 	}
+	for _, j := range by[JournalDownPayment] {
+		if strings.HasSuffix(j.key, ":release") && j.date != "2027-05-05" {
+			t.Errorf("the release journal is dated %s, want the release date 2027-05-05", j.date)
+		}
+	}
 	if n := len(by[JournalDownPayment]); n != 3 {
 		t.Errorf("down payment journals = %d, want receipt, clearing and release", n)
 	}
 	second, err := s.BackfillGLJournals(ctx, BackfillRequest{LegalEntityID: legalEntity})
 	if err != nil || second.DunningFees+second.Interest+second.DownPayments+second.Deductions != 0 {
 		t.Errorf("a repeat queued more: %+v %v", second, err)
+	}
+}
+
+// A statement and a balance confirmation count what a cross-currency settlement took off the item (item_amount, in the item's currency),
+// not the cash in the payment currency.
+func TestCrossCurrencySettlement_StatementAndConfirmationUseTheItemAmount(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx) // USD 1000.00
+	s.WithRates(fakeRates{"EUR>USD@2027-03-08": "1.12"})
+	if _, err := s.PutFXSetting(ctx, FXSetting{LegalEntityID: legalEntity, CrossCurrencyEnabled: true, FunctionalCurrency: "USD"}); err != nil {
+		t.Fatal(err)
+	}
+	pay := eurPayment(t, s, item.CustomerID, "st-1") // EUR 90.00
+	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("90.00"), ItemCurrencyAmount: amt("100.00")}}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	asOf := parseDay("2027-12-31")
+	sections, err := s.Statement(ctx, legalEntity, item.CustomerID, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open decimal.Decimal
+	for _, sec := range sections {
+		for _, l := range sec.Lines {
+			if l.DocumentNumber == "INV-30001" {
+				open = l.OpenAmount
+			}
+		}
+	}
+	if !open.Equal(amt("900.00")) {
+		t.Errorf("the statement shows %s open, want 900.00 (not 910.00)", open)
+	}
+	got, err := asOfBalancesFor(t, s, ctx, "2027-12-31")
+	if err != nil || !got.Equal(amt("900.00")) {
+		t.Errorf("balance confirmation basis = %s (%v), want 900.00", got, err)
+	}
+	// Settle the rest in full: the item is gone from both.
+	pay2 := eurPayment(t, s, item.CustomerID, "st-2")
+	execAdmin(t, s, `update payment set amount = 800, unapplied_amount = 800 where id = $1`, pay2.ID)
+	pay2, _ = s.GetPayment(ctx, pay2.ID)
+	if _, err := s.ApplyPayment(ctx, pay2.ID, pay2.Version, ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("800.00"), ItemCurrencyAmount: amt("900.00")}}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := asOfBalancesFor(t, s, ctx, "2027-12-31"); err != nil || !got.IsZero() {
+		t.Errorf("after the full settlement the balance is %s (%v), want 0", got, err)
+	}
+}
+
+func asOfBalancesFor(t *testing.T, s *Postgres, ctx context.Context, asOf string) (decimal.Decimal, error) {
+	t.Helper()
+	total := decimal.Zero
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		bs, err := asOfBalances(ctx, tx, legalEntity, asOf)
+		for _, b := range bs {
+			if b.Currency == "USD" {
+				total = total.Add(b.Balance)
+			}
+		}
+		return err
+	})
+	return total, err
+}
+
+// The item amount must be what the cash is worth: GBP 1 cannot close a EUR 10,000 invoice into a realized loss, and the item amount has no
+// more decimals than the item's currency.
+func TestApplyPayment_CrossCurrencyItemAmountMustMatchTheCash(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx)
+	s.WithRates(fakeRates{"EUR>USD@2027-03-08": "1.12"})
+	if _, err := s.PutFXSetting(ctx, FXSetting{LegalEntityID: legalEntity, CrossCurrencyEnabled: true, FunctionalCurrency: "USD"}); err != nil {
+		t.Fatal(err)
+	}
+	pay := eurPayment(t, s, item.CustomerID, "tol-1")
+	big := ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("90.00"), ItemCurrencyAmount: amt("1000.00")}}}
+	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, big, ""); problemCode(err) != CodeFXTolerance {
+		t.Fatalf("a 1000.00 item amount for 90.00 EUR: %v", err)
+	}
+	fine := ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("90.00"), ItemCurrencyAmount: amt("100.005")}}}
+	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, fine, ""); problemCode(err) != domain.CodeApplyMismatch {
+		t.Fatalf("too many decimals: %v", err)
+	}
+	// Within the 5.00 tolerance (cash worth 100.80): accepted.
+	ok := ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("90.00"), ItemCurrencyAmount: amt("104.00")}}}
+	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, ok, ""); err != nil {
+		t.Fatalf("within tolerance: %v", err)
+	}
+}
+
+func TestReversePayment_RefusedWhenItConfirmedARemittanceAdvice(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx)
+	cust := item.CustomerID
+	mk := func(key string) Payment {
+		p, err := s.CreatePayment(ctx, Payment{LegalEntityID: legalEntity, CustomerID: &cust, PaymentMode: "ACH", Source: "MANUAL",
+			Amount: amt("50.00"), UnappliedAmount: amt("50.00"), Currency: "USD", ReceivedDate: "2027-03-08", ValueDate: "2027-03-08"}, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	bank, advised := mk("adv-1"), mk("adv-2")
+	execAdmin(t, s, `update payment set status = 'CONFIRMED', confirmed_by_payment_id = $2 where id = $1`, advised.ID, bank.ID)
+	if _, err := s.ReversePayment(ctx, bank.ID, bank.Version); problemCode(err) != CodePaymentState {
+		t.Fatalf("reversing the confirming payment: %v", err)
 	}
 }

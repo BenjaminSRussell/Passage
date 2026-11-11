@@ -67,13 +67,17 @@ func (a *API) modifyContract(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "contract not found"))
 		return
 	}
-	expected := 0
-	if raw := r.Header.Get("If-Match"); raw != "" {
-		var ok bool
-		if expected, ok = parseIfMatch(raw); !ok {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", `If-Match must be the contract version as an entity tag, for example "1"`))
-			return
-		}
+	// The price change is relative, so a retry would apply it twice: the contract version the caller reviewed is required, and a repeat
+	// of the same call finds the version moved on (412).
+	raw := r.Header.Get("If-Match")
+	if strings.TrimSpace(raw) == "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionRequired, "COM-0428", "If-Match with the contract version is required to modify a contract"))
+		return
+	}
+	expected, ok := parseIfMatch(raw)
+	if !ok || expected == 0 {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", `If-Match must be the contract version as an entity tag, for example "1"`))
+		return
 	}
 	var req modifyRequest
 	if err := httpx.Decode(r, &req); err != nil {

@@ -108,7 +108,7 @@ func backfillCollections(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID
 		}
 		out.DownPayments++
 	}
-	rels, err := readBackfillRows(ctx, tx, `select d.id::text, '', d.kind, d.currency::text, current_date::text, (d.amount - d.cleared_amount)::text, '0'
+	rels, err := readBackfillRows(ctx, tx, `select d.id::text, '', d.kind, d.currency::text, coalesce(d.released_at, d.received_date::timestamptz)::date::text, (d.amount - d.cleared_amount)::text, '0'
 		from down_payment d where d.legal_entity_id = $1 and d.status = 'RELEASED' and d.kind = 'SECURITY_DEPOSIT'
 		and `+missing(`'downpayment:' || d.id::text || ':release'`), legalEntityID)
 	if err != nil {

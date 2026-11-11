@@ -339,3 +339,31 @@ func TestWithholding_RunRecordsTheWithheldTaxWithTheTaxServiceAndRetriesIdempote
 		t.Error("two invoices share an entry id")
 	}
 }
+
+// A refusal from tax that retrying cannot fix parks the run with a reason an operator sees, instead of an endless 502.
+func TestWithholding_PermanentTaxRefusalParksTheRun(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{withholdingCodes: map[string]string{vendorOne: "WHT30"}})
+	f.approve()
+	runID := f.start()["id"].(string)
+	if rec := f.step(f.erin, runID, "generate-file"); rec.Code != http.StatusOK {
+		t.Fatalf("generate-file: %d %s", rec.Code, rec.Body)
+	}
+	f.tax.mu.Lock()
+	f.tax.entriesStatus = http.StatusForbidden
+	f.tax.mu.Unlock()
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusUnprocessableEntity, "AP-RUN-019")
+	got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, ""))
+	if got["withholdingRecordError"] == nil || got["journalPostedAt"] == nil {
+		t.Fatalf("run = %v, want the journal posted and the park reason shown", got)
+	}
+	f.tax.mu.Lock()
+	f.tax.entriesStatus = 0
+	f.tax.mu.Unlock()
+	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK {
+		t.Fatalf("retry: %d %s", rec.Code, rec.Body)
+	}
+	got = decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, ""))
+	if got["withholdingRecordError"] != nil {
+		t.Errorf("the park was not cleared: %v", got["withholdingRecordError"])
+	}
+}

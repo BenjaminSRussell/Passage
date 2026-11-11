@@ -327,7 +327,7 @@ func (s *Postgres) ReleaseDownPayment(ctx context.Context, id string, version in
 		if !domain.ReleaseAllowed(cur.Kind, cur.Status) {
 			return domainProblem(domain.CodeDownPaymentState, "only a received security deposit can be released; this "+cur.Kind+" is "+cur.Status)
 		}
-		if _, err := tx.Exec(ctx, `update down_payment set status = 'RELEASED', version = version + 1 where tenant_id = $1 and id = $2`,
+		if _, err := tx.Exec(ctx, `update down_payment set status = 'RELEASED', released_at = now(), version = version + 1 where tenant_id = $1 and id = $2`,
 			p.TenantID, id); err != nil {
 			return err
 		}
