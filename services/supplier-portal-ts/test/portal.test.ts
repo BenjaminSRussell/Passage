@@ -97,6 +97,26 @@ describe("document virus scan", () => {
     expect(rig.calls).toHaveLength(0);
   });
 
+  it("scans an invoice document before it goes to receiving, and refuses an infected one", async () => {
+    const scanner = new FakeScanner((c) => (c.toString().includes("EICAR") ? { clean: false, signature: "Eicar-Test-Signature" } : { clean: true }));
+    rig = await startRig({ scan: { scanner, allowUnscanned: false } });
+    const s = await signIn(rig);
+    const invoice = (content: string) => ({ format: "OCR", mediaType: "application/pdf", content: Buffer.from(content).toString("base64") });
+    expect((await api(rig, s, "POST", "/api/v1/invoice-documents", invoice("%PDF-1.4 invoice"))).status).toBe(200);
+    expect(rig.calls[0]!.url).toBe("http://receiving.test/v1/receiving/vendor/invoice-captures");
+    expect((await api(rig, s, "POST", "/api/v1/invoice-documents", invoice("X5O!P%@AP EICAR"))).status).toBe(422);
+    expect(scanner.seen.map((b) => b.toString())).toEqual(["%PDF-1.4 invoice", "X5O!P%@AP EICAR"]);
+    expect(rig.calls).toHaveLength(1);
+  });
+
+  it("refuses an invoice document when no scanner is configured and unscanned uploads are not allowed", async () => {
+    rig = await startRig();
+    const s = await signIn(rig);
+    const res = await api(rig, s, "POST", "/api/v1/invoice-documents", { format: "UBL", mediaType: "application/xml", content: Buffer.from("<Invoice/>").toString("base64") });
+    expect(res.status).toBe(503);
+    expect(rig.calls).toHaveLength(0);
+  });
+
   it("does not scan routes that carry no upload", async () => {
     const scanner = new FakeScanner();
     rig = await startRig({ scan: { scanner, allowUnscanned: false } });

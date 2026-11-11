@@ -47,7 +47,7 @@ export const ROUTES: readonly Route[] = [
   { method: "GET", path: "/api/v1/payments", audience: "payables", upstream: `${A}/payments` },
   { method: "GET", path: "/api/v1/invoice-documents", audience: "receiving", upstream: `${R}/invoice-captures` },
   { method: "GET", path: "/api/v1/invoice-documents/:id", audience: "receiving", upstream: `${R}/invoice-captures/:id` },
-  { method: "POST", path: "/api/v1/invoice-documents", audience: "receiving", upstream: `${R}/invoice-captures`, body: "json", injectLegalEntity: true },
+  { method: "POST", path: "/api/v1/invoice-documents", audience: "receiving", upstream: `${R}/invoice-captures`, body: "json", injectLegalEntity: true, scan: "content" },
 
   { method: "GET", path: "/api/v1/requests", audience: "party", upstream: `${Y}/requests` },
   { method: "GET", path: "/api/v1/requests/:id", audience: "party", upstream: `${Y}/requests/:id` },
