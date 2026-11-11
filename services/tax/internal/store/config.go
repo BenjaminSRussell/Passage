@@ -231,14 +231,15 @@ func (s *Store) DeleteCode(ctx context.Context, code string) error {
 		return err
 	}
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var groups, boxes, certs int
+		var groups, boxes, certs, policies int
 		if err := tx.QueryRow(ctx, `select (select count(*) from tax_group where tenant_id = $1 and $2 = any(tax_codes)),
 			(select count(*) from tax_vat_box_code where tenant_id = $1 and code = $2),
-			(select count(*) from tax_exemption_certificate where tenant_id = $1 and $2 = any(codes))`, p.TenantID, code).Scan(&groups, &boxes, &certs); err != nil {
+			(select count(*) from tax_exemption_certificate where tenant_id = $1 and $2 = any(codes)),
+			(select count(*) from tax_recovery_policy where tenant_id = $1 and code = $2)`, p.TenantID, code).Scan(&groups, &boxes, &certs, &policies); err != nil {
 			return fmt.Errorf("check tax code use: %w", err)
 		}
-		if groups > 0 || boxes > 0 || certs > 0 {
-			return inUse("code", "Tax code %s is used by %d tax groups, %d VAT return boxes and %d exemption certificates. Remove it from them first.", code, groups, boxes, certs)
+		if groups > 0 || boxes > 0 || certs > 0 || policies > 0 {
+			return inUse("code", "Tax code %s is used by %d tax groups, %d VAT return boxes, %d exemption certificates and %d recovery policies. Remove it from them first.", code, groups, boxes, certs, policies)
 		}
 		tag, err := tx.Exec(ctx, `delete from tax_code where tenant_id = $1 and code = $2`, p.TenantID, code)
 		if err != nil {
@@ -357,6 +358,9 @@ func (s *Store) LoadConfig(ctx context.Context) (domain.Config, error) {
 		}
 		for _, c := range certs {
 			cfg.Exemptions = append(cfg.Exemptions, c.Exemption)
+		}
+		if cfg.Recovery, err = listRecovery(ctx, tx, p.TenantID); err != nil {
+			return err
 		}
 		return nil
 	})

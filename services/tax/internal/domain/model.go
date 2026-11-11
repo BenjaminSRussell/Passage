@@ -143,6 +143,9 @@ type Config struct {
 	ItemGroups      map[string][]string `json:"item_groups"`
 	Codes           []Code              `json:"codes"`
 	Exemptions      []Exemption         `json:"exemptions"`
+	// Recovery says how much of an input tax is recoverable for a code, and for an item tax group within it; it replaces the code's
+	// own recoverable_pct where one applies on the tax date.
+	Recovery []RecoveryPolicy `json:"recovery,omitempty"`
 }
 
 type Party struct {

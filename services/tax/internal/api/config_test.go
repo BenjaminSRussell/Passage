@@ -30,10 +30,29 @@ type fakeConfig struct {
 	putCodes  []domain.ConfigCode
 	putGroups []domain.Group
 	putCerts  []domain.Certificate
+	policies  []domain.RecoveryPolicy
+	reclaim   *domain.Reclaim
 	imported  []domain.MasterEntry
 	overwrite bool
 	vat       *domain.VATReturn
 	esl       *domain.ESL
+}
+
+func (f *fakeConfig) PutRecoveryPolicy(_ context.Context, p domain.RecoveryPolicy) error {
+	f.policies = append(f.policies, p)
+	return f.err
+}
+func (f *fakeConfig) ListRecoveryPolicies(context.Context) ([]domain.RecoveryPolicy, error) {
+	return f.policies, f.err
+}
+func (f *fakeConfig) DeleteRecoveryPolicy(context.Context, string, string, domain.Date) error {
+	return f.err
+}
+func (f *fakeConfig) Reclaim(context.Context, domain.Period) (domain.Reclaim, error) {
+	if f.reclaim != nil {
+		return *f.reclaim, f.err
+	}
+	return domain.Reclaim{}, f.err
 }
 
 func (f *fakeConfig) ImportMaster(_ context.Context, e []domain.MasterEntry, overwrite bool) (store.ImportResult, error) {
@@ -354,5 +373,39 @@ func TestFilingFormatsAndLayoutRoutes(t *testing.T) {
 		`"6":[{"code":"UK20","direction":"output"}],"7":[{"code":"UK20","direction":"input"}],"8":[{"code":"UK0","direction":"output"}],"9":[{"code":"UK0","direction":"input"}]}}`
 	if code := apply("GB", full); code != http.StatusOK || len(fc.boxes) != 8 {
 		t.Errorf("a full mapping: %d, stored %d boxes", code, len(fc.boxes))
+	}
+}
+
+func TestRecoveryAndReclaimRoutes(t *testing.T) {
+	fc := &fakeConfig{reclaim: &domain.Reclaim{PeriodFrom: domain.Day("2026-04-01"), PeriodTo: domain.Day("2026-04-30"), TotalInputTax: decimal.NewFromInt(150),
+		TotalRecoverable: decimal.NewFromInt(80), TotalNonRecoverable: decimal.NewFromInt(70), Rows: []domain.ReclaimRow{{Code: "VAT19"}}}}
+	r := configRouter(fc)
+	put := func(path, body string) int {
+		return do(r, http.MethodPut, path, body, tenantOne, "tax.config.manage").Code
+	}
+	if code := put("/v1/tax/recovery-policies/VAT19", `{"code":"OTHER","recoverable_pct":"50","valid_from":"2026-01-01"}`); code != http.StatusBadRequest {
+		t.Errorf("a body code that differs from the path: %d", code)
+	}
+	if code := put("/v1/tax/recovery-policies/VAT19", `{"recoverable_pct":"50","valid_from":"2026-01-01","surprise":1}`); code != http.StatusBadRequest {
+		t.Errorf("an unknown field: %d", code)
+	}
+	if len(fc.policies) != 0 {
+		t.Fatal("an invalid body reached the store")
+	}
+	if code := put("/v1/tax/recovery-policies/VAT19", `{"item_group":"CARS","recoverable_pct":"50","valid_from":"2026-01-01"}`); code != http.StatusOK || fc.policies[0].Code != "VAT19" {
+		t.Errorf("a valid policy: %d %+v", code, fc.policies)
+	}
+	if rec := do(r, http.MethodDelete, "/v1/tax/recovery-policies/VAT19?item_group=CARS", ``, tenantOne, "tax.config.manage"); rec.Code != http.StatusBadRequest {
+		t.Errorf("delete without valid_from: %d", rec.Code)
+	}
+	if rec := do(r, http.MethodDelete, "/v1/tax/recovery-policies/VAT19?item_group=CARS&valid_from=2026-01-01", ``, tenantOne, "tax.config.manage"); rec.Code != http.StatusNoContent {
+		t.Errorf("delete: %d", rec.Code)
+	}
+	rec := do(r, http.MethodGet, "/v1/tax/vat-reclaim?period_from=2026-04-01&period_to=2026-04-30", ``, tenantOne, "tax.vatreturn.read")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"total_recoverable":"80"`) {
+		t.Errorf("reclaim: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(r, http.MethodGet, "/v1/tax/vat-reclaim?period_from=2026-04-01", ``, tenantOne, "tax.vatreturn.read"); rec.Code != http.StatusBadRequest {
+		t.Errorf("reclaim without a period end: %d", rec.Code)
 	}
 }

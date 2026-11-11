@@ -896,6 +896,83 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/recovery-policies:
+    get:
+      operationId: listRecoveryPolicies
+      x-passage-duty: tax.config.read
+      summary: How much of an input tax is recoverable per code and item tax group, effective-dated
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfRecoveryPolicy" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/recovery-policies/{code}:
+    put:
+      operationId: putRecoveryPolicy
+      x-passage-duty: tax.config.manage
+      summary: Create or replace the recovery policy of a code, item tax group and start date; stored_config calculations apply it to input tax
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecoveryPolicy" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryPolicy" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteRecoveryPolicy
+      x-passage-duty: tax.config.manage
+      summary: Delete a recovery policy
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: item_group, in: query, required: false, schema: { type: string } }
+        - { name: valid_from, in: query, required: false, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/vat-reclaim:
+    get:
+      operationId: getVatReclaim
+      x-passage-duty: tax.vatreturn.read
+      summary: Input tax of a period per code: what may be reclaimed and what stays in the cost of the purchases
+      parameters:
+        - { name: period_from, in: query, required: false, schema: { type: string } }
+        - { name: period_to, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reclaim" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   responses:
     Problem:
@@ -1090,6 +1167,7 @@ components:
               tax_date: { $ref: "#/components/schemas/Date" }
               amount: { $ref: "#/components/schemas/Decimal" }
               base_amount: { $ref: "#/components/schemas/Decimal" }
+              recoverable_amount: { $ref: "#/components/schemas/Decimal", description: "Input or use tax only: the part found recoverable under the recovery policies; the VAT reclaim totals it, else it applies the code recoverable_pct." }
               counterparty_country: { type: string, pattern: '^[A-Z]{2}$' }
               counterparty_vat_id: { type: string, maxLength: 20 }
               supply_kind: { type: string, enum: [goods, services, triangular] }
@@ -1398,3 +1476,36 @@ components:
                     label: { type: string }
                     kind: { type: string, enum: [base, tax, payable] }
                     role: { type: string }
+    RecoveryPolicy:
+      type: object
+      required: [recoverable_pct, valid_from]
+      properties:
+        code: { type: string }
+        item_group: { type: string, description: "An item tax group; empty applies to every group of the code, and a policy for the line's own group wins." }
+        recoverable_pct: { $ref: "#/components/schemas/Decimal" }
+        valid_from: { $ref: "#/components/schemas/Date" }
+        valid_to: { $ref: "#/components/schemas/Date" }
+        note: { type: string, maxLength: 200 }
+    ItemsOfRecoveryPolicy:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/RecoveryPolicy" } }
+    Reclaim:
+      type: object
+      properties:
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date" }
+        total_input_tax: { type: string }
+        total_recoverable: { type: string }
+        total_non_recoverable: { type: string }
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              input_tax: { type: string }
+              recoverable: { type: string }
+              non_recoverable: { type: string }
+              transactions: { type: integer }
+              estimated: { type: integer, description: "Transactions recorded without a recoverable amount, which took the code's own recoverable_pct." }

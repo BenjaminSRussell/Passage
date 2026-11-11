@@ -75,6 +75,8 @@ type transactionInput struct {
 	CounterpartyCountry string      `json:"counterparty_country"`
 	CounterpartyVATID   string      `json:"counterparty_vat_id"`
 	SupplyKind          string      `json:"supply_kind"`
+	// RecoverableAmount is the recoverable part of an input tax; it may not exceed the tax.
+	RecoverableAmount *domain.Dec `json:"recoverable_amount"`
 }
 
 type transactionsRequest struct {
@@ -101,11 +103,16 @@ func (req transactionsRequest) txns() ([]domain.Txn, error) {
 			return nil, invalid(field+".counterparty_country", "counterparty_country must be a 2-letter ISO 3166 code in capitals")
 		case len(t.CounterpartyVATID) > 20:
 			return nil, invalid(field+".counterparty_vat_id", "counterparty_vat_id is at most 20 characters")
+		case t.RecoverableAmount != nil && (t.RecoverableAmount.IsNegative() != t.Amount.IsNegative() && !t.RecoverableAmount.IsZero() || t.RecoverableAmount.Abs().GreaterThan(t.Amount.Abs())):
+			return nil, invalid(field+".recoverable_amount", "recoverable_amount must have the sign of the amount and not exceed it")
+		case t.RecoverableAmount != nil && t.Direction == domain.DirOutput:
+			return nil, invalid(field+".recoverable_amount", "only an input or use tax has a recoverable amount")
 		case t.SupplyKind != "" && t.SupplyKind != domain.SupplyGoods && t.SupplyKind != domain.SupplyServices && t.SupplyKind != domain.SupplyTriangular:
 			return nil, invalid(field+".supply_kind", "supply_kind must be %q, %q or %q", domain.SupplyGoods, domain.SupplyServices, domain.SupplyTriangular)
 		}
 		out[i] = domain.Txn{ID: t.ID, Code: t.Code, Direction: t.Direction, TaxDate: t.TaxDate, Amount: t.Amount,
-			Base: t.BaseAmount, CounterpartyCountry: t.CounterpartyCountry, CounterpartyVATID: t.CounterpartyVATID, SupplyKind: t.SupplyKind}
+			Base: t.BaseAmount, CounterpartyCountry: t.CounterpartyCountry, CounterpartyVATID: t.CounterpartyVATID, SupplyKind: t.SupplyKind,
+			Recoverable: t.RecoverableAmount}
 	}
 	return out, nil
 }

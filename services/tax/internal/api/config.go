@@ -34,6 +34,10 @@ type ConfigStore interface {
 	PutGroup(ctx context.Context, g domain.Group) error
 	DeleteGroup(ctx context.Context, kind, code string) error
 	LoadConfig(ctx context.Context) (domain.Config, error)
+	ListRecoveryPolicies(ctx context.Context) ([]domain.RecoveryPolicy, error)
+	PutRecoveryPolicy(ctx context.Context, r domain.RecoveryPolicy) error
+	DeleteRecoveryPolicy(ctx context.Context, code, itemGroup string, validFrom domain.Date) error
+	Reclaim(ctx context.Context, period domain.Period) (domain.Reclaim, error)
 	ListCertificates(ctx context.Context) ([]domain.Certificate, error)
 	PutCertificate(ctx context.Context, c domain.Certificate) error
 	DeleteCertificate(ctx context.Context, number string) error
@@ -79,6 +83,10 @@ func (a *API) registerConfig(r chi.Router) {
 	r.With(manage).Put("/v1/tax/groups/{kind}/{code}", a.putGroup)
 	r.With(manage).Delete("/v1/tax/groups/{kind}/{code}", a.deleteGroup)
 	r.With(read).Get("/v1/tax/config", a.getConfig)
+	r.With(read).Get("/v1/tax/recovery-policies", a.listRecovery)
+	r.With(manage).Put("/v1/tax/recovery-policies/{code}", a.putRecovery)
+	r.With(manage).Delete("/v1/tax/recovery-policies/{code}", a.deleteRecovery)
+	r.With(vat).Get("/v1/tax/vat-reclaim", a.vatReclaim)
 	r.With(read).Get("/v1/tax/exemption-certificates", a.listCertificates)
 	r.With(manage).Put("/v1/tax/exemption-certificates/{number}", a.putCertificate)
 	r.With(manage).Delete("/v1/tax/exemption-certificates/{number}", a.deleteCertificate)
@@ -515,4 +523,69 @@ func (a *API) applyLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": boxes})
+}
+
+func (a *API) listRecovery(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	out, err := a.config.ListRecoveryPolicies(r.Context())
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func (a *API) putRecovery(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	var p domain.RecoveryPolicy
+	if err := httpx.Decode(r, &p); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	code, err := pathCode(r, p.Code)
+	if err == nil {
+		p.Code = code
+		err = a.config.PutRecoveryPolicy(r.Context(), p)
+	}
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, p)
+}
+
+func (a *API) deleteRecovery(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	var from domain.Date
+	err := parseDate(r, "valid_from", &from)
+	if err == nil {
+		err = a.config.DeleteRecoveryPolicy(r.Context(), chi.URLParam(r, "code"), r.URL.Query().Get("item_group"), from)
+	}
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) vatReclaim(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	period, err := periodParam(r)
+	var out domain.Reclaim
+	if err == nil {
+		out, err = a.config.Reclaim(r.Context(), period)
+	}
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
