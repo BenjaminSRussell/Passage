@@ -165,8 +165,10 @@ jobs:
       - name: Build the packages (unsigned)
         shell: pwsh
         run: |
-          $fips = if ('${{ matrix.fips }}' -eq 'true') { @('-Fips') } else { @() }
-          .\deploy\windows\scripts\Build-Packages.ps1 -Version $env:VERSION -Arch ${{ matrix.wixarch }} -Variant $env:VARIANT -Out $env:OUT @fips
+          # A hashtable splat: an empty array assigned from an if expression is $null and would be passed as a positional argument.
+          $p = @{ Version = $env:VERSION; Arch = '${{ matrix.wixarch }}'; Variant = $env:VARIANT; Out = $env:OUT }
+          if ('${{ matrix.fips }}' -eq 'true') { $p.Fips = $true }
+          .\deploy\windows\scripts\Build-Packages.ps1 @p
 
       # The build job has no signing secrets: this lists the unsigned files and passes. The release job fails on any unsigned binary.
       - name: Report unsigned binaries
@@ -256,8 +258,10 @@ jobs:
       - name: Build the packages
         shell: pwsh
         run: |
-          $fips = if ('${{ matrix.fips }}' -eq 'true') { @('-Fips') } else { @() }
-          .\deploy\windows\scripts\Build-Packages.ps1 -Version $env:VERSION -Arch ${{ matrix.wixarch }} -Variant $env:VARIANT -Out $env:OUT @fips
+          # A hashtable splat: an empty array assigned from an if expression is $null and would be passed as a positional argument.
+          $p = @{ Version = $env:VERSION; Arch = '${{ matrix.wixarch }}'; Variant = $env:VARIANT; Out = $env:OUT }
+          if ('${{ matrix.fips }}' -eq 'true') { $p.Fips = $true }
+          .\deploy\windows\scripts\Build-Packages.ps1 @p
 
       - name: Sign the MSIs and the bundle
         shell: pwsh
