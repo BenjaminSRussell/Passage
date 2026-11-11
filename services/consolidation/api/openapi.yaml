@@ -1036,6 +1036,7 @@ components:
       properties:
         period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
         rates:
+          description: Optional. A foreign unit currency named here is translated at these rates; every other one is read from the fx rate tables (the average and the closing rate type, valid on the last day of the period). A rate that is in neither place is 422 CNS-0927 naming the currency pair.
           type: array
           maxItems: 100
           items:

@@ -386,7 +386,11 @@ func (a *API) startRunFromCollection(w http.ResponseWriter, r *http.Request, bod
 	// Each unit's opening comes from the collection at the end of its previous fiscal year, when the group has one.
 	byPeriod := map[string]*store.CollectionDetail{}
 	for _, u := range group.Units {
-		end := domain.PreviousFiscalYearEnd(c.Period, u.FiscalYearStartMonth)
+		end, err := a.previousYearEnd(r.Context(), u, c.Period)
+		if err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
 		prev, seen := byPeriod[end]
 		if !seen {
 			got, ok, err := a.groups.LatestCollection(r.Context(), c.GroupID, end)

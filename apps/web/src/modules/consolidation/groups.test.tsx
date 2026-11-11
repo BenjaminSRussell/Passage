@@ -160,10 +160,11 @@ describe("group page", () => {
     await screen.findByText("Mapping saved");
 
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "2026-11" } });
-    fireEvent.click(screen.getByRole("button", { name: "Collect balances" }));
-    expect(await screen.findAllByText("Enter a rate above 0.")).toHaveLength(2);
-
+    // One rate without the other is refused; a currency with neither is left to the rate tables.
     fireEvent.change(screen.getByLabelText("Average rate"), { target: { value: "1.084" } });
+    fireEvent.click(screen.getByRole("button", { name: "Collect balances" }));
+    expect(await screen.findAllByText("Enter a rate above 0.")).toHaveLength(1);
+
     fireEvent.change(screen.getByLabelText("Closing rate"), { target: { value: "1.095" } });
     fireEvent.click(screen.getByRole("button", { name: "Collect balances" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url.pathname.endsWith("/collections"))).toBe(true));

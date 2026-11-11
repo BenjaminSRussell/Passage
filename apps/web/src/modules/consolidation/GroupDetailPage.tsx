@@ -421,7 +421,10 @@ function CollectForm({ group, onDone }: { group: GroupDetail; onDone(c: Collecti
     event.preventDefault();
     const found: Record<string, string> = {};
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period.trim())) found.period = "Enter a period such as 2026-11.";
+    // A row with neither rate is left to the rate tables.
+    const named = rates.filter((r) => r.average.trim() !== "" || r.closing.trim() !== "");
     rates.forEach((r, i) => {
+      if (!named.includes(r)) return;
       if (!isCurrency(r.currency.trim().toUpperCase())) found[`rates[${i}].currency`] = "Enter a three-letter currency code.";
       if (!isPositive(r.average)) found[`rates[${i}].average`] = "Enter a rate above 0.";
       if (!isPositive(r.closing)) found[`rates[${i}].closing`] = "Enter a rate above 0.";
@@ -431,7 +434,7 @@ function CollectForm({ group, onDone }: { group: GroupDetail; onDone(c: Collecti
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      const c = await collectBalances(group.id, { period: period.trim(), rates: rates.map((r) => ({ currency: r.currency.trim().toUpperCase(), average: r.average.trim(), closing: r.closing.trim() })) }, key.current);
+      const c = await collectBalances(group.id, { period: period.trim(), rates: named.map((r) => ({ currency: r.currency.trim().toUpperCase(), average: r.average.trim(), closing: r.closing.trim() })) }, key.current);
       key.current = newKey();
       onDone(c);
     } catch (err) {
@@ -452,6 +455,7 @@ function CollectForm({ group, onDone }: { group: GroupDetail; onDone(c: Collecti
         {(c) => <Input {...c} className={styles.mono} value={period} onChange={(e) => setPeriod(e.target.value)} invalid={Boolean(errors.period)} />}
       </FormField>
       <h4 className={styles.section}>Rates to {group.currency}</h4>
+      <p className={styles.note}>Leave a currency without rates to use the rate tables&apos; average and closing rates for the period.</p>
       <RowGrid idPrefix="rate" path="rates" noun="Rate" fields={rateFields} rows={rates} errors={errors} newRow={emptyRate} onChange={setRates} />
       {failure ? (
         <div className={styles.formActions}>

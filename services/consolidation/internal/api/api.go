@@ -22,9 +22,11 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/fxclient"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/orgclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/domain"
 )
@@ -54,6 +56,10 @@ type API struct {
 	runs                 RunStore
 	groups               GroupStore
 	ledger               LedgerBalances
+	rates                fxclient.Rater
+	averageType          string
+	closingType          string
+	fiscal               *orgclient.Years
 	collections          atomic.Int64
 	runsCompleted        atomic.Int64
 	eliminationPreviews  atomic.Int64

@@ -3784,8 +3784,17 @@
     "platform.global.admin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {
-    "consolidation": {"ledger": ["ledger.balance.read"]},
-    "intercompany": {"ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup"]},
+    "consolidation": {
+      "ledger": ["ledger.balance.read"],
+      "fx": ["fx.rate.lookup"],
+      "org": ["org.read"]
+    },
+    "intercompany": {
+      "ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup", "ledger.balance.read"],
+      "fx": ["fx.rate.lookup"],
+      "org": ["org.read"],
+      "tax": ["tax.tax.calculate", "tax.transaction.record"]
+    },
     "finreport": {"ledger": ["ledger.entry.lookup", "ledger.balance.read"]},
     "billing": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
