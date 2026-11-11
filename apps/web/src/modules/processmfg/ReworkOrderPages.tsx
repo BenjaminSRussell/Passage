@@ -142,7 +142,7 @@ export function NewReworkOrderPage() {
     event.preventDefault();
     const found: Record<string, string> = {};
     if (!UUID.test(formulaId.trim())) found.formulaId = "Enter the rework formula id as a UUID.";
-    if (!UUID.test(batchId.trim())) found.batchId = "Enter the batch id as a UUID.";
+    if (!UUID.test(batchId.trim())) found.batchId = "Choose the batch.";
     for (const [name, value, text] of [
       ["batchSize", batchSize, "the batch size"],
       ["batchQty", batchQty, "the quantity of the batch"],

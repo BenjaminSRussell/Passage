@@ -239,7 +239,7 @@ describe("derive batch attributes (slice 16)", () => {
     };
     const { unmount } = renderAt("/processmfg/derive-stored");
     fireEvent.click(screen.getByRole("button", { name: "Derive attributes" }));
-    expect(await screen.findByText("Enter the receiver batch id as a UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the receiver batch.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
     fill("Receiver batch", RECV);
     fill("Sender 1 batch", RECV);

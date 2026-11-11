@@ -174,7 +174,7 @@ describe("Sales quotations list", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "SENT" } });
-    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("status")).toBe("SENT"));
   });
 

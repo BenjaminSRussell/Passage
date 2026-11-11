@@ -79,9 +79,9 @@ export function DeriveStoredPage() {
     event.preventDefault();
     const found: Record<string, string> = {};
     const id = receiverId.trim();
-    if (!UUID.test(id)) found.receiverId = "Enter the receiver batch id as a UUID.";
+    if (!UUID.test(id)) found.receiverId = "Choose the receiver batch.";
     const ids = rows.map((r) => r.batchId.trim().toLowerCase());
-    if (rows.some((r) => !UUID.test(r.batchId.trim()))) found.senders = "Enter each sender batch id as a UUID.";
+    if (rows.some((r) => !UUID.test(r.batchId.trim()))) found.senders = "Choose each sender batch.";
     else if (new Set(ids).size !== ids.length) found.senders = "A sender is listed twice.";
     else if (ids.includes(id.toLowerCase())) found.senders = "A batch cannot be its own sender.";
     else if (rows.some((r) => !QUANTITY.test(r.qty.trim()))) found.senders = "Enter the quantity consumed from each sender, 0 or more, at most 6 decimals.";

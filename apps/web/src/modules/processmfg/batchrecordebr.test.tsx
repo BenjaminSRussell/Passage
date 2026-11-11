@@ -132,7 +132,7 @@ describe("batch record list (slice 15)", () => {
     renderAt("/processmfg/batch-records");
     await screen.findByText("No batch records yet");
     fireEvent.click(screen.getByRole("button", { name: "Compile record" }));
-    expect(await screen.findByText("Enter the batch id as a UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the batch.")).toBeInTheDocument();
     fill("Batch", BATCH);
     fireEvent.click(screen.getByRole("button", { name: "Compile record" }));
     expect(await screen.findByText("Batch record of L-100")).toBeInTheDocument();

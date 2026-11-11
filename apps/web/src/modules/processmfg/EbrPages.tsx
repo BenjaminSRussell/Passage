@@ -108,7 +108,7 @@ export function BatchRecordsPage() {
     event.preventDefault();
     setFailure(null);
     if (!UUID.test(batchId.trim())) {
-      setError("Enter the batch id as a UUID.");
+      setError("Choose the batch.");
       return;
     }
     setError(undefined);
