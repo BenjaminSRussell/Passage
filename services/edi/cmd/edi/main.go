@@ -36,7 +36,16 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	var err error
+	switch {
+	case len(os.Args) == 1:
+		err = run()
+	case len(os.Args) == 2 && os.Args[1] == "consume":
+		err = consume(context.Background(), os.Getenv)
+	default:
+		err = fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to run the outbound consumer)", os.Args[1:])
+	}
+	if err != nil {
 		slog.Error("edi exited", "err", err)
 		os.Exit(1)
 	}
@@ -100,6 +109,10 @@ func run() error {
 	if signer != nil && fulfillmentURL != "" && billingURL != "" && salesURL != "" {
 		src := sources.New(signer, fulfillmentURL, billingURL, salesURL, nil)
 		a.Sources, a.Intake = src, src
+		// A returned punchout cart becomes a requisition in purchasing when its URL is set (35-3).
+		if purchasingURL := os.Getenv("EDI_PURCHASING_URL"); purchasingURL != "" {
+			a.Requisitions = src.WithPurchasing(purchasingURL)
+		}
 	}
 	tc, err := loadTransportConfig(os.Getenv, addr)
 	if err != nil {

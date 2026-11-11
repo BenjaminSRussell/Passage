@@ -1252,6 +1252,630 @@ paths:
                   valid: { type: boolean }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/auto-outbound:
+    put:
+      operationId: putAutoOutbound
+      summary: Set the documents the partner receives when a shipment ships or an invoice posts
+      description: >
+        The consumer of fulfillment asn.issued and billing invoice.posted (`edi consume`) sends the 856 or DESADV and the 810 or INVOIC listed here to this
+        partner, generated from the source document as outbound:from-source does (same idempotency key, so a redelivered event, a replay and a route call
+        made by hand yield one interchange). An empty list switches it off. The partner needs a trade profile (EDI-0012); the legal entity is its profile's.
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transactionSets]
+              properties:
+                transactionSets: { type: array, maxItems: 4, uniqueItems: true, items: { type: string, enum: ['856', '810', DESADV, INVOIC] } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { transactionSets: { type: array, items: { type: string } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0012 — the partner has no trade profile
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: getAutoOutbound
+      summary: Read the documents the partner receives automatically
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { transactionSets: { type: array, items: { type: string } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/self-billing:
+    put:
+      operationId: putSelfBillConfig
+      summary: Set the partner's self-billing tolerances, wait days and VAT rate
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantityTolerance: { type: string, default: '0' }
+                priceTolerance: { type: string, default: '0.01', description: per unit }
+                waitDays: { type: integer, minimum: 1, maximum: 120, default: 30 }
+                taxRatePct: { type: string, default: '0', description: the VAT rate the partner's shipments are recomputed at (BR-35.15) }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0012 — the partner has no trade profile
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: getSelfBillConfig
+      summary: Read the partner's self-billing settings (the defaults when none were set)
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string } } }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/self-billing:sweep:
+    post:
+      operationId: sweepSelfBilling
+      summary: Match pending self-billed invoices and dispute shipments not billed in time
+      description: >
+        Matches the inbound INVOIC 389 messages still MAPPED (a document is matched right after receipt; this catches any that missed it), then opens one
+        UNBILLED dispute (EDI-0138) for each shipment of the caller's partners still not self-billed after the partner's wait days. Safe to run as often as wanted: a
+        shipment is disputed once.
+      x-passage-duty: edi.self-billing.reconcile
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { reconciled: { type: integer }, unbilled: { type: array, items: { type: object } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /edi/v1/self-billing/documents:
+    get:
+      operationId: listSelfBillDocuments
+      summary: List the self-billed documents received, newest first
+      x-passage-duty: edi.self-billing.reconcile
+      parameters:
+        - { name: status, in: query, required: false, description: 'Only documents of this status', schema: { type: string, enum: [MATCHED, DISPUTED, RESOLVED] } }
+        - { name: limit, in: query, required: false, description: 'Page size', schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { type: object } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /edi/v1/self-billing/disputes:
+    get:
+      operationId: listSelfBillDisputes
+      summary: The self-billing dispute worklist, oldest first
+      description: >
+        Kinds: DIFFERENCE (a line differs in quantity, price or tax, EDI-0136), UNMATCHED (no shipment, EDI-0137) and UNBILLED (a shipment not billed in time, EDI-0138).
+      x-passage-duty: edi.self-billing.reconcile
+      parameters:
+        - { name: status, in: query, required: false, description: 'Only disputes of this status', schema: { type: string, enum: [OPEN, ACCEPTED, REJECTED] } }
+        - { name: partnerId, in: query, required: false, description: 'Only this partner', schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, description: 'Page size', schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { type: object } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /edi/v1/self-billing/disputes/{id}:resolve:
+    post:
+      operationId: resolveSelfBillDispute
+      summary: Accept or reject a self-billing dispute
+      description: >
+        ACCEPTED takes the customer's line as billed (an UNBILLED shipment is closed as billed outside the system); REJECTED keeps our figures. The document becomes
+        RESOLVED when its last open dispute is decided. Nothing is posted to billing or receivables (wave 29 handoff).
+      x-passage-duty: edi.self-billing.reconcile
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [ACCEPTED, REJECTED] }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0026 — the dispute was already decided
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/einvoice/parties/{role}/{subjectId}:
+    put:
+      operationId: putEInvoiceParty
+      summary: Store the seller profile of a legal entity or the buyer profile of a customer
+      description: >
+        Billing carries no address, VAT id or endpoint, so the e-invoice builder takes them from these profiles.
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - { name: role, in: path, required: true, schema: { type: string, enum: [SELLER, BUYER] } }
+        - { name: subjectId, in: path, required: true, description: the legal entity (SELLER) or the customer (BUYER), schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, party]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                party: { type: object, description: name, legalName, endpointScheme, endpointId, countryCode, vatId, legalId, streetName, cityName, postalZone and contact fields as in peppol/invoices:build }
+                buyerReference: { type: string, description: BT-10, the fallback when the invoice has no customer PO }
+                iban: { type: string, description: the seller's payment account }
+                paymentMeansCode: { type: string, enum: ['30', '58'] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getEInvoiceParty
+      summary: Read a stored party profile
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - { name: role, in: path, required: true, schema: { type: string, enum: [SELLER, BUYER] } }
+        - { name: subjectId, in: path, required: true, description: the legal entity (SELLER) or the customer (BUYER), schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, required: false, description: 'The legal entity the profile belongs to', schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/einvoice/invoices:
+    post:
+      operationId: createEInvoice
+      summary: Build and store the e-invoice of a posted billing invoice for a mandate
+      description: >
+        Reads the invoice from billing, maps it (the VAT rate is derived: billing carries tax amounts, so one rate per invoice, EINV-0113 for mixed rates; the payable
+        must equal billing's gross, EINV-0112) and builds it with the mandate: PEPPOL (UBL 2.1, Peppol BIS Billing 3.0) here, IT_SDI and MX_CFDI as hooks that refuse
+        (EINV-0150) until a country pack installs a generator. The answer is VALID with its XML or INVALID with the blocking issues. A repeat returns the stored
+        e-invoice (200); a repeat of an INVALID one builds again. EDI-0027 when the seller or buyer profile is missing.
+      x-passage-duty: edi.einvoice.operate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, invoiceId, mandate]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                invoiceId: { type: string, format: uuid }
+                mandate: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI] }
+      responses:
+        '201':
+          description: Built and stored
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0027 — a party profile is missing
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: The invoice belongs to another legal entity
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: listEInvoices
+      summary: List e-invoices newest first, without their XML
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - { name: status, in: query, required: false, description: 'Only this status', schema: { type: string, enum: [VALID, INVALID, SUBMITTED, ACCEPTED, REJECTED] } }
+        - { name: mandate, in: query, required: false, description: 'Only this mandate', schema: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI] } }
+        - { name: limit, in: query, required: false, description: 'Page size', schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { type: object } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /edi/v1/einvoice/invoices/{id}:
+    get:
+      operationId: getEInvoice
+      summary: One e-invoice with its XML and issues
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/einvoice/invoices/{id}:submit:
+    post:
+      operationId: submitEInvoice
+      summary: Hand a VALID (or rejected) e-invoice to its network through the access point
+      description: >
+        VALID or REJECTED moves to SUBMITTED with the network's reference and publishes einvoice.submitted. 503 EDI-0029 while no access point is configured
+        (a live Peppol access point or government portal is injected by the deployment); 409 EDI-0031 for an INVALID e-invoice.
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0030 or EDI-0031
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '502':
+          description: EDI-0029 — the access point did not take the document
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: EDI-0029 — no access point is configured
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/einvoice/invoices/{id}:response:
+    post:
+      operationId: recordEInvoiceResponse
+      summary: Record the network's answer to a submitted e-invoice
+      description: >
+        SUBMITTED moves to ACCEPTED or REJECTED and publishes einvoice.accepted or einvoice.rejected.
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: { type: string, enum: [ACCEPTED, REJECTED] }
+                reference: { type: string, maxLength: 200 }
+                reason: { type: string, maxLength: 1000, description: required when REJECTED }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0030 — not submitted
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/partners/{id}/punchout:
+    put:
+      operationId: putPunchoutSupplier
+      summary: Set the supplier's punchout settings (BR-35.13 inputs, setup URL, network identities)
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [setupUrl, buyerIdentity, supplierIdentity, currencies]
+              properties:
+                setupUrl: { type: string, format: uri, description: https }
+                buyerIdentity: { type: string }
+                supplierIdentity: { type: string }
+                sharedSecretRef: { type: string, description: a file in the mounted secrets, never the secret }
+                currencies: { type: array, items: { type: string } }
+                uomMap: { type: object, additionalProperties: { type: string } }
+                tolerancePct: { type: string, default: '0' }
+                referencePrices: { type: object, additionalProperties: { type: string } }
+                sessionMinutes: { type: integer, minimum: 5, maximum: 480, default: 60 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0012 — the partner has no trade profile
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: getPunchoutSupplier
+      summary: Read the supplier's punchout settings
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/punchout/sessions:
+    post:
+      operationId: createPunchoutSession
+      summary: Open a supplier's catalog for the caller
+      description: >
+        Records an OPEN session for the caller (the requester), sends the cXML PunchOutSetupRequest (or, for OCI, builds the supplier URL with HOOK_URL) and returns
+        the URL to send the browser to. The cart comes back to POST /punchout/v1/return/{session}. 502 EDI-0033 when the supplier refuses or is down (no session
+        is stored); 503 EDI-0032 without the public URL (EDI_AS2_PUBLIC_URL).
+      x-passage-duty: edi.requisition.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partnerId]
+              properties:
+                partnerId: { type: string, format: uuid }
+                format: { type: string, enum: [CXML, OCI], default: CXML }
+      responses:
+        '201':
+          description: Session opened
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '502':
+          description: EDI-0033 — the supplier refused the setup
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: EDI-0032 — no public URL
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: listPunchoutSessions
+      summary: The caller's punchout sessions, newest first
+      x-passage-duty: edi.requisition.create
+      parameters:
+        - { name: limit, in: query, required: false, description: 'Page size', schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { type: object } } } }
+  /edi/v1/punchout/sessions/{id}:
+    get:
+      operationId: getPunchoutSession
+      summary: One of the caller's punchout sessions, with the validated cart once it is back
+      x-passage-duty: edi.requisition.create
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/punchout/sessions/{id}:cancel:
+    post:
+      operationId: cancelPunchoutSession
+      summary: Cancel an open punchout session
+      x-passage-duty: edi.requisition.create
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0035 — the session is not open
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/punchout/sessions/{id}:create-requisition:
+    post:
+      operationId: createRequisitionFromPunchout
+      summary: Turn a returned cart into a DRAFT requisition of the requester
+      description: >
+        Creates the requisition in purchasing (wave 17) as the requester, under the Idempotency-Key punchout:<session>, so a repeat returns the same requisition (200).
+        The lines are description, UNSPSC (category), quantity, UN/ECE unit, catalog price and a date from the lead time; purchasing has no field for the catalog and
+        approval flags, which stay on the session and in the punchout.returned event. 422 EDI-0034 when purchasing refuses the lines.
+      x-passage-duty: edi.requisition.create
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '201':
+          description: Requisition created
+          content:
+            application/json:
+              schema: { type: object, properties: { sessionId: { type: string }, requisitionId: { type: string } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0035 — the cart was not returned or was rejected
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: EDI-0034 — purchasing refused the requisition
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /punchout/v1/return/{session}:
+    servers:
+      - url: https://as2.{env}.passage.dev
+        description: The public listener (EDI_AS2_ADDR), reached without a Passage token
+        variables:
+          env: { default: dev }
+    post:
+      operationId: punchoutReturn
+      summary: The supplier returns the cart (public listener)
+      description: >
+        Called by the supplier's catalog page (the requester's browser) or the supplier's server, with no Passage token: the session id and its secret (random, stored
+        hashed, valid until the session expires) select and open one session. cXML arrives as the raw body or in the cxml-urlencoded or cxml-base64 field of a form post;
+        OCI as NEW_ITEM-... form fields. The cart is validated (BR-35.13): 200 with the line count, 422 EDI-0134 when the total does not match (session REJECTED), 400 for
+        an unreadable cart or a wrong BuyerCookie, 404 for an unknown session or secret, 409 when the cart was returned already, 410 when the session expired.
+      x-passage-duty: none
+      parameters:
+        - { name: session, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: t, in: query, required: true, description: the session secret from the return URL, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/cxml:
+    put:
+      operationId: putPartnerCXML
+      summary: Set the partner's cXML network identity and shared secret
+      description: >
+        Returns the URL the partner posts its documents to. The URL stays the same when the secret is rotated.
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [networkIdentity, sharedSecret]
+              properties:
+                networkIdentity: { type: string, maxLength: 80, description: the NetworkId identity the partner sends under }
+                sharedSecret: { type: string, minLength: 16, maxLength: 200, description: write-only; only its hash is kept }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { partnerId: { type: string }, endpointId: { type: string }, url: { type: string }, networkIdentity: { type: string } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: EDI-0012 — the partner has no trade profile
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: getPartnerCXML
+      summary: Read the partner's cXML identity and URL (never the secret)
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { partnerId: { type: string }, endpointId: { type: string }, url: { type: string }, networkIdentity: { type: string } } }
+        '404': { $ref: '#/components/responses/Problem' }
+  /cxml/v1/{endpoint}:
+    servers:
+      - url: https://as2.{env}.passage.dev
+        description: The public listener (EDI_AS2_ADDR), reached without a Passage token
+        variables:
+          env: { default: dev }
+    post:
+      operationId: cxmlReceive
+      summary: Receive a cXML document from a network (public listener)
+      description: >
+        Called by the partner's cXML network (Ariba, Coupa), with no Passage token. The Sender credential (NetworkId identity and shared secret) is checked against the
+        partner's profile; ConfirmationRequest, ShipNoticeRequest and InvoiceDetailRequest are recorded as an interchange of standard CXML with a canonical message and
+        message.received. The answer is a cXML Response: Status 200 (taken), 400 (not well-formed, a document type this endpoint does not take, or a document missing
+        required elements, recorded FAILED), 401 (bad credentials), 409 (EDI-0135: the payloadID was used before with other content). The same payloadID with the same
+        content gets the first answer back and records nothing (BR-35.14). 404 for an unknown endpoint, an inactive partner or a partner whose endpoint changed.
+      x-passage-duty: none
+      parameters:
+        - { name: endpoint, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
 components:
   parameters:
     IdempotencyKey:

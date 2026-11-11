@@ -236,6 +236,8 @@ var serviceGrants = map[string]map[string][]string{
 		"fulfillment": {"fulfillment.shipment.read"},
 		"billing":     {"billing.invoice.read"},
 		"sales":       {"sales.order.lookup", "sales.channel.intake"},
+		// A returned punchout cart becomes a requisition of the requester (#35, 35-3): the token carries the requester as act.
+		"purchasing": {"procurement.requisition.create"},
 	},
 	"fieldservice": {
 		"dispatch": {"dispatch.run.create", "dispatch.run.read"},

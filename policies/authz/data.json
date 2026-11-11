@@ -1276,7 +1276,11 @@
       {"resource": "/edi/v1/partners/*/transport", "methods": ["GET", "PUT"]},
       {"resource": "/edi/v1/partners/*/item-xrefs", "methods": ["GET", "POST"]},
       {"resource": "/edi/v1/partners/*/item-xrefs/*", "methods": ["PUT", "DELETE"]},
-      {"resource": "/edi/v1/partners/*/sales-defaults", "methods": ["GET", "PUT"]}
+      {"resource": "/edi/v1/partners/*/sales-defaults", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/partners/*/auto-outbound", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/partners/*/self-billing", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/partners/*/punchout", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/partners/*/cxml", "methods": ["GET", "PUT"]}
     ]},
     "edi.operate": {"permissions": [
       {"resource": "/edi/v1/inbound/edifact", "methods": ["POST"]},
@@ -1295,7 +1299,15 @@
       {"resource": "/edi/v1/partners/sla", "methods": ["GET"]}
     ]},
     "edi.pii.view": {"flag": true, "permissions": []},
-    "edi.einvoice.operate": {"permissions": [{"resource": "/edi/v1/peppol/invoices:build", "methods": ["POST"]}]},
+    "edi.einvoice.operate": {"permissions": [
+      {"resource": "/edi/v1/peppol/invoices:build", "methods": ["POST"]},
+      {"resource": "/edi/v1/einvoice/parties/*/*", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/einvoice/invoices", "methods": ["GET", "POST"]},
+      {"resource": "/edi/v1/einvoice/invoices/*", "methods": ["GET"]},
+      {"resource": "/edi/v1/einvoice/invoices/*:submit", "methods": ["POST"]},
+      {"resource": "/edi/v1/einvoice/invoices/*:response", "methods": ["POST"]}
+    ]},
+    "edi.outbound.from-event": {"flag": true, "permissions": []},
     "eam.asset.maintain": {"permissions": [
       {"resource": "/v1/eam/assets", "methods": ["POST"]},
       {"resource": "/v1/eam/assets/*/activate", "methods": ["POST"]},
@@ -1654,7 +1666,13 @@
       {"resource": "/v1/hr/me/team", "methods": ["GET"]},
       {"resource": "/v1/hr/me/team/*", "methods": ["GET"]}
     ]},
-    "edi.requisition.create": {"permissions": [{"resource": "/edi/v1/punchout/returns:parse", "methods": ["POST"]}]},
+    "edi.requisition.create": {"permissions": [
+      {"resource": "/edi/v1/punchout/returns:parse", "methods": ["POST"]},
+      {"resource": "/edi/v1/punchout/sessions", "methods": ["GET", "POST"]},
+      {"resource": "/edi/v1/punchout/sessions/*", "methods": ["GET"]},
+      {"resource": "/edi/v1/punchout/sessions/*:cancel", "methods": ["POST"]},
+      {"resource": "/edi/v1/punchout/sessions/*:create-requisition", "methods": ["POST"]}
+    ]},
     "fulfillment.packaging-fee.maintain": {"permissions": [
       {"resource": "/v1/fulfillment/packaging-fee-rates", "methods": ["GET", "POST"]},
       {"resource": "/v1/fulfillment/packaging-report", "methods": ["GET"]}
@@ -1814,7 +1832,13 @@
       {"resource": "/v1/quality/test-groups", "methods": ["GET"]},
       {"resource": "/v1/quality/test-groups/*", "methods": ["GET"]}
     ]},
-    "edi.self-billing.reconcile": {"permissions": [{"resource": "/edi/v1/self-billing:match", "methods": ["POST"]}]},
+    "edi.self-billing.reconcile": {"permissions": [
+      {"resource": "/edi/v1/self-billing:match", "methods": ["POST"]},
+      {"resource": "/edi/v1/self-billing:sweep", "methods": ["POST"]},
+      {"resource": "/edi/v1/self-billing/documents", "methods": ["GET"]},
+      {"resource": "/edi/v1/self-billing/disputes", "methods": ["GET"]},
+      {"resource": "/edi/v1/self-billing/disputes/*:resolve", "methods": ["POST"]}
+    ]},
     "compliance.security.admin": {"permissions": [
       {"resource": "/v1/sod/evaluations", "methods": ["POST"]},
       {"resource": "/v1/sod/simulate", "methods": ["POST"]}
@@ -3842,7 +3866,8 @@
     "edi": {
       "fulfillment": ["fulfillment.shipment.read"],
       "billing": ["billing.invoice.read"],
-      "sales": ["sales.order.lookup", "sales.channel.intake"]
+      "sales": ["sales.order.lookup", "sales.channel.intake"],
+      "purchasing": ["procurement.requisition.create"]
     },
     "fieldservice": {
       "dispatch": ["dispatch.run.create", "dispatch.run.read"]
@@ -3857,6 +3882,7 @@
     }
   },
   "service_principals": {
+    "edi-outbound": ["edi.outbound.from-event"],
     "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],
     "pricing-cache": ["pricing.cache.invalidate"],
