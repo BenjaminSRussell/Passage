@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -27,7 +28,7 @@ func execute(args []string, stdout, stderr io.Writer, getenv func(string) string
 		if inServiceMode() {
 			args = []string{"serve"}
 		} else {
-			_, _ = fmt.Fprintln(stderr, "usage: passage-server serve|migrate|doctor|version")
+			_, _ = fmt.Fprintln(stderr, "usage: passage-server serve|migrate|doctor|wrap|version")
 			return 2
 		}
 	}
@@ -41,6 +42,8 @@ func execute(args []string, stdout, stderr io.Writer, getenv func(string) string
 		return migrateCmd(args[1:], stderr, getenv)
 	case "serve":
 		return serveCmd(stderr, getenv)
+	case "wrap":
+		return wrapCmd(args[1:], stderr, getenv)
 	}
 	_, _ = fmt.Fprintf(stderr, "passage-server: unknown command %q\n", args[0])
 	return 2
@@ -53,7 +56,7 @@ func doctorCmd(args []string, stdout, stderr io.Writer, getenv func(string) stri
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg, procs, err := loadConfig(getenv)
+	cfg, procs, err := loadConfig(getenv, ModeServe)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "FAIL config: %v\n", err)
 		return 1
@@ -90,9 +93,41 @@ func migrateCmd(args []string, stderr io.Writer, getenv func(string) string) int
 	return 0
 }
 
+// runFunc is what runs under a console or the service control manager.
+type runFunc func(ctx context.Context, log *slog.Logger) error
+
 func serveCmd(stderr io.Writer, getenv func(string) string) int {
+	run := func(ctx context.Context, log *slog.Logger) error { return runServe(ctx, getenv, log) }
+	return runMain(stderr, getenv, "Passage", filepath.Join(DefaultDataDir(getenv), "logs"), run)
+}
+
+// wrapCmd: passage-server wrap -service NAME [-logdir DIR] -- exe args...  runs one external program as the service NAME.
+func wrapCmd(args []string, stderr io.Writer, getenv func(string) string) int {
+	fs := flag.NewFlagSet("wrap", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	name := fs.String("service", "", "Windows service name")
+	logDir := fs.String("logdir", "", "directory for the program's log (default: <data>\\logs)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if *name == "" || len(rest) == 0 {
+		_, _ = fmt.Fprintln(stderr, "usage: passage-server wrap -service NAME [-logdir DIR] -- program [args...]")
+		return 2
+	}
+	dir := *logDir
+	if dir == "" {
+		dir = filepath.Join(DefaultDataDir(getenv), "logs")
+	}
+	run := func(ctx context.Context, log *slog.Logger) error {
+		return runWrap(ctx, log, dir, *name, rest[0], rest[1:])
+	}
+	return runMain(stderr, getenv, *name, dir, run)
+}
+
+func runMain(stderr io.Writer, getenv func(string) string, serviceName, logDir string, run runFunc) int {
 	if inServiceMode() {
-		if err := runAsService(getenv); err != nil {
+		if err := runAsService(serviceName, logDir, run); err != nil {
 			_, _ = fmt.Fprintln(stderr, "passage-server:", err)
 			return 1
 		}
@@ -101,7 +136,7 @@ func serveCmd(stderr io.Writer, getenv func(string) string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log := slog.New(slog.NewJSONHandler(stderr, nil))
-	if err := runServe(ctx, getenv, log); err != nil && !errors.Is(err, context.Canceled) {
+	if err := run(ctx, log); err != nil && !errors.Is(err, context.Canceled) {
 		_, _ = fmt.Fprintln(stderr, "passage-server:", err)
 		return 1
 	}

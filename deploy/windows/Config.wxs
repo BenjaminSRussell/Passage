@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Generated shape: one Property + one RegistrySearch + one SetProperty + one Registry value per MSI property. Edit by hand if a property is added; keep names equal to tools/passage-server/policy_windows.go registryValueNames. -->
+<!-- One Property + RegistrySearch + SetProperty + Registry value per MSI property, so a value given once survives upgrade and repair.
+     Names must stay equal to tools/passage-server/policy_windows.go registryValueNames (SERVICE_ACCOUNT, LISTEN_PORT, OPEN_FIREWALL are read by the MSI only). -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
-    <!-- Postgres URL for the services (role passage_app, NOBYPASSRLS). Secret. -->
+    <!-- Postgres owner URL (creates and migrates the service databases). Secret. -->
     <Property Id="PG_DSN" Secure="yes" Hidden="yes" />
     <Property Id="PREV_PG_DSN" Secure="yes" Hidden="yes">
       <RegistrySearch Id="Search_PG_DSN" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="PG_DSN" Type="raw" Bitness="always64" />
     </Property>
     <SetProperty Id="PG_DSN" Value="[PREV_PG_DSN]" After="AppSearch" Condition="NOT PG_DSN AND PREV_PG_DSN" />
-    <!-- Optional separate passage_app URL when PG_DSN is an admin URL. -->
+    <!-- passage_app URL every service connects as (NOBYPASSRLS). Secret. -->
     <Property Id="PG_APP_DSN" Secure="yes" Hidden="yes" />
     <Property Id="PREV_PG_APP_DSN" Secure="yes" Hidden="yes">
       <RegistrySearch Id="Search_PG_APP_DSN" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="PG_APP_DSN" Type="raw" Bitness="always64" />
@@ -44,13 +45,13 @@
       <RegistrySearch Id="Search_OPA_URL" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OPA_URL" Type="raw" Bitness="always64" />
     </Property>
     <SetProperty Id="OPA_URL" Value="[PREV_OPA_URL]" After="AppSearch" Condition="NOT OPA_URL AND PREV_OPA_URL" />
-    <!-- Comma-separated Kafka bootstrap servers. -->
+    <!-- Comma-separated Kafka bootstrap servers (passed to services as KAFKA_BROKERS). -->
     <Property Id="KAFKA_BOOTSTRAP" Secure="yes" />
     <Property Id="PREV_KAFKA_BOOTSTRAP" Secure="yes">
       <RegistrySearch Id="Search_KAFKA_BOOTSTRAP" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="KAFKA_BOOTSTRAP" Type="raw" Bitness="always64" />
     </Property>
     <SetProperty Id="KAFKA_BOOTSTRAP" Value="[PREV_KAFKA_BOOTSTRAP]" After="AppSearch" Condition="NOT KAFKA_BOOTSTRAP AND PREV_KAFKA_BOOTSTRAP" />
-    <!-- Temporal frontend host:port. -->
+    <!-- Temporal frontend host:port (passed to services as TEMPORAL_ADDRESS). -->
     <Property Id="TEMPORAL_HOSTPORT" Secure="yes" />
     <Property Id="PREV_TEMPORAL_HOSTPORT" Secure="yes">
       <RegistrySearch Id="Search_TEMPORAL_HOSTPORT" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TEMPORAL_HOSTPORT" Type="raw" Bitness="always64" />
@@ -86,6 +87,33 @@
       <RegistrySearch Id="Search_REQUIRE_FIPS" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="REQUIRE_FIPS" Type="raw" Bitness="always64" />
     </Property>
     <SetProperty Id="REQUIRE_FIPS" Value="[PREV_REQUIRE_FIPS]" After="AppSearch" Condition="NOT REQUIRE_FIPS AND PREV_REQUIRE_FIPS" />
+    <!-- 1 lets a non-loopback LISTEN serve plain HTTP (behind a TLS-terminating proxy). -->
+    <Property Id="ALLOW_PLAINTEXT" Secure="yes" />
+    <Property Id="PREV_ALLOW_PLAINTEXT" Secure="yes">
+      <RegistrySearch Id="Search_ALLOW_PLAINTEXT" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="ALLOW_PLAINTEXT" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="ALLOW_PLAINTEXT" Value="[PREV_ALLOW_PLAINTEXT]" After="AppSearch" Condition="NOT ALLOW_PLAINTEXT AND PREV_ALLOW_PLAINTEXT" />
+    <!-- Service account: virtual NT SERVICE\Passage by default, or DOMAIN\gmsa$. -->
+    <Property Id="SERVICE_ACCOUNT" Secure="yes" />
+    <Property Id="PREV_SERVICE_ACCOUNT" Secure="yes">
+      <RegistrySearch Id="Search_SERVICE_ACCOUNT" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="SERVICE_ACCOUNT" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="SERVICE_ACCOUNT" Value="[PREV_SERVICE_ACCOUNT]" After="AppSearch" Condition="NOT SERVICE_ACCOUNT AND PREV_SERVICE_ACCOUNT" />
+    <SetProperty Id="SERVICE_ACCOUNT" Action="Default_SERVICE_ACCOUNT" Value="NT SERVICE\Passage" After="Set_SERVICE_ACCOUNT" Condition="NOT SERVICE_ACCOUNT" />
+    <!-- Port of the firewall rule; keep equal to the port in LISTEN. -->
+    <Property Id="LISTEN_PORT" Secure="yes" />
+    <Property Id="PREV_LISTEN_PORT" Secure="yes">
+      <RegistrySearch Id="Search_LISTEN_PORT" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="LISTEN_PORT" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="LISTEN_PORT" Value="[PREV_LISTEN_PORT]" After="AppSearch" Condition="NOT LISTEN_PORT AND PREV_LISTEN_PORT" />
+    <SetProperty Id="LISTEN_PORT" Action="Default_LISTEN_PORT" Value="8443" After="Set_LISTEN_PORT" Condition="NOT LISTEN_PORT" />
+    <!-- 1 opens the inbound rule for a non-loopback LISTEN. -->
+    <Property Id="OPEN_FIREWALL" Secure="yes" />
+    <Property Id="PREV_OPEN_FIREWALL" Secure="yes">
+      <RegistrySearch Id="Search_OPEN_FIREWALL" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OPEN_FIREWALL" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="OPEN_FIREWALL" Value="[PREV_OPEN_FIREWALL]" After="AppSearch" Condition="NOT OPEN_FIREWALL AND PREV_OPEN_FIREWALL" />
+    <SetProperty Id="OPEN_FIREWALL" Action="Default_OPEN_FIREWALL" Value="1" After="Set_OPEN_FIREWALL" Condition="NOT OPEN_FIREWALL" />
   </Fragment>
   <Fragment>
     <ComponentGroup Id="ConfigRegistry" Directory="INSTALLFOLDER">
@@ -130,6 +158,18 @@
       </Component>
       <Component Id="Cfg_REQUIRE_FIPS" Guid="*" Bitness="always64" Condition="REQUIRE_FIPS">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="REQUIRE_FIPS" Type="string" Value="[REQUIRE_FIPS]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_ALLOW_PLAINTEXT" Guid="*" Bitness="always64" Condition="ALLOW_PLAINTEXT">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="ALLOW_PLAINTEXT" Type="string" Value="[ALLOW_PLAINTEXT]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_SERVICE_ACCOUNT" Guid="*" Bitness="always64" Condition="SERVICE_ACCOUNT">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="SERVICE_ACCOUNT" Type="string" Value="[SERVICE_ACCOUNT]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_LISTEN_PORT" Guid="*" Bitness="always64" Condition="LISTEN_PORT">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="LISTEN_PORT" Type="string" Value="[LISTEN_PORT]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_OPEN_FIREWALL" Guid="*" Bitness="always64" Condition="OPEN_FIREWALL">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OPEN_FIREWALL" Type="string" Value="[OPEN_FIREWALL]" KeyPath="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>

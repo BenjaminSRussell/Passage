@@ -13,9 +13,13 @@ type fakeDB struct {
 	super, bypass bool
 	migrations    int
 	exists        bool
+	role          string
 }
 
 func (f fakeDB) Role(context.Context) (string, bool, bool, error) {
+	if f.role != "" {
+		return f.role, f.super, f.bypass, nil
+	}
 	return "passage_app", f.super, f.bypass, nil
 }
 func (f fakeDB) Migrations(context.Context) (int, bool, error) { return f.migrations, f.exists, nil }
@@ -23,7 +27,10 @@ func (f fakeDB) Close(context.Context) error                   { return nil }
 
 func goodDeps() Deps {
 	return Deps{
-		OpenDB: func(context.Context, string) (DBInspector, error) {
+		OpenDB: func(_ context.Context, dsn string) (DBInspector, error) {
+			if strings.Contains(dsn, "//owner:") {
+				return fakeDB{role: "owner", migrations: 12, exists: true}, nil
+			}
 			return fakeDB{migrations: 12, exists: true}, nil
 		},
 		HTTPGet: func(_ context.Context, u string) (int, []byte, error) {
@@ -45,7 +52,8 @@ func goodDeps() Deps {
 
 func goodConfig() (Config, []Process) {
 	c := DefaultConfig()
-	c.DatabaseDSN = "postgres://passage_app:pw@db:5432/postgres"
+	c.DatabaseDSN = "postgres://owner:pw@db:5432/postgres"
+	c.AppDSN = "postgres://passage_app:pw@db:5432/postgres"
 	c.OIDCIssuer = "https://id.example/realms/p"
 	c.OPAURL = "http://opa:8181"
 	c.KafkaBootstrap = "k1:9092,k2:9092"

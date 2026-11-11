@@ -25,7 +25,7 @@ created on first start in `keys\` (readable only by SYSTEM, Administrators and t
 
 | Dependency | Property | Notes |
 |---|---|---|
-| PostgreSQL 16 or later (Windows, Linux or Azure Database for PostgreSQL) | `PG_DSN` | Roles and RLS as in `deploy/postgres`. The URL must use the `passage_app` role, which must be `NOBYPASSRLS` and not a superuser. Each `passage_<service>` database must exist (`CREATE DATABASE`); migrations are applied by `passage-server migrate`. SQL Server is not supported. |
+| PostgreSQL 16 or later (Windows, Linux or Azure Database for PostgreSQL) | `PG_DSN`, `PG_APP_DSN` | Two roles, as in `deploy/postgres`. `PG_DSN` is the **owner** role (needs `CREATEDB`; it owns the tables, runs migrations and is used by `passage-server migrate` only). `PG_APP_DSN` is the `passage_app` role (`LOGIN NOSUPERUSER NOBYPASSRLS`, not an owner) that every running service connects as. `migrate` creates each missing `passage_<service>` database as the owner and grants `passage_app` connect, usage on `public` and read/write on the owner's tables (by default privileges); to do it by hand: `CREATE DATABASE passage_<service> OWNER <owner>;` then in that database `GRANT USAGE ON SCHEMA public TO passage_app; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passage_app; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passage_app;`. Doctor fails when the two URLs use the same role or the app role has `BYPASSRLS`. SQL Server is not supported. |
 | OIDC issuer (Keycloak realm) | `OIDC_ISSUER` | Discovery document at `<issuer>/.well-known/openid-configuration` must report the same `issuer`. |
 | OPA | `OPA_URL` | An OPA server loaded with `policies/authz`. Embedding is a follow-up. |
 | Kafka-compatible broker with Debezium outbox | `KAFKA_BOOTSTRAP` | Not bundled (Kafka on Windows is not supported upstream). |
@@ -43,24 +43,25 @@ name). Values are stored under `HKLM\SOFTWARE\Passage\Config`; a property you om
 
 | Property | Default | Meaning |
 |---|---|---|
-| `PG_DSN` | none (required) | Postgres URL for the services, role `passage_app`. A secret: the key is ACL-restricted, see [Secrets](#secrets). |
-| `PG_APP_DSN` | `PG_DSN` | Use when `PG_DSN` is an admin URL and the services need a separate `passage_app` URL. |
+| `PG_DSN` | none (required) | Postgres **owner** URL: creates and migrates the service databases (the database name in it is only where it connects first). A secret: the key is ACL-restricted, see [Secrets](#secrets). |
+| `PG_APP_DSN` | none (required) | `passage_app` URL every running service uses (`DATABASE_URL`). A secret. Services started by `serve` get `MIGRATE_ON_START=false`; `migrate` starts them with the owner URL as `DATABASE_URL` and `MIGRATE_DATABASE_URL` and `MIGRATE_ON_START=true`. |
 | `OIDC_ISSUER` | none (required) | Keycloak realm URL. |
 | `OIDC_AUDIENCE` | `passage-api` | Required token audience. |
 | `OIDC_JWKS_URL` | issuer default | Set when the JWKS is not at the issuer's discovered address. |
 | `TENANT_ID` | empty | The tenant id the gateway accepts; empty means the verifier's default rule. |
 | `OPA_URL` | none (required) | OPA base URL. |
-| `KAFKA_BOOTSTRAP` | none (required) | Comma-separated bootstrap servers. |
-| `TEMPORAL_HOSTPORT` | none (required) | Temporal frontend `host:port`. |
-| `LISTEN` | `127.0.0.1:8443` | Gateway address. Anything that is not loopback needs `TLS_CERT_FILE` and `TLS_KEY_FILE` (doctor fails otherwise). |
+| `KAFKA_BOOTSTRAP` | none (required) | Comma-separated bootstrap servers; services receive it as `KAFKA_BROKERS`. |
+| `TEMPORAL_HOSTPORT` | none (required) | Temporal frontend `host:port`; services receive it as `TEMPORAL_ADDRESS`. |
+| `LISTEN` | `127.0.0.1:8443` | Gateway address. Anything that is not loopback needs `TLS_CERT_FILE` and `TLS_KEY_FILE`: otherwise `passage-server` refuses to start (and doctor fails). |
+| `ALLOW_PLAINTEXT` | `0` | `1` lets a non-loopback `LISTEN` serve plain HTTP, only for a TLS-terminating proxy in front. |
 | `LISTEN_PORT` | `8443` | Port used for the firewall rule; keep equal to the port in `LISTEN`. |
-| `OPEN_FIREWALL` | `1` | `0` skips the inbound firewall rule. |
+| `OPEN_FIREWALL` | `1` | `0` skips the inbound firewall rule. The rule is only created when `LISTEN` is not loopback. |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | none | PEM certificate (with chain) and private key. |
 | `CLOUD_PROFILE` | none | `PASSAGE_CLOUD_PROFILE` for every child (`commercial`, `gcc`, `gcc-high`, `dod`, `china`, overlays) (#599). |
-| `REQUIRE_FIPS` | `0` (`1` in the FIPS MSI) | `1` makes the server refuse to start unless `crypto/fips140.Enabled()`. |
-| `SERVICE_ACCOUNT` | `NT SERVICE\Passage` | Virtual account; pass `DOMAIN\gmsa$` for a group managed service account. |
-| `SKIP_DOCTOR` | `0` | `1` skips the dependency checks, to stage an install before the dependencies exist. |
-| `SKIP_MIGRATE` | `0` | `1` skips the migration step. |
+| `REQUIRE_FIPS` | `0` (`1` in the FIPS MSI, a separate product with its own upgrade code) | `1` makes the server refuse to start unless `crypto/fips140.Enabled()`. |
+| `SERVICE_ACCOUNT` | `NT SERVICE\Passage` | Virtual account; pass `DOMAIN\gmsa$` for a group managed service account. `SERVICE_ACCOUNT`, `LISTEN_PORT` and `OPEN_FIREWALL` are remembered like the other properties. |
+| `SKIP_DOCTOR` | `0` | `1` skips the dependency checks only. |
+| `SKIP_MIGRATE` | `0` | `1` skips the migration step only. To stage an install before its dependencies exist, set both to 1. Doctor and migrate run on a first install, a major upgrade and a repair, not on modify. |
 | `BACKUP_CONFIRMED` | `0` | An upgrade is refused unless this is `1`: take the backup first (below). |
 | `REMOVE_DATA` | `0` | On uninstall, `1` also deletes `%ProgramData%\Passage`. By default config, keys, certificates and logs stay. |
 | `ADDLOCAL` | Core | Add `NodeServices` and/or `PythonServices` to install the optional runtimes. |
@@ -75,7 +76,8 @@ Example silent install:
 
 ```
 msiexec /i Passage-1.0.0-x64.msi /qn /l*v C:\Windows\Temp\passage-install.log ^
-  PG_DSN="postgres://passage_app:SECRET@db01:5432/postgres?sslmode=verify-full" ^
+  PG_DSN="postgres://passage_owner:SECRET@db01:5432/postgres?sslmode=verify-full" ^
+  PG_APP_DSN="postgres://passage_app:SECRET2@db01:5432/postgres?sslmode=verify-full" ^
   OIDC_ISSUER="https://id.example.com/realms/passage" OPA_URL="http://opa01:8181" ^
   KAFKA_BOOTSTRAP="k1:9092,k2:9092" TEMPORAL_HOSTPORT="temporal01:7233" ^
   LISTEN="0.0.0.0:8443" LISTEN_PORT=8443 TLS_CERT_FILE="C:\ProgramData\Passage\certs\passage.pem" TLS_KEY_FILE="C:\ProgramData\Passage\certs\passage.key"
@@ -144,14 +146,15 @@ restarting the service. The per-service signing keys in `keys\` are generated on
 
 | Log | Location |
 |---|---|
-| passage-server | `%ProgramData%\Passage\logs\passage-server.log` (JSON lines, 50 MB x 5 files) |
+| passage-server (service) | `%ProgramData%\Passage\logs\Passage-service.log` (JSON lines, 50 MB x 5 files) |
 | Each service | `%ProgramData%\Passage\logs\<service>.log` (same rotation) |
 | Warnings and errors of the supervisor | Event Viewer, Windows Logs, Application, source `Passage` |
 | MSI install | the file given to `msiexec /l*v` |
-| Readiness | `https://<host>:<port>/readyz` returns 503 and lists the failing services; `/healthz` is liveness |
+| Readiness | `https://<host>:<port>/readyz` returns `{"ready":true|false}` (503 when not ready) with no per-service detail; `/healthz` is liveness. Per-service state is in the logs and in `doctor`. |
 
-A required service that exits more than five times in five minutes makes `passage-server` stop with exit code 1, and the service
-recovery actions restart it after 30 seconds. Optional services (the Node and Python features) failing do not stop it.
+A required service that exits more than five times in five minutes makes `passage-server` stop with a non-zero exit code; the service's failure
+actions are set to run on a non-zero exit as well as on a crash, so the service restarts after 30 seconds. Children are stopped hard on Windows
+(there is no console to deliver a graceful signal to); the services commit in database transactions and replay from the outbox. Optional services (the Node and Python features) failing do not stop it.
 
 ## Upgrade
 
@@ -189,9 +192,11 @@ and the registry export; start the service. Restoring the `keys` folder matters:
 
 ## Releases: signing, SBOM, CI secrets
 
-`.github/workflows/windows-msi.yml` builds for amd64 and arm64, standard and FIPS, on `windows-latest`. It runs on pull requests that touch
-`deploy/windows`, `tools/passage-server` or `platform/go/cloudprofile`, on `v*` tags and by hand. It signs and fails on unsigned binaries for tags and for
-dispatches with `sign: true`; pull requests build unsigned (they have no secrets) and the verification step lists the unsigned files.
+`.github/workflows/windows-msi.yml` has two build jobs on `windows-latest`. `build` has no secrets and no `id-token`: it cross-builds, packages unsigned
+and lists unsigned files; on a pull request it builds only amd64 (when `deploy/windows`, `tools/passage-server`, `platform/go`, `services/*/cmd` or the workflow change), on tags and manual runs all four
+legs (amd64 and arm64, standard and FIPS). `release` runs only for `v*` tags and manual runs with `sign: true`, in the `platform-release` environment: it signs the executables
+before packaging, then the MSIs and the bundle, fails on any unsigned or untimestamped binary, writes the SBOM and the cosign bundles and uploads them. The secrets are mapped only onto
+the signing steps and `id-token: write` exists only in that job.
 
 Secrets the workflow references (none is defined in the repository; put them in the `platform-release` environment):
 
@@ -204,6 +209,25 @@ Variables (optional): `WINDOWS_TIMESTAMP_URL`, `WIX_VERSION`, `WIX_OSMF_ACCEPTED
 `PYTHON_WIN_URL`/`PYTHON_WIN_SHA256`, `TEMPORAL_WIN_URL`/`TEMPORAL_WIN_SHA256`, `POSTGRES_WIN_URL`/`POSTGRES_WIN_SHA256`. Nothing third-party is
 downloaded without its hash. Each build publishes the MSI(s), the bundle, an SPDX SBOM and, on tags, a keyless cosign bundle for each file.
 Verify with `cosign verify-blob --bundle <file>.cosign.bundle <file>` and `Get-AuthenticodeSignature <file>`.
+
+## Trust boundary on the host
+
+Every service listens on `127.0.0.1` and trusts the `X-Passage-*` identity headers, so on a host where other people can log on (a shared
+Windows Server) a local user could skip authentication by calling a loopback port. `passage-server` closes that: each start it generates a random
+secret, gives it to every child as `PASSAGE_GATEWAY_SECRET`, and adds it to every proxied request; `platform/go/tenant` then rejects any
+identity-header request without it (service tokens are signed and unaffected). Only the gateway process, which verifies the JWT and asks OPA, can
+speak for a user. The secret lives only in process memory and environments; processes of other users cannot read it. Still treat the server as
+a dedicated host, and keep the data folder ACLs as installed.
+
+## Temporal (optional package)
+
+`PassageTemporal-<version>-x64.msi` installs `temporal-server.exe` and runs it as the `PassageTemporal` service through `passage-server wrap`
+(temporal-server does not speak the Windows service protocol itself, so it runs as a supervised child with the same restart policy, log rotation and
+failure actions). Edit `%ProgramData%\PassageTemporal\config\passage.yaml` (Postgres address, database names, and the placeholder password
+`CHANGE_ME`, in a folder only SYSTEM, Administrators and the service account can read), create the two databases, run Temporal's schema setup
+(`temporal-sql-tool`) against them, then `Start-Service PassageTemporal`. Point `TEMPORAL_HOSTPORT` at `127.0.0.1:7233`. The config is kept on upgrade and uninstall.
+The bundle installs it with `InstallTemporal=1`, and PostgreSQL with `InstallPostgres=1 PostgresOptionFile=<file>`, where the file is one you created (Administrators only)
+holding the EDB installer's option lines such as `superpassword=...`; the password never goes on a command line.
 
 ## Known limits
 

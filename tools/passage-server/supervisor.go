@@ -227,6 +227,7 @@ func (s *Supervisor) probeLoop(ctx context.Context, procs []Process) {
 	}
 }
 
+// stopAll stops the children one at a time, last started first, so a service that others call outlives its callers' shutdown.
 func (s *Supervisor) stopAll() {
 	s.mu.Lock()
 	var hs []Handle
@@ -236,17 +237,11 @@ func (s *Supervisor) stopAll() {
 		}
 	}
 	s.mu.Unlock()
-	var wg sync.WaitGroup
 	for _, h := range hs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := h.Stop(s.StopGrace); err != nil {
-				s.Log.Warn("stop failed", "err", err)
-			}
-		}()
+		if err := h.Stop(s.StopGrace); err != nil {
+			s.Log.Warn("stop failed", "err", err)
+		}
 	}
-	wg.Wait()
 }
 
 func (s *Supervisor) set(name string, st State, msg string) {

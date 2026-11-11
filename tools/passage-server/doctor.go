@@ -54,6 +54,8 @@ type Deps struct {
 	FIPSBuilt   func() bool
 	WebEmbedded bool
 	ProbeWrite  func(dir string) error
+	// ServiceRunning reports whether the Passage Windows service is running now (so its own listener is not a conflict).
+	ServiceRunning func() bool
 }
 
 // RealDeps wires Deps to the network and file system.
@@ -97,9 +99,10 @@ func RealDeps(fipsEnabled, fipsBuilt func() bool) Deps {
 			}
 			return l.Close()
 		},
-		FIPSEnabled: fipsEnabled,
-		FIPSBuilt:   fipsBuilt,
-		WebEmbedded: webEmbedded,
+		FIPSEnabled:    fipsEnabled,
+		FIPSBuilt:      fipsBuilt,
+		WebEmbedded:    webEmbedded,
+		ServiceRunning: serviceRunning,
 		ProbeWrite: func(dir string) error {
 			f, err := os.CreateTemp(dir, ".doctor-*")
 			if err != nil {
@@ -184,6 +187,10 @@ func checkWeb(d Deps, add adder) {
 
 func checkListen(cfg Config, d Deps, add adder) {
 	if err := d.Listen(cfg.Listen); err != nil {
+		if d.ServiceRunning != nil && d.ServiceRunning() {
+			add("listen", LevelWarn, "%s is in use by the running Passage service", cfg.Listen)
+			return
+		}
 		add("listen", LevelFail, "cannot bind %s: %v", cfg.Listen, err)
 		return
 	}
@@ -192,10 +199,12 @@ func checkListen(cfg Config, d Deps, add adder) {
 
 func checkTLS(cfg Config, d Deps, add adder) {
 	if cfg.TLS.CertFile == "" {
-		host, _, _ := net.SplitHostPort(cfg.Listen)
-		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() || host == "localhost" {
+		switch {
+		case loopbackAddr(cfg.Listen):
 			add("tls", LevelWarn, "no certificate configured; plain HTTP on loopback only")
-		} else {
+		case cfg.AllowPlaintext:
+			add("tls", LevelWarn, "ALLOW_PLAINTEXT is set: %s serves plain HTTP; put a TLS-terminating proxy in front", cfg.Listen)
+		default:
 			add("tls", LevelFail, "listen address %s is not loopback and no tls.certFile/tls.keyFile is set", cfg.Listen)
 		}
 		return
@@ -219,20 +228,41 @@ func checkData(cfg Config, d Deps, add adder) {
 	add("data-dir", LevelOK, "%s is writable", cfg.DataDir)
 }
 
+// checkPostgres checks both database roles: the owner (PG_DSN: creates databases, owns the tables, runs migrations) and passage_app
+// (PG_APP_DSN: what every serving child connects as, which must not bypass row-level security or be an owner).
 func checkPostgres(ctx context.Context, cfg Config, procs []Process, d Deps, add adder) {
-	dsn := cfg.AppDSN
-	if dsn == "" {
-		dsn = cfg.DatabaseDSN
-	}
-	if dsn == "" {
-		add("postgres", LevelFail, "no PG_DSN (pgDsn) configured")
-		return
+	if cfg.DatabaseDSN == "" {
+		add("postgres-owner", LevelFail, "no PG_DSN (pgDsn): the database owner URL used to create and migrate the service databases")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	db, err := d.OpenDB(ctx, dsn)
+	ownerRole := ""
+	if cfg.DatabaseDSN != "" {
+		db, err := d.OpenDB(ctx, cfg.DatabaseDSN)
+		if err != nil {
+			add("postgres-owner", LevelFail, "cannot connect with PG_DSN: %s", redact(err.Error(), cfg.DatabaseDSN))
+		} else {
+			name, super, _, err := db.Role(ctx)
+			_ = db.Close(ctx)
+			if err != nil {
+				add("postgres-owner", LevelFail, "cannot read the owner role: %v", err)
+			} else {
+				ownerRole = name
+				if super {
+					add("postgres-owner", LevelWarn, "owner role %s is a superuser; a dedicated owner role with CREATEDB is safer", name)
+				} else {
+					add("postgres-owner", LevelOK, "owner role %s connected", name)
+				}
+			}
+		}
+	}
+	if cfg.AppDSN == "" {
+		add("postgres-role", LevelFail, "no PG_APP_DSN: the services must connect as the passage_app role (NOBYPASSRLS), not as the owner")
+		return
+	}
+	db, err := d.OpenDB(ctx, cfg.AppDSN)
 	if err != nil {
-		add("postgres", LevelFail, "cannot connect: %s", redact(err.Error(), dsn))
+		add("postgres", LevelFail, "cannot connect with PG_APP_DSN: %s", redact(err.Error(), cfg.AppDSN))
 		return
 	}
 	role, super, bypass, err := db.Role(ctx)
@@ -242,8 +272,10 @@ func checkPostgres(ctx context.Context, cfg Config, procs []Process, d Deps, add
 		add("postgres-role", LevelFail, "cannot read the role: %v", err)
 	case bypass || super:
 		add("postgres-role", LevelFail, "role %s has BYPASSRLS or SUPERUSER: row-level security would not protect tenants; use the passage_app role (NOBYPASSRLS)", role)
+	case role == ownerRole:
+		add("postgres-role", LevelFail, "PG_APP_DSN and PG_DSN use the same role %s: the app role must not be the owner of the tables", role)
 	default:
-		add("postgres-role", LevelOK, "role %s is NOBYPASSRLS", role)
+		add("postgres-role", LevelOK, "role %s is NOBYPASSRLS and not the owner", role)
 	}
 	add("postgres", LevelOK, "connected")
 	pending := []string{}

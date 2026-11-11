@@ -8,10 +8,12 @@ package tenant
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -105,6 +107,16 @@ const (
 	HeaderWebLegalEntity      = "X-Passage-LegalEntity"
 	HeaderLegalEntityScopeAll = "X-Passage-LegalEntity-Scope"
 	LegalEntityScopeAll       = "ALL"
+)
+
+// GatewaySecretEnv names an optional shared secret between the gateway and the services behind it. When it is set, Middleware accepts the
+// user-header identity only on a request that carries the same value in HeaderGatewaySecret, so a process that can reach a service's
+// loopback port (another user on a shared Windows Server) cannot invent X-Passage-* headers. The gateway (tools/passage-server) generates
+// a random value per start and sets it on every proxied request. Unset (the default, and in Kubernetes where NetworkPolicy is the
+// boundary) it changes nothing. Service tokens are signed and are not affected.
+const (
+	GatewaySecretEnv    = "PASSAGE_GATEWAY_SECRET"
+	HeaderGatewaySecret = "X-Passage-Gateway-Secret"
 )
 
 // canonicalUUID returns the lowercase hyphenated form of s, or false when s is
@@ -215,6 +227,7 @@ func MiddlewareWith(v *ServiceVerifier) func(http.Handler) http.Handler {
 }
 
 func middlewareWith(verifier func() *ServiceVerifier, next http.Handler) http.Handler {
+	gatewaySecret := []byte(os.Getenv(GatewaySecretEnv))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)
@@ -234,6 +247,11 @@ func middlewareWith(verifier func() *ServiceVerifier, next http.Handler) http.Ha
 			}
 			slog.InfoContext(r.Context(), "service call", "service", claims.Iss, "actor", claims.Act, "legalEntityId", claims.Le, "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
 			next.ServeHTTP(w, r.WithContext(With(r.Context(), claims.Principal())))
+			return
+		}
+		if len(gatewaySecret) > 0 && subtle.ConstantTimeCompare([]byte(r.Header.Get(HeaderGatewaySecret)), gatewaySecret) != 1 {
+			slog.WarnContext(r.Context(), "request without the gateway secret rejected", "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
+			reject(w, r, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "missing gateway credentials")
 			return
 		}
 		raw := r.Header.Get(HeaderTenant)

@@ -73,3 +73,22 @@ func (k ServiceKeys) Apply(procs []Process) {
 		p.Env["PASSAGE_SERVICE_PUBLIC_KEYS"] = strings.Join(pubs, ",")
 	}
 }
+
+// NewGatewaySecret returns a random per-start secret shared by the gateway and its children (tenant.GatewaySecretEnv).
+func NewGatewaySecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// ApplyGatewaySecret puts the secret in every child's environment.
+func ApplyGatewaySecret(procs []Process, secret string) {
+	for i := range procs {
+		if procs[i].Env == nil {
+			procs[i].Env = map[string]string{}
+		}
+		procs[i].Env["PASSAGE_GATEWAY_SECRET"] = secret
+	}
+}

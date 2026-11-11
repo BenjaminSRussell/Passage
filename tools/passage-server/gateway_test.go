@@ -20,7 +20,7 @@ func testGateway(t *testing.T, ready bool) (http.Handler, *[]http.Header) {
 	u, _ := url.Parse(up.URL)
 	web := fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}, "assets/app.js": {Data: []byte("js")}}
 	passThrough := func(next http.Handler) http.Handler { return next }
-	return NewGateway(passThrough, map[string]*url.URL{"party": u}, web, func() (bool, []Status) { return ready, nil }), &seen
+	return NewGateway(passThrough, map[string]*url.URL{"party": u}, web, func() (bool, []Status) { return ready, nil }, "gw-secret"), &seen
 }
 
 func do(h http.Handler, method, target string, hdr map[string]string) *httptest.ResponseRecorder {
@@ -55,6 +55,9 @@ func TestGatewayRoutesAPIAndStripsClientIdentityHeaders(t *testing.T) {
 	if rec.Code != 200 || rec.Body.String() != "/v1/party/vendors" {
 		t.Fatalf("api = %d %q", rec.Code, rec.Body)
 	}
+	if len(*seen) == 1 && (*seen)[0].Get("X-Passage-Gateway-Secret") != "gw-secret" {
+		t.Fatalf("gateway secret not forwarded: %v", *seen)
+	}
 	if len(*seen) != 1 || (*seen)[0].Get("X-Passage-User") != "" || (*seen)[0].Get("X-Passage-Duties") != "" {
 		t.Fatalf("client identity headers reached the service: %v", *seen)
 	}
@@ -81,8 +84,9 @@ func TestGatewayLegalEntitySelectionMustMatchToken(t *testing.T) {
 
 func TestGatewayReadiness(t *testing.T) {
 	g, _ := testGateway(t, false)
-	if rec := do(g, "GET", "/readyz", nil); rec.Code != 503 {
-		t.Fatalf("readyz = %d", rec.Code)
+	rec := do(g, "GET", "/readyz", nil)
+	if rec.Code != 503 || strings.Contains(rec.Body.String(), "services") {
+		t.Fatalf("readyz = %d %s (must not list services)", rec.Code, rec.Body)
 	}
 	if rec := do(g, "GET", "/healthz", nil); rec.Code != 200 {
 		t.Fatalf("healthz = %d", rec.Code)

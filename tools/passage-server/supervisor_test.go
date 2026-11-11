@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,12 +129,8 @@ func TestStartsAllAndStopsInReverseOrder(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	stopped := map[string]bool{}
-	for _, n := range r.stops {
-		stopped[n] = true
-	}
-	if len(stopped) != 3 {
-		t.Fatalf("stops = %v", r.stops)
+	if got := strings.Join(r.stops, ","); got != "c,b,a" {
+		t.Fatalf("stop order = %s, want c,b,a (reverse of start order)", got)
 	}
 	if s := state(s, "a"); s != StateStopped {
 		t.Fatalf("a state = %s", s)
@@ -189,7 +186,9 @@ func TestOptionalServiceFailureDoesNotStopTheServer(t *testing.T) {
 	default:
 	}
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 }
 
 func TestHealthAggregation(t *testing.T) {

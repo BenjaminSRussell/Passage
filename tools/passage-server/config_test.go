@@ -13,7 +13,7 @@ func TestLoadConfigDefaultsAndOverrides(t *testing.T) {
 	if err := os.WriteFile(path, []byte("listen: 0.0.0.0:9443\npgDsn: postgres://a:b@db/x\nfeatures:\n  node: true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path, map[string]string{"PG_DSN": "postgres://c:d@db2/y", "OIDC_ISSUER": "https://id/realms/p", "FEATURE_PYTHON": "1", "REQUIRE_FIPS": "true"})
+	cfg, err := LoadConfig(path, map[string]string{"PG_DSN": "postgres://c:d@db2/y", "OIDC_ISSUER": "https://id/realms/p", "ALLOW_PLAINTEXT": "1", "FEATURE_PYTHON": "1", "REQUIRE_FIPS": "true"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,12 +55,14 @@ func TestResolveDiscoversServicesAndAssignsPorts(t *testing.T) {
 	c.InstallDir = filepath.Join("C:", "Passage")
 	c.DataDir = "data"
 	c.AppDSN = "postgres://passage_app:pw@db:5432/postgres?sslmode=require"
+	c.DatabaseDSN = "postgres://owner:pw@db:5432/postgres?sslmode=require"
 	c.KafkaBootstrap = "k:9092"
+	c.TemporalHost = "t:7233"
 	c.Services = []ServiceSpec{{Name: "ledger", Env: map[string]string{"X": "1"}}, {Name: "fx", Disabled: true}, {Name: "agents", Feature: "node", Exe: "node.exe"}}
 	list := func(string) ([]string, error) {
 		return []string{"purchasing.exe", "ledger.exe", "fx.exe", "passage-server.exe", "readme.txt"}, nil
 	}
-	_, procs, err := c.Resolve(func(string) string { return "" }, list)
+	_, procs, err := c.Resolve(func(string) string { return "" }, list, ModeServe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,10 +76,10 @@ func TestResolveDiscoversServicesAndAssignsPorts(t *testing.T) {
 		t.Fatalf("purchasing = %+v", procs[1])
 	}
 	env := procs[0].Env
-	if env["DATABASE_URL"] != "postgres://passage_app:pw@db:5432/passage_ledger?sslmode=require" || env["X"] != "1" || env["KAFKA_BOOTSTRAP"] != "k:9092" {
+	if env["DATABASE_URL"] != "postgres://passage_app:pw@db:5432/passage_ledger?sslmode=require" || env["X"] != "1" || env["KAFKA_BROKERS"] != "k:9092" || env["TEMPORAL_ADDRESS"] != "t:7233" {
 		t.Fatalf("env = %v", env)
 	}
-	if env["HTTP_ADDR"] != "127.0.0.1:18100" || env["MIGRATE_ON_START"] != "true" {
+	if env["HTTP_ADDR"] != "127.0.0.1:18100" || env["MIGRATE_ON_START"] != "false" || env["MIGRATE_DATABASE_URL"] != "" {
 		t.Fatalf("env = %v", env)
 	}
 	if !strings.HasSuffix(filepath.ToSlash(procs[0].Exe), "bin/ledger.exe") {
@@ -90,7 +92,7 @@ func TestResolveFeatureGate(t *testing.T) {
 	c.InstallDir, c.DataDir = "i", "d"
 	c.Features = map[string]bool{"node": true}
 	c.Services = []ServiceSpec{{Name: "agents-ts", Feature: "node", Exe: "{install}/runtime/node/node.exe", Args: []string{"{data}/x.js"}, NoDB: true}}
-	_, procs, err := c.Resolve(func(string) string { return "" }, func(string) ([]string, error) { return nil, nil })
+	_, procs, err := c.Resolve(func(string) string { return "" }, func(string) ([]string, error) { return nil, nil }, ModeServe)
 	if err != nil || len(procs) != 1 {
 		t.Fatalf("procs=%v err=%v", procs, err)
 	}
@@ -101,7 +103,7 @@ func TestResolveFeatureGate(t *testing.T) {
 		t.Fatalf("exe = %s", procs[0].Exe)
 	}
 	c.Features = nil
-	_, procs, _ = c.Resolve(func(string) string { return "" }, func(string) ([]string, error) { return nil, nil })
+	_, procs, _ = c.Resolve(func(string) string { return "" }, func(string) ([]string, error) { return nil, nil }, ModeServe)
 	if len(procs) != 0 {
 		t.Fatal("feature off must drop the service")
 	}
@@ -119,5 +121,72 @@ func TestConfDMergesFeatureServices(t *testing.T) {
 	cfg, err := LoadConfig(filepath.Join(dir, "passage.yaml"), map[string]string{"FEATURE_NODE": "1"})
 	if err != nil || len(cfg.Services) != 1 || cfg.Services[0].Name != "workflow-ts" || !cfg.Features["node"] {
 		t.Fatalf("cfg=%+v err=%v", cfg, err)
+	}
+}
+
+func resolveWith(t *testing.T, c Config, mode Mode, files ...string) []Process {
+	t.Helper()
+	c.InstallDir, c.DataDir = "i", "d"
+	_, procs, err := c.Resolve(func(string) string { return "" }, func(string) ([]string, error) { return files, nil }, mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return procs
+}
+
+func TestRolesPerMode(t *testing.T) {
+	c := DefaultConfig()
+	c.DatabaseDSN = "postgres://owner:o@db/postgres"
+	c.AppDSN = "postgres://passage_app:a@db/postgres"
+	serve := resolveWith(t, c, ModeServe, "ledger.exe")[0].Env
+	if serve["DATABASE_URL"] != "postgres://passage_app:a@db/passage_ledger" || serve["MIGRATE_ON_START"] != "false" || serve["MIGRATE_DATABASE_URL"] != "" {
+		t.Fatalf("serve env = %v", serve)
+	}
+	mig := resolveWith(t, c, ModeMigrate, "ledger.exe")[0].Env
+	if mig["DATABASE_URL"] != "postgres://owner:o@db/passage_ledger" || mig["MIGRATE_DATABASE_URL"] != mig["DATABASE_URL"] || mig["MIGRATE_ON_START"] != "true" {
+		t.Fatalf("migrate env = %v", mig)
+	}
+}
+
+func TestChildrenKnowTheirPeers(t *testing.T) {
+	procs := resolveWith(t, DefaultConfig(), ModeServe, "ledger.exe", "party.exe", "supplier-portal-ts.exe")
+	byName := map[string]map[string]string{}
+	for _, p := range procs {
+		byName[p.Name] = p.Env
+	}
+	if byName["party"]["LEDGER_URL"] != "http://127.0.0.1:18100" || byName["ledger"]["PARTY_URL"] != "http://127.0.0.1:18101" {
+		t.Fatalf("peer urls: %v / %v", byName["party"], byName["ledger"])
+	}
+	if byName["ledger"]["SUPPLIER_PORTAL_TS_URL"] != "http://127.0.0.1:18102" {
+		t.Fatalf("dashes must become underscores: %v", byName["ledger"])
+	}
+	if _, self := byName["ledger"]["LEDGER_URL"]; self {
+		t.Fatal("a service must not get a URL for itself")
+	}
+}
+
+func TestPlaintextNonLoopbackIsRefused(t *testing.T) {
+	c := DefaultConfig()
+	c.Listen = "0.0.0.0:8443"
+	if err := c.Validate(); err == nil {
+		t.Fatal("non-loopback without TLS must be refused")
+	}
+	c.AllowPlaintext = true
+	if err := c.Validate(); err != nil {
+		t.Fatalf("explicit override: %v", err)
+	}
+	c = DefaultConfig()
+	c.Listen = "[::1]:8443"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("ipv6 loopback: %v", err)
+	}
+}
+
+func TestDuplicateRoutesAreRefused(t *testing.T) {
+	c := DefaultConfig()
+	c.InstallDir, c.DataDir = "i", "d"
+	c.Services = []ServiceSpec{{Name: "a", Exe: "a.exe", Route: "x"}, {Name: "b", Exe: "b.exe", Route: "x"}}
+	if _, _, err := c.Resolve(func(string) string { return "" }, func(string) ([]string, error) { return nil, nil }, ModeServe); err == nil {
+		t.Fatal("two services on one route must be refused")
 	}
 }

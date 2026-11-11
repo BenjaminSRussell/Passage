@@ -3,9 +3,12 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
+	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -46,3 +49,11 @@ func attachToJob(cmd *exec.Cmd) {
 		slog.Warn("assign child to job failed", "err", err)
 	}
 }
+
+// setProcAttr starts the child in its own process group, so a Ctrl+C aimed at a console running passage-server does not hit it twice.
+func setProcAttr(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP, HideWindow: true}
+}
+
+// interrupt reports that a graceful signal cannot be delivered; the caller kills the child.
+func interrupt(*os.Process) error { return errors.New("no graceful stop signal on windows") }

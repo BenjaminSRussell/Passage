@@ -13,7 +13,8 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
   <?ifndef Version?><?define Version = "0.0.0" ?><?endif?>
-  <Bundle Name="Passage" Manufacturer="Passage" Version="$(Version)" UpgradeCode="e7a50757-87b4-46af-8668-5914ce6e927d"
+  <?ifdef Fips?><?define BundleUpgradeCode = "9a1d7b3c-52e4-4a6f-8f21-0c5e6d7a8b19" ?><?else?><?define BundleUpgradeCode = "e7a50757-87b4-46af-8668-5914ce6e927d" ?><?endif?>
+  <Bundle Name="Passage" Manufacturer="Passage" Version="$(Version)" UpgradeCode="$(BundleUpgradeCode)"
           Compressed="yes">
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" SuppressOptionsUI="yes" />
@@ -22,7 +23,9 @@
     <!-- Optional prerequisite switches (all default off). -->
     <Variable Name="InstallPostgres" Type="numeric" Value="0" bal:Overridable="yes" />
     <Variable Name="InstallTemporal" Type="numeric" Value="0" bal:Overridable="yes" />
-    <Variable Name="PostgresSuperPassword" Type="string" Value="" Hidden="yes" bal:Overridable="yes" />
+    <!-- The superuser password never goes on a command line: point this at a file you created (readable only by Administrators) that holds
+         the installer's option lines, for example "superpassword=..." (the EDB installer option file). Required with InstallPostgres=1. -->
+    <Variable Name="PostgresOptionFile" Type="string" Value="" bal:Overridable="yes" />
     <Variable Name="PostgresServiceName" Type="string" Value="postgresql-x64-17" />
     <!-- Properties forwarded to Passage.msi. Hidden ones stay out of the bundle log. -->
     <Variable Name="PG_DSN" Type="string" Value="" Hidden="yes" bal:Overridable="yes" />
@@ -42,6 +45,9 @@
     <Variable Name="REQUIRE_FIPS" Type="string" Value="" bal:Overridable="yes" />
     <Variable Name="REMOVE_DATA" Type="string" Value="0" bal:Overridable="yes" />
     <Variable Name="SKIP_DOCTOR" Type="string" Value="0" bal:Overridable="yes" />
+    <Variable Name="SKIP_MIGRATE" Type="string" Value="0" bal:Overridable="yes" />
+    <Variable Name="OPEN_FIREWALL" Type="string" Value="1" bal:Overridable="yes" />
+    <Variable Name="ALLOW_PLAINTEXT" Type="string" Value="" bal:Overridable="yes" />
     <Variable Name="BACKUP_CONFIRMED" Type="string" Value="0" bal:Overridable="yes" />
     <Variable Name="SERVICE_ACCOUNT" Type="string" Value="NT SERVICE\Passage" bal:Overridable="yes" />
 
@@ -51,8 +57,8 @@
     <Chain>
       <?ifdef PostgresInstaller?>
       <ExePackage Id="PostgreSQL" DisplayName="PostgreSQL 17" SourceFile="$(PostgresInstaller)" Cache="keep"
-                  DetectCondition="PostgresInstalled" InstallCondition="InstallPostgres=1 AND NOT PostgresInstalled"
-                  InstallArguments="--mode unattended --unattendedmodeui none --superpassword [PostgresSuperPassword] --servicename [PostgresServiceName] --serverport 5432"
+                  DetectCondition="PostgresInstalled" InstallCondition="InstallPostgres=1 AND NOT PostgresInstalled AND PostgresOptionFile"
+                  InstallArguments="--mode unattended --unattendedmodeui none --optionfile &quot;[PostgresOptionFile]&quot; --servicename [PostgresServiceName] --serverport 5432"
                   UninstallArguments="" Permanent="yes" Vital="yes" />
       <?endif?>
       <?ifdef TemporalMsi?>
@@ -77,6 +83,9 @@
         <MsiProperty Name="REQUIRE_FIPS" Value="[REQUIRE_FIPS]" />
         <MsiProperty Name="REMOVE_DATA" Value="[REMOVE_DATA]" />
         <MsiProperty Name="SKIP_DOCTOR" Value="[SKIP_DOCTOR]" />
+        <MsiProperty Name="SKIP_MIGRATE" Value="[SKIP_MIGRATE]" />
+        <MsiProperty Name="OPEN_FIREWALL" Value="[OPEN_FIREWALL]" />
+        <MsiProperty Name="ALLOW_PLAINTEXT" Value="[ALLOW_PLAINTEXT]" />
         <MsiProperty Name="BACKUP_CONFIRMED" Value="[BACKUP_CONFIRMED]" />
         <MsiProperty Name="SERVICE_ACCOUNT" Value="[SERVICE_ACCOUNT]" />
       </MsiPackage>

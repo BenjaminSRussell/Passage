@@ -11,10 +11,19 @@
      xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
 
   <?ifndef Version?><?define Version = "0.0.0" ?><?endif?>
+  <!-- The FIPS and the standard MSI are different products with different upgrade codes: switching between them is an uninstall and an
+       install, never a silent in-place swap. -->
+  <?ifdef Fips?>
+  <?define PkgName = "Passage (FIPS)" ?>
+  <?define PkgUpgradeCode = "2f0c5d1e-8c0a-4f3e-9d57-6a2b7e1c4f90" ?>
+  <?else?>
+  <?define PkgName = "Passage" ?>
+  <?define PkgUpgradeCode = "6b6b0137-599b-4c52-98b9-2c0380210543" ?>
+  <?endif?>
 
-  <Package Name="Passage" Manufacturer="Passage"
+  <Package Name="$(PkgName)" Manufacturer="Passage"
            Version="$(Version)"
-           UpgradeCode="6b6b0137-599b-4c52-98b9-2c0380210543"
+           UpgradeCode="$(PkgUpgradeCode)"
            Scope="perMachine"
            Compressed="yes"
            InstallerVersion="500">
@@ -32,14 +41,12 @@
     <Property Id="SKIP_DOCTOR" Secure="yes" Value="0" />
     <Property Id="SKIP_MIGRATE" Secure="yes" Value="0" />
     <Property Id="BACKUP_CONFIRMED" Secure="yes" Value="0" />
-    <Property Id="LISTEN_PORT" Secure="yes" Value="8443" />
-    <Property Id="OPEN_FIREWALL" Secure="yes" Value="1" />
-    <!-- The service runs as a virtual service account by default; pass SERVICE_ACCOUNT=DOMAIN\gmsa$ for a group managed service account. -->
-    <Property Id="SERVICE_ACCOUNT" Secure="yes" Value="NT SERVICE\Passage" />
+    <!-- LISTEN_PORT (8443), OPEN_FIREWALL (1) and SERVICE_ACCOUNT (NT SERVICE\Passage, a virtual service account; pass DOMAIN\gmsa$ for a
+         group managed service account) are defined in Config.wxs: they keep their stored value on upgrade and repair. -->
 
     <!-- FIPS variant (built with -d Fips=1 and GOFIPS140=v1.0.0): the server refuses to start unless crypto/fips140.Enabled() is true. -->
     <?ifdef Fips?>
-    <SetProperty Id="REQUIRE_FIPS" Value="1" After="AppSearch" Condition="NOT REQUIRE_FIPS" />
+    <SetProperty Id="REQUIRE_FIPS" Action="SetFipsDefault" Value="1" After="Set_REQUIRE_FIPS" Condition="NOT REQUIRE_FIPS" />
     <?endif?>
 
     <!-- Pre-upgrade backup prompt: an upgrade runs migrations that expand the schema, and database rollback is a restore. -->
@@ -100,6 +107,9 @@
                         Type="ownProcess" Start="auto" ErrorControl="normal"
                         Account="[SERVICE_ACCOUNT]" Arguments="serve">
           <ServiceDependency Id="Tcpip" />
+          <!-- Run the failure actions when the service stops with a non-zero exit code too, not only when it crashes: passage-server
+               exits non-zero when a required service keeps failing and relies on the restart below. -->
+          <ServiceConfig FailureActionsWhen="failedToStopOrReturnedError" OnInstall="yes" OnReinstall="yes" />
           <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart"
                               RestartServiceDelayInSeconds="30" ResetPeriodInDays="1" />
         </ServiceInstall>
@@ -129,41 +139,47 @@
       <Component Id="ConfDFolder" Directory="CONFDFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
     </ComponentGroup>
 
-    <Component Id="FirewallRule" Directory="INSTALLFOLDER" Guid="*" Bitness="always64" Condition="OPEN_FIREWALL=&quot;1&quot;">
+    <Component Id="FirewallRule" Directory="INSTALLFOLDER" Guid="*" Bitness="always64" Condition="OPEN_FIREWALL=&quot;1&quot; AND LISTEN AND NOT LISTEN~&lt;&lt;&quot;127.&quot; AND NOT LISTEN~&lt;&lt;&quot;localhost&quot; AND NOT LISTEN~&lt;&lt;&quot;[::1]&quot;">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Passage" Name="FirewallRule" Type="integer" Value="1" KeyPath="yes" />
       <fw:FirewallException Id="PassageHttps" Name="Passage gateway" Protocol="tcp" Port="[LISTEN_PORT]" Scope="any" Profile="all" />
     </Component>
 
-    <!-- REMOVE_DATA=1 on uninstall deletes %ProgramData%\Passage (config, logs, signing keys, certificates). Default: keep it. -->
-    <SetProperty Id="PASSAGE_DATA_PATH" Value="[CommonAppDataFolder]Passage" Sequence="both" Before="CostInitialize" />
-    <Component Id="DataWipe" Directory="INSTALLFOLDER" Guid="*" Bitness="always64" Condition="REMOVE_DATA=&quot;1&quot;">
-      <RegistryValue Root="HKLM" Key="SOFTWARE\Passage" Name="DataWipeArmed" Type="integer" Value="1" KeyPath="yes" />
+    <!-- REMOVE_DATA=1 on uninstall deletes %ProgramData%\Passage (config, logs, signing keys, certificates). Default: keep it. The component is
+         always installed so the removal can run; PASSAGE_DATA_PATH, the folder it removes, is set only for a real uninstall that asked
+         for it, never during a major upgrade (the old product's uninstall runs with UPGRADINGPRODUCTCODE set) or a repair. -->
+    <SetProperty Id="PASSAGE_DATA_PATH" Value="[CommonAppDataFolder]Passage" Sequence="execute" Before="Wix4RemoveFoldersEx"
+                 Condition="REMOVE~=&quot;ALL&quot; AND REMOVE_DATA=&quot;1&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    <Component Id="DataWipe" Directory="INSTALLFOLDER" Guid="*" Bitness="always64">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Passage" Name="DataWipe" Type="integer" Value="1" KeyPath="yes" />
       <util:RemoveFolderEx On="uninstall" Property="PASSAGE_DATA_PATH" />
     </Component>
 
     <!-- ===== Custom actions (deferred, after InstallServices and before StartServices) ===== -->
+    <!-- Doctor and migrate run on a first install, a major upgrade and a repair (REINSTALL), not on a modify or on the first, no-op pass of a
+         maintenance run. SKIP_DOCTOR=1 skips only the dependency checks and SKIP_MIGRATE=1 only the migrations; stage an install before its
+         dependencies exist with both set to 1. -->
     <!-- 1. Lock down the data folder and the config registry key to SYSTEM, Administrators and the service account. -->
-    <SetProperty Id="PassageSetAcl" Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[SCRIPTSFOLDER]Set-PassageAcl.ps1&quot; -DataDir &quot;[CommonAppDataFolder]Passage&quot; -Account &quot;[SERVICE_ACCOUNT]&quot;"
+    <SetProperty Id="PassageSetAcl" Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[SCRIPTSFOLDER]Set-PassageAcl.ps1&quot; -DataDir &quot;[CommonAppDataFolder]Passage&quot; -Account &quot;[SERVICE_ACCOUNT]&quot; -RegistryKey &quot;HKLM:\SOFTWARE\Passage\Config&quot;"
                  Sequence="execute" Before="PassageSetAcl" Condition="NOT REMOVE~=&quot;ALL&quot;" />
-    <CustomAction Id="PassageSetAcl" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
+    <CustomAction Id="PassageSetAcl" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
 
     <!-- 2. doctor: fails the install with readable lines in the MSI log when a dependency check fails (bad DSN, a BYPASSRLS role, an
          unreachable issuer). SKIP_DOCTOR=1 skips it, for staging an install before the dependencies exist. -->
     <SetProperty Id="PassageDoctor" Value="&quot;[BINFOLDER]passage-server.exe&quot; doctor" Sequence="execute" Before="PassageDoctor"
-                 Condition="NOT REMOVE~=&quot;ALL&quot; AND SKIP_DOCTOR&lt;&gt;&quot;1&quot;" />
-    <CustomAction Id="PassageDoctor" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
+                 Condition="NOT REMOVE~=&quot;ALL&quot; AND (NOT Installed OR WIX_UPGRADE_DETECTED OR REINSTALL) AND SKIP_DOCTOR&lt;&gt;&quot;1&quot;" />
+    <CustomAction Id="PassageDoctor" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
 
     <!-- 3. migrate: applies every service's migrations once. A failure aborts the transaction; MSI restores the N-1 files and the
          old service is started again. The migrations are expand/contract-safe (deploy/multi-region/tools/expand_contract_lint.py),
          so N-1 keeps working against the expanded schema. -->
     <SetProperty Id="PassageMigrate" Value="&quot;[BINFOLDER]passage-server.exe&quot; migrate" Sequence="execute" Before="PassageMigrate"
-                 Condition="NOT REMOVE~=&quot;ALL&quot; AND SKIP_MIGRATE&lt;&gt;&quot;1&quot;" />
-    <CustomAction Id="PassageMigrate" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
+                 Condition="NOT REMOVE~=&quot;ALL&quot; AND (NOT Installed OR WIX_UPGRADE_DETECTED OR REINSTALL) AND SKIP_MIGRATE&lt;&gt;&quot;1&quot;" />
+    <CustomAction Id="PassageMigrate" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
 
     <InstallExecuteSequence>
       <Custom Action="PassageSetAcl" After="InstallServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
-      <Custom Action="PassageDoctor" After="PassageSetAcl" Condition="NOT REMOVE~=&quot;ALL&quot; AND SKIP_DOCTOR&lt;&gt;&quot;1&quot;" />
-      <Custom Action="PassageMigrate" After="PassageDoctor" Condition="NOT REMOVE~=&quot;ALL&quot; AND SKIP_MIGRATE&lt;&gt;&quot;1&quot;" />
+      <Custom Action="PassageDoctor" After="PassageSetAcl" Condition="NOT REMOVE~=&quot;ALL&quot; AND (NOT Installed OR WIX_UPGRADE_DETECTED OR REINSTALL) AND SKIP_DOCTOR&lt;&gt;&quot;1&quot;" />
+      <Custom Action="PassageMigrate" After="PassageDoctor" Condition="NOT REMOVE~=&quot;ALL&quot; AND (NOT Installed OR WIX_UPGRADE_DETECTED OR REINSTALL) AND SKIP_MIGRATE&lt;&gt;&quot;1&quot;" />
     </InstallExecuteSequence>
   </Package>
 

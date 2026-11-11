@@ -1,11 +1,12 @@
 <#
-  Run by the MSI (deferred, as SYSTEM) after the Passage service exists. Restricts %ProgramData%\Passage and the config registry key
+  Run by the MSI (deferred, as SYSTEM) after the Passage service exists. Restricts the data folder and, when -RegistryKey is given, that registry key
   to SYSTEM, Administrators and the service account, so the database password and the service signing keys are not readable by
   ordinary users. Safe to run again.
 #>
 param(
     [Parameter(Mandatory)] [string] $DataDir,
-    [Parameter(Mandatory)] [string] $Account
+    [Parameter(Mandatory)] [string] $Account,
+    [string] $RegistryKey = ''
 )
 $ErrorActionPreference = 'Stop'
 
@@ -22,8 +23,8 @@ $acl.AddAccessRule((New-Rule 'BUILTIN\Administrators' 'FullControl'))
 $acl.AddAccessRule((New-Rule $Account 'Modify'))
 Set-Acl -LiteralPath $DataDir -AclObject $acl
 
-$key = 'HKLM:\SOFTWARE\Passage\Config'
-if (Test-Path $key) {
+$key = $RegistryKey
+if ($key -and (Test-Path $key)) {
     $racl = Get-Acl -Path $key
     $racl.SetAccessRuleProtection($true, $false)
     foreach ($rule in @($racl.Access)) { [void]$racl.RemoveAccessRule($rule) }

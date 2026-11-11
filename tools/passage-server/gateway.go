@@ -40,14 +40,16 @@ type Guard func(http.Handler) http.Handler
 // HealthFunc reports aggregated supervisor health.
 type HealthFunc func() (ready bool, statuses []Status)
 
-// NewGateway builds the handler. web may be nil (API only).
-func NewGateway(guard Guard, upstreams map[string]*url.URL, web fs.FS, health HealthFunc) http.Handler {
+// NewGateway builds the handler. web may be nil (API only). secret, when not empty, is added to every proxied request as
+// tenant.HeaderGatewaySecret; the children started with the same PASSAGE_GATEWAY_SECRET refuse identity headers without it, so only this
+// gateway can speak for a user on the loopback ports.
+func NewGateway(guard Guard, upstreams map[string]*url.URL, web fs.FS, health HealthFunc, secret string) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			target := upstreams[serviceOf(pr.In.URL.Path)]
 			pr.SetURL(target)
 			pr.Out.Host = target.Host
-			setIdentity(pr)
+			setIdentity(pr, secret)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, _ error) {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, "GW-0502", "upstream service is unavailable"))
@@ -70,15 +72,16 @@ func NewGateway(guard Guard, upstreams map[string]*url.URL, web fs.FS, health He
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		ready, statuses := health()
+	// The public listener says only whether the server is ready; per-service state and error text stay in the log and in doctor.
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		ready, _ := health()
 		code := http.StatusOK
 		if !ready {
 			code = http.StatusServiceUnavailable
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ready": ready, "services": statuses})
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ready": ready})
 	})
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		trimmed, ok := strings.CutPrefix(r.URL.Path, "/api")
@@ -97,7 +100,13 @@ func NewGateway(guard Guard, upstreams map[string]*url.URL, web fs.FS, health He
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "GW-0400", "request path is not canonical"))
 			return
 		}
-		w.Header().Set("X-Content-Type-Options", "nosniff")
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		if r.TLS != nil {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		mux.ServeHTTP(w, r)
 	})
 }
@@ -156,9 +165,12 @@ func stripIdentity(h http.Header) {
 
 // setIdentity runs inside Rewrite, after ReverseProxy has removed the hop-by-hop headers, so a client's Connection
 // header cannot name an identity header and have it dropped on the way to the service.
-func setIdentity(pr *httputil.ProxyRequest) {
+func setIdentity(pr *httputil.ProxyRequest, secret string) {
 	stripIdentity(pr.Out.Header)
 	pr.Out.Header.Del("Authorization")
+	if secret != "" {
+		pr.Out.Header.Set(tenant.HeaderGatewaySecret, secret)
+	}
 	principal, ok := tenant.FromContext(pr.In.Context())
 	if !ok {
 		return

@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,5 +84,51 @@ func TestFIPSStartupHook(t *testing.T) {
 func TestDatabaseURLRejectsGarbage(t *testing.T) {
 	if _, err := databaseURL("not-a-url", "x"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestGatewaySecretIsRandomAndApplied(t *testing.T) {
+	a, err := NewGatewaySecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := NewGatewaySecret()
+	if a == b || len(a) < 32 {
+		t.Fatalf("secrets: %q %q", a, b)
+	}
+	procs := []Process{{Name: "x"}}
+	ApplyGatewaySecret(procs, a)
+	if procs[0].Env["PASSAGE_GATEWAY_SECRET"] != a {
+		t.Fatal("secret not applied")
+	}
+}
+
+type fakeProv struct {
+	dbs    []string
+	grants []string
+}
+
+func (f *fakeProv) EnsureDatabase(_ context.Context, n string) error {
+	f.dbs = append(f.dbs, n)
+	return nil
+}
+func (f *fakeProv) GrantApp(_ context.Context, db, role string) error {
+	f.grants = append(f.grants, role+"@"+db)
+	return nil
+}
+
+func TestProvisionDatabases(t *testing.T) {
+	c := DefaultConfig()
+	c.AppDSN = "postgres://passage_app:a@db/postgres"
+	procs := []Process{
+		{Name: "ledger", Env: map[string]string{"DATABASE_URL": "postgres://owner:o@db/passage_ledger"}},
+		{Name: "agents", Env: map[string]string{}},
+	}
+	f := &fakeProv{}
+	if err := ProvisionDatabases(context.Background(), c, procs, f, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.dbs) != 1 || f.dbs[0] != "passage_ledger" || len(f.grants) != 1 || f.grants[0] != "passage_app@passage_ledger" {
+		t.Fatalf("dbs=%v grants=%v", f.dbs, f.grants)
 	}
 }

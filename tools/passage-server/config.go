@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,16 +13,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is %ProgramData%\Passage\passage.yaml. Every field can be overridden by a registry policy value (HKLM\SOFTWARE\Policies\Passage,
-// Windows only) or by the MSI properties the installer writes into the file, so Intune, SCCM and GPO can manage it.
+// Config is %ProgramData%\Passage\passage.yaml. Fields can be overridden by the install-time registry values the MSI writes
+// (HKLM\SOFTWARE\Passage\Config) and by a policy key (HKLM\SOFTWARE\Policies\Passage), both Windows only, so Intune, SCCM and GPO can
+// manage it. The override names are the MSI property names (see applyOverrides).
 type Config struct {
 	// Listen is the address of the gateway that serves the web app and /api. Default 0.0.0.0:8443.
 	Listen string `yaml:"listen"`
 	// TLS names a PEM certificate and key. Empty means plain HTTP on loopback only.
 	TLS TLSConfig `yaml:"tls"`
-	// DatabaseDSN is an admin-capable Postgres URL for migrations; per-service URLs are derived from it by database name.
+	// AllowPlaintext lets a non-loopback Listen run without TLS. Off by default: the gateway refuses to start.
+	AllowPlaintext bool `yaml:"allowPlaintext"`
+	// DatabaseDSN is the owner URL (PG_DSN): a role that can create the passage_<service> databases and own their tables. It is used
+	// by migrate only (as DATABASE_URL and MIGRATE_DATABASE_URL), never by a serving child.
 	DatabaseDSN string `yaml:"pgDsn"`
-	// AppDSN is the passage_app (NOBYPASSRLS) URL the services use. When empty, DatabaseDSN is used.
+	// AppDSN is the passage_app (NOBYPASSRLS, not an owner) URL (PG_APP_DSN) every serving child uses as DATABASE_URL. When empty the
+	// children would run as the owner role, which doctor reports as a failure.
 	AppDSN         string `yaml:"appDsn"`
 	DatabasePrefix string `yaml:"databasePrefix"`
 	OIDCIssuer     string `yaml:"oidcIssuer"`
@@ -153,6 +159,9 @@ func (c *Config) applyOverrides(o map[string]string) {
 	set(&c.CloudProfile, "CLOUD_PROFILE")
 	set(&c.TLS.CertFile, "TLS_CERT_FILE")
 	set(&c.TLS.KeyFile, "TLS_KEY_FILE")
+	if v := o["ALLOW_PLAINTEXT"]; v == "1" || strings.EqualFold(v, "true") {
+		c.AllowPlaintext = true
+	}
 	if v := o["REQUIRE_FIPS"]; v == "1" || strings.EqualFold(v, "true") {
 		c.RequireFIPS = true
 	}
@@ -173,6 +182,9 @@ func (c Config) Validate() error {
 	}
 	if (c.TLS.CertFile == "") != (c.TLS.KeyFile == "") {
 		return errors.New("tls.certFile and tls.keyFile must be set together")
+	}
+	if c.TLS.CertFile == "" && !loopbackAddr(c.Listen) && !c.AllowPlaintext {
+		return fmt.Errorf("listen %s is not loopback and no TLS certificate is configured: set TLS_CERT_FILE and TLS_KEY_FILE (or ALLOW_PLAINTEXT=1 behind a TLS-terminating proxy)", c.Listen)
 	}
 	for _, p := range []struct{ name, v string }{{"oidcIssuer", c.OIDCIssuer}, {"opaUrl", c.OPAURL}, {"oidcJwksUrl", c.OIDCJWKSURL}} {
 		if p.v == "" {
@@ -215,8 +227,29 @@ func DefaultDataDir(getenv func(string) string) string {
 	return "data"
 }
 
+// loopbackAddr reports whether a host:port listens on loopback only.
+func loopbackAddr(hostport string) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Mode says what the children are started for: serving requests as passage_app, or migrating as the database owner.
+type Mode string
+
+const (
+	ModeServe   Mode = "serve"
+	ModeMigrate Mode = "migrate"
+)
+
 // Resolve fills InstallDir and DataDir, discovers service executables and returns the final, port-assigned process list.
-func (c Config) Resolve(getenv func(string) string, listDir func(string) ([]string, error)) (Config, []Process, error) {
+func (c Config) Resolve(getenv func(string) string, listDir func(string) ([]string, error), mode Mode) (Config, []Process, error) {
 	if c.DataDir == "" {
 		c.DataDir = DefaultDataDir(getenv)
 	}
@@ -272,15 +305,29 @@ func (c Config) Resolve(getenv func(string) string, listDir func(string) ([]stri
 		if route == "" {
 			route = routeOf(n)
 		}
-		p := Process{Name: n, Route: route, Exe: exe, Args: s.Args, Optional: s.Optional, Port: c.BasePort + i, AdminPort: c.BasePort + adminOffset + i}
-		env, err := c.childEnv(s, p)
+		procs = append(procs, Process{Name: n, Route: route, Exe: exe, Args: s.Args, Optional: s.Optional, Port: c.BasePort + i, AdminPort: c.BasePort + adminOffset + i})
+	}
+	routes := map[string]string{}
+	for _, p := range procs {
+		if other, dup := routes[p.Route]; dup {
+			return c, nil, fmt.Errorf("services %s and %s share the gateway route %q", other, p.Name, p.Route)
+		}
+		routes[p.Route] = p.Name
+	}
+	for i := range procs {
+		env, err := c.childEnv(specs[procs[i].Name], procs[i], procs, mode)
 		if err != nil {
 			return c, nil, err
 		}
-		p.Env = env
-		procs = append(procs, p)
+		procs[i].Env = env
 	}
 	return c, procs, nil
+}
+
+// peerEnvName is the <NAME>_URL variable a service reads for a peer: the service name upper-cased, dashes as underscores
+// (LEDGER_URL, PARTY_URL, SUPPLIER_PORTAL_TS_URL), as tools/e2e/stack sets them.
+func peerEnvName(name string) string {
+	return strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_URL"
 }
 
 // expand replaces {install} and {data} in a service's exe and args.
@@ -296,18 +343,31 @@ func routeOf(name string) string {
 	return name
 }
 
-// childEnv builds the environment of one child. Secrets (signing keys) are added by the caller from the key store.
-func (c Config) childEnv(s ServiceSpec, p Process) (map[string]string, error) {
+// childEnv builds the environment of one child. Secrets (signing keys, the gateway secret) are added by the caller.
+//
+// Database roles: a serving child gets the passage_app URL and MIGRATE_ON_START=false. A migrating child gets the owner URL as both
+// DATABASE_URL and MIGRATE_DATABASE_URL and MIGRATE_ON_START=true, so DDL runs as the table owner and the runtime role never needs
+// CREATE on the schema. Every child also learns where each peer listens (<PEER>_URL), the Kafka brokers and the Temporal address.
+func (c Config) childEnv(s ServiceSpec, p Process, all []Process, mode Mode) (map[string]string, error) {
 	env := map[string]string{
 		"HTTP_ADDR":            fmt.Sprintf("127.0.0.1:%d", p.Port),
 		"ADMIN_ADDR":           fmt.Sprintf("127.0.0.1:%d", p.AdminPort),
 		"PASSAGE_SERVICE_NAME": p.Name,
-		"MIGRATE_ON_START":     "true",
+		"MIGRATE_ON_START":     "false",
+	}
+	for _, peer := range all {
+		if peer.Name != p.Name {
+			env[peerEnvName(peer.Name)] = fmt.Sprintf("http://127.0.0.1:%d", peer.Port)
+		}
 	}
 	if !s.NoDB {
 		dsn := c.AppDSN
 		if dsn == "" {
 			dsn = c.DatabaseDSN
+		}
+		if mode == ModeMigrate {
+			dsn = c.DatabaseDSN
+			env["MIGRATE_ON_START"] = "true"
 		}
 		if dsn != "" {
 			u, err := databaseURL(dsn, c.DatabasePrefix+"_"+p.Name)
@@ -315,16 +375,19 @@ func (c Config) childEnv(s ServiceSpec, p Process) (map[string]string, error) {
 				return nil, err
 			}
 			env["DATABASE_URL"] = u
+			if mode == ModeMigrate {
+				env["MIGRATE_DATABASE_URL"] = u
+			}
 		}
 	}
 	if c.CloudProfile != "" {
 		env["PASSAGE_CLOUD_PROFILE"] = c.CloudProfile
 	}
 	if c.KafkaBootstrap != "" {
-		env["KAFKA_BOOTSTRAP"] = c.KafkaBootstrap
+		env["KAFKA_BROKERS"] = c.KafkaBootstrap
 	}
 	if c.TemporalHost != "" {
-		env["TEMPORAL_HOSTPORT"] = c.TemporalHost
+		env["TEMPORAL_ADDRESS"] = c.TemporalHost
 		env["TEMPORAL_NAMESPACE"] = c.TemporalNS
 	}
 	for k, v := range s.Env {

@@ -26,6 +26,16 @@ Ship an Authenticode-signed MSI built with the WiX Toolset that installs **one**
   OPA decision, header stripping, `/api/v1/<service>` routing) plus the web app embedded with `go:embed`. Children are
   tied to a Windows job object, so they die with the supervisor. The gateway code is a copy of the devgateway's
   (which is a `package main`); the shared parts are the identity verifier and OPA client it imports.
+- **Trust boundary.** Services trust `X-Passage-*` identity headers on their loopback ports. On a host with other logons that would let a
+  local user skip the JWT and OPA checks, so `passage-server` generates a per-start random secret, passes it to every child as
+  `PASSAGE_GATEWAY_SECRET`, and the gateway adds it to every proxied request. `platform/go/tenant` (opt-in by that environment variable, off in
+  Kubernetes where NetworkPolicy is the boundary) rejects a header identity without it; service tokens are signed and unaffected. The
+  supported shape is still a dedicated server.
+- **Database roles.** `PG_DSN` is the owner role (creates the `passage_<service>` databases, owns the tables, runs migrations with
+  `MIGRATE_DATABASE_URL`); `PG_APP_DSN` is `passage_app` (NOBYPASSRLS, not an owner) for every serving child with `MIGRATE_ON_START=false`.
+  Doctor checks both roles.
+- **Temporal.** `temporal-server.exe` has no service-control handler, so the Temporal MSI installs `passage-server wrap`, which runs it as a
+  supervised child with the same restart policy and logs.
 - **One service, not sixty.** The service runs under a virtual service account (`NT SERVICE\Passage`, or a gMSA via
   `SERVICE_ACCOUNT`), starts automatically, has restart-on-failure recovery actions, writes warnings and errors to the
   Windows Event Log and everything to rotating files in `%ProgramData%\Passage\logs`.

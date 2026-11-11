@@ -307,3 +307,36 @@ func TestReadOnlyPOSTDoesNotLetASwappedPrincipalInheritTheGrant(t *testing.T) {
 		}
 	}
 }
+
+func TestMiddlewareGatewaySecret(t *testing.T) {
+	t.Setenv(tenant.GatewaySecretEnv, "s3cret-per-boot")
+	called := false
+	h := tenant.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	do := func(secret string) int {
+		called = false
+		req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+		req.Header.Set(tenant.HeaderTenant, validTenant)
+		if secret != "" {
+			req.Header.Set(tenant.HeaderGatewaySecret, secret)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := do(""); code != http.StatusUnauthorized || called {
+		t.Fatalf("no secret: %d called=%v", code, called)
+	}
+	if code := do("wrong"); code != http.StatusUnauthorized || called {
+		t.Fatalf("wrong secret: %d called=%v", code, called)
+	}
+	if code := do("s3cret-per-boot"); code != http.StatusOK || !called {
+		t.Fatalf("right secret: %d called=%v", code, called)
+	}
+	// Health probes never carry the secret.
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("readyz: %d", rec.Code)
+	}
+}
