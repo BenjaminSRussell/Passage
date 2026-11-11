@@ -53,6 +53,7 @@ spec:
           - { name: migration, path: services/migration/charts/migration, namespace: hello-ledger }
           - { name: mobile, path: services/mobile/charts/mobile, namespace: hello-ledger }
           - { name: numbering, path: services/numbering/charts/numbering, namespace: hello-ledger }
+          - { name: ops, path: services/ops/charts/ops, namespace: hello-ledger }
           - { name: party, path: services/party/charts/party, namespace: hello-ledger }
           - { name: payables, path: services/payables/charts/payables, namespace: hello-ledger }
           - { name: payroll, path: services/payroll/charts/payroll, namespace: hello-ledger }
