@@ -23,6 +23,8 @@ type approvalFake struct {
 	calls   int
 	filter  store.ApprovalQueueFilter
 	err     error
+	// beforeErr runs before err is returned: a concurrent request that wins the row lock.
+	beforeErr func()
 	// keys holds the request hash of each Idempotency-Key the fake has applied, so a retry replays as the store does.
 	keys map[string]string
 }
@@ -32,6 +34,9 @@ func (f *fakeStore) ActOnRequisition(_ context.Context, id string, version int, 
 	f.approval.calls++
 	r := f.requisitions[id]
 	if f.approval.err != nil {
+		if f.approval.beforeErr != nil {
+			f.approval.beforeErr()
+		}
 		return store.Requisition{}, f.approval.err
 	}
 	if f.approval.keys == nil {

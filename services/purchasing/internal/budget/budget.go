@@ -125,6 +125,18 @@ func (c *Client) post(ctx context.Context, what, path, key, duty, legalEntityID 
 	return resp.StatusCode, body, nil
 }
 
+// CurrencyMismatchCode is budgeting's code for a control rule in another currency than the requisition (BUD-0080).
+const CurrencyMismatchCode = "BUD-0080"
+
+// Refusal is budgeting answering 422 with a code that is the user's to fix, not an outage: the check is refused and
+// nothing was reserved.
+type Refusal struct {
+	Code   string
+	Detail string
+}
+
+func (e *Refusal) Error() string { return "budget check refused: " + e.Code + ": " + e.Detail }
+
 // LineCheck is what budgeting answered for one requisition line.
 type LineCheck struct {
 	LineID  string          `json:"lineId"`
@@ -168,6 +180,15 @@ func (c *Client) CheckRequisition(ctx context.Context, r store.Requisition) (Che
 		map[string]any{"legalEntityId": r.LegalEntityID, "requisitionId": r.ID, "currency": r.Currency, "lines": lines})
 	if err != nil {
 		return Check{}, err
+	}
+	if status == http.StatusUnprocessableEntity {
+		var prob struct {
+			Code   string `json:"code"`
+			Detail string `json:"detail"`
+		}
+		if json.Unmarshal(body, &prob) == nil && prob.Code == CurrencyMismatchCode {
+			return Check{}, &Refusal{Code: prob.Code, Detail: prob.Detail}
+		}
 	}
 	if status != http.StatusOK {
 		return Check{}, fmt.Errorf("%s: status %d: %s", what, status, strings.TrimSpace(string(body)))
@@ -213,6 +234,7 @@ type Queue interface {
 	BudgetCallsFor(ctx context.Context, purchaseOrderID, requisitionID string) ([]store.BudgetCall, error)
 	ListBudgetCalls(ctx context.Context, status string, limit int) ([]store.BudgetCall, error)
 	RecordBudgetCall(ctx context.Context, id string, callErr error) error
+	QueueBudgetReleases(ctx context.Context, legalEntityID, requisitionID string, lineIDs []string) error
 }
 
 // Run makes one owed call and records the outcome: done when budgeting accepted it, one more failed attempt otherwise.
@@ -295,4 +317,26 @@ func Retry(ctx context.Context, p Port, q Queue) (RetryResult, error) {
 		res.Done++
 	}
 	return res, nil
+}
+
+// ReleaseReserved gives back what CheckRequisition reserved for a requisition whose approval then failed, so the funds
+// are not held by a requisition that stays unapproved. Each line that was sent to the check is released directly; one
+// budgeting does not release is queued and repeated by Retry. It reports the lines it could not release at once.
+func ReleaseReserved(ctx context.Context, p Port, q Queue, r store.Requisition) []string {
+	var failed []string
+	for _, l := range r.Lines {
+		if l.Status != "OPEN" || l.GLAccount == "" || l.CostCenter == "" {
+			continue
+		}
+		if err := p.ReleaseLine(ctx, r.LegalEntityID, r.ID, l.ID); err != nil {
+			slog.ErrorContext(ctx, "budget reservation of a failed approval not released; queued", "err", err, "requisitionId", r.ID, "requisitionLineId", l.ID, "correlationId", middleware.GetReqID(ctx))
+			failed = append(failed, l.ID)
+		}
+	}
+	if len(failed) > 0 {
+		if err := q.QueueBudgetReleases(ctx, r.LegalEntityID, r.ID, failed); err != nil {
+			slog.ErrorContext(ctx, "release of a failed approval's reservation not queued", "err", err, "requisitionId", r.ID, "correlationId", middleware.GetReqID(ctx))
+		}
+	}
+	return failed
 }

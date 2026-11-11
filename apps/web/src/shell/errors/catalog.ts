@@ -70,6 +70,7 @@ const purchasing: Record<string, ProblemCatalogEntry> = {
   "PRC-REQ-002": { message: "A requisition can have at most 500 lines.", action: "Split the lines over more than one requisition." },
   "PRC-REQ-003": { message: "A line has no estimated price.", action: "Enter an estimated unit price on each line." },
   "PRC-REQ-BUDGET": { message: "The requisition is over budget, so it was not approved and no funds were reserved.", action: "Lower the amounts, move the lines to another account or cost center, or ask for a budget override." },
+  "PRC-REQ-BUDGET-CURRENCY": { message: "The budget control rule for this legal entity is in another currency than the requisition, so it was not approved.", action: "Change the requisition's currency, or ask finance to fix the control rule's currency." },
   "PRC-REQ-BUDGET-DOWN": { message: "Budget control did not answer, so the requisition was not approved.", action: "Try the approval again in a moment." },
   "PRC-BUDGET-OFF": { message: "Budget control is not set up for this service.", action: "Ask an administrator to connect purchasing to budgeting." },
   "BUD-0080": { message: "The budget control rule is in another currency than the requisition.", action: "Check the requisition's currency, or the control rule for this legal entity." },

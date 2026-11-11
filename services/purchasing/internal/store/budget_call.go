@@ -151,3 +151,14 @@ func (s *Postgres) RecordBudgetCall(ctx context.Context, id string, callErr erro
 		return err
 	})
 }
+
+// QueueBudgetReleases records releases of pre-encumbrances that the requisition budget check reserved but whose approval
+// then failed, so a release budgeting did not answer is repeated by budget-calls:retry. A line already queued is left.
+func (s *Postgres) QueueBudgetReleases(ctx context.Context, legalEntityID, requisitionID string, lineIDs []string) error {
+	if !s.queueBudget || len(lineIDs) == 0 {
+		return nil
+	}
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		return enqueueBudgetRelease(ctx, tx, true, legalEntityID, requisitionID, lineIDs)
+	})
+}

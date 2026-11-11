@@ -9,6 +9,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/budget"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
@@ -161,5 +162,54 @@ func TestApproveRequisition_ARepeatApproverIsRefusedBeforeTheBudgetCheckReserves
 	}
 	if len(b2.checked) != 0 || h2.fake.approval.calls != 0 {
 		t.Fatalf("a refused approval ran %d budget checks (reserving funds) and %d store calls; want none", len(b2.checked), h2.fake.approval.calls)
+	}
+}
+
+// The check reserved the funds; an approval the store then refuses must give them back, and one that budgeting does not
+// release at once is queued for budget-calls:retry. An approval that a concurrent request won keeps its reservation.
+func TestApproveRequisition_AFailedApprovalReleasesWhatTheCheckReserved(t *testing.T) {
+	b := &fakeBudget{check: budget.Check{Result: "PASS"}}
+	h, id := budgetHarness(t, b)
+	lineID := h.fake.requisitions[id].Lines[0].ID
+	h.fake.approval.err = httpx.NewProblem(http.StatusConflict, "PRC-REQ-VERSION", "changed meanwhile")
+	b.releaseOK = true
+	if code := decide(h, id, "approve", userApprover, []string{dutyRequisitionApprove}, ""); code != http.StatusConflict {
+		t.Fatalf("approve: %d, want the store's 409", code)
+	}
+	if len(b.checked) != 1 || len(b.releases) != 1 || b.releases[0] != lineID || len(h.fake.budgetCalls) != 0 {
+		t.Fatalf("checked %d, released %v, queued %+v; want the reserved line released at once", len(b.checked), b.releases, h.fake.budgetCalls)
+	}
+
+	// Budgeting down at release time: the release is queued, not lost.
+	b2 := &fakeBudget{check: budget.Check{Result: "PASS"}}
+	h2, id2 := budgetHarness(t, b2)
+	h2.fake.approval.err = errors.New("database is down")
+	decide(h2, id2, "approve", userApprover, []string{dutyRequisitionApprove}, "")
+	if len(h2.fake.budgetCalls) != 1 || h2.fake.budgetCalls[0].Kind != store.BudgetCallRelease || h2.fake.budgetCalls[0].RequisitionLineID != h2.fake.requisitions[id2].Lines[0].ID {
+		t.Fatalf("queued %+v; want one pending release for the line", h2.fake.budgetCalls)
+	}
+
+	// A concurrent request approved it: the reservation is the approval's, so nothing is released.
+	b3 := &fakeBudget{check: budget.Check{Result: "PASS"}, releaseOK: true}
+	h3, id3 := budgetHarness(t, b3)
+	h3.fake.approval.err = httpx.NewProblem(http.StatusConflict, "PRC-REQ-VERSION", "changed meanwhile")
+	h3.fake.approval.beforeErr = func() {
+		r := h3.fake.requisitions[id3]
+		r.Status = store.RequisitionApproved
+		h3.fake.requisitions[id3] = r
+	}
+	decide(h3, id3, "approve", userApprover, []string{dutyRequisitionApprove}, "")
+	if len(b3.checked) != 1 || len(b3.releases) != 0 {
+		t.Fatalf("released %v for a requisition that was approved", b3.releases)
+	}
+}
+
+func TestApproveRequisition_ACurrencyMismatchIsItsOwnRefusalNotAnOutage(t *testing.T) {
+	b := &fakeBudget{checkErr: &budget.Refusal{Code: budget.CurrencyMismatchCode, Detail: "the budget control rule CTL-1 is in EUR but the requisition is in USD"}}
+	h, id := budgetHarness(t, b)
+	rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions/" + id + ":approve", user: userApprover, duties: []string{dutyRequisitionApprove},
+		headers: map[string]string{"Idempotency-Key": "k-c", "If-Match": `"4"`}})
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeBudgetCurrency || !strings.Contains(rec.Body.String(), "EUR") || h.fake.approval.calls != 0 {
+		t.Fatalf("currency mismatch: %d %s; want 422 %s naming both currencies and no approval", rec.Code, rec.Body, CodeBudgetCurrency)
 	}
 }

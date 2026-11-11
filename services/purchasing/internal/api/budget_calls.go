@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,9 @@ const (
 	// CodeBudgetUnavailable is the 503 when budget control did not answer: the requisition stays IN_REVIEW, and the approval
 	// can be repeated.
 	CodeBudgetUnavailable = "PRC-REQ-BUDGET-DOWN"
+	// CodeBudgetCurrency is the 422 when the budget control rule of the legal entity is in another currency than the
+	// requisition (budgeting BUD-0080): the buyer fixes the currency or the rule, so it is not reported as an outage.
+	CodeBudgetCurrency = "PRC-REQ-BUDGET-CURRENCY"
 )
 
 // WithBudget turns on budget control for requisitions: the last approval runs the budget check and reserves
@@ -38,6 +42,11 @@ func (a *API) checkRequisitionBudget(r *http.Request, cur store.Requisition) err
 		return nil
 	}
 	res, err := a.budget.CheckRequisition(r.Context(), cur)
+	var refused *budget.Refusal
+	if errors.As(err, &refused) && refused.Code == budget.CurrencyMismatchCode {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeBudgetCurrency,
+			"the requisition was not approved: "+refused.Detail+". Change the requisition's currency or the budget control rule for this legal entity")
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "budget check of a requisition failed", "err", err, "requisitionId", cur.ID, "correlationId", middleware.GetReqID(r.Context()))
 		return httpx.NewProblem(http.StatusServiceUnavailable, CodeBudgetUnavailable, "budget control did not answer, so the requisition was not approved; try the approval again")
@@ -63,6 +72,23 @@ func (a *API) checkRequisitionBudget(r *http.Request, cur store.Requisition) err
 		p.Errors = lines
 	}
 	return p
+}
+
+// releaseAfterFailedApproval gives back the funds the budget check reserved when the approval then failed (a stale
+// version, a concurrent decision, a database error). It first re-reads the requisition: if it is APPROVED the approval
+// went through (a concurrent request won), the reservation belongs to it and stays. If the state cannot be read the
+// reservation also stays, because releasing an approved requisition's funds is the worse mistake; the unanswered case
+// is repeated by the next approval, whose check key is the same.
+func (a *API) releaseAfterFailedApproval(r *http.Request, id string, checked store.Requisition) {
+	now, err := a.store.GetRequisition(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "requisition not re-read after a failed approval; its budget reservation was kept", "err", err, "requisitionId", id, "correlationId", middleware.GetReqID(r.Context()))
+		return
+	}
+	if now.Status == store.RequisitionApproved {
+		return
+	}
+	budget.ReleaseReserved(r.Context(), a.budget, a.budgetQueue, checked)
 }
 
 // repeatApprover reports whether the user approved a level of the requisition since it was last submitted, read from its
