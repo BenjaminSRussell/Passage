@@ -2,6 +2,7 @@
   "assignments": {},
   "duties": {
     "identity.user.maintain": {"permissions": [{"resource": "/v1/identity/users{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "identity.user-name.read": {"permissions": [{"resource": "/v1/identity/user-names", "methods": ["GET"]}]},
     "identity.user.provision": {"permissions": [{"resource": "/scim/v2{,/**}", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"]}]},
     "identity.effective-permission.view": {"permissions": [{"resource": "/v1/identity/users/*/effective-permissions", "methods": ["GET"]}]},
     "identity.security-role.maintain": {"permissions": [

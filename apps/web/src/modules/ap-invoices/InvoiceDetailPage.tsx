@@ -48,13 +48,17 @@ function HoldNotice({ invoice }: { invoice: Invoice }) {
     return (
       <Alert tone="danger" title="Rejected after audit">
         {invoice.rejectReason ? `${invoice.rejectReason}. ` : ""}
-        {invoice.rejectedBy ? `Rejected by another user on ${when(invoice.rejectedAt)}.` : ""}
+        {invoice.rejectedBy ? (
+          <>
+            Rejected by <EntityName entity="user" id={invoice.rejectedBy} fallback="a user who is no longer listed" /> on {when(invoice.rejectedAt)}.
+          </>
+        ) : null}
       </Alert>
     );
   }
   return invoice.releasedBy ? (
     <Alert tone="success" title="Released from audit hold">
-      Released by another user on {when(invoice.releasedAt)}.
+      Released by <EntityName entity="user" id={invoice.releasedBy} fallback="a user who is no longer listed" /> on {when(invoice.releasedAt)}.
     </Alert>
   ) : null;
 }

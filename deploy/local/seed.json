@@ -20,6 +20,7 @@
         "identity.security-role.maintain",
         "identity.setup.maintain",
         "identity.setup.view",
+        "identity.user-name.read",
         "identity.user.maintain",
         "ledger.balance.read",
         "ledger.journal.approve",
@@ -51,6 +52,7 @@
       "duties": [
         "identity.feature.view",
         "identity.setup.view",
+        "identity.user-name.read",
         "inbox.read",
         "ledger.journal.read",
         "party.read",

@@ -521,7 +521,11 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
           await getJson(`/api/v1/identity/users${query({ q, status: "active", legalEntityId: scope.legalEntityId, limit: String(PAGE_SIZE) })}`, signal),
         ).map(userOption),
       ),
-    resolve: async (id, signal) => userOption(await getOne("/api/v1/identity/users", id, signal)),
+    // user-names needs only the read-a-name duty every role can hold; the full user record is for administrators.
+    resolve: async (id, signal) => {
+      const found = items(await getJson(`/api/v1/identity/user-names${query({ ids: id })}`, signal))[0];
+      return found ? userOption(found) : null;
+    },
   },
   operatingUnit: operatingUnitDef,
   itemGroup: itemGroupDef,
