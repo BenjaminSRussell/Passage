@@ -13,6 +13,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/api"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/posting"
@@ -60,7 +61,7 @@ func postingAPIWith(t *testing.T, wrap func(*ledgerclient.Fake) ledgerclient.Led
 }
 
 func postAs(h http.Handler, method, path, key, body string) *httptest.ResponseRecorder {
-	headers := map[string]string{"X-Passage-User": "user-7"}
+	headers := map[string]string{"X-Passage-User": "user-7", tenant.HeaderLegalEntity: leA + "," + leB}
 	if key != "" {
 		headers["Idempotency-Key"] = key
 	}
@@ -232,6 +233,23 @@ func TestPostJournal_Validation(t *testing.T) {
 	viewOnly := call{method: http.MethodPost, path: "/v1/interco/journals", duties: api.DutyView, body: journalBodyFor("USD", ""), headers: map[string]string{"Idempotency-Key": "d", "X-Passage-User": "u"}}
 	if rec := viewOnly.on(h); rec.Code != http.StatusForbidden {
 		t.Errorf("view duty cannot post = %d", rec.Code)
+	}
+}
+
+func TestPostJournal_RefusesASideOutsideTheCallersScope(t *testing.T) {
+	h, fake := postingAPI(t)
+	onlyA := call{method: http.MethodPost, path: "/v1/interco/journals", duties: api.DutyPost + "," + api.DutyView, body: journalBodyFor("USD", ""),
+		headers: map[string]string{"Idempotency-Key": "scope-1", "X-Passage-User": "user-7", tenant.HeaderLegalEntity: leA}}
+	if rec := onlyA.on(h); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("caller scoped to A posting into B = %d %s", rec.Code, rec.Body.String())
+	}
+	charge := call{method: http.MethodPost, path: "/v1/interco/charges", duties: api.DutyPost + "," + api.DutyView, body: postChargeBody("scope-src", 1, "Engineer"),
+		headers: map[string]string{"Idempotency-Key": "scope-2", "X-Passage-User": "user-7", tenant.HeaderLegalEntity: leA}}
+	if rec := charge.on(h); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("caller scoped to A charging B = %d %s", rec.Code, rec.Body.String())
+	}
+	if n := len(fake.Entries()); n != 0 {
+		t.Fatalf("ledger entries after refused postings = %d, want 0", n)
 	}
 }
 

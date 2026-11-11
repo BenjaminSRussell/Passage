@@ -5,8 +5,8 @@
 import type { StepType } from "./flowGraph";
 import { checkScan, CLASS_LABEL, classifyScan, describeScan, type Classified, type ParseOptions, type ScanClass } from "./gs1";
 
-/** Capture bridge that produced the scan (§6.32.13 scanner_profile). */
-export type ScanSource = "DATAWEDGE" | "HONEYWELL_DC" | "KEYBOARD_WEDGE";
+/** Capture bridge that produced the scan (§6.32.13 scanner_profile); RFID is a tag read (FR-32.9), VOICE spoken digits. */
+export type ScanSource = "DATAWEDGE" | "HONEYWELL_DC" | "KEYBOARD_WEDGE" | "RFID" | "VOICE";
 
 /** The step that has focus when the scan arrives. */
 export interface FocusedStep {

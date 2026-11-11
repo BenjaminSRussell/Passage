@@ -16,17 +16,14 @@ import (
 	"github.com/BenjaminSRussell/passage/services/print/migrations"
 )
 
-func TestGrants_AppRoleCannotRewriteRegistryOrOutbox(t *testing.T) {
+func TestGrants_AppRoleCannotDeletePrintersOrRewriteOutbox(t *testing.T) {
 	admin, app := testkit.DBWithApp(t)
 	ctx := tenantCtx(1)
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	for _, stmt := range []string{
-		`update print_device set name = name`,
 		`delete from print_device`,
-		`update print_routing_rule set sequence = sequence`,
-		`delete from print_routing_rule`,
 		`select count(*) from outbox`,
 		`update outbox set type = type`,
 	} {

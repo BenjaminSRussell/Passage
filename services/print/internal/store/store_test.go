@@ -74,7 +74,7 @@ func TestPrinterRegistry_IdempotencyAndConflicts(t *testing.T) {
 	if err != nil || len(queue) != 2 || queue[0].Code != "DOCK-1" || queue[1].Code != "DOCK-2" {
 		t.Fatalf("queue order: %+v %v", queue, err)
 	}
-	if other, err := s.ListPrinters(tenantCtx(2)); err != nil || len(other) != 0 {
+	if other, err := s.ListPrinters(tenantCtx(2), false); err != nil || len(other) != 0 {
 		t.Fatalf("tenant 2 saw %+v %v", other, err)
 	}
 }
@@ -373,7 +373,7 @@ func TestMigrationsApplyWithForcedRLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := tenantCtx(2)
-	printers, err := s.ListPrinters(other)
+	printers, err := s.ListPrinters(other, false)
 	if err != nil || len(printers) != 0 {
 		t.Fatalf("tenant 2 printers: %+v %v", printers, err)
 	}

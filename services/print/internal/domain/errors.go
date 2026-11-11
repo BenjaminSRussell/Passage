@@ -20,4 +20,6 @@ const (
 	CodeTerminal         = "PRN-0004" // job already completed (service-local)
 	CodeRankTaken        = "PRN-0006" // queue already has a device at this failover rank (service-local)
 	CodeMediaMismatch    = "PRN-0007" // label does not fit the device's media (service-local)
+	CodePrinterNotFound  = "PRN-0010" // printer not found or already retired (service-local)
+	CodeRuleNotFound     = "PRN-0011" // routing rule not found (service-local)
 )

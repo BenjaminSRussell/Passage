@@ -16,6 +16,9 @@ func allowReason(v violation) (string, bool) {
 }
 
 var allowlist = map[string]string{
+	// A consolidation group spans legal entities by design: the group's units, ownership chain and consolidated trial balance are read
+	// whole by the consolidation duties, and hiding a unit outside the caller's scope would give a wrong consolidated result, not a smaller one.
+	"consolidation.consolidation_unit:" + problemNoEntityPol: "permanent: group-level master data; a consolidation group spans legal entities and is read whole by the consolidation duties (0003_groups, #40)",
 	// #486 review decision: in EAM, legal_entity_id on asset and work_order is the GL booking entity, not a visibility scope. Sites, plans, permits,
 	// rounds and every other EAM table are tenant-wide and join these rows, and legacy rows have a NULL entity that a scoped caller must see to set it
 	// (PUT /v1/eam/assets/{id}/legal-entity) and that the GL reconciliation lists; a restrictive policy would hide them or would have to admit NULL.

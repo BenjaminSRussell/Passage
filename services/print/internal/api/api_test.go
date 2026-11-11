@@ -51,10 +51,24 @@ func (m *memStore) CreatePrinter(_ context.Context, p domain.Printer, _ string) 
 	return p, true, nil
 }
 
-func (m *memStore) ListPrinters(context.Context) ([]domain.Printer, error) {
+func (m *memStore) ListPrinters(_ context.Context, includeRetired bool) ([]domain.Printer, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]domain.Printer{}, m.printers...), nil
+	out := []domain.Printer{}
+	for _, p := range m.printers {
+		if includeRetired || p.RetiredAt == nil {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// queueStale stores a QUEUED job last touched at `at`, as if its process had died.
+func (m *memStore) queueStale(id, queue, zpl string, at time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jobs[id] = domain.Job{ID: id, TemplateCode: "LP_LABEL", QueueCode: queue, Format: domain.FormatZPL, Status: domain.JobQueued, ZPL: zpl, CreatedAt: at, UpdatedAt: at}
+	m.order = append(m.order, id)
 }
 
 func (m *memStore) QueueDevices(_ context.Context, queue string) ([]domain.Printer, error) {
@@ -62,7 +76,7 @@ func (m *memStore) QueueDevices(_ context.Context, queue string) ([]domain.Print
 	defer m.mu.Unlock()
 	var out []domain.Printer
 	for _, p := range m.printers {
-		if p.QueueCode == queue {
+		if p.QueueCode == queue && p.RetiredAt == nil {
 			out = append(out, p)
 		}
 	}

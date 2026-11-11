@@ -28,7 +28,7 @@ func (s *Postgres) PrinterStatuses(ctx context.Context) ([]domain.PrinterStatus,
 				order by j.created_at desc, j.id desc
 				limit 1
 			) last on true
-			where d.tenant_id = $1
+			where d.tenant_id = $1 and d.retired_at is null
 			order by d.code`, p.TenantID)
 		if err != nil {
 			return err

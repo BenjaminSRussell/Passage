@@ -2000,7 +2000,11 @@
     "print.admin": {"permissions": [
       {"resource": "/print/v1/jobs:purge", "methods": ["POST"]},
       {"resource": "/print/v1/printers", "methods": ["POST"]},
-      {"resource": "/print/v1/routing-rules", "methods": ["POST"]}
+      {"resource": "/print/v1/routing-rules", "methods": ["POST"]},
+      {"resource": "/print/v1/printers/*", "methods": ["PATCH"]},
+      {"resource": "/print/v1/printers/*:retire", "methods": ["POST"]},
+      {"resource": "/print/v1/routing-rules/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/print/v1/jobs:sweep", "methods": ["POST"]}
     ]},
     "warehouse.offline-conflict.resolve": {"permissions": [
       {"resource": "/api/v1/mobile/offline/conflicts", "methods": ["GET"]},
