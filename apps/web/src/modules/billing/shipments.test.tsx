@@ -94,8 +94,8 @@ function fillForm() {
   fill("Customer", CUST);
   fill("Invoice account", ACCT);
   fill("Invoice date", "2027-03-10");
-  fill("Packing slip id", SLIP);
-  fill("Sales order id", ORDER);
+  fill("Packing slip", SLIP);
+  fill("Sales order", ORDER);
   fill("Slip date", "2027-03-09");
   fill("Slip charge", "12.50");
   fill("Slip line id", SLIP_LINE);
@@ -133,7 +133,7 @@ describe("Invoice shipments", () => {
     expect(await screen.findByRole("heading", { name: "Invoice shipments" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Create proposals" }));
-    expect(await screen.findByText("Enter the packing slip id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the packing slip.")).toBeInTheDocument();
     expect(screen.getByText("Enter the shipped quantity, above zero.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
@@ -179,7 +179,7 @@ describe("Invoice shipments", () => {
     const alert = await findAlert();
     expect(alert).toHaveTextContent("A packing slip line is already invoiced");
     expect(alert).toHaveTextContent("BIL-0104");
-    expect(screen.getByLabelText("Packing slip id")).toHaveValue(SLIP);
+    expect(screen.getByLabelText("Packing slip")).toHaveAttribute("data-value", SLIP);
   });
 
   it("puts the service's field errors next to the slip line fields", async () => {
@@ -193,11 +193,11 @@ describe("Invoice shipments", () => {
   it("adds and removes packing slips and lines", async () => {
     renderAt("/billing/proposals/new");
     fireEvent.click(screen.getByRole("button", { name: "Add packing slip" }));
-    expect(screen.getAllByLabelText("Packing slip id")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Packing slip")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Add line to slip 2" }));
     expect(screen.getAllByLabelText("Slip line id")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "Remove packing slip 1" }));
-    expect(screen.getAllByLabelText("Packing slip id")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Packing slip")).toHaveLength(1);
     expect(screen.getAllByLabelText("Slip line id")).toHaveLength(2);
   });
 });

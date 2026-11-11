@@ -1003,6 +1003,7 @@ paths:
       parameters:
         - { name: itemId, in: query, schema: { type: string, format: uuid } }
         - { name: disposition, in: query, schema: { $ref: '#/components/schemas/Disposition' } }
+        - { name: q, in: query, description: "Only batches whose number contains it, ignoring case.", schema: { type: string, maxLength: 100 } }
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':

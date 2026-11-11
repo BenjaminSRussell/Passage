@@ -73,9 +73,8 @@ describe("validation rules list", () => {
   it("asks for a ledger first, then lists the rules and opens one", async () => {
     fake();
     const { container } = renderAt("/ledger/validation-rules");
-    expect(screen.getByText("Enter a ledger id to see its validation rules.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
+    expect(screen.getByText("Choose a ledger to see its validation rules.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     const grid = await findTable({ name: "Validation rules" });
     const open = await screen.findByRole("button", { name: rule.name });
     const row = open.closest("tr") as HTMLElement;

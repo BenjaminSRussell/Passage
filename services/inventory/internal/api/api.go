@@ -64,6 +64,8 @@ type API struct {
 	glBooked atomic.Int64
 	// truck serves the truck stock routes (WithTruckStock); nil answers 503.
 	truck TruckStock
+	// opening serves the opening stock import (WithOpeningBatches); nil answers 503.
+	opening OpeningBatches
 }
 
 // New builds the API with the posting parameters from configuration.
@@ -98,6 +100,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerReturnReceipts(r)
 	a.registerGL(r)
 	a.registerTruck(r)
+	a.registerOpening(r)
 }
 
 // Metrics serves the counters for the admin port.

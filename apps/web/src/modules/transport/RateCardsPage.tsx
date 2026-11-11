@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listRateCards, type RateCard } from "./api/client";
 import { dash, fixed, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const columns: DataTableColumn<RateCard>[] = [
   { key: "carrierId", header: "Carrier", mono: true, render: (row) => <span title={row.carrierId}>{shortId(row.carrierId)}</span> },
@@ -43,9 +44,7 @@ export function RateCardsPage() {
           if (!invalid) setApplied(carrier.trim());
         }}
       >
-        <FormField id="rate-card-carrier" label="Carrier id" optional error={invalid ? "Enter the carrier id as a lower-case UUID." : undefined}>
-          {(control) => <Input {...control} className={styles.mono} value={carrier} onChange={(e) => setCarrier(e.target.value)} invalid={invalid} />}
-        </FormField>
+        <LookupFormField id="rate-card-carrier" label="Carrier" optional entity="vendor" value={carrier} error={invalid ? "Choose the carrier." : undefined} onChange={setCarrier} />
         <Button type="submit">Filter</Button>
       </form>
       {state.error ? (

@@ -14,7 +14,7 @@ import {
 import { DATE, dayOf, validFte } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 interface Values {
   workerId: string;
@@ -96,14 +96,14 @@ export function AssignmentForm({ position, onCreated, onCancel }: { position: Po
     : employments.loading
       ? "Loading employments…"
       : employments.error
-        ? `Could not load employments (${employments.error.code}).`
+        ? `Could not load employments. ${problemSummary(employments.error)}`
         : employments.data?.length === 0
           ? "This worker has no current employment in the position's legal entity."
           : undefined;
 
   return (
     <form className={styles.form} onSubmit={submit} noValidate aria-label="Assign worker">
-      <FormField id="assignment-workerId" label="Worker" error={errors.workerId} hint={workers.error ? `Could not load workers (${workers.error.code}).` : undefined}>
+      <FormField id="assignment-workerId" label="Worker" error={errors.workerId} hint={workers.error ? `Could not load workers. ${problemSummary(workers.error)}` : undefined}>
         {(control) => (
           <Select {...control} value={values.workerId} invalid={Boolean(errors.workerId)} onChange={(event) => update({ workerId: event.target.value, employmentId: "" })}>
             <option value="">Choose a worker</option>

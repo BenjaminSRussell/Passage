@@ -99,6 +99,7 @@ export function InvoicesPage() {
       columns={columns}
       filters={filters}
       useRows={useInvoiceRows}
+      search={(row) => ({ number: invoiceName(row) })}
       getRowKey={(row) => row.id}
       onRowOpen={(row) => navigate(`/billing/invoices/${row.id}`)}
       empty={{

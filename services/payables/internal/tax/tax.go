@@ -23,6 +23,8 @@ const (
 	audience        = "tax"
 	dutyWithholding = "tax.withholding.calculate"
 	withholdingPath = "/v1/tax/withholding/calculate"
+	dutyRecord      = "tax.withholding.record"
+	entriesPath     = "/v1/tax/withholding/entries"
 	maxResponseSize = 1 << 20
 )
 
@@ -93,39 +95,53 @@ func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
 
 func (c *Client) Signed() bool { return c.signer != nil }
 
+// Result is what the tax service worked out for one payment: the tax withheld and the base it was withheld on (the gross less any
+// amount under the code's threshold). A response without a base is taken to have withheld on the whole gross.
+type Result struct {
+	Withheld    decimal.Decimal
+	TaxableBase decimal.Decimal
+}
+
+// Withholding is Calculate reduced to the tax withheld.
 func (c *Client) Withholding(ctx context.Context, legalEntityID string, in Request) (decimal.Decimal, error) {
+	res, err := c.Calculate(ctx, legalEntityID, in)
+	return res.Withheld, err
+}
+
+func (c *Client) Calculate(ctx context.Context, legalEntityID string, in Request) (Result, error) {
+	zero := Result{}
 	if c.signer == nil {
-		return decimal.Zero, ErrUnsigned
+		return zero, ErrUnsigned
 	}
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
-		return decimal.Zero, fmt.Errorf("%w: no principal in context", ErrConfig)
+		return zero, fmt.Errorf("%w: no principal in context", ErrConfig)
 	}
 	payload, err := json.Marshal(requestBody{
 		Currency: in.Currency, PartyType: "vendor", PaymentDate: in.PaymentDate, Code: in.Code.Code,
 		GrossAmount: in.Gross.String(), PaidToDate: in.PaidToDate.String(), Codes: []Code{in.Code},
 	})
 	if err != nil {
-		return decimal.Zero, fmt.Errorf("tax: %w", err)
+		return zero, fmt.Errorf("tax: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+withholdingPath, bytes.NewReader(payload))
 	if err != nil {
-		return decimal.Zero, fmt.Errorf("tax: %w", err)
+		return zero, fmt.Errorf("tax: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyWithholding}); err != nil {
-		return decimal.Zero, fmt.Errorf("%w: %w", ErrConfig, err)
+		return zero, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "tax request failed", "err", err, "code", in.Code.Code, "correlationId", middleware.GetReqID(ctx))
-		return decimal.Zero, fmt.Errorf("tax: %w", err)
+		return zero, fmt.Errorf("tax: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		slog.ErrorContext(ctx, "tax read failed", "err", err, "code", in.Code.Code, "correlationId", middleware.GetReqID(ctx))
-		return decimal.Zero, fmt.Errorf("tax: %w", err)
+		return zero, fmt.Errorf("tax: %w", err)
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -135,13 +151,14 @@ func (c *Client) Withholding(ctx context.Context, legalEntityID string, in Reque
 			Code        string `json:"code"`
 		}
 		_ = json.Unmarshal(raw, &problem)
-		return decimal.Zero, &RuleError{Code: firstNonEmpty(problem.ServiceCode, problem.Code)}
+		return zero, &RuleError{Code: firstNonEmpty(problem.ServiceCode, problem.Code)}
 	default:
 		slog.ErrorContext(ctx, "tax rejected the withholding request", "status", resp.StatusCode, "code", in.Code.Code, "correlationId", middleware.GetReqID(ctx))
-		return decimal.Zero, &StatusError{Status: resp.StatusCode}
+		return zero, &StatusError{Status: resp.StatusCode}
 	}
 	var body struct {
-		Withheld string `json:"withholding_amount"`
+		Withheld    string `json:"withholding_amount"`
+		TaxableBase string `json:"taxable_base"`
 	}
 	err = json.Unmarshal(raw, &body)
 	var withheld decimal.Decimal
@@ -150,9 +167,18 @@ func (c *Client) Withholding(ctx context.Context, legalEntityID string, in Reque
 	}
 	if err != nil || withheld.IsNegative() || withheld.GreaterThan(in.Gross) {
 		slog.ErrorContext(ctx, "tax withholding response unusable", "code", in.Code.Code, "correlationId", middleware.GetReqID(ctx))
-		return decimal.Zero, errors.New("tax: response has no usable withholding amount")
+		return zero, errors.New("tax: response has no usable withholding amount")
 	}
-	return withheld, nil
+	base := in.Gross
+	if body.TaxableBase != "" {
+		b, err := decimal.NewFromString(body.TaxableBase)
+		if err != nil || b.IsNegative() || b.GreaterThan(in.Gross) || withheld.GreaterThan(b) {
+			slog.ErrorContext(ctx, "tax withholding response unusable", "code", in.Code.Code, "correlationId", middleware.GetReqID(ctx))
+			return zero, errors.New("tax: response has no usable taxable base")
+		}
+		base = b
+	}
+	return Result{Withheld: withheld, TaxableBase: base}, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -162,4 +188,75 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// Entry is the withholding of one payment as the tax service records it for remittance and certificates (POST /v1/tax/withholding/entries).
+// ID is the entry's own identity: recording the same ID again changes nothing.
+type Entry struct {
+	ID          string
+	PartyRef    string
+	Code        string
+	PaymentDate string
+	Currency    string
+	Gross       decimal.Decimal
+	TaxableBase decimal.Decimal
+	Withheld    decimal.Decimal
+}
+
+type entryBody struct {
+	ID          string `json:"id"`
+	PartyType   string `json:"party_type"`
+	PartyRef    string `json:"party_ref"`
+	Code        string `json:"code"`
+	PaymentDate string `json:"payment_date"`
+	Currency    string `json:"currency"`
+	Gross       string `json:"gross_amount"`
+	TaxableBase string `json:"taxable_base"`
+	Withheld    string `json:"withholding_amount"`
+}
+
+// RecordWithholding tells the tax service which tax was withheld from vendor payments, so its remittance runs and certificates cover
+// them. It is idempotent by entry id, so a retry after a failure is safe.
+func (c *Client) RecordWithholding(ctx context.Context, legalEntityID string, entries []Entry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if c.signer == nil {
+		return ErrUnsigned
+	}
+	principal, ok := tenant.FromContext(ctx)
+	if !ok {
+		return fmt.Errorf("%w: no principal in context", ErrConfig)
+	}
+	body := struct {
+		Entries []entryBody `json:"entries"`
+	}{}
+	for _, e := range entries {
+		body.Entries = append(body.Entries, entryBody{ID: e.ID, PartyType: "vendor", PartyRef: e.PartyRef, Code: e.Code, PaymentDate: e.PaymentDate,
+			Currency: e.Currency, Gross: e.Gross.String(), TaxableBase: e.TaxableBase.String(), Withheld: e.Withheld.String()})
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("tax: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+entriesPath, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("tax: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyRecord}); err != nil {
+		return fmt.Errorf("%w: %w", ErrConfig, err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		slog.ErrorContext(ctx, "tax withholding record failed", "err", err, "correlationId", middleware.GetReqID(ctx))
+		return fmt.Errorf("tax: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseSize))
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		slog.ErrorContext(ctx, "tax rejected the withholding entries", "status", resp.StatusCode, "correlationId", middleware.GetReqID(ctx))
+		return &StatusError{Status: resp.StatusCode}
+	}
+	return nil
 }

@@ -1,16 +1,16 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, entityText, FormField, Input, ListPage, PageHeader, StatusPill, type ListColumn, type ListData, type ListFilterDef, type ListQuery, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
 import {
   createQuotation,
   describeProblem,
   listQuotations,
   newKey,
   QUOTATION_STATUSES,
+  SalesApiError,
   type NewQuotation,
   type Problem,
   type Quotation,
-  type QuotationFilter,
   type QuotationStatus,
 } from "./api/client";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
@@ -83,81 +83,81 @@ export function validateQuotation(values: QuotationValues, on: string = today())
   };
 }
 
-const columns: DataTableColumn<Quotation>[] = [
+const columns: ListColumn<Quotation>[] = [
   { key: "quotationNumber", header: "Quotation", mono: true },
-  { key: "customerId", header: "Customer", render: (q) => <EntityName entity="customer" id={q.customerId} fallback="Customer" /> },
-  { key: "status", header: "Status", render: (q) => <QuotationStatusBadge quotation={q} /> },
+  { key: "customerId", header: "Customer", sortable: false, render: (q) => <EntityName entity="customer" id={q.customerId} fallback="Customer" />, csv: (q) => entityText("customer", q.customerId) },
+  { key: "status", header: "Status", render: (q) => <QuotationStatusBadge quotation={q} />, sortValue: (q) => q.status, csv: (q) => sentence(q.status) },
   { key: "validUntil", header: "Valid until" },
-  { key: "probabilityPct", header: "Probability", align: "end", render: (q) => `${q.probabilityPct}%` },
-  { key: "netTotal", header: "Net total", align: "end", render: (q) => money(q.netTotal, q.currency) },
-  { key: "lines", header: "Open lines", align: "end", render: (q) => `${q.openLines} of ${q.lineCount}` },
-  { key: "createdAt", header: "Created", render: (q) => formatDateTime(q.createdAt) },
+  { key: "probabilityPct", header: "Probability", align: "end", render: (q) => `${q.probabilityPct}%`, sortValue: (q) => q.probabilityPct, csv: (q) => q.probabilityPct },
+  { key: "netTotal", header: "Net total", align: "end", render: (q) => money(q.netTotal, q.currency), sortValue: (q) => q.netTotal, csv: (q) => q.netTotal, csvWith: "currency" },
+  { key: "lines", header: "Open lines", align: "end", sortable: false, render: (q) => `${q.openLines} of ${q.lineCount}`, csv: (q) => `${q.openLines} of ${q.lineCount}` },
+  { key: "createdAt", header: "Created", render: (q) => formatDateTime(q.createdAt), csv: (q) => q.createdAt },
+  { key: "currency", header: "Currency", defaultHidden: true },
 ];
+
+const filters: ListFilterDef[] = [
+  { kind: "entity", key: "legalEntityId", label: "Legal entity", entity: "legalEntity" },
+  { kind: "entity", key: "customerId", label: "Customer", entity: "customer" },
+  { kind: "select", key: "status", label: "Status", anyLabel: "Any status", options: QUOTATION_STATUSES.map((s) => ({ value: s, label: sentence(s) })) },
+];
+
+/** The quotations of the filter; the service answers one page of at most 200, so there is nothing more to load. */
+function useQuotationRows(query: ListQuery): ListData<Quotation> {
+  const { legalEntityId = "", customerId = "", status = "" } = query.filters;
+  const [forbidden, setForbidden] = useState(false);
+  const state = useLoad(async (signal) => {
+    try {
+      const rows = await listQuotations({ legalEntityId, customerId, status: status as QuotationStatus | "" }, signal);
+      if (!signal.aborted) setForbidden(false);
+      return rows;
+    } catch (error) {
+      if (!signal.aborted) setForbidden(error instanceof SalesApiError && error.status === 403);
+      throw error;
+    }
+  }, `${legalEntityId}|${customerId}|${status}`);
+  return {
+    rows: state.error ? [] : (state.data ?? []),
+    loading: state.loading,
+    loadingMore: false,
+    error: state.error ?? undefined,
+    forbidden,
+    hasMore: false,
+    loadMore: () => undefined,
+    retry: state.reload,
+  };
+}
 
 /** Quotations pipeline (PRD §5.27.14): every quotation, newest first, with validity and probability (FR-27.1). */
 export function QuotationsPage() {
   const navigate = useNavigate();
-  const [draft, setDraft] = useState<{ legalEntityId: string; customerId: string; status: QuotationStatus | "" }>({ legalEntityId: "", customerId: "", status: "" });
-  const [filter, setFilter] = useState<QuotationFilter>({});
-  const invalid: Errors = {};
-  if (draft.legalEntityId.trim() && !UUID.test(draft.legalEntityId.trim())) invalid.legalEntityId = "Enter a legal entity UUID.";
-  if (draft.customerId.trim() && !UUID.test(draft.customerId.trim())) invalid.customerId = "Enter a customer UUID.";
-  const state = useLoad((signal) => listQuotations(filter, signal), JSON.stringify(filter));
-
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Sales quotations"
-        description="Priced offers to customers. Send a quotation, then convert it, whole or by line, into a draft order while it is valid."
-        actions={
-          <Link className={buttonClassName("primary")} to="/sales/quotations/new">
+    <ListPage
+      id="sales-quotations"
+      title="Sales quotations"
+      description="Priced offers to customers. Send a quotation, then convert it, whole or by line, into a draft order while it is valid."
+      noun="quotations"
+      singular="quotation"
+      actions={
+        <Link className={buttonClassName("primary")} to="/sales/quotations/new">
+          New quotation
+        </Link>
+      }
+      columns={columns}
+      filters={filters}
+      useRows={useQuotationRows}
+      search={(q) => ({ number: q.quotationNumber })}
+      getRowKey={(q) => q.id}
+      onRowOpen={(q) => navigate(`/sales/quotations/${q.id}`)}
+      empty={{
+        title: "No quotations yet",
+        description: "Create a quotation to offer a customer prices before they order.",
+        action: (
+          <Link className={buttonClassName("secondary")} to="/sales/quotations/new">
             New quotation
           </Link>
-        }
-      />
-      <form
-        className={styles.toolbar}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (Object.keys(invalid).length === 0) setFilter({ legalEntityId: draft.legalEntityId.trim(), customerId: draft.customerId.trim(), status: draft.status });
-        }}
-      >
-        <FormField id="quotations-le" label="Legal entity" error={invalid.legalEntityId} optional>
-          {(control) => <EntityLookup entity="legalEntity" {...control} prefill={false} placeholder="All legal entities" value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid.legalEntityId)} />}
-        </FormField>
-        <FormField id="quotations-customer" label="Customer" error={invalid.customerId} optional>
-          {(control) => <EntityLookup entity="customer" {...control} placeholder="All customers" value={draft.customerId} onChange={(e) => setDraft({ ...draft, customerId: e.target.value })} invalid={Boolean(invalid.customerId)} />}
-        </FormField>
-        <FormField id="quotations-status" label="Status">
-          {(control) => (
-            <Select {...control} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as QuotationStatus | "" })}>
-              <option value="">Any status</option>
-              {QUOTATION_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {sentence(s)}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <Button type="submit">Filter</Button>
-      </form>
-      {state.error ? (
-        <Alert tone="danger" title="Could not load quotations" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Sales quotations"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(q) => q.id}
-          loading={state.loading}
-          empty={{ title: "No quotations yet", description: "Create a quotation to offer a customer prices before they order." }}
-          onRowOpen={(q) => navigate(`/sales/quotations/${q.id}`)}
-        />
-      )}
-    </div>
+        ),
+      }}
+    />
   );
 }
 
@@ -185,6 +185,7 @@ export function NewQuotationPage() {
     key.current = newKey();
   }
 
+  const { prompt, release } = useUnsavedChanges(useFormBaseline(values));
   async function submit(event: FormEvent) {
     event.preventDefault();
     const { errors: found, input } = validateQuotation(values);
@@ -194,6 +195,7 @@ export function NewQuotationPage() {
     setBusy(true);
     try {
       const created = await createQuotation(input, key.current);
+      release();
       navigate(`/sales/quotations/${created.value.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -265,6 +267,7 @@ export function NewQuotationPage() {
             </Link>
           </div>
         </form>
+      {prompt}
       </Card>
     </div>
   );

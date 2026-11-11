@@ -1,0 +1,17 @@
+{
+  "pack": "onhand",
+  "expectations": [
+    {"type": "expect_column_values_to_not_be_null", "check": "legacy_id_present", "column": "legacyId"},
+    {"type": "expect_column_values_to_be_unique", "check": "legacy_id_unique", "column": "legacyId", "skip_blank": true},
+    {"type": "expect_compound_columns_to_be_unique", "check": "natural_key_unique", "columns": ["item", "site", "warehouse", "location", "batch", "serial"]},
+    {"type": "expect_compound_columns_to_be_unique", "check": "serial_unique_per_item", "columns": ["item", "serial"], "skip_blank": true},
+    {"type": "expect_column_values_to_be_in_set", "check": "item_in_master", "column": "item", "set": "items"},
+    {"type": "expect_column_values_to_not_be_null", "check": "site_required", "column": "site"},
+    {"type": "expect_column_values_to_not_be_null", "check": "warehouse_required", "column": "warehouse"},
+    {"type": "expect_column_values_to_not_be_null", "check": "unit_required", "column": "unit"},
+    {"type": "expect_column_values_to_be_between", "check": "quantity_positive", "column": "quantity", "min": "0", "strict_min": true},
+    {"type": "expect_column_values_to_be_between", "check": "value_not_negative", "column": "value", "min": "0"},
+    {"type": "expect_column_values_to_equal_when_column_present", "check": "serial_quantity_one", "column": "quantity", "when": "serial", "equals": "1"},
+    {"type": "expect_column_values_to_be_in_set", "check": "currency_iso4217", "column": "currency", "set": "iso4217"}
+  ]
+}

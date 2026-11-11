@@ -56,7 +56,7 @@ const FIELDS: { key: keyof OneTimeValues; label: string; hint?: string; optional
   { key: "region", label: "State or region", optional: true },
   { key: "postalCode", label: "Postal code" },
   { key: "country", label: "Country", hint: "Two-letter ISO code, such as DE." },
-  { key: "taxId", label: "Tax id", hint: "Carried to the invoice.", optional: true },
+  { key: "taxId", label: "Tax registration number", hint: "Carried to the invoice.", optional: true },
 ];
 
 /** The walk-in buyer's document-level name, address and tax id (FR-27.22). */

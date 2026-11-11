@@ -149,10 +149,10 @@ describe("Start tender", () => {
     handler = (url, init) => (url.pathname === `/api/v1/transport/loads/${LOAD}:tender` && init.method === "POST" ? json(201, tender()) : json(200, tender()));
     const { container } = renderAt(`/transport/tenders/new?loadId=${LOAD}`);
     expect(screen.getByLabelText("Load")).toHaveAttribute("data-value", LOAD);
-    fill("Carrier 1 carrier id", C1);
+    fill("Carrier 1 carrier", C1);
     fill("Carrier 1 rate quoted", "412.50");
     fireEvent.click(screen.getByRole("button", { name: "Add carrier" }));
-    fill("Carrier 2 carrier id", C2);
+    fill("Carrier 2 carrier", C2);
     expect(violations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Start tender" }));
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(`/transport/tenders/${TENDER}`));
@@ -164,7 +164,7 @@ describe("Start tender", () => {
   it("shows TMS-0114 when the load already has an open tender", async () => {
     handler = () => problem(409, "TMS-0114", "load already has pending tender x");
     renderAt(`/transport/tenders/new?loadId=${LOAD}`);
-    fill("Carrier 1 carrier id", C1);
+    fill("Carrier 1 carrier", C1);
     fireEvent.click(screen.getByRole("button", { name: "Start tender" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Could not start the tender");
@@ -175,7 +175,7 @@ describe("Start tender", () => {
     renderAt("/transport/tenders/new");
     fireEvent.click(screen.getByRole("button", { name: "Start tender" }));
     expect(screen.getByText("Choose the load.")).toBeInTheDocument();
-    expect(screen.getByText(/Carrier 1: Enter the carrier id/)).toBeInTheDocument();
+    expect(screen.getByText(/Carrier 1: Choose the carrier/)).toBeInTheDocument();
     expect(calls).toHaveLength(0);
   });
 });
@@ -225,7 +225,7 @@ describe("Release a load to the tender workflow", () => {
     const { container } = renderAt(`/transport/tenders/new?loadId=${LOAD}`, TENDER_DUTY);
     expect(await screen.findByText("version 3")).toBeInTheDocument();
     expect(screen.getByText("Planned")).toBeInTheDocument();
-    fill("Carrier 1 carrier id", C1);
+    fill("Carrier 1 carrier", C1);
     fill("Carrier 1 rate quoted", "412.50");
     expect(violations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Release to the tender workflow" }));
@@ -279,7 +279,7 @@ describe("Release a load to the tender workflow", () => {
       };
       const view = renderAt(`/transport/tenders/new?loadId=${LOAD}`, TENDER_DUTY);
       await screen.findByText("version 3");
-      fill("Carrier 1 carrier id", C1);
+      fill("Carrier 1 carrier", C1);
       fireEvent.click(screen.getByRole("button", { name: "Release to the tender workflow" }));
       const alert = await findAlert();
       expect(alert).toHaveTextContent("Could not release the load");
@@ -303,7 +303,7 @@ describe("Release a load to the tender workflow", () => {
     renderAt(`/transport/tenders/new?loadId=${LOAD}`, TENDER_DUTY);
     await screen.findByText("version 3");
     version = 5;
-    fill("Carrier 1 carrier id", C1);
+    fill("Carrier 1 carrier", C1);
     fireEvent.click(screen.getByRole("button", { name: "Release to the tender workflow" }));
     expect(await findAlert()).toHaveTextContent("conflict_version");
     expect(await screen.findByText("version 5")).toBeInTheDocument();
@@ -327,7 +327,7 @@ describe("Tender detail", () => {
     const { container } = renderAt(`/transport/tenders/${TENDER}`);
     const attempts = await findTable({ name: "Tender attempts" });
     expect(attempts).toHaveTextContent("412.50 USD");
-    expect(screen.getByLabelText("Responding carrier id")).toHaveValue(C1);
+    expect(screen.getByLabelText("Responding carrier")).toHaveAttribute("data-value", C1);
     expect(violations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Record acceptance" }));
     await waitFor(() => expect(screen.getAllByText("Accepted").length).toBeGreaterThan(0));

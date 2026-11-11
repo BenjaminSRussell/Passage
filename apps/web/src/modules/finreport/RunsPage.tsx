@@ -26,7 +26,7 @@ export function runQuery(definition: string, ledger: string, period: string): { 
   if (definition.trim() !== "") query.definition = definition.trim().toUpperCase();
   if (ledger.trim() !== "") {
     if (UUID.test(ledger.trim())) query.ledger = ledger.trim();
-    else errors.ledger = "Enter the ledger id (a UUID), or leave it empty for every ledger.";
+    else errors.ledger = "Choose the ledger, or leave it empty for every ledger.";
   }
   if (period.trim() !== "") {
     if (PERIOD.test(period.trim())) query.period = period.trim();

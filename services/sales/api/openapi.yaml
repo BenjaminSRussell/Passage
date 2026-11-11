@@ -38,6 +38,7 @@ paths:
         - {name: status, in: query, schema: {type: string, enum: [DRAFT, OPEN, CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED, CLOSED, CANCELLED]}}
         - {name: customerId, in: query, schema: {type: string, format: uuid}}
         - {name: hold, in: query, description: only orders with an ACTIVE hold of this type, schema: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}}
+        - {name: q, in: query, description: "only orders whose number contains it, ignoring case", schema: {type: string, maxLength: 100}}
         - {name: cursor, in: query, description: nextCursor of the previous page, schema: {type: string, format: uuid}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:

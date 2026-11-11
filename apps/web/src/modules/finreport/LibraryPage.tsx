@@ -26,7 +26,7 @@ export function blankLibraryValues(): LibraryValues {
 /** The checks the service makes (a UUID ledger, a period as YYYY-PP). */
 export function validateLibrary(v: LibraryValues): LibraryErrors {
   const errors: LibraryErrors = {};
-  if (v.ledger.trim() !== "" && !UUID.test(v.ledger.trim())) errors.ledger = "Enter the ledger id (a UUID), or leave it empty for every ledger.";
+  if (v.ledger.trim() !== "" && !UUID.test(v.ledger.trim())) errors.ledger = "Choose the ledger, or leave it empty for every ledger.";
   if (v.period.trim() !== "" && !PERIOD.test(v.period.trim())) errors.period = "Enter the fiscal year and period number, such as 2026-03.";
   return errors;
 }

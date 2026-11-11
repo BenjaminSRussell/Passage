@@ -5,3 +5,6 @@ oidc:
   issuer: https://idp.dev.passage.dev/realms/passage
   redirectUri: https://supplier.dev.passage.dev/bff/callback
 appOrigin: https://supplier.dev.passage.dev
+# No clamd in dev: uploads are accepted unscanned. Set scan.clamavAddr (and drop this) wherever documents are real.
+scan:
+  allowUnscanned: true

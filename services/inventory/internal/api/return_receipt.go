@@ -43,7 +43,9 @@ func (a *API) registerReturnReceipts(r chi.Router) {
 
 // reservedJournalKey reports whether a journal Idempotency-Key lies in the return-receipt key space, which only
 // postReturnReceipt may create journals under (so a journal user cannot squat an RMA line's key).
-func reservedJournalKey(key string) bool { return strings.HasPrefix(key, returnReceiptKeyPrefix) }
+func reservedJournalKey(key string) bool {
+	return strings.HasPrefix(key, returnReceiptKeyPrefix) || strings.HasPrefix(key, openingKeyPrefix)
+}
 
 // postReturnReceipt books one returned line into stock: a MOVEMENT journal under the journal key
 // return-receipt:<Idempotency-Key> holding exactly one line whose client key is the Idempotency-Key, posted at once.

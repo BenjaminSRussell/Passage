@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
 import { BillingApiError, createFreeTextInvoice, describeProblem, newKey, type FreeTextInvoiceInput, type Problem } from "./api/client";
 import { ACCOUNT, CURRENCY, DAY, DECIMAL, TAX_CODE, today, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -158,6 +158,7 @@ export function NewFreeTextInvoicePage() {
     );
   }
 
+  const { prompt, release } = useUnsavedChanges(useFormBaseline(values));
   async function submit(event: FormEvent) {
     event.preventDefault();
     const found = validateFreeText(values);
@@ -167,6 +168,7 @@ export function NewFreeTextInvoicePage() {
     setBusy(true);
     try {
       const created = await createFreeTextInvoice(toFreeTextInput(values), key.current);
+      release();
       navigate(`/billing/invoices/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -314,6 +316,7 @@ export function NewFreeTextInvoicePage() {
             </Link>
           </div>
         </form>
+      {prompt}
       </Card>
     </div>
   );

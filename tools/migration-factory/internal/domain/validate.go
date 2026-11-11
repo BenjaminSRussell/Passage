@@ -113,3 +113,10 @@ func QuarantineShareExceeded(quarantined, total int, maxPct decimal.Decimal) err
 	}
 	return nil
 }
+
+// ValidCurrency reports whether code is an ISO 4217 currency the packs accept; the data-quality suites use it as their
+// reference set.
+func ValidCurrency(code string) bool {
+	_, ok := iso4217[code]
+	return ok
+}

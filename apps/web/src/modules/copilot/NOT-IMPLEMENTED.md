@@ -11,7 +11,7 @@ agent runtime's new `GET`/`POST /api/v1/agents/kill-switch`.
 
 | Deliverable / criterion | Status | Reason |
 |---|---|---|
-| Server-sent streaming response from `POST /api/v1/copilot/chat` (FR-47.3, first-token p95 < 2 s, 9.47.10) | partly built | `services/agents-ts` serves the route and sends `token`/`done` frames, but the provider layer is not a streaming API: the answer is complete before the first frame, so first-token latency equals full-answer latency. Provider-side streaming is a later slice |
+| Server-sent streaming response from `POST /api/v1/copilot/chat` (FR-47.3, first-token p95 < 2 s, 9.47.10) | built except the live p95 | `services/agents-ts` streams the Anthropic adapter's answer as it is written (see its NOT-IMPLEMENTED); the p95 against a live model is tracked in #213. |
 | Screens for the rest of the agent runtime: token budget status, provider and failover status (9.47.6) | later slice of PSG-47 | The kill switch screen is built. `services/agents-ts` serves no budget or provider endpoint yet (9.47.5 `GET /api/v1/agents/budgets/{tenant}` comes with the persisted budgets) |
 | `POST /api/v1/copilot/chat` server | built | Served by `services/agents-ts` (`src/runtime/copilot.ts`): read tools as the user, duty gate AGT-0203, 5-minute per-user cache, budget hold, redaction, one audited run per turn. The `explain` mode reads only what the tools return; the knowledge search tool behind AGT-0212 is not built |
 | `Ctrl+/` opens the copilot with the current record context (9.47.6) | later slice of PSG-47 | Needs the shell's keyboard and record context hooks (shell owner, wave 5) |

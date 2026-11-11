@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/shopspring/decimal"
 
@@ -448,6 +449,9 @@ func validApprovalStatus(s string) bool {
 	return false
 }
 
+// maxSearchRunes bounds the q filter of a list.
+const maxSearchRunes = 100
+
 func (a *API) listOrders(w http.ResponseWriter, r *http.Request) {
 	limit, after, err := listParams(r)
 	if err != nil {
@@ -455,7 +459,11 @@ func (a *API) listOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.PurchaseOrderFilter{ApprovalStatus: q.Get("approvalStatus"), VendorID: q.Get("vendorId")}
+	f := store.PurchaseOrderFilter{ApprovalStatus: q.Get("approvalStatus"), VendorID: q.Get("vendorId"), Q: strings.TrimSpace(q.Get("q"))}
+	if utf8.RuneCountInString(f.Q) > maxSearchRunes {
+		fail(w, r, invalid("q", "must be at most 100 characters"))
+		return
+	}
 	if f.ApprovalStatus != "" && !validApprovalStatus(f.ApprovalStatus) {
 		fail(w, r, invalid("approvalStatus", "must be DRAFT, IN_REVIEW, APPROVED, REJECTED, CONFIRMED, FINALIZED or CANCELLED"))
 		return

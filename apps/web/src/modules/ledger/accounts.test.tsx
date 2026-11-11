@@ -221,7 +221,7 @@ describe("exports on the inquiry screens", () => {
         : undefined;
     renderAt("/ledger/trial-balance");
     expect(screen.queryByRole("button", { name: /Export trial balance/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText(/Period from/), { target: { value: "2026-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     fireEvent.click(await screen.findByRole("button", { name: "Export trial balance (CSV)" }));

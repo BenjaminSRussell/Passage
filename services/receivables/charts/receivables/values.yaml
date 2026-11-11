@@ -29,6 +29,10 @@ resources:
     cpu: "1"
     memory: 512Mi
 
+# Where cross-currency settlements read their exchange rates (FX_URL, the fx service; needs the service signing key and the receivables
+# public key in the fx service's serviceIdentity.publicKeys). Without it a settlement across currencies answers 503 AR-FX-UNAVAILABLE.
+fxUrl: ""
+
 # With tenantIds set, every replica runs the scheduled auto-apply (RECEIVABLES_AUTO_APPLY_*): the matcher's AUTO_APPLY decision on
 # the tenants' unapplied payments, so payments with no advice, and items opened later, settle without a clerk. It runs every
 # interval, or once a day at `at` (UTC, "02:30") when that is set; set one of the two. A payment is never applied twice.

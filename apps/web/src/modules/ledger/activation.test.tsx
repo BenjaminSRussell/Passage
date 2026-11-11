@@ -59,7 +59,7 @@ describe("open-item activation list", () => {
 
   it("asks for a ledger first", () => {
     renderAt("/ledger/open-item-activations");
-    expect(screen.getByText("Enter a ledger id to see its activation runs.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a ledger to see its activation runs.")).toBeInTheDocument();
   });
 });
 

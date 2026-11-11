@@ -88,6 +88,7 @@ func (a *API) Register(r chi.Router) {
 		a.statementRoutes(r)
 		a.glJournalRoutes(r)
 		a.bankAccountRoutes(r)
+		a.fxRoutes(r)
 		a.creditSettlementRoutes(r)
 		a.adviceRoutes(r)
 		a.customerPortalRoutes(r)
@@ -276,7 +277,7 @@ func (a *API) getPayment(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// paymentAction handles POST /payments/{id}:apply and POST /payments/{id}:match.
+// paymentAction handles POST /payments/{id}:apply, :match and :reverse.
 func (a *API) paymentAction(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -291,6 +292,8 @@ func (a *API) paymentAction(w http.ResponseWriter, r *http.Request) {
 		a.applyPayment(w, r, id)
 	case "match":
 		a.matchPayment(w, r, id)
+	case "reverse":
+		a.reversePayment(w, r, id)
 	default:
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodePaymentNotFound, "unknown payment action "+action))
 	}
@@ -306,6 +309,9 @@ type settlementRequest struct {
 	Amount       decimal.Decimal `json:"amount"`
 	CashDiscount decimal.Decimal `json:"cashDiscount"`
 	WriteOff     decimal.Decimal `json:"writeOff"`
+	// ItemAmount is what the settlement takes off the item, in the item's currency; only for an item in another currency than
+	// the payment (cross-currency settlement, which the legal entity must have enabled).
+	ItemAmount decimal.Decimal `json:"itemAmount"`
 }
 
 func (a *API) applyPayment(w http.ResponseWriter, r *http.Request, id string) {
@@ -336,11 +342,11 @@ func (a *API) applyPayment(w http.ResponseWriter, r *http.Request, id string) {
 		if !ids.Valid(s.OpenItemID) {
 			fields[fmt.Sprintf("settlements[%d].openItemId", i)] = "must be a UUID"
 		}
-		if s.Amount.IsNegative() || s.CashDiscount.IsNegative() || s.WriteOff.IsNegative() {
+		if s.Amount.IsNegative() || s.CashDiscount.IsNegative() || s.WriteOff.IsNegative() || s.ItemAmount.IsNegative() {
 			fields[fmt.Sprintf("settlements[%d]", i)] = "amounts must not be negative"
 		}
 		plan.Allocations = append(plan.Allocations, domain.Allocation{OpenItemID: s.OpenItemID, Amount: s.Amount,
-			CashDiscount: s.CashDiscount, WriteOff: s.WriteOff})
+			CashDiscount: s.CashDiscount, WriteOff: s.WriteOff, ItemCurrencyAmount: s.ItemAmount})
 	}
 	if len(fields) > 0 {
 		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
@@ -390,7 +396,11 @@ func (a *API) listPayments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := a.store.ListPayments(r.Context(), store.PaymentFilter{Status: status, CustomerID: customer}, limit)
+	search, ok := searchParam(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListPayments(r.Context(), store.PaymentFilter{Status: status, CustomerID: customer, Q: search}, limit)
 	if err != nil {
 		a.fail("list payments", w, r, err)
 		return
@@ -439,7 +449,11 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 		badQuery(w, r, "importSource", "must name a legacy system, as sent to open-items:batch")
 		return
 	}
-	filter := store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source}
+	search, ok := searchParam(w, r)
+	if !ok {
+		return
+	}
+	filter := store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source, Q: search}
 	if !openItemWindow(w, r, &filter) {
 		return
 	}
@@ -499,6 +513,16 @@ func ifMatch(r *http.Request) (int, error) {
 }
 
 func etag(version int) string { return `"` + strconv.Itoa(version) + `"` }
+
+// searchParam reads the q filter of a list: trimmed, at most 100 characters.
+func searchParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if utf8.RuneCountInString(q) > 100 {
+		badQuery(w, r, "q", "must be at most 100 characters")
+		return "", false
+	}
+	return q, true
+}
 
 func badQuery(w http.ResponseWriter, r *http.Request, field, rule string) {
 	p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)

@@ -48,7 +48,7 @@ describe("lag gate on the run form", () => {
     const select = await screen.findByLabelText("Definition");
     await waitFor(() => expect(select.querySelectorAll("option")).toHaveLength(2));
     fireEvent.change(select, { target: { value: "PL-STD" } });
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.click(screen.getByRole("button", { name: "Run statement" }));
     expect(await screen.findByText("The read model is behind the ledger")).toBeInTheDocument();
     expect(screen.getByText(/90 s behind/)).toBeInTheDocument();

@@ -254,7 +254,8 @@ describe("Credit notes list", () => {
 
     server.handler = () => json(200, { items: [] });
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "PROPOSAL" } });
-    expect(await screen.findByText("No proposal credit notes")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No credit notes match these filters")).toBeInTheDocument();
     expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("PROPOSAL");
   });
 
@@ -273,9 +274,9 @@ describe("Credit notes list", () => {
   });
 
   it("shows the error state with a retry", async () => {
-    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty billing.invoice.view" });
+    server.handler = () => json(500, { code: "COM-0500", detail: "store unavailable" });
     renderAt("/billing/credit-notes");
-    expect(await findAlert()).toHaveTextContent("missing duty billing.invoice.view");
+    expect(await findAlert()).toHaveTextContent("Could not load credit notes");
     server.handler = () => json(200, { items: [] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No credit notes yet")).toBeInTheDocument();

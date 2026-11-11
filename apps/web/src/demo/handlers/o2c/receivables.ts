@@ -20,7 +20,7 @@ import type {
 import { BUCKETS } from "../../../modules/receivables/api/client";
 import { CUSTOMERS, LEGAL_ENTITY } from "../../company";
 import { reply, route } from "../../backend";
-import { at, dec, day, uid } from "../../store";
+import { at, dec, day, matchesQ, uid } from "../../store";
 import { IMPORT_SOURCE, KR, importedAt, openAtImport, r2 } from "./arLedger";
 import {
   allItems,
@@ -58,7 +58,7 @@ route("GET", `${BASE}/open-items`, ({ query }) => {
   const customer = query.get("customer");
   const source = query.get("importSource");
   const items: OpenItem[] = allItems().filter(
-    (i) => (all || Number(i.openAmount) !== 0) && (!customer || i.customerId === customer) && (!source || i.importSource === source),
+    (i) => (all || Number(i.openAmount) !== 0) && (!customer || i.customerId === customer) && (!source || i.importSource === source) && matchesQ(query, i.documentNumber),
   );
   return { items: items.slice(0, limitOf(query, 500)) };
 });
@@ -111,7 +111,7 @@ route("GET", `${BASE}/payments`, ({ query }) => {
   const customer = query.get("customer");
   const rows = payments
     .all()
-    .filter((p) => (!status || p.status === status) && (!customer || p.customerId === customer))
+    .filter((p) => (!status || p.status === status) && (!customer || p.customerId === customer) && matchesQ(query, p.payerName, p.sourceRef, p.amount))
     .sort((a, b) => b.receivedDate.localeCompare(a.receivedDate) || (b.sourceRef ?? "").localeCompare(a.sourceRef ?? ""));
   return { items: rows.slice(0, limitOf(query)) };
 });

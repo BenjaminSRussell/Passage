@@ -188,7 +188,7 @@ describe("EcoCreatePage", () => {
   it("carries the change request id from the ECR into the body", async () => {
     const fetchMock = stub(() => ok(eco("new"), 201));
     render(<EcoCreatePage initialEcrId="ecr-1" onCreated={() => undefined} />);
-    expect(screen.getByLabelText(/Change request ID/)).toHaveValue("ecr-1");
+    expect(screen.getByLabelText(/Change request/)).toHaveAttribute("data-value", "ecr-1");
     fill();
     fireEvent.click(screen.getByRole("button", { name: "Create ECO" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());

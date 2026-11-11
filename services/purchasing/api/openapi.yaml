@@ -3137,6 +3137,7 @@ paths:
       parameters:
         - { name: approvalStatus, in: query, required: false, schema: { type: string, enum: [DRAFT, IN_REVIEW, APPROVED, REJECTED, CONFIRMED, FINALIZED, CANCELLED] } }
         - { name: vendorId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: q, in: query, required: false, description: "Keeps the orders whose number contains it, ignoring case; leading and trailing spaces are ignored.", schema: { type: string, maxLength: 100 } }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/Cursor' }
       responses:

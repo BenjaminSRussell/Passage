@@ -465,3 +465,10 @@
       visibility 0s;
   }
 }
+
+/* A touch screen gets the 44px touch target on the density toggle, which is a small button elsewhere (#508). */
+@media (pointer: coarse) {
+  .topbarActions .compactToggle {
+    min-block-size: 44px;
+  }
+}

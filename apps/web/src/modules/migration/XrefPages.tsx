@@ -14,7 +14,7 @@ const columns: DataTableColumn<XrefEntry>[] = [
   { key: "sourceSystem", header: "Source system", mono: true },
   { key: "entity", header: "Entity", mono: true },
   { key: "sourceKey", header: "Legacy key", mono: true },
-  { key: "targetId", header: "Passage id", mono: true },
+  { key: "targetId", header: "Passage identifier", mono: true },
   { key: "mergedIntoTargetId", header: "Merged into", mono: true, render: (row) => row.mergedIntoTargetId ?? "" },
   // No legal entity: tenant-wide master data, or a row loaded before legal entities were recorded; both resolve in every legal entity.
   { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => row.legalEntityId ?? "All legal entities" },
@@ -115,7 +115,7 @@ export function XrefPage() {
         <FormField id="xref-prefix" label="Legacy key starts with">
           {(control) => <Input {...control} value={form.keyPrefix} onChange={(event) => change("keyPrefix", event.target.value)} />}
         </FormField>
-        <FormField id="xref-target" label="Passage id" error={targetIdError}>
+        <FormField id="xref-target" label="Passage identifier" error={targetIdError}>
           {(control) => <Input {...control} value={form.targetId} onChange={(event) => change("targetId", event.target.value)} />}
         </FormField>
       </div>
