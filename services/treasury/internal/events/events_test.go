@@ -23,6 +23,11 @@ func TestAll_EveryTypeFollowsTheNamingRule(t *testing.T) {
 
 		ReconciliationMatched:   events.Type(Context, "reconciliation", "matched", 1),
 		ReconciliationUnmatched: events.Type(Context, "reconciliation", "unmatched", 1),
+		CashDeskCreated:         events.Type(Context, "cashdesk", "created", 1),
+		CashDeskUpdated:         events.Type(Context, "cashdesk", "updated", 1),
+		CashDeskDeactivated:     events.Type(Context, "cashdesk", "deactivated", 1),
+		CashDeskDayClosed:       events.Type(Context, "cashdeskday", "closed", 1),
+		CashDeskEntryPosted:     events.Type(Context, "cashdeskentry", "posted", 1),
 	}
 	if len(All()) != len(want) {
 		t.Fatalf("All() = %v, want %d types", All(), len(want))

@@ -94,7 +94,10 @@ type ReleaseInput struct {
 func (s *Postgres) ReleaseRequisitions(ctx context.Context, in ReleaseInput, idem Idem) (ReleaseRun, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ReleaseRun
+	var created []PurchaseOrder
+	orders := []PurchaseOrder{}
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		orders = orders[:0]
 		runID := ids.New()
 		existing, replay, err := claimKey(ctx, tx, idem, runID)
 		if err != nil {
@@ -118,7 +121,7 @@ func (s *Postgres) ReleaseRequisitions(ctx context.Context, in ReleaseInput, ide
 			LinesConsidered: in.Considered, PurchaseOrders: []ReleasedOrder{}, Skipped: append([]ReleaseSkip{}, in.Skipped...),
 			Warnings: []Warning{}, RequestedBy: in.RequestedBy}
 		for _, g := range in.Groups {
-			pos, err := writeReleaseGroup(ctx, tx, g, locked)
+			pos, err := writeReleaseGroup(ctx, tx, g, locked, s.queueBudget)
 			if err != nil {
 				var prob *httpx.Problem
 				if !errors.As(err, &prob) {
@@ -131,6 +134,7 @@ func (s *Postgres) ReleaseRequisitions(ctx context.Context, in ReleaseInput, ide
 				continue
 			}
 			run.Warnings = append(run.Warnings, g.Warnings...)
+			orders = append(orders, pos...)
 			for _, po := range pos {
 				run.PurchaseOrders = append(run.PurchaseOrders, ReleasedOrder{PurchaseOrderID: po.ID, Number: po.Number,
 					VendorID: po.VendorID, Currency: po.Currency, Total: po.Total, LineCount: len(po.Lines)})
@@ -162,8 +166,13 @@ func (s *Postgres) ReleaseRequisitions(ctx context.Context, in ReleaseInput, ide
 			}
 		}
 		out = run
+		created = orders
 		return nil
 	})
+	if err == nil && len(created) > 0 {
+		// The orders are committed; tell budget control, as every other path that creates orders does (FR-38.5).
+		s.created(ctx, created...)
+	}
 	return out, err
 }
 
@@ -171,7 +180,7 @@ func (s *Postgres) ReleaseRequisitions(ctx context.Context, in ReleaseInput, ide
 // group wrote survives: its POs, PO lines, requisition line links, agreement draws and the outbox rows they enqueued
 // (agreement.threshold.v1). The row locks taken before the savepoint are kept. A problem (a 4xx the group's lines
 // caused) is returned for the caller to record and the transaction goes on; any other error aborts the run.
-func writeReleaseGroup(ctx context.Context, tx pgx.Tx, g ReleaseGroup, locked []SourcingLine) (_ []PurchaseOrder, err error) {
+func writeReleaseGroup(ctx context.Context, tx pgx.Tx, g ReleaseGroup, locked []SourcingLine, queueBudget bool) (_ []PurchaseOrder, err error) {
 	sp, err := tx.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -188,7 +197,7 @@ func writeReleaseGroup(ctx context.Context, tx pgx.Tx, g ReleaseGroup, locked []
 	for _, o := range g.Orders {
 		o.ID = ids.New()
 		var po PurchaseOrder
-		if po, err = insertPurchaseOrder(ctx, sp, o); err != nil {
+		if po, err = insertPurchaseOrder(ctx, sp, o, queueBudget); err != nil {
 			return nil, err
 		}
 		out = append(out, po)

@@ -664,23 +664,35 @@ export interface CashDesk {
   mainAccountId: string;
   maxBalance: string;
   status: "active" | "inactive";
+  /** A counted day needs a second person's signature before it is closed. */
+  dualControl?: boolean;
   version: number;
   /** The open business day and its book balance, when there is an open day. */
   openDate?: string;
   balance?: string;
 }
 
+export interface CashDeskDenomination {
+  value: string;
+  count: number;
+}
+
+/** A counted day of a dual-control desk is "closing" until the second signature. */
 export interface CashDeskDay {
   deskId: string;
   businessDate: string;
-  status: "open" | "closed";
+  status: "open" | "closing" | "closed";
   openingBalance: string;
   bookBalance: string;
   countedBalance?: string;
   difference?: string;
   differenceReason?: string;
+  denominations?: CashDeskDenomination[];
   openedBy: string;
   closedBy?: string;
+  approvedBy?: string;
+  /** Ledger state of the cash over or short entry; absent or not_posted when the desk does not post. */
+  differencePosting?: "not_posted" | "pending" | "posted";
 }
 
 export interface CashDeskEntry {
@@ -692,6 +704,10 @@ export interface CashDeskEntry {
   reference?: string;
   createdBy: string;
   balanceAfter: string;
+  counterAccount?: string;
+  bankAccountId?: string;
+  /** not_posted: the desk does not post to the ledger; pending: saved, waiting for the ledger. */
+  postingStatus?: "not_posted" | "pending" | "posted";
 }
 
 export interface CashDeskInput {
@@ -701,39 +717,79 @@ export interface CashDeskInput {
   currency: string;
   mainAccountId: string;
   maxBalance: string;
+  dualControl?: boolean;
 }
+
+export interface CashDeskEntryInput {
+  kind: "receipt" | "payment";
+  amount: string;
+  description: string;
+  reference?: string;
+  /** The ledger account on the other side of the cash. */
+  counterAccount?: string;
+  /** A bank transfer: a payment pays cash into the bank account, a receipt draws it out. */
+  bankAccountId?: string;
+}
+
+const deskPath = (id: string) => `/cash-desks/${encodeURIComponent(id)}`;
+const dayPath = (id: string, date: string) => `${deskPath(id)}/days/${encodeURIComponent(date)}`;
 
 export function listCashDesks(legalEntityId: string, signal?: AbortSignal): Promise<CashDesk[]> {
   return items<CashDesk>(`/cash-desks${query({ legalEntityId })}`, signal);
 }
 
 export function getCashDesk(id: string, signal?: AbortSignal): Promise<CashDesk> {
-  return send<CashDesk>(`/cash-desks/${encodeURIComponent(id)}`, {}, signal);
+  return send<CashDesk>(deskPath(id), {}, signal);
 }
 
 export function createCashDesk(input: CashDeskInput, key: string = newKey()): Promise<CashDesk> {
   return send<CashDesk>("/cash-desks", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
 }
 
+/** PATCH /cash-desks/{id} - needs the desk's version (If-Match). */
+export function updateCashDesk(desk: CashDesk, changes: { name?: string; maxBalance?: string; dualControl?: boolean }): Promise<CashDesk> {
+  return send<CashDesk>(deskPath(desk.id), { method: "PATCH", headers: { "If-Match": `"${desk.version}"` }, body: JSON.stringify(changes) });
+}
+
+export function setCashDeskStatus(desk: CashDesk, status: "active" | "inactive"): Promise<CashDesk> {
+  return send<CashDesk>(`${deskPath(desk.id)}:${status === "active" ? "activate" : "deactivate"}`, { method: "POST", headers: { "If-Match": `"${desk.version}"` } });
+}
+
 export function listCashDeskDays(id: string, signal?: AbortSignal): Promise<CashDeskDay[]> {
-  return items<CashDeskDay>(`/cash-desks/${encodeURIComponent(id)}/days`, signal);
+  return items<CashDeskDay>(`${deskPath(id)}/days`, signal);
 }
 
 export function openCashDeskDay(id: string, businessDate: string): Promise<CashDeskDay> {
-  return send<CashDeskDay>(`/cash-desks/${encodeURIComponent(id)}/days`, { method: "POST", body: JSON.stringify({ businessDate }) });
+  return send<CashDeskDay>(`${deskPath(id)}/days`, { method: "POST", body: JSON.stringify({ businessDate }) });
 }
 
-export function closeCashDeskDay(id: string, date: string, countedBalance: string, reason: string): Promise<CashDeskDay> {
-  return send<CashDeskDay>(`/cash-desks/${encodeURIComponent(id)}/days/${encodeURIComponent(date)}:close`, {
+/** The count is a total, or the notes and coins counted (the total is then their sum). */
+export function closeCashDeskDay(id: string, date: string, count: { countedBalance?: string; denominations?: CashDeskDenomination[] }, reason: string): Promise<CashDeskDay> {
+  return send<CashDeskDay>(`${dayPath(id, date)}:close`, {
     method: "POST",
-    body: JSON.stringify({ countedBalance, ...(reason ? { reason } : {}) }),
+    body: JSON.stringify({ ...(count.countedBalance ? { countedBalance: count.countedBalance } : {}), ...(count.denominations?.length ? { denominations: count.denominations } : {}), ...(reason ? { reason } : {}) }),
   });
 }
 
-export function listCashDeskEntries(id: string, date: string, signal?: AbortSignal): Promise<CashDeskEntry[]> {
-  return items<CashDeskEntry>(`/cash-desks/${encodeURIComponent(id)}/days/${encodeURIComponent(date)}/entries`, signal);
+/** The second signature of a dual-control desk; the approver must differ from the person who counted. */
+export function approveCashDeskDay(id: string, date: string): Promise<CashDeskDay> {
+  return send<CashDeskDay>(`${dayPath(id, date)}:approve`, { method: "POST" });
 }
 
-export function addCashDeskEntry(id: string, input: { kind: "receipt" | "payment"; amount: string; description: string; reference?: string }, key: string = newKey()): Promise<CashDeskEntry> {
-  return send<CashDeskEntry>(`/cash-desks/${encodeURIComponent(id)}/entries`, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+/** Sends a counted day back to open, so the cash is recounted. */
+export function rejectCashDeskDay(id: string, date: string): Promise<CashDeskDay> {
+  return send<CashDeskDay>(`${dayPath(id, date)}:reject`, { method: "POST" });
+}
+
+/** Posts what the day still owes the general ledger; safe to repeat. */
+export function postCashDeskDay(id: string, date: string): Promise<CashDeskDay> {
+  return send<CashDeskDay>(`${dayPath(id, date)}:post`, { method: "POST" });
+}
+
+export function listCashDeskEntries(id: string, date: string, signal?: AbortSignal): Promise<CashDeskEntry[]> {
+  return items<CashDeskEntry>(`${dayPath(id, date)}/entries`, signal);
+}
+
+export function addCashDeskEntry(id: string, input: CashDeskEntryInput, key: string = newKey()): Promise<CashDeskEntry> {
+  return send<CashDeskEntry>(`${deskPath(id)}/entries`, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
 }

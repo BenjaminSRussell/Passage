@@ -14,8 +14,11 @@ import {
   listCollections,
   newKey,
   setAccountMap,
+  startRunFromCollection,
   type AccountMapRow,
+  type AccountRole,
   type AccountType,
+  type DerivedRun,
   type Collection,
   type GroupDetail,
   type Unit,
@@ -25,7 +28,7 @@ import styles from "./pages.module.css";
 import { RowGrid, type RowField } from "./RowGrid";
 import { useLegalEntityNames } from "./useEntityNames";
 
-type MapKey = "mainAccount" | "consolidationAccount" | "accountType";
+type MapKey = "mainAccount" | "consolidationAccount" | "accountType" | "role";
 type RateKey = "currency" | "average" | "closing";
 
 const mapFields: RowField<MapKey>[] = [
@@ -39,6 +42,21 @@ const mapFields: RowField<MapKey>[] = [
       { value: "income", label: "Average rate (income)" },
     ],
   },
+  {
+    name: "role",
+    label: "Role in a run",
+    optional: true,
+    options: [
+      { value: "", label: "None" },
+      { value: "asset", label: "Asset" },
+      { value: "liability", label: "Liability" },
+      { value: "equity", label: "Equity" },
+      { value: "ic_receivable", label: "Intercompany receivable" },
+      { value: "ic_payable", label: "Intercompany payable" },
+      { value: "ic_sales", label: "Intercompany sales" },
+      { value: "ic_cost", label: "Intercompany cost" },
+    ],
+  },
 ];
 const rateFields: RowField<RateKey>[] = [
   { name: "currency", label: "Currency", mono: true },
@@ -46,11 +64,11 @@ const rateFields: RowField<RateKey>[] = [
   { name: "closing", label: "Closing rate", decimal: true },
 ];
 
-const emptyMapRow = (): Record<MapKey, string> => ({ mainAccount: "", consolidationAccount: "", accountType: "balance_sheet" });
+const emptyMapRow = (): Record<MapKey, string> => ({ mainAccount: "", consolidationAccount: "", accountType: "balance_sheet", role: "" });
 const emptyRate = (): Record<RateKey, string> => ({ currency: "", average: "", closing: "" });
 
 /** Checks of the chart mapping that mirror the service, and the request it sends. */
-export function validateMap(rows: Record<MapKey, string>[]): { errors: Record<string, string>; request?: AccountMapRow[] } {
+export function validateMap(rows: (Record<Exclude<MapKey, "role">, string> & { role?: string })[]): { errors: Record<string, string>; request?: AccountMapRow[] } {
   const errors: Record<string, string> = {};
   const seen = new Set<string>();
   const code = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -64,7 +82,12 @@ export function validateMap(rows: Record<MapKey, string>[]): { errors: Record<st
   if (Object.keys(errors).length > 0) return { errors };
   return {
     errors,
-    request: rows.map((r) => ({ mainAccount: r.mainAccount.trim(), consolidationAccount: r.consolidationAccount.trim(), accountType: r.accountType as AccountType })),
+    request: rows.map((r) => ({
+      mainAccount: r.mainAccount.trim(),
+      consolidationAccount: r.consolidationAccount.trim(),
+      accountType: r.accountType as AccountType,
+      ...(r.role ? { role: r.role as AccountRole } : {}),
+    })),
   };
 }
 
@@ -82,6 +105,8 @@ export function GroupDetailPage() {
   const [loadFailure, setLoadFailure] = useState<Problem | null>(null);
   const [mapRows, setMapRows] = useState<Record<MapKey, string>[]>([]);
   const [reload, setReload] = useState(0);
+  const [run, setRun] = useState<DerivedRun | null>(null);
+  const [runFailure, setRunFailure] = useState<Problem | null>(null);
   const names = useLegalEntityNames(group?.units.map((u) => u.legalEntityId) ?? []);
 
   useEffect(() => {
@@ -90,7 +115,7 @@ export function GroupDetailPage() {
     Promise.all([getGroup(id, ctl.signal), getAccountMap(id, ctl.signal), listCollections(id, ctl.signal)])
       .then(([g, map, cols]) => {
         setGroup(g);
-        setMapRows(map.accounts.map((a) => ({ ...a })));
+        setMapRows(map.accounts.map((a) => ({ ...a, role: a.role ?? "" })));
         setCollections(cols.items);
       })
       .catch((err: unknown) => {
@@ -113,6 +138,7 @@ export function GroupDetailPage() {
     { key: "entity", header: "Legal entity", render: (u) => <EntityName entity="legalEntity" id={u.legalEntityId} /> },
     { key: "ledger", header: "Ledger", mono: true, render: (u) => u.ledgerId },
     { key: "currency", header: "Currency", mono: true, render: (u) => u.currency },
+    { key: "fiscalYear", header: "Fiscal year starts in month", align: "end", render: (u) => String(u.fiscalYearStartMonth ?? 1) },
     { key: "percent", header: "Held today (%)", align: "end", render: (u) => percent(u.currentPercent) },
     {
       key: "history",
@@ -125,7 +151,30 @@ export function GroupDetailPage() {
     { key: "version", header: "Version", align: "end", render: (c) => String(c.version) },
     { key: "by", header: "Collected by", render: (c) => c.createdBy },
     { key: "at", header: "Collected", render: (c) => c.createdAt.slice(0, 16).replace("T", " ") },
+    {
+      key: "run",
+      header: "Consolidate",
+      render: (c) => (
+        <Button
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            void runFrom(c);
+          }} aria-label={`Run the consolidation from the collection of ${c.period} version ${c.version}`}>
+          Run from this collection
+        </Button>
+      ),
+    },
   ];
+  async function runFrom(c: Collection) {
+    setRunFailure(null);
+    setRun(null);
+    try {
+      setRun(await startRunFromCollection({ collectionId: c.id }, newKey()));
+    } catch (err) {
+      setRunFailure(describeProblem(err));
+    }
+  }
 
   return (
     <div className={styles.stack}>
@@ -146,6 +195,16 @@ export function GroupDetailPage() {
       </Card>
       <Card title="Collected balances" headingLevel={3}>
         <div className={styles.stack}>
+          {run ? (
+            <Alert tone="success" title={`Run version ${run.version} stored`} live="status">
+              {`Consolidated ${run.unitCount} ${run.unitCount === 1 ? "unit" : "units"} for ${run.period} from the collection, with ${run.eliminationCount} elimination entries and a translation difference of ${run.ctaAmount} ${run.currency}.`}
+            </Alert>
+          ) : null}
+          {runFailure ? (
+            <Alert tone="danger" title="The run was not started" live="alert">
+              <ProblemMessage problem={runFailure} />
+            </Alert>
+          ) : null}
           <DataTable
             label="Collections"
             columns={collectionColumns}

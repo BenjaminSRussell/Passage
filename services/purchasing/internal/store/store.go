@@ -48,6 +48,9 @@ type Store interface {
 	GetTradeAgreement(ctx context.Context, id string) (domain.TradeAgreement, error)
 	ListTradeAgreements(ctx context.Context, f TradeAgreementFilter, after string, limit int) (Page[domain.TradeAgreement], error)
 	PriceCandidates(ctx context.Context, f PriceFilter) ([]domain.TradeAgreement, error)
+	ListBudgetCalls(ctx context.Context, status string, limit int) ([]BudgetCall, error)
+	BudgetCallsFor(ctx context.Context, purchaseOrderID, requisitionID string) ([]BudgetCall, error)
+	RecordBudgetCall(ctx context.Context, id string, callErr error) error
 	CreateRequisition(ctx context.Context, in Requisition, idem Idem) (Requisition, error)
 	GetRequisition(ctx context.Context, id string) (Requisition, error)
 	ListRequisitions(ctx context.Context, f RequisitionFilter, after string, limit int) (Page[RequisitionSummary], error)
@@ -221,6 +224,8 @@ type Postgres struct {
 	pool *pgxpool.Pool
 	// afterOrders runs after a transaction that created purchase orders commits (never inside it).
 	afterOrders OrderHook
+	// queueBudget writes a budget_call row in the transaction that needs a call to budget control (WithBudgetCalls).
+	queueBudget bool
 }
 
 // OrderHook is told about purchase orders a committed transaction created, so a port to another service (budget

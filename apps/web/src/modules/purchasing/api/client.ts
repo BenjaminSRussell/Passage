@@ -71,6 +71,9 @@ export interface RequisitionLine {
   /** The warehouse the line is wanted in; consolidation keeps different warehouses on different orders. */
   warehouseId?: string;
   preferredVendorId?: string;
+  /** The budget dimensions of the line (account|cost center); both or neither. A line with both is budget controlled. */
+  glAccount?: string;
+  costCenter?: string;
   /** The procurement catalog entry the line was picked from; absent on a non-catalog line. */
   catalogEntryId?: string;
   /** The line this one was cut out of by a split (FR-17.3); absent on a line as entered. */
@@ -172,6 +175,8 @@ export interface RequisitionLineInput {
   siteId?: string;
   warehouseId?: string;
   preferredVendorId?: string;
+  glAccount?: string;
+  costCenter?: string;
   /** Pick the line from a published catalog entry; the service fills the blanks from it. */
   catalogEntryId?: string;
 }
