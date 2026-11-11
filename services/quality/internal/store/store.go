@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -154,6 +155,9 @@ func pgCode(err error) string {
 type OrderFilter struct {
 	Status string
 	SiteID string
+	// Number keeps the orders whose number starts with it (ignoring case), so a
+	// lookup finds an order by its number.
+	Number string
 	Limit  int
 }
 
@@ -441,7 +445,7 @@ func (s *Postgres) ListAssociations(ctx context.Context) ([]domain.Association, 
 
 const orderColumns = "id, trigger, source_ref, item_id, site_id, warehouse_id, dims, lot_qty::text, sample_qty::text, uom, " +
 	"test_group_id, test_group_version, sampling_method, inspection_severity, code_letter, accept_no, reject_no, status, version, created_at, closed_at, " +
-	"certificate_required"
+	"certificate_required, coalesce(number, '')"
 
 func scanOrder(row pgx.Row) (domain.Order, error) {
 	var o domain.Order
@@ -449,7 +453,7 @@ func scanOrder(row pgx.Row) (domain.Order, error) {
 	var lot, sample, method, sev string
 	err := row.Scan(&o.ID, &o.Trigger, &sourceRef, &o.ItemID, &o.SiteID, &o.WarehouseID, &dims, &lot, &sample, &o.UOM,
 		&o.TestGroupID, &o.TestGroupVersion, &method, &sev, &o.CodeLetter, &o.AcceptNo, &o.RejectNo, &o.Status, &o.Version, &o.CreatedAt, &o.ClosedAt,
-		&o.CertificateRequired)
+		&o.CertificateRequired, &o.Number)
 	if err != nil {
 		return o, err
 	}
@@ -543,13 +547,19 @@ func (s *Postgres) GetOrder(ctx context.Context, id string) (domain.Order, error
 	return o, err
 }
 
+// likePrefix upper-cases a number prefix and escapes the LIKE wildcards in it.
+func likePrefix(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.ToUpper(strings.TrimSpace(s)))
+}
+
 // ListOrders returns the quality order worklist, newest first.
 func (s *Postgres) ListOrders(ctx context.Context, f OrderFilter) ([]domain.Order, error) {
 	out := []domain.Order{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+orderColumns+` from quality_order
 			where `+ownTenant+` and ($1 = '' or status = $1) and ($2 = '' or site_id = nullif($2, '')::uuid)
-			order by created_at desc, id limit $3`, f.Status, f.SiteID, f.Limit)
+			  and ($4 = '' or upper(number) like $4 || '%')
+			order by created_at desc, id limit $3`, f.Status, f.SiteID, f.Limit, likePrefix(f.Number))
 		if err != nil {
 			return err
 		}

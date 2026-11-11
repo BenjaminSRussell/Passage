@@ -39,7 +39,11 @@ type SourceRef struct {
 // Order is a quality order. Its hold in the inventory ledger is a handoff, so
 // BlockRef stays empty in this slice.
 type Order struct {
-	ID               string            `json:"id"`
+	ID string `json:"id"`
+	// Number is the order's document number (QO-000123), assigned on insert
+	// (migration 0008); empty for an order created before it that was not
+	// backfilled.
+	Number           string            `json:"number,omitempty"`
 	Trigger          string            `json:"trigger"`
 	SourceRef        SourceRef         `json:"sourceRef"`
 	ItemID           string            `json:"itemId"`
