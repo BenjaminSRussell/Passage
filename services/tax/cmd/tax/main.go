@@ -80,6 +80,23 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	settle, err := newSettlementJob(getenv, a, st)
+	if err != nil {
+		return err
+	}
+	switch {
+	case settle != nil && gl == nil:
+		slog.Warn("tax settlement job not started: it needs LEDGER_URL to reconcile against the general ledger")
+	case settle != nil:
+		go settle.loop(ctx)
+	}
+	recommit, err := newRecommitJob(getenv, a, st)
+	if err != nil {
+		return err
+	}
+	if recommit != nil {
+		go recommit.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

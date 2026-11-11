@@ -8,6 +8,18 @@ providerTimeoutMs: 2000
 providers:
   avalara: { url: "", companyCode: "", secret: tax-avalara }
   vertex: { url: "", tokenUrl: "", company: "", secret: tax-vertex }
+# With tenantIds set (and ledgerUrl), every replica settles the previous calendar month of each legal entity that has a ledger
+# configuration, once a month on `day` (1 to 28) at `at` (UTC): the reconciliation to the GL tax accounts is the one POST
+# /v1/tax/settlements:run makes, so a month that differs is refused and logged. Replicas running together settle nothing twice.
+settlement:
+  tenantIds: []
+  day: 5
+  at: "04:00"
+# With tenantIds set, every replica drains the recommit queue of the tenants' legal entities every interval (a document the internal
+# engine calculated while a provider was down is recalculated on the provider once it is back).
+recommit:
+  tenantIds: []
+  interval: 5m
 replicaCount: 2
 resources:
   requests: { cpu: 50m, memory: 64Mi }

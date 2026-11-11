@@ -204,17 +204,42 @@ func (a *API) settle(w http.ResponseWriter, r *http.Request) {
 		a.reject(w, r, err)
 		return
 	}
-	p, _ := tenant.FromContext(r.Context())
-	newGL := func(cfg store.LedgerConfig) domain.GLMovement {
-		return ledger.GL{Client: a.ledger, LegalEntityID: p.LegalEntityID, LedgerID: cfg.LedgerID, Accounts: cfg.Accounts}
-	}
-	run, err := a.store.SettleRun(r.Context(), domain.Period{From: req.PeriodFrom, To: req.PeriodTo}, newGL)
+	run, err := a.RunSettlement(r.Context(), domain.Period{From: req.PeriodFrom, To: req.PeriodTo})
 	if err != nil {
 		a.reject(w, r, err)
 		return
 	}
-	a.settlements.Add(1)
 	httpx.JSON(w, http.StatusCreated, run)
+}
+
+// RunSettlement settles the open tax transactions of the period for the legal entity of ctx against the ledger (POST
+// /v1/tax/settlements:run and the scheduled settlement); it is ErrNotConfigured-like 503 when the store or the ledger is missing.
+func (a *API) RunSettlement(ctx context.Context, period domain.Period) (store.Run, error) {
+	if a.store == nil || a.ledger == nil {
+		return store.Run{}, errors.New("tax: the store or the general ledger is not configured")
+	}
+	p, _ := tenant.FromContext(ctx)
+	newGL := func(cfg store.LedgerConfig) domain.GLMovement {
+		return ledger.GL{Client: a.ledger, LegalEntityID: p.LegalEntityID, LedgerID: cfg.LedgerID, Accounts: cfg.Accounts}
+	}
+	run, err := a.store.SettleRun(ctx, period, newGL)
+	if err == nil {
+		a.settlements.Add(1)
+	}
+	return run, err
+}
+
+// RunRecommit drains up to limit queued recommits of the legal entity of ctx on their providers (POST /v1/tax/recommit:run and the
+// scheduled recommit).
+func (a *API) RunRecommit(ctx context.Context, limit int) (store.RecommitSummary, error) {
+	if a.store == nil {
+		return store.RecommitSummary{}, errors.New("tax: the store is not configured")
+	}
+	sum, err := a.store.Recommit(ctx, limit, a.recommitOne)
+	if err == nil {
+		a.recommitted.Add(int64(sum.Completed))
+	}
+	return sum, err
 }
 
 func (a *API) queueRecommit(ctx context.Context, req calculateRequest, notice *domain.FallbackNotice) {
@@ -265,12 +290,11 @@ func (a *API) recommit(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	sum, err := a.store.Recommit(r.Context(), limit, a.recommitOne)
+	sum, err := a.RunRecommit(r.Context(), limit)
 	if err != nil {
 		a.reject(w, r, err)
 		return
 	}
-	a.recommitted.Add(int64(sum.Completed))
 	httpx.JSON(w, http.StatusOK, sum)
 }
 

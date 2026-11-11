@@ -79,6 +79,15 @@ spec:
             - { name: VERTEX_PASSWORD, valueFrom: { secretKeyRef: { name: {{ .secret | quote }}, key: password } } }
 {{- end }}
 {{- end }}
+{{- if .Values.settlement.tenantIds }}
+            - { name: TAX_SETTLEMENT_TENANT_IDS, value: {{ join "," .Values.settlement.tenantIds | quote }} }
+            - { name: TAX_SETTLEMENT_DAY, value: {{ .Values.settlement.day | quote }} }
+            - { name: TAX_SETTLEMENT_AT, value: {{ .Values.settlement.at | quote }} }
+{{- end }}
+{{- if .Values.recommit.tenantIds }}
+            - { name: TAX_RECOMMIT_TENANT_IDS, value: {{ join "," .Values.recommit.tenantIds | quote }} }
+            - { name: TAX_RECOMMIT_INTERVAL, value: {{ .Values.recommit.interval | quote }} }
+{{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
           volumeMounts:
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }

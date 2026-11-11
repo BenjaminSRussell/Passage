@@ -344,3 +344,38 @@ func lockPending(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int) 
 	}
 	return items, rows.Err()
 }
+
+// LedgerConfigEntities lists the legal entities of the caller's tenant that have a ledger configuration, so a scheduled settlement can
+// run once for each under a principal scoped to it.
+func (s *Store) LedgerConfigEntities(ctx context.Context) ([]string, error) {
+	return s.entityList(ctx, `select distinct legal_entity_id::text from tax_ledger_config where tenant_id = $1`)
+}
+
+// RecommitEntities lists the legal entities of the caller's tenant with a recommit queued and waiting.
+func (s *Store) RecommitEntities(ctx context.Context) ([]string, error) {
+	return s.entityList(ctx, `select distinct legal_entity_id::text from tax_recommit_queue where tenant_id = $1 and status = 'pending'`)
+}
+
+func (s *Store) entityList(ctx context.Context, query string) ([]string, error) {
+	p, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("tax: no principal in context")
+	}
+	var out []string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, p.TenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			out = append(out, id)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
