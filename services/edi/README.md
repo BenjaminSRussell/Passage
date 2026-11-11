@@ -455,6 +455,29 @@ Migration `0012_b2b_exchange.sql`. Every table is tenant-scoped with the legal-e
 Sample files: `testdata/cxml/` (the three network documents, a punchout cart and setup response) and
 `testdata/edifact/invoic-389-selfbilled.edi`. Tests run against fakes (in-test supplier and access point, fake sources and purchasing).
 
+## Slice 11 scope: B2B round 2 (#35)
+
+- **35-1 per packing slip.** The `asn.issued` event names its packing slip and the SSCCs of the containers that left with it. The consumer
+  generates one 856 or DESADV per shipment and slip (idempotency key `source:partner:set:shipment:slip`), listing only that slip's
+  containers, with the delivery note `<shipment number>-<slip number>`; a partly shipped shipment is accepted for a slip notice. The route
+  `outbound:from-source` still sends the whole shipment under the shipment's key. Self-billing lines are registered per delivery note.
+- **35-2.** `POST /einvoice/invoices/{id}:submit` claims the e-invoice (VALID or REJECTED to SUBMITTING in one statement; a concurrent submit
+  gets 409 EDI-0030), calls the access point, then records SUBMITTED; a failure releases the claim, and a claim older than ten minutes can
+  be taken over. An invoice may carry several VAT rates (the rate is derived per line from billing's tax and snapped to the nearest half
+  percent when that reproduces the tax; discounts are allowed per rate, header charges at the rate billing's tax total implies).
+  `POST /einvoice/invoices/{id}:validate` runs the Go-native Peppol rule subset (`CheckPeppolRules`), which also gates every Peppol build.
+  The mandate `FACTURX` stores the EN 16931 CII XML; `GET /einvoice/invoices/{id}/facturx.pdf` serves a PDF with it embedded. A customer
+  registered under a mandate (`PUT /einvoice/mandates/{customerId}/{mandate}`, optional `autoSubmit`) is e-invoiced by `edi consume` when
+  its invoice posts. Web: `/integration/einvoices` and its detail.
+- **35-4.** `POST /partners/{id}/cxml:send` builds OrderRequest (from a purchase order read from purchasing; orderID is the PO number, kept in
+  `cxml_order`), ConfirmationRequest, ShipNoticeRequest and InvoiceDetailRequest, records them as OUT interchanges and posts them to the
+  network of `PUT /partners/{id}/cxml/outbound` (https only, our identity, the secret by reference). Inbound confirmations and ship notices
+  are put onto purchasing (`:confirm`) and receiving (`POST /v1/receiving/asns`) as `service:edi-cxml`, right after receipt and with
+  `POST /messages/{id}:post`; what cannot be mapped is parked with EDI-0036 to EDI-0039 and EDI-0042. A FAILED cXML message is reprocessed
+  with `:reprocess` like any inbound interchange.
+- **35-5.** The self-billing sweep runs on a schedule with the transport workers (`EDI_SELFBILL_SWEEP_MINUTES`). Web:
+  `/integration/self-billing/disputes`.
+
 ## Wave 35 proof
 
 - **Partner simulator round trip** (`internal/api/partnersim_test.go`,
