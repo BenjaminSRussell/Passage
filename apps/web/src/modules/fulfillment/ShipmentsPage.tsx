@@ -1,76 +1,86 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { listShipments, SHIPMENT_STATUSES, type ShipmentStatus, type ShipmentSummary } from "./api/client";
+import { buttonClassName, entityText, ListPage, type ListColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
+import { FulfillmentApiError, listShipments, SHIPMENT_STATUSES, type ShipmentStatus, type ShipmentSummary } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
 import { formatDate, formatDateTime, SHIPMENT_STATUS_LABELS } from "./format";
-import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { EntityName } from "../../shell/lookup/EntityName";
-import { OrderNumber } from "../sales/OrderNumber";
+import { OrderNumber, orderNumberText } from "../sales/OrderNumber";
 
-const columns: DataTableColumn<ShipmentSummary>[] = [
+const statusText = (row: ShipmentSummary) => SHIPMENT_STATUS_LABELS[row.status] ?? row.status;
+
+const columns: ListColumn<ShipmentSummary>[] = [
   { key: "shipmentNumber", header: "Shipment", mono: true },
-  { key: "status", header: "Status", render: (row) => <ShipmentStatusBadge status={row.status} /> },
-  { key: "orderId", header: "Order", render: (row) => <OrderNumber id={row.orderId} /> },
-  { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
-  { key: "warehouseId", header: "Warehouse", render: (row) => <EntityName entity="warehouse" id={row.warehouseId} /> },
-  { key: "plannedShipDate", header: "Planned ship", render: (row) => formatDate(row.plannedShipDate) },
-  { key: "actualShipDate", header: "Shipped", render: (row) => formatDateTime(row.actualShipDate) },
+  { key: "status", header: "Status", render: (row) => <ShipmentStatusBadge status={row.status} />, sortValue: statusText, csv: statusText },
+  { key: "orderId", header: "Order", sortable: false, render: (row) => <OrderNumber id={row.orderId} />, csv: (row) => orderNumberText(row.orderId) },
+  { key: "customerId", header: "Customer", sortable: false, render: (row) => <EntityName entity="customer" id={row.customerId} />, csv: (row) => entityText("customer", row.customerId) },
+  { key: "warehouseId", header: "Warehouse", sortable: false, render: (row) => <EntityName entity="warehouse" id={row.warehouseId} />, csv: (row) => entityText("warehouse", row.warehouseId) },
+  { key: "plannedShipDate", header: "Planned ship", render: (row) => formatDate(row.plannedShipDate), csv: (row) => row.plannedShipDate ?? "" },
+  { key: "actualShipDate", header: "Shipped", render: (row) => formatDateTime(row.actualShipDate), csv: (row) => row.actualShipDate ?? "" },
   { key: "lineCount", header: "Lines", align: "end" },
 ];
+
+const filters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: SHIPMENT_STATUSES.map((s) => ({ value: s, label: SHIPMENT_STATUS_LABELS[s] })) },
+];
+
+/** The shipments of one status; the service answers one page, so there is nothing more to load. */
+function useShipmentRows(query: ListQuery): ListData<ShipmentSummary> {
+  const status = (query.filters.status ?? "") as ShipmentStatus | "";
+  const [forbidden, setForbidden] = useState(false);
+  const state = useLoad(async (signal) => {
+    try {
+      const rows = await listShipments({ status }, signal);
+      if (!signal.aborted) setForbidden(false);
+      return rows;
+    } catch (error) {
+      if (!signal.aborted) setForbidden(error instanceof FulfillmentApiError && error.status === 403);
+      throw error;
+    }
+  }, status);
+  return {
+    rows: state.error ? [] : (state.data ?? []),
+    loading: state.loading,
+    loadingMore: false,
+    error: state.error ?? undefined,
+    forbidden,
+    hasMore: false,
+    loadMore: () => undefined,
+    retry: state.reload,
+  };
+}
 
 /** Shipments list / delivery monitor (section 5.28.14), filtered by status. */
 export function ShipmentsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<ShipmentStatus | "">("");
-  const state = useLoad((signal) => listShipments({ status }, signal), status);
-
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Shipments"
-        description="Every shipment released to the warehouse, newest first. Open one to pick, pack and post its packing slip."
-        actions={
-          <Link className={buttonClassName("primary")} to="/fulfillment/release">
+    <ListPage
+      id="fulfillment-shipments"
+      title="Shipments"
+      description="Every shipment released to the warehouse, newest first. Open one to pick, pack and post its packing slip."
+      noun="shipments"
+      singular="shipment"
+      actions={
+        <Link className={buttonClassName("primary")} to="/fulfillment/release">
+          Release lines
+        </Link>
+      }
+      columns={columns}
+      filters={filters}
+      useRows={useShipmentRows}
+      search={(row) => ({ number: row.shipmentNumber })}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/fulfillment/shipments/${row.id}`)}
+      empty={{
+        title: "No shipments yet",
+        description: "Release confirmed order lines to the warehouse to create shipments.",
+        action: (
+          <Link className={buttonClassName("secondary")} to="/fulfillment/release">
             Release lines
           </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="shipment-status" label="Status">
-          {(control) => (
-            <Select {...control} value={status} onChange={(event) => setStatus(event.target.value as ShipmentStatus | "")}>
-              <option value="">All statuses</option>
-              {SHIPMENT_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {SHIPMENT_STATUS_LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </div>
-      {state.error ? (
-        <Alert tone="danger" title="Could not load shipments" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Shipments"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          onRowOpen={(row) => navigate(`/fulfillment/shipments/${row.id}`)}
-          empty={
-            status
-              ? { title: "No shipments in this status", description: "Choose another status, or show all statuses." }
-              : { title: "No shipments yet", description: "Release confirmed order lines to the warehouse to create shipments." }
-          }
-        />
-      )}
-    </div>
+        ),
+      }}
+    />
   );
 }

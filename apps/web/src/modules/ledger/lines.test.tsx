@@ -39,7 +39,7 @@ const empty = { ledgerId: "", accountFrom: "", accountTo: "", dateFrom: "", date
 
 describe("ledger transaction filters", () => {
   it("requires a UUID ledger and well-formed, ordered ranges", () => {
-    expect(validateLineFilter(empty).ledgerId).toMatch(/UUID/);
+    expect(validateLineFilter(empty).ledgerId).toMatch(/Choose/);
     expect(validateLineFilter({ ...empty, ledgerId: LEDGER })).toEqual({});
     expect(validateLineFilter({ ...empty, ledgerId: LEDGER, accountFrom: "60 10" }).accountFrom).toBeDefined();
     expect(validateLineFilter({ ...empty, ledgerId: LEDGER, dateFrom: "10/03/2026" }).dateFrom).toMatch(/YYYY-MM-DD/);
@@ -84,10 +84,10 @@ describe("Ledger transactions page", () => {
   it("asks for a ledger and does not call the API with an invalid one", async () => {
     renderAt("/ledger/transactions");
     expect(screen.getByRole("heading", { name: "Ledger transactions" })).toBeInTheDocument();
-    expect(screen.getByText("Enter a ledger id to list its posted lines.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: "not-a-uuid" } });
+    expect(screen.getByText("Choose a ledger to list its posted lines.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: "not-a-uuid" } });
     fireEvent.click(screen.getByRole("button", { name: "Show lines" }));
-    expect(await screen.findByText("Enter the ledger id as a UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the ledger.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
 
@@ -95,7 +95,7 @@ describe("Ledger transactions page", () => {
     server.handler = (url) =>
       url.pathname === "/api/v1/ledger/journal-lines" ? json(200, { items: [line(1, { quantity: "12.500000", unit: "KG" }), line(2, { debitCredit: "C", account: "2100", displayName: "2100", dimensions: undefined, negativePosting: true })] }) : undefined;
     renderAt("/ledger/transactions");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText(/Account from/), { target: { value: "2000" } });
     fireEvent.change(screen.getByLabelText(/Account to/), { target: { value: "6999" } });
     fireEvent.change(screen.getByLabelText(/Dimension values/), { target: { value: "DEPT=D100" } });
@@ -183,7 +183,7 @@ describe("trial balance drill-down", () => {
       return undefined;
     };
     renderAt("/ledger/trial-balance");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     fireEvent.click(await screen.findByText("Freight"));
     expect(await screen.findByText("GL-000001")).toBeInTheDocument();

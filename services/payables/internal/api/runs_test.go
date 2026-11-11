@@ -362,7 +362,8 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	}
 	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks, keys).WithEmployeeVendors(pg)
 	if !opts.noTax {
-		a.WithWithholding(tax.New(taxSrv.URL, nil).WithSigner(signer), pg, runProfiles)
+		taxClient := tax.New(taxSrv.URL, nil).WithSigner(signer)
+		a.WithWithholding(taxClient, pg, runProfiles).WithWithholdingRecorder(taxClient)
 	}
 	if opts.noGroupDimension {
 		a.WithVendorGroupDimension("")

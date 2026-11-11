@@ -129,7 +129,7 @@ describe("Edit worker", () => {
     await screen.findByLabelText("Name");
     fill("Name", "Ana Lee");
     fireEvent.click(screen.getByRole("button", { name: "Save worker" }));
-    expect(await screen.findByText(/changed by someone else. Reload the page and try again. \(SF-0143\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/changed by someone else. Reload the page and try again./)).toBeInTheDocument();
   });
 
   it("explains a currency change after approved pay and an edit of one's own record", async () => {
@@ -141,11 +141,11 @@ describe("Edit worker", () => {
     await screen.findByLabelText("Name");
     fill("Currency", "eur");
     fireEvent.click(screen.getByRole("button", { name: "Save worker" }));
-    expect(await screen.findByText(/currency can't change because pay of this worker is already approved. \(SF-0169\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/currency can't change because pay of this worker is already approved./)).toBeInTheDocument();
     expect(sent("PUT", `/workers/${ANA}`)[0].body).toMatchObject({ currency: "EUR" });
     code = "SF-0106";
     fireEvent.click(screen.getByRole("button", { name: "Save worker" }));
-    expect(await screen.findByText(/can't edit your own worker record. Ask another supervisor. \(SF-0106\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/can't edit your own worker record. Ask another supervisor./)).toBeInTheDocument();
   });
 });
 
@@ -196,6 +196,6 @@ describe("Deactivate and reactivate", () => {
     serve(worker({ active: false, deactivationReason: "x" }), (_url, init) => (init.method === "POST" ? json(409, { code: "SF-0168", detail: "worker is already active" }) : undefined));
     renderWorker();
     fireEvent.click(await screen.findByRole("button", { name: "Reactivate worker" }));
-    expect(await screen.findByText(/already active. Reload the page. \(SF-0168\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/already active. Reload the page./)).toBeInTheDocument();
   });
 });

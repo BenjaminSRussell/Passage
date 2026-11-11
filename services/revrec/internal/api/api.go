@@ -73,6 +73,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyView, dutyAllocationRead)).Get("/v1/revrec/contracts", a.listContracts)
 	r.With(authz.RequireAnyDuty(dutyView, dutyAllocationRead)).Get("/v1/revrec/contracts/{id}", a.getContract)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/revrec/contracts/{id}:allocate", a.allocateContract)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/revrec/contracts/{id}:modify", a.modifyContract)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/revrec/milestones/{id}:satisfy", a.satisfyMilestone)
 	r.With(authz.RequireDuty(dutyMaintain)).Put("/v1/revrec/recognition-templates/{id}", a.putTemplate)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/recognition-templates", a.listTemplates)
@@ -92,7 +93,7 @@ func (a *API) Metrics() http.Handler {
 		}
 		counter("revrec_allocation_previews_total", "Allocation previews answered.", a.previews.Load())
 		counter("revrec_contracts_created_total", "Revenue contracts created; idempotent replays are not counted.", a.contractsCreated.Load())
-		counter("revrec_contracts_modified_total", "Contract modifications that added obligations (:allocate).", a.contractsModified.Load())
+		counter("revrec_contracts_modified_total", "Contract modifications (:allocate added obligations, :modify re-allocated them).", a.contractsModified.Load())
 		counter("revrec_milestones_satisfied_total", "Milestone obligations satisfied; replays are not counted.", a.milestonesSatisfied.Load())
 		counter("revrec_schedule_lines_recognized_total", "Ratable schedule lines recognized by recognition runs.", a.linesRecognized.Load())
 		counter("revrec_journal_postings_total", "Ledger entries (Dr 2400, Cr 4000) posted for recognized revenue.", a.journalPostings.Load())

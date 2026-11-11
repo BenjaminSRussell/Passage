@@ -55,6 +55,10 @@ A list's text search finds what the command palette finds: both follow the recor
 - The count line ("3 vendor invoices loaded, more available") and the action message line (view saved, export done) are polite live regions that stay mounted.
 - Tests: `src/shell/ui/ListPage.test.tsx` covers each feature and runs the in-repo AA checks.
 
+## Search box (#506)
+
+Pass `search={(row) => ({ number, name })}` to add a search box over the rows loaded so far. It matches the way the record search service and the command palette do (`shell/search/match.ts`): a number by its start, a name by what it contains, a typo forgiven, so the same words find the same record in a list and in the palette. A row with no name is searched by its number. When more rows exist than are loaded the page says the search covers the loaded rows only. Every list above passes it.
+
 ## Examples
 
 - `src/modules/ap-invoices/InvoicesPage.tsx` (react-query infinite query, server filters).
@@ -76,6 +80,9 @@ The procure-to-pay and order-to-cash lists are all converted:
 | Packing slips | `fulfillment/PackingSlipsPage.tsx` | Converted |
 | Billing invoices | `billing/InvoicesPage.tsx` | Converted |
 | AR payments | `receivables/PaymentsPage.tsx` | Converted |
+| Sales quotations | `sales/QuotationsPage.tsx` | Converted |
+| Credit notes | `billing/CreditNotesPage.tsx` | Converted |
+| Shipments | `fulfillment/ShipmentsPage.tsx` | Converted |
 
 For each further list:
 

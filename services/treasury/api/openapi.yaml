@@ -327,6 +327,79 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/opening-balances:
+    post:
+      operationId: importOpeningBalances
+      summary: Load a batch of opening bank balances from a legacy system (#49, H-S10-1)
+      description: |
+        The migration factory's cutover snapshot of the book balance of each bank account, in whole minor units of the account's currency.
+        A batch of 1 to 1000 items is stored all or nothing under its `batchKey`; the same key with the same content answers 200 with `Idempotent-Replayed`,
+        the same key with other content is 422 TRS-0603. 422 TRS-0601 names invalid rows (`errors` keyed `items[row].field`), TRS-0602 rows whose
+        account is not an account of the legal entity or whose currency differs, TRS-0604 an account that already has an opening balance.
+        503 TRS-0605 when the import is not enabled.
+      x-passage-duty: treasury.import.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, batchKey, asOf, items]
+              additionalProperties: false
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                batchKey: {type: string, minLength: 1, maxLength: 200}
+                asOf: {type: string, format: date}
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [reference, bankAccountId, currency, balanceMinor]
+                    additionalProperties: false
+                    properties:
+                      reference: {type: string, minLength: 1, maxLength: 255}
+                      bankAccountId: {type: string, format: uuid}
+                      currency: {type: string, pattern: "^[A-Z]{3}$"}
+                      balanceMinor: {type: integer, format: int64}
+      responses:
+        "200":
+          description: The stored batch (a replay)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OpeningBatch"}
+        "201":
+          description: Batch stored
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OpeningBatch"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listOpeningBalanceBatches
+      summary: The opening balance batches of a legal entity, in key order, with their totals per currency
+      x-passage-duty: treasury.import.read
+      parameters:
+        - {name: legal_entity, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: A page of batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/OpeningBatch"}}
+                  nextCursor: {type: string}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
   /v1/treasury/cash-desks:
     post:
       operationId: createCashDesk
@@ -1944,6 +2017,15 @@ components:
               currency: {type: string}
               booked: {type: string}
               available: {type: string}
+    OpeningBatch:
+      type: object
+      required: [legalEntityId, batchKey, asOf, itemCount, totalsMinor]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        batchKey: {type: string}
+        asOf: {type: string, format: date}
+        itemCount: {type: integer}
+        totalsMinor: {type: object, additionalProperties: {type: integer, format: int64}}
     CashDesk:
       type: object
       required: [id, legalEntityId, code, name, currency, mainAccountId, maxBalance, status, dualControl, version, createdAt]

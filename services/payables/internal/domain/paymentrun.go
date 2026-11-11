@@ -19,6 +19,8 @@ const (
 	CodeRunPayee       = "AP-RUN-017"
 	// CodeRunNotCompleted refuses a remittance advice for a run that is not completed.
 	CodeRunNotCompleted = "AP-RUN-018"
+	// CodeRunWithholdingParked: the tax service refused the run's withholding entries for good; the run is parked for an operator.
+	CodeRunWithholdingParked = "AP-RUN-019"
 
 	RunRunning   = "RUNNING"
 	RunCompleted = "COMPLETED"

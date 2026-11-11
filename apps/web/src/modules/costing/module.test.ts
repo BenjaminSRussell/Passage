@@ -123,7 +123,7 @@ describe("SettlementPreview results", () => {
     try {
       render(createElement(MemoryRouter, null, createElement(SettlementPreview)));
       fireEvent.click(screen.getByRole("button", { name: "Preview settlement" }));
-      expect(await findAlert()).toHaveTextContent("CST-TXN-001");
+      expect(await findAlert()).toHaveTextContent("STANDARD needs a positive standard unit cost");
       const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
       expect(JSON.parse(init.body as string)).not.toHaveProperty("standardUnitCost");
     } finally {

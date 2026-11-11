@@ -73,9 +73,8 @@ describe("realignment list", () => {
   it("asks for a ledger first, then lists runs and opens one", async () => {
     fake();
     const { container } = renderAt("/ledger/realignments");
-    expect(screen.getByText("Enter a ledger id to see its realignment runs.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
+    expect(screen.getByText("Choose a ledger to see its realignment runs.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     const open = await screen.findByRole("button", { name: "2026-03-15" });
     const row = open.closest("tr") as HTMLElement;
     expect(row.textContent).toContain("DEPT: C100 to C150");

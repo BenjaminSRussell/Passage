@@ -126,7 +126,7 @@ export function AutoClearingRunPage() {
       />
       <LedgerPicker id="acr-run-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to run automatic clearing on it.</p>
+        <p className={styles.note}>Choose a ledger to run automatic clearing on it.</p>
       ) : (
         <>
           <Card>

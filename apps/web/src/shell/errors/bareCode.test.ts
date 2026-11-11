@@ -13,53 +13,6 @@
  */
 import { parseAst } from "vite";
 
-/**
- * Rendered failure codes left for a later pass, as `path/relative/to/src:expression`. The
- * purchase-to-pay and order-to-cash modules are clean; these belong to other areas. Remove an
- * entry when its page moves to ProblemMessage. Do not add to this list.
- */
-const ALLOWLIST = new Set<string>([
-  "modules/budgeting/api/client.ts:err.problem.code",
-  "modules/costacct/api/client.ts:err.problem.code",
-  "modules/costing/api/client.ts:err.problem.code",
-  "modules/analytics/DashboardsPage.tsx:failure.code",
-  "modules/analytics/DataQualityPage.tsx:failure.code",
-  "modules/eam/PlansPage.tsx:rounds.error.code",
-  "modules/eam/PlansPage.tsx:state.error.code",
-  "modules/finreport/NewRunPage.tsx:hierarchies.error.code",
-  "modules/finreport/NewRunPage.tsx:trees.error.code",
-  "modules/finreport/TreeRevisions.tsx:list.error.code",
-  "modules/hr/AssignmentForm.tsx:employments.error.code",
-  "modules/hr/AssignmentForm.tsx:workers.error.code",
-  "modules/integration/parts.tsx:issue.code",
-  "modules/intercompany/PartnerDetailPage.tsx:failure.code",
-  "modules/migration-factory/SetTolerancePage.tsx:state.error.code",
-  "modules/mobile-flows/NewPrintDocumentPage.tsx:failure.code",
-  "modules/mobile-flows/api/client.ts:error.code",
-  "modules/org/HierarchyDesignerPage.tsx:units.error.code",
-  "modules/org/StructurePages.tsx:calendars.error.code",
-  "modules/org/StructurePages.tsx:warehouses.error.code",
-  "modules/org/UomTabs.tsx:failure.code",
-  "modules/production/module.ts:error.code",
-  "modules/projects/ChangeOrderPages.tsx:wbs.error.code",
-  "modules/quality/NewOrderPage.tsx:failure.code",
-  "modules/quality/UsageDecisionForm.tsx:failure.code",
-  "modules/scheduling/CapacityBlockDetailPage.tsx:failure.code",
-  "modules/scheduling/EditResourcePage.tsx:failure.code",
-  "modules/scheduling/NetworkDetailPage.tsx:failure.code",
-  "modules/scheduling/ParametersPage.tsx:failure.code",
-  "modules/service/AgreementsPage.tsx:profiles.error.code",
-  "modules/service/CasesPage.tsx:profiles.error.code",
-  "modules/shopfloor/KioskJobs.tsx:failure.code",
-  "modules/shopfloor/KioskPage.tsx:failure.code",
-  "modules/shopfloor/TimeApprovalPage.tsx:workers.error.code",
-  "modules/shopfloor/WorkerCostRates.tsx:failure.code",
-  "modules/shopfloor/WorkerHomeResource.tsx:failure.code",
-  "modules/shopfloor/WorkerMaintenance.tsx:failure.code",
-  "modules/shopfloor/WorkerMaintenance.tsx:stateFailure.code",
-  "modules/shopfloor/WorkerPaySetup.tsx:failure.code",
-]);
-
 type Node = { type?: unknown; start?: number; end?: number; [key: string]: unknown };
 
 const isNode = (value: unknown): value is Node => typeof value === "object" && value !== null;
@@ -136,9 +89,7 @@ describe("failure codes are not messages", () => {
   it("no module or shell source renders a failure's code as the message", () => {
     const files = Object.entries(sources);
     expect(files.length).toBeGreaterThan(100);
-    const findings = files
-      .flatMap(([path, source]) => findBareCodes(source, path.replace(/^\.\.\/\.\.\//, "").replace(/^\.\.\//, "shell/")))
-      .filter((f) => !ALLOWLIST.has(`${f.file}:${f.text}`));
+    const findings = files.flatMap(([path, source]) => findBareCodes(source, path.replace(/^\.\.\/\.\.\//, "").replace(/^\.\.\//, "shell/")));
     const report = findings.map((f) => `${f.file}:${f.line}  ${f.text}`).join("\n");
     expect(report, "Show the failure with ProblemMessage (or problemSummary for a string); the code belongs under Details").toBe("");
   }, 60_000);

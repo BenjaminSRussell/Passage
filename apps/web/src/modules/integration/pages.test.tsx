@@ -171,7 +171,7 @@ describe("trading partners", () => {
     const { container } = renderAt("/integration/partners/new");
     expect(pageViolations(container)).toEqual([]);
     fill("Partner name", "Demo distributor");
-    fill("ISA sender id", "DISTRIBUTOR");
+    fill("ISA sender identifier", "DISTRIBUTOR");
     fireEvent.click(screen.getByRole("button", { name: "Create partner" }));
 
     expect(await screen.findByRole("heading", { name: "Demo distributor" })).toBeInTheDocument();
@@ -190,10 +190,10 @@ describe("trading partners", () => {
     expect(calls).toHaveLength(0);
 
     fill("Partner name", "Demo distributor");
-    fill("ISA sender id", "DISTRIBUTOR");
+    fill("ISA sender identifier", "DISTRIBUTOR");
     fireEvent.click(screen.getByRole("button", { name: "Create partner" }));
     expect(await screen.findByText("A partner with this ISA qualifier and id already exists in this environment.")).toBeInTheDocument();
-    expect(screen.getByLabelText("ISA sender id")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("ISA sender identifier")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("reports a missing partner on the detail page", async () => {

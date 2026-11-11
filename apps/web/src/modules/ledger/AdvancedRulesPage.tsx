@@ -61,7 +61,7 @@ export function AdvancedRulesPage() {
       />
       <LedgerPicker id="ar-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its advanced rules.</p>
+        <p className={styles.note}>Choose a ledger to see its advanced rules.</p>
       ) : rules.isError ? (
         <Alert tone="danger" title="Could not load the advanced rules" live="alert" action={<Button size="sm" onClick={() => void rules.refetch()}>Try again</Button>}>
           {errorText(rules.error)}

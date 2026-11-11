@@ -1,5 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
-# Ingress: only the edge gateway. Egress: DNS, the three owning services, and Keycloak over 443.
+# Ingress: only the edge gateway. Egress: DNS, the four owning services, Keycloak over 443, and clamd when a scanner is set.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -38,4 +38,12 @@ spec:
         - ipBlock: { cidr: {{ .Values.networkPolicy.identityProviderCidr | quote }} }
       ports:
         - { protocol: TCP, port: 443 }
+    {{- if .Values.scan.clamavAddr }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.clamavNamespace | quote }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.networkPolicy.clamavPort }} }
+    {{- end }}
 {{- end }}

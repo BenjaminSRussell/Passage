@@ -165,11 +165,11 @@ describe("new recurring journal", () => {
     };
     const { container } = renderAt("/ledger/recurring-journals/new");
     fireEvent.click(screen.getByRole("button", { name: "Save recurring journal" }));
-    expect(await screen.findByText("Enter the ledger id as a UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the ledger.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
 
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText("Journal name"), { target: { value: "GJ" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Monthly freight accrual" } });
     fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "2026-04-01" } });
@@ -208,7 +208,7 @@ describe("recurring journal detail", () => {
     const runs = await findTable({ name: "Generated batches" });
     expect(within(runs).getByText("2026-04-30")).toBeInTheDocument();
     expect(within(runs).getByRole("link", { name: "Open batch" })).toHaveAttribute("href", `/ledger/journal-batches/${BATCH}`);
-    expect(screen.getByLabelText("Ledger id")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Ledger")).toHaveAttribute("readonly");
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Base amount for this run"), { target: { value: "250.50" } });
@@ -292,7 +292,7 @@ describe("save a batch as a recurring journal", () => {
     const { container } = renderAt(`/ledger/recurring-journals/new?fromBatch=${BATCH}`);
     // The batch description becomes both the template name and the batch description.
     expect(await screen.findAllByDisplayValue("March rent")).toHaveLength(2);
-    expect(screen.getByLabelText("Ledger id")).toHaveValue(LEDGER);
+    expect(screen.getByLabelText("Ledger")).toHaveAttribute("data-value", LEDGER);
     expect(screen.getByLabelText("Start date")).toHaveValue("2026-03-31");
     expect(screen.getByLabelText("Currency")).toHaveValue("EUR");
     expect(screen.getByLabelText("Line 1 dimensions")).toHaveValue("DEPT=D100");

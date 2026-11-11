@@ -262,6 +262,21 @@ func TestListLedgerSetsAndAccountMappingsPage(t *testing.T) {
 	}
 }
 
+func TestListLedgers(t *testing.T) {
+	fs := &fakeStore{listNext: testLedger}
+	h := server(fs)
+	rec := call(h, http.MethodGet, "/v1/ledger/ledgers?legalEntityId="+testDoc+"&cursor="+testLedger, "", dutyRead, nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items"`) || !strings.Contains(rec.Body.String(), `"nextCursor":"`+testLedger+`"`) || fs.listAfter != testLedger {
+		t.Fatalf("status %d after %q: %s", rec.Code, fs.listAfter, rec.Body.String())
+	}
+	if rec := call(h, http.MethodGet, "/v1/ledger/ledgers?legalEntityId=nope", "", dutyRead, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("malformed legal entity: status %d", rec.Code)
+	}
+	if rec := call(h, http.MethodGet, "/v1/ledger/ledgers", "", dutyPost, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("without the read duty: status %d", rec.Code)
+	}
+}
+
 func TestListLedgerSetsAndAccountMappings(t *testing.T) {
 	h := server(&fakeStore{})
 	for _, path := range []string{"/v1/ledger/ledger-sets", "/v1/ledger/ledgers/" + testLedger + "/account-mappings"} {

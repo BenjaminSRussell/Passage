@@ -303,14 +303,14 @@ describe("conversions tab", () => {
     ["ORG-UOM-CONVERSION-DUPLICATE", "A conversion between these two units already exists."],
     ["ORG-UOM-UNIT-INACTIVE", "One of the selected units is inactive."],
     ["ORG-UOM-CLASS-MISMATCH", "The two units belong to different classes."],
-  ])("renders %s as a readable message with the code", async (code, message) => {
+  ])("renders %s as a readable message", async (code, message) => {
     serve({ ...conversionRoutes, "POST /uom/conversions": () => problem(code, 409) });
     const { user } = await openConversions();
     await user.selectOptions(screen.getByLabelText("From unit"), "kg");
     await user.selectOptions(screen.getByLabelText("To unit"), "m");
     await user.type(screen.getByLabelText("Factor"), "2");
     await user.click(screen.getByRole("button", { name: "Add conversion" }));
-    expect(await screen.findByText(`${message} (${code})`)).toBeInTheDocument();
+    expect(await screen.findByText(message)).toBeInTheDocument();
   });
 
   it("hides the add form without the duty but keeps the test panel", async () => {

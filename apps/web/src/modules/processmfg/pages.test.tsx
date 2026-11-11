@@ -187,7 +187,7 @@ describe("formulas", () => {
     const { container } = renderAt("/processmfg/formulas/new");
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "dough-1" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Bread dough" } });
-    fireEvent.change(screen.getByLabelText("Product item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Item"), { target: { value: FLOUR } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1000" } });
     expect(pageViolations(container)).toEqual([]);

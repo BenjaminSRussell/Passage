@@ -443,3 +443,46 @@ func setEntryKey(key, ledgerID string) string {
 	sum := sha256.Sum256([]byte(key + "|" + ledgerID))
 	return hex.EncodeToString(sum[:])
 }
+
+// ListLedgers returns the ledgers of the caller's scope, one page at a time, ordered by legal entity and code.
+// legalEntityID, when not empty, narrows the list to one legal entity.
+func (s *Postgres) ListLedgers(ctx context.Context, legalEntityID, after string) ([]Ledger, string, error) {
+	p, err := principalOf(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	out := []Ledger{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if after != "" {
+			var known bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from ledger where tenant_id = $1 and id = $2::uuid)`, p.TenantID, after).Scan(&known); err != nil {
+				return err
+			}
+			if !known {
+				return errUnknownCursor()
+			}
+		}
+		rows, err := tx.Query(ctx, ledgerColumns+` from ledger l where l.tenant_id = $1
+				and ($2 = '' or l.legal_entity_id = $2::uuid)
+				and ($3 = '' or (l.legal_entity_id, l.code) > (select a.legal_entity_id, a.code from ledger a where a.tenant_id = $1 and a.id = $3::uuid))
+			order by l.legal_entity_id, l.code limit $4`, p.TenantID, legalEntityID, after, setListPageSize+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			l, err := scanLedger(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, l)
+		}
+		return rows.Err()
+	})
+	next := ""
+	if len(out) > setListPageSize {
+		out = out[:setListPageSize]
+		next = out[setListPageSize-1].ID
+	}
+	return out, next, err
+}

@@ -207,7 +207,7 @@ describe("new worker", () => {
     fireEvent.change(screen.getByLabelText("Personnel number"), { target: { value: "wrk-1001" } });
     fireEvent.change(screen.getByLabelText("Party"), { target: { value: PARTY } });
     fireEvent.change(screen.getByLabelText("Legal name"), { target: { value: "Ada Lovelace" } });
-    fireEvent.change(screen.getByLabelText("National ID"), { target: { value: "123-45-6789" } });
+    fireEvent.change(screen.getByLabelText("National identification number"), { target: { value: "123-45-6789" } });
     fireEvent.click(screen.getByRole("button", { name: "Create worker" }));
     expect(await screen.findByText("This personnel number is already used.")).toBeInTheDocument();
     duplicate = false;

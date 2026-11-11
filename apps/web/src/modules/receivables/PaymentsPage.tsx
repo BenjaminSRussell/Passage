@@ -93,6 +93,7 @@ export function PaymentsPage() {
       columns={columns}
       filters={filters}
       useRows={usePaymentRows}
+      search={(row) => ({ number: row.sourceRef ?? "", name: row.payerName ?? undefined })}
       getRowKey={(row) => row.id}
       onRowOpen={(row) => navigate(`/receivables/payments/${row.id}`)}
       empty={{
