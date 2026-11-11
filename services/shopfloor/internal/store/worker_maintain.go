@@ -37,6 +37,8 @@ type WorkerInput struct {
 	UserID   *string
 	CostRate decimal.Decimal
 	Currency string
+	// TimeZone replaces the worker's work-day zone when not empty; empty keeps it.
+	TimeZone string
 }
 
 // lockWorkerRow locks one worker row and returns it, or SF-0101 (404).
@@ -85,9 +87,9 @@ func (s *Postgres) UpdateWorker(ctx context.Context, workerID string, version in
 			}
 		}
 		out, err = scanWorker(tx.QueryRow(ctx, `update worker set name = $3, badge_id = $4, user_id = $5, cost_rate = $6, currency = $7,
-				version = version + 1, updated_at = now()
+				time_zone = coalesce(nullif($9, ''), time_zone), version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2 and version = $8 returning `+workerColumns,
-			p.TenantID, workerID, in.Name, in.BadgeID, in.UserID, in.CostRate.String(), in.Currency, version))
+			p.TenantID, workerID, in.Name, in.BadgeID, in.UserID, in.CostRate.String(), in.Currency, version, in.TimeZone))
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return httpx.NewProblem(http.StatusConflict, CodeBadgeTaken, "badge is already assigned to another worker")

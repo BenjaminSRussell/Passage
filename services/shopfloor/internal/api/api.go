@@ -291,6 +291,8 @@ type workerRequest struct {
 	UserID   *string `json:"userId"`
 	CostRate string  `json:"costRate"`
 	Currency string  `json:"currency"`
+	// TimeZone is the IANA zone of the worker's site (default UTC).
+	TimeZone string `json:"timeZone"`
 }
 
 type itemsResponse[T any] struct {
@@ -475,6 +477,9 @@ func (a *API) createWorker(w http.ResponseWriter, r *http.Request) {
 	if !currencyRe.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
 	}
+	if req.TimeZone != "" && !validZone(req.TimeZone) {
+		fields["timeZone"] = "must be an IANA time zone name such as America/Chicago"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -483,7 +488,7 @@ func (a *API) createWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.store.CreateWorker(r.Context(), store.Worker{PartyID: req.PartyID, Name: name, BadgeID: req.BadgeID, UserID: req.UserID,
-		CostRate: rate, Currency: req.Currency}, idem)
+		CostRate: rate, Currency: req.Currency, TimeZone: req.TimeZone}, idem)
 	if err != nil {
 		a.fail(w, r, "create worker", err)
 		return

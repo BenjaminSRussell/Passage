@@ -168,3 +168,51 @@ func TestRegistrationPosted_JobStopUsesRateEffectiveOnWorkDate(t *testing.T) {
 		t.Fatalf("work before the first dated rate = %d, want the worker's base rate 2600", got)
 	}
 }
+
+// #543: the work date of a job stop is the local day in the worker's time zone. Work that started at 21:00 in Chicago on
+// 20 October is already 21 October in UTC, and a rate that takes effect on 21 October must not price it.
+func TestRegistrationPosted_JobStopWorkDateIsLocalToTheWorkersSite(t *testing.T) {
+	s, _, admin := setup(t)
+	tenantID := testkit.TenantID(88)
+	ctx := testkit.Ctx(tenantID)
+	newWorker := func(badge, zone string) Worker {
+		w, err := s.CreateWorker(ctx, Worker{PartyID: ids.New(), Name: badge, BadgeID: &badge, CostRate: decimal.RequireFromString("26"), Currency: "USD", TimeZone: zone}, idem("worker-"+ids.New()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	chicago, utc := newWorker("B-CHI", "America/Chicago"), newWorker("B-UTC", "")
+	if chicago.TimeZone != "America/Chicago" || utc.TimeZone != "UTC" {
+		t.Fatalf("zones %q %q; want the one given and UTC by default", chicago.TimeZone, utc.TimeZone)
+	}
+	for _, w := range []Worker{chicago, utc} {
+		mustRate(t, s, ctx, w.ID, "2026-10-20", "28")
+		mustRate(t, s, ctx, w.ID, "2026-10-21", "30")
+	}
+	job, _, err := s.UpsertJob(ctx, Job{ID: ids.New(), OrderRef: ids.New(), OperationRef: "20", ResourceID: ids.New(), PlannedQty: decimal.NewFromInt(100), SequenceStart: day(8, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 02:00 UTC on 21 October is 21:00 CDT on 20 October.
+	from := time.Date(2026, 10, 21, 2, 0, 0, 0, time.UTC)
+	if got := stopCost(t, s, ctx, admin, tenantID, chicago.ID, &job.ID, from, from.Add(time.Hour)); got != 2800 {
+		t.Fatalf("Chicago evening work of 20 October = %d, want the rate of 20 October (2800)", got)
+	}
+	if got := stopCost(t, s, ctx, admin, tenantID, utc.ID, &job.ID, from, from.Add(time.Hour)); got != 3000 {
+		t.Fatalf("the same instant for a UTC worker = %d, want the rate of 21 October (3000)", got)
+	}
+	// A zone can be changed with the worker's edit; an omitted zone keeps the stored one.
+	cur, err := s.GetWorker(ctx, chicago.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd, err := s.UpdateWorker(ctx, chicago.ID, cur.Version, WorkerInput{Name: cur.Name, BadgeID: cur.BadgeID, CostRate: cur.CostRate, Currency: cur.Currency}, "sup", idem("upd-"+ids.New()))
+	if err != nil || upd.TimeZone != "America/Chicago" {
+		t.Fatalf("an edit without a zone: %+v %v", upd, err)
+	}
+	upd, err = s.UpdateWorker(ctx, chicago.ID, upd.Version, WorkerInput{Name: cur.Name, BadgeID: cur.BadgeID, CostRate: cur.CostRate, Currency: cur.Currency, TimeZone: "Europe/Berlin"}, "sup", idem("upd-"+ids.New()))
+	if err != nil || upd.TimeZone != "Europe/Berlin" {
+		t.Fatalf("an edit with a zone: %+v %v", upd, err)
+	}
+}

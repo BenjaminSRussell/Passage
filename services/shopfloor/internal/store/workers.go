@@ -42,14 +42,17 @@ type Worker struct {
 	DeactivatedAt      *time.Time `json:"deactivatedAt"`
 	DeactivatedBy      *string    `json:"deactivatedBy"`
 	DeactivationReason *string    `json:"deactivationReason"`
+	// TimeZone is the IANA zone the worker's work days are reckoned in, normally the zone of the site they work at (#543):
+	// the dated cost rate of a job stop is the one effective on the local day the work started. UTC by default.
+	TimeZone string `json:"timeZone"`
 }
 
-const workerColumns = `id::text, party_id::text, name, badge_id, user_id, cost_rate::text, currency, active, version, created_at, profile_id::text, pay_agreement_id::text, default_resource_id::text, deactivated_at, deactivated_by, deactivation_reason`
+const workerColumns = `id::text, party_id::text, name, badge_id, user_id, cost_rate::text, currency, active, version, created_at, profile_id::text, pay_agreement_id::text, default_resource_id::text, deactivated_at, deactivated_by, deactivation_reason, time_zone`
 
 func scanWorker(row pgx.Row) (Worker, error) {
 	var w Worker
 	var rate string
-	if err := row.Scan(&w.ID, &w.PartyID, &w.Name, &w.BadgeID, &w.UserID, &rate, &w.Currency, &w.Active, &w.Version, &w.CreatedAt, &w.ProfileID, &w.PayAgreementID, &w.DefaultResourceID, &w.DeactivatedAt, &w.DeactivatedBy, &w.DeactivationReason); err != nil {
+	if err := row.Scan(&w.ID, &w.PartyID, &w.Name, &w.BadgeID, &w.UserID, &rate, &w.Currency, &w.Active, &w.Version, &w.CreatedAt, &w.ProfileID, &w.PayAgreementID, &w.DefaultResourceID, &w.DeactivatedAt, &w.DeactivatedBy, &w.DeactivationReason, &w.TimeZone); err != nil {
 		return Worker{}, err
 	}
 	var err error
@@ -64,9 +67,13 @@ func (s *Postgres) CreateWorker(ctx context.Context, in Worker, idem Idem) (Work
 	var out Worker
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		out, err = scanWorker(tx.QueryRow(ctx, `insert into worker (tenant_id, id, party_id, name, badge_id, user_id, cost_rate, currency)
-			values ($1, $2, $3, $4, $5, $6, $7, $8) returning `+workerColumns,
-			p.TenantID, ids.New(), in.PartyID, in.Name, in.BadgeID, in.UserID, in.CostRate.String(), in.Currency))
+		zone := in.TimeZone
+		if zone == "" {
+			zone = "UTC"
+		}
+		out, err = scanWorker(tx.QueryRow(ctx, `insert into worker (tenant_id, id, party_id, name, badge_id, user_id, cost_rate, currency, time_zone)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+workerColumns,
+			p.TenantID, ids.New(), in.PartyID, in.Name, in.BadgeID, in.UserID, in.CostRate.String(), in.Currency, zone))
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			return httpx.NewProblem(http.StatusConflict, CodeBadgeTaken, "badge is already assigned to another worker")
