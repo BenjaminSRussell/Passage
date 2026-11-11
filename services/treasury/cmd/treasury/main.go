@@ -85,6 +85,7 @@ func run() error {
 	a.WithReconciliations(pg)
 	a.WithCashPositions(pg)
 	a.WithCashDesks(pg)
+	a.WithOpeningBalances(pg)
 	if err := wireForecastSources(a); err != nil {
 		return err
 	}

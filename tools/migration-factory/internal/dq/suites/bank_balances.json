@@ -1,0 +1,11 @@
+{
+  "pack": "bank_balances",
+  "expectations": [
+    {"type": "expect_column_values_to_not_be_null", "check": "legacy_id_present", "column": "legacyId"},
+    {"type": "expect_column_values_to_be_unique", "check": "legacy_id_unique", "column": "legacyId", "skip_blank": true},
+    {"type": "expect_column_values_to_be_unique", "check": "bank_account_unique", "column": "bankAccount"},
+    {"type": "expect_column_values_to_be_in_set", "check": "bank_account_in_master", "column": "bankAccount", "set": "bankAccounts"},
+    {"type": "expect_column_values_to_be_in_set", "check": "currency_iso4217", "column": "currency", "set": "iso4217"},
+    {"type": "expect_column_values_to_have_max_decimals_for_currency", "check": "balance_minor_units", "column": "balance", "currency_column": "currency"}
+  ]
+}

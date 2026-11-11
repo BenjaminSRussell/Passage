@@ -29,7 +29,7 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 	if err != nil {
 		return f, err
 	}
-	var pending []int
+	var pending, loaded []int
 	var systems []string
 	for rows.Next() {
 		var pf domain.PackFact
@@ -46,6 +46,9 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 		if recv != nil {
 			pf.ReceivablesLoad = *recv
 		}
+		if domain.TargetOfPack(pf.Pack) != "" {
+			loaded = append(loaded, len(f.Packs))
+		}
 		if pf.Pack == domain.PackGLBalances {
 			pending = append(pending, len(f.Packs))
 			systems = append(systems, system)
@@ -55,6 +58,12 @@ func readinessFacts(ctx context.Context, tx pgx.Tx, plan domain.Plan) (domain.Re
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return f, err
+	}
+	for _, i := range loaded {
+		if err := tx.QueryRow(ctx, `select exists (select 1 from opening_load where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1::uuid
+			and status = 'RECONCILED' and rejected = 0 and pending = 0)`, f.Packs[i].RunID).Scan(&f.Packs[i].TargetLoaded); err != nil {
+			return f, err
+		}
 	}
 	for n, i := range pending {
 		if f.Packs[i].GLPosted, err = openingPosted(ctx, tx, systems[n], f.Packs[i].Company); err != nil {

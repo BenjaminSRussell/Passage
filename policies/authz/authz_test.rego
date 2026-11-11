@@ -1606,7 +1606,7 @@ test_integration_hub_reaches_only_render_and_xref_record if {
 }
 
 test_migration_factory_grant_reaches_only_the_receivables_import if {
-	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "payables": ["opening-item.import", "opening-item.import.read"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
+	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "payables": ["opening-item.import", "opening-item.import.read"], "inventory": ["inventory.import.write", "inventory.import.read"], "treasury": ["treasury.import.write", "treasury.import.read"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
 	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
 	allowed("receivables.view", "GET", "/v1/receivables/open-item-imports")
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
@@ -2800,4 +2800,33 @@ test_agent_run_duties_open_only_their_routes if {
 	allowed("mcp.copilot.use", "POST", "/api/v1/copilot/chat")
 	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
 	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
+	allowed("mcp.copilot.use", "POST", "/api/v1/knowledge/search")
+	not allowed("mcp.copilot.use", "POST", "/api/v1/knowledge/chunks")
+	allowed("knowledge.write", "POST", "/api/v1/knowledge/chunks")
+	not allowed("knowledge.write", "POST", "/api/v1/knowledge/search")
+	not allowed("knowledge.write", "POST", "/api/v1/copilot/chat")
+}
+
+test_opening_stock_and_bank_import_duties_are_service_only_and_cover_only_their_route if {
+	data.duties["inventory.import.write"].service_only
+	data.duties["inventory.import.read"].service_only
+	data.duties["treasury.import.write"].service_only
+	data.duties["treasury.import.read"].service_only
+	allowed("inventory.import.write", "POST", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.write", "GET", "/v1/inventory/opening-batches")
+	allowed("inventory.import.read", "GET", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.read", "POST", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.write", "POST", "/v1/inventory/journals")
+	allowed("treasury.import.write", "POST", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.write", "GET", "/v1/treasury/opening-balances")
+	allowed("treasury.import.read", "GET", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.read", "POST", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.write", "POST", "/v1/treasury/bank-accounts")
+}
+
+test_migration_opening_load_routes_need_run_and_view_duties if {
+	allowed("migration.factory.run", "POST", "/api/v1/migration/runs/r1/opening-load")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/opening-load")
+	allowed("migration.factory.view", "GET", "/api/v1/migration/runs/r1/opening-load")
+	not allowed("migration.factory.view", "POST", "/api/v1/migration/runs/r1/opening-load")
 }

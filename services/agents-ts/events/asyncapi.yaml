@@ -63,7 +63,7 @@ components:
         workflow inbox. `proposal` is the pseudonymized proposal: raw PII is
         refused at build time (AGT-0210). The inbox shows real values from the
         run, never from this event.
-      required: [run_id, action_id, tool_name, proposal, confidence, risk_score]
+      required: [run_id, action_id, tool_name, proposal, confidence]
       additionalProperties: false
       properties:
         run_id: { type: string, minLength: 1 }
