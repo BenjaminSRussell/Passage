@@ -1,0 +1,61 @@
+{
+  "entries": {
+    "modules/budgeting/PlanPages.tsx": {
+      "table": 1,
+      "input": 4
+    },
+    "modules/costacct/AllocationRunsPage.tsx": {
+      "table": 1
+    },
+    "modules/costacct/HierarchyPanels.tsx": {
+      "table": 1
+    },
+    "modules/costacct/TopDownRunsPage.tsx": {
+      "table": 1
+    },
+    "modules/finreport/RunPage.tsx": {
+      "button": 1
+    },
+    "modules/mobile-flows/ClusterPanel.tsx": {
+      "button": 4,
+      "textarea": 1,
+      "input": 1
+    },
+    "modules/mobile-flows/DeviceApp.tsx": {
+      "button": 8,
+      "h1": 1,
+      "input": 2
+    },
+    "modules/mobile-flows/ExceptionsPanel.tsx": {
+      "button": 3,
+      "select": 2,
+      "input": 6
+    },
+    "modules/mobile-flows/ReceiveLabelPanel.tsx": {
+      "button": 1,
+      "input": 1
+    },
+    "modules/org/ReferenceDataPage.tsx": {
+      "button": 1
+    },
+    "modules/payroll/pages.tsx": {
+      "table": 1,
+      "button": 1,
+      "h1": 1,
+      "select": 1,
+      "input": 2
+    },
+    "modules/projects/ChangeOrderPages.tsx": {
+      "table": 1
+    },
+    "modules/projects/ForecastPages.tsx": {
+      "table": 1
+    },
+    "modules/projects/PlanPages.tsx": {
+      "table": 2
+    },
+    "modules/setup/pages.tsx": {
+      "button": 1
+    }
+  }
+}
