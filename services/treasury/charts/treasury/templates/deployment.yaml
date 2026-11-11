@@ -29,6 +29,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -84,6 +85,17 @@ spec:
             - name: TREASURY_SFTP_KEY_VERSION
               value: {{ .sftpKeyVersion | quote }}
             {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.ledgerUrl }}
+            {{- if not .Values.serviceIdentity.signingKeySecret }}
+            {{- fail "ledgerUrl needs serviceIdentity.signingKeySecret: the ledger only accepts service-signed postings" }}
+            {{- end }}
+            - name: LEDGER_URL
+              value: {{ .Values.ledgerUrl | quote }}
+            {{- if .Values.glProfiles }}
+            - name: TREASURY_GL_PROFILES
+              value: {{ .Values.glProfiles | quote }}
             {{- end }}
             {{- end }}
           ports:

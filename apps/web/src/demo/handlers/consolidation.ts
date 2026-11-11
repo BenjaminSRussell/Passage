@@ -160,6 +160,28 @@ route("POST", `${BASE}/groups/{id}/units`, ({ params, body }) => {
   LEDGERS[u.id] = [];
   return reply.created(u);
 });
+route("PATCH", `${BASE}/groups/{id}/units/{unitId}`, ({ params, body }) => {
+  const u = units.find((x) => x.id === params.unitId);
+  if (!u) return reply.problem(404, "CNS-0924", "No consolidation group or unit with that id");
+  const b = body as { ledgerId?: string; currency?: string; fiscalYearStartMonth?: number };
+  if (b.currency && b.currency !== u.currency && collections.some((c) => c.lines.some((l) => l.unit === u.id))) return reply.problem(409, "CNS-0931", `Collections were made from this unit in ${u.currency}; its currency can no longer change`);
+  Object.assign(u, { ...(b.ledgerId ? { ledgerId: b.ledgerId } : {}), ...(b.currency ? { currency: b.currency } : {}), ...(b.fiscalYearStartMonth ? { fiscalYearStartMonth: b.fiscalYearStartMonth } : {}) });
+  return structuredClone(u);
+});
+route("DELETE", `${BASE}/groups/{id}/units/{unitId}`, ({ params }) => {
+  const i = units.findIndex((x) => x.id === params.unitId);
+  if (i < 0) return reply.problem(404, "CNS-0924", "No consolidation group or unit with that id");
+  if (collections.some((c) => c.lines.some((l) => l.unit === params.unitId))) return reply.problem(409, "CNS-0931", "Collections were made from this unit, so it stays in the group; end its ownership instead");
+  units.splice(i, 1);
+  return new Response(null, { status: 204 });
+});
+route("POST", `${BASE}/runs`, ({ body }) => {
+  const b = body as { collectionId?: string };
+  const c = collections.find((x) => x.id === b.collectionId);
+  if (!c) return reply.problem(404, "CNS-0928", "No collection with that id");
+  const unitCount = units.filter((u) => Number(u.currentPercent) > 0).length;
+  return reply.created({ id: newId(), groupId: c.groupId, period: c.period, currency: c.currency, collectionId: c.id, version: 1, unitCount, eliminationCount: unitCount * 17, ctaAmount: "39523.81" });
+});
 route("POST", `${BASE}/groups/{id}/units/{unitId}/ownership`, ({ params, body }) => {
   const b = body as { holderUnitId?: string; effectiveFrom: string; percent: string };
   const u = units.find((x) => x.id === params.unitId);

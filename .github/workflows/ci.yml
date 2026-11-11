@@ -366,6 +366,54 @@ jobs:
       - run: bash services/batch/charts/batch/test-notify.sh
       - run: bash services/edi/charts/edi/test-as2.sh
 
+  # Cloud profile (#599 #600 #601): the profile table and its generated copies, every chart rendered under every
+  # profile against the egress allowlist, the region pairs, the AKS module (providers mocked, no subscription), and the
+  # FIPS variants: Go binaries built with GOFIPS140 must start under a FIPS profile and refuse to start with FIPS off,
+  # and the Keycloak image is built with BouncyCastle FIPS in strict mode and booted with the realm.
+  cloud-profiles:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26'
+          cache-dependency-path: '**/go.sum'
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4
+        with:
+          tofu_version: 1.13.2
+      - run: make -C deploy test-cloud-profiles
+      - run: make -C deploy test-tofu
+      - run: go test -count=1 ./cloudprofile/... ./fieldcrypt/... ./httpx/...
+        working-directory: platform/go
+      - name: Boot the FIPS Go variant
+        working-directory: platform/go
+        run: |
+          GOFIPS140=v1.0.0 CGO_ENABLED=0 go build -o "$RUNNER_TEMP/fipscheck" ./cloudprofile/cmd/fipscheck
+          PASSAGE_CLOUD_PROFILE=gcc "$RUNNER_TEMP/fipscheck" | tee /dev/stderr | grep -q 'fips140.Enabled=true'
+          if PASSAGE_CLOUD_PROFILE=gcc GODEBUG=fips140=off "$RUNNER_TEMP/fipscheck"; then echo "must refuse to start with FIPS off"; exit 1; fi
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/plaincheck" ./cloudprofile/cmd/fipscheck
+          if PASSAGE_CLOUD_PROFILE=gcc "$RUNNER_TEMP/plaincheck"; then echo "an ordinary build must refuse a FIPS profile"; exit 1; fi
+      - name: Build a service image the FIPS way
+        run: docker build --build-arg GOFIPS140=v1.0.0 -f services/identity/Dockerfile -t passage/identity-fips .
+      - name: Build and boot Keycloak with BouncyCastle FIPS (strict)
+        run: |
+          docker build -f deploy/keycloak/Dockerfile.fips -t passage/keycloak-fips deploy/keycloak
+          password="Kc-$(openssl rand -hex 16)"
+          docker run -d --name keycloak-fips -p 8080:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD="$password" -e KC_HOSTNAME_STRICT=false \
+            -v "$PWD/deploy/keycloak/realm-passage.json:/opt/keycloak/data/import/realm-passage.json:ro" \
+            passage/keycloak-fips start-dev --features=fips --fips-mode=strict --import-realm --http-enabled=true
+          for _ in $(seq 1 60); do
+            curl -fsS http://localhost:8080/realms/passage/.well-known/openid-configuration >/dev/null && exit 0
+            sleep 3
+          done
+          docker logs keycloak-fips
+          exit 1
+
   deploy-release:
     runs-on: ubuntu-24.04
     steps:

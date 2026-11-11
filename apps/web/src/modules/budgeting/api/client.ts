@@ -333,6 +333,26 @@ export function postRegisterEntry(input: RegisterEntryInput, idempotencyKey: str
   return command(`${BASE}/register-entries`, input, idempotencyKey);
 }
 
+/** Actual cost of one cost object in one period from the cost ledger (cost accounting), the other side of cost control's plan. */
+export interface ActualRow {
+  costObjectId: string;
+  kind: string;
+  code: string;
+  name: string;
+  period: string;
+  currency: string;
+  /** What the journals booked on the object. */
+  primary: string;
+  /** What allocations, settlements and distributions moved onto or off it. */
+  allocated: string;
+  total: string;
+}
+
+/** GET /api/v1/controlling/cost-actuals: cost centers' actual cost per period for the months from to to (YYYY-MM). */
+export function listCostActuals(legalEntityId: string, from: string, to: string, signal?: AbortSignal): Promise<Items<ActualRow>> {
+  return request(`/api/v1/controlling/cost-actuals${query({ legalEntityId, from, to, kind: "CostCenter" })}`, { signal });
+}
+
 export function listAvailable(rule: string, signal?: AbortSignal): Promise<Items<Balance>> {
   return request(`${BASE}/available${query({ rule })}`, { signal });
 }

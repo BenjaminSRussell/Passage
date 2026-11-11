@@ -1,6 +1,6 @@
 asyncapi: 3.0.0
 info:
-  title: Passage Treasury events (slices 1 and 3, PSG-36)
+  title: Passage Treasury events (PSG-36)
   version: 0.3.0
   description: |
     CloudEvents 1.0 structured envelope from platform/go/events (extensions
@@ -30,6 +30,20 @@ channels:
         $ref: "#/components/messages/ReconciliationMatched"
       reconciliationUnmatched:
         $ref: "#/components/messages/ReconciliationUnmatched"
+  cashDesk:
+    address: passage.treasury.cashdesk
+    description: Topic for cash desk events (Debezium outbox router); the outbox aggregate is the desk id.
+    messages:
+      cashDeskCreated:
+        $ref: "#/components/messages/CashDeskCreated"
+      cashDeskUpdated:
+        $ref: "#/components/messages/CashDeskUpdated"
+      cashDeskDeactivated:
+        $ref: "#/components/messages/CashDeskDeactivated"
+      cashDeskDayClosed:
+        $ref: "#/components/messages/CashDeskDayClosed"
+      cashDeskEntryPosted:
+        $ref: "#/components/messages/CashDeskEntryPosted"
 operations:
   publishReconciliationMatched:
     action: send
@@ -59,6 +73,41 @@ operations:
     summary: A bank statement and its lines committed.
     messages:
       - $ref: "#/channels/statementImported/messages/statementImported"
+  publishCashDeskCreated:
+    action: send
+    channel:
+      $ref: "#/channels/cashDesk"
+    summary: A cash desk was created.
+    messages:
+      - $ref: "#/channels/cashDesk/messages/cashDeskCreated"
+  publishCashDeskUpdated:
+    action: send
+    channel:
+      $ref: "#/channels/cashDesk"
+    summary: A cash desk's name, maximum balance, cash account or dual control changed.
+    messages:
+      - $ref: "#/channels/cashDesk/messages/cashDeskUpdated"
+  publishCashDeskDeactivated:
+    action: send
+    channel:
+      $ref: "#/channels/cashDesk"
+    summary: A cash desk was deactivated.
+    messages:
+      - $ref: "#/channels/cashDesk/messages/cashDeskDeactivated"
+  publishCashDeskDayClosed:
+    action: send
+    channel:
+      $ref: "#/channels/cashDesk"
+    summary: A cash desk day is final: counted, and signed a second time where the desk needs it.
+    messages:
+      - $ref: "#/channels/cashDesk/messages/cashDeskDayClosed"
+  publishCashDeskEntryPosted:
+    action: send
+    channel:
+      $ref: "#/channels/cashDesk"
+    summary: A cash desk journal line was posted to the general ledger.
+    messages:
+      - $ref: "#/channels/cashDesk/messages/cashDeskEntryPosted"
 components:
   messages:
     StatementImported:
@@ -179,3 +228,157 @@ components:
               legalEntityId: {type: string, format: uuid}
               reason: {type: string}
               unmatchedBy: {type: string}
+    CashDeskCreated:
+      name: dev.passage.treasury.cashdesk.created.v1
+      title: Cash Desk Created
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.cashdesk.created.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: desk id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [deskId, legalEntityId, code, currency, status, maxBalance, dualControl]
+            properties:
+              deskId: {type: string, format: uuid}
+              legalEntityId: {type: string, format: uuid}
+              code: {type: string}
+              currency: {type: string}
+              status: {type: string, enum: [active, inactive]}
+              maxBalance: {type: string, description: decimal string}
+              dualControl: {type: boolean}
+    CashDeskUpdated:
+      name: dev.passage.treasury.cashdesk.updated.v1
+      title: Cash Desk Updated
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.cashdesk.updated.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: desk id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [deskId, legalEntityId, code, currency, status, maxBalance, dualControl]
+            properties:
+              deskId: {type: string, format: uuid}
+              legalEntityId: {type: string, format: uuid}
+              code: {type: string}
+              currency: {type: string}
+              status: {type: string, enum: [active, inactive]}
+              maxBalance: {type: string, description: decimal string}
+              dualControl: {type: boolean}
+    CashDeskDeactivated:
+      name: dev.passage.treasury.cashdesk.deactivated.v1
+      title: Cash Desk Deactivated
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.cashdesk.deactivated.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: desk id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [deskId, legalEntityId, code, currency, status, maxBalance, dualControl]
+            properties:
+              deskId: {type: string, format: uuid}
+              legalEntityId: {type: string, format: uuid}
+              code: {type: string}
+              currency: {type: string}
+              status: {type: string, enum: [active, inactive]}
+              maxBalance: {type: string, description: decimal string}
+              dualControl: {type: boolean}
+    CashDeskDayClosed:
+      name: dev.passage.treasury.cashdeskday.closed.v1
+      title: Cash Desk Day Closed
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.cashdeskday.closed.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: desk id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [deskId, legalEntityId, businessDate, currency, openingBalance, bookBalance, countedBalance, difference, closedBy]
+            properties:
+              deskId: {type: string, format: uuid}
+              legalEntityId: {type: string, format: uuid}
+              businessDate: {type: string, format: date}
+              currency: {type: string}
+              openingBalance: {type: string, description: decimal string}
+              bookBalance: {type: string, description: decimal string}
+              countedBalance: {type: string, description: decimal string}
+              difference: {type: string, description: counted less book, decimal string}
+              closedBy: {type: string}
+              approvedBy: {type: string, description: the second signature, when the desk needs one}
+    CashDeskEntryPosted:
+      name: dev.passage.treasury.cashdeskentry.posted.v1
+      title: Cash Desk Entry Posted
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.cashdeskentry.posted.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: desk id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [deskId, entryId, legalEntityId, businessDate, kind, amount, currency, ledgerEntryId]
+            properties:
+              deskId: {type: string, format: uuid}
+              entryId: {type: string, format: uuid}
+              legalEntityId: {type: string, format: uuid}
+              businessDate: {type: string, format: date}
+              kind: {type: string, enum: [receipt, payment]}
+              amount: {type: string, description: decimal string}
+              currency: {type: string}
+              ledgerEntryId: {type: string}

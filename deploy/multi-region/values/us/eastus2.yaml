@@ -1,0 +1,33 @@
+# Region file: eastus2 is PRIMARY in the US pair (East US 2 / Central US), the pair for commercial Azure US regions
+# (#600) and for the gcc profile (#601): both regions are in the gcc allowedRegions and backups archive to a Blob
+# storage account in the same US region, so no data leaves the US. Check it with
+#   python3 deploy/multi-region/tools/check_region_pair.py --values-dir deploy/multi-region/values/us --cloud-profile gcc
+# Render it with the cloud profile's global values so the Blob suffix comes from the profile:
+#   helm template mr deploy/multi-region/chart -f deploy/cloud-profiles/values/gcc.yaml -f deploy/multi-region/values/us/eastus2.yaml
+# MirrorMaker 2 does not run here while centralus is its target.
+region:
+  id: eastus2
+  role: PRIMARY
+  provider: aks
+  namespace: passage-data
+
+postgres:
+  primary:
+    host: passage-pg-rw.centralus.passage.internal
+
+backup:
+  store: azure-blob
+  azure:
+    storageAccount: passagepgbkpeastus2
+    storageAccountRegion: eastus2
+    container: pg-backups
+
+kafka:
+  localAlias: eastus2
+  localBootstrap: passage-kafka-bootstrap.kafka.svc:9093
+  remoteAlias: centralus
+  remoteBootstrap: passage-kafka-bootstrap.kafka.passage-centralus.internal:9093
+
+mm2:
+  sourceAlias: eastus2
+  targetAlias: centralus

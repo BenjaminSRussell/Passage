@@ -1,0 +1,20 @@
+# Keycloak with the BouncyCastle FIPS provider, in strict ("approved") mode (#599, #601).
+#   docker build -f deploy/keycloak/Dockerfile.fips -t passage/keycloak-fips deploy/keycloak
+# Deploy with the kustomize overlay deploy/keycloak-fips, which starts it with `start --optimized`.
+# Strict mode needs: passwords of 14+ characters and pbkdf2-sha512 hashing (realm-passage.json pins both), RSA keys of
+# 2048 bits or more, and BCFKS key and trust stores (https://www.keycloak.org/server/fips).
+# The jar versions are the ones Keycloak 26.0.8 itself builds against (keycloak/pom.xml tag 26.0.8); the checksums pin them.
+FROM quay.io/keycloak/keycloak:26.0.8 AS builder
+ADD --chown=keycloak:keycloak --checksum=sha256:f6a25fd5744e91cc019a9f79733ae757da6648a80946fad9932041ad05695240 \
+    https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/2.0.0/bc-fips-2.0.0.jar /opt/keycloak/providers/
+ADD --chown=keycloak:keycloak --checksum=sha256:0bceb027307098323b0e1365b31bca19caf4f0f20e787d1b48b40be3e6804be0 \
+    https://repo1.maven.org/maven2/org/bouncycastle/bctls-fips/2.0.19/bctls-fips-2.0.19.jar /opt/keycloak/providers/
+ADD --chown=keycloak:keycloak --checksum=sha256:4471e25adb42e400fd9ffa472d78a40a3b6add49b37cd5945ac2ca62398b16fd \
+    https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-fips/2.0.7/bcpkix-fips-2.0.7.jar /opt/keycloak/providers/
+ADD --chown=keycloak:keycloak --checksum=sha256:d7ab2fa5ba33594324a2cc26c75fd30e6a13e4d6524cb2027bb8384fd1befa14 \
+    https://repo1.maven.org/maven2/org/bouncycastle/bcutil-fips/2.0.3/bcutil-fips-2.0.3.jar /opt/keycloak/providers/
+RUN /opt/keycloak/bin/kc.sh build --features=fips --fips-mode=strict --db=postgres --health-enabled=true
+
+FROM quay.io/keycloak/keycloak:26.0.8
+COPY --from=builder /opt/keycloak/ /opt/keycloak/
+ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]

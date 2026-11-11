@@ -1,0 +1,6 @@
+apiVersion: v2
+name: passage-secret-store
+description: External Secrets Operator ClusterSecretStore for Passage on Azure Key Vault (workload identity), endpoints from the cloud profile (#600)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

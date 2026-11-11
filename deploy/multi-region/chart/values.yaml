@@ -41,10 +41,20 @@ postgres:
 
 backup:
   enabled: true
-  # Empty derives s3://passage-pg-backups-<region.id>/ so each region archives to its own bucket.
+  # s3 (default) or azure-blob (#600). azure-blob archives to Azure Blob storage through barman-cloud.
+  store: s3
+  # Empty derives s3://passage-pg-backups-<region.id>/ so each region archives to its own bucket, or for azure-blob
+  # https://<azure.storageAccount>.<global.endpoints.blobSuffix>/<azure.container>/ (the suffix comes from the cloud profile).
   destinationPath: ""
   endpointURL: ""             # S3-compatible stores only
-  credentialsSecret: passage-pg-backup-s3   # keys: ACCESS_KEY_ID, ACCESS_SECRET_KEY
+  credentialsSecret: passage-pg-backup-s3   # keys: ACCESS_KEY_ID, ACCESS_SECRET_KEY (azure-blob without workload identity: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY)
+  azure:
+    # Workload identity: no storage key; the managed identity needs Storage Blob Data Contributor on the account.
+    useWorkloadIdentity: true
+    workloadIdentityClientId: ""   # client id of that managed identity (deploy/tofu/cluster output backup_identity_client_id)
+    storageAccount: ""             # a storage account in this region (US-only profiles: a US region)
+    storageAccountRegion: ""       # the account's Azure region; check_region_pair.py requires it in the profile's allowedRegions
+    container: pg-backups
   compression: gzip
   retentionPolicy: 30d        # base backups and the WAL they need are kept this long
   schedule: "0 0 2 * * *"     # CNPG six-field cron (seconds first): daily 02:00 UTC

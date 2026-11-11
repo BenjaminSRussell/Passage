@@ -1,0 +1,60 @@
+{
+  "identityProvider": {
+    "alias": "entra-oidc",
+    "config": {
+      "authorizationUrl": "https://login.partner.microsoftonline.cn/REPLACE_WITH_ENTRA_TENANT_ID/oauth2/v2.0/authorize",
+      "clientAuthMethod": "client_secret_post",
+      "clientId": "REPLACE_WITH_CLIENT_ID",
+      "defaultScope": "openid email profile",
+      "issuer": "https://login.partner.microsoftonline.cn/REPLACE_WITH_ENTRA_TENANT_ID/v2.0",
+      "jwksUrl": "https://login.partner.microsoftonline.cn/REPLACE_WITH_ENTRA_TENANT_ID/discovery/v2.0/keys",
+      "logoutUrl": "https://login.partner.microsoftonline.cn/REPLACE_WITH_ENTRA_TENANT_ID/oauth2/v2.0/logout",
+      "pkceEnabled": "true",
+      "pkceMethod": "S256",
+      "syncMode": "FORCE",
+      "tokenUrl": "https://login.partner.microsoftonline.cn/REPLACE_WITH_ENTRA_TENANT_ID/oauth2/v2.0/token",
+      "useJwksUrl": "true",
+      "userInfoUrl": "https://microsoftgraph.chinacloudapi.cn/oidc/userinfo",
+      "validateSignature": "true"
+    },
+    "displayName": "Microsoft Entra ID",
+    "enabled": false,
+    "linkOnly": false,
+    "postBrokerLoginFlowAlias": "passage-post-broker-mfa",
+    "providerId": "oidc",
+    "storeToken": false,
+    "trustEmail": false
+  },
+  "identityProviderMappers": [
+    {
+      "config": {
+        "attribute": "tenant_id",
+        "attribute.value": "REPLACE_WITH_TENANT_ID",
+        "syncMode": "FORCE"
+      },
+      "identityProviderAlias": "entra-oidc",
+      "identityProviderMapper": "hardcoded-attribute-idp-mapper",
+      "name": "tenant"
+    },
+    {
+      "config": {
+        "claim": "given_name",
+        "syncMode": "INHERIT",
+        "user.attribute": "firstName"
+      },
+      "identityProviderAlias": "entra-oidc",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "name": "given-name"
+    },
+    {
+      "config": {
+        "claim": "family_name",
+        "syncMode": "INHERIT",
+        "user.attribute": "lastName"
+      },
+      "identityProviderAlias": "entra-oidc",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "name": "family-name"
+    }
+  ]
+}

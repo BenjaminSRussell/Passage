@@ -60,11 +60,12 @@ func (s *Postgres) UpdateRequisition(ctx context.Context, id string, version int
 			}
 			for _, l := range edit.Lines {
 				if _, err := tx.Exec(ctx, `insert into purchase_requisition_line (tenant_id, id, requisition_id, line_no, product_id, description,
-					category, qty, unit, estimated_unit_price, amount, requested_date, site_id, preferred_vendor_id, status, catalog_entry_id, warehouse_id)
-					values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'OPEN', $15, $16)`,
+					category, qty, unit, estimated_unit_price, amount, requested_date, site_id, preferred_vendor_id, status, catalog_entry_id, warehouse_id,
+					gl_account, cost_center)
+					values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'OPEN', $15, $16, $17, $18)`,
 					p.TenantID, ids.New(), id, l.LineNo, nullable(l.ProductID), l.Description, l.Category, l.Qty, l.Unit,
 					l.EstimatedUnitPrice, l.Amount, l.RequestedDate.Time, nullable(l.SiteID), nullable(l.PreferredVendorID),
-					nullable(l.CatalogEntryID), nullable(l.WarehouseID)); err != nil {
+					nullable(l.CatalogEntryID), nullable(l.WarehouseID), nullable(l.GLAccount), nullable(l.CostCenter)); err != nil {
 					return err
 				}
 			}
@@ -153,6 +154,9 @@ func (s *Postgres) CancelRequisitionLine(ctx context.Context, id string, version
 		} else if held {
 			return httpx.NewProblem(http.StatusConflict, CodeRequisitionOnRFQ, fmt.Sprintf(
 				"requisition %s line %d is being sourced on %s; award or cancel the RFQ first", cur.Number, line.LineNo, number))
+		}
+		if err := enqueueBudgetRelease(ctx, tx, s.queueBudget, cur.LegalEntityID, id, []string{lineID}); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(ctx, `update purchase_requisition_line set status = 'CANCELLED' where tenant_id = $1 and id = $2`, p.TenantID, lineID); err != nil {
 			return err

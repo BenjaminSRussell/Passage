@@ -8,6 +8,9 @@ prometheus:
   endpoint: http://prometheus.observability.svc:9090
 pagerDuty:
   enabled: true
+  # Events API endpoint. Rendered explicitly so the egress allowlist test sees it; cloud profiles without PagerDuty in
+  # their allowlist (global.pagerDutyAllowed false) disable this receiver.
+  url: https://events.pagerduty.com/v2/enqueue
   routingKeySecret: pagerduty
   routingKeyKey: routing-key
   severity: error

@@ -75,6 +75,8 @@ function rline(lineNo: number, number: string, qty: number, needIn: number, opts
     siteId: PLANT.id,
     warehouseId: WH_RAW.id,
     preferredVendorId: opts.vendor === false ? undefined : vendorOf(number).id,
+    glAccount: "5100",
+    costCenter: "CC-PLANT",
     status: opts.status ?? "OPEN",
     purchaseOrderId: opts.po?.id,
     purchaseOrderLineNo: opts.po?.lineNo,
@@ -204,6 +206,8 @@ route("POST", `${BASE}/requisitions`, ({ body }) => {
       siteId: l.siteId,
       warehouseId: l.warehouseId,
       preferredVendorId: l.preferredVendorId || (it?.vendor !== undefined ? VENDORS[it.vendor].id : undefined),
+      glAccount: l.glAccount,
+      costCenter: l.costCenter,
       status: "OPEN",
     };
   });

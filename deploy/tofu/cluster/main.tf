@@ -1,22 +1,80 @@
 locals {
+  is_k3d      = var.provider_kind == "k3d"
+  is_aks      = var.provider_kind == "aks"
   agents      = sum([for pool in var.node_pools : pool.count])
   k3s_image   = var.kubernetes_version == "" ? "" : "--image rancher/k3s:v${var.kubernetes_version}-k3s1"
   kube_config = { config_path = var.kubeconfig_path, config_context = "k3d-${var.name}" }
+  # aks: the helm provider talks to the new cluster through the AAD-integrated kubeconfig values the module exports.
+  helm_kubernetes = {
+    config_path            = local.is_aks ? null : local.kube_config.config_path
+    config_context         = local.is_aks ? null : local.kube_config.config_context
+    host                   = local.is_aks ? one(module.aks[*].kube_host) : null
+    cluster_ca_certificate = local.is_aks ? base64decode(nonsensitive(one(module.aks[*].kube_cluster_ca_certificate))) : null
+    exec = local.is_aks ? {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "kubelogin"
+      args        = ["get-token", "--login", "azurecli", "--server-id", "6dae42f8-4368-4678-94ff-3960e28e3630"]
+    } : null
+  }
+}
+
+# Only k3d and aks are implemented; any other provider_kind stops here with the pointer to the tracking file.
+resource "terraform_data" "unsupported_provider" {
+  count = contains(["k3d", "aks"], var.provider_kind) ? 0 : 1
+
+  lifecycle {
+    precondition {
+      condition     = contains(["k3d", "aks"], var.provider_kind)
+      error_message = "provider_kind ${var.provider_kind} is not implemented yet; see services/platform-health/NOT-IMPLEMENTED.md."
+    }
+  }
+}
+
+# One instance only for provider_kind = "aks": a k3d run never configures (or needs credentials for) Azure.
+provider "azurerm" {
+  alias    = "aks"
+  for_each = local.is_aks ? toset(["aks"]) : toset([])
+
+  features {}
+  subscription_id                 = var.azure_subscription_id
+  resource_provider_registrations = "none"
+}
+
+module "aks" {
+  count  = local.is_aks ? 1 : 0
+  source = "./modules/aks"
+
+  providers = {
+    azurerm = azurerm.aks["aks"]
+  }
+
+  name                     = var.name
+  location                 = var.azure_location
+  allowed_regions          = var.allowed_regions
+  fips                     = var.fips
+  tenant_id                = var.azure_tenant_id
+  kubernetes_version       = var.kubernetes_version
+  node_pools               = var.node_pools
+  backup_replication_type  = var.azure_backup_replication_type
+  postgres_flexible_server = var.azure_postgres_flexible_server
+
+  postgres_admin_group_object_id = var.azure_postgres_admin_group_object_id
+  cloud_endpoints = {
+    blobSuffix              = lookup(var.cloud_endpoints, "blobSuffix", "")
+    containerRegistrySuffix = lookup(var.cloud_endpoints, "containerRegistrySuffix", "")
+    postgresSuffix          = lookup(var.cloud_endpoints, "postgresSuffix", "")
+    keyVaultPrivateLinkZone = lookup(var.cloud_endpoints, "keyVaultPrivateLinkZone", "")
+  }
 }
 
 resource "null_resource" "cluster" {
+  count = local.is_k3d ? 1 : 0
+
   triggers = {
     name   = var.name
     agents = local.agents
     image  = local.k3s_image
     config = filesha256(var.k3d_config_path)
-  }
-
-  lifecycle {
-    precondition {
-      condition     = var.provider_kind == "k3d"
-      error_message = "provider_kind ${var.provider_kind} is not implemented yet; see services/platform-health/NOT-IMPLEMENTED.md."
-    }
   }
 
   provisioner "local-exec" {
@@ -30,7 +88,7 @@ resource "null_resource" "cluster" {
 }
 
 provider "helm" {
-  kubernetes = local.kube_config
+  kubernetes = local.helm_kubernetes
 }
 
 resource "helm_release" "cert_manager" {
@@ -42,7 +100,7 @@ resource "helm_release" "cert_manager" {
   create_namespace = true
   wait             = true
   values           = [yamlencode({ crds = { enabled = true } })]
-  depends_on       = [null_resource.cluster]
+  depends_on       = [null_resource.cluster, module.aks]
 }
 
 resource "helm_release" "argocd" {
@@ -68,5 +126,5 @@ resource "helm_release" "argocd" {
     LUA
     } }
   })]
-  depends_on = [null_resource.cluster]
+  depends_on = [null_resource.cluster, module.aks]
 }

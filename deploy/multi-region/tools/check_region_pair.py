@@ -24,9 +24,18 @@ still lint. This tool reads both region files of a pair, merges each over the ch
     - ``license.warnDays`` a non-empty list of distinct integers 1-365
     - ``fence.enabled`` false in the chart defaults (a region is fenced by its FENCED role or a game day)
 
+  cloud profile (#599), when a profile is named with --cloud-profile or by ``region.cloudProfile`` in the files
+    - ``region.id`` is in the profile's ``allowedRegions`` (a region outside the list fails; a profile with no list
+      allows any), so a gcc pair can only be US regions and an EU-data-boundary pair only EU ones
+    - on ``provider: aks`` the backup store is ``azure-blob``, its storage account sits in the region itself, that
+      region is allowed, and an explicit ``backup.destinationPath`` is an https URL on the profile's Blob suffix
+
 Run it after every edit to the region files, including step 3 of docs/ops/runbooks/failover.md:
 
     python3 deploy/multi-region/tools/check_region_pair.py
+    python3 deploy/multi-region/tools/check_region_pair.py --values-dir deploy/multi-region/values/us --cloud-profile gcc
+
+Without --values-dir it checks the pair in values/ and every pair in a subdirectory of values/ (values/us).
 
 The values files use a small YAML subset (nested mappings, scalars, flow lists, comments). The parser here
 handles exactly that subset and rejects anything else (block lists, anchors, multi-line scalars), so no
@@ -43,6 +52,9 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent.parent / "cloud-profiles"))
+import cloudprofile  # noqa: E402  (the one profile table, deploy/cloud-profiles/profiles.json)
+
 VALUES_DIR = HERE.parent / "values"
 CHART_VALUES = HERE.parent / "chart" / "values.yaml"
 ROLES = ("PRIMARY", "PASSIVE", "FENCED")
@@ -225,6 +237,46 @@ def check(files: dict[str, dict[str, Any]], chart: dict[str, Any]) -> list[str]:
     return problems
 
 
+def check_cloud_profile(files: dict[str, dict[str, Any]], chart: dict[str, Any], selector: str | None = None) -> list[str]:
+    """Problems with the pair against a cloud profile; the profile is `selector` or the files' region.cloudProfile."""
+    declared = {name: _get(doc, "region.cloudProfile") for name, doc in files.items()}
+    named = {v for v in declared.values() if v}
+    if len(named) > 1:
+        return [f"region files name different cloud profiles: {declared}"]
+    selector = selector or (named.pop() if named else None)
+    if not selector:
+        return []
+    base, overlays = cloudprofile.parse_selector(selector)
+    try:
+        profile = cloudprofile.resolve(cloudprofile.load(), base, overlays)
+    except ValueError as exc:
+        return [f"cloud profile {selector!r}: {exc}"]
+    problems: list[str] = []
+    allowed = profile["allowedRegions"]
+    blob = profile["endpoints"]["blobSuffix"]
+    for name, doc in sorted({n: merge(chart, d) for n, d in files.items()}.items()):
+        if allowed and name not in allowed:
+            problems.append(f"{name}: region is not in the {selector} allowedRegions ({', '.join(allowed)})")
+        if _get(doc, "region.provider") != "aks":
+            continue
+        if _get(doc, "backup.store") != "azure-blob":
+            problems.append(f"{name}: provider aks needs backup.store azure-blob, got {_get(doc, 'backup.store')!r}")
+            continue
+        account_region = _get(doc, "backup.azure.storageAccountRegion")
+        if account_region != name:
+            problems.append(f"{name}: backup.azure.storageAccountRegion is {account_region!r}, expected the region itself ({name!r})")
+        if allowed and account_region not in allowed:
+            problems.append(f"{name}: backup storage region {account_region!r} is not in the {selector} allowedRegions")
+        if not _get(doc, "backup.azure.storageAccount"):
+            problems.append(f"{name}: backup.azure.storageAccount is not set")
+        destination = _get(doc, "backup.destinationPath")
+        if destination:
+            host = cloudprofile.host_of(destination)
+            if not destination.startswith("https://") or not host.endswith("." + blob):
+                problems.append(f"{name}: backup.destinationPath {destination!r} must be an https URL on *.{blob}")
+    return problems
+
+
 def load_pair(values_dir: Path) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for path in sorted(values_dir.glob("*.yaml")):
@@ -235,26 +287,48 @@ def load_pair(values_dir: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
+def discover_pairs(values_dir: Path) -> dict[str, Path]:
+    """The pair in `values_dir` itself plus one pair per subdirectory that holds region files."""
+    pairs: dict[str, Path] = {}
+    if any(values_dir.glob("*.yaml")):
+        pairs[values_dir.name] = values_dir
+    for sub in sorted(p for p in values_dir.iterdir() if p.is_dir() and any(p.glob("*.yaml"))):
+        pairs[sub.name] = sub
+    return pairs
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--values-dir", type=Path, default=VALUES_DIR, help="directory holding the pair's two files")
+    parser.add_argument("--values-dir", type=Path, default=None, help="directory holding one pair's two files (default: values/ and each subdirectory of it)")
+    parser.add_argument("--cloud-profile", default=None, help="check the pair against a cloud profile selector, for example gcc or commercial+eu-data-boundary")
     parser.add_argument("--chart-values", type=Path, default=CHART_VALUES, help="the chart's default values.yaml")
     args = parser.parse_args(argv)
 
     try:
-        files = load_pair(args.values_dir)
         chart = parse(args.chart_values.read_text(encoding="utf-8"))
+        if args.values_dir is None:
+            dirs = discover_pairs(VALUES_DIR)
+        else:
+            dirs = {args.values_dir.name: args.values_dir}
+        pairs = {name: load_pair(path) for name, path in dirs.items()}
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    problems = check(files, chart)
-    for problem in problems:
-        print(f"FAIL  {problem}")
-    if problems:
-        print(f"REGION PAIR FAILED: {len(problems)} problem(s)")
+    total = 0
+    for pair_name, files in pairs.items():
+        problems = check(files, chart) + check_cloud_profile(files, chart, args.cloud_profile)
+        for problem in problems:
+            print(f"FAIL  {pair_name + ': ' if len(pairs) > 1 else ''}{problem}")
+        total += len(problems)
+    if total:
+        print(f"REGION PAIR FAILED: {total} problem(s)")
         return 1
-    print(f"REGION PAIR PASSED: {', '.join(sorted(files))}; parameters within PRD 9.50.13 ranges")
+    shown = "; ".join(
+        (f"{name}: " if len(pairs) > 1 else "") + ", ".join(sorted(files)) for name, files in pairs.items()
+    )
+    suffix = f"; cloud profile {args.cloud_profile}" if args.cloud_profile else ""
+    print(f"REGION PAIR PASSED: {shown}; parameters within PRD 9.50.13 ranges{suffix}")
     return 0
 
 

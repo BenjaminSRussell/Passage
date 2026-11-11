@@ -422,6 +422,8 @@ components:
         siteId: { type: string, format: uuid }
         warehouseId: { type: string, format: uuid, description: "Warehouse the line is wanted in. Consolidation puts lines of different sites or warehouses on different POs, and the PO line is delivered there." }
         preferredVendorId: { type: string, format: uuid, description: "With productId and no estimate, the estimate defaults from this vendor's trade agreement." }
+        glAccount: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', description: "The general ledger account the line is charged to. With costCenter it makes the line budget controlled: the last approval checks it against the plan (FR-38.4) and reserves a pre-encumbrance (FR-38.5). Both or neither." }
+        costCenter: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', description: "The cost center the line is charged to; see glAccount." }
         catalogEntryId: { type: string, format: uuid, description: "Pick the line from a PUBLISHED catalog entry (FR-17.18): blank product, description, category, unit, estimate and preferred vendor take the entry's values; a different unit, product or category is refused (COM-0001). 422 PRC-CAT-004 when the catalog is not published to the legal entity and unit today, PRC-CAT-006 when its currency differs." }
     RequisitionInput:
       type: object
@@ -452,11 +454,30 @@ components:
         siteId: { type: string, format: uuid }
         warehouseId: { type: string, format: uuid }
         preferredVendorId: { type: string, format: uuid }
+        glAccount: { type: string }
+        costCenter: { type: string }
         status: { type: string, enum: [OPEN, CONSOLIDATED, CANCELLED] }
         purchaseOrderId: { type: string, format: uuid, description: "Set when CONSOLIDATED: the PO that orders the line." }
         purchaseOrderLineNo: { type: integer, description: "Set when CONSOLIDATED: the PO line that orders the line." }
         catalogEntryId: { type: string, format: uuid, description: "The catalog entry the line was picked from; absent on a non-catalog line." }
         splitFromLineId: { type: string, format: uuid, description: "The line this one was cut out of by a split (FR-17.3); absent on a line as entered." }
+    BudgetCall:
+      type: object
+      required: [id, legalEntityId, kind, status, attempts, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        kind: { type: string, enum: [convert, release] }
+        requisitionId: { type: string, format: uuid }
+        requisitionLineId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        purchaseOrderLineId: { type: string, format: uuid }
+        status: { type: string, enum: [pending, done] }
+        attempts: { type: integer }
+        lastError: { type: string }
+        createdAt: { type: string, format: date-time }
+        attemptedAt: { type: string, format: date-time }
+        doneAt: { type: string, format: date-time }
     RequisitionLineSplitInput:
       type: object
       required: [quantities]
@@ -2480,7 +2501,9 @@ paths:
         The approver must be inside the requisition's legal entity scope, must not be the requester (PRC-REQ-009) or have approved an earlier
         level of the same round (PRC-REQ-010), and needs a REQUISITION approval limit in the requisition currency that covers the total
         (PRC-SL-001, PRC-SL-002; BR-17.15, fails closed). The CATEGORY_OWNER level needs a manager of one of the requisition's categories
-        once any are assigned (PRC-REQ-011). If-Match is the requisition version, which moves on with every level; a replayed
+        once any are assigned (PRC-REQ-011). Where budget control is configured the last level first runs the budget check of the lines
+        that name a glAccount and costCenter and reserves them as pre-encumbrances: a refusal is 422 PRC-REQ-BUDGET (nothing approved,
+        nothing reserved) and an unanswered call 503 PRC-REQ-BUDGET-DOWN (repeat the approval). If-Match is the requisition version, which moves on with every level; a replayed
         Idempotency-Key returns the requisition as it is now. The optional comment is kept in the history.
       parameters:
         - { $ref: '#/components/parameters/Id' }
@@ -4939,6 +4962,55 @@ paths:
         '412': { description: If-Match is not the stored version (PRC-CAT-013), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: Validation - status or window (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/budget-calls:
+    get:
+      operationId: listBudgetCalls
+      x-passage-duty: procurement.purchase-order.inquire
+      summary: Calls to budget control that purchasing owes, oldest first (FR-38.5)
+      description: >-
+        A purchase order created from requisition lines owes budget control one conversion per line (the pre-encumbrance becomes the
+        PO line's encumbrance), and a cancelled approved requisition or line owes a release. The row is written with the order or the
+        cancellation, so a crash loses nothing. pending rows are calls budgeting has not accepted yet, with the attempts made and the
+        last error.
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [pending, done] } }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: The calls
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/BudgetCall' } }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty procurement.purchase-order.inquire (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: status is malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/budget-calls:retry:
+    post:
+      operationId: retryBudgetCalls
+      x-passage-duty: procurement.purchase-order.maintain
+      summary: Repeat the pending calls to budget control (oldest 100)
+      description: >-
+        Safe to repeat: every call has a stable idempotency key at budgeting. Meant for a scheduled job and for the buyer's
+        "try again" after budget control was down. 503 PRC-BUDGET-OFF when the service has no BUDGETING_URL.
+      responses:
+        '200':
+          description: What the pass did
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tried, done, failed]
+                properties:
+                  tried: { type: integer }
+                  done: { type: integer }
+                  failed: { type: integer }
+        '401': { description: Unauthenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: Missing duty procurement.purchase-order.maintain (AUTH-0003), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '503': { description: Budget control is not configured (PRC-BUDGET-OFF), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/inbound-changes:
     get:
       operationId: listInboundChanges

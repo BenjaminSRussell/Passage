@@ -599,7 +599,8 @@
       {"resource": "/v1/procurement/inbound-changes/*:retry", "methods": ["POST"]},
       {"resource": "/v1/procurement/inbound-changes/*:acknowledge", "methods": ["POST"]},
       {"resource": "/v1/procurement/requisition-lines/*:split", "methods": ["POST"]},
-      {"resource": "/v1/procurement/requisition-releases", "methods": ["POST"]}
+      {"resource": "/v1/procurement/requisition-releases", "methods": ["POST"]},
+      {"resource": "/v1/procurement/budget-calls:retry", "methods": ["POST"]}
     ]},
     "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}
@@ -653,6 +654,7 @@
       {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/budget-calls", "methods": ["GET"]},
       {"resource": "/v1/procurement/inquiries/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases/*", "methods": ["GET"]},
@@ -1234,6 +1236,8 @@
       {"resource": "/v1/consol/groups", "methods": ["POST"]},
       {"resource": "/v1/consol/groups/*/account-map", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units", "methods": ["POST"]},
+      {"resource": "/v1/consol/groups/*/units/*", "methods": ["PATCH", "DELETE"]},
+      {"resource": "/v1/consol/groups/*/units/*/terms", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units/*/ownership", "methods": ["POST"]}
     ]},
     "consolidation.journal.maintain": {"permissions": [{"resource": "/v1/consol/group-journals:preview", "methods": ["POST"]}]},
@@ -1253,9 +1257,12 @@
     "consolidation.view": {"permissions": [
       {"resource": "/v1/consol/collections/*", "methods": ["GET"]},
       {"resource": "/v1/consol/collections/*/trial-balance", "methods": ["GET"]},
+      {"resource": "/v1/consol/collections/*/validations", "methods": ["GET"]},
       {"resource": "/v1/consol/groups", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/account-map", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/account-map/versions", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/unit-terms", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/collections", "methods": ["GET"]},
       {"resource": "/v1/consol/runs", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*", "methods": ["GET"]},
@@ -2270,6 +2277,10 @@
       {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances:convert", "methods": ["POST"]}
     ]},
+    "budget.requisition.check": {"service_only": true, "permissions": [
+      {"resource": "/v1/budget/requisition-checks", "methods": ["POST"]},
+      {"resource": "/v1/budget/requisition-checks:release-line", "methods": ["POST"]}
+    ]},
     "budget.plan.workflow": {"service_only": true, "permissions": [
       {"resource": "/v1/budget/plans/*/stages/*:sign-off", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*:reject", "methods": ["POST"]}
@@ -2328,6 +2339,7 @@
       {"resource": "/v1/controlling/allocation-runs/*", "methods": ["GET"]},
       {"resource": "/v1/controlling/allocation-templates", "methods": ["GET"]},
       {"resource": "/v1/controlling/allocation-templates/*", "methods": ["GET"]},
+      {"resource": "/v1/controlling/cost-actuals", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-behavior-rules", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-elements", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-object-hierarchies", "methods": ["GET"]},
@@ -3677,7 +3689,15 @@
       {"resource": "/v1/treasury/cash-desks", "methods": ["POST"]},
       {"resource": "/v1/treasury/cash-desks/*/days", "methods": ["POST"]},
       {"resource": "/v1/treasury/cash-desks/*/days/*:close", "methods": ["POST"]},
-      {"resource": "/v1/treasury/cash-desks/*/entries", "methods": ["POST"]}
+      {"resource": "/v1/treasury/cash-desks/*/days/*:post", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/entries", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*", "methods": ["PATCH"]},
+      {"resource": "/v1/treasury/cash-desks/*:activate", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*:deactivate", "methods": ["POST"]}
+    ]},
+    "treasury.cashdesk.approve": {"permissions": [
+      {"resource": "/v1/treasury/cash-desks/*/days/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/days/*:reject", "methods": ["POST"]}
     ]},
     "treasury.statement.import": {"permissions": [
       {"resource": "/v1/treasury/statements/import", "methods": ["POST"]},
@@ -3815,7 +3835,7 @@
       "payables": ["payables.inbox.read"]
     },
     "purchasing": {
-      "budgeting": ["budget.encumbrance.convert"]
+      "budgeting": ["budget.encumbrance.convert", "budget.requisition.check"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],

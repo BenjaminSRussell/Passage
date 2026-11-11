@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/BenjaminSRussell/passage/platform/cloudprofile"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
@@ -126,7 +127,14 @@ func Fail(w http.ResponseWriter, r *http.Request, err error) {
 
 // Serve runs the handler on addr until SIGINT/SIGTERM or ctx cancellation,
 // then drains in-flight requests for up to 15s.
+//
+// In a FIPS cloud profile (PASSAGE_CLOUD_PROFILE, #599), or in a binary built with GOFIPS140, Serve
+// refuses to start unless crypto/fips140.Enabled() is true, so every service that serves through it
+// fails closed.
 func Serve(ctx context.Context, addr string, h http.Handler) error {
+	if err := cloudprofile.CheckFIPS(os.Getenv); err != nil {
+		return err
+	}
 	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()

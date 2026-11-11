@@ -30,6 +30,8 @@ export interface Unit {
   currency: string;
   /** Total held on today's date. */
   currentPercent: string;
+  /** The month (1 to 12) the unit's fiscal year starts in; income is collected from the start of the year the period falls in. */
+  fiscalYearStartMonth?: number;
   ownership: Holding[];
 }
 
@@ -39,10 +41,49 @@ export interface GroupDetail extends Group {
 
 export type AccountType = "balance_sheet" | "income";
 
+/** What a run reads an account for: the balance sheet totals of a unit and its intercompany balances. */
+export type AccountRole = "asset" | "liability" | "equity" | "ic_sales" | "ic_cost" | "ic_receivable" | "ic_payable";
+
 export interface AccountMapRow {
   mainAccount: string;
   consolidationAccount: string;
   accountType: AccountType;
+  role?: AccountRole;
+}
+
+export interface UnitTerms {
+  unitId: string;
+  investmentCost: string;
+  shareCapital: string;
+  preAcquisitionRe: string;
+  historicalRate: string;
+  sellerIsSubsidiary: boolean;
+  icNetInvestment: boolean;
+  fxGainLossAccount?: string;
+}
+
+export interface MappingVersion {
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  accounts: number;
+}
+
+export interface DerivedRun {
+  id: string;
+  groupId: string;
+  period: string;
+  currency: string;
+  collectionId?: string;
+  version: number;
+  unitCount: number;
+  eliminationCount: number;
+  ctaAmount: string;
+}
+
+export interface CollectionValidations {
+  blocked: boolean;
+  units: { unit: string; status: string; results: { rule: string; severity: string; difference: string; failed: boolean }[] }[];
 }
 
 export interface Collection {
@@ -102,11 +143,32 @@ export const addUnit = (groupId: string, input: { legalEntityId: string; ledgerI
 export const addOwnership = (groupId: string, unitId: string, input: { holderUnitId?: string; effectiveFrom: string; percent: string }) =>
   call<Unit>("POST", `/groups/${encodeURIComponent(groupId)}/units/${encodeURIComponent(unitId)}/ownership`, { body: input });
 
-export const getAccountMap = (groupId: string, signal?: AbortSignal) =>
-  call<{ accounts: AccountMapRow[] }>("GET", `/groups/${encodeURIComponent(groupId)}/account-map`, { signal });
+export const updateUnit = (groupId: string, unitId: string, changes: { ledgerId?: string; currency?: string; fiscalYearStartMonth?: number }) =>
+  call<Unit>("PATCH", `/groups/${encodeURIComponent(groupId)}/units/${encodeURIComponent(unitId)}`, { body: changes });
 
+export const removeUnit = (groupId: string, unitId: string) => call<void>("DELETE", `/groups/${encodeURIComponent(groupId)}/units/${encodeURIComponent(unitId)}`);
+
+export const setUnitTerms = (groupId: string, unitId: string, terms: Omit<UnitTerms, "unitId">) =>
+  call<UnitTerms>("PUT", `/groups/${encodeURIComponent(groupId)}/units/${encodeURIComponent(unitId)}/terms`, { body: terms });
+
+export const listUnitTerms = (groupId: string, signal?: AbortSignal) => call<{ items: UnitTerms[] }>("GET", `/groups/${encodeURIComponent(groupId)}/unit-terms`, { signal });
+
+export const getAccountMap = (groupId: string, signal?: AbortSignal) =>
+  call<{ accounts: AccountMapRow[]; version?: number }>("GET", `/groups/${encodeURIComponent(groupId)}/account-map`, { signal });
+
+/** Every save is a new version; the earlier ones stay readable. */
 export const setAccountMap = (groupId: string, accounts: AccountMapRow[]) =>
-  call<{ accounts: AccountMapRow[] }>("PUT", `/groups/${encodeURIComponent(groupId)}/account-map`, { body: { accounts } });
+  call<{ accounts: AccountMapRow[]; version?: number }>("PUT", `/groups/${encodeURIComponent(groupId)}/account-map`, { body: { accounts } });
+
+export const listMappingVersions = (groupId: string, signal?: AbortSignal) =>
+  call<{ items: MappingVersion[] }>("GET", `/groups/${encodeURIComponent(groupId)}/account-map/versions`, { signal });
+
+/** Derive a consolidation run from a stored collection; ic supplies the pair amounts a trial balance cannot attribute to one partner. */
+export const startRunFromCollection = (input: { collectionId: string; ic?: { unit: string; unsoldShare?: string; payableGroup?: string }[]; openingRates?: { currency: string; rate: string }[] }, key: string) =>
+  call<DerivedRun>("POST", "/runs", { body: input, headers: { "Idempotency-Key": key } });
+
+export const getCollectionValidations = (collectionId: string, signal?: AbortSignal) =>
+  call<CollectionValidations>("GET", `/collections/${encodeURIComponent(collectionId)}/validations`, { signal });
 
 export const listCollections = (groupId: string, signal?: AbortSignal) =>
   call<{ items: Collection[] }>("GET", `/groups/${encodeURIComponent(groupId)}/collections`, { signal });

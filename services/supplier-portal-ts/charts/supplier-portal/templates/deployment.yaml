@@ -35,6 +35,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: HTTP_ADDR
               value: ":8080"
             - name: OIDC_ISSUER

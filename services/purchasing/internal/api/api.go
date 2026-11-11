@@ -24,6 +24,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/purchasing/internal/budget"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
@@ -89,6 +90,9 @@ type API struct {
 	memberships Memberships
 	vendors     VendorPrincipal
 	now         func() time.Time
+	// budget is the port to budget control; nil when BUDGETING_URL is not set (requisitions are then approved unchecked).
+	budget      budget.Port
+	budgetQueue budget.Queue
 
 	requisitionsCreated       atomic.Int64
 	requisitionsSubmitted     atomic.Int64
@@ -174,6 +178,7 @@ func (a *API) Register(r chi.Router) {
 		// Custom methods (":submit", ":approve", ...) arrive as one path segment; requisitionAction checks the duty of each.
 		r.Post("/requisitions/{id}", a.requisitionAction)
 		a.registerRequisitionApprovalRoutes(r)
+		a.registerBudgetCalls(r)
 		maintain := r.With(authz.RequireDuty(dutyPurchaseOrderMaintain))
 		maintain.Post("/purchase-orders", a.createOrder)
 		// The consolidation queue and :consolidate (FR-17.3).

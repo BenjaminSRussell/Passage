@@ -177,6 +177,12 @@ func (s *Postgres) ActOnRequisition(ctx context.Context, id string, version int,
 				return err
 			}
 		}
+		if act.Action == domain.ReqActionCancel && from == RequisitionApproved {
+			// An approved requisition holds pre-encumbrances in budget control; the cancelled lines give them back.
+			if err := enqueueBudgetRelease(ctx, tx, s.queueBudget, cur.LegalEntityID, id, cancelled); err != nil {
+				return err
+			}
+		}
 		cur.Status, cur.ApprovedSteps, cur.ApproverChain, cur.Version = next, steps, chain, version+1
 		if err := addRequisitionHistory(ctx, tx, cur, h); err != nil {
 			return err

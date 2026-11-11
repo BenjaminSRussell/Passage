@@ -3,7 +3,7 @@
 | Deliverable or AC | Status | Reason |
 |---|---|---|
 | Deliverable 1: TypeScript services, React web, Python layout | not built | `web modules: none` and no TS or Python code exists in the owned paths |
-| Deliverable 2: providers `eks`, `gke`, `aks`, `baremetal` | interface accepts them, apply fails a precondition | no cloud account, credentials or provider is named by the ticket |
+| Deliverable 2: providers `eks`, `gke`, `baremetal` (`aks` is built, see docs/ops/azure-aks.md) | interface accepts them, apply fails a precondition | no cloud account, credentials or provider is named by the ticket |
 | Deploy: one cloud dev cluster | not built | same reason; `deploy/envs/dev` and `deploy/argocd/root-dev.yaml` are ready for it |
 | Deliverable 3: stage app-of-apps and digest promotion/rollback CLI (AC3) | declarative/local tooling added in slice 2 | no stage cluster/cloud credentials to prove sync or Argo history live; Release rows and `release.*` events are recorded after merge through `stage_release.py record` and `POST /v1/platform/releases` (issue #75); Argo `Healthy` confirmation and the live stage proof stay on #213 |
 | Deliverable 4: blocking gate for unsigned images and its negative test (AC4) | slice 2 of PSG-1 | line budget; CI still builds the SBOM, signs and attests every pushed image |

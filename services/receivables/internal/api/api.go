@@ -447,12 +447,23 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := a.store.ListOpenItems(r.Context(), store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source, Q: search}, limit)
+	filter := store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source, Q: search}
+	if !openItemWindow(w, r, &filter) {
+		return
+	}
+	// One more than asked for tells whether another page follows without a second query.
+	items, err := a.store.ListOpenItems(r.Context(), filter, limit+1)
 	if err != nil {
 		a.fail("list open items", w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	page := map[string]any{"items": items}
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		page = map[string]any{"items": items, "nextCursor": encodeOpenItemCursor(last.DueDate, last.ID)}
+	}
+	httpx.JSON(w, http.StatusOK, page)
 }
 
 func (a *API) aging(w http.ResponseWriter, r *http.Request) {
