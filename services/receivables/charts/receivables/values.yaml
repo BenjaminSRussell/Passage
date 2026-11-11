@@ -37,6 +37,17 @@ autoApply:
   interval: 15m
   at: ""
 
+# With sources set, every replica polls the bank inboxes (RECEIVABLES_SFTP_*): each camt.053 file in a source's inbox is imported like
+# an upload and moved to its done directory (to failed when it cannot be read). A source is {tenantId, legalEntityId, addr, user,
+# hostKeyFingerprint ("SHA256:..." of the bank's host key), inbox, done, failed, autoApply}. The client private key is the
+# `keySecretKey` entry of the Secret `keySecret`, mounted read-only. Polls every interval, or daily at `at` (UTC "HH:MM").
+sftpPoll:
+  sources: []
+  keySecret: ""
+  keySecretKey: id_ed25519
+  interval: 15m
+  at: ""
+
 serviceMonitor:
   enabled: false
   interval: 30s

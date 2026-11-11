@@ -167,6 +167,13 @@ func run() error {
 	if autoApply != nil {
 		go autoApply.loop(ctx)
 	}
+	sftpPoll, err := newSFTPPollJob(os.Getenv, s)
+	if err != nil {
+		return err
+	}
+	if sftpPoll != nil {
+		go sftpPoll.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr, r) }()
 	go func() { errs <- httpx.Serve(ctx, adminAddr, admin) }()

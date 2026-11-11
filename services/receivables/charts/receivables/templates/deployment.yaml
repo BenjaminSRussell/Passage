@@ -53,6 +53,23 @@ spec:
               value: {{ .Values.autoApply.interval | quote }}
             {{- end }}
             {{- end }}
+            {{- if .Values.sftpPoll.sources }}
+            - name: RECEIVABLES_SFTP_SOURCES
+              value: {{ .Values.sftpPoll.sources | toJson | quote }}
+            - name: RECEIVABLES_SFTP_KEY_FILE
+              value: /var/run/passage/sftp/{{ .Values.sftpPoll.keySecretKey }}
+            {{- if .Values.sftpPoll.at }}
+            - name: RECEIVABLES_SFTP_POLL_AT
+              value: {{ .Values.sftpPoll.at | quote }}
+            {{- else }}
+            - name: RECEIVABLES_SFTP_POLL_INTERVAL
+              value: {{ .Values.sftpPoll.interval | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if .Values.sftpPoll.sources }}
+          volumeMounts:
+            - { name: sftp-key, mountPath: /var/run/passage/sftp, readOnly: true }
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -63,3 +80,10 @@ spec:
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.sftpPoll.sources }}
+      volumes:
+        - name: sftp-key
+          secret:
+            secretName: {{ required "sftpPoll.keySecret names the Secret holding the client private key" .Values.sftpPoll.keySecret }}
+            defaultMode: 0400
+      {{- end }}
