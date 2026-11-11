@@ -156,40 +156,48 @@ func recordRecipeChange(ctx context.Context, tx pgx.Tx, tenantID string, c Contr
 // edge node. A process control destination needs an edge node that exists and is switched on (SF-0178).
 // Idempotent by the Idempotency-Key.
 func (s *Postgres) CreateControlRecipe(ctx context.Context, in ControlRecipeInput, createdBy string, idem Idem) (ControlRecipe, error) {
+	var out ControlRecipe
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = createControlRecipeTx(ctx, tx, in, nil, createdBy, idem)
+		return err
+	})
+	return out, err
+}
+
+// createControlRecipeTx stores and sends a recipe inside tx; piSheetID names the PI sheet it was made from, if any.
+func createControlRecipeTx(ctx context.Context, tx pgx.Tx, in ControlRecipeInput, piSheetID *string, createdBy string, idem Idem) (ControlRecipe, error) {
 	p, _ := tenant.FromContext(ctx)
 	doc, err := json.Marshal(in.Recipe)
 	if err != nil {
 		return ControlRecipe{}, err
 	}
-	var out ControlRecipe
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if in.EdgeID != nil {
-			var active bool
-			err := tx.QueryRow(ctx, `select active from edge_node where tenant_id = $1 and id = $2`, p.TenantID, *in.EdgeID).Scan(&active)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRecipeDestination, "the edge node does not exist")
-			}
-			if err != nil {
-				return err
-			}
-			if !active {
-				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRecipeDestination, "the edge node is switched off")
-			}
+	if in.EdgeID != nil {
+		var active bool
+		err := tx.QueryRow(ctx, `select active from edge_node where tenant_id = $1 and id = $2`, p.TenantID, *in.EdgeID).Scan(&active)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ControlRecipe{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeRecipeDestination, "the edge node does not exist")
 		}
-		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into control_recipe (tenant_id, id, order_id, resource_id, destination, edge_id, topic, status, recipe, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7, 'sent', $8, $9)`, p.TenantID, id, in.OrderID, in.ResourceID, in.Destination, in.EdgeID, in.Topic, doc, createdBy); err != nil {
-			return err
+		if err != nil {
+			return ControlRecipe{}, err
 		}
-		if out, err = scanRecipe(tx.QueryRow(ctx, `select `+recipeColumns+` from control_recipe r where r.id = $1`, id)); err != nil {
-			return err
+		if !active {
+			return ControlRecipe{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeRecipeDestination, "the edge node is switched off")
 		}
-		if err := recordRecipeChange(ctx, tx, p.TenantID, out, nil, createdBy, nil, false); err != nil {
-			return err
-		}
-		return remember(ctx, tx, idem, http.StatusCreated, out)
-	})
-	return out, err
+	}
+	id := ids.New()
+	if _, err := tx.Exec(ctx, `insert into control_recipe (tenant_id, id, order_id, resource_id, destination, edge_id, topic, status, recipe, created_by, pi_sheet_id)
+		values ($1, $2, $3, $4, $5, $6, $7, 'sent', $8, $9, $10)`, p.TenantID, id, in.OrderID, in.ResourceID, in.Destination, in.EdgeID, in.Topic, doc, createdBy, piSheetID); err != nil {
+		return ControlRecipe{}, err
+	}
+	out, err := scanRecipe(tx.QueryRow(ctx, `select `+recipeColumns+` from control_recipe r where r.id = $1`, id))
+	if err != nil {
+		return out, err
+	}
+	if err := recordRecipeChange(ctx, tx, p.TenantID, out, nil, createdBy, nil, false); err != nil {
+		return out, err
+	}
+	return out, remember(ctx, tx, idem, http.StatusCreated, out)
 }
 
 // ListControlRecipes is the control recipe monitor: newest first, at most f.Limit rows.
@@ -327,7 +335,8 @@ func (s *Postgres) ReportControlRecipe(ctx context.Context, id, to string, errTe
 }
 
 // ResendControlRecipe sends a recipe in error again (BR-25.11): at most five times, and with force and a
-// reason once a process message for the order was received. The status goes back to sent.
+// reason once a process message for the order was received after the recipe was last sent (a message from
+// before the send says nothing about what the process control system did with it). The status goes back to sent.
 func (s *Postgres) ResendControlRecipe(ctx context.Context, id string, force bool, reason, actor string, idem Idem) (ControlRecipe, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ControlRecipe
@@ -337,7 +346,7 @@ func (s *Postgres) ResendControlRecipe(ctx context.Context, id string, force boo
 			return err
 		}
 		var messages bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from process_message where tenant_id = $1 and order_id = $2 and deleted_at is null)`, p.TenantID, c.OrderID).Scan(&messages); err != nil {
+		if err := tx.QueryRow(ctx, `select exists (select 1 from process_message where tenant_id = $1 and order_id = $2 and deleted_at is null and received_at > $3)`, p.TenantID, c.OrderID, c.LastSentAt).Scan(&messages); err != nil {
 			return err
 		}
 		kind, err := domain.ResendCheck(c.Status, c.SendCount, messages, force, reason)
@@ -404,8 +413,13 @@ func (s *Postgres) EdgeControlRecipes(ctx context.Context, edgeID, subject strin
 // than ReadbackTolerance is a deviation and publishes controlrecipe.deviation.
 func (s *Postgres) EdgeReportControlRecipe(ctx context.Context, edgeID, subject, id string, rep EdgeRecipeReport) (ControlRecipe, error) {
 	p, _ := tenant.FromContext(ctx)
+	// A deviation also becomes a process message of category deviation (the tenant's definition of it, else the default).
+	devCat, err := s.ResolveProcessCategory(ctx, "deviation")
+	if err != nil {
+		devCat, _ = domain.CategoryByCode("deviation")
+	}
 	var out ControlRecipe
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, _, err := edgeConnector(ctx, tx, p.TenantID, edgeID, subject, true); err != nil {
 			return err
 		}
@@ -426,7 +440,7 @@ func (s *Postgres) EdgeReportControlRecipe(ctx context.Context, edgeID, subject,
 			if err := json.Unmarshal(c.Recipe, &doc); err != nil {
 				return err
 			}
-			if err := auditEdgeWrites(ctx, tx, p.TenantID, c, doc, rep.Writes); err != nil {
+			if err := auditEdgeWrites(ctx, tx, p.TenantID, c, doc, rep.Writes, devCat); err != nil {
 				return err
 			}
 		}
@@ -436,7 +450,7 @@ func (s *Postgres) EdgeReportControlRecipe(ctx context.Context, edgeID, subject,
 	return out, err
 }
 
-func auditEdgeWrites(ctx context.Context, tx pgx.Tx, tenantID string, c ControlRecipe, doc domain.RecipeDoc, writes []EdgeWrite) error {
+func auditEdgeWrites(ctx context.Context, tx pgx.Tx, tenantID string, c ControlRecipe, doc domain.RecipeDoc, writes []EdgeWrite, devCat domain.Category) error {
 	setpoints := doc.Setpoints()
 	for _, w := range writes {
 		var match bool
@@ -454,7 +468,13 @@ func auditEdgeWrites(ctx context.Context, tx pgx.Tx, tenantID string, c ControlR
 		}
 		deviation := false
 		if w.Written {
-			deviation = w.Readback == nil || w.Value.Sub(*w.Readback).Abs().GreaterThan(decimal.NewFromFloat(ReadbackTolerance))
+			switch {
+			case w.Readback != nil:
+				deviation = w.Value.Sub(*w.Readback).Abs().GreaterThan(decimal.NewFromFloat(ReadbackTolerance))
+			case c.Destination != domain.DestPCSMQTT:
+				// MQTT has no readback, so a missing one proves nothing; every other protocol must give one.
+				deviation = true
+			}
 		}
 		at := w.At
 		if at.IsZero() {
@@ -474,6 +494,9 @@ func auditEdgeWrites(ctx context.Context, tx pgx.Tx, tenantID string, c ControlR
 				RecipeID: c.ID, OrderID: c.OrderID, EdgeID: *c.EdgeID, PhasePath: w.PhasePath, Node: w.Node, Written: w.Value.String(), Readback: rb}); err != nil {
 				return err
 			}
+			if err := recordDeviationMessage(ctx, tx, tenantID, c, w, at, devCat); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -485,4 +508,78 @@ func nullDecimal(d *decimal.Decimal) *string {
 	}
 	s := d.String()
 	return &s
+}
+
+// endRecipesFromMessage ends the in-execution recipes of the message's order that run on a process control
+// system when the message says the batch ended (domain.RecipeEnd): completed, or error with the reason. The
+// recipe's history names the message as the actor, so the monitor shows what ended it. Called with the
+// message's transaction, so the message and the status change commit together.
+func endRecipesFromMessage(ctx context.Context, tx pgx.Tx, tenantID, messageID string, in domain.NewMessage, values []domain.Characteristic) error {
+	if in.OrderID == "" || (in.CategoryCode != "order-status" && in.CategoryCode != "phase-end") {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `select `+recipeColumns+` from control_recipe r
+		where r.tenant_id = $1 and r.order_id = $2 and r.status = 'in-execution' and r.destination <> 'kiosk' order by r.created_at for update`, tenantID, in.OrderID)
+	if err != nil {
+		return err
+	}
+	var recipes []ControlRecipe
+	for rows.Next() {
+		c, err := scanRecipe(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		recipes = append(recipes, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, c := range recipes {
+		var doc domain.RecipeDoc
+		if err := json.Unmarshal(c.Recipe, &doc); err != nil {
+			return err
+		}
+		to, reason, ends := domain.RecipeEnd(in.CategoryCode, in.PhasePath, values, doc)
+		if !ends {
+			continue
+		}
+		var errText *string
+		if reason != "" {
+			errText = &reason
+		}
+		if _, err := applyRecipeStatus(ctx, tx, tenantID, c, to, errText, "process-message:"+messageID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recordDeviationMessage turns a setpoint deviation into a process message of category deviation, so it
+// reaches the batch record, quality and the other destinations of that category like any deviation (BR-25.13).
+// The message is idempotent by the recipe, the setpoint and the time of the write, so a report the connector
+// repeats does not make a second one.
+func recordDeviationMessage(ctx context.Context, tx pgx.Tx, tenantID string, c ControlRecipe, w EdgeWrite, at time.Time, cat domain.Category) error {
+	if c.OrderID == "" {
+		return nil
+	}
+	values := []domain.Characteristic{
+		{Name: "setpoint", Type: "numeric", Value: w.Value.String()},
+		{Name: "node", Type: "text", Value: w.Node},
+	}
+	if w.Readback != nil {
+		values = append(values, domain.Characteristic{Name: "readback", Type: "numeric", Value: w.Readback.String()})
+	} else {
+		values = append(values, domain.Characteristic{Name: "readback", Type: "text", Value: "none"})
+	}
+	in := domain.NewMessage{Source: domain.SourceEdge, SourceMessageID: fmt.Sprintf("recipe-deviation:%s:%s:%s:%d", c.ID, w.PhasePath, w.Node, at.UnixNano()),
+		CategoryCode: "deviation", OrderID: c.OrderID, PhasePath: w.PhasePath, OccurredAt: at, Values: values}
+	now := time.Now().UTC()
+	raw, deliveries, status, vals, err := prepareProcessMessage(in, cat, now)
+	if err != nil {
+		return err
+	}
+	_, err = ingestProcessMessageTx(ctx, tx, tenantID, in, cat, now, raw, deliveries, status, vals)
+	return err
 }

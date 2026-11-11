@@ -101,15 +101,29 @@ func deliveryNotFound() error {
 // writes nothing (FR-25.17: idempotent by source message id).
 func (s *Postgres) IngestProcessMessage(ctx context.Context, in domain.NewMessage, cat domain.Category, now time.Time) (ProcessIngest, error) {
 	p, _ := tenant.FromContext(ctx)
-	values := in.Values
-	if values == nil {
-		values = []domain.Characteristic{}
-	}
-	raw, err := json.Marshal(values)
+	raw, deliveries, status, values, err := prepareProcessMessage(in, cat, now)
 	if err != nil {
 		return ProcessIngest{}, err
 	}
-	deliveries := make([]domain.Delivery, 0, len(cat.Destinations))
+	var out ProcessIngest
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = ingestProcessMessageTx(ctx, tx, p.TenantID, in, cat, now, raw, deliveries, status, values)
+		return err
+	})
+	return out, err
+}
+
+// prepareProcessMessage builds what storing a message needs: its characteristics as JSON, one delivery per
+// destination of the category (Kafka is delivered at commit, as the outbox row itself) and the rolled-up status.
+func prepareProcessMessage(in domain.NewMessage, cat domain.Category, now time.Time) (raw []byte, deliveries []domain.Delivery, status string, values []domain.Characteristic, err error) {
+	values = in.Values
+	if values == nil {
+		values = []domain.Characteristic{}
+	}
+	if raw, err = json.Marshal(values); err != nil {
+		return nil, nil, "", nil, err
+	}
 	for _, dest := range cat.Destinations {
 		at := now
 		d := domain.Delivery{Destination: dest, Status: domain.DeliveryPending, NextAttemptAt: &at}
@@ -118,56 +132,63 @@ func (s *Postgres) IngestProcessMessage(ctx context.Context, in domain.NewMessag
 		}
 		deliveries = append(deliveries, d)
 	}
-	status := domain.RollupStatus(deliveries)
+	return raw, deliveries, domain.RollupStatus(deliveries), values, nil
+}
+
+// ingestProcessMessageTx is IngestProcessMessage inside a transaction the caller owns, so another command (a
+// control recipe report that finds a deviation) can record its message with the rest of its changes. A new
+// message that is an end-of-batch message of a process control system also ends the recipe it names.
+func ingestProcessMessageTx(ctx context.Context, tx pgx.Tx, tenantID string, in domain.NewMessage, cat domain.Category, now time.Time,
+	raw []byte, deliveries []domain.Delivery, status string, values []domain.Characteristic) (ProcessIngest, error) {
+	p := tenant.Principal{TenantID: tenantID}
 	var out ProcessIngest
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		id := ids.New()
-		tag, err := tx.Exec(ctx, `insert into process_message (tenant_id, id, source, source_message_id, category_code, order_id, phase_path,
+	id := ids.New()
+	tag, err := tx.Exec(ctx, `insert into process_message (tenant_id, id, source, source_message_id, category_code, order_id, phase_path,
 				characteristics, occurred_at, received_at, status)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			on conflict (tenant_id, source, source_message_id) do nothing`,
-			p.TenantID, id, in.Source, in.SourceMessageID, in.CategoryCode, in.OrderID, in.PhasePath, raw, in.OccurredAt, now, status)
+		p.TenantID, id, in.Source, in.SourceMessageID, in.CategoryCode, in.OrderID, in.PhasePath, raw, in.OccurredAt, now, status)
+	if err != nil {
+		return out, err
+	}
+	if tag.RowsAffected() == 0 {
+		msgs, err := loadProcessMessages(ctx, tx, p.TenantID, "source = $2 and source_message_id = $3", []any{in.Source, in.SourceMessageID}, 1)
 		if err != nil {
-			return err
+			return out, err
 		}
-		if tag.RowsAffected() == 0 {
-			msgs, err := loadProcessMessages(ctx, tx, p.TenantID, "source = $2 and source_message_id = $3", []any{in.Source, in.SourceMessageID}, 1)
-			if err != nil {
-				return err
-			}
-			if len(msgs) == 0 {
-				return fmt.Errorf("process message %s/%s vanished during replay", in.Source, in.SourceMessageID)
-			}
-			out = ProcessIngest{Message: msgs[0], Duplicate: true}
-			return nil
+		if len(msgs) == 0 {
+			return out, fmt.Errorf("process message %s/%s vanished during replay", in.Source, in.SourceMessageID)
 		}
-		for _, d := range deliveries {
-			if _, err := tx.Exec(ctx, `insert into process_message_delivery (tenant_id, message_id, destination, status, attempts, next_attempt_at, delivered_at)
+		return ProcessIngest{Message: msgs[0], Duplicate: true}, nil
+	}
+	for _, d := range deliveries {
+		if _, err := tx.Exec(ctx, `insert into process_message_delivery (tenant_id, message_id, destination, status, attempts, next_attempt_at, delivered_at)
 				values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, id, d.Destination, d.Status, d.Attempts, d.NextAttemptAt, d.DeliveredAt); err != nil {
-				return err
-			}
+			return out, err
 		}
-		if err := enqueue(ctx, tx, processAggregate, id, sfevents.ProcessMessageReceived, p.TenantID, sfevents.ProcessMessageReceivedData{
-			MessageID: id, Source: in.Source, SourceMessageID: in.SourceMessageID, CategoryCode: in.CategoryCode, OrderID: in.OrderID,
-			PhasePath: in.PhasePath, Destinations: cat.Destinations, Values: values, OutOfLimit: domain.AnyOutOfLimit(values), OccurredAt: in.OccurredAt,
+	}
+	if err := enqueue(ctx, tx, processAggregate, id, sfevents.ProcessMessageReceived, p.TenantID, sfevents.ProcessMessageReceivedData{
+		MessageID: id, Source: in.Source, SourceMessageID: in.SourceMessageID, CategoryCode: in.CategoryCode, OrderID: in.OrderID,
+		PhasePath: in.PhasePath, Destinations: cat.Destinations, Values: values, OutOfLimit: domain.AnyOutOfLimit(values), OccurredAt: in.OccurredAt,
+	}); err != nil {
+		return out, err
+	}
+	if status == domain.MessageDelivered {
+		if err := enqueue(ctx, tx, processAggregate, id, sfevents.ProcessMessageDelivered, p.TenantID, sfevents.ProcessMessageDeliveredData{
+			MessageID: id, CategoryCode: in.CategoryCode, OrderID: in.OrderID,
 		}); err != nil {
-			return err
+			return out, err
 		}
-		if status == domain.MessageDelivered {
-			if err := enqueue(ctx, tx, processAggregate, id, sfevents.ProcessMessageDelivered, p.TenantID, sfevents.ProcessMessageDeliveredData{
-				MessageID: id, CategoryCode: in.CategoryCode, OrderID: in.OrderID,
-			}); err != nil {
-				return err
-			}
-		}
-		msgs, err := loadProcessMessages(ctx, tx, p.TenantID, "id = $2::uuid", []any{id}, 1)
-		if err != nil {
-			return err
-		}
-		out = ProcessIngest{Message: msgs[0]}
-		return nil
-	})
-	return out, err
+	}
+	if err := endRecipesFromMessage(ctx, tx, p.TenantID, id, in, values); err != nil {
+		return out, err
+	}
+	msgs, err := loadProcessMessages(ctx, tx, p.TenantID, "id = $2::uuid", []any{id}, 1)
+	if err != nil {
+		return out, err
+	}
+	out = ProcessIngest{Message: msgs[0]}
+	return out, nil
 }
 
 // StoredProcessMessage returns the message stored under (source, sourceMessageID), if any. The
