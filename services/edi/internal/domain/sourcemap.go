@@ -98,6 +98,7 @@ type SourceOrderLine struct {
 	LineNo    int             `json:"lineNo"`
 	Unit      string          `json:"unit"`
 	UnitPrice decimal.Decimal `json:"unitPrice"`
+	Quantity  decimal.Decimal `json:"quantity"`
 }
 
 type SourceOrder struct {

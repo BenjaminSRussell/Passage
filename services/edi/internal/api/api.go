@@ -27,6 +27,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/cxmlmap"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -110,7 +111,9 @@ type API struct {
 	AccessPoint AccessPoint
 	// Requisitions creates the requisition of a returned punchout cart in purchasing (35-3); nil answers 503.
 	Requisitions Requisitions
-	// PunchoutHTTP sends the cXML PunchOutSetupRequest; nil uses a client with a 10 second timeout that follows no redirect.
+	// CXMLMapper puts inbound cXML confirmations and ship notices onto purchasing and receiving (35-4); nil leaves them recorded only.
+	CXMLMapper *cxmlmap.Mapper
+	// PunchoutHTTP sends the cXML PunchOutSetupRequest and the outbound cXML documents; nil uses a client with a 10 second timeout that follows no redirect.
 	PunchoutHTTP *http.Client
 }
 
@@ -164,6 +167,9 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/sessions/{id}:create-requisition", a.createRequisitionFromSession)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/cxml", a.getPartnerCXML)
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/cxml", a.putPartnerCXML)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/cxml/outbound", a.getCXMLOutbound)
+		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/cxml/outbound", a.putCXMLOutbound)
+		r.With(authz.RequireDuty("edi.operate")).Post("/partners/{id}/cxml:send", a.sendCXML)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/punchout", a.getPunchoutSupplier)
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/punchout", a.putPunchoutSupplier)
 		r.With(authz.RequireDuty("edi.self-billing.reconcile")).Post("/self-billing:match", a.selfBillingMatch)

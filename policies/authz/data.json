@@ -1328,7 +1328,8 @@
       {"resource": "/edi/v1/partners/*/auto-outbound", "methods": ["GET", "PUT"]},
       {"resource": "/edi/v1/partners/*/self-billing", "methods": ["GET", "PUT"]},
       {"resource": "/edi/v1/partners/*/punchout", "methods": ["GET", "PUT"]},
-      {"resource": "/edi/v1/partners/*/cxml", "methods": ["GET", "PUT"]}
+      {"resource": "/edi/v1/partners/*/cxml", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/partners/*/cxml/outbound", "methods": ["GET", "PUT"]}
     ]},
     "edi.operate": {"permissions": [
       {"resource": "/edi/v1/inbound/edifact", "methods": ["POST"]},
@@ -1344,6 +1345,7 @@
       {"resource": "/edi/v1/messages/*:post", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/*/outbound", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/*/outbound:from-source", "methods": ["POST"]},
+      {"resource": "/edi/v1/partners/*/cxml:send", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/sla", "methods": ["GET"]}
     ]},
     "edi.pii.view": {"flag": true, "permissions": []},
@@ -3932,7 +3934,8 @@
       "fulfillment": ["fulfillment.shipment.read"],
       "billing": ["billing.invoice.read"],
       "sales": ["sales.order.lookup", "sales.channel.intake"],
-      "purchasing": ["procurement.requisition.create"]
+      "purchasing": ["procurement.requisition.create", "procurement.purchase-order.inquire", "procurement.purchase-order.confirm"],
+      "receiving": ["receiving.asn.maintain"]
     },
     "fieldservice": {
       "dispatch": ["dispatch.run.create", "dispatch.run.read"]
@@ -3952,6 +3955,7 @@
     }
   },
   "service_principals": {
+    "edi-cxml": ["procurement.purchase-order.inquire", "procurement.purchase-order.confirm", "receiving.asn.maintain"],
     "edi-outbound": ["edi.outbound.from-event"],
     "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],

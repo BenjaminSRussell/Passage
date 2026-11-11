@@ -2560,6 +2560,11 @@ test_edi_b2b_routes_belong_to_their_duties if {
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/self-billing")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/punchout")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml/outbound")
+	allowed("edi.admin", "GET", "/edi/v1/partners/p1/cxml/outbound")
+	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/cxml/outbound")
+	allowed("edi.operate", "POST", "/edi/v1/partners/p1/cxml:send")
+	not allowed("edi.einvoice.operate", "POST", "/edi/v1/partners/p1/cxml:send")
 	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/auto-outbound")
 	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices")
 	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
@@ -2577,6 +2582,13 @@ test_edi_b2b_routes_belong_to_their_duties if {
 	allowed("edi.self-billing.reconcile", "POST", "/edi/v1/self-billing/disputes/d1:resolve")
 	allowed("edi.self-billing.reconcile", "POST", "/edi/v1/self-billing:sweep")
 	not allowed("edi.operate", "POST", "/edi/v1/self-billing/disputes/d1:resolve")
+}
+
+test_edi_cxml_grants_are_narrow if {
+	data.service_grants.edi.receiving == ["receiving.asn.maintain"]
+	"procurement.purchase-order.confirm" in data.service_grants.edi.purchasing
+	data.service_principals["edi-cxml"] == ["procurement.purchase-order.inquire", "procurement.purchase-order.confirm", "receiving.asn.maintain"]
+	not "procurement.purchase-order.approve" in data.service_grants.edi.purchasing
 }
 
 test_edi_requisition_grant_is_the_requester_duty_only if {

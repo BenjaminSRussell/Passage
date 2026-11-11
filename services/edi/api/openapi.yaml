@@ -823,8 +823,13 @@ paths:
   /edi/v1/messages/{id}:post:
     post:
       operationId: postMessage
-      summary: Post an inbound 850 or ORDERS to sales as an order
+      summary: Post an inbound 850 or ORDERS to sales as an order, or put an inbound cXML document onto purchasing or receiving
       description: >
+        For an inbound cXML document (35-4) the route puts it onto the service that owns the object, as service:edi-cxml: a ConfirmationRequest that accepts
+        the order as sent confirms the purchase order in purchasing, and a ShipNoticeRequest becomes the ASN of the purchase order in receiving; the order is
+        found by the orderID the OrderRequest was sent under. The message becomes POSTED. A rejected or changed line (EDI-0037), an orderID nothing was sent
+        under (EDI-0036), an invoice (EDI-0038: payables matches it against receipts) or a refusal by the service (EDI-0039) parks the message with that code
+        (422) and the route posts it again once the cause is fixed. The same mapping runs right after receipt on the public listener.
         Builds the sales intake order (channel EDI) from the stored canonical order, the partner's
         item cross-references and sales defaults, and places it with sales under the service grant
         edi to sales for sales.channel.intake, in the legal entity of the trade profile. The
@@ -1942,6 +1947,82 @@ paths:
             application/json:
               schema: { type: object, properties: { partnerId: { type: string }, endpointId: { type: string }, url: { type: string }, networkIdentity: { type: string } } }
         '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/cxml/outbound:
+    put:
+      operationId: putCXMLOutbound
+      summary: Set where outbound cXML documents are posted and who we are on the network
+      description: >
+        The network's https URL, our NetworkId identity, the reference of our shared secret in EDI_SECRETS_DIR (never the secret itself) and the vendor this
+        partner is for: only purchase orders of that vendor are sent to it. 409 EDI-0040 when the partner has no cXML identity yet.
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outboundUrl, ourIdentity]
+              properties:
+                outboundUrl: { type: string, description: 'https URL of the network endpoint' }
+                ourIdentity: { type: string, maxLength: 80 }
+                outboundSecretRef: { type: string }
+                vendorId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getCXMLOutbound
+      summary: Read the outbound cXML settings
+      x-passage-duty: edi.admin
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/partners/{id}/cxml:send:
+    post:
+      operationId: sendCXML
+      summary: Build, record and post one outbound cXML document
+      description: >
+        OrderRequest from a purchase order (sourceId: the PO; it must be APPROVED or CONFIRMED and of the partner's vendor, and is remembered under its number
+        as the orderID), ConfirmationRequest from a sales order, ShipNoticeRequest from a shipment, InvoiceDetailRequest from an invoice (the partner's customer).
+        The document is recorded as an OUT interchange (the shared secret is redacted in the stored copy), posted to the network and the network's Response
+        recorded: 201 when it answers 200 or 201; otherwise 502 EDI-0041 with the document recorded FAILED (a document that failed is sent again as a new one).
+        409 EDI-0040 without outbound settings.
+      x-passage-duty: edi.operate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentType, sourceId]
+              properties:
+                documentType: { type: string, enum: [OrderRequest, ConfirmationRequest, ShipNoticeRequest, InvoiceDetailRequest] }
+                sourceId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Sent and accepted
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
   /cxml/v1/{endpoint}:
     servers:
       - url: https://as2.{env}.passage.dev

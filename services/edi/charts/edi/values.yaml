@@ -13,7 +13,9 @@ resources:
 serviceMonitor: { enabled: false, interval: 30s }
 # Outbound 856 and 810 are read from their owning services under a signed service grant.
 serviceIdentity: { signingKeySecret: "", keyId: "" }
-sources: { fulfillmentUrl: "", billingUrl: "", salesUrl: "", purchasingUrl: "" }
+# purchasingUrl and receivingUrl together switch on the cXML exchange (#35, 35-4): inbound confirmations confirm purchase orders and inbound
+# ship notices become receiving ASNs, as service:edi-cxml. The purchasing and receiving charts must list edi's public key.
+sources: { fulfillmentUrl: "", billingUrl: "", salesUrl: "", purchasingUrl: "", receivingUrl: "" }
 # The outbound consumer (#35, 35-1, args [consume]): sends the 856, DESADV, 810 or INVOIC of fulfillment's asn.issued and billing's
 # invoice.posted to the partners with auto-outbound sets. It exits at start unless service:edi-outbound is seeded in the service
 # principal table, and needs serviceIdentity and the three source URLs like the API. Off by default, like the other consumers, until

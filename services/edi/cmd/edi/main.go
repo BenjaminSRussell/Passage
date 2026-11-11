@@ -26,6 +26,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/api"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/cxmlmap"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/poster"
@@ -110,8 +111,14 @@ func run() error {
 		src := sources.New(signer, fulfillmentURL, billingURL, salesURL, nil)
 		a.Sources, a.Intake = src, src
 		// A returned punchout cart becomes a requisition in purchasing when its URL is set (35-3).
-		if purchasingURL := os.Getenv("EDI_PURCHASING_URL"); purchasingURL != "" {
+		purchasingURL, receivingURL := os.Getenv("EDI_PURCHASING_URL"), os.Getenv("EDI_RECEIVING_URL")
+		if purchasingURL != "" {
 			a.Requisitions = src.WithPurchasing(purchasingURL)
+		}
+		// The cXML exchange (35-4) reads and confirms purchase orders in purchasing and creates ASNs in receiving.
+		if purchasingURL != "" && receivingURL != "" {
+			src.WithReceiving(receivingURL)
+			a.CXMLMapper = &cxmlmap.Mapper{Store: st, Purchasing: src, Receiving: src}
 		}
 	}
 	tc, err := loadTransportConfig(os.Getenv, addr)
