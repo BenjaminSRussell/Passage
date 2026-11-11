@@ -846,7 +846,8 @@ components:
         document_date: { $ref: "#/components/schemas/Date" }
         tax_date: { $ref: "#/components/schemas/Date" }
         ship_from_country: { type: string }
-        provider: { type: string, description: External provider name; empty uses the internal engine. }
+        document_ref: { type: string, description: "Names the document at an external provider so a later commit or void can find it; without it a provider only quotes." }
+        provider: { type: string, enum: [avalara, vertex], description: External provider name (avalara or vertex, when configured); empty uses the internal engine. }
         stored_config: { type: boolean, description: Use the persisted tax configuration (GET /v1/tax/config) instead of an inline config. }
         party:
           type: object

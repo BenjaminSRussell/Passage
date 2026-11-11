@@ -16,6 +16,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/api"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/tax/internal/provider"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/store"
 	"github.com/BenjaminSRussell/passage/services/tax/migrations"
 )
@@ -59,8 +60,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	providers, err := providersFromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("tax providers: %w", err)
+	}
 	st := store.New(pool)
-	a := api.New(pool, map[string]domain.TaxProvider{}, providerTimeout(getenv)).WithStore(st).WithConfigStore(st)
+	a := api.New(pool, providers, providerTimeout(getenv)).WithStore(st).WithConfigStore(st)
 	gl, err := ledgerclient.FromEnv(getenv, "tax")
 	if err != nil {
 		return fmt.Errorf("ledger client: %w", err)
@@ -79,6 +84,28 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+// providersFromEnv configures the external providers whose URL is set: "avalara" (AVALARA_URL and its credentials) and "vertex"
+// (VERTEX_URL and its credentials). A provider with a URL but missing credentials stops the service at start rather than failing every
+// calculation that names it.
+func providersFromEnv(getenv func(string) string) (map[string]domain.TaxProvider, error) {
+	out := map[string]domain.TaxProvider{}
+	av, err := provider.AvalaraFromEnv(getenv)
+	if err != nil {
+		return nil, err
+	}
+	if av != nil {
+		out[av.Name()] = av
+	}
+	vx, err := provider.VertexFromEnv(getenv)
+	if err != nil {
+		return nil, err
+	}
+	if vx != nil {
+		out[vx.Name()] = vx
+	}
+	return out, nil
 }
 
 func providerTimeout(getenv func(string) string) time.Duration {

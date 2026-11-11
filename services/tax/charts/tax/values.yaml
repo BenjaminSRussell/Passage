@@ -3,6 +3,11 @@ databaseSecret: tax-db
 migrateOnStart: false
 ledgerUrl: ""
 providerTimeoutMs: 2000
+# External tax providers. A provider is on when its url is set; its credentials come from the named Secret (Vault-synced),
+# never from values. Avalara keys: account-id, license-key. Vertex keys: client-id, client-secret, username, password.
+providers:
+  avalara: { url: "", companyCode: "", secret: tax-avalara }
+  vertex: { url: "", tokenUrl: "", company: "", secret: tax-vertex }
 replicaCount: 2
 resources:
   requests: { cpu: 50m, memory: 64Mi }
