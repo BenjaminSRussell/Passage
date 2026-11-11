@@ -116,6 +116,20 @@ BEGIN
 END
 $$;
 
+-- A caller sees and writes only the registry entries and FX adjustments of legal entities in its scope, like the journal entries.
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['ic_entity', 'ic_fx_adjustment'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = t AND policyname = t || '_legal_entity_scope') THEN
+      EXECUTE format($p$CREATE POLICY %I ON %I AS RESTRICTIVE
+        USING (current_setting('passage.legal_entity_scopes', true) = '*'
+               OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')))$p$, t || '_legal_entity_scope', t);
+    END IF;
+  END LOOP;
+END
+$$;
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN

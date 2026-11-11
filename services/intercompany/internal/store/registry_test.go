@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	regLeA = "00000000-0000-0000-0000-0000000000b1"
-	regLeB = "00000000-0000-0000-0000-0000000000b2"
+	// The legal entity of testkit.Ctx, so the registry rows are in the caller's scope.
+	regLeA = "00000000-0000-0000-0000-0000000000e1"
+	regLeB = "00000000-0000-0000-0000-0000000000e1"
 )
 
 // The registry, the matrix, the prices and the settings work as the application role, and each tenant sees only its own.
