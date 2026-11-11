@@ -190,3 +190,29 @@ func TestPoll_AnOversizedFileIsParkedAndTheInboxIsCapped(t *testing.T) {
 		t.Fatalf("a full inbox: %+v, %v", res, err)
 	}
 }
+
+// listingServer lists names the way a misbehaving server could, with path separators in them.
+type listingServer struct {
+	memServer
+	names []string
+}
+
+func (l *listingServer) List(context.Context, string) ([]string, error) { return l.names, nil }
+
+func TestPoll_TakesOnlyPlainFileNames(t *testing.T) {
+	srv := &listingServer{memServer: memServer{files: map[string]string{
+		"/in/ok.xml":             fmt.Sprintf(camtFile, 1, 1),
+		"/in/../elsewhere/x.xml": fmt.Sprintf(camtFile, 2, 2),
+	}}, names: []string{"ok.xml", "../elsewhere/x.xml", `..\x.xml`}}
+	imp := &fakeImporter{seen: map[string]bool{}}
+	res, err := Poll(context.Background(), srv, imp, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Imported != 1 || res.Failed != 0 {
+		t.Fatalf("result: %+v", res)
+	}
+	if _, ok := srv.files["/in/../elsewhere/x.xml"]; !ok {
+		t.Fatal("a name with a separator was read and moved")
+	}
+}

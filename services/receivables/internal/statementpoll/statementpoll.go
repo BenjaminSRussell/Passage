@@ -75,7 +75,9 @@ func Poll(ctx context.Context, c Client, imp Importer, src Source) (Result, erro
 	}
 	var files []string
 	for _, n := range names {
-		if strings.EqualFold(path.Ext(n), extension) && !strings.HasPrefix(n, ".") {
+		// Only a plain file name is taken: a name with a separator (from a misbehaving server) would read or move a file outside
+		// the source's directories.
+		if strings.EqualFold(path.Ext(n), extension) && !strings.HasPrefix(n, ".") && !strings.ContainsAny(n, `/\`) {
 			files = append(files, n)
 		}
 	}
