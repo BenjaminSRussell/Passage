@@ -78,8 +78,28 @@ func PlanConfirmation(c CXMLCanonical) (orderID string, park *Park) {
 		return "", &Park{Code: CodeCXMLNeedsReview, Detail: "the confirmation is " + strconv.Quote(c.Purpose) + ", not an acceptance, and lists no lines"}
 	}
 	for _, l := range c.Lines {
-		if !strings.EqualFold(l.Status, "accept") {
-			return "", &Park{Code: CodeCXMLNeedsReview, Detail: "line " + l.Line + " is " + strconv.Quote(l.Status) + ", not accepted as ordered; the buyer decides"}
+		statuses := l.Statuses
+		if len(statuses) == 0 {
+			statuses = []CXMLStatus{{Type: l.Status, Quantity: l.Quantity}}
+		}
+		accepted := decimal.Zero
+		for _, st := range statuses {
+			if !strings.EqualFold(st.Type, "accept") {
+				return "", &Park{Code: CodeCXMLNeedsReview, Detail: "line " + l.Line + " is " + strconv.Quote(st.Type) + ", not accepted as ordered; the buyer decides"}
+			}
+			q := st.Quantity
+			if q == "" {
+				q = l.Quantity
+			}
+			d, err := decimal.NewFromString(strings.TrimSpace(q))
+			if err != nil {
+				return "", &Park{Code: CodeCXMLMappingInvalid, Detail: "line " + l.Line + " has a status with the quantity " + strconv.Quote(q)}
+			}
+			accepted = accepted.Add(d)
+		}
+		ordered, err := decimal.NewFromString(strings.TrimSpace(l.Quantity))
+		if err != nil || !accepted.Equal(ordered) {
+			return "", &Park{Code: CodeCXMLNeedsReview, Detail: "line " + l.Line + " accepts " + accepted.String() + " of " + strings.TrimSpace(l.Quantity) + "; the buyer decides"}
 		}
 	}
 	return c.OrderIDs[0], nil
@@ -103,4 +123,35 @@ func addQty(a, b string) string {
 	x, _ := decimal.NewFromString(a)
 	y, _ := decimal.NewFromString(b)
 	return x.Add(y).String()
+}
+
+// POLineQty is an open purchase order line as the confirmation is checked against it.
+type POLineQty struct {
+	LineNo int
+	Qty    string
+}
+
+// CheckConfirmationCoversOrder holds an accepting confirmation to the purchase order it confirms: when it lists items, every open line
+// of the order must be listed, with the ordered quantity (a confirmation that skips a line or states another quantity confirms
+// something else than the order). A confirmation with no items accepts the whole order and is not checked.
+func CheckConfirmationCoversOrder(c CXMLCanonical, open []POLineQty) *Park {
+	if len(c.Lines) == 0 {
+		return nil
+	}
+	listed := map[string]string{}
+	for _, l := range c.Lines {
+		listed[strings.TrimSpace(l.Line)] = strings.TrimSpace(l.Quantity)
+	}
+	for _, o := range open {
+		q, ok := listed[strconv.Itoa(o.LineNo)]
+		if !ok {
+			return &Park{Code: CodeCXMLNeedsReview, Detail: "the confirmation does not list line " + strconv.Itoa(o.LineNo) + " of the order; the buyer decides"}
+		}
+		want, err1 := decimal.NewFromString(o.Qty)
+		got, err2 := decimal.NewFromString(q)
+		if err1 != nil || err2 != nil || !want.Equal(got) {
+			return &Park{Code: CodeCXMLNeedsReview, Detail: "the confirmation states " + q + " for line " + strconv.Itoa(o.LineNo) + " but the order has " + o.Qty + "; the buyer decides"}
+		}
+	}
+	return nil
 }

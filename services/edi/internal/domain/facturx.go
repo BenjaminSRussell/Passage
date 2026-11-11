@@ -221,10 +221,16 @@ func FacturXPDF(cii string, created time.Time) ([]byte, error) {
 	cur := settle.val("InvoiceCurrencyCode")
 	sum := settle.first("SpecifiedTradeSettlementHeaderMonetarySummation")
 
-	var lines []string
+	// The summary runs over as many A4 pages as it needs: a line that does not fit under the bottom margin starts the next page.
+	pages := [][]string{{}}
 	y := 800
 	put := func(size int, s string) {
-		lines = append(lines, fmt.Sprintf("BT /F1 %d Tf 50 %d Td (%s) Tj ET", size, y, pdfText(s)))
+		if y < 60 {
+			pages = append(pages, []string{})
+			y = 800
+		}
+		last := len(pages) - 1
+		pages[last] = append(pages[last], fmt.Sprintf("BT /F1 %d Tf 50 %d Td (%s) Tj ET", size, y, pdfText(s)))
 		y -= size + 6
 	}
 	put(18, title+" "+number)
@@ -296,22 +302,28 @@ func FacturXPDF(cii string, created time.Time) ([]byte, error) {
 		return fmt.Sprintf("<< %s /Length %d >>\nstream\n%s\nendstream", dict, len(data), data)
 	}
 	out.WriteString("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
-	obj("<< /Type /Catalog /Pages 2 0 R /Metadata 5 0 R /AF [7 0 R] /Names << /EmbeddedFiles << /Names [(factur-x.xml) 7 0 R] >> >> /MarkInfo << /Marked true >> >>")
-	obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-	obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 6 0 R >> >> >>")
-	obj(stream("", strings.Join(lines, "\n")))
+	kids := make([]string, len(pages))
+	for i := range pages {
+		kids[i] = fmt.Sprintf("%d 0 R", 8+2*i)
+	}
+	obj("<< /Type /Catalog /Pages 2 0 R /Metadata 3 0 R /AF [5 0 R] /Names << /EmbeddedFiles << /Names [(factur-x.xml) 5 0 R] >> >> /MarkInfo << /Marked true >> >>")
+	obj(fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), len(pages)))
 	obj(stream("/Type /Metadata /Subtype /XML", xmp))
 	obj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
-	obj("<< /Type /Filespec /F (factur-x.xml) /UF (factur-x.xml) /Desc (Factur-X invoice) /AFRelationship /Data /EF << /F 8 0 R /UF 8 0 R >> >>")
+	obj("<< /Type /Filespec /F (factur-x.xml) /UF (factur-x.xml) /Desc (Factur-X invoice) /AFRelationship /Data /EF << /F 6 0 R /UF 6 0 R >> >>")
 	obj(stream(fmt.Sprintf("/Type /EmbeddedFile /Subtype /text#2Fxml /Params << /Size %d /ModDate (D:%s) >>", len(cii), stamp), cii))
 	obj(fmt.Sprintf("<< /Producer (Passage EDI) /CreationDate (D:%s) /ModDate (D:%s) >>", stamp, stamp))
+	for i, lines := range pages {
+		obj(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents %d 0 R /Resources << /Font << /F1 4 0 R >> >> >>", 9+2*i))
+		obj(stream("", strings.Join(lines, "\n")))
+	}
 	xref := out.Len()
 	fmt.Fprintf(&out, "xref\n0 %d\n0000000000 65535 f \n", len(offsets)+1)
 	for _, o := range offsets {
 		fmt.Fprintf(&out, "%010d 00000 n \n", o)
 	}
 	id := fmt.Sprintf("%x", fnv64(cii))
-	fmt.Fprintf(&out, "trailer\n<< /Size %d /Root 1 0 R /Info 9 0 R /ID [<%s%s> <%s%s>] >>\nstartxref\n%d\n%%%%EOF\n", len(offsets)+1, id, id, id, id, xref)
+	fmt.Fprintf(&out, "trailer\n<< /Size %d /Root 1 0 R /Info 7 0 R /ID [<%s%s> <%s%s>] >>\nstartxref\n%d\n%%%%EOF\n", len(offsets)+1, id, id, id, id, xref)
 	return out.Bytes(), nil
 }
 

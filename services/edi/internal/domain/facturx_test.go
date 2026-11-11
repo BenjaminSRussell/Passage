@@ -89,3 +89,34 @@ func TestFacturXPDF_EmbedsTheXMLAndNamesTheProfile(t *testing.T) {
 }
 
 func fmtSscan(s string, v *int) (int, error) { return fmt.Sscanf(s, "%d", v) }
+
+func TestFacturXPDF_RunsOverToMorePagesInsteadOfDroppingLines(t *testing.T) {
+	inv := facturxInvoice()
+	inv.Lines = nil
+	for i := 1; i <= 120; i++ {
+		inv.Lines = append(inv.Lines, UBLLine{ID: fmt.Sprint(i), Name: fmt.Sprintf("Part number %03d", i), UnitCode: "C62", Quantity: dec("1"), UnitPrice: dec("1"), Category: "S", Percent: dec("19")})
+	}
+	inv.AllowanceCharges = nil
+	doc, issues := BuildCII(inv)
+	if len(issues) != 0 {
+		t.Fatalf("issues: %+v", issues)
+	}
+	pdf, err := FacturXPDF(doc, time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(pdf, []byte("Part number 001")) || !bytes.Contains(pdf, []byte("Part number 120")) || !bytes.Contains(pdf, []byte("Amount due")) {
+		t.Fatal("a line or the totals were dropped")
+	}
+	if n := bytes.Count(pdf, []byte("/Type /Page ")); n < 3 {
+		t.Fatalf("120 lines need more than %d pages", n)
+	}
+	if !bytes.Contains(pdf, []byte(fmt.Sprintf("/Count %d", bytes.Count(pdf, []byte("/Type /Page "))))) {
+		t.Fatal("the page count does not match the pages")
+	}
+	var xref int
+	idx := bytes.LastIndex(pdf, []byte("startxref\n"))
+	if _, err := fmtSscan(string(pdf[idx+len("startxref\n"):]), &xref); err != nil || !bytes.HasPrefix(pdf[xref:], []byte("xref\n")) {
+		t.Fatalf("startxref: %v", err)
+	}
+}

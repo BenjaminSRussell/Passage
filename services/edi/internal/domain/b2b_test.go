@@ -201,6 +201,11 @@ func TestEInvoiceFromBilling_DiscountChargesAndMultipleRates(t *testing.T) {
 	if r := lineRate(dec("3.33"), dec("0.63")); !r.Equal(dec("19")) {
 		t.Fatalf("rate %s", r)
 	}
+	for _, c := range []struct{ net, tax, want string }{{"10.00", "0.21", "2.1"}, {"10.00", "0.81", "8.1"}, {"10.00", "0.09", "0.9"}, {"100", "7", "7"}, {"100", "19", "19"}, {"200", "11", "5.5"}} {
+		if r := lineRate(dec(c.net), dec(c.tax)); !r.Equal(dec(c.want)) {
+			t.Fatalf("rate of %s tax on %s is %s, want %s", c.tax, c.net, r, c.want)
+		}
+	}
 	if r := lineRate(dec("10"), dec("0.5")); !r.Equal(dec("5")) {
 		t.Fatalf("rate %s", r)
 	}
@@ -213,5 +218,60 @@ func TestEInvoiceFromBilling_DiscountChargesAndMultipleRates(t *testing.T) {
 	// A hook mandate without a generator refuses to build.
 	if _, is := DefaultMandates()[MandateMXCFDI].Build(doc); len(is) != 1 || is[0].Code != CodeMandateHook {
 		t.Fatalf("hook: %+v", is)
+	}
+}
+
+func TestRedactCXMLSecret_FindsTheEscapedSecret(t *testing.T) {
+	secret := `p@ss&word<123>"'`
+	doc, err := BuildCXMLOrderRequest(CXMLCredentials{From: "A", To: "B", Secret: secret}, "p1", time.Now(), CXMLOrder{Number: "PO-1", Currency: "USD", Total: "8.00",
+		Lines: []CXMLOrderLine{{LineNo: 1, ProductID: "x", Qty: "1", Unit: "EA", UnitPrice: "8.00"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(doc, "p@ss&amp;word") {
+		t.Fatalf("the sent copy carries the escaped secret: %s", doc)
+	}
+	stored := RedactCXMLSecret(doc)
+	for _, leak := range []string{"p@ss", "word", "&amp;", "123"} {
+		if strings.Contains(stored, leak) {
+			t.Fatalf("stored copy leaks %q: %s", leak, stored)
+		}
+	}
+	if !strings.Contains(stored, "[redacted]") {
+		t.Fatal("no placeholder")
+	}
+}
+
+func TestPlanConfirmation_ReadsEveryStatusAndTheOrderedQuantity(t *testing.T) {
+	item := func(qty string, statuses ...CXMLStatus) CXMLCanonical {
+		return CXMLCanonical{DocType: "ConfirmationRequest", OrderIDs: []string{"PO-1"}, Lines: []CXMLLine{{Line: "1", Quantity: qty, Status: statuses[0].Type, Statuses: statuses}}}
+	}
+	if _, p := PlanConfirmation(item("10", CXMLStatus{"accept", "10"})); p != nil {
+		t.Fatalf("a full acceptance: %+v", p)
+	}
+	if _, p := PlanConfirmation(item("10", CXMLStatus{"accept", "6"}, CXMLStatus{"accept", "4"})); p != nil {
+		t.Fatalf("accepted in two parts: %+v", p)
+	}
+	// A backorder split: the first status accepts, the second backorders the rest.
+	if _, p := PlanConfirmation(item("10", CXMLStatus{"accept", "6"}, CXMLStatus{"backordered", "4"})); p == nil || p.Code != CodeCXMLNeedsReview {
+		t.Fatalf("a backorder split: %+v", p)
+	}
+	// Accepted less than ordered.
+	if _, p := PlanConfirmation(item("10", CXMLStatus{"accept", "6"})); p == nil {
+		t.Fatal("6 of 10 accepted confirms nothing")
+	}
+	// The order has two open lines but the confirmation lists one.
+	c := item("10", CXMLStatus{"accept", "10"})
+	if p := CheckConfirmationCoversOrder(c, []POLineQty{{1, "10"}, {2, "5"}}); p == nil || p.Code != CodeCXMLNeedsReview {
+		t.Fatalf("a missing line: %+v", p)
+	}
+	if p := CheckConfirmationCoversOrder(c, []POLineQty{{1, "12"}}); p == nil {
+		t.Fatal("another quantity")
+	}
+	if p := CheckConfirmationCoversOrder(c, []POLineQty{{1, "10"}}); p != nil {
+		t.Fatalf("covers the order: %+v", p)
+	}
+	if p := CheckConfirmationCoversOrder(CXMLCanonical{}, []POLineQty{{1, "10"}}); p != nil {
+		t.Fatal("a header-only acceptance accepts the order")
 	}
 }

@@ -743,7 +743,8 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 		"fulfillment": ["fulfillment.shipment.read"],
 		"billing": ["billing.invoice.read"],
 		"sales": ["sales.order.lookup", "sales.channel.intake"],
-		"purchasing": ["procurement.requisition.create"],
+		"purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
+		"receiving": ["receiving.asn.maintain"],
 	}
 	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
@@ -2609,13 +2610,28 @@ test_edi_b2b_routes_belong_to_their_duties if {
 
 test_edi_cxml_grants_are_narrow if {
 	data.service_grants.edi.receiving == ["receiving.asn.maintain"]
-	"procurement.purchase-order.confirm" in data.service_grants.edi.purchasing
-	data.service_principals["edi-cxml"] == ["procurement.purchase-order.inquire", "procurement.purchase-order.confirm", "receiving.asn.maintain"]
-	not "procurement.purchase-order.approve" in data.service_grants.edi.purchasing
+	data.service_principals["edi-cxml"] == ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"]
+	every duty in ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"] {
+		data.duties[duty].service_only
+	}
+	allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:confirm")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:approve")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:reject")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders:reprice")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/acknowledgements/a1:approve")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/acknowledgements/a1:decline")
+	allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders/o1")
+	not allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders")
+	not allowed("procurement.purchase-order.lookup", "POST", "/v1/procurement/purchase-orders/o1:confirm")
+	# edi's grants and principal hold none of the duties that approve, reject or reprice.
+	every duty in ["procurement.purchase-order.confirm", "procurement.purchase-order.inquire", "procurement.purchase-order.maintain"] {
+		not duty in data.service_grants.edi.purchasing
+		not duty in data.service_principals["edi-cxml"]
+	}
 }
 
 test_edi_requisition_grant_is_the_requester_duty_only if {
-	data.service_grants.edi.purchasing == ["procurement.requisition.create"]
+	"procurement.requisition.create" in data.service_grants.edi.purchasing
 	not allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r1:approve")
 }
 

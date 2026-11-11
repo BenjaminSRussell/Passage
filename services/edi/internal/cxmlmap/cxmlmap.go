@@ -137,6 +137,15 @@ func (m *Mapper) confirm(ctx context.Context, st store.PostState, c domain.CXMLC
 	if err != nil {
 		return Result{}, err
 	}
+	var open []domain.POLineQty
+	for _, l := range po.Lines {
+		if l.Status != "CANCELLED" {
+			open = append(open, domain.POLineQty{LineNo: l.LineNo, Qty: l.Qty})
+		}
+	}
+	if park := domain.CheckConfirmationCoversOrder(c, open); park != nil {
+		return Result{}, m.park(ctx, st.ID, *park)
+	}
 	// Confirmed already (the buyer confirmed by hand, or an earlier attempt got through before the answer was lost): nothing to do.
 	if po.ApprovalStatus != "CONFIRMED" {
 		err = m.Purchasing.ConfirmPurchaseOrder(cctx, o.LegalEntityID, o.PurchaseOrderID, po.RowVersion, st.ID)

@@ -237,6 +237,16 @@ func TestAutoOutbound_SecondPackingSlipSendsItsOwn856(t *testing.T) {
 	if n := countInterchanges(t, h, "OUT"); n != 2 {
 		t.Fatalf("one 856 per slip expected, got %d", n)
 	}
+	// Each 856 carries only its own slip's SSCC and delivery note.
+	for _, c := range []struct{ note, has, hasNot string }{{"SHP-0001-PS-1", "003456789012340019", "003456789012340026"}, {"SHP-0001-PS-2", "003456789012340026", "003456789012340019"}} {
+		var raw string
+		if err := pool.QueryRow(context.Background(), `select raw_payload from interchange where direction = 'OUT' and raw_payload like '%' || $1 || '%'`, c.note).Scan(&raw); err != nil {
+			t.Fatalf("856 of %s: %v", c.note, err)
+		}
+		if !strings.Contains(raw, c.has) || strings.Contains(raw, c.hasNot) {
+			t.Fatalf("856 of %s must list %s and not %s: %s", c.note, c.has, c.hasNot, raw)
+		}
+	}
 	var notes []string
 	rows, err := pool.Query(context.Background(), `select delivery_note from self_billing_shipment order by delivery_note`)
 	if err != nil {
@@ -252,5 +262,27 @@ func TestAutoOutbound_SecondPackingSlipSendsItsOwn856(t *testing.T) {
 	}
 	if strings.Join(notes, ",") != "SHP-0001-PS-1,SHP-0001-PS-2" {
 		t.Fatalf("delivery notes: %v", notes)
+	}
+}
+
+// An event that names a packing slip never falls back to the whole shipment, even when the slip lists no container.
+func TestAutoOutbound_SlipWithoutContainersSendsNothing(t *testing.T) {
+	f := newFake()
+	_, h, _, partner, handlers := autoSetup(t, f)
+	do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/auto-outbound", `{"transactionSets":["856"]}`, "edi.admin", srcScope)
+	evt := event(t, autosend.ASNIssuedType, autosend.FulfillmentSource, map[string]any{"shipment_id": srcShipment, "legal_entity_id": srcLE,
+		"packing_slip_id": "00000000-0000-0000-0000-0000000000d3", "packing_slip_number": "PS-3", "containers": []map[string]string{}})
+	if err := handlers[autosend.ASNIssuedType](consumerCtx(t), evt); err != nil {
+		t.Fatal(err)
+	}
+	if n := countInterchanges(t, h, "OUT"); n != 0 {
+		t.Fatalf("a slip with no container sends no 856, got %d", n)
+	}
+	bad := event(t, autosend.ASNIssuedType, autosend.FulfillmentSource, map[string]any{"shipment_id": srcShipment, "legal_entity_id": srcLE, "packing_slip_id": "not-an-id"})
+	if err := handlers[autosend.ASNIssuedType](consumerCtx(t), bad); err == nil {
+		t.Fatal("a malformed slip id is a permanent failure")
+	}
+	if n := countInterchanges(t, h, "OUT"); n != 0 {
+		t.Fatalf("no 856: %d", n)
 	}
 }

@@ -156,11 +156,16 @@ func (s *Store) ListEInvoices(ctx context.Context, status, mandate string, limit
 // claim and the answer of the access point. The access point must still deduplicate by invoice number for that takeover.
 const SubmitClaimTTL = 10 * time.Minute
 
+// SubmitClaim identifies one claim of the right to submit (the moment it was taken); release and mark need it, so a caller whose claim
+// was taken over cannot disturb the new holder.
+type SubmitClaim struct{ at time.Time }
+
 // ClaimEInvoiceSubmit takes the right to hand the e-invoice to the access point: a VALID or REJECTED one becomes SUBMITTING in one
 // statement, so of two concurrent :submit calls exactly one gets it and the other is told ErrEInvoiceState (409). A claim older than
 // SubmitClaimTTL (its caller died) can be taken over. The status the e-invoice came from is kept to return it to on a failure.
-func (s *Store) ClaimEInvoiceSubmit(ctx context.Context, id string) (EInvoice, error) {
+func (s *Store) ClaimEInvoiceSubmit(ctx context.Context, id string) (EInvoice, SubmitClaim, error) {
 	var out EInvoice
+	var token SubmitClaim
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		err := scanEInvoice(tx.QueryRow(ctx, `update einvoice set submit_from = case when status = 'SUBMITTING' then submit_from else status end,
 			status = 'SUBMITTING', submitting_at = now(), version = version + 1, updated_at = now()
@@ -176,24 +181,28 @@ func (s *Store) ClaimEInvoiceSubmit(ctx context.Context, id string) (EInvoice, e
 				return ErrEInvoiceState
 			}
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `select submitting_at from einvoice where id = $1`, id).Scan(&token.at)
 	})
-	return out, err
+	return out, token, err
 }
 
-// ReleaseEInvoiceClaim returns a SUBMITTING e-invoice to the status it was claimed from (the access point did not take it).
-func (s *Store) ReleaseEInvoiceClaim(ctx context.Context, id string) error {
+// ReleaseEInvoiceClaim returns a SUBMITTING e-invoice to the status it was claimed from (the access point did not take it). Only the
+// holder of the claim releases it: a claim taken over since belongs to its new holder and is left alone.
+func (s *Store) ReleaseEInvoiceClaim(ctx context.Context, id string, claim SubmitClaim) error {
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `update einvoice set status = coalesce(submit_from, 'VALID'), submitting_at = null, version = version + 1, updated_at = now()
-			where id = $1 and status = 'SUBMITTING'`, id)
+			where id = $1 and status = 'SUBMITTING' and submitting_at = $2`, id, claim.at)
 		return err
 	})
 }
 
 // MarkEInvoiceSubmitted records that the access point took the document (SUBMITTING to SUBMITTED) and publishes einvoice.submitted.
 // The reference is the network's.
-func (s *Store) MarkEInvoiceSubmitted(ctx context.Context, id, reference string) (EInvoice, error) {
-	return s.moveEInvoice(ctx, id, []string{"SUBMITTING"}, "SUBMITTED", reference, "", ediev.EInvoiceSubmitted)
+func (s *Store) MarkEInvoiceSubmitted(ctx context.Context, id string, claim SubmitClaim, reference string) (EInvoice, error) {
+	return s.moveEInvoiceHeld(ctx, id, []string{"SUBMITTING"}, &claim, "SUBMITTED", reference, "", ediev.EInvoiceSubmitted)
 }
 
 // MandateCustomer is a customer that is e-invoiced under a mandate when its invoice posts.
@@ -262,6 +271,11 @@ func (s *Store) RecordEInvoiceResponse(ctx context.Context, id string, accepted 
 }
 
 func (s *Store) moveEInvoice(ctx context.Context, id string, from []string, to, reference, text, eventType string) (EInvoice, error) {
+	return s.moveEInvoiceHeld(ctx, id, from, nil, to, reference, text, eventType)
+}
+
+// moveEInvoiceHeld is moveEInvoice that, with a claim, also requires the e-invoice to be held by that claim.
+func (s *Store) moveEInvoiceHeld(ctx context.Context, id string, from []string, claim *SubmitClaim, to, reference, text, eventType string) (EInvoice, error) {
 	var out EInvoice
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tid, err := tenantID(ctx)
@@ -277,6 +291,15 @@ func (s *Store) moveEInvoice(ctx context.Context, id string, from []string, to, 
 		}
 		if !ok {
 			return ErrEInvoiceState
+		}
+		if claim != nil {
+			var held bool
+			if err := tx.QueryRow(ctx, `select submitting_at = $2 from einvoice where id = $1`, id, claim.at).Scan(&held); err != nil {
+				return err
+			}
+			if !held {
+				return ErrEInvoiceState
+			}
 		}
 		if reference == "" {
 			reference = out.Reference

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -31,6 +32,9 @@ const (
 	CodeEInvoiceNotValid  = "EDI-0031"
 	roleSeller, roleBuyer = "SELLER", "BUYER"
 )
+
+// submitCallTimeout bounds one call to the access point; it is far below store.SubmitClaimTTL.
+const submitCallTimeout = 2 * time.Minute
 
 // AccessPoint hands one document to the network of a mandate and returns the network's reference for it.
 type AccessPoint interface {
@@ -326,18 +330,26 @@ func (a *API) SubmitEInvoice(ctx context.Context, id string) (store.EInvoice, er
 	default:
 		return store.EInvoice{}, httpx.NewProblem(http.StatusConflict, CodeEInvoiceState, "the e-invoice is already "+strings.ToLower(e.Status))
 	}
-	if e, err = a.store.ClaimEInvoiceSubmit(ctx, id); err != nil {
+	var claim store.SubmitClaim
+	if e, claim, err = a.store.ClaimEInvoiceSubmit(ctx, id); err != nil {
 		return store.EInvoice{}, eInvoiceProblem(err)
 	}
-	ref, err := a.AccessPoint.Submit(ctx, e.Mandate, e.Number, e.XML)
+	// The call to the access point is bounded well under the claim's life, so a claim that outlives it belongs to a caller that died.
+	callCtx, cancel := context.WithTimeout(ctx, submitCallTimeout)
+	ref, err := a.AccessPoint.Submit(callCtx, e.Mandate, e.Number, e.XML)
+	cancel()
 	if err != nil {
-		if rerr := a.store.ReleaseEInvoiceClaim(ctx, id); rerr != nil {
+		if rerr := a.store.ReleaseEInvoiceClaim(ctx, id, claim); rerr != nil {
 			slog.ErrorContext(ctx, "e-invoice claim not released", "einvoice", id, "err", rerr)
 		}
 		return store.EInvoice{}, httpx.NewProblem(http.StatusBadGateway, CodeAccessPointOff, "the access point did not take the document: "+err.Error())
 	}
-	out, err := a.store.MarkEInvoiceSubmitted(ctx, id, ref)
+	out, err := a.store.MarkEInvoiceSubmitted(ctx, id, claim, ref)
 	if err != nil {
+		if errors.Is(err, store.ErrEInvoiceState) {
+			// The claim was taken over while the access point was answering: the document may have been handed over twice; the access point deduplicates by number.
+			slog.WarnContext(ctx, "e-invoice claim lost before the access point's answer was recorded", "einvoice", id, "reference", ref)
+		}
 		return store.EInvoice{}, eInvoiceProblem(err)
 	}
 	return out, nil

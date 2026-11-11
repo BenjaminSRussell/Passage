@@ -63,10 +63,16 @@ type asnData struct {
 	} `json:"containers"`
 }
 
-// slip is the packing slip the notice is for, nil when the event names none or no containers (then the whole shipment is sent).
-func (d asnData) slip() *domain.SlipRef {
-	if !ids.Valid(d.PackingSlipID) || len(d.Containers) == 0 {
-		return nil
+// slip is the packing slip the notice is for. An event that names a slip always gets a notice for that slip and never the whole
+// shipment's (which would send a slip's containers twice, once per slip): the SSCCs it lists are the notice's containers. ok is false
+// when the event names a slip that lists no container, which has nothing to notify; a nil slip with ok true is a legacy event that names
+// no slip at all, sent as the whole shipment.
+func (d asnData) slip() (slip *domain.SlipRef, ok bool, err error) {
+	if d.PackingSlipID == "" {
+		return nil, true, nil
+	}
+	if !ids.Valid(d.PackingSlipID) {
+		return nil, false, fmt.Errorf("asn.issued names the packing slip %q, which is not an id", d.PackingSlipID)
 	}
 	s := &domain.SlipRef{ID: d.PackingSlipID, Number: d.PackingSlipNumber}
 	for _, c := range d.Containers {
@@ -75,9 +81,9 @@ func (d asnData) slip() *domain.SlipRef {
 		}
 	}
 	if len(s.SSCCs) == 0 {
-		return nil
+		return nil, false, nil
 	}
-	return s
+	return s, true, nil
 }
 
 type invoiceData struct {
@@ -100,7 +106,15 @@ func Handlers(p Partners, s Sender) map[string]eventing.Handler {
 			if err := json.Unmarshal(evt.Data, &d); err != nil {
 				return eventing.Permanent(fmt.Errorf("asn.issued data: %w", err))
 			}
-			return send(ctx, p, s, evt, FulfillmentSource, d.LegalEntityID, d.ShipmentID, d.slip(), []string{"856", "DESADV"})
+			slip, ok, err := d.slip()
+			if err != nil {
+				return eventing.Permanent(err)
+			}
+			if !ok {
+				slog.InfoContext(ctx, "edi outbound skipped: the packing slip lists no container", "shipment", d.ShipmentID, "slip", d.PackingSlipID)
+				return nil
+			}
+			return send(ctx, p, s, evt, FulfillmentSource, d.LegalEntityID, d.ShipmentID, slip, []string{"856", "DESADV"})
 		}),
 		InvoicePostedType: eventing.HandlerFunc(func(ctx context.Context, _ pgx.Tx, evt events.Event) error {
 			var d invoiceData

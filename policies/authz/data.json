@@ -670,6 +670,9 @@
       {"resource": "/v1/procurement/vendor/purchase-orders/*/acknowledgements", "methods": ["POST"]}
     ]},
     "purchasing.inbound.apply": {"flag": true, "permissions": []},
+    "procurement.purchase-order.vendor-confirm": {"service_only": true, "permissions": [
+      {"resource": "/v1/procurement/purchase-orders/*:confirm", "methods": ["POST"]}
+    ]},
     "procurement.purchase-order.confirm": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders/*:approve", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders/*:reject", "methods": ["POST"]},
@@ -3954,7 +3957,7 @@
       "fulfillment": ["fulfillment.shipment.read"],
       "billing": ["billing.invoice.read"],
       "sales": ["sales.order.lookup", "sales.channel.intake"],
-      "purchasing": ["procurement.requisition.create", "procurement.purchase-order.inquire", "procurement.purchase-order.confirm"],
+      "purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
       "receiving": ["receiving.asn.maintain"]
     },
     "fieldservice": {
@@ -3975,7 +3978,7 @@
     }
   },
   "service_principals": {
-    "edi-cxml": ["procurement.purchase-order.inquire", "procurement.purchase-order.confirm", "receiving.asn.maintain"],
+    "edi-cxml": ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"],
     "edi-outbound": ["edi.outbound.from-event"],
     "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],

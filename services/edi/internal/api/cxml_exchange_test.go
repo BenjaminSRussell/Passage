@@ -273,6 +273,27 @@ func TestCXMLInbound_ParksWhatCannotBeMapped(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != domain.CodeCXMLNeedsReview || len(down.confirmed) != 0 {
 		t.Fatalf("rejected line: %d %s", rec.Code, rec.Body.String())
 	}
+	// A backorder split (6 accepted, 4 backordered) and a confirmation that leaves out a line of the order are not confirmations.
+	h, pub, pool, _, path, down, wire = exInbound(t, true)
+	split := strings.Replace(sample(t, "confirmation.xml"), `<ConfirmationStatus type="accept" quantity="10" shipmentDate="2026-11-04T00:00:00-05:00"><UnitOfMeasure>EA</UnitOfMeasure></ConfirmationStatus>`,
+		`<ConfirmationStatus type="accept" quantity="6"><UnitOfMeasure>EA</UnitOfMeasure></ConfirmationStatus><ConfirmationStatus type="backordered" quantity="4"><UnitOfMeasure>EA</UnitOfMeasure></ConfirmationStatus>`, 1)
+	if split == sample(t, "confirmation.xml") {
+		t.Fatal("the fixture was not changed")
+	}
+	postCXML(pub, path, split)
+	wire()
+	rec = do(t, h, http.MethodPost, "/edi/v1/messages/"+messageID(t, pool, "ConfirmationRequest")+":post", "", "edi.operate", srcScope)
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != domain.CodeCXMLNeedsReview || len(down.confirmed) != 0 {
+		t.Fatalf("backorder split: %d %s", rec.Code, rec.Body.String())
+	}
+	h, pub, pool, _, path, down, wire = exInbound(t, true)
+	down.po.Lines = append(down.po.Lines, sources.PurchaseOrderLine{LineNo: 2, ProductID: "prod-b", Qty: "5", Unit: "EA", UnitPrice: "3.00"})
+	postCXML(pub, path, sample(t, "confirmation.xml"))
+	wire()
+	rec = do(t, h, http.MethodPost, "/edi/v1/messages/"+messageID(t, pool, "ConfirmationRequest")+":post", "", "edi.operate", srcScope)
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != domain.CodeCXMLNeedsReview || len(down.confirmed) != 0 {
+		t.Fatalf("missing line: %d %s", rec.Code, rec.Body.String())
+	}
 	// Receiving refuses the notice (quantity over the open quantity): parked with its code, posted again once fixed.
 	h, pub, pool, _, path, down, wire = exInbound(t, true)
 	down.refuse = &sources.DownstreamRefusedError{Service: "receiving", Status: 422, Code: "SUP-ASN-001", Detail: "over the open quantity"}
@@ -345,3 +366,58 @@ func TestCXMLInbound_IsMappedOnReceipt(t *testing.T) {
 		t.Fatalf("confirmed %v", down.confirmed)
 	}
 }
+
+// The default client for partner URLs refuses loopback (SSRF): the network at 127.0.0.1 is never called.
+func TestCXMLOutbound_DefaultClientRefusesLoopback(t *testing.T) {
+	f := newFake()
+	called := false
+	network := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		_, _ = io.WriteString(w, domain.CXMLResponse("r", "2026-11-11T10:00:00Z", 200, "OK"))
+	}))
+	defer network.Close()
+	a, h, _, partner, _ := autoSetup(t, f)
+	a.Sources = &exSources{fakeSources: f, po: poFixture()}
+	do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/cxml", `{"networkIdentity":"AN-SUPPLIER","sharedSecret":"`+cxmlSecret+`"}`, "edi.admin", srcScope)
+	do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/cxml/outbound", `{"outboundUrl":"`+network.URL+`/cxml","ourIdentity":"AN-ME","vendorId":"`+exVendor+`"}`, "edi.admin", srcScope)
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/cxml:send", `{"documentType":"OrderRequest","sourceId":"`+exPO+`"}`, "edi.operate", srcScope)
+	if rec.Code != http.StatusBadGateway || called {
+		t.Fatalf("loopback network: %d called=%v %s", rec.Code, called, rec.Body.String())
+	}
+}
+
+// A secret with XML-special characters is not stored in the clear.
+func TestCXMLOutbound_StoredCopyKeepsNoSecret(t *testing.T) {
+	f := newFake()
+	const secret = "p@ss&word<123>-long-enough"
+	var posted string
+	network := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		posted = string(raw)
+		_, _ = io.WriteString(w, domain.CXMLResponse("r", "2026-11-11T10:00:00Z", 200, "OK"))
+	}))
+	defer network.Close()
+	a, h, pool, partner, _ := autoSetup(t, f)
+	a.PunchoutHTTP = network.Client()
+	a.Secrets = fakeSecrets{"net-secret": secret}
+	a.Sources = &exSources{fakeSources: f, po: poFixture()}
+	do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/cxml", `{"networkIdentity":"AN-SUPPLIER","sharedSecret":"`+cxmlSecret+`"}`, "edi.admin", srcScope)
+	do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/cxml/outbound", `{"outboundUrl":"`+network.URL+`/cxml","ourIdentity":"AN-ME","outboundSecretRef":"net-secret","vendorId":"`+exVendor+`"}`, "edi.admin", srcScope)
+	if rec := do(t, h, http.MethodPost, "/edi/v1/partners/"+partner+"/cxml:send", `{"documentType":"OrderRequest","sourceId":"`+exPO+`"}`, "edi.operate", srcScope); rec.Code != http.StatusCreated {
+		t.Fatalf("send: %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(posted, "p@ss&amp;word&lt;123&gt;-long-enough") {
+		t.Fatalf("the network gets the secret: %s", posted)
+	}
+	var raw string
+	if err := pool.QueryRow(context.Background(), `select raw_payload from interchange where direction = 'OUT' and standard = 'CXML'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "p@ss") || strings.Contains(raw, "word") || strings.Contains(raw, "123") || !strings.Contains(raw, "[redacted]") {
+		t.Fatalf("the stored copy holds the secret: %s", raw)
+	}
+}
+
+type fakeSecrets map[string]string
+
+func (f fakeSecrets) Read(ref string) ([]byte, error) { return []byte(f[ref]), nil }

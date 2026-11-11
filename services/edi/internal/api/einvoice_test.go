@@ -12,6 +12,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/events"
 
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/autosend"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -354,5 +355,46 @@ func TestEInvoice_FacturXBuildAndPDF(t *testing.T) {
 	_, p := createEI(t, h, "PEPPOL")
 	if rec := do(t, h, http.MethodGet, "/edi/v1/einvoice/invoices/"+p.ID+"/facturx.pdf", "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusConflict {
 		t.Fatalf("peppol pdf: %d", rec.Code)
+	}
+}
+
+// A caller whose claim was taken over can neither release the new holder's claim nor record its own answer over it.
+func TestEInvoice_SubmitClaimHasAnOwner(t *testing.T) {
+	f := newFake()
+	a, h, pool, _, _ := autoSetup(t, f)
+	f.invoice.Currency, f.invoice.DueDate = "USD", "2026-11-20"
+	for role, body := range map[string]string{"SELLER/" + srcLE: sellerProfile, "BUYER/" + srcCustomer: buyerProfile} {
+		do(t, h, http.MethodPut, "/edi/v1/einvoice/parties/"+role, body, "edi.einvoice.operate", srcScope)
+	}
+	_, e := createEI(t, h, "PEPPOL")
+	ctx := store.SystemContext(context.Background(), testkit.TenantID(7))
+	first, firstClaim, err := a.store.ClaimEInvoiceSubmit(ctx, e.ID)
+	if err != nil || first.Status != "SUBMITTING" {
+		t.Fatalf("first claim: %+v %v", first, err)
+	}
+	if _, _, err := a.store.ClaimEInvoiceSubmit(ctx, e.ID); !errors.Is(err, store.ErrEInvoiceState) {
+		t.Fatalf("a fresh claim holds: %v", err)
+	}
+	// The claim goes stale and is taken over.
+	if _, err := pool.Exec(context.Background(), `update einvoice set submitting_at = now() - interval '1 hour'`); err != nil {
+		t.Fatal(err)
+	}
+	_, second, err := a.store.ClaimEInvoiceSubmit(ctx, e.ID)
+	if err != nil {
+		t.Fatalf("takeover: %v", err)
+	}
+	// The first holder still has its token, which matches no live claim.
+	if err := a.store.ReleaseEInvoiceClaim(ctx, e.ID, firstClaim); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := a.store.GetEInvoice(ctx, e.ID); got.Status != "SUBMITTING" {
+		t.Fatalf("the stale holder released the new holder's claim: %s", got.Status)
+	}
+	if _, err := a.store.MarkEInvoiceSubmitted(ctx, e.ID, firstClaim, "AP-OLD"); !errors.Is(err, store.ErrEInvoiceState) {
+		t.Fatalf("the stale holder's answer is refused: %v", err)
+	}
+	out, err := a.store.MarkEInvoiceSubmitted(ctx, e.ID, second, "AP-NEW")
+	if err != nil || out.Status != "SUBMITTED" || out.Reference != "AP-NEW" {
+		t.Fatalf("the new holder records its answer: %+v %v", out, err)
 	}
 }

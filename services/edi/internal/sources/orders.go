@@ -22,8 +22,8 @@ import (
 const (
 	audReceiving = "receiving"
 
-	DutyPurchaseOrderRead    = "procurement.purchase-order.inquire"
-	DutyPurchaseOrderConfirm = "procurement.purchase-order.confirm"
+	DutyPurchaseOrderRead    = "procurement.purchase-order.lookup"
+	DutyPurchaseOrderConfirm = "procurement.purchase-order.vendor-confirm"
 	DutyASNMaintain          = "receiving.asn.maintain"
 )
 

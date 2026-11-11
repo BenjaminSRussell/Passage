@@ -27,7 +27,7 @@ import (
 // partner's network (PUT /partners/{id}/cxml/outbound) and records the network's Response. Inbound: the documents recorded by the public
 // listener are put onto purchasing and receiving by POST /messages/{id}:post and, best effort, right after receipt (cxmlmap).
 
-// PurchaseOrders reads a purchase order to send it (purchasing, duty procurement.purchase-order.inquire).
+// PurchaseOrders reads a purchase order to send it (purchasing, duty procurement.purchase-order.lookup).
 type PurchaseOrders interface {
 	PurchaseOrder(ctx context.Context, legalEntityID, id string) (sources.PurchaseOrder, error)
 }
@@ -185,7 +185,7 @@ func (a *API) SendCXML(ctx context.Context, partnerID, docType, sourceID string)
 	if err != nil {
 		return CXMLSendResult{}, err
 	}
-	rec, err := a.store.RecordCXMLOutbound(ctx, store.CXMLOutbound{PartnerID: partnerID, PayloadID: payloadID, DocType: docType, Raw: redactSecret(doc, secret), Order: orderRef})
+	rec, err := a.store.RecordCXMLOutbound(ctx, store.CXMLOutbound{PartnerID: partnerID, PayloadID: payloadID, DocType: docType, Raw: domain.RedactCXMLSecret(doc), Order: orderRef})
 	if err != nil {
 		return CXMLSendResult{}, err
 	}
@@ -202,14 +202,6 @@ func (a *API) SendCXML(ctx context.Context, partnerID, docType, sourceID string)
 		slog.ErrorContext(ctx, "cxml outbound result not recorded", "message", rec.MessageID, "err", ferr)
 	}
 	return res, nil
-}
-
-// redactSecret keeps the shared secret out of the stored copy of an outbound document.
-func redactSecret(doc, secret string) string {
-	if secret == "" {
-		return doc
-	}
-	return strings.ReplaceAll(doc, "<SharedSecret>"+secret+"</SharedSecret>", "<SharedSecret>[redacted]</SharedSecret>")
 }
 
 func (a *API) postCXML(ctx context.Context, to, doc string) (int, string, error) {

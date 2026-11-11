@@ -169,16 +169,19 @@ func ValidateInvoiceStatus(inv SourceInvoice) (bool, error) {
 	return false, fmt.Errorf("%w: invoice %s is %s, not posted", ErrSourceNotReady, inv.Number, inv.Status)
 }
 
-// lineRate derives the VAT rate of an amount from its tax: the tax over the net, snapped to the nearest half percent when that
-// reproduces the tax within a cent or two (so 3.33 net with 0.63 tax is 19%, not 18.92%), else rounded to two decimals.
+// lineRate derives the VAT rate of an amount from its tax: the tax over the net, taken to the nearest half percent and then the nearest
+// tenth of a percent, and only when that rate reproduces the tax to the cent exactly (so 3.33 net with 0.63 tax is 19%, not 18.92%,
+// while 10.00 net with 0.21 tax is 2.1%, never 2%); otherwise the ratio rounded to two decimals.
 func lineRate(net, tax decimal.Decimal) decimal.Decimal {
 	if !net.IsPositive() || !tax.IsPositive() {
 		return decimal.Zero
 	}
 	raw := tax.Div(net).Mul(hundred)
-	snapped := raw.Mul(decimal.NewFromInt(2)).Round(0).Div(decimal.NewFromInt(2))
-	if net.Mul(snapped).Div(hundred).Sub(tax).Abs().LessThanOrEqual(decimal.RequireFromString("0.02")) {
-		return snapped
+	two, ten := decimal.NewFromInt(2), decimal.NewFromInt(10)
+	for _, candidate := range []decimal.Decimal{raw.Mul(two).Round(0).Div(two), raw.Mul(ten).Round(0).Div(ten)} {
+		if net.Mul(candidate).Div(hundred).Round(2).Equal(tax) {
+			return candidate
+		}
 	}
 	return raw.Round(2)
 }

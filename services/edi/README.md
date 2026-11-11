@@ -475,6 +475,7 @@ Sample files: `testdata/cxml/` (the three network documents, a punchout cart and
   are put onto purchasing (`:confirm`) and receiving (`POST /v1/receiving/asns`) as `service:edi-cxml`, right after receipt and with
   `POST /messages/{id}:post`; what cannot be mapped is parked with EDI-0036 to EDI-0039 and EDI-0042. A FAILED cXML message is reprocessed
   with `:reprocess` like any inbound interchange.
+- Review fixes: the SUBMITTING claim has an owner (release and the answer need the claim's token; the access point call is bounded to two minutes); the stored copy of an outbound cXML document has every SharedSecret emptied; partner URLs (cXML outbound, punchout, AS2 from `main`) are dialed only at public addresses (`internal/safenet`; `EDI_AS2_ALLOW_HTTP` allows private ones for development); a confirmation is accepted only when every status of every item accepts the ordered quantity and every open order line is listed; an `asn.issued` event that names a slip never falls back to the whole shipment; the Factur-X PDF paginates.
 - **35-5.** The self-billing sweep runs on a schedule with the transport workers (`EDI_SELFBILL_SWEEP_MINUTES`). Web:
   `/integration/self-billing/disputes`.
 

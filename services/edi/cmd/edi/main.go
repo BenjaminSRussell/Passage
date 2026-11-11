@@ -30,6 +30,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/poster"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/safenet"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -248,7 +249,8 @@ func loadTransportConfig(getenv func(string) string, httpAddr string) (transport
 	c.mdnTimeout = time.Duration(minutes) * time.Minute
 	// Partner URLs are configured by an administrator; redirects are not
 	// followed so a partner endpoint cannot bounce the service elsewhere.
-	c.http = &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// Partner AS2 URLs are dialed only at public addresses; EDI_AS2_ALLOW_HTTP (development) also allows private ones.
+	c.http = safenet.Client(2*time.Minute, c.allowHTTP)
 	return c, nil
 }
 

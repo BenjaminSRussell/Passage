@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +78,14 @@ func xmlAttr(s string) string {
 		}
 	}
 	return b.String()
+}
+
+var sharedSecretElement = regexp.MustCompile(`<SharedSecret>[^<]*</SharedSecret>`)
+
+// RedactCXMLSecret returns the document with every SharedSecret element emptied, whatever characters the secret held (the sent copy
+// carries it XML-escaped, so it cannot be found by searching for the raw secret). It is the copy that is stored.
+func RedactCXMLSecret(doc string) string {
+	return sharedSecretElement.ReplaceAllString(doc, "<SharedSecret>[redacted]</SharedSecret>")
 }
 
 func cxmlWrap(c CXMLCredentials, payloadID string, at time.Time, body string) string {
