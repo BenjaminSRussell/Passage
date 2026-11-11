@@ -4,6 +4,7 @@ global:
   cloudOverlays: []
   cloudName: "AzureChinaCloud"
   fips: false
+  secretStoreProvider: "azure-key-vault"
   imageRegistry: ""
   imageRegistryRequired: true
   allowedRegions: ["chinanorth", "chinaeast", "chinanorth2", "chinaeast2", "chinanorth3", "chinaeast3"]

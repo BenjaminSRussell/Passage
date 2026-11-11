@@ -29,6 +29,7 @@ PROFILES = ("commercial", "gcc", "gcc-high", "dod", "china")
 
 # Values a chart insists on before it renders. Nothing here names an external host except where a test says so.
 REQUIRED_VALUES = {
+    "deploy/secret-store": ["azureKeyVault.name=kv-passage", "azureKeyVault.tenantId=00000000-0000-0000-0000-000000000002"],
     "deploy/postgres": ["database=outbox", "externalSecret.environment=dev"],
     "deploy/temporal-postgres": ["externalSecret.environment=dev"],
     "services/supplier-portal-ts/charts/supplier-portal": [

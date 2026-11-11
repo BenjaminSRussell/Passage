@@ -1,5 +1,5 @@
 variable "provider_kind" {
-  description = "Cluster provider. Only k3d is implemented; the others are listed in services/platform-health/NOT-IMPLEMENTED.md."
+  description = "Cluster provider. k3d (local) and aks (Azure, #600) are implemented; the others are listed in services/platform-health/NOT-IMPLEMENTED.md."
   type        = string
   default     = "k3d"
 
@@ -44,4 +44,73 @@ variable "argocd_chart_version" {
 variable "cert_manager_chart_version" {
   type    = string
   default = "v1.21.3"
+}
+
+# ---- aks (#600) -------------------------------------------------------------------------------------------------
+# Feed the cloud profile with -var-file=../../cloud-profiles/tofu/<profile>.tfvars.json (commercial, gcc, ...).
+
+variable "cloud_profile" {
+  description = "Cloud profile name (deploy/cloud-profiles). Informational here; the profile's data arrives through the variables below."
+  type        = string
+  default     = "commercial"
+}
+
+variable "cloud_overlays" {
+  type    = list(string)
+  default = []
+}
+
+variable "cloud_endpoints" {
+  description = "The profile's endpoint table, from the generated tfvars file."
+  type        = map(string)
+  default     = {}
+}
+
+variable "allowed_regions" {
+  description = "The profile's allowedRegions; location must be one of them when the list is not empty."
+  type        = list(string)
+  default     = []
+}
+
+variable "fips" {
+  description = "The profile's fips flag: AKS node pools use FIPS-enabled images."
+  type        = bool
+  default     = false
+}
+
+variable "azure_location" {
+  type    = string
+  default = "eastus2"
+
+  validation {
+    condition     = length(var.allowed_regions) == 0 || contains(var.allowed_regions, var.azure_location)
+    error_message = "azure_location is not in the cloud profile's allowed_regions; data, backups and keys must stay in those regions."
+  }
+}
+
+variable "azure_tenant_id" {
+  description = "Entra tenant of the subscription. Required for aks."
+  type        = string
+  default     = ""
+}
+
+variable "azure_subscription_id" {
+  description = "Subscription to deploy into. CI plans against a stub value (a well-formed GUID with no credentials)."
+  type        = string
+  default     = "00000000-0000-0000-0000-000000000000"
+}
+
+variable "azure_postgres_flexible_server" {
+  type    = bool
+  default = false
+}
+
+variable "azure_postgres_admin_group_object_id" {
+  type    = string
+  default = ""
+}
+
+variable "azure_backup_replication_type" {
+  type    = string
+  default = "ZRS"
 }

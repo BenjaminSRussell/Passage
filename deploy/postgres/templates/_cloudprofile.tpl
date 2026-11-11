@@ -15,3 +15,23 @@ Usage: include "passage.mirrorImage" (dict "root" $ "ref" .Values.image)
 {{- .ref -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+passage.secretKey / passage.secretProperty: ExternalSecret remote references for the configured store. Key Vault secret
+names allow only letters, digits and dashes and hold a plain value, so with global.secretStoreProvider "azure-key-vault"
+(set by every cloud profile values file) path separators become dashes (passage/dev/x/y becomes passage-dev-x-y) and
+`property: value` is left out. Any other store (Vault, the default) keeps the path and the property.
+*/}}
+{{- define "passage.secretKey" -}}
+{{- if eq ((.root.Values.global | default dict).secretStoreProvider | default "") "azure-key-vault" -}}
+{{- regexReplaceAll "[^0-9A-Za-z-]" .key "-" -}}
+{{- else -}}
+{{- .key -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "passage.secretProperty" -}}
+{{- if ne ((.Values.global | default dict).secretStoreProvider | default "") "azure-key-vault" -}}
+property: value
+{{- end -}}
+{{- end -}}

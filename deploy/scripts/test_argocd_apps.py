@@ -45,6 +45,9 @@ EXEMPT = {
     # Per-region CNPG cluster, fence and alert rules; one release per region cluster with
     # deploy/multi-region/values/<region>.yaml. There are no region clusters yet (docs/ops/NOT-IMPLEMENTED.md).
     "deploy/multi-region/chart",
+    # ClusterSecretStore for Azure Key Vault (#600): installed per Azure environment with the cloud profile's global values,
+    # after the External Secrets Operator. The dev cluster uses the Vault store named `passage` instead.
+    "deploy/secret-store",
 }
 # Dev sync-wave order (#106): each group syncs strictly after the one before. The operator, then the Kafka cluster
 # and the databases, then what the cluster's operators reconcile and Temporal, then Connect and its connectors.

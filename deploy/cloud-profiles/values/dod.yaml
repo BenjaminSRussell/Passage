@@ -4,6 +4,7 @@ global:
   cloudOverlays: []
   cloudName: "AzureUSGovernment"
   fips: true
+  secretStoreProvider: "azure-key-vault"
   imageRegistry: ""
   imageRegistryRequired: true
   allowedRegions: ["usdodeast", "usdodcentral", "usgovvirginia", "usgovarizona", "usgovtexas"]

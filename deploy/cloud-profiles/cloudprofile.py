@@ -200,6 +200,8 @@ def helm_values(r: dict[str, Any], registry: str = "") -> str:
             "cloudOverlays": r["overlays"],
             "cloudName": r["cloud"],
             "fips": r["fips"],
+            # Every profile is an Azure cloud: ExternalSecret references use Key Vault naming (see passage.secretKey).
+            "secretStoreProvider": "azure-key-vault",
             "imageRegistry": registry,
             "imageRegistryRequired": r["requireMirror"],
             "allowedRegions": r["allowedRegions"],

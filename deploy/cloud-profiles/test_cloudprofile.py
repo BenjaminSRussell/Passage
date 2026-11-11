@@ -134,7 +134,7 @@ class GeneratedCopiesTests(unittest.TestCase):
     def test_values_files_carry_the_global_contract(self) -> None:
         for name in cp.load()["profiles"]:
             text = cp.values_path(name).read_text(encoding="utf-8")
-            for key in ("cloudProfile", "cloudOverlays", "fips", "imageRegistry", "imageRegistryRequired", "allowedRegions", "endpoints", "egressAllowlist", "pagerDutyAllowed"):
+            for key in ("cloudProfile", "cloudOverlays", "fips", "imageRegistry", "imageRegistryRequired", "allowedRegions", "endpoints", "egressAllowlist", "pagerDutyAllowed", "secretStoreProvider"):
                 self.assertIn(f"  {key}:", text, f"{name}: global.{key}")
 
     def test_cli_values_and_errors(self) -> None:
@@ -163,7 +163,7 @@ class NoHardCodedAzureHostsTests(unittest.TestCase):
             if rel.startswith(self.EXEMPT_DIRS) or "node_modules" in rel or rel.endswith((".md", ".lock", ".sum", ".png", ".svg", ".ico", ".woff2")):
                 continue
             name = Path(rel).name
-            if name.startswith("test_") or name.endswith(("_test.go", ".test.ts", ".test.tsx", ".spec.ts")) or "/testdata/" in rel or "/test/" in rel:
+            if name.startswith("test_") or name.endswith(("_test.go", ".test.ts", ".test.tsx", ".spec.ts", ".tftest.hcl")) or "/testdata/" in rel or "/test/" in rel:
                 continue
             path = REPO / rel
             if not path.is_file():

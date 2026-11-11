@@ -4,6 +4,7 @@ global:
   cloudOverlays: []
   cloudName: "AzurePublic"
   fips: false
+  secretStoreProvider: "azure-key-vault"
   imageRegistry: ""
   imageRegistryRequired: false
   allowedRegions: []
