@@ -72,6 +72,8 @@ spec:
             {{- end }}
             - name: PUBLIC_RATE_PER_HOUR
               value: {{ .Values.publicRatePerHour | quote }}
+            - name: PASSAGE_TRUSTED_PROXIES
+              value: {{ .Values.trustedProxies | quote }}
             - name: PASSAGE_SERVICE_NAME
               value: supplier-portal
             - name: PASSAGE_SERVICE_SIGNING_KEY

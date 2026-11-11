@@ -709,7 +709,7 @@ paths:
     get:
       operationId: listVendorInvites
       summary: "List the calling vendor's user invitations"
-      x-passage-duty: party.vendor-portal.read
+      x-passage-duty: party.vendor-portal.admin
       description: The invitations of the vendor in the verified supplier-portal service token, newest first. Tokens are never returned.
       parameters:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -729,10 +729,10 @@ paths:
     post:
       operationId: createVendorInvite
       summary: "Invite a user to the calling vendor's supplier portal account"
-      x-passage-duty: party.vendor-portal.write
+      x-passage-duty: party.vendor-portal.admin
       description: >-
         Stores the invitation with a hash of its token and an expiry and emits the created event without the token; a pending
-        invitation of the same vendor for the same email is revoked. The token is in this answer only; nothing stores it. The supplier portal BFF lets only the vendor's administrator call this.
+        invitation of the same vendor for the same email is revoked. The token is in this answer only; nothing stores it. Only the vendor administrator's token carries the duty (the supplier-admin role); the portal signs it only for the invitation routes.
       requestBody:
         required: true
         content:
@@ -763,7 +763,7 @@ paths:
     post:
       operationId: revokeVendorInvite
       summary: "Revoke an open invitation of the calling vendor"
-      x-passage-duty: party.vendor-portal.write
+      x-passage-duty: party.vendor-portal.admin
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:

@@ -5,9 +5,11 @@
 // Virus scan of uploads: CLAMAV_ADDR (host:port of clamd; when set the scan is required and a failed scan refuses the upload),
 // CLAMAV_TIMEOUT_MS, SCAN_ALLOW_UNSCANNED=true (accept uploads when no scanner is configured; default false).
 // Public registration page: REGISTRATION_TENANT_ID and REGISTRATION_LEGAL_ENTITY_ID (both, or registration is closed),
-// PUBLIC_RATE_PER_HOUR (per client address, default 10).
+// PUBLIC_RATE_PER_HOUR (per client address, default 10). PASSAGE_TRUSTED_PROXIES: comma-separated CIDRs or addresses of the
+// proxies in front (the edge) whose X-Forwarded-For is believed; empty means none and the client address is the TCP peer.
 
 import { readFileSync } from "node:fs";
+import { parseTrustedProxies, TRUSTED_PROXIES_ENV } from "./clientAddress.ts";
 import { Jwks, type OidcConfig } from "./oidc.ts";
 import { PendingProvisioner } from "./provision.ts";
 import { scanPolicyFromEnv } from "./scan.ts";
@@ -55,6 +57,10 @@ function main(): void {
   const env = process.env;
   const oidc = oidcFromEnv(env);
   const registration = registrationFromEnv(env);
+  const trustedProxies = parseTrustedProxies(env[TRUSTED_PROXIES_ENV]);
+  if (trustedProxies.size === 0) {
+    console.log(JSON.stringify({ msg: `${TRUSTED_PROXIES_ENV} is empty: the public rate limit counts by the TCP peer, so behind a proxy every client shares one allowance` }));
+  }
   const server = createHttpServer({
     oidc,
     jwks: new Jwks(oidc.jwksUri, fetch),
@@ -69,6 +75,7 @@ function main(): void {
     provisioner: new PendingProvisioner((entry) => console.log(JSON.stringify(entry))),
     ...(registration ? { registration } : {}),
     publicLimiter: new RateLimiter(Number(env["PUBLIC_RATE_PER_HOUR"] ?? 10), 3_600_000),
+    trustedProxies,
   });
   const { host, port } = listenAddress(env["HTTP_ADDR"]);
   server.listen(port, host, () => console.log(JSON.stringify({ msg: "supplier-portal listening", host: host ?? "", port })));

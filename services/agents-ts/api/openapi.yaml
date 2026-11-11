@@ -182,6 +182,97 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /api/v1/knowledge/search:
+    post:
+      operationId: knowledgeSearch
+      summary: Hybrid search over the tenant's knowledge chunks (FR-47.14)
+      description: |
+        Postgres full-text search and embedding similarity, fused by reciprocal rank. Each chunk carries its fused score
+        and, when the embedding side found it, its cosine similarity; the copilot's citation gate (AGT-0212) accepts a
+        chunk only at 0.75 or more. Without an embedding port the search is keyword only and no chunk carries a
+        similarity. The copilot calls this as its read tool `passage.knowledge.search`.
+      x-passage-duty: mcp.copilot.use
+      x-passage-approval: none
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: {type: string, minLength: 1, maxLength: 1000}
+                limit: {type: integer, minimum: 1, maximum: 20, default: 10}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Chunks, best first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chunks]
+                properties:
+                  chunks:
+                    type: array
+                    items:
+                      type: object
+                      required: [chunkId, sourceType, sourceRef, section, fusedScore]
+                      properties:
+                        chunkId: {type: string, format: uuid}
+                        sourceType: {type: string, enum: [ARTICLE, DOC, POLICY]}
+                        sourceRef: {type: string}
+                        section: {type: string}
+                        fusedScore: {type: number}
+                        similarity: {type: number}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /api/v1/knowledge/chunks:
+    post:
+      operationId: knowledgeIndexChunks
+      summary: Index or replace knowledge chunks (FR-47.14)
+      description: |
+        Stores 1 to 100 chunks of articles, documents or policies, replacing a chunk of the same source and section, and
+        embeds them when an embedding port is configured.
+      x-passage-duty: knowledge.write
+      x-passage-approval: none
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chunks]
+              properties:
+                chunks:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [sourceType, sourceRef, section, body]
+                    properties:
+                      sourceType: {type: string, enum: [ARTICLE, DOC, POLICY]}
+                      sourceRef: {type: string, minLength: 1, maxLength: 200}
+                      section: {type: string, minLength: 1, maxLength: 200}
+                      body: {type: string, minLength: 1, maxLength: 20000}
+                    additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: How many chunks were indexed and embedded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [indexed, embedded]
+                properties:
+                  indexed: {type: integer}
+                  embedded: {type: integer}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
   /api/v1/copilot/chat:
     post:
       operationId: copilotChat

@@ -15,7 +15,7 @@ export const SERVICE_NAME = "supplier-portal";
 export const SERVICE_GRANTS = {
   purchasing: ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],
   receiving: ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"],
-  party: ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"],
+  party: ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept", "party.vendor-portal.admin"],
   payables: ["payables.vendor-portal.read"],
 } as const;
 
@@ -23,7 +23,9 @@ export const SERVICE_GRANTS = {
 export const DUTY_REGISTER = "party.vendor-portal.register";
 /** Verifying and accepting an invitation: signed only for the accept routes, never in a signed-in user's token. */
 export const DUTY_INVITE_ACCEPT = "party.vendor-portal.invite-accept";
-const SPECIAL_DUTIES: readonly string[] = [DUTY_REGISTER, DUTY_INVITE_ACCEPT];
+/** Listing, creating and revoking the vendor's invitations: signed only for a vendor administrator (the `supplier-admin` role), only for those routes. */
+export const DUTY_PORTAL_ADMIN = "party.vendor-portal.admin";
+const SPECIAL_DUTIES: readonly string[] = [DUTY_REGISTER, DUTY_INVITE_ACCEPT, DUTY_PORTAL_ADMIN];
 
 export type Audience = keyof typeof SERVICE_GRANTS;
 
@@ -33,10 +35,12 @@ export interface Caller {
   legalEntityId: string;
   userId: string;
   vendorId: string;
+  /** The session holds the `supplier-admin` role; only then may a token carry the vendor-admin duty. */
+  isAdmin?: boolean;
 }
 
 export interface ServiceTokenSigner {
-  /** A token for a signed-in vendor user. `only` narrows the duties; the default is the grant less the registration and invite-accept duties. */
+  /** A token for a signed-in vendor user. `only` narrows the duties; the default is the grant less the registration, invite-accept and vendor-admin duties. */
   mint(audience: Audience, caller: Caller, only?: readonly string[]): string;
   /** The vendorless token of the public prospect registration: carries only `party.vendor-portal.register`. */
   mintRegistration(tenantId: string, legalEntityId: string): string;
@@ -71,6 +75,7 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
       }
       const grant: readonly string[] = SERVICE_GRANTS[audience];
       const duties = only ? grant.filter((d) => only.includes(d)) : grant.filter((d) => !SPECIAL_DUTIES.includes(d));
+      if (duties.includes(DUTY_PORTAL_ADMIN) && caller.isAdmin !== true) throw new TypeError("only a vendor administrator's token carries the vendor-admin duty");
       if (duties.length === 0) throw new TypeError(`no duty to sign for ${audience}`);
       return sealed({ ...base(audience, caller.tenantId, caller.legalEntityId, caller.userId, duties), vnd: caller.vendorId });
     },

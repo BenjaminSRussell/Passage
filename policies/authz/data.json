@@ -537,6 +537,8 @@
       {"resource": "/v1/inventory/consignment-orders/*:close", "methods": ["POST"]},
       {"resource": "/v1/inventory/consignment-orders/*:cancel", "methods": ["POST"]}
     ]},
+    "inventory.import.write": {"service_only": true, "permissions": [{"resource": "/v1/inventory/opening-batches", "methods": ["POST"]}]},
+    "inventory.import.read": {"service_only": true, "permissions": [{"resource": "/v1/inventory/opening-batches", "methods": ["GET"]}]},
     "inventory.truck-stock.write": {"permissions": [{"resource": "/v1/inventory/truck-stock-levels", "methods": ["PUT"]}]},
     "inventory.transfer.write": {"permissions": [
       {"resource": "/v1/inventory/transfer-orders", "methods": ["POST"]},
@@ -994,16 +996,17 @@
       {"resource": "/v1/party/vendor-portal/documents", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-portal/documents/*/content", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-portal/distributions", "methods": ["GET"]},
-      {"resource": "/v1/party/vendor-portal/distributions/*/content", "methods": ["GET"]},
-      {"resource": "/v1/party/vendor-portal/invites", "methods": ["GET"]}
+      {"resource": "/v1/party/vendor-portal/distributions/*/content", "methods": ["GET"]}
     ]},
     "party.vendor-portal.write": {"service_only": true, "permissions": [
       {"resource": "/v1/party/vendor-portal/requests", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/requests/*:submit", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/requests/*:withdraw", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/documents", "methods": ["POST"]},
-      {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]},
-      {"resource": "/v1/party/vendor-portal/invites", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]}
+    ]},
+    "party.vendor-portal.admin": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/invites", "methods": ["GET", "POST"]},
       {"resource": "/v1/party/vendor-portal/invites/*:revoke", "methods": ["POST"]}
     ]},
     "party.vendor-portal.invite-accept": {"service_only": true, "permissions": [
@@ -1021,6 +1024,8 @@
     ]},
     "receivables.aging.run": {"permissions": [{"resource": "/v1/receivables/aging-snapshots", "methods": ["POST"]}]},
     "receivables.bankaccount.manage": {"permissions": [{"resource": "/v1/receivables/bank-accounts", "methods": ["PUT", "DELETE"]}]},
+    "receivables.fxsetting.manage": {"permissions": [{"resource": "/v1/receivables/fx-settings", "methods": ["PUT"]}]},
+    "receivables.payment.reverse": {"permissions": [{"resource": "/v1/receivables/payments/*:reverse", "methods": ["POST"]}]},
     "receivables.payment-file.import": {"permissions": [
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["POST"]},
       {"resource": "/v1/receivables/lockbox/imports", "methods": ["POST"]}
@@ -1053,6 +1058,7 @@
       {"resource": "/v1/receivables/balance-confirmations/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/balance-confirmations/*/differences", "methods": ["GET"]},
       {"resource": "/v1/receivables/bank-accounts", "methods": ["GET"]},
+      {"resource": "/v1/receivables/fx-settings", "methods": ["GET"]},
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["GET"]},
       {"resource": "/v1/receivables/cases", "methods": ["GET"]},
       {"resource": "/v1/receivables/cases/*", "methods": ["GET"]},
@@ -1275,6 +1281,9 @@
       {"resource": "/v1/consol/runs", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*/statements", "methods": ["GET"]}
+    ]},
+    "knowledge.write": {"permissions": [
+      {"resource": "/api/v1/knowledge/chunks", "methods": ["POST"]}
     ]},
     "mcp.copilot.use": {"permissions": [
       {"resource": "/api/v1/copilot/chat", "methods": ["POST"]},
@@ -1729,6 +1738,7 @@
       {"resource": "/api/v1/migration/parallel-runs/replay", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/load", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/load-payables", "methods": ["POST"]},
+      {"resource": "/api/v1/migration/runs/*/opening-load", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/quarantine/*/release", "methods": ["POST"]}
     ]},
@@ -1743,6 +1753,7 @@
       {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-load", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/payables-load", "methods": ["GET"]},
+      {"resource": "/api/v1/migration/runs/*/opening-load", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-rows", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/projects/*/opening", "methods": ["GET"]},
       {"resource": "/api/v1/migration/tolerances", "methods": ["GET"]}
@@ -3295,6 +3306,7 @@
     "revrec.maintain": {"permissions": [
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
       {"resource": "/v1/revrec/contracts/*:allocate", "methods": ["POST"]},
+      {"resource": "/v1/revrec/contracts/*:modify", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]},
       {"resource": "/v1/revrec/recognition-templates/*", "methods": ["PUT"]}
     ]},
@@ -3693,6 +3705,8 @@
       {"resource": "/v1/treasury/reconciliation-rules/*:deactivate", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-runs", "methods": ["POST"]}
     ]},
+    "treasury.import.write": {"service_only": true, "permissions": [{"resource": "/v1/treasury/opening-balances", "methods": ["POST"]}]},
+    "treasury.import.read": {"service_only": true, "permissions": [{"resource": "/v1/treasury/opening-balances", "methods": ["GET"]}]},
     "treasury.cashdesk.write": {"permissions": [
       {"resource": "/v1/treasury/cash-desks", "methods": ["POST"]},
       {"resource": "/v1/treasury/cash-desks/*/days", "methods": ["POST"]},
@@ -3919,7 +3933,8 @@
     "receivables": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
       "tax": ["tax.transaction.record"],
-      "billing": ["billing.invoice.read", "billing.credit-reservation.write"]
+      "billing": ["billing.invoice.read", "billing.credit-reservation.write"],
+      "fx": ["fx.rate.lookup"]
     },
     "ledger": {
       "close": ["period.check"],
@@ -3934,7 +3949,7 @@
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
       "fx": ["fx.rate.lookup"],
-      "tax": ["tax.withholding.calculate"],
+      "tax": ["tax.withholding.calculate", "tax.withholding.record"],
       "party": ["party.vendor-bank.reveal", "party.vendor.lookup"]
     },
     "workflow-ts": {
@@ -3973,6 +3988,8 @@
     "migration-factory": {
       "receivables": ["receivables.import.write", "receivables.view"],
       "payables": ["opening-item.import", "opening-item.import.read"],
+      "inventory": ["inventory.import.write", "inventory.import.read"],
+      "treasury": ["treasury.import.write", "treasury.import.read"],
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "integration-hub": {
@@ -3993,7 +4010,7 @@
     "supplier-portal": {
       "purchasing": ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],
       "receiving": ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"],
-      "party": ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"],
+      "party": ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept", "party.vendor-portal.admin"],
       "payables": ["payables.vendor-portal.read"]
     },
     "customer-portal": {

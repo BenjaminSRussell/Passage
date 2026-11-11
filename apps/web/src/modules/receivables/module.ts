@@ -8,6 +8,7 @@ import { DisputeDetailPage, DisputesPage, NewDisputePage } from "./Disputes";
 import { DownPaymentDetailPage, DownPaymentsPage, NewDownPaymentPage } from "./DownPayments";
 import { DunningRunDetailPage, DunningRunsPage, NewDunningRunPage } from "./Dunning";
 import { GLJournalsPage } from "./GLJournals";
+import { LedgerSetupPage } from "./LedgerSetup";
 import { InterestNotesPage, InterestRunPage } from "./Interest";
 import { LockboxImportPage, LockboxPage } from "./Lockbox";
 import { NewPaymentPage } from "./NewPaymentPage";
@@ -35,6 +36,7 @@ const receivables: PassageModule = {
     { path: "/receivables/payments/:id", element: createElement(PaymentDetailPage), handle: { title: "Payment" } },
     { path: "/receivables/remittance-advice", element: createElement(RemittanceAdvicePage), handle: { title: "Remittance advice" } },
     { path: "/receivables/gl-journals", element: createElement(GLJournalsPage), handle: { title: "Ledger journals" } },
+    { path: "/receivables/ledger-setup", element: createElement(LedgerSetupPage), handle: { title: "Ledger setup" } },
     { path: "/receivables/lockbox", element: createElement(LockboxPage), handle: { title: "Lockbox imports" } },
     { path: "/receivables/lockbox/new", element: createElement(LockboxImportPage), handle: { title: "Import lockbox file" } },
     { path: "/receivables/bank-statements", element: createElement(BankStatementsPage), handle: { title: "Bank statements" } },
@@ -86,6 +88,7 @@ const receivables: PassageModule = {
     { label: "Customer statements", to: "/receivables/statements", duty: "receivables.view" },
     { label: "Balance snapshots", to: "/receivables/balance-snapshots", duty: "receivables.view" },
     { label: "Ledger journals", to: "/receivables/gl-journals", duty: "receivables.view" },
+    { label: "Ledger setup", to: "/receivables/ledger-setup", duty: "receivables.view" },
   ],
 };
 

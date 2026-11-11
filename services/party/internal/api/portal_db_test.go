@@ -173,3 +173,64 @@ func TestAcceptProspect_ARepeatAfterAStopFinishesWithTheSameOnboardingAndASecond
 		t.Errorf("repeat linked %+v, want %+v", resumed, accepted)
 	}
 }
+
+// Approving a PROFILE_CHANGE rewrites the vendor's tenant-wide party, so through the real route it needs the party edit duty
+// (party.write, the duty of PATCH /v1/party/parties/{id}) besides the decide duty; without it the answer is 403
+// PTY-SUP-PARTY-WRITE and nothing changes.
+func TestApproveProfileChange_ThroughTheRouteNeedsPartyWrite(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)}), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	pg := store.New(app)
+	r := httpx.NewRouter()
+	api.New(&stubChecker{}, stubPinger{}, pg, &fakeSequencer{}).WithVendors(pg).WithSuppliers(pg).WithPortal(pg).Register(r)
+
+	asBuyer := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: portalLE, UserID: "buyer", Duties: testkit.ScopeDuties(portalLE)})
+	q, err := pg.CreateQuestionnaire(asBuyer, "Basics", []domain.Question{{ID: "iso", Label: "ISO 9001?", Type: domain.QuestionYesNo}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrar := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: portalLE, UserID: "portal-prospect", Service: tenant.VendorPortalIssuer, Duties: map[string]struct{}{tenant.DutyPortalRegister: {}}})
+	if _, err := pg.RegisterProspect(registrar, domain.NewProspect{CompanyName: "Birch Valve Co", ContactName: "Sam", Email: "sam@birch.example", Country: "US"}); err != nil {
+		t.Fatal(err)
+	}
+	prospects, err := pg.ListProspects(asBuyer, domain.ProspectNew, 10)
+	if err != nil || len(prospects) != 1 {
+		t.Fatalf("prospects %v %v", prospects, err)
+	}
+	body := `{"accountNumber":"V-200","vendorGroupId":"` + ids.New() + `","currencyCode":"USD","questionnaireId":"` + q.ID + `"}`
+	var accepted store.Prospect
+	if rec := buyer(r, "buyer", "party.write", http.MethodPost, "/v1/party/vendor-prospects/"+prospects[0].ID+":accept", body); rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &accepted) != nil {
+		t.Fatalf("accept: %d %s", rec.Code, rec.Body)
+	}
+	req, err := pg.CreateRequest(asBuyer, accepted.VendorID, domain.RequestProfileChange, "Rename", "New legal name.", map[string]string{"legalName": "Birch Valve Company Ltd", "registrationNumber": "RC-77"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/v1/party/vendor-requests/" + req.ID + ":approve"
+
+	refused := buyer(r, "ap", "party.vendor-request.decide", http.MethodPost, path, `{"note":"ok"}`)
+	if refused.Code != http.StatusForbidden || !strings.Contains(refused.Body.String(), store.CodeSupplierPartyWrite) {
+		t.Fatalf("approve with the decide duty only: %d %s, want 403 %s", refused.Code, refused.Body, store.CodeSupplierPartyWrite)
+	}
+	if got, err := pg.GetRequest(asBuyer, "", req.ID); err != nil || got.Status != domain.RequestSubmitted || got.AppliedAt != nil {
+		t.Errorf("request after a refused approval: %+v %v", got, err)
+	}
+	if p, _, err := pg.GetParty(asBuyer, accepted.PartyID); err != nil || p.Name != "Birch Valve Co" || p.Version != 1 {
+		t.Errorf("party after a refused approval: %+v %v", p, err)
+	}
+	// party.write alone cannot decide a vendor request either.
+	if rec := buyer(r, "ap", "party.write", http.MethodPost, path, `{"note":"ok"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("approve with party.write only: %d %s, want 403", rec.Code, rec.Body)
+	}
+
+	approved := buyer(r, "ap", "party.vendor-request.decide,party.write", http.MethodPost, path, `{"note":"ok"}`)
+	if approved.Code != http.StatusOK || !strings.Contains(approved.Body.String(), domain.RequestApproved) {
+		t.Fatalf("approve with both duties: %d %s", approved.Code, approved.Body)
+	}
+	p, _, err := pg.GetParty(asBuyer, accepted.PartyID)
+	if err != nil || p.LegalName == nil || *p.LegalName != "Birch Valve Company Ltd" || p.RegistrationNumber == nil || *p.RegistrationNumber != "RC-77" || p.Version != 2 {
+		t.Fatalf("party after approval: %+v %v", p, err)
+	}
+}

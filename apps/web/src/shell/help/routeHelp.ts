@@ -913,6 +913,13 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "ar-clerk.md#check-the-journals-posted-to-the-ledger",
   },
   {
+    patterns: ["/receivables/ledger-setup"],
+    title: "Ledger setup",
+    purpose: "Which ledger account each bank account's cash goes to, how exchange differences are booked, and the journals still owed for earlier activity.",
+    howTo: ["Choose the legal entity.", "Map each bank account to its ledger account, or leave cash on account 1000.", "To let a payment settle invoices in another currency, turn it on and name the functional currency and the gain and loss accounts.", "Queue the journals for earlier activity once, after the first set-up."],
+    guide: "ar-clerk.md#check-the-journals-posted-to-the-ledger",
+  },
+  {
     patterns: ["/receivables/lockbox", "/receivables/lockbox/new"],
     title: "Lockbox imports",
     purpose: "Bank files of checks, newest first. Each check becomes a Received payment to match and apply.",
