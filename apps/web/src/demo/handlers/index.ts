@@ -10,3 +10,4 @@ import "./documents";
 import "./tax";
 import "./shell";
 import "./print";
+import "./technician";

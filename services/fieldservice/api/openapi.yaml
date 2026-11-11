@@ -2767,6 +2767,7 @@ components:
             code: { type: string }
             name: { type: string }
             timeZone: { type: string }
+            legalEntityId: { type: string, format: uuid }
             truck:
               type: object
               properties:

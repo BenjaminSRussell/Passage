@@ -28,11 +28,14 @@ type DayTruck struct {
 
 // DayTechnician is the technician a day belongs to.
 type DayTechnician struct {
-	ID       string    `json:"id"`
-	Code     string    `json:"code"`
-	Name     string    `json:"name"`
-	TimeZone string    `json:"timeZone"`
-	Truck    *DayTruck `json:"truck,omitempty"`
+	ID       string `json:"id"`
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	TimeZone string `json:"timeZone"`
+	// LegalEntityID is the entity the technician works for; the device asks inventory for the
+	// truck's stock under it.
+	LegalEntityID string    `json:"legalEntityId"`
+	Truck         *DayTruck `json:"truck,omitempty"`
 }
 
 // DayLine is a work-order line as the technician sees it, with what has been consumed.
@@ -172,7 +175,7 @@ func (s *Postgres) TechnicianDay(ctx context.Context, technicianID, date string,
 			return err
 		}
 		from, to := day, day.AddDate(0, 0, 1)
-		out = Day{Technician: DayTechnician{ID: t.ID, Code: t.Code, Name: t.Name, TimeZone: t.TimeZone}, Date: date, GeneratedAt: now.UTC(), Visits: []DayVisit{}}
+		out = Day{Technician: DayTechnician{ID: t.ID, Code: t.Code, Name: t.Name, TimeZone: t.TimeZone, LegalEntityID: t.LegalEntityID}, Date: date, GeneratedAt: now.UTC(), Visits: []DayVisit{}}
 		if t.TruckSiteID != nil && t.TruckWarehouseID != nil {
 			out.Technician.Truck = &DayTruck{SiteID: *t.TruckSiteID, WarehouseID: *t.TruckWarehouseID, LocationID: t.TruckLocationID}
 		}
