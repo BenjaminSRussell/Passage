@@ -69,6 +69,9 @@ func (s *Postgres) CreateCollection(ctx context.Context, groupID, period string,
 			if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+"|collection|"+groupID+"|"+period); err != nil {
 				return Collection{}, err
 			}
+			if err := lockCollectedUnits(ctx, tx, tenantID, groupID, lines); err != nil {
+				return Collection{}, err
+			}
 			c := Collection{ID: ids.New(), GroupID: groupID, Period: period, Currency: currency, CreatedBy: by, MappingVersion: mappingVersion}
 			if err := tx.QueryRow(ctx, `select coalesce(max(version), 0) + 1 from consolidation_collection where tenant_id = $1 and group_id = $2::uuid and period = $3`,
 				tenantID, groupID, period).Scan(&c.Version); err != nil {
@@ -226,4 +229,50 @@ func loadCollection(ctx context.Context, tx pgx.Tx, tenantID, where, id string, 
 		d.Lines = append(d.Lines, l)
 	}
 	return rows.Err()
+}
+
+// lockCollectedUnits holds the units the lines were collected from (FOR SHARE) until the collection commits, and refuses lines
+// of a unit that left the group or changed currency since it was read: the lines are read from the ledgers before this
+// transaction, so without it a unit removed meanwhile (RemoveUnit checks for collection lines under its row lock) would leave
+// stored lines of a unit the group no longer has, and a currency change would leave lines in a currency the unit no longer is.
+func lockCollectedUnits(ctx context.Context, tx pgx.Tx, tenantID, groupID string, lines []domain.CollectLine) error {
+	want := map[string]string{}
+	for _, l := range lines {
+		want[l.UnitID] = l.UnitCurrency
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	unitIDs := make([]string, 0, len(want))
+	for id := range want {
+		unitIDs = append(unitIDs, id)
+	}
+	rows, err := tx.Query(ctx, `select id::text, currency from consolidation_unit where tenant_id = $1 and group_id = $2::uuid and id = any($3::uuid[])
+		order by id for share`, tenantID, groupID, unitIDs)
+	if err != nil {
+		return err
+	}
+	have := map[string]string{}
+	for rows.Next() {
+		var id, currency string
+		if err := rows.Scan(&id, &currency); err != nil {
+			rows.Close()
+			return err
+		}
+		have[id] = currency
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range unitIDs {
+		currency, ok := have[id]
+		switch {
+		case !ok:
+			return &domain.Error{Code: domain.CodeCollectionError, Detail: "unit " + id + " left the group while it was collected; collect again"}
+		case currency != want[id]:
+			return &domain.Error{Code: domain.CodeCollectionError, Detail: "unit " + id + " changed its currency to " + currency + " while it was collected; collect again"}
+		}
+	}
+	return nil
 }
