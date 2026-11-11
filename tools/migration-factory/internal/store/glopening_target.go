@@ -144,6 +144,20 @@ func (s *Postgres) ReleaseOpeningTarget(ctx context.Context, system domain.Sourc
 	// Postings are scoped by legal entity, so the check that none exists must see every entity's: the
 	// release needs a caller with no legal-entity claim and the tenant.administer duty.
 	err := dbx.WithTenantWideAdminTx(ctx, s.pool, p, dutyOpeningTargetRelease, func(tx pgx.Tx) error {
+		// Under the company's lock, like a posting call's lease: a posting that holds a lease may be between the ledger booking
+		// a journal and recording it, so the pin must stay until it ends (or its lease expires).
+		if err := lockOpeningCompany(ctx, tx, string(system), company); err != nil {
+			return err
+		}
+		var posting int
+		if err := tx.QueryRow(ctx, `select count(*) from gl_opening_posting_lease where tenant_id = current_setting('passage.tenant_id', true)::uuid
+			and source_system = $1 and source_company = $2 and expires_at > now()`, string(system), company).Scan(&posting); err != nil {
+			return err
+		}
+		if posting > 0 {
+			return fmt.Errorf("%w: an opening journal of %s is being posted right now; release the target after it has finished (a posting that was cut off frees it within %d minutes)",
+				domain.ErrTransition, company, int(postingLeaseTTL.Minutes()))
+		}
 		pin, err := readOpeningTarget(ctx, tx, string(system), company)
 		if err != nil {
 			return err
