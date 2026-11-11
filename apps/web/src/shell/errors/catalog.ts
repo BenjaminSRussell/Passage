@@ -583,6 +583,8 @@ const receivingGaps: Record<string, ProblemCatalogEntry> = {
   "SUP-INV-003": { message: "The quantity is more than is still left to invoice on that received line.", action: "Lower the quantity to what is left, or withdraw the earlier invoice that holds it." },
   "SUP-INV-004": { message: "An invoice with this number was already submitted.", action: "Check your submitted invoices, or use a different number." },
   "SUP-INV-005": { message: "The invoice has already been decided or withdrawn.", action: "Reload the page to see its current status." },
+  "SUP-INV-006": { message: "That vendor invoice already closes another submission.", action: "Choose the invoice you posted from this submission." },
+  "SUP-INV-007": { message: "That vendor invoice is of another legal entity, or it was rejected after audit.", action: "Choose a posted invoice of the submission's legal entity." },
   "RCV-PO-001": { message: "The purchase order isn't approved or confirmed.", action: "Get the order approved or confirmed first." },
   "RCV-PO-002": { message: "A purchase order line is cancelled.", action: "Remove the line from the receipt." },
   "RCV-PO-003": { message: "The purchase order belongs to another legal entity.", action: "Choose an order of the same legal entity." },

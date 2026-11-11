@@ -15,6 +15,10 @@ const (
 	CodeSubmissionOverQty   = "SUP-INV-003"
 	CodeSubmissionDuplicate = "SUP-INV-004"
 	CodeSubmissionState     = "SUP-INV-005"
+	// CodeSubmissionInvoiceTaken: the invoice already closes another submission.
+	CodeSubmissionInvoiceTaken = "SUP-INV-006"
+	// CodeSubmissionInvoiceMismatch: the invoice is of another legal entity, or rejected after audit.
+	CodeSubmissionInvoiceMismatch = "SUP-INV-007"
 
 	SubmissionSubmitted = "SUBMITTED"
 	SubmissionWithdrawn = "WITHDRAWN"

@@ -101,6 +101,8 @@ Accounts payable reads submissions at `GET /v1/receiving/invoice-submissions[/{i
 | SUP-INV-003 | 422 | an invoice line asks for more than is left to invoice |
 | SUP-INV-004 | 409 | an invoice with this number is already submitted or posted for the vendor |
 | SUP-INV-005 | 409 | the submission is already decided or withdrawn |
+| SUP-INV-006 | 422 | `:resolve` names an invoice that already closes another submission (also a unique index, migration `0029`) |
+| SUP-INV-007 | 422 | `:resolve` names an invoice of another legal entity, or one rejected after audit |
 | RCV-NF-011 | 404 | invoice submission not found (also another vendor's) |
 | RCV-OVR-001 | domain | receipt quantity above the over-delivery allowance |
 | RCV-CW-001 | 422 | catch weight outside min × cases to max × cases (BR-24.5), on registration and on a correction |

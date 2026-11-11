@@ -1441,7 +1441,9 @@ paths:
       operationId: resolveInvoiceSubmission
       summary: "Close a vendor's invoice submission with the posted invoice"
       x-passage-duty: receiving.vendor-invoice.post
-      description: Closes a SUBMITTED submission as POSTED, naming the vendor invoice accounts payable posted from it.
+      description: >-
+        Closes a SUBMITTED submission as POSTED, naming the vendor invoice accounts payable posted from it. The invoice must be the
+        submission vendor's, of the submission's legal entity, POSTED or AUDIT_BLOCKED, and not already close another submission.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1465,6 +1467,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-011' }
         '409': { $ref: '#/components/responses/Problem', description: 'SUP-INV-005 already decided or withdrawn.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'SUP-INV-001 not the vendor''s invoice; SUP-INV-006 the invoice already closes another submission; SUP-INV-007 another legal entity or rejected after audit.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /healthz:
     get:
