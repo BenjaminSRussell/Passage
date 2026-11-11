@@ -28,32 +28,32 @@ var (
 )
 
 type PaymentRun struct {
-	ID                 string              `json:"id"`
-	LegalEntityID      string              `json:"legalEntityId"`
-	ProposalID         string              `json:"proposalId"`
-	Status             string              `json:"status"`
-	RequestedBy        string              `json:"requestedBy"`
-	LedgerID           string              `json:"ledgerId"`
-	BankAccount        string              `json:"bankAccount"`
-	ControlAccount     string              `json:"controlAccount"`
-	DiscountAccount    *string             `json:"discountAccount,omitempty"`
-	WithholdingAccount *string             `json:"withholdingAccount,omitempty"`
-	FileNumber         *string             `json:"fileNumber,omitempty"`
-	FileSHA256         *string             `json:"fileSha256,omitempty"`
-	PaymentCount       *int                `json:"paymentCount,omitempty"`
-	FileGeneratedAt    *time.Time          `json:"fileGeneratedAt,omitempty"`
-	JournalRequested   *time.Time          `json:"journalRequestedAt,omitempty"`
-	JournalRejected    *time.Time          `json:"journalRejectedAt,omitempty"`
-	JournalEntryID     *string             `json:"journalEntryId,omitempty"`
-	JournalPostedAt    *time.Time          `json:"journalPostedAt,omitempty"`
-	SettledAt          *time.Time          `json:"settledAt,omitempty"`
-	FailureReason      *string             `json:"failureReason,omitempty"`
-	CreatedAt          time.Time           `json:"createdAt"`
-	CompletedAt        *time.Time          `json:"completedAt,omitempty"`
+	ID                 string     `json:"id"`
+	LegalEntityID      string     `json:"legalEntityId"`
+	ProposalID         string     `json:"proposalId"`
+	Status             string     `json:"status"`
+	RequestedBy        string     `json:"requestedBy"`
+	LedgerID           string     `json:"ledgerId"`
+	BankAccount        string     `json:"bankAccount"`
+	ControlAccount     string     `json:"controlAccount"`
+	DiscountAccount    *string    `json:"discountAccount,omitempty"`
+	WithholdingAccount *string    `json:"withholdingAccount,omitempty"`
+	FileNumber         *string    `json:"fileNumber,omitempty"`
+	FileSHA256         *string    `json:"fileSha256,omitempty"`
+	PaymentCount       *int       `json:"paymentCount,omitempty"`
+	FileGeneratedAt    *time.Time `json:"fileGeneratedAt,omitempty"`
+	JournalRequested   *time.Time `json:"journalRequestedAt,omitempty"`
+	JournalRejected    *time.Time `json:"journalRejectedAt,omitempty"`
+	JournalEntryID     *string    `json:"journalEntryId,omitempty"`
+	JournalPostedAt    *time.Time `json:"journalPostedAt,omitempty"`
+	SettledAt          *time.Time `json:"settledAt,omitempty"`
+	FailureReason      *string    `json:"failureReason,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	CompletedAt        *time.Time `json:"completedAt,omitempty"`
 	// WithholdingRecordError is set while the tax service refuses the run's withholding entries for good; an operator fixes the cause
 	// (the withholding code, the grant) and repeats post-journal.
 	WithholdingRecordError *string             `json:"withholdingRecordError,omitempty"`
-	Payments           []domain.RunPayment `json:"payments"`
+	Payments               []domain.RunPayment `json:"payments"`
 }
 
 type NewRun struct {

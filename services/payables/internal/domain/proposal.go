@@ -61,8 +61,8 @@ type ProposalLine struct {
 	// WithheldBase is the amount the tax was withheld on (the pay amount less what is under the code's threshold); the tax service
 	// records it with the withheld tax. Zero on lines stored before it was kept: the pay amount stands in for it.
 	WithheldBase decimal.Decimal `json:"-"`
-	Rate            decimal.Decimal `json:"rate"`
-	Valued          decimal.Decimal `json:"valued"`
+	Rate         decimal.Decimal `json:"rate"`
+	Valued       decimal.Decimal `json:"valued"`
 }
 
 type ProposalGroup struct {
