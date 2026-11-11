@@ -390,7 +390,11 @@ func (a *API) listPayments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := a.store.ListPayments(r.Context(), store.PaymentFilter{Status: status, CustomerID: customer}, limit)
+	search, ok := searchParam(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListPayments(r.Context(), store.PaymentFilter{Status: status, CustomerID: customer, Q: search}, limit)
 	if err != nil {
 		a.fail("list payments", w, r, err)
 		return
@@ -439,7 +443,11 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 		badQuery(w, r, "importSource", "must name a legacy system, as sent to open-items:batch")
 		return
 	}
-	items, err := a.store.ListOpenItems(r.Context(), store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source}, limit)
+	search, ok := searchParam(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.store.ListOpenItems(r.Context(), store.OpenItemFilter{CustomerID: customer, OpenOnly: status == "open", ImportSource: source, Q: search}, limit)
 	if err != nil {
 		a.fail("list open items", w, r, err)
 		return
@@ -488,6 +496,16 @@ func ifMatch(r *http.Request) (int, error) {
 }
 
 func etag(version int) string { return `"` + strconv.Itoa(version) + `"` }
+
+// searchParam reads the q filter of a list: trimmed, at most 100 characters.
+func searchParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if utf8.RuneCountInString(q) > 100 {
+		badQuery(w, r, "q", "must be at most 100 characters")
+		return "", false
+	}
+	return q, true
+}
 
 func badQuery(w http.ResponseWriter, r *http.Request, field, rule string) {
 	p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
