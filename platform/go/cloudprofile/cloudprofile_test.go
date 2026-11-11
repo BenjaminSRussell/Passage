@@ -236,3 +236,37 @@ func TestCloudEnvironmentSettings(t *testing.T) {
 		t.Error("no idle timeout without the hipaa overlay")
 	}
 }
+
+func TestPostgresTLSIsVerifiedUnderTheGovernmentProfiles(t *testing.T) {
+	noEnv := func(string) string { return "" }
+	for _, name := range []string{"gcc", "gcc-high", "dod"} {
+		p := mustResolve(t, name)
+		for _, bad := range []string{
+			"postgres://u@db.example.invalid/x?sslmode=disable",
+			"postgres://u@db.example.invalid/x?sslmode=require",
+			"postgres://u@db.example.invalid/x",
+			"host=db user=u sslmode=verify-ca",
+		} {
+			if err := p.CheckPostgresConn(bad, noEnv); err == nil {
+				t.Errorf("%s must refuse %q", name, bad)
+			}
+		}
+		for _, ok := range []string{"postgres://u@db.example.invalid/x?sslmode=verify-full", "host=db user=u sslmode='verify-full'"} {
+			if err := p.CheckPostgresConn(ok, noEnv); err != nil {
+				t.Errorf("%s must accept %q: %v", name, ok, err)
+			}
+		}
+		if err := p.CheckPostgresConn("postgres://u@db.example.invalid/x", func(k string) string {
+			if k == "PGSSLMODE" {
+				return "verify-full"
+			}
+			return ""
+		}); err != nil {
+			t.Errorf("%s: PGSSLMODE=verify-full in the environment is honoured: %v", name, err)
+		}
+	}
+	// The default profile keeps local development working.
+	if err := mustResolve(t, "commercial").CheckPostgresConn("postgres://u@localhost/x?sslmode=disable", noEnv); err != nil {
+		t.Errorf("commercial must not enforce: %v", err)
+	}
+}

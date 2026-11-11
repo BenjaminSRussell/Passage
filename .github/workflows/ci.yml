@@ -355,6 +355,7 @@ jobs:
           tofu_version: 1.13.2
       - run: make -C deploy test-cloud-profiles
       - run: make -C deploy test-tofu
+      - run: make -C deploy test-offline
       - run: go test -count=1 ./cloudprofile/... ./fieldcrypt/... ./httpx/...
         working-directory: platform/go
       - name: Boot the FIPS Go variant
@@ -380,6 +381,28 @@ jobs:
             sleep 3
           done
           docker logs keycloak-fips
+          exit 1
+      # The realm the hipaa overlay and the IdP MFA trust option produce (#602 #606): retention, idle timeout and the
+      # post-broker flow that skips the second factor when the IdP's amr shows MFA must import into strict FIPS Keycloak.
+      - name: Import the hipaa realm patch with IdP MFA trust into strict FIPS Keycloak
+        run: |
+          docker rm -f keycloak-fips >/dev/null
+          (cd platform/go && go run ./cloudprofile/cmd/cloudprofile realm-patch -profile gcc-high+hipaa -trust-idp-mfa -realm ../../deploy/keycloak/realm-passage.json) > "$RUNNER_TEMP/realm-hipaa.json"
+          password="Kc-$(openssl rand -hex 16)"
+          docker run -d --name keycloak-hipaa -p 8080:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD="$password" -e KC_HOSTNAME_STRICT=false \
+            -v "$RUNNER_TEMP/realm-hipaa.json:/opt/keycloak/data/import/realm-passage.json:ro" \
+            passage/keycloak-fips start-dev --features=fips --fips-mode=strict --import-realm --http-enabled=true
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/realms/passage/.well-known/openid-configuration >/dev/null; then
+              token="$(curl -fsS -d client_id=admin-cli -d username=admin --data-urlencode "password=$password" -d grant_type=password http://localhost:8080/realms/master/protocol/openid-connect/token | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+              flows="$(curl -fsS -H "Authorization: Bearer $token" http://localhost:8080/admin/realms/passage/authentication/flows)"
+              echo "$flows" | grep -q 'passage-post-broker-trust-idp-mfa' || { echo "the trust flow did not import"; exit 1; }
+              exit 0
+            fi
+            sleep 3
+          done
+          docker logs keycloak-hipaa
           exit 1
 
   deploy-release:

@@ -9,7 +9,7 @@ PYTHON ?= python3
 IMAGE_DIGEST ?=
 SKIP_VERIFY ?=
 
-.PHONY: test-tofu test-cloud-profiles deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema test-argocd
+.PHONY: test-tofu test-cloud-profiles test-offline offline-bundle deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema test-argocd
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -103,3 +103,15 @@ test-tofu:
 	tofu -chdir=tofu/cluster test
 	tofu -chdir=tofu/cluster/modules/aks init -backend=false -input=false
 	tofu -chdir=tofu/cluster/modules/aks test
+
+# Offline install bundle (#603, IL6 readiness): the tool's tests, with skopeo, cosign and helm replaced by a recorder.
+test-offline:
+	$(PYTHON) -m unittest discover -s offline -v
+
+# Build the signed offline bundle on a connected machine: every image (pinned by digest, with signature and SBOM), chart and
+# policy as one archive. OUT is the output directory, KEY the cosign private key (or a KMS/HSM URI). Needs skopeo, cosign, helm.
+OUT ?= ../dist/offline
+KEY ?=
+offline-bundle:
+	@test -n "$(KEY)" || { echo "Usage: make -C deploy offline-bundle KEY=<cosign private key> [OUT=<dir>]" >&2; exit 2; }
+	$(PYTHON) offline/offline_bundle.py build --out "$(OUT)" --key "$(KEY)"

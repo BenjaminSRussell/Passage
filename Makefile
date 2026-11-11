@@ -3,7 +3,7 @@ GO_MODULES := $(shell find platform/go services tools/rlscheck tools/tenant-rest
 TS_PACKAGES := $(shell find apps services -maxdepth 2 -name package.json -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 PY_PACKAGES := $(shell find services -maxdepth 2 -name pyproject.toml -exec dirname {} \; 2>/dev/null)
 
-.PHONY: test test-go test-ts test-py test-e2e bench-ledger vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local dev dev-down dev-render e2e-local
+.PHONY: offline-bundle test test-go test-ts test-py test-e2e bench-ledger vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local dev dev-down dev-render e2e-local
 
 # One command for a laptop: Postgres, Kafka, Keycloak and OPA in Docker, the services, the dev gateway and the web
 # app on the host. Needs docker compose, psql, go and node (see deploy/local/README.md).
@@ -20,6 +20,10 @@ e2e-local:
 
 dev-down:
 	PASSAGE_DEV_DIR=$(CURDIR)/.run/dev docker compose -f deploy/local/compose.yaml down
+
+# Signed offline install bundle for an air-gapped cluster (IL6 readiness, docs/ops/dod-il5.md): make offline-bundle KEY=cosign.key
+offline-bundle:
+	$(MAKE) -C deploy offline-bundle KEY="$(KEY)" $(if $(OUT),OUT="$(OUT)")
 
 test: test-go test-ts test-py check-deploy-local
 
