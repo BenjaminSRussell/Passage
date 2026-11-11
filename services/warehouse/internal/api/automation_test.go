@@ -73,9 +73,10 @@ func TestAutomationRoutes_DutiesAndValidation(t *testing.T) {
 		"orders listing: no duty":         {req{method: "GET", path: "/v1/warehouse/automation/transport-orders", duties: dutyReceive}, 403, ""},
 		"report status is checked":        {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + wh + ":report", duties: dutyAutomation, body: `{"status":"ARRIVED"}`}, 400, "status"},
 		"report needs the connector duty": {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + wh + ":report", duties: dutyWorkSupervise, body: `{"status":"SENT"}`}, 403, ""},
-		"events kind is checked":          {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"PLC","events":[{"kind":"melted","seq":1,"at":"2026-10-27T09:00:00Z"}]}`}, 400, "events[0].kind"},
-		"events station is checked":       {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"","events":[{"kind":"fault","seq":1,"at":"2026-10-27T09:00:00Z"}]}`}, 400, "station"},
-		"events are accepted":             {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"PLC","events":[{"kind":"fault","seq":1,"code":"0042","at":"2026-10-27T09:00:00Z"}]}`}, 200, ""},
+		"events kind is checked":          {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"PLC","events":[{"kind":"melted","session":"s1","seq":1,"at":"2026-10-27T09:00:00Z"}]}`}, 400, "events[0].kind"},
+		"events station is checked":       {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"","events":[{"kind":"fault","session":"s1","seq":1,"at":"2026-10-27T09:00:00Z"}]}`}, 400, "station"},
+		"events session is required":      {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"PLC","events":[{"kind":"fault","seq":1,"code":"0042","at":"2026-10-27T09:00:00Z"}]}`}, 400, "events[0].session"},
+		"events are accepted":             {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"PLC","events":[{"kind":"fault","session":"s1","seq":1,"code":"0042","at":"2026-10-27T09:00:00Z"}]}`}, 200, ""},
 		"pallet label needs inquiry":      {req{method: "GET", path: "/v1/warehouse/pallets/306141410000000013/label", duties: dutyReceive}, 403, ""},
 		"gs1 settings need setup":         {req{method: "PUT", path: "/v1/warehouse/gs1-settings", duties: dutySetupView, body: `{"companyPrefix":"0614141"}`}, 403, ""},
 		"gs1 prefix is validated":         {req{method: "PUT", path: "/v1/warehouse/gs1-settings", duties: dutySetupMaintain, body: `{"companyPrefix":"12"}`}, 400, "companyPrefix"},
@@ -228,7 +229,7 @@ func TestPalletFromReceiptToPLCArrival(t *testing.T) {
 
 	// The PLC reports the arrival, and repeats the telegram; stock lands once.
 	events := func(seq int) string {
-		return fmt.Sprintf(`{"station":"PLC","events":[{"kind":"arrived","seq":%d,"loadUnit":%q,"location":%q,"at":"2026-10-27T09:05:00Z"},{"kind":"arrived","seq":%d,"loadUnit":"000000000000000000","at":"2026-10-27T09:05:01Z"}]}`, seq, sscc, ord.ToLocation, seq+1)
+		return fmt.Sprintf(`{"station":"PLC","events":[{"kind":"arrived","session":"link-1","seq":%d,"loadUnit":%q,"location":%q,"at":"2026-10-27T09:05:00Z"},{"kind":"arrived","session":"link-1","seq":%d,"loadUnit":"000000000000000000","at":"2026-10-27T09:05:01Z"}]}`, seq, sscc, ord.ToLocation, seq+1)
 	}
 	rec = call(h, req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: events(7)})
 	var res store.AutomationIngest

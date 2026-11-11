@@ -245,41 +245,47 @@ func (s *Store) ConfirmLine(ctx context.Context, idem Idem, in ConfirmInput) (do
 	)
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var err error
-		out, replayed, err = once(ctx, tx, idem, http.StatusOK, func() (domain.Work, error) {
-			w, err := lockWork(ctx, tx, in.WorkID, in.IfMatch)
-			if err != nil {
-				return w, err
-			}
-			again, err := w.ConfirmLine(in.LineNo, in.Qty, idem.Key, in.User)
-			if err != nil || again {
-				return w, err
-			}
-			line, err := w.Line(in.LineNo)
-			if err != nil {
-				return w, err
-			}
-			if err := s.moveStock(ctx, tx, w, line, &claims); err != nil {
-				return w, err
-			}
-			if err := updateWork(ctx, tx, &w); err != nil {
-				return w, err
-			}
-			if w.Completed() {
-				if err := enqueue(ctx, tx, w.ID, evts.WorkCompleted, completedData(w, in.Now)); err != nil {
-					return w, err
-				}
-				if err := releaseDependents(ctx, tx, w); err != nil {
-					return w, err
-				}
-			}
-			return w, nil
-		})
+		out, replayed, err = s.confirmLineTx(ctx, tx, idem, in, &claims)
 		return err
 	})
 	if err != nil {
 		claims.run()
 	}
 	return out, replayed, err
+}
+
+// confirmLineTx is ConfirmLine inside the caller's transaction; the inventory claims it takes are added to claims, for
+// the caller to withdraw when its transaction does not commit.
+func (s *Store) confirmLineTx(ctx context.Context, tx pgx.Tx, idem Idem, in ConfirmInput, claims *undoLog) (domain.Work, bool, error) {
+	return once(ctx, tx, idem, http.StatusOK, func() (domain.Work, error) {
+		w, err := lockWork(ctx, tx, in.WorkID, in.IfMatch)
+		if err != nil {
+			return w, err
+		}
+		again, err := w.ConfirmLine(in.LineNo, in.Qty, idem.Key, in.User)
+		if err != nil || again {
+			return w, err
+		}
+		line, err := w.Line(in.LineNo)
+		if err != nil {
+			return w, err
+		}
+		if err := s.moveStock(ctx, tx, w, line, claims); err != nil {
+			return w, err
+		}
+		if err := updateWork(ctx, tx, &w); err != nil {
+			return w, err
+		}
+		if w.Completed() {
+			if err := enqueue(ctx, tx, w.ID, evts.WorkCompleted, completedData(w, in.Now)); err != nil {
+				return w, err
+			}
+			if err := releaseDependents(ctx, tx, w); err != nil {
+				return w, err
+			}
+		}
+		return w, nil
+	})
 }
 
 // Exception actions of POST /work/{id}:exception.

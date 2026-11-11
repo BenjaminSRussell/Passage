@@ -866,10 +866,13 @@ paths:
       operationId: ingestAutomationEvents
       summary: The PLC's events: arrived, diverted, fault (FR-32.12)
       description: >
-        Each event is stored once by station and sequence, so a telegram the PLC repeats is a duplicate. An arrival of a
-        load unit with an order SENT to the station marks the order ARRIVED and confirms its work line as the station's
-        identity, so the stock moves; `confirmed` counts those. A confirmation that fails leaves the order ARRIVED with
-        the reason in `confirmError`.
+        Each event is stored once by station, link session and sequence: the PLC numbers its telegrams per session
+        (from 1 again after the connector dials it again, wrapping after 99999), so a telegram the PLC repeats within
+        ten minutes in the same session is a duplicate, and the same number in another session, or later, is a new
+        event. An arrival of a load unit with an order SENT to the station marks the order ARRIVED and confirms its work
+        line as the station's identity in the same transaction, so the stock moves; `confirmed` counts those. A
+        confirmation the warehouse refuses leaves the order ARRIVED with the reason in `confirmError`; any other failure
+        is an error for the whole batch, nothing is stored, and the connector has the PLC send it again.
       x-passage-duty: warehouse.automation.execute
       requestBody:
         required: true
@@ -888,9 +891,13 @@ paths:
                   items:
                     type: object
                     additionalProperties: false
-                    required: [kind, seq, at]
+                    required: [kind, session, seq, at]
                     properties:
                       kind: { type: string, enum: [arrived, diverted, fault] }
+                      session:
+                        type: string
+                        pattern: "^[A-Za-z0-9._:-]{1,64}$"
+                        description: The connector's link session to the PLC; sequence numbers restart with each.
                       seq: { type: integer, minimum: 0 }
                       loadUnit: { type: string, pattern: "^[0-9]{18}$" }
                       location: { type: string }

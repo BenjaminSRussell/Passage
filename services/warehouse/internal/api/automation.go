@@ -32,6 +32,9 @@ const (
 
 var stationName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,8}$`)
 
+// linkSession is the connector's name for one link session to a PLC; the PLC's sequence numbers restart with each.
+var linkSession = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
+
 // registerAutomation mounts the RFID read and automation routes inside the tenant-checked group.
 func (a *API) registerAutomation(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRFIDIngest)).Post("/v1/warehouse/rfid-reads:ingest", a.ingestRFID)
@@ -240,6 +243,7 @@ func (a *API) reportTransportOrder(w http.ResponseWriter, r *http.Request) {
 
 type automationEventInput struct {
 	Kind     string `json:"kind"`
+	Session  string `json:"session"`
 	Seq      int    `json:"seq"`
 	LoadUnit string `json:"loadUnit"`
 	Location string `json:"location"`
@@ -254,8 +258,8 @@ type automationEventsInput struct {
 	Events  []automationEventInput `json:"events"`
 }
 
-// ingestAutomationEvents takes the events a PLC reported (arrived, diverted, fault), once each by station and
-// sequence. An arrival of a load unit that has an order sent to the station confirms the order's work line.
+// ingestAutomationEvents takes the events a PLC reported (arrived, diverted, fault), once each by station, link
+// session and sequence. An arrival of a load unit that has an order sent to the station confirms the order's work line.
 func (a *API) ingestAutomationEvents(w http.ResponseWriter, r *http.Request) {
 	var in automationEventsInput
 	if err := httpx.Decode(r, &in); err != nil {
@@ -275,6 +279,9 @@ func (a *API) ingestAutomationEvents(w http.ResponseWriter, r *http.Request) {
 		if e.Kind != "arrived" && e.Kind != "diverted" && e.Kind != "fault" {
 			fields[p+".kind"] = "must be arrived, diverted or fault"
 		}
+		if !linkSession.MatchString(e.Session) {
+			fields[p+".session"] = "must name the connector's link session to the PLC, 1 to 64 letters, digits, '.', '_', ':' or '-'"
+		}
 		if e.Seq < 0 {
 			fields[p+".seq"] = "must not be negative"
 		}
@@ -288,7 +295,7 @@ func (a *API) ingestAutomationEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			fields[p+".at"] = "must be a time, RFC 3339"
 		}
-		events = append(events, store.AutomationEvent{Kind: e.Kind, Seq: e.Seq, LoadUnit: e.LoadUnit, Location: e.Location, Lane: e.Lane, Code: e.Code, Text: e.Text, At: at.UTC()})
+		events = append(events, store.AutomationEvent{Kind: e.Kind, Session: e.Session, Seq: e.Seq, LoadUnit: e.LoadUnit, Location: e.Location, Lane: e.Lane, Code: e.Code, Text: e.Text, At: at.UTC()})
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

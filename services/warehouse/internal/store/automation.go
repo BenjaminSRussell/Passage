@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/warehouse/internal/domain"
 )
@@ -378,7 +378,10 @@ func (s *Store) ReportAutomationOrder(ctx context.Context, id, status, reason st
 
 // AutomationEvent is what a PLC reported (the payload of dev.passage.warehouse.automation.event.v1).
 type AutomationEvent struct {
-	Kind     string
+	Kind string
+	// Session names the connector's link session to the PLC. The PLC numbers its telegrams per session (from 1 again
+	// after the connector dials it again), so a sequence number alone does not name an event.
+	Session  string
 	Seq      int
 	LoadUnit string
 	Location string
@@ -398,47 +401,61 @@ type AutomationIngest struct {
 	Unmatched int `json:"unmatched"`
 }
 
-type pendingConfirm struct {
-	orderID string
-	workID  string
-	lineNo  int
-	qty     decimal.Decimal
-	seq     int
-}
+// EventDedupeWindow is how long a (station, session, seq) is remembered. A telegram the PLC repeats (the connector's
+// answer was lost) comes back within seconds; the same number in the same session after the window is the sequence
+// wrapping after 99999, a new event.
+const EventDedupeWindow = 10 * time.Minute
 
-// IngestAutomationEvents stores the events of a station once each (by station and sequence). An arrival of a load
-// unit with an order SENT to the station marks the order ARRIVED and confirms its work line as the station's identity,
-// so the stock moves; a divert marks it DIVERTED, a fault FAULT with the PLC's code. A confirmation that fails (the
-// location is full, the stock is not there) leaves the order ARRIVED with the reason in confirm_error, for a person.
+// IngestAutomationEvents stores the events of a station once each: a repeat is the same session and sequence within
+// EventDedupeWindow. An arrival of a load unit with an order SENT to the station marks the order ARRIVED and confirms
+// its work line as the station's identity in the same transaction, so the event, the status and the stock move commit
+// together or not at all; a divert marks it DIVERTED, a fault FAULT with the PLC's code. A confirmation the warehouse
+// refuses (the location is full, the stock is not there) leaves the order ARRIVED with the reason in confirm_error,
+// for a person. Any other failure fails the whole batch: nothing is stored, the connector answers the PLC busy and
+// the PLC sends the telegram again.
 func (s *Store) IngestAutomationEvents(ctx context.Context, station string, events []AutomationEvent, now time.Time) (AutomationIngest, error) {
 	var out AutomationIngest
-	var confirms []pendingConfirm
+	var claims undoLog
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		out, confirms = AutomationIngest{}, nil
+		out, claims = AutomationIngest{}, undoLog{}
+		// One batch per station at a time, so a repeat posted while the first is still running is seen as one.
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('warehouse.automation_event:' || $1::text || ':' || $2::text, 0))`,
+			tenantID(ctx), station); err != nil {
+			return err
+		}
 		for _, e := range events {
-			tag, err := tx.Exec(ctx, `insert into automation_event (tenant_id, station, seq, kind, load_unit, location, lane, code, text, at)
-				values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict do nothing`, tenantID(ctx), station, e.Seq, e.Kind, e.LoadUnit, e.Location, e.Lane, e.Code, e.Text, e.At)
-			if err != nil {
+			var dup bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from automation_event where station = $1 and session = $2 and seq = $3 and received_at > $4)`,
+				station, e.Session, e.Seq, now.Add(-EventDedupeWindow)).Scan(&dup); err != nil {
 				return err
 			}
-			if tag.RowsAffected() == 0 {
+			if dup {
 				out.Duplicates++
 				continue
 			}
 			out.Accepted++
-			if e.LoadUnit == "" {
-				continue
-			}
 			var orderID, workID string
 			var lineNo int
-			err = tx.QueryRow(ctx, `select id::text, work_id::text, line_no from automation_order where station = $1 and load_unit = $2 and status = 'SENT'
-				order by sent_at desc limit 1 for update`, station, e.LoadUnit).Scan(&orderID, &workID, &lineNo)
-			if errors.Is(err, pgx.ErrNoRows) {
-				out.Unmatched++
-				continue
+			if e.LoadUnit != "" {
+				err := tx.QueryRow(ctx, `select id::text, work_id::text, line_no from automation_order where station = $1 and load_unit = $2 and status = 'SENT'
+					order by sent_at desc limit 1 for update`, station, e.LoadUnit).Scan(&orderID, &workID, &lineNo)
+				switch {
+				case errors.Is(err, pgx.ErrNoRows):
+					out.Unmatched++
+				case err != nil:
+					return err
+				}
 			}
-			if err != nil {
+			var order any
+			if orderID != "" {
+				order = orderID
+			}
+			if _, err := tx.Exec(ctx, `insert into automation_event (tenant_id, id, station, session, seq, kind, load_unit, location, lane, code, text, at, received_at, order_id)
+				values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, tenantID(ctx), ids.New(), station, e.Session, e.Seq, e.Kind, e.LoadUnit, e.Location, e.Lane, e.Code, e.Text, e.At, now, order); err != nil {
 				return err
+			}
+			if orderID == "" {
+				continue
 			}
 			newStatus := map[string]string{"arrived": OrderArrived, "diverted": OrderDiverted, "fault": OrderFault}[e.Kind]
 			reason := ""
@@ -448,43 +465,82 @@ func (s *Store) IngestAutomationEvents(ctx context.Context, station string, even
 			if _, err := tx.Exec(ctx, `update automation_order set status = $2, reason = $3, done_at = $4 where id = $1`, orderID, newStatus, reason, e.At); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `update automation_event set order_id = $4 where station = $1 and seq = $2 and tenant_id = $3`, station, e.Seq, tenantID(ctx), orderID); err != nil {
-				return err
-			}
 			if e.Kind == "arrived" {
-				var qty string
-				if err := tx.QueryRow(ctx, `select qty::text from work_line where work_id = $1 and line_no = $2`, workID, lineNo).Scan(&qty); err != nil {
-					return err
-				}
-				q, err := dec(qty)
+				confirmed, err := s.confirmArrival(ctx, tx, station, orderID, workID, lineNo, now, &claims)
 				if err != nil {
 					return err
 				}
-				confirms = append(confirms, pendingConfirm{orderID: orderID, workID: workID, lineNo: lineNo, qty: q, seq: e.Seq})
+				if confirmed {
+					out.Confirmed++
+				}
 			}
 		}
 		return nil
 	})
 	if err != nil {
+		claims.run()
 		return AutomationIngest{}, err
 	}
-	for _, c := range confirms {
-		_, _, cerr := s.ConfirmLine(ctx, Idem{Key: fmt.Sprintf("automation:%s:%d", station, c.seq), Hash: "automation-arrival"},
-			ConfirmInput{WorkID: c.workID, LineNo: c.lineNo, Qty: c.qty, User: AutomationUser(station), Now: now})
-		if cerr != nil {
-			if err := s.inTx(ctx, func(tx pgx.Tx) error {
-				msg := cerr.Error()
-				if len(msg) > 500 {
-					msg = msg[:500]
-				}
-				_, e := tx.Exec(ctx, `update automation_order set confirm_error = $2 where id = $1`, c.orderID, msg)
-				return e
-			}); err != nil {
-				return out, err
-			}
-			continue
-		}
-		out.Confirmed++
-	}
 	return out, nil
+}
+
+// confirmArrival confirms the work line of an order that just turned ARRIVED, inside the ingest's transaction and
+// under a savepoint. The confirmation is keyed by the order: the SENT to ARRIVED change, made under the order's row
+// lock, already happens once per order. A refusal rolls back to the savepoint and records the reason on the order;
+// it returns false and no error. Any other failure is returned and fails the batch.
+func (s *Store) confirmArrival(ctx context.Context, tx pgx.Tx, station, orderID, workID string, lineNo int, now time.Time, claims *undoLog) (bool, error) {
+	var qty string
+	if err := tx.QueryRow(ctx, `select qty::text from work_line where work_id = $1 and line_no = $2`, workID, lineNo).Scan(&qty); err != nil {
+		return false, err
+	}
+	q, err := dec(qty)
+	if err != nil {
+		return false, err
+	}
+	sp, err := tx.Begin(ctx) // a savepoint
+	if err != nil {
+		return false, err
+	}
+	var mine undoLog
+	_, _, cerr := s.confirmLineTx(ctx, sp, ArrivalIdem(orderID), ConfirmInput{WorkID: workID, LineNo: lineNo, Qty: q, User: AutomationUser(station), Now: now}, &mine)
+	if cerr == nil {
+		if err := sp.Commit(ctx); err != nil {
+			mine.run()
+			return false, err
+		}
+		claims.fns = append(claims.fns, mine.fns...)
+		return true, nil
+	}
+	mine.run()
+	if err := sp.Rollback(ctx); err != nil {
+		return false, err
+	}
+	if !confirmRefused(cerr) {
+		return false, cerr
+	}
+	msg := cerr.Error()
+	if len(msg) > 500 {
+		msg = msg[:500]
+	}
+	_, err = tx.Exec(ctx, `update automation_order set confirm_error = $2 where id = $1`, orderID, msg)
+	return false, err
+}
+
+// ArrivalIdem is the idempotency key of the confirmation an order's arrival makes.
+func ArrivalIdem(orderID string) Idem {
+	return Idem{Key: "automation-arrival:" + orderID, Hash: "automation-arrival"}
+}
+
+// confirmRefused tells a confirmation the warehouse refused, which a person has to look at, from a failure that may
+// pass when the PLC sends the telegram again (the database or inventory being away).
+func confirmRefused(err error) bool {
+	var de *domain.Error
+	var pr *httpx.Problem
+	switch {
+	case errors.As(err, &de):
+		return true
+	case errors.As(err, &pr):
+		return pr.Status < 500
+	}
+	return errors.Is(err, ErrNotFound) || errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrIdempotencyReuse) || errors.Is(err, ErrVersionConflict)
 }

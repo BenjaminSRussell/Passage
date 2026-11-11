@@ -128,8 +128,9 @@ with its position, a tag read again at the same reader within five seconds is a 
 its receipt and pallet) and `GET /v1/warehouse/rfid-reads`; automation orders from transport work (`POST
 /v1/warehouse/automation/transport-orders`, the line's pallet SSCC and two locations of at most 12 characters, the work assigned
 to `automation:<station>`), the connector's pull and report, and `POST /v1/warehouse/automation/events`, where each PLC event is
-stored once by station and sequence and an arrival of a load unit with an order sent to the station confirms the work line as the
-station's identity (migration `0007`). Duties `warehouse.rfid.ingest` and `warehouse.automation.execute`.
+stored once by station, link session and sequence (the PLC numbers telegrams per session, from 1 again after a reconnect, so a
+repeat is the same session and number within ten minutes) and an arrival of a load unit with an order sent to the station confirms
+the work line as the station's identity in the same transaction, keyed by the order (migration `0007`). Duties `warehouse.rfid.ingest` and `warehouse.automation.execute`.
 
 | Item | Status | Reason |
 |---|---|---|

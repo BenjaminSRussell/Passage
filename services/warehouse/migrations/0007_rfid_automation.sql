@@ -44,10 +44,14 @@ CREATE TABLE IF NOT EXISTS automation_order (
 CREATE INDEX IF NOT EXISTS automation_order_pending ON automation_order (tenant_id, station, status, created_at);
 CREATE INDEX IF NOT EXISTS automation_order_unit ON automation_order (tenant_id, station, load_unit) WHERE status = 'SENT';
 
--- What the PLC reported, once per (station, sequence): a repeat of a telegram is not a second event.
+-- What the PLC reported. A telegram's sequence number is only unique within one link session (it restarts at 1 when
+-- the connector dials the PLC again, and wraps after 99999), so a repeat is the same (station, session, seq) received
+-- within a short window (store.EventDedupeWindow); the same number in another session, or long after, is a new event.
 CREATE TABLE IF NOT EXISTS automation_event (
   tenant_id uuid NOT NULL,
+  id uuid NOT NULL,
   station text NOT NULL CHECK (char_length(station) BETWEEN 1 AND 8),
+  session text NOT NULL CHECK (char_length(session) BETWEEN 1 AND 64),
   seq integer NOT NULL CHECK (seq >= 0),
   kind text NOT NULL CHECK (kind IN ('arrived', 'diverted', 'fault')),
   load_unit text NOT NULL DEFAULT '',
@@ -58,8 +62,9 @@ CREATE TABLE IF NOT EXISTS automation_event (
   at timestamptz NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now(),
   order_id uuid,
-  PRIMARY KEY (tenant_id, station, seq)
+  PRIMARY KEY (tenant_id, id)
 );
+CREATE INDEX IF NOT EXISTS automation_event_seq ON automation_event (tenant_id, station, session, seq, received_at DESC);
 
 ALTER TABLE rfid_read ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rfid_read FORCE ROW LEVEL SECURITY;
