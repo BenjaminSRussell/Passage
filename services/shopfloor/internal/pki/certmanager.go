@@ -110,6 +110,9 @@ func (c *CertManager) call(ctx context.Context, method, path string, body any) (
 	return res.StatusCode, b, err
 }
 
+// errNotIssuedInTime is the answer when cert-manager has not signed the request within Timeout.
+var errNotIssuedInTime = errors.New("cert-manager did not issue the certificate in time; is the issuer ready?")
+
 // Issue has cert-manager sign the request for subject.
 func (c *CertManager) Issue(csr *x509.CertificateRequest, subject string, now time.Time) (Issued, error) {
 	if subject == "" {
@@ -174,11 +177,15 @@ func (c *CertManager) Issue(csr *x509.CertificateRequest, subject string, now ti
 		}
 		select {
 		case <-ctx.Done():
-			return Issued{}, errors.New("cert-manager did not issue the certificate in time; is the issuer ready?")
+			return Issued{}, errNotIssuedInTime
 		case <-time.After(every):
 		}
 		status, b, err = c.call(ctx, http.MethodGet, path+"/"+url.PathEscape(name), nil)
 		if err != nil {
+			// The wait ran out while a read was in flight: that is the same timeout as above, not a broken API.
+			if ctx.Err() != nil {
+				return Issued{}, errNotIssuedInTime
+			}
 			return Issued{}, fmt.Errorf("cert-manager: read the certificate request: %w", err)
 		}
 		if status != http.StatusOK {

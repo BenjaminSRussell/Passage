@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Card } from "../../shell/ui";
+import { Button, Card } from "../../shell/ui";
 import { OrderNumber } from "../mfg-shared/orders";
 import { ResourceName } from "../mfg-shared/resources";
 import { listControlRecipes, type ControlRecipe } from "./api/client";
@@ -17,7 +17,9 @@ export function KioskPiList({ resourceId }: { resourceId: string | null }) {
     // A quiet note, not an alert: the punches above are what the kiosk is for, and this list is retried on the next sign-in.
     return (
       <p className={styles.hint}>
-        The PI sheets could not be loaded. <button type="button" onClick={state.reload}>Reload PI sheets</button>
+        The PI sheets could not be loaded. <Button size="sm" onClick={state.reload}>
+          Reload PI sheets
+        </Button>
       </p>
     );
   }
