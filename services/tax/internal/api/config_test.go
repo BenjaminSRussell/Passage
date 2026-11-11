@@ -38,6 +38,13 @@ type fakeConfig struct {
 	esl       *domain.ESL
 }
 
+func (f *fakeConfig) RunRemittance(context.Context, domain.Period) (store.RemittanceRun, error) {
+	return store.RemittanceRun{}, f.err
+}
+func (f *fakeConfig) RecordWithholding(_ context.Context, e []domain.WithholdingEntry) (int, error) {
+	return len(e), f.err
+}
+
 func (f *fakeConfig) PutRecoveryPolicy(_ context.Context, p domain.RecoveryPolicy) error {
 	f.policies = append(f.policies, p)
 	return f.err
@@ -407,5 +414,42 @@ func TestRecoveryAndReclaimRoutes(t *testing.T) {
 	}
 	if rec := do(r, http.MethodGet, "/v1/tax/vat-reclaim?period_from=2026-04-01", ``, tenantOne, "tax.vatreturn.read"); rec.Code != http.StatusBadRequest {
 		t.Errorf("reclaim without a period end: %d", rec.Code)
+	}
+}
+
+func TestWithholdingRemittanceRoutesValidate(t *testing.T) {
+	r := configRouter(&fakeConfig{err: &domain.Error{Code: domain.CodeNothingToRemit, Detail: "nothing"}})
+	good := `{"id":"` + tenantOne + `","party_type":"vendor","party_ref":"v1","code":"NEC","payment_date":"2026-01-10","currency":"USD","gross_amount":"100","taxable_base":"100","withholding_amount":"24"}`
+	post := func(path, body, duty string) *httptest.ResponseRecorder {
+		return do(r, http.MethodPost, path, body, tenantOne, duty)
+	}
+	for name, body := range map[string]string{
+		"no entries":          `{"entries":[]}`,
+		"bad id":              `{"entries":[` + strings.Replace(good, tenantOne, "x", 1) + `]}`,
+		"tax above the base":  `{"entries":[` + strings.Replace(good, `"withholding_amount":"24"`, `"withholding_amount":"101"`, 1) + `]}`,
+		"base above gross":    `{"entries":[` + strings.Replace(good, `"taxable_base":"100"`, `"taxable_base":"101"`, 1) + `]}`,
+		"lower case currency": `{"entries":[` + strings.Replace(good, `"USD"`, `"usd"`, 1) + `]}`,
+		"unknown party type":  `{"entries":[` + strings.Replace(good, `"vendor"`, `"employee"`, 1) + `]}`,
+		"twice":               `{"entries":[` + good + `,` + good + `]}`,
+	} {
+		if rec := post("/v1/tax/withholding/entries", body, "tax.withholding.record"); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", name, rec.Code)
+		}
+	}
+	for name, body := range map[string]string{
+		"no dates":         `{}`,
+		"reversed":         `{"period_from":"2026-02-01","period_to":"2026-01-01"}`,
+		"across two years": `{"period_from":"2026-12-01","period_to":"2027-01-31"}`,
+	} {
+		if rec := post("/v1/tax/withholding/remittance-runs", body, "tax.withholding.remit"); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", name, rec.Code)
+		}
+	}
+	rec := post("/v1/tax/withholding/remittance-runs", `{"period_from":"2026-01-01","period_to":"2026-01-31"}`, "tax.withholding.remit")
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"serviceCode":"TAX-0014"`) {
+		t.Errorf("nothing to remit: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(r, http.MethodGet, "/v1/tax/withholding/remittance-runs/not-a-uuid", ``, tenantOne, "tax.withholding.read"); rec.Code != http.StatusBadRequest {
+		t.Errorf("a bad run id: %d", rec.Code)
 	}
 }

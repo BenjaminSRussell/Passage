@@ -704,6 +704,7 @@ const tax: Record<string, ProblemCatalogEntry> = {
   "TAX-0011": { message: "The currency doesn't match the ledger's accounting currency.", action: "Use the ledger's accounting currency." },
   "TAX-0012": { message: "The ledger data can't be turned into a valid tax audit file.", action: TRY_LATER },
   "TAX-0013": { message: "This tax setup item is still used by something else, so it can't be deleted.", action: "Remove it from the jurisdictions, tax groups or return boxes that use it, then try again." },
+  "TAX-0014": { message: "No withholding is waiting to be remitted in this period.", action: "Check the dates, or record the payments that withheld tax first." },
 };
 
 const product: Record<string, ProblemCatalogEntry> = {

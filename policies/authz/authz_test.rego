@@ -1631,6 +1631,43 @@ test_tax_configuration_vat_and_intrastat_duties_reach_only_their_routes if {
 	not allowed("tax.intrastat.export", "POST", "/v1/tax/intrastat/journals/j-1/validate")
 }
 
+test_tax_certificates_recovery_layouts_reclaim_and_master_seed_reach_only_their_routes if {
+	allowed("tax.config.read", "GET", "/v1/tax/exemption-certificates")
+	allowed("tax.config.read", "GET", "/v1/tax/recovery-policies")
+	allowed("tax.config.read", "GET", "/v1/tax/vat-layouts")
+	not allowed("tax.config.read", "PUT", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "PUT", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "DELETE", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "PUT", "/v1/tax/recovery-policies/VAT19")
+	allowed("tax.config.manage", "DELETE", "/v1/tax/recovery-policies/VAT19")
+	allowed("tax.config.manage", "POST", "/v1/tax/vat-layouts/GB/apply")
+	not allowed("tax.config.read", "POST", "/v1/tax/vat-layouts/GB/apply")
+	allowed("tax.vatreturn.read", "GET", "/v1/tax/vat-reclaim")
+	not allowed("tax.config.manage", "GET", "/v1/tax/vat-reclaim")
+	allowed("tax.intrastatmaster.manage", "POST", "/v1/tax/intrastat/master:seed")
+	allowed("tax.intrastatmaster.manage", "POST", "/v1/tax/intrastat/master:import")
+	not allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/master:seed")
+	not allowed("tax.intrastat.read", "POST", "/v1/tax/intrastat/master:import")
+}
+
+test_withholding_remittance_duties_reach_only_their_routes if {
+	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
+	allowed("tax.withholding.remit", "POST", "/v1/tax/withholding/remittance-runs")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/remittance-runs")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/remittance-runs/r1")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/certificates")
+	not allowed("tax.withholding.read", "POST", "/v1/tax/withholding/remittance-runs")
+	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/remittance-runs")
+	not allowed("tax.withholding.remit", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.calculate", "POST", "/v1/tax/withholding/entries")
+}
+
+test_revrec_allocate_belongs_to_maintain_only if {
+	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:allocate")
+	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:allocate")
+	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:allocate")
+}
+
 test_tax_duties_reach_only_their_routes if {
 	allowed("tax.transaction.record", "POST", "/v1/tax/transactions")
 	allowed("tax.settlement.run", "POST", "/v1/tax/settlements:run")

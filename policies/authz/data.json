@@ -193,6 +193,13 @@
     ]},
     "tax.tax.calculate": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
     "tax.withholding.calculate": {"permissions": [{"resource": "/v1/tax/withholding/calculate", "methods": ["POST"]}]},
+    "tax.withholding.record": {"permissions": [{"resource": "/v1/tax/withholding/entries", "methods": ["POST"]}]},
+    "tax.withholding.remit": {"permissions": [{"resource": "/v1/tax/withholding/remittance-runs", "methods": ["POST"]}]},
+    "tax.withholding.read": {"permissions": [
+      {"resource": "/v1/tax/withholding/remittance-runs", "methods": ["GET"]},
+      {"resource": "/v1/tax/withholding/remittance-runs/*", "methods": ["GET"]},
+      {"resource": "/v1/tax/withholding/certificates", "methods": ["GET"]}
+    ]},
     "production.inheritance-rule.write": {"permissions": [
       {"resource": "/v1/production/inheritance-rules", "methods": ["POST"]},
       {"resource": "/v1/production/inheritance-rules/*:retire", "methods": ["POST"]}
@@ -212,17 +219,24 @@
       {"resource": "/v1/tax/groups/*", "methods": ["GET"]},
       {"resource": "/v1/tax/config", "methods": ["GET"]},
       {"resource": "/v1/tax/entity-settings", "methods": ["GET"]},
-      {"resource": "/v1/tax/vat-boxes", "methods": ["GET"]}
+      {"resource": "/v1/tax/exemption-certificates", "methods": ["GET"]},
+      {"resource": "/v1/tax/recovery-policies", "methods": ["GET"]},
+      {"resource": "/v1/tax/vat-boxes", "methods": ["GET"]},
+      {"resource": "/v1/tax/vat-layouts", "methods": ["GET"]}
     ]},
     "tax.config.manage": {"permissions": [
       {"resource": "/v1/tax/jurisdictions/*", "methods": ["PUT", "DELETE"]},
       {"resource": "/v1/tax/codes/*", "methods": ["PUT", "DELETE"]},
       {"resource": "/v1/tax/groups/*/*", "methods": ["PUT", "DELETE"]},
       {"resource": "/v1/tax/entity-settings", "methods": ["PUT"]},
-      {"resource": "/v1/tax/vat-boxes", "methods": ["PUT"]}
+      {"resource": "/v1/tax/exemption-certificates/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/tax/recovery-policies/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/tax/vat-boxes", "methods": ["PUT"]},
+      {"resource": "/v1/tax/vat-layouts/*/apply", "methods": ["POST"]}
     ]},
     "tax.vatreturn.read": {"permissions": [
       {"resource": "/v1/tax/vat-return", "methods": ["GET"]},
+      {"resource": "/v1/tax/vat-reclaim", "methods": ["GET"]},
       {"resource": "/v1/tax/esl", "methods": ["GET"]}
     ]},
     "tax.intrastat.read": {"permissions": [
@@ -231,7 +245,9 @@
       {"resource": "/v1/tax/intrastat/journals/*", "methods": ["GET"]}
     ]},
     "tax.intrastatmaster.manage": {"permissions": [
-      {"resource": "/v1/tax/intrastat/master/*/*", "methods": ["PUT", "DELETE"]}
+      {"resource": "/v1/tax/intrastat/master/*/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/v1/tax/intrastat/master:import", "methods": ["POST"]},
+      {"resource": "/v1/tax/intrastat/master:seed", "methods": ["POST"]}
     ]},
     "tax.intrastat.manage": {"permissions": [
       {"resource": "/v1/tax/intrastat/journals", "methods": ["POST"]},
@@ -3171,6 +3187,7 @@
     ]},
     "revrec.maintain": {"permissions": [
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
+      {"resource": "/v1/revrec/contracts/*:allocate", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]},
       {"resource": "/v1/revrec/recognition-templates/*", "methods": ["PUT"]}
     ]},

@@ -34,6 +34,11 @@ type ConfigStore interface {
 	PutGroup(ctx context.Context, g domain.Group) error
 	DeleteGroup(ctx context.Context, kind, code string) error
 	LoadConfig(ctx context.Context) (domain.Config, error)
+	RecordWithholding(ctx context.Context, entries []domain.WithholdingEntry) (int, error)
+	RunRemittance(ctx context.Context, period domain.Period) (store.RemittanceRun, error)
+	ListRemittanceRuns(ctx context.Context) ([]store.RemittanceRun, error)
+	GetRemittanceRun(ctx context.Context, id string) (store.RemittanceRun, error)
+	ListWithholdingCertificates(ctx context.Context, partyRef string) ([]domain.WithholdingCertificate, error)
 	ListRecoveryPolicies(ctx context.Context) ([]domain.RecoveryPolicy, error)
 	PutRecoveryPolicy(ctx context.Context, r domain.RecoveryPolicy) error
 	DeleteRecoveryPolicy(ctx context.Context, code, itemGroup string, validFrom domain.Date) error
@@ -99,6 +104,7 @@ func (a *API) registerConfig(r chi.Router) {
 	r.With(read).Get("/v1/tax/vat-layouts", a.listLayouts)
 	r.With(manage).Post("/v1/tax/vat-layouts/{country}/apply", a.applyLayout)
 	a.registerIntrastat(r)
+	a.registerWithholdingRemittance(r)
 }
 
 func (a *API) configReady(w http.ResponseWriter, r *http.Request) bool {
