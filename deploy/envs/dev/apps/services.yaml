@@ -19,6 +19,7 @@ spec:
   generators:
     - list:
         elements:
+          - { name: agent-runtime, path: services/agents-ts/charts/agent-runtime, namespace: hello-ledger }
           - { name: analytics, path: services/analytics/charts/analytics, namespace: hello-ledger }
           - { name: assets, path: services/assets/charts/assets, namespace: hello-ledger }
           - { name: audit, path: services/audit/charts/audit, namespace: hello-ledger }
@@ -57,6 +58,7 @@ spec:
           - { name: payables, path: services/payables/charts/payables, namespace: hello-ledger }
           - { name: payroll, path: services/payroll/charts/payroll, namespace: hello-ledger }
           - { name: planning, path: services/planning/charts/planning, namespace: hello-ledger }
+          - { name: prediction, path: services/prediction-py/charts/prediction, namespace: hello-ledger }
           - { name: pricing, path: services/pricing/charts/pricing, namespace: hello-ledger }
           - { name: print, path: services/print/charts/print, namespace: hello-ledger }
           - { name: processmfg, path: services/processmfg/charts/processmfg, namespace: hello-ledger }
