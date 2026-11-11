@@ -351,7 +351,7 @@ run "every_fieldcrypt_service_account_gets_a_federated_credential" {
   }
 
   assert {
-    condition     = toset(output.federated_fieldcrypt_service_accounts) == toset(["passage-hr", "passage-party", "passage-payables", "passage-receiving", "passage-sales", "passage-compliance", "passage-migration", "passage-integration-hub"])
+    condition     = toset(output.federated_fieldcrypt_service_accounts) == toset(["passage-hr", "passage-party", "passage-payables", "passage-receiving", "passage-sales", "passage-compliance", "passage-migration"])
     error_message = "one federated credential per service that unwraps fieldcrypt keys"
   }
   assert {

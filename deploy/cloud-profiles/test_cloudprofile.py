@@ -192,6 +192,12 @@ class CloudEnvironmentTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(json.loads(proc.stdout)["hipaa"])
 
+    def test_cli_prints_the_idle_timeout_the_web_build_reads(self) -> None:
+        run = lambda sel: subprocess.run([sys.executable, str(HERE / "cloudprofile.py"), "idle-timeout", sel], capture_output=True, text=True)
+        self.assertEqual(run("gcc-high+hipaa").stdout.strip(), "15")
+        self.assertEqual(run("gcc-high").stdout.strip(), "0")
+        self.assertEqual(run("nope").returncode, 2)
+
     def test_unverified_china_suffixes_say_what_was_checked(self) -> None:
         for key in ("containerRegistrySuffix", "azureOpenAISuffix"):
             ep = self.doc["profiles"]["china"]["endpoints"][key]
@@ -205,6 +211,21 @@ class CloudEnvironmentTests(unittest.TestCase):
         problems = cp.check_parity(doc)
         self.assertTrue(any("dod: deployment.azureEnvironment" in p for p in problems), problems)
         self.assertTrue(any("gcc: deployment.managedHsm needs" in p for p in problems), problems)
+
+
+class GoImagesAreFipsBuildableTests(unittest.TestCase):
+    """Every Go image takes GOFIPS140 (services and tools, #599): a FIPS profile can build any of them validated."""
+
+    def test_every_go_dockerfile_takes_the_gofips140_build_arg(self) -> None:
+        missing = []
+        for pattern in ("services/*/Dockerfile", "tools/*/Dockerfile"):
+            for path in sorted(REPO.glob(pattern)):
+                text = path.read_text(encoding="utf-8")
+                if "go build" not in text:
+                    continue  # TypeScript and Python images
+                if "ARG GOFIPS140" not in text or "GOFIPS140=$GOFIPS140" not in text:
+                    missing.append(str(path.relative_to(REPO)))
+        self.assertEqual(missing, [], "add `ARG GOFIPS140=off` and build with GOFIPS140=$GOFIPS140")
 
 
 class GeneratedCopiesTests(unittest.TestCase):

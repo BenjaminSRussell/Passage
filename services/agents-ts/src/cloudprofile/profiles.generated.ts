@@ -12,7 +12,8 @@ export const CLOUD_PROFILE_DATA = {
     "blobSuffix",
     "containerRegistrySuffix",
     "postgresSuffix",
-    "azureOpenAISuffix"
+    "azureOpenAISuffix",
+    "managedHsmSuffix"
   ],
   "profiles": {
     "commercial": {
@@ -59,6 +60,10 @@ export const CLOUD_PROFILE_DATA = {
         },
         "keyVaultPrivateLinkZone": {
           "value": "privatelink.vaultcore.azure.net",
+          "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns"
+        },
+        "managedHsmSuffix": {
+          "value": "managedhsm.azure.net",
           "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns"
         }
       },
@@ -150,6 +155,10 @@ export const CLOUD_PROFILE_DATA = {
         "keyVaultPrivateLinkZone": {
           "value": "privatelink.vaultcore.azure.net",
           "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns"
+        },
+        "managedHsmSuffix": {
+          "value": "managedhsm.azure.net",
+          "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns"
         }
       },
       "registry": {
@@ -229,6 +238,12 @@ export const CLOUD_PROFILE_DATA = {
         "keyVaultPrivateLinkZone": {
           "value": "privatelink.vaultcore.usgovcloudapi.net",
           "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns"
+        },
+        "managedHsmSuffix": {
+          "value": "managedhsm.usgovcloudapi.net",
+          "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns",
+          "status": "unverified",
+          "note": "Checked on Microsoft Learn 2026-11-11: private-link/private-endpoint-dns lists Managed HSM (privatelink.managedhsm.azure.net, forwarder managedhsm.azure.net) only for the commercial cloud; its Government and China sections have no Managed HSM row. The value follows the cloud's Key Vault naming; confirm in a subscription in that cloud before relying on it."
         }
       },
       "registry": {
@@ -310,6 +325,12 @@ export const CLOUD_PROFILE_DATA = {
         "keyVaultPrivateLinkZone": {
           "value": "privatelink.vaultcore.usgovcloudapi.net",
           "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns"
+        },
+        "managedHsmSuffix": {
+          "value": "managedhsm.usgovcloudapi.net",
+          "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns",
+          "status": "unverified",
+          "note": "Checked on Microsoft Learn 2026-11-11: private-link/private-endpoint-dns lists Managed HSM (privatelink.managedhsm.azure.net, forwarder managedhsm.azure.net) only for the commercial cloud; its Government and China sections have no Managed HSM row. The value follows the cloud's Key Vault naming; confirm in a subscription in that cloud before relying on it."
         }
       },
       "registry": {
@@ -403,6 +424,12 @@ export const CLOUD_PROFILE_DATA = {
         "keyVaultPrivateLinkZone": {
           "value": "privatelink.vaultcore.azure.cn",
           "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns"
+        },
+        "managedHsmSuffix": {
+          "value": "managedhsm.azure.cn",
+          "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns",
+          "status": "unverified",
+          "note": "Checked on Microsoft Learn 2026-11-11: private-link/private-endpoint-dns lists Managed HSM (privatelink.managedhsm.azure.net, forwarder managedhsm.azure.net) only for the commercial cloud; its Government and China sections have no Managed HSM row. The value follows the cloud's Key Vault naming; confirm in a subscription in that cloud before relying on it."
         }
       },
       "registry": {
@@ -499,7 +526,9 @@ export const CLOUD_PROFILE_DATA = {
           "Microsoft Entra ID",
           "Azure Private Link",
           "Azure Virtual Network",
-          "Azure Policy"
+          "Azure Policy",
+          "Azure Managed Disks",
+          "Azure Resource Manager"
         ]
       },
       "phiServices": [

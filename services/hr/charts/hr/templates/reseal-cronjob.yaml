@@ -22,9 +22,11 @@ spec:
       template:
         metadata:
           labels:
+            {{- include "passage.wiLabels" $ | nindent 12 }}
             app.kubernetes.io/name: passage-hr-reseal-pii
             app.kubernetes.io/instance: {{ .Release.Name }}
         spec:
+          {{- include "passage.wiServiceAccount" (dict "root" $ "name" "passage-hr") | nindent 10 }}
           restartPolicy: Never
           securityContext:
             {{- toYaml .Values.podSecurityContext | nindent 12 }}

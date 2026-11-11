@@ -39,6 +39,9 @@ export const copy = {
     expiredTitle: "Your session has ended",
     expiredBody: "Sign in again to keep working. Anything you have not saved on this page may be lost.",
     signIn: "Sign in",
+    idleTitle: "Still there?",
+    idleBody: (seconds: number) => `You have been away for a while. For your security you will be signed out in ${seconds} seconds.`,
+    idleStay: "Stay signed in",
   },
   announce: {
     searchOpened: "Search opened",

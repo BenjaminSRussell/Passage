@@ -235,6 +235,25 @@ class RenderedChartsStayInsideTheAllowlist(unittest.TestCase):
         self.assertNotIn("pagerduty_configs", gcc)
         self.assertIn("https://events.pagerduty.com/v2/enqueue", commercial)
 
+    def test_alerts_still_reach_an_in_boundary_receiver_without_pagerduty(self) -> None:
+        """#602: where the profile has no PagerDuty, alertmanager routes to the in-boundary webhook; commercial is unchanged."""
+        obs = REPO / "deploy/observability/charts/observability"
+        for profile in ("gcc", "gcc-high", "dod", "china"):
+            with self.subTest(profile=profile):
+                out = subprocess.run([HELM, "template", "o", str(obs), "-f", str(cp.values_path(profile))], capture_output=True, text=True, check=True).stdout
+                self.assertNotIn("pagerduty", out.lower().replace("pagerduty:", ""))
+                self.assertIn("receiver: in-boundary", out)
+                self.assertIn("webhook_configs:", out)
+                self.assertIn("credentials_file: /etc/alertmanager/secrets/token", out)
+                self.assertEqual(violations(out, cp.resolve(cp.load(), profile)["egressAllowlist"]), [])
+        commercial = subprocess.run([HELM, "template", "o", str(obs), "-f", str(cp.values_path("commercial"))], capture_output=True, text=True, check=True).stdout
+        self.assertNotIn("in-boundary", commercial)
+        custom = subprocess.run(
+            [HELM, "template", "o", str(obs), "-f", str(cp.values_path("gcc-high")), "--set", "alertWebhook.url=https://hooks.example.invalid/alerts"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        self.assertIn('url: "https://hooks.example.invalid/alerts"', custom)
+
     def test_services_get_the_profile_in_their_environment(self) -> None:
         out = render(REPO / "services/ledger/charts/ledger", "gcc", mirror_for("gcc"))
         self.assertRegex(out, r'name: PASSAGE_CLOUD_PROFILE\s+value: "gcc"')

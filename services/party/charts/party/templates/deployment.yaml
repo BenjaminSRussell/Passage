@@ -12,8 +12,10 @@ spec:
   template:
     metadata:
       labels:
+        {{- include "passage.wiLabels" $ | nindent 8 }}
         app.kubernetes.io/name: party
     spec:
+      {{- include "passage.wiServiceAccount" (dict "root" $ "name" "passage-party") | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         {{- if .Values.serviceIdentity.signingKeySecret }}

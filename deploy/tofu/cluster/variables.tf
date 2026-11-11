@@ -131,7 +131,7 @@ variable "azure_policy_initiative_id" {
 }
 
 variable "fieldcrypt_service_accounts" {
-  description = "Service accounts that unwrap fieldcrypt keys; empty uses the module default (hr, party, payables, receiving, sales, compliance, migration, integration-hub in namespace passage)."
+  description = "Service accounts that unwrap fieldcrypt keys; empty uses the module default (hr, party, payables, receiving, sales, compliance, migration in namespace passage)."
   type        = list(object({ namespace = string, service_account = string }))
   default = [
     { namespace = "passage", service_account = "passage-hr" },
@@ -141,7 +141,6 @@ variable "fieldcrypt_service_accounts" {
     { namespace = "passage", service_account = "passage-sales" },
     { namespace = "passage", service_account = "passage-compliance" },
     { namespace = "passage", service_account = "passage-migration" },
-    { namespace = "passage", service_account = "passage-integration-hub" },
   ]
 }
 

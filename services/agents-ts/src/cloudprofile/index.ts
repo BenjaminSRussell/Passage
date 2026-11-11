@@ -125,7 +125,7 @@ export function resolveProfile(base: string, overlays: string[] = [], table: Pro
   for (const [k, row] of Object.entries(p.endpoints)) endpoints[k] = row.value;
   const ep = (k: string): string => endpoints[k] ?? "";
   const hosts = [hostOf(ep("entraAuthority")), ...(p.endpoints.entraAuthority?.aliases ?? []).map(hostOf), hostOf(ep("graphRoot")), hostOf(ep("armEndpoint"))];
-  hosts.push(`*.${ep("keyVaultSuffix")}`, `*.${ep("blobSuffix")}`, `*.${ep("containerRegistrySuffix")}`, `*.${ep("postgresSuffix")}`);
+  hosts.push(`*.${ep("keyVaultSuffix")}`, `*.${ep("managedHsmSuffix")}`, `*.${ep("blobSuffix")}`, `*.${ep("containerRegistrySuffix")}`, `*.${ep("postgresSuffix")}`);
   for (const name of llm) hosts.push(name === "azure-openai" ? `*.${ep("azureOpenAISuffix")}` : (LLM_HOSTS[name] ?? ""));
   if (pager) hosts.push("events.pagerduty.com");
   if (!requireMirror) hosts.push("ghcr.io");

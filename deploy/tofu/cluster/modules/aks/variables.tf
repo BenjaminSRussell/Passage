@@ -95,7 +95,6 @@ variable "fieldcrypt_service_accounts" {
     { namespace = "passage", service_account = "passage-sales" },
     { namespace = "passage", service_account = "passage-compliance" },
     { namespace = "passage", service_account = "passage-migration" },
-    { namespace = "passage", service_account = "passage-integration-hub" },
   ]
 }
 

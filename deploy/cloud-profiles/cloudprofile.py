@@ -311,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("sync", help="rewrite the generated copies")
     s.add_argument("--check", action="store_true")
     sub.add_parser("check", help="key parity and data rules")
+    i = sub.add_parser("idle-timeout", help="print the web app's idle sign-out minutes for a selector (0 = off)")
+    i.add_argument("profile")
     t = sub.add_parser("tofu-vars", help="print the OpenTofu -var-file for a selector such as gcc-high+hipaa")
     t.add_argument("profile")
     v = sub.add_parser("values", help="print the Helm values for one profile")
@@ -334,6 +336,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAIL  {problem}")
         print("CLOUD PROFILES " + ("FAILED" if problems else "PASSED") + f": {', '.join(sorted(doc['profiles']))}")
         return 1 if problems else 0
+    if args.cmd == "idle-timeout":
+        try:
+            base, overlays = parse_selector(args.profile)
+            print(resolve(doc, base, overlays)["idleTimeoutMinutes"])
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return 0
     if args.cmd == "tofu-vars":
         try:
             base, overlays = parse_selector(args.profile)
