@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +108,13 @@ func TestRegisterBatch_DuplicateReplayAndIsolation(t *testing.T) {
 	}
 	if list, err := s.ListBatches(ctxFor(1, ""), store.BatchFilter{ItemID: item, Disposition: "available", Limit: 10}); err != nil || len(list) != 1 {
 		t.Fatalf("list %+v err=%v", list, err)
+	}
+	// q finds the batch by part of its number, ignoring case.
+	if list, err := s.ListBatches(ctxFor(1, ""), store.BatchFilter{Q: strings.ToLower(b.BatchNumber), Limit: 10}); err != nil || len(list) != 1 || list[0].ID != b.ID {
+		t.Fatalf("search %q: %+v err=%v", b.BatchNumber, list, err)
+	}
+	if list, err := s.ListBatches(ctxFor(1, ""), store.BatchFilter{Q: "no-such-batch", Limit: 10}); err != nil || len(list) != 0 {
+		t.Fatalf("search for nothing: %+v err=%v", list, err)
 	}
 }
 
