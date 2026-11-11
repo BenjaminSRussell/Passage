@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run one Go CI shard. Slow packages get dedicated shards; everything else is
 # hashed into rest-0..rest-2 so `go list` stays the source of package membership.
+# Packages get 20 minutes, not go test's 10-minute default: the identity package checks every duty
+# against the real policy and outgrew the default on a slow runner.
 set -euo pipefail
 
 shard=${1:?usage: go-test-shard.sh SHARD}
@@ -53,7 +55,7 @@ for mod in "${modules[@]}"; do
   done <<< "$listed"
   [ "${#pkgs[@]}" -eq 0 ] && continue
   echo "== go test $mod ${pkgs[*]}"
-  if ! (cd "$mod" && go test -count=1 -p 4 "${pkgs[@]}"); then
+  if ! (cd "$mod" && go test -count=1 -p 4 -timeout 20m "${pkgs[@]}"); then
     failed=1
   fi
 done
