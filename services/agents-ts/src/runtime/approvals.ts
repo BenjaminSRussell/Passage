@@ -55,6 +55,8 @@ export function createPersistedApprovalPort(o: PersistedApprovalOptions): Approv
         // req.args holds real values (the engine restored them for the commit call); the inbox
         // row must stay PII-free, so only the tool, the confidence and the amount are stored.
         proposalJson: JSON.stringify({ tool: req.tool, confidence: req.confidence, amount: req.amount }),
+        confidence: req.confidence,
+        ...(req.riskScore !== undefined ? { riskScore: req.riskScore } : {}),
       });
       o.onOpened?.(actionId);
       for (;;) {

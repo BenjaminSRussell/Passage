@@ -1,0 +1,10 @@
+{
+  "pack": "gl_balances",
+  "expectations": [
+    {"type": "expect_column_values_to_not_be_null", "check": "legacy_id_present", "column": "legacyId"},
+    {"type": "expect_column_values_to_be_unique", "check": "legacy_id_unique", "column": "legacyId", "skip_blank": true},
+    {"type": "expect_compound_columns_to_be_unique", "check": "account_dimension_currency_unique", "columns": ["account", "dimensions", "currency"]},
+    {"type": "expect_column_values_to_be_in_set", "check": "account_in_chart", "column": "account", "set": "accounts"},
+    {"type": "expect_column_values_to_be_in_set", "check": "currency_iso4217", "column": "currency", "set": "iso4217"}
+  ]
+}

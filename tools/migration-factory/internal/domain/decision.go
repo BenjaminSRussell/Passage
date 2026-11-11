@@ -84,6 +84,9 @@ type PackFact struct {
 	// GLPosted is true for a gl_balances run whose company has an opening journal posted to the
 	// general ledger in every currency it holds a balance in.
 	GLPosted bool
+	// TargetLoaded is true for an onhand or bank_balances run whose staged balances all reached the inventory ledger or
+	// treasury and whose totals were reconciled with the target's own (opening_load RECONCILED, nothing rejected or pending).
+	TargetLoaded bool
 }
 
 // NoReceivablesLoadNote starts the note on a met packs_reconciled item for an open_items run started
@@ -109,6 +112,9 @@ func ReceivablesLoadOpen(pf PackFact) string {
 // lines, while its receivables lines that went through the receivables import count as loaded.
 func NotPostedRun(pf PackFact) string {
 	if pf.Pack == PackGLBalances && pf.GLPosted {
+		return ""
+	}
+	if TargetOfPack(pf.Pack) != "" && pf.TargetLoaded {
 		return ""
 	}
 	if why := NotPosted(pf.Pack); why != "" {
