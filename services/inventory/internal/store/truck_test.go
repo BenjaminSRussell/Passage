@@ -141,3 +141,23 @@ func TestReplenishTrucks_ConcurrentRunsCreateOneDraft(t *testing.T) {
 		t.Fatalf("inbound %+v %v, want 9 on its way", levels, err)
 	}
 }
+
+func TestTruckLegalEntities_ListsTheEntitiesThatKeepTruckLevels(t *testing.T) {
+	s, _, _ := setup(t)
+	le, other := ids.New(), ids.New()
+	ctx := entityCtx(1, le)
+	if got, err := s.TruckLegalEntities(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("no levels yet: %v %v", got, err)
+	}
+	product := ids.New()
+	for _, e := range []string{le, other} {
+		ref := store.TruckRef{LegalEntityID: e, SiteID: "S1", WarehouseID: "truck-1", SourceSiteID: "S1", SourceWarehouseID: "W1"}
+		if err := s.SetTruckLevels(entityCtx(1, e), ref, []domain.TruckLevel{{ProductID: product, Unit: "EA", Min: dec("1"), Max: dec("2")}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.TruckLegalEntities(tenantWideCtx(1))
+	if err != nil || len(got) != 2 {
+		t.Fatalf("entities %v %v, want both", got, err)
+	}
+}

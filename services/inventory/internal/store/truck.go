@@ -158,6 +158,29 @@ func (s *Postgres) truckInbound(ctx context.Context, legalEntityID, siteID, ware
 	return out, err
 }
 
+// TruckLegalEntities lists the legal entities of the caller's tenant that keep truck levels, so the nightly run can replenish
+// each under a principal scoped to it. The caller needs the all-scope duty to see them all.
+func (s *Postgres) TruckLegalEntities(ctx context.Context) ([]string, error) {
+	tp, _ := tenant.FromContext(ctx)
+	var out []string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		r, err := tx.Query(ctx, `select distinct legal_entity_id::text from inventory_truck_level where tenant_id = $1 order by 1`, tp.TenantID)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var le string
+			if err := r.Scan(&le); err != nil {
+				return err
+			}
+			out = append(out, le)
+		}
+		return r.Err()
+	})
+	return out, err
+}
+
 // ReplenishTrucks creates a DRAFT transfer order for each truck of the legal entity (or the
 // one truck named) whose stock plus open inbound transfers is below the minimum of any level:
 // from the truck's source warehouse, for the quantity that brings each short product up to
