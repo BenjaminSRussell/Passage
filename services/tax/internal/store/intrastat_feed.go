@@ -131,19 +131,28 @@ func (s *Store) ListMovements(ctx context.Context, status string) ([]domain.Move
 	}
 	out := []domain.Movement{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		out, err = readMovements(ctx, tx, p.TenantID, p.LegalEntityID, status, "", 500, false)
+		out, err = readMovements(ctx, tx, p.TenantID, p.LegalEntityID, status, "", time.Time{}, 500, false)
 		return err
 	})
 	return out, err
 }
 
-func readMovements(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, status, flow string, limit int, lock bool) ([]domain.Movement, error) {
+// readMovements reads staged movements; a non-zero month keeps only the movements dated in that calendar month, so a journal's
+// transfer reads (and locks) its own month and is not crowded out by later months' movements.
+func readMovements(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, status, flow string, month time.Time, limit int, lock bool) ([]domain.Movement, error) {
 	q := `select id::text, flow, source_ref, movement_date, partner_country, transaction_code, transport_mode, delivery_terms, port, lines, status from tax_intrastat_movement
-		where tenant_id = $1 and legal_entity_id = $2 and ($3 = '' or status = $3) and ($4 = '' or flow = $4) order by movement_date desc, source_ref limit $5`
+		where tenant_id = $1 and legal_entity_id = $2 and ($3 = '' or status = $3) and ($4 = '' or flow = $4)
+		  and ($6::date is null or (movement_date >= $6::date and movement_date < ($6::date + interval '1 month')))
+		order by movement_date desc, source_ref limit $5`
 	if lock {
 		q += ` for update`
 	}
-	rows, err := tx.Query(ctx, q, tenantID, legalEntityID, status, flow, limit)
+	var first *time.Time
+	if !month.IsZero() {
+		m := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+		first = &m
+	}
+	rows, err := tx.Query(ctx, q, tenantID, legalEntityID, status, flow, limit, first)
 	if err != nil {
 		return nil, fmt.Errorf("read movements: %w", err)
 	}
@@ -193,7 +202,7 @@ func (s *Store) TransferMovements(ctx context.Context, journalID string, d domai
 		if err != nil {
 			return err
 		}
-		movements, err := readMovements(ctx, tx, p.TenantID, p.LegalEntityID, "staged", j.Flow, 2000, true)
+		movements, err := readMovements(ctx, tx, p.TenantID, p.LegalEntityID, "staged", j.Flow, j.PeriodFrom.Time, 2000, true)
 		if err != nil {
 			return err
 		}

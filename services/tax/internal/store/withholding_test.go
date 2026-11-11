@@ -111,8 +111,11 @@ func TestIntrastatFeed_StagesTransfersAndCompletesOnceTheProductIsMapped(t *test
 		{Flow: "dispatch", SourceRef: "SHIP-2", MovementDate: domain.Day("2026-03-09"), PartnerCountry: "FR", Lines: []domain.MovementLine{line(1, pump, "1", "500"), line(2, valve, "2", "80")}},
 		{Flow: "dispatch", SourceRef: "SHIP-3", MovementDate: domain.Day("2026-03-10"), PartnerCountry: "DE", Lines: []domain.MovementLine{line(1, pump, "1", "500")}},
 		{Flow: "arrival", SourceRef: "RCV-1", MovementDate: domain.Day("2026-03-05"), PartnerCountry: "FR", Lines: []domain.MovementLine{line(1, pump, "9", "900")}},
+		// Either side of the journal's month: read by neither transfer, they stay staged.
+		{Flow: "dispatch", SourceRef: "SHIP-FEB", MovementDate: domain.Day("2026-02-28"), PartnerCountry: "FR", Lines: []domain.MovementLine{line(1, pump, "1", "500")}},
+		{Flow: "dispatch", SourceRef: "SHIP-APR", MovementDate: domain.Day("2026-04-01"), PartnerCountry: "FR", Lines: []domain.MovementLine{line(1, pump, "1", "500")}},
 	}
-	if n, err := s.StageMovements(ctx, movements); err != nil || n != 4 {
+	if n, err := s.StageMovements(ctx, movements); err != nil || n != 6 {
 		t.Fatalf("stage: %d %v", n, err)
 	}
 	if n, err := s.StageMovements(ctx, movements[:2]); err != nil || n != 0 {
@@ -139,8 +142,8 @@ func TestIntrastatFeed_StagesTransfersAndCompletesOnceTheProductIsMapped(t *test
 	staged, _ := s.ListMovements(ctx, "staged")
 	transferred, _ := s.ListMovements(ctx, "transferred")
 	ignored, _ := s.ListMovements(ctx, "ignored")
-	if len(staged) != 2 || len(transferred) != 1 || len(ignored) != 1 {
-		t.Fatalf("staged %d (SHIP-2 and the arrival), transferred %d, ignored %d", len(staged), len(transferred), len(ignored))
+	if len(staged) != 4 || len(transferred) != 1 || len(ignored) != 1 {
+		t.Fatalf("staged %d (SHIP-2, the arrival, February and April), transferred %d, ignored %d", len(staged), len(transferred), len(ignored))
 	}
 
 	// Map the valve and transfer again: only the missing line is added, and the movement is complete.
