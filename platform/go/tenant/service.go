@@ -31,6 +31,10 @@ const (
 	// VendorPortalIssuer is the one service whose tokens name a vendor (vnd).
 	VendorPortalIssuer = "supplier-portal"
 
+	// DutyPortalRegister is the one duty a supplier portal token may carry without a vendor: the public prospect registration (#511),
+	// where no vendor exists yet. Such a token carries no other duty, and every vendor route refuses a token without a vendor.
+	DutyPortalRegister = "party.vendor-portal.register"
+
 	ServiceTokenMaxTTL = 60 * time.Second
 
 	EnvServiceName        = "PASSAGE_SERVICE_NAME"
@@ -251,7 +255,8 @@ var serviceGrants = map[string]map[string][]string{
 	"supplier-portal": {
 		"purchasing": {"procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"},
 		"receiving":  {"receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"},
-		"party":      {"party.vendor-portal.read", "party.vendor-portal.write"},
+		"party":      {"party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"},
+		"payables":   {"payables.vendor-portal.read"},
 	},
 }
 
@@ -384,8 +389,8 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 // grant. A nil duties means the whole grant less its tenant-level duties, which
 // are signed only when asked for by name.
 func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, only []string) (string, error) {
-	if s.name == VendorPortalIssuer && p.VendorID == "" {
-		return "", errors.New("the supplier portal signs tokens for a vendor only")
+	if s.name == VendorPortalIssuer && p.VendorID == "" && !(len(only) == 1 && only[0] == DutyPortalRegister) {
+		return "", errors.New("the supplier portal signs tokens for a vendor only, except the prospect registration")
 	}
 	vendor := ""
 	if s.name == VendorPortalIssuer {
@@ -641,7 +646,7 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 		if vnd, ok := canonicalUUID(c.Vnd); !ok || vnd != c.Vnd || vnd == ids.Nil || c.Iss != VendorPortalIssuer {
 			return ServiceClaims{}, ErrServiceToken
 		}
-	} else if c.Iss == VendorPortalIssuer {
+	} else if c.Iss == VendorPortalIssuer && !(len(c.Duties) == 1 && c.Duties[0] == DutyPortalRegister) {
 		return ServiceClaims{}, ErrServiceToken
 	}
 	if tenantLevel, mixed := tenantLevelToken(c.Duties); mixed || tenantLevel != (c.Le == "") {

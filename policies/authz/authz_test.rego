@@ -900,7 +900,52 @@ test_supplier_portal_holds_only_service_only_vendor_duties if {
 	}
 	data.service_grants["supplier-portal"].purchasing == ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"]
 	data.service_grants["supplier-portal"].receiving == ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"]
-	data.service_grants["supplier-portal"].party == ["party.vendor-portal.read", "party.vendor-portal.write"]
+	data.service_grants["supplier-portal"].party == ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"]
+	data.service_grants["supplier-portal"].payables == ["payables.vendor-portal.read"]
+}
+
+# Invoice by received line, payment status, prospect registration and vendor-admin invites (#511 remainders).
+test_receiving_vendor_invoice_submissions_are_vendor_routes_and_buyer_routes_are_separate if {
+	allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/vendor/invoiceable-lines")
+	allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/vendor/invoice-submissions")
+	allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/vendor/invoice-submissions/s1")
+	allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/vendor/invoice-submissions/s1:withdraw")
+	not allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/invoice-submissions")
+	not allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	not allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/vendor/invoice-submissions")
+	allowed("receiving.ap.inquire", "GET", "/v1/receiving/invoice-submissions/s1")
+	allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-submissions/s1:resolve")
+	not allowed("receiving.ap.inquire", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	not allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/vendor/invoice-submissions")
+}
+
+test_payables_vendor_portal_read_opens_only_the_vendor_payment_list if {
+	data.duties["payables.vendor-portal.read"].service_only
+	allowed("payables.vendor-portal.read", "GET", "/v1/payables/vendor/payments")
+	not allowed("payables.vendor-portal.read", "POST", "/v1/payables/vendor/payments")
+	not allowed("payables.vendor-portal.read", "GET", "/v1/payables/open-items")
+	not allowed("open-item.read", "GET", "/v1/payables/vendor/payments")
+}
+
+test_party_prospects_invites_and_registration_have_their_own_duties if {
+	data.duties["party.vendor-portal.register"].service_only
+	data.duties["party.vendor-portal.invite-accept"].service_only
+	allowed("party.vendor-portal.register", "POST", "/v1/party/vendor-portal/prospects")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/prospects")
+	not allowed("party.vendor-portal.register", "GET", "/v1/party/vendor-portal/requests")
+	allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/invites")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites/i1:revoke")
+	allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites/i1:verify")
+	allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites/i1:accept")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites/i1:accept")
+	not allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites")
+	allowed("party.read", "GET", "/v1/party/vendor-prospects")
+	allowed("party.write", "POST", "/v1/party/vendor-prospects/p1:accept")
+	allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-prospects/p1:reject")
+	not allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-prospects/p1:accept")
+	not allowed("party.write", "POST", "/v1/party/vendor-prospects/p1:reject")
 }
 
 test_receiving_vendor_portal_duties_open_only_vendor_routes if {
