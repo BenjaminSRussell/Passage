@@ -13,6 +13,7 @@ import {
 import { gateCitations, type Citation } from "../domain/knowledge.js";
 import { assertNoPii, Pseudonymizer } from "../domain/redaction.js";
 import { AgentError } from "../errors.js";
+import { StreamRestorer } from "../providers/stream.js";
 import { ProviderError, proposeTool } from "../providers/wire.js";
 import type { AuditPort, BudgetPort, KillSwitchPort, ModelProvider, ModelUsage, RunRequest, RunResult } from "./engine.js";
 import type { McpConnector } from "./mcp.js";
@@ -49,6 +50,16 @@ export interface ChatResponse {
   refusal: { code: string; message: string } | null;
   /** Always true: generated text is labelled as such in the UI (FR-47.12). */
   generated: true;
+}
+
+/** What a caller of `chat` can listen for while the answer is written. */
+export interface ChatHooks {
+  /**
+   * The answer as the model writes it, with pseudonyms already restored (FR-47.3). Called only when the provider
+   * can stream and no answer is served from the cache; the finished ChatResponse stays the authoritative answer.
+   * Nothing is sent for a chat whose knowledge results fail the citation gate (AGT-0212): that answer is refused.
+   */
+  onToken?: (text: string) => void;
 }
 
 export interface CopilotStore extends AuditPort, BudgetPort {}
@@ -114,7 +125,7 @@ const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}
 export function createCopilotService(deps: CopilotDeps) {
   const now = deps.now ?? (() => new Date());
   return {
-    async chat(caller: Principal, token: string, req: ChatRequest): Promise<ChatResponse> {
+    async chat(caller: Principal, token: string, req: ChatRequest, hooks: ChatHooks = {}): Promise<ChatResponse> {
       if (deps.killSwitch.isHalted(caller.tenantId)) throw new AgentError("AGT-0201", "agent runs are halted by the kill switch");
       const prompt = req.recordRef === undefined ? req.message : `${req.message}\n[record: ${req.recordRef}]`;
       const asker = { tenantId: caller.tenantId, userId: caller.userId, duties: caller.duties };
@@ -160,6 +171,15 @@ export function createCopilotService(deps: CopilotDeps) {
       const provider = deps.providerFor(deps.modelId);
       const system = systemPrompt(req.mode, gate.allowed);
       let context = pseudo.redact(prompt);
+      const sink = hooks.onToken;
+      const restorer = new StreamRestorer((text) => pseudo.restore(text));
+      // Text is shown as it is written unless a knowledge result already makes the answer unanswerable.
+      const streamable = (): boolean => knowledge.length === 0 || gateCitations(knowledge).answerable;
+      const onText = (delta: string): void => {
+        if (sink === undefined || !streamable()) return;
+        const text = restorer.push(delta);
+        if (text !== "") sink(text);
+      };
       const row = (tool: string, input: unknown, output: unknown, decision: Decision, why?: string): void => {
         actions.push(
           buildActionRecord({
@@ -188,7 +208,12 @@ export function createCopilotService(deps: CopilotDeps) {
           );
           let response;
           try {
-            response = await provider.complete({ system, user: context, allowedTools: gate.allowed, maxOutputTokens });
+            const call = { system, user: context, allowedTools: gate.allowed, maxOutputTokens };
+            response = sink !== undefined && provider.stream !== undefined ? await provider.stream(call, onText) : await provider.complete(call);
+            if (sink !== undefined && streamable()) {
+              const tail = restorer.flush();
+              if (tail !== "") sink(tail);
+            }
           } catch (err) {
             if (err instanceof ProviderError && err.unbilled) settleSpend = false;
             throw err;
