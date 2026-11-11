@@ -89,3 +89,78 @@ func TestWithholdingRemittance_NumbersGapFreeCertifiesPerPayeeAndRemitsOnce(t *t
 		t.Fatalf("a new year = %+v, %v", next, err)
 	}
 }
+
+const (
+	pump  = "0190f0a0-0000-7000-8000-0000000000a1"
+	valve = "0190f0a0-0000-7000-8000-0000000000a2"
+)
+
+func TestIntrastatFeed_StagesTransfersAndCompletesOnceTheProductIsMapped(t *testing.T) {
+	s, _, ctx := setup(t)
+	if err := s.PutEntitySetting(ctx, store.EntitySetting{HomeCountry: "DE", VATID: "DE123456789"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutIntrastatProduct(ctx, domain.IntrastatProduct{ProductID: pump, CommodityCode: "84137030", OriginCountry: "US", NetMassPerUnit: domain.D("12.5"), SupplementaryPerUnit: domain.D("1")}); err != nil {
+		t.Fatal(err)
+	}
+	line := func(no int, product, qty, value string) domain.MovementLine {
+		return domain.MovementLine{LineNo: no, ProductID: product, Qty: domain.D(qty), Value: domain.D(value)}
+	}
+	movements := []domain.Movement{
+		{Flow: "dispatch", SourceRef: "SHIP-1", MovementDate: domain.Day("2026-03-04"), PartnerCountry: "FR", Lines: []domain.MovementLine{line(1, pump, "4", "2000")}},
+		{Flow: "dispatch", SourceRef: "SHIP-2", MovementDate: domain.Day("2026-03-09"), PartnerCountry: "FR", Lines: []domain.MovementLine{line(1, pump, "1", "500"), line(2, valve, "2", "80")}},
+		{Flow: "dispatch", SourceRef: "SHIP-3", MovementDate: domain.Day("2026-03-10"), PartnerCountry: "DE", Lines: []domain.MovementLine{line(1, pump, "1", "500")}},
+		{Flow: "arrival", SourceRef: "RCV-1", MovementDate: domain.Day("2026-03-05"), PartnerCountry: "FR", Lines: []domain.MovementLine{line(1, pump, "9", "900")}},
+	}
+	if n, err := s.StageMovements(ctx, movements); err != nil || n != 4 {
+		t.Fatalf("stage: %d %v", n, err)
+	}
+	if n, err := s.StageMovements(ctx, movements[:2]); err != nil || n != 0 {
+		t.Fatalf("an identical replay: %d %v", n, err)
+	}
+	changed := movements[0]
+	changed.Lines = []domain.MovementLine{line(1, pump, "5", "2500")}
+	if _, err := s.StageMovements(ctx, []domain.Movement{changed}); asDomainError(err) == nil {
+		t.Errorf("a changed replay was accepted: %v", err)
+	}
+
+	j, err := s.CreateJournal(ctx, "dispatch", domain.Day("2026-03-01"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.TransferMovements(ctx, j.ID, domain.MovementDefaults{TransactionCode: "11", TransportMode: "3"})
+	if err != nil || res.Added != 2 || res.Ignored != 1 || res.Complete != 1 || len(res.Unmapped) != 1 || res.Unmapped[0].ProductID != valve {
+		t.Fatalf("first transfer = %+v, %v", res, err)
+	}
+	got, _ := s.GetJournal(ctx, j.ID)
+	if len(got.Lines) != 2 || got.Lines[0].NetMass.String() != "50" || got.Lines[0].TransactionCode != "11" || got.Lines[1].SourceRef != "SHIP-2:1" {
+		t.Fatalf("journal lines = %+v", got.Lines)
+	}
+	staged, _ := s.ListMovements(ctx, "staged")
+	transferred, _ := s.ListMovements(ctx, "transferred")
+	ignored, _ := s.ListMovements(ctx, "ignored")
+	if len(staged) != 2 || len(transferred) != 1 || len(ignored) != 1 {
+		t.Fatalf("staged %d (SHIP-2 and the arrival), transferred %d, ignored %d", len(staged), len(transferred), len(ignored))
+	}
+
+	// Map the valve and transfer again: only the missing line is added, and the movement is complete.
+	if err := s.PutIntrastatProduct(ctx, domain.IntrastatProduct{ProductID: valve, CommodityCode: "84818099", OriginCountry: "CN", NetMassPerUnit: domain.D("2")}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.TransferMovements(ctx, j.ID, domain.MovementDefaults{TransactionCode: "11", TransportMode: "3"})
+	if err != nil || again.Added != 1 || again.Skipped != 1 || again.Complete != 1 || len(again.Unmapped) != 0 {
+		t.Fatalf("second transfer = %+v, %v", again, err)
+	}
+	if third, err := s.TransferMovements(ctx, j.ID, domain.MovementDefaults{}); err != nil || third.Added != 0 || third.Complete != 0 {
+		t.Fatalf("third transfer = %+v, %v", third, err)
+	}
+	if products, err := s.ListIntrastatProducts(ctx); err != nil || len(products) != 2 {
+		t.Fatalf("products = %+v, %v", products, err)
+	}
+	if err := s.DeleteIntrastatProduct(ctx, valve); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteIntrastatProduct(ctx, valve); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("deleting twice: %v", err)
+	}
+}

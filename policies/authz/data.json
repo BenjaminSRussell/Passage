@@ -241,17 +241,22 @@
     ]},
     "tax.intrastat.read": {"permissions": [
       {"resource": "/v1/tax/intrastat/master/*", "methods": ["GET"]},
+      {"resource": "/v1/tax/intrastat/movements", "methods": ["GET"]},
+      {"resource": "/v1/tax/intrastat/products", "methods": ["GET"]},
       {"resource": "/v1/tax/intrastat/journals", "methods": ["GET"]},
       {"resource": "/v1/tax/intrastat/journals/*", "methods": ["GET"]}
     ]},
     "tax.intrastatmaster.manage": {"permissions": [
       {"resource": "/v1/tax/intrastat/master/*/*", "methods": ["PUT", "DELETE"]},
       {"resource": "/v1/tax/intrastat/master:import", "methods": ["POST"]},
+      {"resource": "/v1/tax/intrastat/products/*", "methods": ["PUT", "DELETE"]},
       {"resource": "/v1/tax/intrastat/master:seed", "methods": ["POST"]}
     ]},
+    "tax.intrastat.feed": {"permissions": [{"resource": "/v1/tax/intrastat/movements", "methods": ["POST"]}]},
     "tax.intrastat.manage": {"permissions": [
       {"resource": "/v1/tax/intrastat/journals", "methods": ["POST"]},
       {"resource": "/v1/tax/intrastat/journals/*/transfer", "methods": ["POST"]},
+      {"resource": "/v1/tax/intrastat/journals/*/transfer-movements", "methods": ["POST"]},
       {"resource": "/v1/tax/intrastat/journals/*/validate", "methods": ["POST"]},
       {"resource": "/v1/tax/intrastat/journals/*/compress", "methods": ["POST"]},
       {"resource": "/v1/tax/intrastat/journals/*/correct", "methods": ["POST"]},

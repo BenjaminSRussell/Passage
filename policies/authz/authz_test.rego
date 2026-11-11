@@ -1650,6 +1650,19 @@ test_tax_certificates_recovery_layouts_reclaim_and_master_seed_reach_only_their_
 	not allowed("tax.intrastat.read", "POST", "/v1/tax/intrastat/master:import")
 }
 
+test_intrastat_feed_products_and_movement_transfer_reach_only_their_routes if {
+	allowed("tax.intrastat.feed", "POST", "/v1/tax/intrastat/movements")
+	not allowed("tax.intrastat.feed", "GET", "/v1/tax/intrastat/movements")
+	not allowed("tax.intrastat.feed", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/movements")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/products")
+	allowed("tax.intrastatmaster.manage", "PUT", "/v1/tax/intrastat/products/p-1")
+	allowed("tax.intrastatmaster.manage", "DELETE", "/v1/tax/intrastat/products/p-1")
+	not allowed("tax.intrastat.read", "PUT", "/v1/tax/intrastat/products/p-1")
+	allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+	not allowed("tax.intrastat.read", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+}
+
 test_withholding_remittance_duties_reach_only_their_routes if {
 	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
 	allowed("tax.withholding.remit", "POST", "/v1/tax/withholding/remittance-runs")

@@ -334,32 +334,39 @@ func (s *Store) Transfer(ctx context.Context, id string, lines []domain.Intrasta
 		if _, err := lockOpenJournal(ctx, tx, p, id); err != nil {
 			return err
 		}
-		var next int
-		if err := tx.QueryRow(ctx, `select coalesce(max(line_no), 0) from tax_intrastat_line where tenant_id = $1 and journal_id = $2`, p.TenantID, id).Scan(&next); err != nil {
-			return fmt.Errorf("read last line number: %w", err)
-		}
-		for _, l := range lines {
-			tag, err := tx.Exec(ctx, `insert into tax_intrastat_transferred (tenant_id, journal_id, source_ref) values ($1, $2, $3) on conflict do nothing`, p.TenantID, id, l.SourceRef)
-			if err != nil {
-				return fmt.Errorf("record transferred source: %w", err)
-			}
-			if tag.RowsAffected() == 0 {
-				res.Skipped++
-				continue
-			}
-			next++
-			l.LineNo, l.CompressedFrom, l.Errors = next, 1, nil
-			if err := insertLine(ctx, tx, p.TenantID, id, l); err != nil {
-				return err
-			}
-			res.Added++
-		}
-		if res.Added > 0 {
-			return setStatus(ctx, tx, p.TenantID, id, domain.JournalDraft)
-		}
-		return nil
+		res, err = transferLines(ctx, tx, p.TenantID, id, lines)
+		return err
 	})
 	return res, err
+}
+
+// transferLines adds the lines whose source reference the journal has not taken yet, inside tx.
+func transferLines(ctx context.Context, tx pgx.Tx, tenantID, id string, lines []domain.IntrastatLine) (TransferResult, error) {
+	var res TransferResult
+	var next int
+	if err := tx.QueryRow(ctx, `select coalesce(max(line_no), 0) from tax_intrastat_line where tenant_id = $1 and journal_id = $2`, tenantID, id).Scan(&next); err != nil {
+		return res, fmt.Errorf("read last line number: %w", err)
+	}
+	for _, l := range lines {
+		tag, err := tx.Exec(ctx, `insert into tax_intrastat_transferred (tenant_id, journal_id, source_ref) values ($1, $2, $3) on conflict do nothing`, tenantID, id, l.SourceRef)
+		if err != nil {
+			return res, fmt.Errorf("record transferred source: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			res.Skipped++
+			continue
+		}
+		next++
+		l.LineNo, l.CompressedFrom, l.Errors = next, 1, nil
+		if err := insertLine(ctx, tx, tenantID, id, l); err != nil {
+			return res, err
+		}
+		res.Added++
+	}
+	if res.Added > 0 {
+		return res, setStatus(ctx, tx, tenantID, id, domain.JournalDraft)
+	}
+	return res, nil
 }
 
 // Validate checks every line against the master data and the entity's country, stores the

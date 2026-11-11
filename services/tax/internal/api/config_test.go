@@ -31,11 +31,25 @@ type fakeConfig struct {
 	putGroups []domain.Group
 	putCerts  []domain.Certificate
 	policies  []domain.RecoveryPolicy
+	movements []domain.Movement
+	defaults  domain.MovementDefaults
 	reclaim   *domain.Reclaim
 	imported  []domain.MasterEntry
 	overwrite bool
 	vat       *domain.VATReturn
 	esl       *domain.ESL
+}
+
+func (f *fakeConfig) PutIntrastatProduct(context.Context, domain.IntrastatProduct) error {
+	return f.err
+}
+func (f *fakeConfig) StageMovements(_ context.Context, m []domain.Movement) (int, error) {
+	f.movements = append(f.movements, m...)
+	return len(m), f.err
+}
+func (f *fakeConfig) TransferMovements(_ context.Context, id string, d domain.MovementDefaults) (store.MovementTransfer, error) {
+	f.defaults = d
+	return store.MovementTransfer{Added: 1}, f.err
 }
 
 func (f *fakeConfig) RunRemittance(context.Context, domain.Period) (store.RemittanceRun, error) {
@@ -451,5 +465,54 @@ func TestWithholdingRemittanceRoutesValidate(t *testing.T) {
 	}
 	if rec := do(r, http.MethodGet, "/v1/tax/withholding/remittance-runs/not-a-uuid", ``, tenantOne, "tax.withholding.read"); rec.Code != http.StatusBadRequest {
 		t.Errorf("a bad run id: %d", rec.Code)
+	}
+}
+
+func TestIntrastatFeedRoutes(t *testing.T) {
+	fc := &fakeConfig{}
+	r := configRouter(fc)
+	const product = "0190f0a0-0000-7000-8000-0000000000a1"
+	movement := `{"flow":"dispatch","source_ref":"SHIP-1","movement_date":"2026-03-04","partner_country":"FR","lines":[{"line_no":1,"product_id":"` + product + `","qty":"4","value":"2000"}]}`
+	post := func(path, body, duty string) int { return do(r, http.MethodPost, path, body, tenantOne, duty).Code }
+	for name, body := range map[string]string{
+		"no movements":  `{"movements":[]}`,
+		"bad flow":      `{"movements":[` + strings.Replace(movement, "dispatch", "sideways", 1) + `]}`,
+		"no lines":      `{"movements":[` + strings.Replace(movement, `"lines":[{"line_no":1,"product_id":"`+product+`","qty":"4","value":"2000"}]`, `"lines":[]`, 1) + `]}`,
+		"repeated ref":  `{"movements":[` + movement + `,` + movement + `]}`,
+		"unknown field": `{"movements":[],"x":1}`,
+	} {
+		if code := post("/v1/tax/intrastat/movements", body, "tax.intrastat.feed"); code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", name, code)
+		}
+	}
+	if len(fc.movements) != 0 {
+		t.Fatal("an invalid body reached the store")
+	}
+	if code := post("/v1/tax/intrastat/movements", `{"movements":[`+movement+`]}`, "tax.intrastat.feed"); code != http.StatusCreated || len(fc.movements) != 1 {
+		t.Errorf("a valid movement: %d %d", code, len(fc.movements))
+	}
+	if code := post("/v1/tax/intrastat/movements", `{"movements":[`+movement+`]}`, "tax.intrastat.manage"); code != http.StatusForbidden {
+		t.Errorf("staging needs the feed duty: %d", code)
+	}
+	if code := post("/v1/tax/intrastat/journals/j-1/transfer-movements", `{"transaction_code":"11","transport_mode":"3"}`, "tax.intrastat.manage"); code != http.StatusOK || fc.defaults.TransactionCode != "11" {
+		t.Errorf("transfer: %d %+v", code, fc.defaults)
+	}
+	if code := post("/v1/tax/intrastat/journals/j-1/transfer-movements", ``, "tax.intrastat.manage"); code != http.StatusOK {
+		t.Errorf("transfer without defaults: %d", code)
+	}
+	put := func(path, body string) int {
+		return do(r, http.MethodPut, path, body, tenantOne, "tax.intrastatmaster.manage").Code
+	}
+	if code := put("/v1/tax/intrastat/products/"+product, `{"product_id":"other","commodity_code":"84137030","origin_country":"US","net_mass_per_unit":"1"}`); code != http.StatusBadRequest {
+		t.Errorf("a body id that differs from the path: %d", code)
+	}
+	if code := put("/v1/tax/intrastat/products/"+product, `{"commodity_code":"8413","origin_country":"US","net_mass_per_unit":"1"}`); code != http.StatusBadRequest {
+		t.Errorf("a short commodity code: %d", code)
+	}
+	if code := put("/v1/tax/intrastat/products/"+product, `{"commodity_code":"84137030","origin_country":"US","net_mass_per_unit":"1.5"}`); code != http.StatusOK {
+		t.Errorf("a valid product: %d", code)
+	}
+	if rec := do(r, http.MethodGet, "/v1/tax/intrastat/movements?status=bogus", ``, tenantOne, "tax.intrastat.read"); rec.Code != http.StatusBadRequest {
+		t.Errorf("a bad status: %d", rec.Code)
 	}
 }

@@ -38,6 +38,7 @@ func (a *API) registerIntrastat(r chi.Router) {
 	r.With(manage).Put("/v1/tax/intrastat/journals/{id}/lines/{lineNo}", a.putLine)
 	r.With(manage).Delete("/v1/tax/intrastat/journals/{id}/lines/{lineNo}", a.deleteLine)
 	r.With(export).Get("/v1/tax/intrastat/journals/{id}/export", a.export)
+	a.registerIntrastatFeed(r)
 }
 
 func masterKind(r *http.Request) (string, error) {

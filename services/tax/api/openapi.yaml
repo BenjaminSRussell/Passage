@@ -1071,6 +1071,125 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/products:
+    get:
+      operationId: listIntrastatProducts
+      x-passage-duty: tax.intrastat.read
+      summary: Intrastat mapping of products: commodity code, origin and mass per unit
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfIntrastatProduct" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/products/{product_id}:
+    put:
+      operationId: putIntrastatProduct
+      x-passage-duty: tax.intrastatmaster.manage
+      summary: Create or replace the Intrastat mapping of a product
+      parameters:
+        - { name: product_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntrastatProduct" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntrastatProduct" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteIntrastatProduct
+      x-passage-duty: tax.intrastatmaster.manage
+      summary: Delete the Intrastat mapping of a product
+      parameters:
+        - { name: product_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/movements:
+    post:
+      operationId: stageIntrastatMovements
+      x-passage-duty: tax.intrastat.feed
+      summary: Stage the goods movements of shipments (dispatch) and receipts (arrival); a source reference is staged once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MovementsRequest" }
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StagedResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listIntrastatMovements
+      x-passage-duty: tax.intrastat.read
+      summary: Staged movements of the legal entity, newest first
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfMovement" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}/transfer-movements:
+    post:
+      operationId: transferIntrastatMovements
+      x-passage-duty: tax.intrastat.manage
+      summary: Fill a draft journal from the staged movements of its flow and month; movements with an unmapped product stay staged and are named in the answer
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MovementDefaults" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MovementTransfer" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   responses:
     Problem:
@@ -1681,3 +1800,79 @@ components:
       type: object
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/RemittanceRun" } }
+    IntrastatProduct:
+      type: object
+      required: [commodity_code, origin_country, net_mass_per_unit]
+      properties:
+        product_id: { type: string, format: uuid }
+        commodity_code: { type: string, pattern: '^[0-9]{8}$' }
+        origin_country: { type: string, pattern: '^[A-Z]{2}$' }
+        net_mass_per_unit: { $ref: "#/components/schemas/Decimal" }
+        supplementary_per_unit: { $ref: "#/components/schemas/Decimal" }
+    ItemsOfIntrastatProduct:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/IntrastatProduct" } }
+    Movement:
+      type: object
+      required: [flow, source_ref, movement_date, partner_country, lines]
+      properties:
+        id: { type: string, format: uuid }
+        flow: { type: string, enum: [arrival, dispatch] }
+        source_ref: { type: string, maxLength: 100 }
+        movement_date: { $ref: "#/components/schemas/Date" }
+        partner_country: { type: string, pattern: '^[A-Z]{2}$' }
+        transaction_code: { type: string }
+        transport_mode: { type: string }
+        delivery_terms: { type: string }
+        port: { type: string }
+        status: { type: string, enum: [staged, transferred, ignored] }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [line_no, product_id, qty, value]
+            properties:
+              line_no: { type: integer, minimum: 1 }
+              product_id: { type: string, format: uuid }
+              qty: { $ref: "#/components/schemas/Decimal" }
+              value: { $ref: "#/components/schemas/Decimal" }
+    MovementsRequest:
+      type: object
+      required: [movements]
+      properties:
+        movements: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/Movement" } }
+    ItemsOfMovement:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Movement" } }
+    StagedResult:
+      type: object
+      properties:
+        staged: { type: integer }
+        duplicates: { type: integer }
+    MovementDefaults:
+      type: object
+      description: Fills what a movement does not carry; whatever stays empty is flagged by the journal's validation.
+      properties:
+        transaction_code: { type: string }
+        transport_mode: { type: string }
+        delivery_terms: { type: string }
+        port: { type: string }
+    MovementTransfer:
+      type: object
+      properties:
+        added: { type: integer }
+        skipped: { type: integer }
+        ignored: { type: integer, description: "Movements to or from the entity's own country or a country outside the EU." }
+        complete_movements: { type: integer }
+        unmapped:
+          type: array
+          items:
+            type: object
+            properties:
+              source_ref: { type: string }
+              line_no: { type: integer }
+              product_id: { type: string, format: uuid }

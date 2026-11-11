@@ -34,6 +34,12 @@ type ConfigStore interface {
 	PutGroup(ctx context.Context, g domain.Group) error
 	DeleteGroup(ctx context.Context, kind, code string) error
 	LoadConfig(ctx context.Context) (domain.Config, error)
+	ListIntrastatProducts(ctx context.Context) ([]domain.IntrastatProduct, error)
+	PutIntrastatProduct(ctx context.Context, p domain.IntrastatProduct) error
+	DeleteIntrastatProduct(ctx context.Context, productID string) error
+	StageMovements(ctx context.Context, movements []domain.Movement) (int, error)
+	ListMovements(ctx context.Context, status string) ([]domain.Movement, error)
+	TransferMovements(ctx context.Context, journalID string, d domain.MovementDefaults) (store.MovementTransfer, error)
 	RecordWithholding(ctx context.Context, entries []domain.WithholdingEntry) (int, error)
 	RunRemittance(ctx context.Context, period domain.Period) (store.RemittanceRun, error)
 	ListRemittanceRuns(ctx context.Context) ([]store.RemittanceRun, error)
