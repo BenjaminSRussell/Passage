@@ -183,6 +183,8 @@ func TestOPCUAConfigValidation(t *testing.T) {
 		{OPCUAConfig{Endpoint: "opc.tcp://h:4840", SecurityPolicy: "Basic256Sha256"}, "both"},
 		{OPCUAConfig{Endpoint: "opc.tcp://h:4840", SecurityPolicy: "Basic256Sha256", SecurityMode: "Sign"}, "certificate"},
 		{OPCUAConfig{Endpoint: "opc.tcp://h:4840", Password: "x"}, "user name"},
+		{OPCUAConfig{Endpoint: "opc.tcp://h:4840", Username: "op", Password: "x"}, "secured channel"},
+		{OPCUAConfig{Endpoint: "opc.tcp://h:4840", SecurityPolicy: "None", SecurityMode: "None", Username: "op"}, "secured channel"},
 	} {
 		if err := c.cfg.Validate(); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%+v: %v", c.cfg, err)
@@ -190,6 +192,13 @@ func TestOPCUAConfigValidation(t *testing.T) {
 	}
 	if err := (OPCUAConfig{Endpoint: "opc.tcp://h:4840"}).Validate(); err != nil {
 		t.Fatal(err)
+	}
+	secured := OPCUAConfig{Endpoint: "opc.tcp://h:4840", SecurityPolicy: "Basic256Sha256", SecurityMode: "SignAndEncrypt", CertFile: "c.pem", KeyFile: "k.pem", Username: "op", Password: "x"}
+	if err := secured.Validate(); err != nil || secured.Insecure() {
+		t.Fatalf("a user name over a secured channel: %v, insecure %v", err, secured.Insecure())
+	}
+	if !(OPCUAConfig{Endpoint: "opc.tcp://h:4840"}).Insecure() {
+		t.Fatal("the default policy None is not reported insecure")
 	}
 }
 

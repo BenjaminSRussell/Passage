@@ -75,8 +75,9 @@ Mapping a vendor's telegram profile onto this one is open (NOT-IMPLEMENTED.md).
 ## Adapters, buffer and writers (#25)
 
 - `EDGE_SOURCE=opcua`: subscribes to the nodes the applied configuration maps (a tag's address is its node id,
-  `ns=2;s=Press1.Count`). `EDGE_OPCUA_ENDPOINT`, `EDGE_OPCUA_SECURITY_POLICY` and `_MODE` (None for dev; a secured channel
-  needs `EDGE_OPCUA_CERT_FILE` and `_KEY_FILE`), `EDGE_OPCUA_USER` with `EDGE_OPCUA_PASSWORD_FILE`, `EDGE_OPCUA_INTERVAL_MS`.
+  `ns=2;s=Press1.Count`). `EDGE_OPCUA_ENDPOINT`, `EDGE_OPCUA_SECURITY_POLICY` and `_MODE` (None only when `PASSAGE_ENV` is dev,
+  refused elsewhere; a secured channel needs `EDGE_OPCUA_CERT_FILE` and `_KEY_FILE`), `EDGE_OPCUA_USER` with
+  `EDGE_OPCUA_PASSWORD_FILE` (refused over None in every environment), `EDGE_OPCUA_INTERVAL_MS`.
 - `EDGE_SOURCE=mqtt`: subscribes to the topics the configuration maps. A message is a bare number or text, or
   `{"value": ..., "ts": "<RFC 3339>"}`. `EDGE_MQTT_BROKER` (host:port), `EDGE_MQTT_TLS` (required outside dev),
   `EDGE_MQTT_CA_FILE`, `EDGE_MQTT_USER`, `EDGE_MQTT_PASSWORD_FILE`, `EDGE_MQTT_CLIENT_ID`.

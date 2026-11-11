@@ -183,6 +183,9 @@ func loadConfig(getenv func(string) string) (config, error) {
 			if err := cfg.OPCUA.Validate(); err != nil {
 				problems = append(problems, "EDGE_OPCUA_*: "+err.Error())
 			}
+			if cfg.OPCUA.Insecure() && cfg.Env != "dev" {
+				problems = append(problems, "EDGE_OPCUA_SECURITY_POLICY must not be None outside dev: set a policy, a mode and a client certificate")
+			}
 		}
 		if wantMQTT {
 			cfg.MQTTBroker, cfg.MQTTClientID, cfg.MQTTUser, cfg.MQTTCAFile = getenv("EDGE_MQTT_BROKER"), orDefault(getenv("EDGE_MQTT_CLIENT_ID"), "passage-"+cfg.EdgeID), getenv("EDGE_MQTT_USER"), getenv("EDGE_MQTT_CA_FILE")

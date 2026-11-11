@@ -131,6 +131,9 @@ func TestLoadConfig_AdaptersBufferAndPLC(t *testing.T) {
 		"opcua security needs a cert":     {"EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840", "EDGE_OPCUA_SECURITY_POLICY": "Basic256Sha256", "EDGE_OPCUA_SECURITY_MODE": "SignAndEncrypt"},
 		"opcua interval out of range":     {"EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840", "EDGE_OPCUA_INTERVAL_MS": "5"},
 		"mqtt needs a broker":             {"EDGE_SOURCE": "mqtt"},
+		"opcua security None outside dev": {"PASSAGE_ENV": "prod", "EDGE_SHOPFLOOR_URL": "https://s", "EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840"},
+		"opcua writer None outside dev":   {"PASSAGE_ENV": "prod", "EDGE_SHOPFLOOR_URL": "https://s", "EDGE_SOURCE": "simulator", "EDGE_WRITER": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840"},
+		"opcua user over None in dev":     {"EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840", "EDGE_OPCUA_USER": "op"},
 		"mqtt without tls outside dev":    {"PASSAGE_ENV": "prod", "EDGE_SHOPFLOOR_URL": "https://s", "EDGE_SOURCE": "mqtt", "EDGE_MQTT_BROKER": "b:8883"},
 		"unknown writer":                  {"EDGE_SOURCE": "simulator", "EDGE_WRITER": "modbus"},
 		"plc station too long":            {"EDGE_SOURCE": "simulator", "EDGE_PLC_ADDR": "simulator", "EDGE_PLC_STATION": "TOOLONGNAME", "EDGE_WAREHOUSE_URL": "http://w"},
@@ -141,5 +144,20 @@ func TestLoadConfig_AdaptersBufferAndPLC(t *testing.T) {
 		if _, err := cfg(extra); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	// Outside dev the OPC-UA channel must be secured; a secured one is accepted.
+	prod := map[string]string{"PASSAGE_ENV": "prod", "EDGE_SHOPFLOOR_URL": "https://s", "EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840"}
+	if _, err := cfg(prod); err == nil || !strings.Contains(err.Error(), "EDGE_OPCUA_SECURITY_POLICY must not be None outside dev") {
+		t.Fatalf("opcua None outside dev: %v", err)
+	}
+	prod["EDGE_OPCUA_SECURITY_POLICY"], prod["EDGE_OPCUA_SECURITY_MODE"] = "Basic256Sha256", "SignAndEncrypt"
+	prod["EDGE_OPCUA_CERT_FILE"], prod["EDGE_OPCUA_KEY_FILE"], prod["EDGE_OPCUA_USER"] = "/c.pem", "/k.pem", "op"
+	if c, err := cfg(prod); err != nil && strings.Contains(err.Error(), "EDGE_OPCUA") {
+		t.Fatalf("a secured opcua channel outside dev: %v", err)
+	} else if err == nil && c.OPCUA.Username != "op" {
+		t.Fatalf("opcua user %q", c.OPCUA.Username)
+	}
+	if _, err := cfg(map[string]string{"EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840", "EDGE_OPCUA_USER": "op"}); err == nil || !strings.Contains(err.Error(), "secured channel") {
+		t.Fatalf("an opcua user name over None in dev: %v", err)
 	}
 }

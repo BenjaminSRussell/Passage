@@ -50,7 +50,7 @@ shopfloor:
 
 # OPC-UA server of the plant (source opcua, or writer opcua). A secured channel (securityPolicy and
 # securityMode other than None) needs `secret` with client.crt and client.key; a user name also needs
-# `password` in it.
+# `password` in it. None is accepted only with config.env dev, and never with a user name.
 opcua:
   endpoint: ""            # opc.tcp://host:4840
   securityPolicy: None    # None | Basic256Sha256 | Aes128_Sha256_RsaOaep | ...

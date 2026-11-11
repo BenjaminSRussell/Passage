@@ -20,7 +20,8 @@ import (
 type OPCUAConfig struct {
 	Endpoint string // opc.tcp://host:4840
 	// SecurityPolicy and SecurityMode select the channel security. "None" (the default) is for the dev and
-	// demo plant; a real plant uses a signed and encrypted channel with CertFile and KeyFile.
+	// demo plant only (the connector refuses it outside PASSAGE_ENV=dev, see Insecure); a real plant uses a
+	// signed and encrypted channel with CertFile and KeyFile.
 	SecurityPolicy string // None, Basic256Sha256, Aes128_Sha256_RsaOaep, ...
 	SecurityMode   string // None, Sign, SignAndEncrypt
 	CertFile       string // PEM client certificate for a secured channel
@@ -65,9 +66,16 @@ func (c OPCUAConfig) Validate() error {
 		return errors.New("a secured OPC-UA channel needs a client certificate and key")
 	case c.Password != "" && c.Username == "":
 		return errors.New("an OPC-UA password needs a user name")
+	case c.Insecure() && (c.Username != "" || c.Password != ""):
+		// Over security policy None the user name token, password included, crosses the plant network unencrypted.
+		return errors.New("an OPC-UA user name and password need a secured channel (security policy other than None)")
 	}
 	return nil
 }
+
+// Insecure reports a channel with security policy None: nothing is signed or encrypted. The connector allows it
+// only when PASSAGE_ENV is dev.
+func (c OPCUAConfig) Insecure() bool { return c.policy() == "None" }
 
 func (c OPCUAConfig) options(ctx context.Context) ([]opcua.Option, error) {
 	opts := []opcua.Option{opcua.RequestTimeout(c.timeout()), opcua.DialTimeout(c.timeout())}
