@@ -138,7 +138,8 @@ export interface ApprovalRequestedData {
   /** Pseudonymized proposal. Real values are shown in the inbox only, never in the event. */
   proposal: string;
   confidence: number;
-  risk_score: number;
+  /** Absent when the run has no risk assessment for the proposal. */
+  risk_score?: number;
 }
 
 /**
@@ -154,14 +155,14 @@ export function approvalRequestedEvent(input: {
   toolName: string;
   proposalRedacted: string;
   confidence: number;
-  riskScore: number;
+  riskScore?: number;
 }): AgentEvent<ApprovalRequestedData> {
   if (!UUID.test(input.tenantId)) throw new Error("tenantId must be a tenant id");
   if (input.runId.trim() === "") throw new Error("runId is required");
   if (input.actionId.trim() === "") throw new Error("actionId is required");
   if (input.toolName.trim() === "") throw new Error("toolName is required");
   if (!isFraction(input.confidence)) throw new Error("confidence must be between 0 and 1");
-  if (!isFraction(input.riskScore)) throw new Error("riskScore must be between 0 and 1");
+  if (input.riskScore !== undefined && !isFraction(input.riskScore)) throw new Error("riskScore must be between 0 and 1");
   assertNoPii(input.proposalRedacted);
   return {
     type: AGENT_EVENT_TYPES.approvalRequested,
@@ -172,7 +173,7 @@ export function approvalRequestedEvent(input: {
       tool_name: input.toolName,
       proposal: input.proposalRedacted,
       confidence: input.confidence,
-      risk_score: input.riskScore,
+      ...(input.riskScore !== undefined ? { risk_score: input.riskScore } : {}),
     },
   };
 }

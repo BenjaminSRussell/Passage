@@ -233,6 +233,8 @@ var serviceGrants = map[string]map[string][]string{
 	"migration-factory": {
 		"receivables": {"receivables.import.write", "receivables.view"},
 		"payables":    {"opening-item.import", "opening-item.import.read"},
+		"inventory":   {"inventory.import.write", "inventory.import.read"},
+		"treasury":    {"treasury.import.write", "treasury.import.read"},
 		// Parallel-run replay and ROLLED_BACK compensating journals (#484).
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
@@ -264,7 +266,7 @@ var serviceGrants = map[string]map[string][]string{
 	"supplier-portal": {
 		"purchasing": {"procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"},
 		"receiving":  {"receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"},
-		"party":      {"party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"},
+		"party":      {"party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept", "party.vendor-portal.admin"},
 		"payables":   {"payables.vendor-portal.read"},
 	},
 	// The customer portal BFF acts for one customer contact at a time (#30). Every token it signs carries the customer id (cus)

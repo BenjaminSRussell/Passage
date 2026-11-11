@@ -80,7 +80,13 @@ func TestServiceGrantForTheFactoryIsSeeded(t *testing.T) {
 	if want := []string{"opening-item.import", "opening-item.import.read"}; !slices.Equal(slices.Sorted(slices.Values(payables)), want) {
 		t.Errorf("the grant for migration-factory -> payables must hold exactly %v (opening-item import, #565), got %v", want, payables)
 	}
-	if other := tenant.ServiceGrantTable()[target.ServiceName]; len(other) != 3 {
-		t.Errorf("migration-factory is granted only receivables, payables (opening items) and ledger (replay, compensations), got %v", other)
+	if inv := tenant.ServiceGrantTable()[target.ServiceName]["inventory"]; !slices.Equal(slices.Sorted(slices.Values(inv)), []string{"inventory.import.read", "inventory.import.write"}) {
+		t.Errorf("the grant for migration-factory -> inventory must hold exactly the opening stock import duties, got %v", inv)
+	}
+	if trs := tenant.ServiceGrantTable()[target.ServiceName]["treasury"]; !slices.Equal(slices.Sorted(slices.Values(trs)), []string{"treasury.import.read", "treasury.import.write"}) {
+		t.Errorf("the grant for migration-factory -> treasury must hold exactly the opening balance import duties, got %v", trs)
+	}
+	if other := tenant.ServiceGrantTable()[target.ServiceName]; len(other) != 5 {
+		t.Errorf("migration-factory is granted only receivables, payables (opening items), inventory and treasury (opening imports) and ledger (replay, compensations), got %v", other)
 	}
 }
