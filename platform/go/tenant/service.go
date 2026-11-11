@@ -403,7 +403,7 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 // grant. A nil duties means the whole grant less its tenant-level duties, which
 // are signed only when asked for by name.
 func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, only []string) (string, error) {
-	if s.name == VendorPortalIssuer && p.VendorID == "" && !(len(only) == 1 && only[0] == DutyPortalRegister) {
+	if s.name == VendorPortalIssuer && p.VendorID == "" && (len(only) != 1 || only[0] != DutyPortalRegister) {
 		return "", errors.New("the supplier portal signs tokens for a vendor only, except the prospect registration")
 	}
 	if s.name == CustomerPortalIssuer && p.CustomerID == "" {
@@ -667,7 +667,7 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 		if vnd, ok := canonicalUUID(c.Vnd); !ok || vnd != c.Vnd || vnd == ids.Nil || c.Iss != VendorPortalIssuer {
 			return ServiceClaims{}, ErrServiceToken
 		}
-	} else if c.Iss == VendorPortalIssuer && !(len(c.Duties) == 1 && c.Duties[0] == DutyPortalRegister) {
+	} else if c.Iss == VendorPortalIssuer && (len(c.Duties) != 1 || c.Duties[0] != DutyPortalRegister) {
 		return ServiceClaims{}, ErrServiceToken
 	}
 	if c.Cus != "" {
