@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -18,6 +19,15 @@ import (
 // this is how an abandoned RMA gives its room back. Only a credit the ledger refused (parked) or one never tried can
 // go: after a lost ledger answer the journal may be booked, so such a credit is retried instead.
 func (s *Postgres) CancelRMACredit(ctx context.Context, id string) (RMACreditView, error) {
+	return s.cancelRMACredit(ctx, id, time.Time{})
+}
+
+// errRMANotExpired is returned by cancelRMACredit when the credit is newer than the expiry cutoff.
+var errRMANotExpired = errors.New("rma credit is not past its reservation TTL")
+
+// cancelRMACredit is CancelRMACredit with an optional cutoff: a non-zero olderThan makes it refuse (errRMANotExpired) a
+// credit created after that instant, so the expiry sweep and an operator cancelling by hand share one rule set.
+func (s *Postgres) cancelRMACredit(ctx context.Context, id string, olderThan time.Time) (RMACreditView, error) {
 	p, _ := tenant.FromContext(ctx)
 	var row rmaCreditRow
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -26,6 +36,9 @@ func (s *Postgres) CancelRMACredit(ctx context.Context, id string) (RMACreditVie
 			return httpx.NewProblem(http.StatusNotFound, CodeRMACreditNotFound, "RMA credit not found")
 		} else if err != nil {
 			return err
+		}
+		if !olderThan.IsZero() && row.createdAt.After(olderThan) {
+			return errRMANotExpired
 		}
 		if row.status != "PENDING" {
 			return httpx.NewProblem(http.StatusConflict, CodeRMACreditState, "the credit is already posted and cannot be cancelled; reverse it with a billing credit note instead")
@@ -137,4 +150,64 @@ func (s *Postgres) backfillReservation(ctx context.Context, where, key, invoiceI
 	}
 	row.billingInvoiceID, row.lines, row.reservationID, row.committed = invoiceID, lines, res.ID, true
 	return row.view(), nil
+}
+
+// MaxRMAExpiryBatch caps how many credits one ExpireRMAReservations call cancels.
+const MaxRMAExpiryBatch = 100
+
+// RMAExpiryResult counts one expiry pass.
+type RMAExpiryResult struct {
+	Expired int `json:"expired"`
+	Skipped int `json:"skipped"`
+	Failed  int `json:"failed"`
+}
+
+// ExpireRMAReservations cancels the PENDING credits of the caller's legal-entity scope that were created more than ttl
+// before now and that CancelRMACredit would accept (parked by the ledger, or never tried and not leased), releasing the
+// invoice room billing holds for them (#557). An abandoned RMA therefore gives its room back on its own. A credit whose
+// ledger post may be booked (tried, not parked) is never expired. ttl <= 0 disables the pass.
+func (s *Postgres) ExpireRMAReservations(ctx context.Context, now time.Time, ttl time.Duration, limit int) (RMAExpiryResult, error) {
+	var res RMAExpiryResult
+	if ttl <= 0 {
+		return res, nil
+	}
+	if limit < 1 || limit > MaxRMAExpiryBatch {
+		limit = MaxRMAExpiryBatch
+	}
+	p, _ := tenant.FromContext(ctx)
+	cutoff := now.Add(-ttl)
+	var ids []string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text from rma_credit
+			where tenant_id = $1 and status = 'PENDING' and created_at <= $2 and (gl_parked or gl_attempts = 0)
+			and (post_lease_until is null or post_lease_until <= $3) order by created_at, id limit $4`, p.TenantID, cutoff, now, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return res, err
+	}
+	for _, id := range ids {
+		_, err := s.cancelRMACredit(ctx, id, cutoff)
+		var prob *httpx.Problem
+		switch {
+		case err == nil:
+			res.Expired++
+		case errors.Is(err, errRMANotExpired), errors.As(err, &prob) && prob.Status == http.StatusConflict:
+			res.Skipped++
+		default:
+			res.Failed++
+		}
+	}
+	return res, nil
 }
