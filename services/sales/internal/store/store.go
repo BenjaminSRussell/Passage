@@ -378,6 +378,8 @@ type Store interface {
 	InspectReturnOrder(ctx context.Context, id string, version int, lines []InspectLine, actor string, now time.Time) (ReturnOrder, error)
 	DispositionReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
 	CreditReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
+	RecomputeReturnCredit(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
+	BackfillReservations(ctx context.Context, legalEntityID string, limit int) (ReservationBackfillResult, error)
 	RejectReturnOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ReturnOrder, error)
 	Ping(ctx context.Context) error
 }

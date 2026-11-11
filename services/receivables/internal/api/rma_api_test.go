@@ -96,6 +96,10 @@ func TestRMACreditOperatorRoutes(t *testing.T) {
 		{"list other legal entity", http.MethodGet, "/v1/receivables/rma-credits?legalEntityId=00000000-0000-0000-0000-0000000000ff", "", "receivables.view", http.StatusForbidden},
 		{"retry needs receivables.payment.post", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "receivables.view", http.StatusForbidden},
 		{"retry service duty is not enough", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", "", "ar.rmacredit.post", http.StatusForbidden},
+		{"backfill by RMA is a service call", http.MethodPost, "/v1/receivables/rma-credits:backfill-reservation", `{"rmaId":"` + id + `","legalEntityId":"` + testLE + `","invoiceId":"` + id + `","invoiceLines":[{"lineNo":1,"qty":"1"}]}`, "receivables.payment.post", http.StatusForbidden},
+		{"backfill by RMA bad ids", http.MethodPost, "/v1/receivables/rma-credits:backfill-reservation", `{"rmaId":"x","legalEntityId":"` + testLE + `"}`, "ar.rmacredit.backfill", http.StatusBadRequest},
+		{"backfill by RMA other legal entity", http.MethodPost, "/v1/receivables/rma-credits:backfill-reservation", `{"rmaId":"` + id + `","legalEntityId":"00000000-0000-0000-0000-0000000000ff","invoiceId":"` + id + `","invoiceLines":[{"lineNo":1,"qty":"1"}]}`, "ar.rmacredit.backfill", http.StatusForbidden},
+		{"backfill by RMA", http.MethodPost, "/v1/receivables/rma-credits:backfill-reservation", `{"rmaId":"` + id + `","legalEntityId":"` + testLE + `","invoiceId":"` + id + `","invoiceLines":[{"lineNo":1,"qty":"1"}]}`, "ar.rmacredit.backfill", http.StatusOK},
 		{"retry bad date", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"03/01/2027"}`, "receivables.payment.post", http.StatusBadRequest},
 		{"retry unknown action", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":post", "", "receivables.payment.post", http.StatusNotFound},
 		{"retry re-dated", http.MethodPost, "/v1/receivables/rma-credits/" + id + ":retry", `{"postingDate":"2027-04-01"}`, "receivables.payment.post", http.StatusOK},
@@ -122,13 +126,13 @@ func TestRMACreditOperatorRoutes(t *testing.T) {
 			t.Fatalf("%s without a legal-entity claim: %d %s", path, rec.Code, rec.Body.String())
 		}
 	}
-	if len(f.rmaRetries) != 2 {
+	if len(f.rmaRetries) != 3 {
 		t.Fatalf("an unscoped retry reached the store: %v", f.rmaRetries)
 	}
 	if !f.rmaFilter.ParkedOnly || f.rmaFilter.Status != "PENDING" {
 		t.Fatalf("list filter %+v", f.rmaFilter)
 	}
-	if len(f.rmaRetries) != 2 || f.rmaRetries[0] != id+"|2027-04-01" || f.rmaRetries[1] != id+"|" {
+	if len(f.rmaRetries) != 3 || f.rmaRetries[0] != testLE+"|"+id+"|backfill-for|"+id || f.rmaRetries[1] != id+"|2027-04-01" || f.rmaRetries[2] != id+"|" {
 		t.Fatalf("retries forwarded %v", f.rmaRetries)
 	}
 }

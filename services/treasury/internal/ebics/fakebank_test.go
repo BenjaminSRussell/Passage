@@ -160,6 +160,7 @@ type fakeBank struct {
 	orders           []receivedOrder
 	served           map[string][]byte
 	segChars         int
+	wrongSegment     bool
 	faults           map[string]*bankFault
 	requests         int
 	verifiedRequests int
@@ -415,8 +416,16 @@ func (b *fakeBank) downloadReply(tx *bankTxn, n int, wrapped []byte) []byte {
 		info = `<DataEncryptionInfo authenticate="true"><EncryptionPubKeyDigest Version="E002" Algorithm="` + algSHA256 + `">` + b64(KeyDigest(b.userE002)) +
 			`</EncryptionPubKeyDigest><TransactionKey>` + b64(wrapped) + `</TransactionKey></DataEncryptionInfo>`
 	}
-	return b.signed("000000", "000000", static, "<TransactionPhase>"+phase+"</TransactionPhase><SegmentNumber"+last+">"+strconv.Itoa(n)+"</SegmentNumber>",
+	return b.signed("000000", "000000", static, "<TransactionPhase>"+phase+"</TransactionPhase><SegmentNumber"+last+">"+strconv.Itoa(b.shownSegment(n))+"</SegmentNumber>",
 		"<DataTransfer>"+info+"<OrderData>"+tx.served[n-1]+"</OrderData></DataTransfer>")
+}
+
+// shownSegment is the segment number a download reply carries: wrong after the first when wrongSegment is set.
+func (b *fakeBank) shownSegment(n int) int {
+	if b.wrongSegment && n > 1 {
+		return n + 5
+	}
+	return n
 }
 
 func (b *fakeBank) replyTxStatic() string {

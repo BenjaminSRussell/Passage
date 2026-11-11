@@ -188,6 +188,8 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 | `POST /api/v1/cutover/plans/{id}/rollback` | `migration.cutover.manage` (two different callers approve; the second runs it) |
 | `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `migration.cutover.manage` |
 | `POST`/`GET /api/v1/cutover/plans/{id}/rollback/compensations` | `migration.cutover.manage` |
+| `PUT /api/v1/cutover/plans/{id}/opening-targets/{system}/{company}`, `GET .../opening-targets` | `migration.cutover.manage` (the company-to-legal-entity and ledger mapping of the opening journal; a mapped company refuses any other target) |
+| `POST /api/v1/migration/opening-targets/{system}/{company}/release` | `migration.opening-target.release` plus `tenant.administer` and no legal-entity scope (frees a pin with no postings; reason, person and time are kept in `gl_opening_target_release`) |
 | `POST /api/v1/migration/parallel-runs/replay` | `migration.factory.run` |
 | `GET /api/v1/migration/coexistence` | `migration.factory.view` |
 | `PUT /api/v1/migration/coexistence/{system}/{company}/{entity}` | `migration.cutover.manage` |

@@ -168,6 +168,35 @@ func TestReceiveReturn_RefusesAJournalThatIsNotThisReceipt(t *testing.T) {
 	}
 }
 
+func TestBackfillRMAReservation_UsesTheBackfillDutyAndMapsTheHeldAnswer(t *testing.T) {
+	status, code := http.StatusOK, ""
+	var got map[string]any
+	h := newHarness(t, func(w http.ResponseWriter, r *http.Request, h *harness) {
+		if r.URL.Path != "/v1/receivables/rma-credits:backfill-reservation" || h.claims(t, r, "receivables").Duties[0] != "ar.rmacredit.backfill" {
+			t.Errorf("request %s", r.URL.Path)
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &got)
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"code":"` + code + `"}`))
+	})
+	lines := []store.ARInvoiceLine{{LineNo: 2, Qty: decimal.RequireFromString("3.5")}}
+	if err := returnsOn(h).BackfillRMAReservation(h.ctx, h.le, "r1", "inv-1", lines); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if got["rmaId"] != "r1" || got["invoiceId"] != "inv-1" || got["legalEntityId"] != h.le {
+		t.Fatalf("body %+v", got)
+	}
+	status, code = http.StatusConflict, "AR-RMA-STATE"
+	if err := returnsOn(h).BackfillRMAReservation(h.ctx, h.le, "r1", "inv-1", lines); !errors.Is(err, store.ErrReservationHeld) {
+		t.Fatalf("held answer: %v", err)
+	}
+	status, code = http.StatusUnprocessableEntity, "AR-RMA-INVOICE"
+	if err := returnsOn(h).BackfillRMAReservation(h.ctx, h.le, "r1", "inv-1", lines); err == nil || errors.Is(err, store.ErrReservationHeld) {
+		t.Fatalf("a refusal is a failure: %v", err)
+	}
+}
+
 func TestPostRMACredit_SendsOnlyWhatReceivablesDerivesNothingFrom(t *testing.T) {
 	var got map[string]any
 	h := newHarness(t, func(w http.ResponseWriter, r *http.Request, h *harness) {

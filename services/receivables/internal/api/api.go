@@ -31,6 +31,7 @@ const (
 	dutyForecastRead = "receivables.forecast.read"
 	dutyPayment      = "receivables.payment.post"
 	dutyRMACredit    = "ar.rmacredit.post"
+	dutyRMABackfill  = "ar.rmacredit.backfill"
 	dutyImport       = "receivables.payment-file.import"
 	maxLockboxBytes  = 3 << 20 // below httpx.Decode's 4 MiB body cap, leaving room for JSON escaping
 	validationDetail = "request failed validation"
@@ -95,6 +96,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRMACredit)).Post("/rma-credits", a.postRMACredit)
 		r.With(authz.RequireDuty(dutyView)).Get("/rma-credits", a.listRMACredits)
 		r.With(authz.RequireDuty(dutyPayment)).Post("/rma-credits:sweep", a.sweepRMACredits)
+		r.With(authz.RequireDuty(dutyRMABackfill)).Post("/rma-credits:backfill-reservation", a.backfillRMAReservationFor)
 		r.Post("/rma-credits/{ref}", a.rmaCreditAction)
 	})
 }

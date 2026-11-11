@@ -884,6 +884,32 @@ func TestAutoBook_BooksPostedInvoicesOnceWithoutARequest(t *testing.T) {
 	}
 }
 
+// failingMark fails the booking write of the Nth document, as a database error would.
+type failingMark struct {
+	GLBooks
+	failOn, calls int
+}
+
+func (f *failingMark) MarkGLBooked(ctx context.Context, id, entryID string, shares map[int]store.GLShare) (bool, error) {
+	f.calls++
+	if f.calls == f.failOn {
+		return false, errors.New("database unavailable")
+	}
+	return f.GLBooks.MarkGLBooked(ctx, id, entryID, shares)
+}
+
+// A store error part-way through a run still reports the invoices already booked, so auto-book's count is not short (#546).
+func TestAutoBook_StoreErrorStillCountsTheInvoicesAlreadyBooked(t *testing.T) {
+	g := newGLRig(t, true)
+	g.invoice(t, gridLine{"10.00", "4000", "", ""})
+	g.invoice(t, gridLine{"20.00", "4000", "", ""})
+	g.api.glBooks = &failingMark{GLBooks: g.api.glBooks, failOn: 2}
+	booked, _, err := g.autoBook(t)
+	if err == nil || booked != 1 {
+		t.Fatalf("booked %d, err %v; want the one booked invoice counted with the error", booked, err)
+	}
+}
+
 func TestAutoBook_LostLedgerAnswerRetriesWithoutPostingTwice(t *testing.T) {
 	g := newGLRig(t, true)
 	id := g.invoice(t, gridLine{"10.00", "4000", "", ""})

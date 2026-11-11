@@ -190,6 +190,25 @@ func reports(t *testing.T, admin *pgxpool.Pool, invoiceID string) map[string]row
 	return out
 }
 
+// A backlog longer than one batch is drained in one tick, not one batch per interval (#553).
+func TestReporter_DrainsABacklogLargerThanOneBatchInOneTick(t *testing.T) {
+	s, admin, ctx := setup(t)
+	le := ids.New()
+	const invoices = 7
+	for range invoices {
+		postInvoice(t, s, ctx, le, billed{ids.New(), ids.New(), "1"})
+	}
+	r, _ := newReporter(t, s, http.StatusCreated)
+	r.Batch = 2
+	if n := runOnce(t, r, ctx); n != invoices {
+		t.Fatalf("one tick with a batch of 2 made %d attempts, want all %d", n, invoices)
+	}
+	var left int
+	if err := admin.QueryRow(context.Background(), `select count(*) from sales_invoice_report where status <> 'REPORTED'`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("%d reports are not REPORTED (err %v)", left, err)
+	}
+}
+
 // #29: posting an invoice queues one INVOICED report per order it bills lines of, in the post transaction: two invoice lines of
 // one order line are summed (sales takes a line once per report), a line without an order source is left out, and an invoice
 // without any order line queues nothing. The reporter sends each report signed as billing for service:billing-sales-report with

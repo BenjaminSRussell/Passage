@@ -52,14 +52,14 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 type Definition struct {
-	ID            string         `json:"id"`
-	Entity        string         `json:"entity"`
-	LegalEntityID string         `json:"legalEntityId"`
-	Version       int            `json:"version"`
-	Status        string         `json:"status"`
-	Steps         []domain.Step  `json:"steps"`
-	CommentReq    bool           `json:"commentRequired"`
-	AdminUserID   string         `json:"adminUserId,omitempty"`
+	ID            string        `json:"id"`
+	Entity        string        `json:"entity"`
+	LegalEntityID string        `json:"legalEntityId"`
+	Version       int           `json:"version"`
+	Status        string        `json:"status"`
+	Steps         []domain.Step `json:"steps"`
+	CommentReq    bool          `json:"commentRequired"`
+	AdminUserID   string        `json:"adminUserId,omitempty"`
 }
 
 type Submit struct {
