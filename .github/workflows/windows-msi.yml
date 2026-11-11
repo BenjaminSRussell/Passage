@@ -1,0 +1,259 @@
+name: windows-msi
+
+# Builds passage-server and the services for Windows, packages the signed WiX MSI (and, when the prerequisite installers are
+# configured, the Burn bundle), writes an SBOM and fails on unsigned binaries. See docs/adr/0004-windows-packaging.md and
+# docs/ops/windows-install.md. It is path-filtered so it does not run on every pull request.
+#
+# Secrets (referenced here, not defined in the repository; the "platform-release" environment should hold them):
+#   WINDOWS_SIGNING_PFX_BASE64    base64 of the Authenticode code-signing certificate (.pfx)
+#   WINDOWS_SIGNING_PFX_PASSWORD  its password
+# Repository variables (optional):
+#   WINDOWS_TIMESTAMP_URL         RFC 3161 timestamp server (default http://timestamp.digicert.com)
+#   WIX_VERSION                   WiX dotnet tool version (default 6.0.2)
+#   WIX_OSMF_ACCEPTED             "true" once the organization accepted the WiX Open Source Maintenance Fee terms (WiX 7 and later)
+#   NODE_WIN_URL / NODE_WIN_SHA256            pinned node-v*-win-<arch>.zip for the TypeScript services feature
+#   PYTHON_WIN_URL / PYTHON_WIN_SHA256        pinned python.org embeddable zip for the Python services feature
+#   TEMPORAL_WIN_URL / TEMPORAL_WIN_SHA256    pinned Temporal server release archive containing temporal-server.exe (x64)
+#   POSTGRES_WIN_URL / POSTGRES_WIN_SHA256    pinned EDB PostgreSQL installer (x64)
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/windows/**'
+      - 'tools/passage-server/**'
+      - 'platform/go/cloudprofile/**'
+      - '.github/workflows/windows-msi.yml'
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'MSI version (x.y.z); defaults to 0.0.<run number>'
+        required: false
+      sign:
+        description: 'Sign the binaries (needs the signing secrets)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: windows-msi-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  WIX_VERSION: ${{ vars.WIX_VERSION || '6.0.2' }}
+
+jobs:
+  test:
+    name: passage-server (windows tests)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26'
+          cache-dependency-path: '**/go.sum'
+      - name: vet and test
+        working-directory: tools/passage-server
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+
+  package:
+    name: msi (${{ matrix.arch }}${{ matrix.fips && ', fips' || '' }})
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write # keyless cosign signatures on tag builds
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, wixarch: x64, fips: false }
+          - { arch: arm64, wixarch: arm64, fips: false }
+          - { arch: amd64, wixarch: x64, fips: true }
+          - { arch: arm64, wixarch: arm64, fips: true }
+    env:
+      GOOS: windows
+      GOARCH: ${{ matrix.arch }}
+      CGO_ENABLED: '0'
+      # The FIPS variant links the Go Cryptographic Module (#599); passage-server then refuses to start when FIPS mode is off.
+      GOFIPS140: ${{ matrix.fips && 'v1.0.0' || 'off' }}
+      OUT: ${{ github.workspace }}\out
+      SIGN: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.sign)) && 'true' || 'false' }}
+      SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+      SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+      TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26'
+          cache-dependency-path: '**/go.sum'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Version
+        shell: pwsh
+        run: |
+          $v = '${{ inputs.version }}'
+          if (-not $v -and $env:GITHUB_REF -like 'refs/tags/v*') { $v = $env:GITHUB_REF_NAME.TrimStart('v') }
+          if (-not $v) { $v = "0.0.${{ github.run_number }}" }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "version $v is not x.y.z (MSI versions are numeric)" }
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VARIANT=$('${{ matrix.fips }}' -eq 'true' ? 'fips-' : '')${{ matrix.wixarch }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # The web build is embedded into passage-server with go:embed (-tags webdist). It is not committed.
+      - name: Build the web app
+        working-directory: apps/web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          New-Item -ItemType Directory -Force -Path ..\..\tools\passage-server\internal\web | Out-Null
+          Copy-Item -Recurse -Force dist ..\..\tools\passage-server\internal\web\dist
+
+      - name: Cross-build passage-server and the Go services
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:OUT\bin" | Out-Null
+          $ld = "-s -w -X main.version=$env:VERSION"
+          Push-Location tools/passage-server
+          go build -trimpath -tags webdist -ldflags $ld -o "$env:OUT\bin\passage-server.exe" .
+          if ($LASTEXITCODE -ne 0) { throw 'passage-server build failed' }
+          Pop-Location
+          # One executable per service whose cmd directory carries the service's name (devgateway, entitygen and demo mains are skipped).
+          $n = 0
+          foreach ($svc in Get-ChildItem services -Directory) {
+              $cmd = Join-Path $svc.FullName "cmd\$($svc.Name)"
+              if (-not (Test-Path "$cmd\main.go")) { continue }
+              Push-Location $svc.FullName
+              go build -trimpath -ldflags "-s -w" -o "$env:OUT\bin\$($svc.Name).exe" ".\cmd\$($svc.Name)"
+              if ($LASTEXITCODE -ne 0) { throw "build failed: $($svc.Name)" }
+              Pop-Location
+              $n++
+          }
+          "built passage-server and $n services for $env:GOARCH (GOFIPS140=$env:GOFIPS140)"
+
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version $env:WIX_VERSION
+          if ($env:WIX_VERSION -match '^(\d+)' -and [int]$Matches[1] -ge 7) {
+            if ('${{ vars.WIX_OSMF_ACCEPTED }}' -ne 'true') { throw 'WiX 7+ needs the Open Source Maintenance Fee terms accepted: set the WIX_OSMF_ACCEPTED variable (docs/adr/0004-windows-packaging.md).' }
+            wix eula accept wix7
+          }
+          foreach ($e in 'Util', 'Firewall', 'BootstrapperApplication') { wix extension add -g "WixToolset.$e.wixext/$env:WIX_VERSION" }
+
+      - name: Optional runtimes and prerequisites (pinned, hash-verified)
+        shell: pwsh
+        run: |
+          $fetch = ".\deploy\windows\scripts\Fetch-Pinned.ps1"
+          $x64 = '${{ matrix.wixarch }}' -eq 'x64'
+          if ('${{ vars.NODE_WIN_URL }}') {
+            & $fetch -Url '${{ vars.NODE_WIN_URL }}' -Sha256 '${{ vars.NODE_WIN_SHA256 }}' -Out "$env:RUNNER_TEMP\node.zip" -ExpandTo "$env:RUNNER_TEMP\node-x"
+            $root = Get-ChildItem "$env:RUNNER_TEMP\node-x" -Directory | Select-Object -First 1
+            "NODE_DIR=$($root.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+          if ('${{ vars.PYTHON_WIN_URL }}') {
+            & $fetch -Url '${{ vars.PYTHON_WIN_URL }}' -Sha256 '${{ vars.PYTHON_WIN_SHA256 }}' -Out "$env:RUNNER_TEMP\python.zip" -ExpandTo "$env:RUNNER_TEMP\python-x"
+            "PYTHON_DIR=$env:RUNNER_TEMP\python-x" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+          if ($x64 -and '${{ vars.TEMPORAL_WIN_URL }}') {
+            & $fetch -Url '${{ vars.TEMPORAL_WIN_URL }}' -Sha256 '${{ vars.TEMPORAL_WIN_SHA256 }}' -Out "$env:RUNNER_TEMP\temporal.zip" -ExpandTo "$env:OUT\temporal"
+            "TEMPORAL_DIR=$env:OUT\temporal" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+          if ($x64 -and '${{ vars.POSTGRES_WIN_URL }}') {
+            & $fetch -Url '${{ vars.POSTGRES_WIN_URL }}' -Sha256 '${{ vars.POSTGRES_WIN_SHA256 }}' -Out "$env:RUNNER_TEMP\postgres-installer.exe"
+            "POSTGRES_INSTALLER=$env:RUNNER_TEMP\postgres-installer.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+
+      - name: Sign the executables
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: .\deploy\windows\scripts\Sign-Files.ps1 -Path "$env:OUT\bin\*.exe"
+
+      - name: Build the MSIs
+        shell: pwsh
+        working-directory: deploy/windows
+        run: |
+          $d = @('-d', "Version=$env:VERSION", '-d', "BinDir=$env:OUT\bin")
+          if ('${{ matrix.fips }}' -eq 'true') { $d += @('-d', 'Fips=1') }
+          if ($env:NODE_DIR) { $d += @('-d', "NodeDir=$env:NODE_DIR") }
+          if ($env:PYTHON_DIR) { $d += @('-d', "PythonDir=$env:PYTHON_DIR") }
+          wix build -arch ${{ matrix.wixarch }} @d -ext WixToolset.Util.wixext -ext WixToolset.Firewall.wixext Package.wxs Config.wxs -o "$env:OUT\Passage-$env:VERSION-$env:VARIANT.msi"
+          if ($LASTEXITCODE -ne 0) { throw 'Passage.msi build failed' }
+          if ($env:TEMPORAL_DIR) {
+            wix build -arch ${{ matrix.wixarch }} -d "Version=$env:VERSION" -d "TemporalDir=$env:TEMPORAL_DIR" -ext WixToolset.Util.wixext Temporal.wxs -o "$env:OUT\PassageTemporal-$env:VERSION-$env:VARIANT.msi"
+            if ($LASTEXITCODE -ne 0) { throw 'PassageTemporal.msi build failed' }
+          }
+
+      - name: Build the Burn bundle
+        if: matrix.wixarch == 'x64'
+        shell: pwsh
+        working-directory: deploy/windows
+        run: |
+          $d = @('-d', "Version=$env:VERSION", '-d', "PassageMsi=$env:OUT\Passage-$env:VERSION-$env:VARIANT.msi")
+          if ($env:TEMPORAL_DIR) { $d += @('-d', "TemporalMsi=$env:OUT\PassageTemporal-$env:VERSION-$env:VARIANT.msi") }
+          if ($env:POSTGRES_INSTALLER) { $d += @('-d', "PostgresInstaller=$env:POSTGRES_INSTALLER") }
+          wix build -arch x64 @d -ext WixToolset.Util.wixext -ext WixToolset.BootstrapperApplication.wixext Bundle.wxs -o "$env:OUT\PassageSetup-$env:VERSION-$env:VARIANT.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'bundle build failed' }
+
+      # A Burn bundle is signed in three steps: detach the engine, sign it, reattach, then sign the bundle itself.
+      - name: Sign the MSIs and the bundle
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          .\deploy\windows\scripts\Sign-Files.ps1 -Path "$env:OUT\*.msi"
+          $bundle = "$env:OUT\PassageSetup-$env:VERSION-$env:VARIANT.exe"
+          if (Test-Path $bundle) {
+            wix burn detach $bundle -engine "$env:RUNNER_TEMP\engine.exe"
+            .\deploy\windows\scripts\Sign-Files.ps1 -Path "$env:RUNNER_TEMP\engine.exe"
+            wix burn reattach $bundle -engine "$env:RUNNER_TEMP\engine.exe" -o $bundle
+            .\deploy\windows\scripts\Sign-Files.ps1 -Path $bundle
+          }
+
+      # Fails the build on any unsigned binary. Pull requests (which carry no secrets) may be unsigned; tags and signed dispatches may not.
+      - name: Verify Authenticode signatures
+        shell: pwsh
+        run: |
+          $allow = ($env:SIGN -ne 'true')
+          if ($allow) { .\deploy\windows\scripts\Test-Signed.ps1 -Root $env:OUT -AllowUnsigned } else { .\deploy\windows\scripts\Test-Signed.ps1 -Root $env:OUT }
+
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c
+        with:
+          path: out/bin
+          format: spdx-json
+          output-file: out/Passage-${{ env.VERSION }}-${{ env.VARIANT }}.spdx.json
+          upload-artifact: false
+
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
+        if: env.SIGN == 'true'
+      # Keyless cosign signature next to each release file (needs id-token: write, granted only on tag builds below).
+      - name: cosign sign-blob
+        if: env.SIGN == 'true' && github.event_name == 'push'
+        shell: pwsh
+        run: |
+          Get-ChildItem "$env:OUT\*" -File -Include *.msi, *.exe, *.json | ForEach-Object {
+            cosign sign-blob --yes --bundle "$($_.FullName).cosign.bundle" $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "cosign failed on $($_.Name)" }
+          }
+
+      - name: Collect release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\release" | Out-Null
+          Get-ChildItem "$env:OUT\*" -File | Copy-Item -Destination "$env:RUNNER_TEMP\release"
+
+      # actions/upload-artifact v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: passage-windows-${{ env.VERSION }}-${{ env.VARIANT }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
