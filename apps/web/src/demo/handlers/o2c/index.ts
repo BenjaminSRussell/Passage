@@ -11,3 +11,4 @@ import "./promotions";
 import "./salesops";
 import "./servicecases";
 import "./receivables-journals";
+import "./revrec";

@@ -1,7 +1,7 @@
 // Master data lookups other screens use: parties (customers and vendors) and products. Ids come from company.ts.
 import type { Party as PartyRecord, Vendor } from "../../../modules/party/api/client";
 import type { Product } from "../../../modules/product/api/client";
-import { CUSTOMERS, ITEMS, LEGAL_ENTITY, USER, VENDORS, type Item, type Party } from "../../company";
+import { CUSTOMERS, ITEMS, LEGAL_ENTITY, SERVICES, USER, VENDORS, type Item, type Party, type ServiceProduct } from "../../company";
 import { reply, route } from "../../backend";
 import { at, uid } from "../../store";
 import { JORDAN, personById } from "../hr/people";
@@ -77,6 +77,11 @@ function product(i: Item): Product {
   };
 }
 
+/** A service sold with the pumps: a product that is not stocked (company.ts SERVICES). */
+function serviceProduct(s: ServiceProduct): Product {
+  return { ...product({ ...ITEMS[0], id: s.id, number: s.number, name: s.name }), description: "Service, not stocked.", productType: "service", baseUom: "ea", itemGroupId: "", serialTracked: false };
+}
+
 const findItems = (q: string | null) => {
   const needle = (q ?? "").trim().toLowerCase();
   return ITEMS.filter((i) => !needle || i.number.toLowerCase().includes(needle) || i.name.toLowerCase().includes(needle));
@@ -92,7 +97,9 @@ route("GET", `${PRODUCT}/products`, ({ query }) => {
 
 route("GET", `${PRODUCT}/products/{id}`, ({ params }) => {
   const i = ITEMS.find((it) => it.id === params.id || it.number === params.id);
-  return i ? reply.versioned(product(i), 1) : reply.problem(404, "PRD-0404", "Product not found");
+  if (i) return reply.versioned(product(i), 1);
+  const s = SERVICES.find((it) => it.id === params.id || it.number === params.id);
+  return s ? reply.versioned(serviceProduct(s), 1) : reply.problem(404, "PRD-0404", "Product not found");
 });
 
 route("GET", `${PRODUCT}/released-products`, () => ({ items: ITEMS.map((i) => ({ id: i.id })), next: "" }));
