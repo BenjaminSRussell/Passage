@@ -49,7 +49,7 @@ func (s *Server) WithTarget(t Target) *Server { s.target = t; return s }
 func parseLoad(l *loadRequestDTO, records []extractRecordDTO, sys domain.SourceSystem, company string, p tenant.Principal) (*domain.TargetConfig, map[string]domain.TargetExtra, error) {
 	if l == nil {
 		for _, r := range records {
-			if r.Ledger != "" || r.DocumentNumber != "" || r.CustomerID != "" || r.Kind != "" || r.DocumentDate != "" || r.DueDate != "" || r.OriginalAmount != "" {
+			if r.Ledger != "" || r.VendorID != "" || r.DocumentNumber != "" || r.CustomerID != "" || r.Kind != "" || r.DocumentDate != "" || r.DueDate != "" || r.OriginalAmount != "" {
 				return nil, nil, invalid("records carry receivables fields, but the request has no load object")
 			}
 		}
@@ -79,10 +79,23 @@ func parseLoad(l *loadRequestDTO, records []extractRecordDTO, sys domain.SourceS
 		}
 		customers[party] = id
 	}
+	var payables *domain.PayablesConfig
+	if l.Payables != nil {
+		payables = &domain.PayablesConfig{Vendors: make(map[string]string, len(l.Payables.VendorIDs))}
+		for party, id := range l.Payables.VendorIDs {
+			if !ids.Valid(id) {
+				return nil, nil, invalid(fmt.Sprintf("load.payables.vendorIds[%q] must be a UUID", party))
+			}
+			payables.Vendors[party] = id
+		}
+	}
 	extras := make(map[string]domain.TargetExtra, len(records))
 	for _, r := range records {
 		x := domain.TargetExtra{Ledger: strings.ToUpper(strings.TrimSpace(r.Ledger)), DocumentNumber: strings.TrimSpace(r.DocumentNumber), CustomerID: strings.TrimSpace(r.CustomerID),
 			Kind: strings.TrimSpace(r.Kind), DocumentDate: strings.TrimSpace(r.DocumentDate), DueDate: strings.TrimSpace(r.DueDate), CashDiscountDate: r.CashDiscountDate}
+		if x.Ledger == domain.LedgerAP && strings.TrimSpace(r.VendorID) != "" {
+			x.CustomerID = strings.TrimSpace(r.VendorID)
+		}
 		if x.Ledger != "" && x.Ledger != domain.LedgerAR && x.Ledger != domain.LedgerAP {
 			return nil, nil, invalid(fmt.Sprintf("record %q ledger must be AR or AP", r.LegacyID))
 		}
@@ -108,7 +121,7 @@ func parseLoad(l *loadRequestDTO, records []extractRecordDTO, sys domain.SourceS
 		}
 		extras[domain.OpenItemKey(side, strings.TrimSpace(r.LegacyID))] = x
 	}
-	return &domain.TargetConfig{LegalEntityID: le, ImportSource: source, Customers: customers}, extras, nil
+	return &domain.TargetConfig{LegalEntityID: le, ImportSource: source, Customers: customers, Payables: payables}, extras, nil
 }
 
 type targetLoadDTO struct {

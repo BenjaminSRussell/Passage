@@ -1530,6 +1530,14 @@ test_migration_factory_grant_reaches_only_the_receivables_import if {
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
 }
 
+test_migration_payables_load_routes_need_run_and_view_duties if {
+	allowed("migration.factory.run", "POST", "/api/v1/migration/runs/r1/load-payables")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/load-payables")
+	allowed("migration.factory.view", "GET", "/api/v1/migration/runs/r1/payables-load")
+	not allowed("migration.factory.view", "POST", "/api/v1/migration/runs/r1/load-payables")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/payables-load")
+}
+
 test_opening_item_duties_are_service_only_and_cover_only_their_route if {
 	allowed("opening-item.import", "POST", "/v1/payables/opening-batches")
 	not allowed("opening-item.import", "GET", "/v1/payables/opening-batches")
@@ -2598,4 +2606,17 @@ test_receiving_document_flow_is_read_only_and_separate if {
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
+}
+
+# Agent runtime surface (#47): starting a run, reading runs and the copilot chat are separate duties.
+test_agent_run_duties_open_only_their_routes if {
+	allowed("agents.invoke", "POST", "/api/v1/agents/ap_coding/runs")
+	not allowed("agents.invoke", "GET", "/api/v1/agents/runs/r1")
+	allowed("agents.run.read", "GET", "/api/v1/agents/runs/r1")
+	allowed("agents.run.read", "GET", "/api/v1/agents/runs/r1/actions")
+	not allowed("agents.run.read", "POST", "/api/v1/agents/ap_coding/runs")
+	not allowed("agents.run.read", "POST", "/api/v1/agents/runs/r1/actions/a1/decision")
+	allowed("mcp.copilot.use", "POST", "/api/v1/copilot/chat")
+	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
+	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
 }

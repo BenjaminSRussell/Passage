@@ -404,3 +404,24 @@ func (u unreachableStore) FinishTargetLoad(context.Context, string, store.Target
 	u.fail()
 	return domain.TargetLoad{}, nil, nil
 }
+
+func (u unreachableStore) GetPayablesLoad(context.Context, string) (domain.PayablesLoad, error) {
+	u.fail()
+	return domain.PayablesLoad{}, nil
+}
+func (u unreachableStore) ClaimPayablesLoad(context.Context, string, string, time.Duration) (domain.PayablesLoad, []store.PendingPayable, error) {
+	u.fail()
+	return domain.PayablesLoad{}, nil, nil
+}
+func (u unreachableStore) RecordPayablesBatch(context.Context, string, time.Duration, store.PayablesBatchSent) error {
+	u.fail()
+	return nil
+}
+func (u unreachableStore) RejectPayablesRows(context.Context, string, time.Duration, []store.PayablesReject) error {
+	u.fail()
+	return nil
+}
+func (u unreachableStore) FinishPayablesLoad(context.Context, string, store.PayablesFinish) (domain.PayablesLoad, []domain.ControlTotal, error) {
+	u.fail()
+	return domain.PayablesLoad{}, nil, nil
+}

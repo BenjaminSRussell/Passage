@@ -1027,8 +1027,10 @@
       {"resource": "/api/v1/agents/*/versions/*/promote", "methods": ["PUT"]},
       {"resource": "/api/v1/agents/budgets/*", "methods": ["GET"]},
       {"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]},
-      {"resource": "/api/v1/predictions/payment/retrain", "methods": ["POST"]}
+      {"resource": "/api/v1/predictions/payment/retrain", "methods": ["POST"]},
+      {"resource": "/api/v1/predictions/payment/score", "methods": ["POST"]}
     ]},
+    "collections.view": {"permissions": [{"resource": "/api/v1/ar/invoices/*/prediction", "methods": ["GET"]}]},
     "analytics.author": {"permissions": [
       {"resource": "/v1/analytics/dashboards/*", "methods": ["PUT"]},
       {"resource": "/v1/analytics/schedules", "methods": ["GET", "POST"]},
@@ -1658,6 +1660,7 @@
       {"resource": "/api/v1/migration/parallel-runs", "methods": ["POST"]},
       {"resource": "/api/v1/migration/parallel-runs/replay", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/load", "methods": ["POST"]},
+      {"resource": "/api/v1/migration/runs/*/load-payables", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/quarantine/*/release", "methods": ["POST"]}
     ]},
@@ -1671,6 +1674,7 @@
       {"resource": "/api/v1/migration/runs/*/control-totals", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-load", "methods": ["GET"]},
+      {"resource": "/api/v1/migration/runs/*/payables-load", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-rows", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/projects/*/opening", "methods": ["GET"]},
       {"resource": "/api/v1/migration/tolerances", "methods": ["GET"]}
@@ -3719,6 +3723,10 @@
     "compliance.retention.read": {"permissions": [{"resource": "/v1/privacy/retention-policies", "methods": ["GET"]}]},
     "receiving.payee.erase": {"permissions": [{"resource": "/v1/receiving/one-time-payees:erase", "methods": ["POST"]}]},
     "agents.invoke": {"permissions": [{"resource": "/api/v1/agents/*/runs", "methods": ["POST"]}]},
+    "agents.run.read": {"permissions": [
+      {"resource": "/api/v1/agents/runs/*", "methods": ["GET"]},
+      {"resource": "/api/v1/agents/runs/*/actions", "methods": ["GET"]}
+    ]},
     "platform.global.admin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {

@@ -4,12 +4,15 @@ info:
   version: 0.1.0
   description: |
     PRD 9.47.5 endpoints for agent runs, approvals, kill switch, budgets and
-    eval triggers. This slice serves the kill switch (read and toggle) and the
-    approval decision (src/api/router.ts). The run, budget, eval and promotion
-    endpoints are not served yet; NOT-IMPLEMENTED.md lists them. Callers reach
-    these routes through the edge, which verifies the user's token and sets
-    x-passage-tenant, x-passage-user and x-passage-duties (client copies are
-    stripped). Errors are RFC 9457 problems with a stable `code`: AGT-04xx and
+    eval triggers. This build serves the kill switch (read and toggle), the
+    approval decision, run start and run read, and the copilot chat
+    (src/api/router.ts). The budget, eval and promotion endpoints are not
+    served yet; NOT-IMPLEMENTED.md lists them. Every route needs the
+    caller's bearer token (Authorization: Bearer), which the runtime verifies
+    itself (RS256, issuer, audience, expiry) and takes the tenant, user and
+    duties from; the x-passage-tenant, x-passage-user and x-passage-duties
+    headers the edge sets must match it, and are never trusted alone (401
+    AGT-0401). Errors are RFC 9457 problems with a stable `code`: AGT-04xx and
     AGT-0500 for HTTP-level errors, AGT-02xx from the PRD 9.47.18 catalog for
     business refusals (README, Error codes).
 servers:
@@ -95,6 +98,128 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
         "413": {$ref: "#/components/responses/Problem"}
+  /api/v1/agents/{agentId}/runs:
+    post:
+      operationId: startAgentRun
+      summary: Start an agent run for one document or question (FR-47.4)
+      description: |
+        Refused before any state exists when the agent is unknown (404 AGT-0404),
+        the caller lacks agents.invoke or one of the agent's own duties (403
+        AGT-0203), the kill switch is on (422 AGT-0201), the agent version has no
+        passing evaluation (422 AGT-0204) or the month's token budget is
+        exhausted (422 AGT-0202). Otherwise the run executes in the background
+        as the caller, with the caller's bearer token forwarded to the MCP
+        gateway, and the answer is 202 with the run id. A run in suggest mode
+        waits at the approval gate; poll GET /api/v1/agents/runs/{runId}.
+      x-passage-duty: agents.invoke
+      x-passage-approval: none
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string, enum: [ap_coding, cash_app, mrp_triage, collections, anomaly]}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: {type: string, minLength: 1, maxLength: 8000}
+              additionalProperties: false
+      responses:
+        "202":
+          description: The run was accepted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StartedRun"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "502": {$ref: "#/components/responses/Problem"}
+  /api/v1/agents/runs/{runId}:
+    get:
+      operationId: getAgentRun
+      summary: A run of the caller's tenant with the approvals still waiting
+      description: |
+        status is RUNNING until the run ends, including while it waits for an
+        approver. pendingApprovals lists the action ids the decision endpoint
+        takes. Another tenant's run is never found (404).
+      x-passage-duty: agents.run.read
+      x-passage-approval: none
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RunView"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /api/v1/agents/runs/{runId}/actions:
+    get:
+      operationId: listAgentRunActions
+      summary: The audit rows of a run (AC-47.3)
+      description: Inputs and outputs are pseudonymized; the approver and the committed reference are recorded per action.
+      x-passage-duty: agents.run.read
+      x-passage-approval: none
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The actions in sequence order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/AgentAction"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /api/v1/copilot/chat:
+    post:
+      operationId: copilotChat
+      summary: One copilot turn (FR-47.3, BR-47.11)
+      description: |
+        The model may call read tools the caller is allowed to use; each call is
+        made with the caller's token and audited as a run of agent "copilot". A
+        tool outside the caller's duties is answered AGT-0203 and never called.
+        With Accept: text/event-stream the answer arrives as `token` frames
+        ({text}) and one terminal `done` frame (the JSON body); otherwise as
+        JSON. Failures before the first byte are ordinary problems. Answers are
+        cached per tenant, user, duty set and mode for 5 minutes.
+      x-passage-duty: mcp.copilot.use
+      x-passage-approval: none
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, message]
+              properties:
+                mode: {type: string, enum: [ask, explain, draft, summarize]}
+                message: {type: string, minLength: 1, maxLength: 4000}
+                recordRef: {type: string, minLength: 1, maxLength: 200}
+              additionalProperties: false
+      responses:
+        "200":
+          description: The answer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ChatResponse"}
+            text/event-stream:
+              schema: {type: string, description: "token frames then one done frame"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
 components:
   responses:
     Problem:
@@ -112,6 +237,76 @@ components:
               detail: {type: string}
               instance: {type: string}
   schemas:
+    StartedRun:
+      type: object
+      required: [runId, agentId, agentVersion, status]
+      properties:
+        runId: {type: string, format: uuid}
+        agentId: {type: string}
+        agentVersion: {type: integer, minimum: 1}
+        status: {type: string, enum: [RUNNING]}
+    PendingApproval:
+      type: object
+      required: [actionId, runId, seq, tool, requestedAt, approvalDuty]
+      properties:
+        actionId: {type: string, format: uuid}
+        runId: {type: string}
+        seq: {type: integer, minimum: 1}
+        tool: {type: string}
+        requestedAt: {type: string, format: date-time}
+        approvalDuty: {type: string}
+    RunView:
+      type: object
+      required: [run, pendingApprovals]
+      properties:
+        run:
+          type: object
+          required: [runId, agentId, agentVersion, invokerUserId, status, tokensIn, tokensOut, estimated, createdAt]
+          properties:
+            runId: {type: string}
+            agentId: {type: string}
+            agentVersion: {type: integer}
+            invokerUserId: {type: string}
+            status: {type: string, enum: [RUNNING, COMMITTED, REJECTED, FAILED, KILLED, FAILED_AFTER_COMMIT]}
+            code: {type: string}
+            reason: {type: string}
+            tokensIn: {type: integer, minimum: 0}
+            tokensOut: {type: integer, minimum: 0}
+            estimated: {type: boolean}
+            postCommitError: {type: string}
+            createdAt: {type: string, format: date-time}
+        pendingApprovals:
+          type: array
+          items: {$ref: "#/components/schemas/PendingApproval"}
+    ChatResponse:
+      type: object
+      required: [answer, citations, toolCalls, refusal, generated]
+      properties:
+        answer: {type: string}
+        citations:
+          type: array
+          items:
+            type: object
+            required: [sourceType, sourceRef, label]
+            properties:
+              sourceType: {type: string, enum: [RECORD, METRIC, ARTICLE, DOC, POLICY]}
+              sourceRef: {type: string}
+              label: {type: string}
+        toolCalls:
+          type: array
+          items:
+            type: object
+            required: [tool, status]
+            properties:
+              tool: {type: string}
+              status: {type: string, enum: [OK, DENIED, ERROR]}
+              code: {type: string}
+        refusal:
+          type: [object, "null"]
+          properties:
+            code: {type: string}
+            message: {type: string}
+        generated: {type: boolean, enum: [true]}
     KillSwitchCommand:
       type: object
       required: [scope, active]
