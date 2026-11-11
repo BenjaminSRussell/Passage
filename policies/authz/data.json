@@ -1162,6 +1162,8 @@
       {"resource": "/v1/consol/groups", "methods": ["POST"]},
       {"resource": "/v1/consol/groups/*/account-map", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units", "methods": ["POST"]},
+      {"resource": "/v1/consol/groups/*/units/*", "methods": ["PATCH", "DELETE"]},
+      {"resource": "/v1/consol/groups/*/units/*/terms", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units/*/ownership", "methods": ["POST"]}
     ]},
     "consolidation.journal.maintain": {"permissions": [{"resource": "/v1/consol/group-journals:preview", "methods": ["POST"]}]},
@@ -1181,9 +1183,12 @@
     "consolidation.view": {"permissions": [
       {"resource": "/v1/consol/collections/*", "methods": ["GET"]},
       {"resource": "/v1/consol/collections/*/trial-balance", "methods": ["GET"]},
+      {"resource": "/v1/consol/collections/*/validations", "methods": ["GET"]},
       {"resource": "/v1/consol/groups", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/account-map", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/account-map/versions", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/unit-terms", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/collections", "methods": ["GET"]},
       {"resource": "/v1/consol/runs", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*", "methods": ["GET"]},

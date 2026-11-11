@@ -49,7 +49,7 @@ func compute(t *testing.T, in domain.RunInput) domain.RunResult {
 
 func start(t *testing.T, s *store.Postgres, ctx context.Context, in domain.RunInput, key string) (store.RunRecord, bool, error) {
 	t.Helper()
-	return s.CreateRun(ctx, in, compute(t, in), key)
+	return s.CreateRun(ctx, in, compute(t, in), "", key)
 }
 
 func setup(t *testing.T) (*store.Postgres, *pgxpool.Pool, context.Context) {
@@ -170,7 +170,7 @@ func TestCreateRun_ConcurrentRerunsGetDistinctVersions(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			rec, _, err := s.CreateRun(ctx, runInput("G1", "2026-06", "150000"), compute(t, runInput("G1", "2026-06", "150000")), "")
+			rec, _, err := s.CreateRun(ctx, runInput("G1", "2026-06", "150000"), compute(t, runInput("G1", "2026-06", "150000")), "", "")
 			versions[i], errs[i] = rec.Version, err
 		}(i)
 	}

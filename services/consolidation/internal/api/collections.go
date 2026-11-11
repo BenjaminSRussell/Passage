@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
@@ -143,7 +146,7 @@ func (a *API) collect(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problemFrom(&domain.Error{Code: domain.CodeCollectionError, Detail: "the group has no units to collect"}))
 		return
 	}
-	mapping, err := a.groups.GetMapping(r.Context(), groupID)
+	mapping, mappingVersion, err := a.groups.GetMapping(r.Context(), groupID, 0)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
@@ -167,11 +170,12 @@ func (a *API) collect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inputs := struct {
-		Period string                        `json:"period"`
-		Rates  map[string]domain.CollectRate `json:"rates"`
-		Units  []domain.UnitLedger           `json:"units"`
-	}{body.Period, rates, ledgers}
-	c, replayed, err := a.groups.CreateCollection(r.Context(), groupID, body.Period, lines, inputs, key)
+		Period         string                        `json:"period"`
+		Rates          map[string]domain.CollectRate `json:"rates"`
+		Units          []domain.UnitLedger           `json:"units"`
+		MappingVersion int                           `json:"mappingVersion"`
+	}{body.Period, rates, ledgers, mappingVersion}
+	c, replayed, err := a.groups.CreateCollection(r.Context(), groupID, body.Period, mappingVersion, lines, inputs, key)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
@@ -194,8 +198,8 @@ func (a *API) collect(w http.ResponseWriter, r *http.Request) {
 }
 
 // readUnit reads one unit's balances: the balance sheet cumulative up to the
-// period and the income accounts from the start of the fiscal year (taken as
-// the calendar year of the period) so closed years do not carry over.
+// period and the income accounts from the start of the unit's own fiscal year
+// that the period falls in, so closed years do not carry over.
 func (a *API) readUnit(ctx context.Context, u domain.Unit, period string, income map[string]bool) (domain.UnitLedger, error) {
 	query := ledgerclient.BalanceQuery{LegalEntityID: u.LegalEntityID, LedgerID: u.LedgerID, PeriodTo: period}
 	cumulative, err := a.ledger.Balances(ctx, query)
@@ -216,7 +220,7 @@ func (a *API) readUnit(ctx context.Context, u domain.Unit, period string, income
 		hasIncome = hasIncome || v
 	}
 	if hasIncome {
-		query.PeriodFrom = period[:4] + "-01"
+		query.PeriodFrom = u.FiscalStart(period)
 		ytd, err := a.ledger.Balances(ctx, query)
 		if err != nil {
 			return domain.UnitLedger{}, &domain.Error{Code: domain.CodeNoLedger, Detail: fmt.Sprintf("the ledger of unit %s could not be read: %v", u.ID, err)}
@@ -319,5 +323,64 @@ func (a *API) getTrialBalance(w http.ResponseWriter, r *http.Request) {
 	for u, v := range tb.UnitDifference {
 		out.UnitDifferences[u] = v.StringFixed(places)
 	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+type collectedRuleBody struct {
+	Rule       string `json:"rule"`
+	Severity   string `json:"severity"`
+	Difference string `json:"difference"`
+	Failed     bool   `json:"failed"`
+}
+
+type collectedUnitBody struct {
+	Unit    string              `json:"unit"`
+	Status  string              `json:"status"`
+	Results []collectedRuleBody `json:"results"`
+}
+
+// getCollectionValidations handles GET /collections/{id}/validations: the balance sheet rule of the consolidation monitor over each
+// unit's collected balances (assets less liabilities and equity including the year's profit, in the unit's currency, within the rule's
+// tolerance). Units whose balance sheet accounts carry no asset, liability or equity role show the difference they leave.
+func (a *API) getCollectionValidations(w http.ResponseWriter, r *http.Request) {
+	if !a.collectorReady(w, r) {
+		return
+	}
+	id, ok := pathID(w, r, "id", domain.CodeCollectionGone)
+	if !ok {
+		return
+	}
+	c, err := a.groups.GetCollection(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	rules := []domain.ValidationRule{{ID: domain.RuleBalanceSheet, Severity: domain.SeverityError, Tolerance: decimal.New(1, -2)}}
+	results, err := domain.UnitValidations(c.Lines, rules)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	units := make([]string, 0, len(results))
+	for u := range results {
+		units = append(units, u)
+	}
+	sort.Strings(units)
+	out := struct {
+		collectionResponse
+		Units []collectedUnitBody `json:"units"`
+		// Blocked is true when any unit failed an Error rule: the group translation must not run.
+		Blocked bool `json:"blocked"`
+	}{collectionResponse: toCollectionResponse(c.ID, c.GroupID, c.Period, c.Version, c.Currency, c.CreatedBy, c.CreatedAt), Units: make([]collectedUnitBody, 0, len(units))}
+	statuses := make([]domain.TaskStatus, 0, len(units))
+	for _, u := range units {
+		body := collectedUnitBody{Unit: u, Status: string(domain.UnitTaskStatus(results[u])), Results: make([]collectedRuleBody, 0, len(results[u]))}
+		statuses = append(statuses, domain.TaskStatus(body.Status))
+		for _, rr := range results[u] {
+			body.Results = append(body.Results, collectedRuleBody{Rule: rr.RuleID, Severity: string(rr.Severity), Difference: rr.Difference.StringFixed(2), Failed: rr.Failed})
+		}
+		out.Units = append(out.Units, body)
+	}
+	out.Blocked = domain.GroupTranslationBlocked(statuses)
 	httpx.JSON(w, http.StatusOK, out)
 }

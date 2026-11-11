@@ -2474,3 +2474,15 @@ test_receiving_document_flow_is_read_only_and_separate if {
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
 }
+
+test_consolidation_unit_edit_terms_and_mapping_versions_follow_configure_and_view if {
+	allowed("consolidation.configure", "PATCH", "/v1/consol/groups/g1/units/u1")
+	allowed("consolidation.configure", "DELETE", "/v1/consol/groups/g1/units/u1")
+	allowed("consolidation.configure", "PUT", "/v1/consol/groups/g1/units/u1/terms")
+	not allowed("consolidation.run", "PATCH", "/v1/consol/groups/g1/units/u1")
+	not allowed("consolidation.view", "PUT", "/v1/consol/groups/g1/units/u1/terms")
+	allowed("consolidation.view", "GET", "/v1/consol/groups/g1/unit-terms")
+	allowed("consolidation.view", "GET", "/v1/consol/groups/g1/account-map/versions")
+	allowed("consolidation.view", "GET", "/v1/consol/collections/c1/validations")
+	not allowed("consolidation.configure", "GET", "/v1/consol/groups/g1/unit-terms")
+}
