@@ -126,6 +126,21 @@ export function EntityLookup({
     };
   }, [entity, value, selected?.id]);
 
+  // A choice made under one legal entity does not follow the form to another: when the legal entity the lookup is
+  // scoped to changes from one to another, the stale choice is cleared. Going from none to one keeps it (it was chosen
+  // before the scope existed).
+  const lastLegalEntity = useRef(scope?.legalEntityId ?? "");
+  useEffect(() => {
+    const current = scope?.legalEntityId ?? "";
+    const before = lastLegalEntity.current;
+    lastLegalEntity.current = current;
+    if (before !== "" && current !== before && value !== "" && !readOnly && !disabled) {
+      setSelected(null);
+      setTyped(null);
+      onChange({ target: { name, value: "" }, option: null });
+    }
+  }, [scope?.legalEntityId]);
+
   const query = typed ?? "";
   useEffect(() => {
     if (!open) {

@@ -18,6 +18,8 @@ export interface BudgetPlanInput {
   submission: number;
   requester: string;
   status?: BudgetPlanState["status"];
+  /** Carried across continue-as-new, so the record of decisions budgeting never answered survives a restart. */
+  droppedDecisions?: BudgetPlanDroppedDecision[];
 }
 
 export const REFUSED_DECISIONS_BEFORE_RESTART = 100;
@@ -157,7 +159,7 @@ export async function budgetPlanWorkflow(
     requester: input.requester,
     status: input.status ?? "awaiting_review",
     refusedDecisions: 0,
-    droppedDecisions: [],
+    droppedDecisions: input.droppedDecisions ?? [],
   };
   const decisions: BudgetPlanDecision[] = [];
   setHandler(budgetPlanStateQuery, () => ({ ...state }));
@@ -238,6 +240,7 @@ export async function budgetPlanWorkflow(
         return continueAsNew<typeof budgetPlanWorkflow>({
           ...input,
           status: state.status,
+          droppedDecisions: state.droppedDecisions,
         });
       }
     }

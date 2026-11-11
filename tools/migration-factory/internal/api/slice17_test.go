@@ -27,6 +27,18 @@ func (u unreachableStore) OpeningPostings(context.Context, string) ([]store.Open
 	u.fail()
 	return nil, nil
 }
+func (u unreachableStore) SetOpeningMapping(context.Context, string, domain.SourceSystem, string, string, string, string) (store.OpeningMapping, error) {
+	u.fail()
+	return store.OpeningMapping{}, nil
+}
+func (u unreachableStore) ListOpeningMappings(context.Context, string) ([]store.OpeningMapping, error) {
+	u.fail()
+	return nil, nil
+}
+func (u unreachableStore) ReleaseOpeningTarget(context.Context, domain.SourceSystem, string, string, string) (store.OpeningRelease, error) {
+	u.fail()
+	return store.OpeningRelease{}, nil
+}
 func (u unreachableStore) CompensationReport(context.Context, string) (store.CompensationReport, error) {
 	u.fail()
 	return store.CompensationReport{}, nil

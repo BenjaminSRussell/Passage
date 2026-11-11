@@ -311,11 +311,19 @@ paths:
       description: >
         One report per (invoice, order) tells sales' `:record-progress` what an invoice billed (kind INVOICED). A PARKED report
         carries the reason in `lastError` (sales refused it, or the attempts ran out); a report sales answers "not yet" (SLS-0058,
-        SLS-0059: the order is not shipped or the delivery has not been reported) is retried with backoff first. At most 200 items.
+        SLS-0059: the order is not shipped or the delivery has not been reported) is retried with backoff first. A page holds at
+        most `limit` items (default and maximum 200); `nextCursor`, when present, is passed back as `cursor` for the next page.
       parameters:
         - name: status
           in: query
           schema: { type: string, enum: [PENDING, REPORTED, PARKED] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: cursor
+          in: query
+          description: The nextCursor of the previous page.
+          schema: { type: string }
       responses:
         "200":
           description: The reports.
@@ -328,6 +336,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/SalesReport"
+                  nextCursor: { type: string }
         "400":
           $ref: "#/components/responses/Problem"
         "503":
@@ -342,7 +351,7 @@ paths:
         The body and the Idempotency-Key sent to sales do not change, so sales answers a report it already holds from its copy.
         A REPORTED report is refused with 409 BIL-0111; an unknown one is 404 BIL-0110.
       parameters:
-        - $ref: "#/components/parameters/InvoiceId"
+        - $ref: "#/components/parameters/SalesReportId"
       responses:
         "200":
           description: The report.
@@ -1030,6 +1039,14 @@ components:
       name: id
       in: path
       required: true
+      schema:
+        type: string
+        format: uuid
+    SalesReportId:
+      name: id
+      in: path
+      required: true
+      description: The id of the sales report (not an invoice id).
       schema:
         type: string
         format: uuid

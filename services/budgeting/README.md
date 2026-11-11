@@ -92,7 +92,10 @@ investment programs.
   The approver may not have created the plan, set its owners or written any cell of the approved scenario (every
   editor is recorded, and a copy inherits its source's editors). The approved plan is the year's budget, not an
   addition to it: one approved plan per rule version and fiscal year (database unique index), and approval is refused
-  (`BUD-0059`) when an Original entry for that year (span key `FY<year>` or `<year>-..`) is already on the rule version.
+  (`BUD-0059`) when an Original entry for that year (span key `FY<year>`, `FY<year>-Q1`, `<year>`, `<year>-03`,
+  `<year>Q1` and the like) is already on the rule version. The check works from both sides under one lock per rule
+  version and year: a manual Original entry for a year an approved plan already budgets is refused (`BUD-0057`), so
+  neither order of the two can double the budget; a Revision is not affected.
 
 Money is `numeric(19,4)` with a currency. Every command requires `Idempotency-Key`. Commands emit outbox events
 (`dev.passage.budget.register.posted.v1`, `dev.passage.budget.check.completed.v1`,

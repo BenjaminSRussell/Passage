@@ -637,6 +637,10 @@ export function formatOption(entry: LookupOption): string {
 }
 
 const resolved = new Map<string, Promise<LookupOption | null>>();
+/** Lookups the server answered with 403: the caller may not read them, so asking again can only fail again. */
+const denied = new Set<string>();
+/** Keys whose lookup failed for a reason other than "missing" (an outage); the caller must not treat them as gone. */
+const unreachable = new Set<string>();
 
 export function resolveOption(
   entity: LookupEntityKey,
@@ -645,15 +649,43 @@ export function resolveOption(
   const key = `${entity}:${id}`;
   let pending = resolved.get(key);
   if (!pending) {
-    pending = lookupDefs[entity].resolve(id).catch(() => null);
+    pending = lookupDefs[entity].resolve(id).then(
+      (entry) => {
+        unreachable.delete(key);
+        return entry;
+      },
+      (error: unknown) => {
+        if (error instanceof LookupError && error.status === 403) {
+          denied.add(key);
+        }
+        if (!(error instanceof LookupError && (error.status === 404 || error.status === 410))) {
+          unreachable.add(key);
+        }
+        return null;
+      },
+    );
     resolved.set(key, pending);
     void pending.then((entry) => {
-      if (entry === null) {
+      // A denied lookup stays cached, so a list of hits does not ask again for every row of a legal entity it cannot read.
+      if (entry === null && !denied.has(key)) {
         resolved.delete(key);
       }
     });
   }
   return pending;
+}
+
+/**
+ * Whether a record is gone: true only when the server said it does not exist (404, 410, or an answer with no usable name).
+ * A 500, a network failure or a denied read says nothing about the record, so callers that would drop a stored choice
+ * (the working context) keep it.
+ */
+export async function isOptionMissing(
+  entity: LookupEntityKey,
+  id: string,
+): Promise<boolean> {
+  const entry = await resolveOption(entity, id);
+  return entry === null && !unreachable.has(`${entity}:${id}`);
 }
 
 export function rememberOption(
@@ -665,5 +697,7 @@ export function rememberOption(
 
 export function clearResolvedOptions(): void {
   resolved.clear();
+  denied.clear();
+  unreachable.clear();
   itemGroupNames = null;
 }

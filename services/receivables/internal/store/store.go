@@ -208,6 +208,7 @@ type Store interface {
 	RetryRMACredit(ctx context.Context, id, postingDate string) (RMACreditView, error)
 	CancelRMACredit(ctx context.Context, id string) (RMACreditView, error)
 	BackfillRMAReservation(ctx context.Context, id, invoiceID string, lines []RMAInvoiceLine) (RMACreditView, error)
+	BackfillRMAReservationFor(ctx context.Context, legalEntityID, rmaID, invoiceID string, lines []RMAInvoiceLine) (RMACreditView, error)
 	ListRMACredits(ctx context.Context, f RMACreditFilter) ([]RMACreditView, error)
 	SweepRMACredits(ctx context.Context, now time.Time, limit int) (RMASweepResult, error)
 	ApplyRemittanceAdvice(ctx context.Context, legalEntityID string, lines []domain.AdviceLine) (AdviceResult, error)
