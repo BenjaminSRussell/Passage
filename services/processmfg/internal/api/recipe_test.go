@@ -218,7 +218,9 @@ func TestRecipeKeyFollowsTheRequestAndARecipeIsMadeOnce(t *testing.T) {
 	fs := &fakeStore{order: releasedOrder(), target: kioskTarget()}
 	sender := &fakeSender{err: errors.New("the shopfloor service answered 503")}
 	h := httpxRouter(New(fs).WithShopfloor(sender))
-	send := func() int { return (call{method: "POST", path: orderPath + ":send-recipe", duties: DutyBatchOrderWrite}).do(h).Code }
+	send := func() int {
+		return (call{method: "POST", path: orderPath + ":send-recipe", duties: DutyBatchOrderWrite}).do(h).Code
+	}
 	if code := send(); code != http.StatusOK || fs.link.Error == nil {
 		t.Fatalf("a failed generation: %d %+v", code, fs.link)
 	}
