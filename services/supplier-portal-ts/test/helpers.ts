@@ -3,6 +3,8 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { Jwks, type OidcConfig } from "../src/oidc.ts";
 import { createHttpServer } from "../src/server.ts";
+import type { UserProvisioner } from "../src/provision.ts";
+import type { ScanPolicy } from "../src/scan.ts";
 import { createServiceTokenSigner } from "../src/serviceToken.ts";
 import { RateLimiter, SessionStore } from "../src/session.ts";
 
@@ -36,8 +38,10 @@ export interface Rig {
   base: string;
   server: Server;
   calls: Call[];
-  /** What the next upstream call (purchasing, receiving, party) answers; default 200 {}. */
+  /** What the next upstream call (purchasing, receiving, party, payables) answers; default 200 {}. */
   answer: (r: Response) => void;
+  /** Answers for the next upstream calls, in order, one each. */
+  answers: (...r: Response[]) => void;
   /** Claims the fake identity provider puts in the next ID token. */
   claims: Record<string, unknown>;
   seedBase64: string;
@@ -51,16 +55,29 @@ export function idToken(key: KeyObject, claims: Record<string, unknown>, kid = "
   return `${h}.${p}.${sign("RSA-SHA256", Buffer.from(`${h}.${p}`), key).toString("base64url")}`;
 }
 
-export async function startRig(opts: { limit?: number } = {}): Promise<Rig> {
+export interface RigOptions {
+  limit?: number;
+  scan?: ScanPolicy;
+  provisioner?: UserProvisioner;
+  registration?: { tenantId: string; legalEntityId: string };
+  publicLimit?: number;
+}
+
+export async function startRig(opts: RigOptions = {}): Promise<Rig> {
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const jwk = { ...publicKey.export({ format: "jwk" }), kid: "k1", use: "sig" };
   const seedBase64 = randomBytes(32).toString("base64");
   const now = { ms: Date.UTC(2026, 10, 10, 12) };
   const calls: Call[] = [];
-  let next: Response | undefined;
+  const queue: Response[] = [];
   const rig = { calls, now, seedBase64, claims: {} as Record<string, unknown> } as Rig;
   rig.answer = (r) => {
-    next = r;
+    queue.length = 0;
+    queue.push(r);
+  };
+  rig.answers = (...r) => {
+    queue.length = 0;
+    queue.push(...r);
   };
   let lastNonce = "";
   const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
@@ -70,9 +87,7 @@ export async function startRig(opts: { limit?: number } = {}): Promise<Rig> {
       return Response.json({ id_token: idToken(privateKey, claims), access_token: "never-used" });
     }
     calls.push({ url, method: init?.method ?? "GET", headers: new Headers(init?.headers), body: typeof init?.body === "string" ? init.body : "" });
-    const r = next ?? Response.json({});
-    next = undefined;
-    return r;
+    return queue.shift() ?? Response.json({});
   };
   const sessions = new SessionStore();
   const server = createHttpServer({
@@ -81,10 +96,14 @@ export async function startRig(opts: { limit?: number } = {}): Promise<Rig> {
     fetcher,
     sessions,
     signer: createServiceTokenSigner({ seedBase64, now: () => now.ms }),
-    upstreams: { purchasing: "http://purchasing.test", receiving: "http://receiving.test", party: "http://party.test" },
+    upstreams: { purchasing: "http://purchasing.test", receiving: "http://receiving.test", party: "http://party.test", payables: "http://payables.test" },
     appOrigin: APP,
     cookieSecure: true,
     limiter: new RateLimiter(opts.limit ?? 1000, 60_000),
+    ...(opts.scan ? { scan: opts.scan } : {}),
+    ...(opts.provisioner ? { provisioner: opts.provisioner } : {}),
+    ...(opts.registration ? { registration: opts.registration } : {}),
+    publicLimiter: new RateLimiter(opts.publicLimit ?? 1000, 3_600_000),
     now: () => now.ms,
     log: () => {},
   });

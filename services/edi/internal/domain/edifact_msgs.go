@@ -483,7 +483,10 @@ func BuildINVOIC(inv Invoice) (EdifactMessage, error) {
 // the 810 rules (the total must equal lines, tax and charges).
 func MapINVOIC(m EdifactMessage) (Invoice, error) {
 	var inv Invoice
-	var lastRFF string
+	var lastRFF, headerNote string
+	var pastUNS bool
+	var lineTax *TaxLine
+	var lineTaxes []TaxLine
 	num := func(s string) (decimal.Decimal, error) {
 		v, err := edifactNumber(s)
 		if err != nil {
@@ -496,8 +499,12 @@ func MapINVOIC(m EdifactMessage) (Invoice, error) {
 		last := len(inv.Lines) - 1
 		switch s.Tag {
 		case "BGM":
-			inv.CreditNote = s.El(0, 0) == "381"
+			code := s.El(0, 0)
+			inv.CreditNote = code == "381" || code == "390"
+			inv.SelfBilled = code == "389" || code == "390"
 			inv.Number = s.El(1, 0)
+		case "UNS":
+			pastUNS = true
 		case "DTM":
 			switch s.El(0, 0) {
 			case "137":
@@ -511,7 +518,18 @@ func MapINVOIC(m EdifactMessage) (Invoice, error) {
 			}
 		case "RFF":
 			lastRFF = s.El(0, 0)
+			if last >= 0 && !pastUNS {
+				switch lastRFF {
+				case "AAK":
+					inv.Lines[last].DeliveryNote = s.El(0, 1)
+				case "LI":
+					inv.Lines[last].POLine = s.El(0, 1)
+				}
+				break
+			}
 			switch lastRFF {
+			case "AAK":
+				headerNote = s.El(0, 1)
 			case "ON":
 				inv.PONumber = s.El(0, 1)
 			case "BM":
@@ -544,7 +562,12 @@ func MapINVOIC(m EdifactMessage) (Invoice, error) {
 			if p := s.El(4, 3); p != "" {
 				pct, err = num(p)
 			}
-			inv.Taxes = append(inv.Taxes, TaxLine{Type: edifactToX12Tax[s.El(1, 0)], Percent: pct})
+			t := TaxLine{Type: edifactToX12Tax[s.El(1, 0)], Percent: pct}
+			if last >= 0 && !pastUNS {
+				lineTax = &t
+			} else {
+				inv.Taxes = append(inv.Taxes, t)
+			}
 		case "MOA":
 			var v decimal.Decimal
 			if v, err = num(s.El(0, 1)); err != nil {
@@ -556,7 +579,13 @@ func MapINVOIC(m EdifactMessage) (Invoice, error) {
 					inv.Charges[len(inv.Charges)-1].Amount = v
 				}
 			case "124":
-				if len(inv.Taxes) > 0 {
+				if lineTax != nil {
+					lineTax.Amount = v
+					amount := v
+					inv.Lines[last].Tax = &amount
+					lineTaxes = append(lineTaxes, *lineTax)
+					lineTax = nil
+				} else if len(inv.Taxes) > 0 {
 					inv.Taxes[len(inv.Taxes)-1].Amount = v
 				}
 			case "86":
@@ -580,6 +609,29 @@ func MapINVOIC(m EdifactMessage) (Invoice, error) {
 		}
 		if err != nil {
 			return inv, err
+		}
+	}
+	// An invoice that states its tax inside the lines only has the same total tax: one amount per type and rate.
+	if len(inv.Taxes) == 0 {
+		for _, t := range lineTaxes {
+			merged := false
+			for i := range inv.Taxes {
+				if inv.Taxes[i].Type == t.Type && inv.Taxes[i].Percent.Equal(t.Percent) {
+					inv.Taxes[i].Amount = inv.Taxes[i].Amount.Add(t.Amount)
+					merged = true
+				}
+			}
+			if !merged {
+				inv.Taxes = append(inv.Taxes, t)
+			}
+		}
+	}
+	for i := range inv.Lines {
+		if inv.Lines[i].DeliveryNote == "" {
+			inv.Lines[i].DeliveryNote = headerNote
+		}
+		if inv.Lines[i].POLine == "" && inv.SelfBilled {
+			inv.Lines[i].POLine = inv.Lines[i].LineNo
 		}
 	}
 	if _, err := Build810(inv); err != nil {

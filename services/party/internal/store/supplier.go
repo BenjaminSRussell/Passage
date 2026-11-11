@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -45,10 +46,14 @@ type VendorRequest struct {
 	QuestionnaireID string            `json:"questionnaireId,omitempty"`
 	Questions       []domain.Question `json:"questions,omitempty"`
 	Answers         map[string]string `json:"answers"`
-	CreatedAt       time.Time         `json:"createdAt"`
-	SubmittedAt     *time.Time        `json:"submittedAt,omitempty"`
-	DecidedAt       *time.Time        `json:"decidedAt,omitempty"`
-	DecisionNote    string            `json:"decisionNote,omitempty"`
+	// Changes are the party fields a PROFILE_CHANGE asks for; approving the request applies them to the vendor's party.
+	Changes      map[string]string `json:"changes,omitempty"`
+	CreatedAt    time.Time         `json:"createdAt"`
+	SubmittedAt  *time.Time        `json:"submittedAt,omitempty"`
+	DecidedAt    *time.Time        `json:"decidedAt,omitempty"`
+	DecisionNote string            `json:"decisionNote,omitempty"`
+	// AppliedAt is when an approved PROFILE_CHANGE was written to the party.
+	AppliedAt *time.Time `json:"appliedAt,omitempty"`
 }
 
 // DocumentMeta describes a stored document without its content.
@@ -98,7 +103,7 @@ type SupplierStore interface {
 	InviteOnboarding(ctx context.Context, vendorID, questionnaireID string) (VendorRequest, error)
 	ListRequests(ctx context.Context, vendorID, status string, limit int) ([]VendorRequest, error)
 	GetRequest(ctx context.Context, vendorID, id string) (VendorRequest, error)
-	CreateRequest(ctx context.Context, vendorID, kind, subject, details string) (VendorRequest, error)
+	CreateRequest(ctx context.Context, vendorID, kind, subject, details string, changes map[string]string) (VendorRequest, error)
 	SubmitRequest(ctx context.Context, vendorID, id string, answers map[string]string) (VendorRequest, error)
 	WithdrawRequest(ctx context.Context, vendorID, id string) (VendorRequest, error)
 	DecideRequest(ctx context.Context, id string, approve bool, note string) (VendorRequest, error)
@@ -216,14 +221,17 @@ func (s *Postgres) ListQuestionnaires(ctx context.Context) ([]Questionnaire, err
 	return out, err
 }
 
-const requestColumns = `r.id::text, r.vendor_id::text, r.kind, r.status, r.subject, r.details, coalesce(r.questionnaire_id::text, ''), coalesce(q.questions, '[]'::jsonb), r.answers, r.created_at, r.submitted_at, r.decided_at, r.decision_note`
+const requestColumns = `r.id::text, r.vendor_id::text, r.kind, r.status, r.subject, r.details, coalesce(r.questionnaire_id::text, ''), coalesce(q.questions, '[]'::jsonb), r.answers, r.created_at, r.submitted_at, r.decided_at, r.decision_note, r.changes, r.applied_at`
 const requestFrom = ` from vendor_request r left join vendor_questionnaire q on q.tenant_id = r.tenant_id and q.id = r.questionnaire_id`
 
 func scanRequest(row pgx.Row) (VendorRequest, error) {
 	var r VendorRequest
-	var qs, answers []byte
-	if err := row.Scan(&r.ID, &r.VendorID, &r.Kind, &r.Status, &r.Subject, &r.Details, &r.QuestionnaireID, &qs, &answers, &r.CreatedAt, &r.SubmittedAt, &r.DecidedAt, &r.DecisionNote); err != nil {
+	var qs, answers, changes []byte
+	if err := row.Scan(&r.ID, &r.VendorID, &r.Kind, &r.Status, &r.Subject, &r.Details, &r.QuestionnaireID, &qs, &answers, &r.CreatedAt, &r.SubmittedAt, &r.DecidedAt, &r.DecisionNote, &changes, &r.AppliedAt); err != nil {
 		return r, err
+	}
+	if len(changes) > 0 && string(changes) != "{}" {
+		_ = json.Unmarshal(changes, &r.Changes)
 	}
 	_ = json.Unmarshal(qs, &r.Questions)
 	r.Answers = map[string]string{}
@@ -313,16 +321,20 @@ func (s *Postgres) GetRequest(ctx context.Context, vendorID, id string) (VendorR
 	return out, err
 }
 
-func (s *Postgres) CreateRequest(ctx context.Context, vendorID, kind, subject, details string) (VendorRequest, error) {
+func (s *Postgres) CreateRequest(ctx context.Context, vendorID, kind, subject, details string, changes map[string]string) (VendorRequest, error) {
 	var out VendorRequest
+	if changes == nil {
+		changes = map[string]string{}
+	}
+	rawChanges, _ := json.Marshal(changes)
 	err := run(ctx, s, func(tx pgx.Tx) error {
 		le, err := vendorEntity(ctx, tx, vendorID)
 		if err != nil {
 			return err
 		}
 		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into vendor_request (tenant_id, id, legal_entity_id, vendor_id, kind, status, subject, details, created_by, submitted_by, submitted_at) values ($1, $2, $3, $4, $5, 'SUBMITTED', $6, $7, $8, $8, now())`,
-			tenantOf(ctx), id, le, vendorID, kind, subject, details, actorOf(ctx)); err != nil {
+		if _, err := tx.Exec(ctx, `insert into vendor_request (tenant_id, id, legal_entity_id, vendor_id, kind, status, subject, details, created_by, submitted_by, submitted_at, changes) values ($1, $2, $3, $4, $5, 'SUBMITTED', $6, $7, $8, $8, now(), $9)`,
+			tenantOf(ctx), id, le, vendorID, kind, subject, details, actorOf(ctx), rawChanges); err != nil {
 			return err
 		}
 		if err := writeAudit(ctx, tx, le, vendorID, "request.submitted", id, kind); err != nil {
@@ -441,6 +453,11 @@ func (s *Postgres) DecideRequest(ctx context.Context, id string, approve bool, n
 		}
 		if err := writeAudit(ctx, tx, le, r.VendorID, "request."+status, rid, ""); err != nil {
 			return err
+		}
+		if approve && r.Kind == domain.RequestProfileChange && len(r.Changes) > 0 {
+			if err := applyProfileChange(ctx, tx, le, r); err != nil {
+				return err
+			}
 		}
 		out, err = loadRequest(ctx, tx, "", rid, false)
 		return err
@@ -690,4 +707,29 @@ func (s *Postgres) ListAudit(ctx context.Context, vendorID string, limit int) ([
 		return rows.Err()
 	})
 	return out, err
+}
+
+// applyProfileChange writes an approved PROFILE_CHANGE to the vendor's party in the approval's own transaction: the party row,
+// its party.updated.v1 event and the audit entry commit together with the decision, or none of them does. A change the party
+// cannot take (it was merged, or the values no longer validate) fails the approval with the party's problem and the request stays
+// SUBMITTED for the buyer to reject with a note.
+func applyProfileChange(ctx context.Context, tx pgx.Tx, le string, r VendorRequest) error {
+	fields, errs := domain.ProfileChange(r.Changes)
+	if len(errs) > 0 {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeSupplierInvalid, "the requested profile change is not valid")
+		p.Errors = errs
+		return p
+	}
+	var partyID string
+	if err := tx.QueryRow(ctx, `select party_id::text from vendor_role where tenant_id = $1 and id = $2`, tenantOf(ctx), r.VendorID).Scan(&partyID); err != nil {
+		return err
+	}
+	_, changed, err := updatePartyTx(ctx, tx, partyID, -1, PartyPatch{Fields: fields})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `update vendor_request set applied_at = now() where tenant_id = $1 and id = $2`, tenantOf(ctx), r.ID); err != nil {
+		return err
+	}
+	return writeAudit(ctx, tx, le, r.VendorID, "profile.applied", r.ID, strings.Join(changed, ","))
 }

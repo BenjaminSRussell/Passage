@@ -1,0 +1,108 @@
+{{- if .Values.consumer.enabled }}
+# The outbound consumer (#35, 35-1, args [consume]): sends the 856, DESADV, 810 or INVOIC of fulfillment's asn.issued and billing's
+# invoice.posted to the partners that asked for them (PUT /partners/{id}/auto-outbound). It starts only while
+# service:edi-outbound is seeded in the service principal table. It reads the source documents with the same service identity and
+# URLs as the API, so it needs them. Kafka user and ACLs: deploy/kafka/edi-consumer.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-consumer
+  labels:
+    app.kubernetes.io/name: edi
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: consumer
+spec:
+  replicas: {{ .Values.consumer.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: edi
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: edi
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: consumer
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: kafka
+          secret:
+            secretName: {{ required "consumer.kafka.secret is required" .Values.consumer.kafka.secret }}
+            defaultMode: 0440
+        - name: service-identity
+          secret:
+            secretName: {{ required "serviceIdentity.signingKeySecret is required with the consumer" .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+      containers:
+        - name: edi-consumer
+          image: {{ include "edi.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [consume]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: admin
+              containerPort: 9090
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseSecret }}
+                  key: DATABASE_URL
+            - name: ADMIN_ADDR
+              value: ":9090"
+            - name: EDI_ISA_QUALIFIER
+              value: {{ .Values.isaSender.qualifier | quote }}
+            - name: EDI_ISA_ID
+              value: {{ .Values.isaSender.id | quote }}
+            - name: EDI_EDIFACT_ID
+              value: {{ .Values.edifactSender.id | quote }}
+            - name: EDI_EDIFACT_QUALIFIER
+              value: {{ .Values.edifactSender.qualifier | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: edi
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+            {{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+            {{- end }}
+            - name: EDI_FULFILLMENT_URL
+              value: {{ required "sources.fulfillmentUrl is required with the consumer" .Values.sources.fulfillmentUrl | quote }}
+            - name: EDI_BILLING_URL
+              value: {{ required "sources.billingUrl is required with the consumer" .Values.sources.billingUrl | quote }}
+            - name: EDI_SALES_URL
+              value: {{ required "sources.salesUrl is required with the consumer" .Values.sources.salesUrl | quote }}
+            - name: KAFKA_BROKERS
+              value: {{ required "consumer.kafka.brokers is required" .Values.consumer.kafka.brokers | quote }}
+            - name: KAFKA_GROUP
+              value: {{ .Values.consumer.kafka.group | quote }}
+            - name: KAFKA_USERNAME
+              value: {{ .Values.consumer.kafka.username | quote }}
+            - name: KAFKA_PASSWORD_FILE
+              value: /var/run/passage/kafka/password
+            - name: KAFKA_TLS_CA_FILE
+              value: /var/run/passage/kafka/ca.crt
+          volumeMounts:
+            - { name: kafka, mountPath: /var/run/passage/kafka, readOnly: true }
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.consumer.resources | nindent 12 }}
+{{- end }}

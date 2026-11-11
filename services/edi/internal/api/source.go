@@ -92,76 +92,104 @@ func (a *API) outboundFromSource(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validation(fields))
 		return
 	}
-	if a.Sources == nil {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeSourceDown, "source services are not configured"))
-		return
-	}
-	if _, err := a.store.GetPartner(r.Context(), partnerID); errors.Is(err, store.ErrNotFound) {
-		httpx.Fail(w, r, notFound("partner"))
-		return
-	} else if err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	profile, err := a.store.GetTradeProfile(r.Context(), partnerID)
-	if errors.Is(err, store.ErrNotFound) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNoTradeProfile, "partner has no trade profile; PUT /partners/{id}/trade-profile first"))
-		return
-	}
+	res, created, err := a.fromSource(r.Context(), partnerID, req)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	doc, err := a.sourceDocument(r.Context(), req, profile)
-	if err != nil {
-		httpx.Fail(w, r, sourceProblem(err))
-		return
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
 	}
-	key := strings.Join([]string{"source", partnerID, req.TransactionSet, req.SourceID}, ":")
-	a.sendOutbound(w, r, key, partnerID, req.TransactionSet, doc)
+	httpx.JSON(w, status, res)
 }
 
-func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.TradeProfile) (json.RawMessage, error) {
+// SendFromSource generates and records the 856, DESADV, 810 or INVOIC of one source document for a partner, as the
+// route does; the event consumer calls it. A document already sent returns its interchange with created false.
+func (a *API) SendFromSource(ctx context.Context, partnerID, transactionSet, sourceID string) (store.OutboundResult, bool, error) {
+	return a.fromSource(ctx, partnerID, sourceRequest{TransactionSet: transactionSet, SourceID: sourceID})
+}
+
+func (a *API) fromSource(ctx context.Context, partnerID string, req sourceRequest) (store.OutboundResult, bool, error) {
+	if a.Sources == nil {
+		return store.OutboundResult{}, false, httpx.NewProblem(http.StatusServiceUnavailable, CodeSourceDown, "source services are not configured")
+	}
+	if _, err := a.store.GetPartner(ctx, partnerID); errors.Is(err, store.ErrNotFound) {
+		return store.OutboundResult{}, false, notFound("partner")
+	} else if err != nil {
+		return store.OutboundResult{}, false, err
+	}
+	profile, err := a.store.GetTradeProfile(ctx, partnerID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.OutboundResult{}, false, httpx.NewProblem(http.StatusConflict, CodeNoTradeProfile, "partner has no trade profile; PUT /partners/{id}/trade-profile first")
+	}
+	if err != nil {
+		return store.OutboundResult{}, false, err
+	}
+	doc, shipped, err := a.sourceDocument(ctx, req, profile)
+	if err != nil {
+		return store.OutboundResult{}, false, sourceProblem(err)
+	}
+	key := strings.Join([]string{"source", partnerID, req.TransactionSet, req.SourceID}, ":")
+	res, created, err := a.recordOutbound(ctx, key, partnerID, req.TransactionSet, doc)
+	if err != nil {
+		return res, created, err
+	}
+	if req.TransactionSet == "856" || req.TransactionSet == "DESADV" {
+		// Registered on a replay too (the insert ignores what is there), so a failure after the document was recorded is repaired by asking again.
+		if err := a.store.RegisterSelfBillShipments(ctx, partnerID, profile.LegalEntityID, shipped); err != nil {
+			return res, created, err
+		}
+	}
+	return res, created, nil
+}
+
+func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.TradeProfile) (json.RawMessage, []domain.SBShipmentLine, error) {
 	var (
-		doc any
-		err error
+		doc     any
+		err     error
+		shipped []domain.SBShipmentLine
 	)
 	switch req.TransactionSet {
 	case "856", "DESADV":
 		var sh domain.SourceShipment
 		if sh, err = a.Sources.Shipment(ctx, p.LegalEntityID, req.SourceID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err = domain.ValidateShipmentSource(p, sh); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var o domain.SourceOrder
 		if o, err = a.Sources.Order(ctx, p.LegalEntityID, sh.OrderID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		doc, err = domain.ASNFromShipment(p, sh, o)
+		if err == nil {
+			shipped, err = domain.SelfBillingLines(p, sh, o)
+		}
 	default:
 		var inv domain.SourceInvoice
 		if inv, err = a.Sources.Invoice(ctx, p.LegalEntityID, req.SourceID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err = domain.ValidateInvoiceSource(p, inv); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var orderID string
 		if orderID, err = domain.InvoiceOrderID(inv); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var o domain.SourceOrder
 		if o, err = a.Sources.Order(ctx, p.LegalEntityID, orderID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		doc, err = domain.InvoiceFromBilling(p, inv, o)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return json.Marshal(doc)
+	raw, err := json.Marshal(doc)
+	return raw, shipped, err
 }
 
 func sourceProblem(err error) *httpx.Problem {

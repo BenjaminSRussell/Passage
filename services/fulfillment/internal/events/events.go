@@ -283,7 +283,10 @@ type ASNContainer struct {
 // enabled (FR-28.9): the containers that left with that slip. The carrier
 // tracking number is not known at post (carrier labels are not built).
 type ASNIssuedData struct {
-	ShipmentID        string         `json:"shipment_id"`
+	ShipmentID string `json:"shipment_id"`
+	// LegalEntityID is the shipment's legal entity; the platform copies it into the envelope's legalentityid so the EDI
+	// engine's consumer (#35, 35-1) can route the notice to that entity's partners.
+	LegalEntityID     string         `json:"legal_entity_id"`
 	ShipmentNumber    string         `json:"shipment_number"`
 	OrderID           string         `json:"order_id"`
 	PackingSlipID     string         `json:"packing_slip_id"`

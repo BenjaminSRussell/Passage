@@ -51,7 +51,22 @@ channels:
     messages:
       created:
         $ref: '#/components/messages/vendorGroupCreated'
+  passage.party.vendorinvite:
+    address: passage.party.vendorinvite
+    messages:
+      created:
+        $ref: '#/components/messages/vendorInviteCreated'
+      accepted:
+        $ref: '#/components/messages/vendorInviteAccepted'
 operations:
+  onVendorInviteCreated:
+    action: send
+    channel: { $ref: '#/channels/passage.party.vendorinvite' }
+    messages: [{ $ref: '#/channels/passage.party.vendorinvite/messages/created' }]
+  onVendorInviteAccepted:
+    action: send
+    channel: { $ref: '#/channels/passage.party.vendorinvite' }
+    messages: [{ $ref: '#/channels/passage.party.vendorinvite/messages/accepted' }]
   onMergeRequested:
     action: send
     channel: { $ref: '#/channels/passage.party.merge' }
@@ -266,7 +281,30 @@ components:
           account_count: { type: integer }
           revealed_at: { type: string, format: date-time }
       x-passage-type: dev.passage.party.vendorbank.revealed.v1
+    vendorInviteCreated:
+      name: created
+      title: Vendor user invited
+      description: A vendor administrator invited a colleague to the supplier portal. The event carries the address and the expiry and never the token; the token was shown once to the administrator.
+      payload:
+        $ref: '#/components/schemas/VendorInvite'
+      x-passage-type: dev.passage.party.vendorinvite.created.v1
+    vendorInviteAccepted:
+      name: accepted
+      title: Vendor user invitation accepted
+      description: The invited colleague used the token. The portal creates the identity-provider user at that moment.
+      payload:
+        $ref: '#/components/schemas/VendorInvite'
+      x-passage-type: dev.passage.party.vendorinvite.accepted.v1
   schemas:
+    VendorInvite:
+      type: object
+      required: [invite_id, vendor_id, legal_entity_id, email, expires_at]
+      properties:
+        invite_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        email: { type: string }
+        expires_at: { type: string, format: date-time }
     MergeRequestEvent:
       type: object
       required: [merge_request_id, survivor_party_id, merged_party_id, requested_by]

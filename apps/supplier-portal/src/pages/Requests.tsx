@@ -4,7 +4,10 @@ import { get, post } from "../api";
 import { Badge, day, Field, messageOf, Notice, Page, State, useLoad } from "../ui";
 
 export interface Question { id: string; label: string; type: "TEXT" | "YESNO" | "CHOICE"; required: boolean; options?: string[] }
-export interface VendorRequest { id: string; kind: string; status: string; subject: string; details: string; questions?: Question[]; answers: Record<string, string>; createdAt: string; decisionNote?: string }
+export interface VendorRequest { id: string; kind: string; status: string; subject: string; details: string; questions?: Question[]; answers: Record<string, string>; changes?: Record<string, string>; createdAt: string; decisionNote?: string; appliedAt?: string }
+
+/** The company details a supplier can ask to change; approving the request writes them to the buyer's record. */
+export const PROFILE_FIELDS: Array<[string, string]> = [["legalName", "Legal name"], ["tradeName", "Trade name"], ["registrationNumber", "Company registration number"], ["industryCode", "Industry code"]];
 
 export function Requests() {
   const load = useLoad(() => get<{ items: VendorRequest[] }>("/api/v1/requests?limit=100"), []);
@@ -12,14 +15,18 @@ export function Requests() {
   const [subject, setSubject] = useState("");
   const [details, setDetails] = useState("");
   const [kind, setKind] = useState("PROFILE_CHANGE");
+  const [changes, setChanges] = useState<Record<string, string>>({});
 
   async function create(e: FormEvent) {
     e.preventDefault();
     setError("");
+    const wanted = Object.fromEntries(Object.entries(changes).filter(([, v]) => v.trim() !== "").map(([k, v]) => [k, v.trim()]));
+    if (kind === "PROFILE_CHANGE" && Object.keys(wanted).length === 0) return setError("Fill in at least one company detail you want to change.");
     try {
-      await post("/api/v1/requests", { kind, subject, details });
+      await post("/api/v1/requests", { kind, subject, details, ...(kind === "PROFILE_CHANGE" ? { changes: wanted } : {}) });
       setSubject("");
       setDetails("");
+      setChanges({});
       load.reload();
     } catch (err) {
       setError(messageOf(err));
@@ -42,6 +49,13 @@ export function Requests() {
       <form onSubmit={create} noValidate>
         <h2>Ask your buyer for a change</h2>
         <Field label="Type">{(id) => <select id={id} value={kind} onChange={(e) => setKind(e.target.value)}><option value="PROFILE_CHANGE">Change to my company details</option><option value="OTHER">Something else</option></select>}</Field>
+        {kind === "PROFILE_CHANGE" ? (
+          <fieldset>
+            <legend>New company details</legend>
+            <p>Fill in only what changes. When your buyer approves, these replace what they have on record.</p>
+            {PROFILE_FIELDS.map(([key, label]) => <Field key={key} label={label}>{(id) => <input id={id} value={changes[key] ?? ""} maxLength={200} onChange={(e) => setChanges((c) => ({ ...c, [key]: e.target.value }))} />}</Field>)}
+          </fieldset>
+        ) : null}
         <Field label="Subject">{(id) => <input id={id} value={subject} maxLength={200} onChange={(e) => setSubject(e.target.value)} />}</Field>
         <Field label="Details">{(id) => <textarea id={id} value={details} maxLength={4000} onChange={(e) => setDetails(e.target.value)} />}</Field>
         {error ? <Notice kind="error">{error}</Notice> : null}
@@ -61,6 +75,13 @@ export function RequestDetail() {
           <>
             <p><strong>{r.subject || "Onboarding questionnaire"}</strong> · <Badge value={r.status} /></p>
             {r.details ? <p>{r.details}</p> : null}
+            {r.changes && Object.keys(r.changes).length > 0 ? (
+              <>
+                <h2>Details you asked to change</h2>
+                <ul>{PROFILE_FIELDS.filter(([k]) => r.changes?.[k] !== undefined).map(([k, label]) => <li key={k}>{label}: {r.changes?.[k]}</li>)}</ul>
+                {r.appliedAt ? <Notice kind="ok">Your buyer approved this and updated your company details on {day(r.appliedAt)}.</Notice> : null}
+              </>
+            ) : null}
             {r.decisionNote ? <p>Buyer's note: {r.decisionNote}</p> : null}
             {r.kind === "ONBOARDING" ? <Questionnaire request={r} onSent={load.reload} /> : null}
             {r.status === "SUBMITTED" || r.status === "INVITED" ? <Withdraw id={r.id} onDone={load.reload} /> : null}
