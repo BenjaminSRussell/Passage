@@ -20,10 +20,14 @@ const (
 	ActSignature   ActionKind = "SIGNATURE"
 	ActNote        ActionKind = "NOTE"
 	ActComplete    ActionKind = "COMPLETE"
+	// ActPhoto attaches up to MaxPhotosPerAction captured photos (FR-45.8); ActChecklist
+	// ticks or clears one checklist item of the work order.
+	ActPhoto     ActionKind = "PHOTO"
+	ActChecklist ActionKind = "CHECKLIST"
 )
 
 // ActionKinds lists every kind the action log accepts.
-var ActionKinds = []ActionKind{ActTravelStart, ActWorkStart, ActHold, ActResume, ActPartUsed, ActSignature, ActNote, ActComplete}
+var ActionKinds = []ActionKind{ActTravelStart, ActWorkStart, ActHold, ActResume, ActPartUsed, ActSignature, ActNote, ActComplete, ActPhoto, ActChecklist}
 
 // Outcomes of an action once the server has merged it.
 const (
@@ -41,6 +45,10 @@ const (
 	CodeActionPart        = "SVC-SYNC-004"
 	CodeActionReuse       = "SVC-SYNC-005"
 	CodeActionClock       = "SVC-SYNC-006"
+	// CodeChecklistOpen refuses a completion while a required checklist item is open.
+	CodeChecklistOpen = "SVC-WO-003"
+	// CodeChecklistItem names an item the work order's checklist does not hold.
+	CodeChecklistItem = "SVC-SYNC-007"
 )
 
 // statusTarget is the status a status action moves the work order to.

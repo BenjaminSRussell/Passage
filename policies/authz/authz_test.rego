@@ -2669,6 +2669,32 @@ test_receiving_document_flow_is_read_only_and_separate if {
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
 }
 
+# #45: the technician's day and capture routes belong to the technician duty; reading a capture
+# back is an inquiry; the checklist is set by office staff who maintain work orders.
+test_fieldservice_technician_day_and_captures if {
+	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/me/day")
+	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/t1/day")
+	allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.work-order.execute", "GET", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/checklist")
+	allowed("fieldservice.inquire", "GET", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.inquire", "PUT", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.inquire", "GET", "/v1/service/technicians/me/day")
+	allowed("fieldservice.work-order.maintain", "PUT", "/v1/service/work-orders/w1/checklist")
+	not allowed("fieldservice.work-order.maintain", "PUT", "/v1/service/work-orders/w1/captures/c1")
+}
+
+# #45: truck stock levels are set with their own duty, read with inventory.read, and replenishment
+# creates transfer orders, so it needs the transfer duty.
+test_inventory_truck_stock if {
+	allowed("inventory.truck-stock.write", "PUT", "/v1/inventory/truck-stock-levels")
+	not allowed("inventory.read", "PUT", "/v1/inventory/truck-stock-levels")
+	allowed("inventory.read", "GET", "/v1/inventory/truck-stock-levels")
+	allowed("inventory.transfer.write", "POST", "/v1/inventory/truck-stock:replenish")
+	not allowed("inventory.truck-stock.write", "POST", "/v1/inventory/truck-stock:replenish")
+	not allowed("inventory.transfer.post", "POST", "/v1/inventory/truck-stock:replenish")
+}
+
 # Agent runtime surface (#47): starting a run, reading runs and the copilot chat are separate duties.
 test_agent_run_duties_open_only_their_routes if {
 	allowed("agents.invoke", "POST", "/api/v1/agents/ap_coding/runs")

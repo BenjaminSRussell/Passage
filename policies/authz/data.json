@@ -426,6 +426,7 @@
     "hub.client.consume": {"service_only": true, "permissions": [{"resource": "/v1/hub/clients:consume", "methods": ["POST"]}]},
     "inventory.read": {"permissions": [
       {"resource": "/v1/inventory/onhand", "methods": ["GET"]},
+      {"resource": "/v1/inventory/truck-stock-levels", "methods": ["GET"]},
       {"resource": "/v1/inventory/journals", "methods": ["GET"]},
       {"resource": "/v1/inventory/journals/*", "methods": ["GET"]},
       {"resource": "/v1/inventory/transactions", "methods": ["GET"]},
@@ -535,8 +536,10 @@
       {"resource": "/v1/inventory/consignment-orders/*:close", "methods": ["POST"]},
       {"resource": "/v1/inventory/consignment-orders/*:cancel", "methods": ["POST"]}
     ]},
+    "inventory.truck-stock.write": {"permissions": [{"resource": "/v1/inventory/truck-stock-levels", "methods": ["PUT"]}]},
     "inventory.transfer.write": {"permissions": [
       {"resource": "/v1/inventory/transfer-orders", "methods": ["POST"]},
+      {"resource": "/v1/inventory/truck-stock:replenish", "methods": ["POST"]},
       {"resource": "/v1/inventory/transfer-orders/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/inventory/transfer-orders/*", "methods": ["PATCH"]},
       {"resource": "/v1/inventory/transfer-orders/*:confirm", "methods": ["POST"]},
@@ -1949,9 +1952,14 @@
       {"resource": "/v1/service/dispatch/runs/*", "methods": ["GET"]},
       {"resource": "/v1/service/dispatch/optimizations", "methods": ["GET"]},
       {"resource": "/v1/service/dispatch/optimizations/*", "methods": ["GET"]},
-      {"resource": "/v1/service/work-orders/*/actions", "methods": ["GET"]}
+      {"resource": "/v1/service/work-orders/*/actions", "methods": ["GET"]},
+      {"resource": "/v1/service/work-orders/*/captures/*", "methods": ["GET"]}
     ]},
-    "fieldservice.work-order.execute": {"permissions": [{"resource": "/v1/service/work-orders/*/actions", "methods": ["POST"]}]},
+    "fieldservice.work-order.execute": {"permissions": [
+      {"resource": "/v1/service/work-orders/*/actions", "methods": ["POST"]},
+      {"resource": "/v1/service/work-orders/*/captures/*", "methods": ["PUT"]},
+      {"resource": "/v1/service/technicians/*/day", "methods": ["GET"]}
+    ]},
     "fieldservice.technician.dispatch": {"permissions": [
       {"resource": "/v1/service/technicians", "methods": ["POST"]},
       {"resource": "/v1/service/technicians/*", "methods": ["PUT"]},
@@ -1974,7 +1982,8 @@
       {"resource": "/v1/service/work-orders", "methods": ["POST"]},
       {"resource": "/v1/service/work-orders/*:follow-up", "methods": ["POST"]},
       {"resource": "/v1/service/work-orders/*:transition", "methods": ["POST"]},
-      {"resource": "/v1/service/work-orders/*/scheduling", "methods": ["PUT"]}
+      {"resource": "/v1/service/work-orders/*/scheduling", "methods": ["PUT"]},
+      {"resource": "/v1/service/work-orders/*/checklist", "methods": ["PUT"]}
     ]},
     "transport.tender.respond": {"permissions": [{"resource": "/v1/transport/tenders/*:respond", "methods": ["POST"]}]},
     "transport.gate.operate": {"permissions": [

@@ -70,6 +70,13 @@ type WorkLine struct {
 	Qty       decimal.Decimal `json:"qty"`
 	UnitPrice decimal.Decimal `json:"unitPrice"`
 	UnitCost  decimal.Decimal `json:"unitCost"`
+	// Description is the line as the technician sees it (a part name, a task).
+	Description string `json:"description,omitempty"`
+	// ProductID and Unit name the stock item of a PART line and the unit its quantity is
+	// in, so the completion can issue what was consumed from the technician's truck
+	// (BR-45.7). A PART line without a product moves no stock.
+	ProductID string `json:"productId,omitempty"`
+	Unit      string `json:"unit,omitempty"`
 }
 
 // WarrantyCover is the warranty term of the service object at completion.

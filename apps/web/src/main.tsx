@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { DeviceHost } from "./modules/mobile-flows/DeviceHost";
+import { TechnicianApp } from "./modules/technician/TechnicianApp";
 import { loadModules } from "./modules/registry";
 import { Shell } from "./shell/Shell";
 import { AuthRoot } from "./shell/auth/AuthRoot";
@@ -27,6 +28,8 @@ function App({ duties, identity, banner }: { duties?: readonly string[]; identit
       createBrowserRouter(
         [
           ...(import.meta.env.DEV ? [{ path: "/device", element: <DeviceHost /> }] : []),
+          // The technician PWA (apps/technician) hosted here for the demo and development; the production app is its own build.
+          ...(import.meta.env.DEV || demo ? [{ path: "/technician", element: <TechnicianApp /> }] : []),
           {
             path: "/",
             element: <Shell modules={modules} duties={duties} identity={identity} />,
