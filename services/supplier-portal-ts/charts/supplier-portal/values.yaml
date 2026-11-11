@@ -16,9 +16,22 @@ upstreams:
   purchasing: http://purchasing.purchasing.svc:8080
   receiving: http://receiving.receiving.svc:8080
   party: http://party.party.svc:8080
+  payables: http://payables.payables.svc:8080
 # Secret holding this service's Ed25519 seed under the key "signing-key". Its public key is added to
-# PASSAGE_SERVICE_PUBLIC_KEYS of purchasing, receiving and party as supplier-portal=...
+# PASSAGE_SERVICE_PUBLIC_KEYS of purchasing, receiving, party and payables as supplier-portal=...
 serviceSigningSecretName: supplier-portal-signing
+# Virus scan of uploaded documents (#511). clamavAddr is the host:port of clamd (INSTREAM over TCP). When it is set the scan is
+# required: a failed scan refuses the upload. With no scanner, uploads are refused unless allowUnscanned is true (dev only).
+scan:
+  clamavAddr: ""
+  clamavTimeoutMs: 30000
+  allowUnscanned: false
+# The public registration page for prospective suppliers. Both ids set opens it (a tenant and legal entity that receive the
+# registrations); both empty closes it. publicRatePerHour limits registrations and invitation checks per client address.
+registration:
+  tenantId: ""
+  legalEntityId: ""
+publicRatePerHour: 10
 resources:
   requests: { cpu: 25m, memory: 96Mi }
   limits: { cpu: 500m, memory: 256Mi }
@@ -27,6 +40,9 @@ networkPolicy:
   dnsNamespace: kube-system
   # The edge (Envoy) namespace, the only caller.
   edgeNamespace: envoy-gateway-system
-  upstreamNamespaces: [purchasing, receiving, party]
+  upstreamNamespaces: [purchasing, receiving, party, payables]
+  # The namespace clamd runs in; its port is reached only when scan.clamavAddr is set.
+  clamavNamespace: clamav
+  clamavPort: 3310
   # Keycloak is reached on 443.
   identityProviderCidr: 0.0.0.0/0

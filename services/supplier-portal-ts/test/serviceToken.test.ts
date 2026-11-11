@@ -33,6 +33,25 @@ describe("service tokens", () => {
   });
 });
 
+describe("special duties", () => {
+  const signer = createServiceTokenSigner({ seedBase64: randomBytes(32).toString("base64"), now: () => 1_000_000, newJti: () => "j" });
+  const caller = { tenantId: TENANT, legalEntityId: LE_1, userId: "user-1", vendorId: VENDOR_A };
+
+  it("keeps the registration and invite-accept duties out of a signed-in user's token", () => {
+    expect(tokenClaims(signer.mint("party", caller))["duties"]).toEqual(["party.vendor-portal.read", "party.vendor-portal.write"]);
+    expect(tokenClaims(signer.mint("payables", caller))["duties"]).toEqual(["payables.vendor-portal.read"]);
+    expect(tokenClaims(signer.mint("party", caller, ["party.vendor-portal.invite-accept"]))["duties"]).toEqual(["party.vendor-portal.invite-accept"]);
+    expect(() => signer.mint("party", caller, ["procurement.vendor-portal.read"])).toThrow(TypeError);
+  });
+
+  it("signs the registration token with no vendor and one duty", () => {
+    const claims = tokenClaims(signer.mintRegistration(TENANT, LE_1));
+    expect(claims).toMatchObject({ iss: SERVICE_NAME, aud: "party", tid: TENANT, le: LE_1, act: "portal-prospect", duties: ["party.vendor-portal.register"] });
+    expect("vnd" in claims).toBe(false);
+    expect(() => signer.mintRegistration("", LE_1)).toThrow(TypeError);
+  });
+});
+
 describe("grants", () => {
   it("match policies/authz/data.json and the Go table, and hold only service-only vendor-portal duties", () => {
     expect(data.service_grants[SERVICE_NAME]).toEqual(SERVICE_GRANTS);

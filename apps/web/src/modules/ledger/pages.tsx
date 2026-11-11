@@ -8,6 +8,7 @@ import { parseDimensionFilter } from "./BatchLinesEditor";
 import { ExportButton } from "./ExportButton";
 import styles from "./pages.module.css";
 import { ReverseEntryForm } from "./ReverseEntryForm";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const PERIOD = /^\d{4}-\d{2}$/;
@@ -91,7 +92,7 @@ export function TrialBalanceScreen() {
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const found: Record<string, string> = {};
-    if (!UUID.test(draft.ledgerId.trim())) found.ledgerId = "Enter the ledger id as a UUID.";
+    if (!UUID.test(draft.ledgerId.trim())) found.ledgerId = "Choose the ledger.";
     if (draft.periodFrom && !PERIOD.test(draft.periodFrom)) found.periodFrom = "Periods use the form YYYY-MM.";
     if (draft.periodTo && !PERIOD.test(draft.periodTo)) found.periodTo = "Periods use the form YYYY-MM.";
     const dimensions = parseDimensionFilter(dimText);
@@ -113,9 +114,7 @@ export function TrialBalanceScreen() {
       <PageHeader title="Trial balance" description="Debit and credit turnover per account from the balance projection. Storno reversals reduce the original side." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Trial balance filters">
-          <FormField id="tb-ledger" label="Ledger id" error={errors.ledgerId}>
-            {(c) => <Input {...c} className={styles.mono} value={draft.ledgerId} onChange={(e) => setDraft({ ...draft, ledgerId: e.target.value })} invalid={Boolean(errors.ledgerId)} />}
-          </FormField>
+          <LookupFormField id="tb-ledger" label="Ledger" entity="ledger" value={draft.ledgerId} error={errors.ledgerId} onChange={(ledgerId) => setDraft({ ...draft, ledgerId })} />
           <FormField id="tb-from" label="Period from" optional error={errors.periodFrom}>
             {(c) => <Input {...c} placeholder="2026-01" value={draft.periodFrom ?? ""} onChange={(e) => setDraft({ ...draft, periodFrom: e.target.value || undefined })} invalid={Boolean(errors.periodFrom)} />}
           </FormField>
@@ -136,7 +135,7 @@ export function TrialBalanceScreen() {
         </form>
       </Card>
       {query === null ? (
-        <p className={styles.note}>Enter a ledger id to see its trial balance.</p>
+        <p className={styles.note}>Choose a ledger to see its trial balance.</p>
       ) : result.isError ? (
         <Alert tone="danger" title="Could not load the trial balance" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
           {problemText(result.error)}

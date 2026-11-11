@@ -15,6 +15,7 @@ import { formatAmount, isMoney, toUnits, UUID } from "./logic";
 import styles from "./pages.module.css";
 import { Detail, formatDateTime, LoadError, statusLabel } from "./parts";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const historyColumns: DataTableColumn<EncumbranceHistory>[] = [
   { key: "at", header: "When", render: (h) => formatDateTime(h.at) },
@@ -46,7 +47,7 @@ function ReleasePanel({ id, documentId, remaining, onReleased }: { id: string; d
 
   function ask(e: FormEvent) {
     e.preventDefault();
-    const found = UUID.test(po.trim()) ? undefined : "Enter the purchase order id (a UUID).";
+    const found = UUID.test(po.trim()) ? undefined : "Choose the purchase order.";
     setError(found);
     setFailure(null);
     if (!found) setConfirming(true);
@@ -79,9 +80,7 @@ function ReleasePanel({ id, documentId, remaining, onReleased }: { id: string; d
             </Select>
           )}
         </FormField>
-        <FormField id="release-po" label="Purchase order id" error={error}>
-          {(c) => <Input {...c} className={styles.mono} value={po} invalid={Boolean(error)} onChange={(e) => setPo(e.target.value)} />}
-        </FormField>
+        <LookupFormField id="release-po" label="Purchase order" entity="purchaseOrder" value={po} error={error} onChange={setPo} />
         <div className={styles.formActions}>
           <Button type="submit" variant="secondary">
             Release remaining funds

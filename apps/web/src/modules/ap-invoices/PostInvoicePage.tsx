@@ -8,6 +8,7 @@ import { DECIMAL, UUID, type InvoiceNavState } from "./parts";
 import styles from "../../shell/pageLayout.module.css";
 import { ProblemMessage } from "../../shell/errors";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const MAX_LINES = 500;
 
@@ -178,7 +179,7 @@ export function PostInvoicePage() {
           {text("invoiceDate", "Invoice date", { type: "date" })}
           {text("postingDate", "Posting date", { type: "date", hint: "Sets the fiscal period; it must be an open AP period." })}
           {text("currency", "Currency", { hint: "Must match the receipt currency." })}
-          {text("ledgerId", "Ledger ID", { mono: true })}
+          <LookupFormField id="invoice-ledgerId" label="Ledger" entity="ledger" scope={{ legalEntityId: values.legalEntityId || undefined }} value={values.ledgerId} error={errors.ledgerId} onChange={(ledgerId) => update({ ledgerId })} />
           {errors.lines ? (
             <div className={styles.formActions}>
               <Alert tone="danger" live="alert">

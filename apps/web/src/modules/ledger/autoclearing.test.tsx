@@ -106,7 +106,7 @@ describe("automatic clearing rules", () => {
 
   it("asks for a ledger first", () => {
     renderAt("/ledger/auto-clearing-rules");
-    expect(screen.getByText("Enter a ledger id to see its automatic clearing rules.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a ledger to see its automatic clearing rules.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
 
@@ -189,7 +189,7 @@ describe("automatic clearing rules", () => {
 describe("automatic clearing run", () => {
   it("asks for a ledger first", () => {
     renderAt("/ledger/auto-clearing");
-    expect(screen.getByText("Enter a ledger id to run automatic clearing on it.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a ledger to run automatic clearing on it.")).toBeInTheDocument();
   });
 
   it("simulates, then clears with one key per attempt and opens the stored run", async () => {

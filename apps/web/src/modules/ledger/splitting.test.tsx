@@ -64,9 +64,8 @@ describe("splitting rules list", () => {
   it("asks for a ledger id first, then lists rules and opens one", async () => {
     fake();
     const { container } = renderAt("/ledger/splitting-rules");
-    expect(screen.getByText("Enter a ledger id to see its splitting rules.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
+    expect(screen.getByText("Choose a ledger to see its splitting rules.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     const open = await screen.findByRole("button", { name: "vendor_invoice" });
     const row = open.closest("tr") as HTMLElement;
     expect(row.textContent).toContain("PROFIT_CENTER");

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -304,7 +305,11 @@ func (a *API) listShipments(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) listPackingSlips(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.PackingSlipFilter{ShipmentID: q.Get("shipmentId"), OrderID: q.Get("orderId"), Status: q.Get("status")}
+	f := store.PackingSlipFilter{ShipmentID: q.Get("shipmentId"), OrderID: q.Get("orderId"), Status: q.Get("status"), Q: strings.TrimSpace(q.Get("q"))}
+	if utf8.RuneCountInString(f.Q) > 100 {
+		fail(w, r, "q", "must be at most 100 characters")
+		return
+	}
 	if f.ShipmentID != "" && !ids.Valid(f.ShipmentID) {
 		fail(w, r, "shipmentId", "must be a UUID")
 		return

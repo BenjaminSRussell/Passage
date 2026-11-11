@@ -344,6 +344,11 @@ func (f *fakeStore) GetLedgerSet(_ context.Context, id string) (store.LedgerSet,
 	return store.LedgerSet{ID: id}, f.err
 }
 
+func (f *fakeStore) ListLedgers(_ context.Context, legalEntityID, after string) ([]store.Ledger, string, error) {
+	f.listAfter = after
+	return []store.Ledger{{ID: testLedger, LegalEntityID: legalEntityID}}, f.listNext, f.err
+}
+
 func (f *fakeStore) ListLedgerSets(_ context.Context, after string) ([]store.LedgerSet, string, error) {
 	f.listAfter = after
 	return []store.LedgerSet{{ID: testSet}}, f.listNext, f.err

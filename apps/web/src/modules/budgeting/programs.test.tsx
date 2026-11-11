@@ -165,7 +165,7 @@ describe("ProgramsPage", () => {
       "GET /api/v1/budget/investment-programs": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/budgeting/programs");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No investment programs yet")).toBeInTheDocument();
@@ -216,7 +216,7 @@ describe("ProgramDetailPage", () => {
   it("shows a load error with a retry", async () => {
     stubRoutes({ [`GET /api/v1/budget/investment-programs/${P1}`]: () => json(404, { title: "not found", code: "BUD-0030", detail: "investment program not found" }) });
     at(`/budgeting/programs/${P1}`);
-    expect(await findAlert()).toHaveTextContent("BUD-0030");
+    expect(await findAlert()).toHaveTextContent("investment program not found");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -250,7 +250,7 @@ describe("ProgramDetailPage", () => {
     fireEvent.change(within(form).getByLabelText("Position code"), { target: { value: "LINE2" } });
     fireEvent.change(within(form).getByLabelText("Budget"), { target: { value: "1" } });
     fireEvent.click(within(form).getByRole("button", { name: "Save distribution" }));
-    expect(await screen.findByText(/CO-0641: distribution exceeds parent position budget by 1.00/)).toBeInTheDocument();
+    expect(await screen.findByText(/distribution exceeds parent position budget by 1.00/)).toBeInTheDocument();
     expect(JSON.parse(calls(fetchMock, "POST", ":distribute")[1][1].body as string)).toMatchObject({ parentPositionId: PLANT });
   });
 

@@ -170,6 +170,7 @@ export function PurchaseOrdersPage() {
       columns={listColumns}
       filters={listFilters}
       useRows={usePurchaseOrderRows}
+      search={(row) => ({ number: row.number })}
       getRowKey={(row) => row.id}
       onRowOpen={(row) => navigate(`/purchasing/purchase-orders/${row.id}`)}
       empty={{ title: "No purchase orders yet", description: "Create one here, or consolidate approved requisition lines." }}

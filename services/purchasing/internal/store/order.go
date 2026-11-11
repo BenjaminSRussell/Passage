@@ -345,6 +345,8 @@ type PurchaseOrderSummary struct {
 type PurchaseOrderFilter struct {
 	ApprovalStatus string
 	VendorID       string
+	// Q keeps the orders whose number contains it, ignoring case.
+	Q string
 }
 
 // ListPurchaseOrders returns PO headers newest first, after the cursor id.
@@ -359,7 +361,8 @@ func (s *Postgres) ListPurchaseOrders(ctx context.Context, f PurchaseOrderFilter
 			from purchase_order o
 			where o.tenant_id = $1 and ($2 = '' or o.approval_status = $2) and ($3 = '' or o.vendor_id::text = $3)
 			and ($4::uuid is null or o.id < $4::uuid)
-			order by o.id desc limit $5`, p.TenantID, f.ApprovalStatus, f.VendorID, nullable(after), limit+1)
+			and ($6 = '' or strpos(lower(o.number), lower($6)) > 0)
+			order by o.id desc limit $5`, p.TenantID, f.ApprovalStatus, f.VendorID, nullable(after), limit+1, f.Q)
 		if err != nil {
 			return err
 		}

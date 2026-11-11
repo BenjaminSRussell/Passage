@@ -15,9 +15,7 @@ function ledger(patch: Partial<Ledger> = {}): Ledger {
 describe("ledger settings", () => {
   it("asks for a ledger first and checks the id", async () => {
     const { container } = renderAt("/ledger/ledger-settings");
-    expect(screen.getByText("Enter a ledger id to see its settings.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
-    expect(await screen.findByText("Enter the ledger id as a UUID.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a ledger to see its settings.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
   });

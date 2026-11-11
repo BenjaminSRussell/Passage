@@ -125,6 +125,7 @@ export function OrdersPage() {
       columns={columns}
       filters={filters}
       useRows={useOrderRows}
+      search={(row) => ({ number: row.orderNumber, name: row.externalRef })}
       getRowKey={(row) => row.id}
       onRowOpen={(row) => navigate(`/sales/orders/${row.id}`)}
       empty={{

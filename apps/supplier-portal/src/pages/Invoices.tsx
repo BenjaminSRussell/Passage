@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { get, post, toBase64 } from "../api";
 import { Badge, day, Field, messageOf, Notice, Page, State, useLoad } from "../ui";
 
@@ -18,7 +19,7 @@ export function Invoices() {
   const posted = useLoad(() => get<{ items: Invoice[] }>("/api/v1/invoices?limit=100"), []);
   const waiting = useLoad(() => get<{ items: Submission[] }>("/api/v1/invoice-documents?limit=100"), []);
   return (
-    <Page title="Invoices">
+    <Page title="Invoices" action={<Link className="button" to="/invoices/received">Invoice received goods</Link>}>
       <SubmitInvoice onSent={waiting.reload} />
       <h2>Waiting for review</h2>
       <State load={waiting} empty={(d) => d.items.length === 0}>

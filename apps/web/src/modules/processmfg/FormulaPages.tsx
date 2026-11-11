@@ -37,6 +37,7 @@ import { formatDateTime, LINE_TYPE_LABELS, PERCENT, percentAtMost100, percentBal
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const listColumns: DataTableColumn<Formula>[] = [
   { key: "code", header: "Code", mono: true },
@@ -210,9 +211,7 @@ export function NewFormulaPage() {
             <FormField id="formula-name" label="Name" error={errors.name}>
               {(c) => <Input {...c} value={values.name} maxLength={120} onChange={(e) => update({ name: e.target.value })} invalid={Boolean(errors.name)} />}
             </FormField>
-            <FormField id="formula-item" label="Product item id" hint="The item the batch produces." error={errors.itemId}>
-              {(c) => <Input {...c} value={values.itemId} className={styles.mono} onChange={(e) => update({ itemId: e.target.value })} invalid={Boolean(errors.itemId)} />}
-            </FormField>
+            <LookupFormField id="formula-item" label="Product" entity="product" hint="The item the batch produces." value={values.itemId} error={errors.itemId} onChange={(itemId) => update({ itemId })} />
             <FormField id="formula-size" label="Formula size" error={errors.size}>
               {(c) => <Input {...c} inputMode="decimal" value={values.size} onChange={(e) => update({ size: e.target.value })} invalid={Boolean(errors.size)} />}
             </FormField>

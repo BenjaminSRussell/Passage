@@ -90,7 +90,7 @@ describe("project groups", () => {
     await waitFor(() => expect(table).toHaveTextContent("Engineering"));
     expect(pageViolations(container)).toEqual([]);
 
-    fireEvent.change(screen.getByLabelText("Group id"), { target: { value: "ops" } });
+    fireEvent.change(screen.getByLabelText("Group code"), { target: { value: "ops" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Operations" } });
     fireEvent.change(screen.getByLabelText("Default project type"), { target: { value: "TIME_MATERIAL" } });
     fireEvent.click(screen.getByRole("button", { name: "Add group" }));
@@ -102,7 +102,7 @@ describe("project groups", () => {
 
     fireEvent.click(within(await findTable({ name: "Project groups" })).getByRole("button", { name: "ENG" }));
     expect(screen.getByRole("heading", { name: "Edit group ENG" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Group id")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Group code")).toHaveAttribute("readonly");
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Engineering services" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("Project group ENG is saved.")).toBeInTheDocument();
@@ -113,13 +113,13 @@ describe("project groups", () => {
     handler = (_url, init) => (init.method === "PUT" ? problem(400, "COM-0001", "request failed validation", { name: "must be 1 to 120 characters" }) : { status: 200, body: { items: [] } });
     renderAt("/projects/groups");
     expect(await screen.findByText("No project groups yet")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Group id"), { target: { value: "*" } });
+    fireEvent.change(screen.getByLabelText("Group code"), { target: { value: "*" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "Add group" }));
     expect(await screen.findByText(/Use 1 to 10 capital letters/)).toBeInTheDocument();
     expect(writes()).toHaveLength(0);
 
-    fireEvent.change(screen.getByLabelText("Group id"), { target: { value: "ENG" } });
+    fireEvent.change(screen.getByLabelText("Group code"), { target: { value: "ENG" } });
     fireEvent.click(screen.getByRole("button", { name: "Add group" }));
     expect(await screen.findByText("must be 1 to 120 characters")).toBeInTheDocument();
     expect(screen.getByText("Could not save the project group")).toBeInTheDocument();

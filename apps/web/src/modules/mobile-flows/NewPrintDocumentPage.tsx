@@ -165,7 +165,7 @@ export function NewPrintDocumentPage() {
                   </Button>
                 }
               >
-                {failure.message} ({failure.code}). Open the PDF in a new tab and print it with the browser instead.
+                <ProblemMessage problem={failure} /> Open the PDF in a new tab and print it with the browser instead.
               </Alert>
             </div>
           ) : failure ? (

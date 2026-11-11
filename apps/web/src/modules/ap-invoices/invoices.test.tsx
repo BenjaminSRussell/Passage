@@ -177,7 +177,7 @@ describe("post vendor invoice", () => {
     fill("Invoice number", "INV-1");
     fill("Invoice date", "2026-10-26");
     fill("Posting date", "2026-10-26");
-    fill("Ledger ID", UUID_A);
+    fill("Ledger", UUID_A);
     fill("Line 1 receipt ID", RECEIPT);
     fill("Line 1 quantity", "6");
     fill("Line 1 unit price", "2.5");

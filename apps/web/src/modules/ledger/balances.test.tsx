@@ -67,7 +67,7 @@ describe("balance dimension inquiry", () => {
       return undefined;
     };
     renderAt("/ledger/trial-balance");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText(/Group by dimensions/), { target: { value: "DEPT, CC" } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     const table = await screen.findByRole("table", { name: "Trial balance" });
@@ -85,7 +85,7 @@ describe("balance dimension inquiry", () => {
         ? json(400, { code: "COM-0001", detail: "request failed validation", errors: { group_by: "PROJECT is not a dimension attribute of the ledger" } })
         : undefined;
     renderAt("/ledger/trial-balance");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText(/Group by dimensions/), { target: { value: "PROJECT" } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     expect((await findAlert()).textContent).toContain("group_by PROJECT is not a dimension attribute of the ledger");
@@ -98,7 +98,7 @@ describe("balance dimension inquiry", () => {
       return undefined;
     };
     renderAt("/ledger/trial-balance");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText(/Group by dimensions/), { target: { value: "DEPT, CC" } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     const table = await screen.findByRole("table", { name: "Trial balance" });
@@ -119,7 +119,7 @@ describe("balance dimension inquiry", () => {
         ? json(200, { ...grouped, rows: [grouped.rows[0]], groupBy: undefined, balanced: false, filtered: true })
         : undefined;
     renderAt("/ledger/trial-balance");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText(/Dimension filter/), { target: { value: "dept=x" } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     expect(await screen.findByText(/ATTRIBUTE=value pairs/)).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe("balance dimension inquiry", () => {
     };
     server.handler = (url) => (url.pathname === "/api/v1/ledger/balances" ? json(200, withQty) : undefined);
     renderAt("/ledger/trial-balance");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     expect(await screen.findByTestId("tb-qty-KG")).toHaveTextContent("10.000000 (debit 12.500000, credit 2.500000)");
     expect(screen.getByTestId("tb-qty-PCS")).toHaveTextContent("3.000000");
@@ -155,7 +155,7 @@ describe("balance dimension inquiry", () => {
     server.handler = (url) =>
       url.pathname === "/api/v1/ledger/balances" ? json(200, { ...grouped, groupBy: undefined, quantitiesPending: true }) : undefined;
     renderAt("/ledger/trial-balance");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     expect(await screen.findByText("Quantity totals are incomplete")).toBeInTheDocument();
   });
@@ -163,7 +163,7 @@ describe("balance dimension inquiry", () => {
   it("reports a failed load with a retry", async () => {
     server.handler = (url) => (url.pathname === "/api/v1/ledger/balances" ? json(404, { code: "LEDGER_NOT_FOUND", detail: "ledger not found" }) : undefined);
     renderAt("/ledger/trial-balance");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     expect((await findAlert()).textContent).toContain("ledger not found");
   });

@@ -305,7 +305,7 @@ function RuleForm({ initial, existing, onSaved }: { initial: Draft; existing: DQ
   return (
     <Card title={existing ? "Rule definition" : "New rule"}>
       <form className={styles.form} onSubmit={submit} noValidate aria-label="Data-quality rule">
-        <FormField id="dq-rule-id" label="Rule id" error={errors.ruleId} hint={existing ? "A rule id cannot change." : undefined}>
+        <FormField id="dq-rule-id" label="Rule key" error={errors.ruleId} hint={existing ? "A rule key cannot change." : undefined}>
           {(control) => (
             <Input {...control} {...field("ruleId")} className={styles.mono} value={draft.ruleId} readOnly={existing !== null} onChange={(e) => set("ruleId", e.target.value)} />
           )}
@@ -362,7 +362,7 @@ function RuleForm({ initial, existing, onSaved }: { initial: Draft; existing: DQ
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title={failure.code === "ANA-0113" ? "Someone else changed this rule" : "The rule was not saved"} live="alert">
-              {failure.code === "ANA-0113" ? "Reload the page to see the current version, then make your change again." : failure.message} ({failure.code})
+              <ProblemMessage problem={failure} message={failure.code === "ANA-0113" ? "Reload the page to see the current version, then make your change again." : undefined} />
             </Alert>
           </div>
         ) : null}
