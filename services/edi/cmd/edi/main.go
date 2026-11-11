@@ -139,6 +139,8 @@ func run() error {
 		p := &delivery.Poller{Store: st, Secrets: tc.secrets, Receive: a.ReceiveFromTransport}
 		go delivery.Run(ctx, "delivery dispatcher", tc.interval, d.RunOnce)
 		go delivery.Run(ctx, "sftp poller", tc.interval, p.RunOnce)
+		// The self-billing sweep (35-5): match pending self-billed documents and open the unbilled disputes, on its own schedule.
+		go delivery.Run(ctx, "self-billing sweep", tc.sweepInterval, a.RunSelfBillSweep)
 		if a.Intake != nil {
 			sp := &poster.Poster{Store: st, Intake: a.Intake, PlaceAs: poster.AsServicePrincipal}
 			go delivery.Run(ctx, "sales poster", tc.interval, sp.RunOnce)
@@ -158,7 +160,9 @@ type transportConfig struct {
 	as2Addr   string
 	workers   bool
 	interval  time.Duration
-	http      *http.Client
+	// sweepInterval is how often the self-billing sweep runs (EDI_SELFBILL_SWEEP_MINUTES, default 60).
+	sweepInterval time.Duration
+	http          *http.Client
 	// ratePerMinute and rateBurst are the AS2 listener's limit per endpoint
 	// (0 per minute: off); mdnTimeout bounds the wait for an asynchronous MDN.
 	ratePerMinute int
@@ -214,6 +218,14 @@ func loadTransportConfig(getenv func(string) string, httpAddr string) (transport
 		return c, errors.New("EDI_TRANSPORT_INTERVAL_SECONDS must be 1 to 3600")
 	}
 	c.interval = time.Duration(seconds) * time.Second
+	sweepMinutes, err := envIntFrom(getenv, "EDI_SELFBILL_SWEEP_MINUTES", 60)
+	if err != nil {
+		return c, err
+	}
+	if sweepMinutes < 1 || sweepMinutes > 1440 {
+		return c, errors.New("EDI_SELFBILL_SWEEP_MINUTES must be 1 to 1440")
+	}
+	c.sweepInterval = time.Duration(sweepMinutes) * time.Minute
 	if c.ratePerMinute, err = envIntFrom(getenv, "EDI_AS2_RATE_PER_MINUTE", 120); err != nil {
 		return c, err
 	}

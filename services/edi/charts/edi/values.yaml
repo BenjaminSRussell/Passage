@@ -49,6 +49,8 @@ transports:
   # run the workers.
   workers: false
   intervalSeconds: 15
+  # How often the workers run the self-billing sweep (#35, 35-5): match the pending self-billed documents, open the unbilled disputes.
+  selfBillSweepMinutes: 60
   # How long a delivery waits for its asynchronous MDN before it is sent again (FAILED after the last attempt).
   mdnTimeoutMinutes: 1440
   # Partner AS2 certificates are always pinned. With rootsConfigMap (key rootsKey: a PEM bundle of the CAs partners'

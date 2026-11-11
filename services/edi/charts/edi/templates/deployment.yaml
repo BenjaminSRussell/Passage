@@ -88,6 +88,8 @@ spec:
               value: {{ .Values.transports.intervalSeconds | quote }}
             - name: EDI_AS2_MDN_TIMEOUT_MINUTES
               value: {{ .Values.transports.mdnTimeoutMinutes | quote }}
+            - name: EDI_SELFBILL_SWEEP_MINUTES
+              value: {{ .Values.transports.selfBillSweepMinutes | quote }}
             {{- end }}
             {{- if .Values.transports.as2.enabled }}
             - name: EDI_AS2_ADDR
