@@ -292,7 +292,24 @@ func addLaterProducts(ctx context.Context, s InvoiceContractStore, existing stor
 	if !strings.EqualFold(existing.Currency, d.Currency) {
 		return nil
 	}
-	c, err := s.GetContract(ctx, existing.ID)
+	// Two invoices of one order may be consumed at the same time; the one that adds a product second finds it there (REV-0105)
+	// or a changed version (REV-0103) and reads the contract again, so its own new products are still added and it is not dead-lettered.
+	for range maxModifyAttempts {
+		err := addMissingObligations(ctx, s, existing.ID, d, date, billable, templates)
+		var p *httpx.Problem
+		if errors.As(err, &p) && (p.Code == store.CodeObligationExists || p.Code == store.CodeVersion) {
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("contract %s kept changing while invoice %s added its products; retrying the event", existing.ID, d.InvoiceID)
+}
+
+// maxModifyAttempts bounds the re-reads of a contract another invoice is modifying at the same time.
+const maxModifyAttempts = 3
+
+func addMissingObligations(ctx context.Context, s InvoiceContractStore, contractID string, d invoicePostedData, date time.Time, billable []orderProduct, templates map[string]store.Template) error {
+	c, err := s.GetContract(ctx, contractID)
 	if err != nil {
 		return err
 	}
@@ -320,6 +337,6 @@ func addLaterProducts(ctx context.Context, s InvoiceContractStore, existing stor
 	if err != nil {
 		return err
 	}
-	_, err = s.AddObligations(ctx, c.ID, price, add, 0)
+	_, err = s.AddObligations(ctx, c.ID, price, add, c.Version)
 	return err
 }

@@ -255,3 +255,48 @@ func TestInvoiceConsumer_RefusesAPrincipalWithoutItsDutyAndSkipsOrderlessInvoice
 		t.Fatalf("contracts: %+v", cs)
 	}
 }
+
+// racingStore runs another invoice of the same order to completion just before the first AddObligations call, as a second consumer
+// would when the two invoices are consumed at the same time.
+type racingStore struct {
+	InvoiceContractStore
+	race func()
+	done bool
+}
+
+func (r *racingStore) AddObligations(ctx context.Context, contractID string, increase decimal.Decimal, add []store.Obligation, expectedVersion int) (store.Contract, error) {
+	if !r.done {
+		r.done = true
+		r.race()
+	}
+	return r.InvoiceContractStore.AddObligations(ctx, contractID, increase, add, expectedVersion)
+}
+
+// Two invoices of one order that both bill a product the contract lacks: the one that loses the race reads the contract again and
+// still adds its own new product, instead of failing with REV-0105 and being dead-lettered.
+func TestInvoiceConsumer_ConcurrentInvoicesOfOneOrderBothAddTheirProducts(t *testing.T) {
+	g := newLedgerRig(t)
+	if err := g.consumeInvoice(t, invoicePosted(t, "2027-03-01", invoiceLine{bundleOrder, bundleHardware, "8000.00"})); err != nil {
+		t.Fatal(err)
+	}
+	other := invoicePosted(t, "2027-04-01", invoiceLine{bundleOrder, bundleInstall, "1350.00"})
+	mine := invoicePosted(t, "2027-04-01", invoiceLine{bundleOrder, bundleInstall, "1350.00"}, invoiceLine{bundleOrder, bundleSupport, "1200.00"})
+	actor, err := tenant.ServicePrincipal(CreditNoteConsumerName, mine.TenantID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenant.With(context.Background(), actor)
+	racing := &racingStore{InvoiceContractStore: g.st}
+	racing.race = func() {
+		if err := InvoiceConsumerHandlers(g.st)[other.Type].Handle(ctx, nil, other); err != nil {
+			t.Errorf("other invoice: %v", err)
+		}
+	}
+	if err := InvoiceConsumerHandlers(racing)[mine.Type].Handle(ctx, nil, mine); err != nil {
+		t.Fatalf("invoice that lost the race: %v", err)
+	}
+	cs := g.contractsOf(t, bundleOrder)
+	if len(cs) != 1 || len(cs[0].Obligations) != 3 || !cs[0].TransactionPrice.Equal(decimal.RequireFromString("10550.00")) {
+		t.Fatalf("contract after the race: %+v", cs)
+	}
+}
