@@ -18,7 +18,7 @@ import (
 // Prospect registration and vendor-admin invitations (#511 remainders). The registration route is the one place a supplier portal
 // token carries no vendor; every other portal route here takes its vendor from the verified token like the rest of vendor-portal.
 const (
-	dutyPortalRegister     = tenant.DutyPortalRegister
+	dutyPortalRegister     = "party.vendor-portal.register"
 	dutyPortalInviteAccept = "party.vendor-portal.invite-accept"
 	// registerBodyLimit is the largest registration the page may send.
 	registerBodyLimit = 16 << 10

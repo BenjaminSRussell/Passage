@@ -71,6 +71,13 @@ func (p *portalHarness) call(t *testing.T, vendor string, only []string, method,
 
 const prospectBody = `{"companyName":" Birch Valve Co ","contactName":"Sam Birch","email":"Sam@Birch.example","country":"us","taxId":"12-3456789"}`
 
+// The route's duty is a literal (the duty seed test reads it); it must stay the one duty a vendorless portal token may carry.
+func TestProspectRegistration_TheRouteDutyIsTheVendorlessTokensDuty(t *testing.T) {
+	if tenant.DutyPortalRegister != "party.vendor-portal.register" {
+		t.Fatalf("platform/go/tenant DutyPortalRegister is %q; api/portal.go and policies/authz/data.json name party.vendor-portal.register", tenant.DutyPortalRegister)
+	}
+}
+
 func TestProspectRegistration_OnlyTheVendorlessPortalTokenMayRegister(t *testing.T) {
 	p := newPortalHarness(t)
 	path := "/v1/party/vendor-portal/prospects"
