@@ -74,6 +74,7 @@ export function PackingSlipsPage() {
       columns={columns}
       filters={filters}
       useRows={usePackingSlipRows}
+      search={(row) => ({ number: row.packingSlipNumber })}
       getRowKey={(row) => row.id}
       onRowOpen={(row) => navigate(`/fulfillment/packing-slips/${row.id}`)}
       empty={{

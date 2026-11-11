@@ -6,6 +6,7 @@ import type { ApprovalRequest, RecordedDecision } from "../src/api/decision.js";
 import { createAgentsHandler, MAX_BODY_BYTES } from "../src/api/router.js";
 import { edgeHeaders, testAuthenticate } from "./jwt.js";
 import type { CopilotService } from "../src/runtime/copilot.js";
+import type { KnowledgeService } from "../src/runtime/knowledge.js";
 import type { RunService } from "../src/runtime/service.js";
 import type { AgentEvent } from "../src/domain/events.js";
 import { KillSwitchRegistry } from "../src/domain/killswitch.js";
@@ -190,6 +191,8 @@ describe("api/openapi.yaml matches the router", () => {
       "POST /api/v1/agents/runs/{runId}/actions/{actionId}/decision",
       "POST /api/v1/agents/{agentId}/runs",
       "POST /api/v1/copilot/chat",
+      "POST /api/v1/knowledge/chunks",
+      "POST /api/v1/knowledge/search",
     ]);
     const handler = createAgentsHandler({
       authenticate: testAuthenticate,
@@ -200,6 +203,7 @@ describe("api/openapi.yaml matches the router", () => {
       // Never reached: an anonymous call is refused at the edge identity check.
       runs: {} as RunService,
       copilot: {} as CopilotService,
+      knowledge: {} as KnowledgeService,
     });
     const s = createServer((req, res) => void handler(req, res));
     await new Promise<void>((resolve) => s.listen(0, "127.0.0.1", resolve));

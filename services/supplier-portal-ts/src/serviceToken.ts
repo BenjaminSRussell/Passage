@@ -15,8 +15,15 @@ export const SERVICE_NAME = "supplier-portal";
 export const SERVICE_GRANTS = {
   purchasing: ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],
   receiving: ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"],
-  party: ["party.vendor-portal.read", "party.vendor-portal.write"],
+  party: ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"],
+  payables: ["payables.vendor-portal.read"],
 } as const;
+
+/** The one duty a token without a vendor may carry: the public prospect registration. */
+export const DUTY_REGISTER = "party.vendor-portal.register";
+/** Verifying and accepting an invitation: signed only for the accept routes, never in a signed-in user's token. */
+export const DUTY_INVITE_ACCEPT = "party.vendor-portal.invite-accept";
+const SPECIAL_DUTIES: readonly string[] = [DUTY_REGISTER, DUTY_INVITE_ACCEPT];
 
 export type Audience = keyof typeof SERVICE_GRANTS;
 
@@ -29,7 +36,10 @@ export interface Caller {
 }
 
 export interface ServiceTokenSigner {
-  mint(audience: Audience, caller: Caller): string;
+  /** A token for a signed-in vendor user. `only` narrows the duties; the default is the grant less the registration and invite-accept duties. */
+  mint(audience: Audience, caller: Caller, only?: readonly string[]): string;
+  /** The vendorless token of the public prospect registration: carries only `party.vendor-portal.register`. */
+  mintRegistration(tenantId: string, legalEntityId: string): string;
 }
 
 export interface SignerOptions {
@@ -45,28 +55,28 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
   const key = createPrivateKey({ key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]), format: "der", type: "pkcs8" });
   const now = options.now ?? Date.now;
   const newJti = options.newJti ?? (() => randomBytes(16).toString("hex"));
+  const sealed = (claims: Record<string, unknown>): string => {
+    const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
+    const signature = sign(null, Buffer.from(TOKEN_CONTEXT + body), key).toString("base64url");
+    return `${body}.${signature}`;
+  };
+  const base = (audience: Audience, tenantId: string, legalEntityId: string, act: string, duties: readonly string[]): Record<string, unknown> => {
+    const iat = Math.floor(now() / 1000);
+    return { iss: SERVICE_NAME, ...(options.keyId ? { kid: options.keyId } : {}), aud: audience, tid: tenantId, le: legalEntityId, act, duties: [...duties], iat, exp: iat + TOKEN_TTL_SECONDS, jti: newJti() };
+  };
   return {
-    mint(audience, caller) {
+    mint(audience, caller, only) {
       if (!caller.tenantId || !caller.legalEntityId || !caller.userId || !caller.vendorId) {
         throw new TypeError("a service token needs a tenant, one legal entity, the acting user and the vendor");
       }
-      const iat = Math.floor(now() / 1000);
-      const claims = {
-        iss: SERVICE_NAME,
-        ...(options.keyId ? { kid: options.keyId } : {}),
-        aud: audience,
-        tid: caller.tenantId,
-        le: caller.legalEntityId,
-        act: caller.userId,
-        vnd: caller.vendorId,
-        duties: [...SERVICE_GRANTS[audience]],
-        iat,
-        exp: iat + TOKEN_TTL_SECONDS,
-        jti: newJti(),
-      };
-      const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
-      const signature = sign(null, Buffer.from(TOKEN_CONTEXT + body), key).toString("base64url");
-      return `${body}.${signature}`;
+      const grant: readonly string[] = SERVICE_GRANTS[audience];
+      const duties = only ? grant.filter((d) => only.includes(d)) : grant.filter((d) => !SPECIAL_DUTIES.includes(d));
+      if (duties.length === 0) throw new TypeError(`no duty to sign for ${audience}`);
+      return sealed({ ...base(audience, caller.tenantId, caller.legalEntityId, caller.userId, duties), vnd: caller.vendorId });
+    },
+    mintRegistration(tenantId, legalEntityId) {
+      if (!tenantId || !legalEntityId) throw new TypeError("a registration token needs a tenant and one legal entity");
+      return sealed(base("party", tenantId, legalEntityId, "portal-prospect", [DUTY_REGISTER]));
     },
   };
 }

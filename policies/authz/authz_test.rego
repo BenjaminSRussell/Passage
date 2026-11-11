@@ -223,6 +223,7 @@ segregation_grants := [
 	["procurement.purchase-order.confirm", "POST", "/v1/procurement/purchase-orders/p1:approve"],
 	["procurement.rfq.award", "POST", "/v1/procurement/rfqs/q1:award"],
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
+	["ledger.journal.read", "GET", "/v1/ledger/ledgers"],
 	["reporting.definition.maintain", "GET", "/v1/reporting/definitions/d1/export"],
 	["platform.promotion.approve", "POST", "/v1/platform/releases"],
 	["platform.environment.rollback", "POST", "/v1/platform/releases"],
@@ -958,7 +959,52 @@ test_supplier_portal_holds_only_service_only_vendor_duties if {
 	}
 	data.service_grants["supplier-portal"].purchasing == ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"]
 	data.service_grants["supplier-portal"].receiving == ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"]
-	data.service_grants["supplier-portal"].party == ["party.vendor-portal.read", "party.vendor-portal.write"]
+	data.service_grants["supplier-portal"].party == ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"]
+	data.service_grants["supplier-portal"].payables == ["payables.vendor-portal.read"]
+}
+
+# Invoice by received line, payment status, prospect registration and vendor-admin invites (#511 remainders).
+test_receiving_vendor_invoice_submissions_are_vendor_routes_and_buyer_routes_are_separate if {
+	allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/vendor/invoiceable-lines")
+	allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/vendor/invoice-submissions")
+	allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/vendor/invoice-submissions/s1")
+	allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/vendor/invoice-submissions/s1:withdraw")
+	not allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/invoice-submissions")
+	not allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	not allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/vendor/invoice-submissions")
+	allowed("receiving.ap.inquire", "GET", "/v1/receiving/invoice-submissions/s1")
+	allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-submissions/s1:resolve")
+	not allowed("receiving.ap.inquire", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	not allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/vendor/invoice-submissions")
+}
+
+test_payables_vendor_portal_read_opens_only_the_vendor_payment_list if {
+	data.duties["payables.vendor-portal.read"].service_only
+	allowed("payables.vendor-portal.read", "GET", "/v1/payables/vendor/payments")
+	not allowed("payables.vendor-portal.read", "POST", "/v1/payables/vendor/payments")
+	not allowed("payables.vendor-portal.read", "GET", "/v1/payables/open-items")
+	not allowed("open-item.read", "GET", "/v1/payables/vendor/payments")
+}
+
+test_party_prospects_invites_and_registration_have_their_own_duties if {
+	data.duties["party.vendor-portal.register"].service_only
+	data.duties["party.vendor-portal.invite-accept"].service_only
+	allowed("party.vendor-portal.register", "POST", "/v1/party/vendor-portal/prospects")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/prospects")
+	not allowed("party.vendor-portal.register", "GET", "/v1/party/vendor-portal/requests")
+	allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/invites")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites")
+	allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites/i1:revoke")
+	allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites/i1:verify")
+	allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites/i1:accept")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites/i1:accept")
+	not allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites")
+	allowed("party.read", "GET", "/v1/party/vendor-prospects")
+	allowed("party.write", "POST", "/v1/party/vendor-prospects/p1:accept")
+	allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-prospects/p1:reject")
+	not allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-prospects/p1:accept")
+	not allowed("party.write", "POST", "/v1/party/vendor-prospects/p1:reject")
 }
 
 test_receiving_vendor_portal_duties_open_only_vendor_routes if {
@@ -1547,7 +1593,7 @@ test_integration_hub_reaches_only_render_and_xref_record if {
 }
 
 test_migration_factory_grant_reaches_only_the_receivables_import if {
-	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "payables": ["opening-item.import", "opening-item.import.read"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
+	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "payables": ["opening-item.import", "opening-item.import.read"], "inventory": ["inventory.import.write", "inventory.import.read"], "treasury": ["treasury.import.write", "treasury.import.read"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
 	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
 	allowed("receivables.view", "GET", "/v1/receivables/open-item-imports")
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
@@ -2767,4 +2813,33 @@ test_agent_run_duties_open_only_their_routes if {
 	allowed("mcp.copilot.use", "POST", "/api/v1/copilot/chat")
 	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
 	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
+	allowed("mcp.copilot.use", "POST", "/api/v1/knowledge/search")
+	not allowed("mcp.copilot.use", "POST", "/api/v1/knowledge/chunks")
+	allowed("knowledge.write", "POST", "/api/v1/knowledge/chunks")
+	not allowed("knowledge.write", "POST", "/api/v1/knowledge/search")
+	not allowed("knowledge.write", "POST", "/api/v1/copilot/chat")
+}
+
+test_opening_stock_and_bank_import_duties_are_service_only_and_cover_only_their_route if {
+	data.duties["inventory.import.write"].service_only
+	data.duties["inventory.import.read"].service_only
+	data.duties["treasury.import.write"].service_only
+	data.duties["treasury.import.read"].service_only
+	allowed("inventory.import.write", "POST", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.write", "GET", "/v1/inventory/opening-batches")
+	allowed("inventory.import.read", "GET", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.read", "POST", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.write", "POST", "/v1/inventory/journals")
+	allowed("treasury.import.write", "POST", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.write", "GET", "/v1/treasury/opening-balances")
+	allowed("treasury.import.read", "GET", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.read", "POST", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.write", "POST", "/v1/treasury/bank-accounts")
+}
+
+test_migration_opening_load_routes_need_run_and_view_duties if {
+	allowed("migration.factory.run", "POST", "/api/v1/migration/runs/r1/opening-load")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/opening-load")
+	allowed("migration.factory.view", "GET", "/api/v1/migration/runs/r1/opening-load")
+	not allowed("migration.factory.view", "POST", "/api/v1/migration/runs/r1/opening-load")
 }

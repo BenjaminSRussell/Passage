@@ -1,3 +1,4 @@
+import { problemSummary } from "../../../shell/errors";
 import { apiFetch } from "../../../shell/api/http";
 // API client for the costing service (services/costing/api/openapi.yaml).
 // Browser calls use /api/v1/costing/... which the web-bff rewrites to the service.
@@ -184,7 +185,7 @@ export function describeError(err: unknown, fallback: string): string {
   const fields = Object.entries(err.problem.errors ?? {})
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([field, msg]) => `${field} ${msg}`);
-  return [`${err.problem.code}: ${err.message}`, ...fields].join("; ");
+  return [problemSummary(err, err.message), ...fields].join("; ");
 }
 
 // ---- costing versions (FR-20.5) ----

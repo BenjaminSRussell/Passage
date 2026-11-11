@@ -98,7 +98,7 @@ export function WorkerPaySetup({ worker, onSaved }: { worker: Worker; onSaved():
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the pay setup" live="alert">
-              {failure.code === "SF-0143" ? "The worker was changed by someone else. Reload the page and try again." : failure.message} ({failure.code})
+              <ProblemMessage problem={failure} message={failure.code === "SF-0143" ? "The worker was changed by someone else. Reload the page and try again." : undefined} />
             </Alert>
           </div>
         ) : null}

@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { describeError, previewValuationLedgers, type CostMethod, type LedgerResult, type LedgersPreviewResponse, type LedgerSpec } from "./api/client";
 import styles from "./pages.module.css";
 import { COST_METHODS, CURRENCY, DECIMAL, parseTransactions, SAMPLE_TRANSACTIONS, TransactionsField } from "./shared";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export const MAX_LEDGERS = 8;
 
@@ -31,7 +32,7 @@ export function validateLedgers(ledgers: LedgerDraft[]): Errors {
   const seen = new Set<string>();
   ledgers.forEach((l, i) => {
     const id = l.id.trim();
-    if (id === "") errors[`ledgers[${i}].id`] = "Enter a ledger id.";
+    if (id === "") errors[`ledgers[${i}].id`] = "Choose a ledger.";
     else if (seen.has(id)) errors[`ledgers[${i}].id`] = "Each ledger needs its own id.";
     seen.add(id);
     if (!CURRENCY.test(l.currency)) errors[`ledgers[${i}].currency`] = "Use a three-letter ISO 4217 code, such as USD.";
@@ -124,9 +125,7 @@ export function ValuationLedgersPage() {
           {ledgers.map((l, i) => (
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.legend}>{`Ledger ${i + 1}`}</legend>
-              <FormField id={`ledger-id-${i}`} label="Ledger id" error={errors[`ledgers[${i}].id`]}>
-                {(c) => <Input {...c} value={l.id} invalid={Boolean(errors[`ledgers[${i}].id`])} onChange={(e) => setLedger(i, { id: e.target.value })} />}
-              </FormField>
+              <LookupFormField id={`ledger-id-${i}`} label="Ledger" entity="ledger" value={l.id} error={errors[`ledgers[${i}].id`]} onChange={(id) => setLedger(i, { id })} />
               <FormField id={`ledger-method-${i}`} label="Costing method">
                 {(c) => (
                   <Select {...c} value={l.method} onChange={(e) => setLedger(i, { method: e.target.value as CostMethod })}>

@@ -26,10 +26,13 @@ var (
 
 	VendorBankRevealed = events.Type(Context, "vendorbank", "revealed", 1)
 	VendorGroupCreated = events.Type(Context, "vendorgroup", "created", 1)
+
+	VendorInviteCreated  = events.Type(Context, "vendorinvite", "created", 1)
+	VendorInviteAccepted = events.Type(Context, "vendorinvite", "accepted", 1)
 )
 
 func All() []string {
-	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerCreated, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated, MergeRequested, MergeRejected, VendorBankRevealed, VendorGroupCreated}
+	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerCreated, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated, MergeRequested, MergeRejected, VendorBankRevealed, VendorGroupCreated, VendorInviteCreated, VendorInviteAccepted}
 }
 
 type CustomerCreatedData struct {
@@ -113,4 +116,14 @@ type MergeRequestData struct {
 	RequestedBy     string  `json:"requested_by"`
 	DecidedBy       string  `json:"decided_by,omitempty"`
 	Reason          *string `json:"reason,omitempty"`
+}
+
+// VendorInviteData is the payload of the invitation events. It names the address and never carries the token: the token is shown
+// once to the vendor administrator who made the invitation.
+type VendorInviteData struct {
+	InviteID      string    `json:"invite_id"`
+	VendorID      string    `json:"vendor_id"`
+	LegalEntityID string    `json:"legal_entity_id"`
+	Email         string    `json:"email"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }

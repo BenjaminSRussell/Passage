@@ -22,9 +22,10 @@ export function proposeTool(allowedTools: readonly string[]): ProposeToolSpec {
     description: "Propose one governed action for human approval, or explain without proposing.",
     inputSchema: {
       type: "object",
+      // `tool` comes first so a streamed answer knows from its first bytes whether the turn proposes a tool (its text is then not the answer).
       properties: {
+        tool: { type: "string", enum: ["", ...allowedTools], description: 'The tool to propose, or "" to answer without proposing. Always give this first.' },
         text: { type: "string", description: "Answer shown to the user. Use pseudonyms exactly as given." },
-        tool: { type: "string", enum: [...allowedTools] },
         args: { type: "object", description: "Arguments for the tool. Never include tenant_id." },
         confidence: { type: "number", minimum: 0, maximum: 1 },
         amount: {

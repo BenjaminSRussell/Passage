@@ -109,7 +109,7 @@ describe("dashboards", () => {
     expect(screen.getByText("Choose a published governed metric.")).toBeInTheDocument();
     expect(server.calls.filter((c) => c.method === "PUT")).toHaveLength(0);
 
-    fireEvent.change(screen.getByLabelText(/^Dashboard id/), { target: { value: "sales" } });
+    fireEvent.change(screen.getByLabelText(/^Dashboard key/), { target: { value: "sales" } });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: " Sales " } });
     fireEvent.change(screen.getByLabelText("Tile title"), { target: { value: "Revenue" } });
     fireEvent.change(metric, { target: { value: "revenue" } });
@@ -147,7 +147,7 @@ describe("dashboards", () => {
     expect(within(tiles).getByRole("link", { name: "Revenue" })).toHaveAttribute("href", "/analytics/metrics/revenue");
     expect(within(tiles).getByText("Year to date")).toBeInTheDocument();
     expect(within(tiles).getByText(revenue.formula)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^Dashboard id/)).toHaveAttribute("readonly");
+    expect(screen.getByLabelText(/^Dashboard key/)).toHaveAttribute("readonly");
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Finance" } });
@@ -255,7 +255,7 @@ describe("dashboards", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save dashboard" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Someone else changed this dashboard");
-    expect(alert).toHaveTextContent("(ANA-0113)");
+    expect(alert).toHaveTextContent("Reload the page to see the current version");
     fireEvent.click(screen.getByRole("button", { name: "Save dashboard" }));
     expect(await screen.findByText("MTD, QTD, YTD or TRAILING_12M")).toBeInTheDocument();
   });

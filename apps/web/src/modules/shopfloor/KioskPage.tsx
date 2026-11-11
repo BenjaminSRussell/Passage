@@ -1,3 +1,4 @@
+import { ProblemMessage } from "../../shell/errors";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { badgeLogin, describeProblem, newKey, type KioskSession, type Problem, type RegistrationInput } from "./api/client";
@@ -111,7 +112,7 @@ export function KioskPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title={session ? "The punch was not recorded" : "Could not sign in"} live="alert">
-          {failure.message} ({failure.code}){session ? " Press the button again to retry the same punch." : ""}
+          <ProblemMessage problem={failure} />{session ? " Press the button again to retry the same punch." : ""}
         </Alert>
       ) : null}
       <div className={`${styles.kiosk} ${styles.stack}`}>

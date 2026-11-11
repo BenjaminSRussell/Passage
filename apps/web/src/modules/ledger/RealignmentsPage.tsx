@@ -51,7 +51,7 @@ export function RealignmentsPage() {
       />
       <LedgerPicker id="ra-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its realignment runs.</p>
+        <p className={styles.note}>Choose a ledger to see its realignment runs.</p>
       ) : result.isError ? (
         <Alert tone="danger" title="Could not load the realignment runs" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
           {errorText(result.error)}

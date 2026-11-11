@@ -195,58 +195,14 @@ func (s *Postgres) GetParty(ctx context.Context, requestedID string) (domain.Par
 }
 
 func (s *Postgres) UpdateParty(ctx context.Context, requestedID string, version int, patch PartyPatch) (domain.Party, error) {
-	caller, _ := tenant.FromContext(ctx)
 	id, err := canonicalID(requestedID)
 	if err != nil {
 		return domain.Party{}, err
 	}
 	var party domain.Party
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		cur, err := scanParty(tx.QueryRow(ctx, `select `+partyColumns+` from party where tenant_id = $1 and id = $2 for update`, caller.TenantID, id))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		party = cur
-		if cur.Status == domain.StatusMerged {
-			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeStatusTransition, "a merged party cannot be changed")
-		}
-		if patch.PartyType != nil && *patch.PartyType != cur.PartyType {
-			return invalid(map[string]string{"partyType": "cannot be changed"})
-		}
-		if patch.Status != nil && *patch.Status != cur.Status && !domain.CheckTransition(cur.Status, *patch.Status) {
-			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeStatusTransition, "status can only move between active and inactive")
-		}
-		if cur.Version != version {
-			return httpx.NewProblem(http.StatusConflict, CodeVersionConflict, "party was changed by another request")
-		}
-		if errs := domain.ValidateParty(cur.PartyType, patch.Fields, false); len(errs) > 0 {
-			return invalid(errs)
-		}
-		changed := domain.ApplyPatch(&cur, patch.Fields)
-		if errs := domain.ValidateParty(cur.PartyType, cur.PartyFields, true); len(errs) > 0 {
-			return invalid(errs)
-		}
-		if patch.Status != nil && *patch.Status != cur.Status {
-			cur.Status = *patch.Status
-			changed = append(changed, "status")
-		}
-		if len(changed) == 0 {
-			return nil
-		}
-		cur.Name = domain.DisplayName(cur.PartyType, cur.PartyFields)
-		cur.SearchName = domain.Normalize(cur.Name)
-		args := append([]any{caller.TenantID, id, cur.Status}, attributes(cur)...)
-		if party, err = scanParty(tx.QueryRow(ctx, updatePartySQL, args...)); err != nil {
-			return err
-		}
-		sort.Strings(changed)
-		if err := enqueue(ctx, tx, caller.TenantID, party.ID, partyevents.PartyUpdated, partyevents.PartyUpdatedData{
-			PartyID: party.ID, PartyNumber: party.PartyNumber, PartyType: party.PartyType, Name: party.Name, Status: party.Status,
-			ChangedFields: domain.PublicFields(changed), Version: party.Version,
-		}); err != nil {
+		var err error
+		if party, _, err = updatePartyTx(ctx, tx, id, version, patch); err != nil {
 			return err
 		}
 		if s.beforeCommit != nil {
@@ -255,4 +211,59 @@ func (s *Postgres) UpdateParty(ctx context.Context, requestedID string, version 
 		return nil
 	})
 	return party, err
+}
+
+// updatePartyTx applies a patch to a party inside the caller's tenant transaction and enqueues party.updated.v1. A version below
+// zero skips the version check (the profile change a buyer approved is applied to whatever the party is now). It returns the
+// party and the names of the fields that changed; nothing is written for a no-op.
+func updatePartyTx(ctx context.Context, tx pgx.Tx, id string, version int, patch PartyPatch) (domain.Party, []string, error) {
+	caller, _ := tenant.FromContext(ctx)
+	cur, err := scanParty(tx.QueryRow(ctx, `select `+partyColumns+` from party where tenant_id = $1 and id = $2 for update`, caller.TenantID, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Party{}, nil, ErrNotFound
+	}
+	if err != nil {
+		return domain.Party{}, nil, err
+	}
+	party := cur
+	if cur.Status == domain.StatusMerged {
+		return party, nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeStatusTransition, "a merged party cannot be changed")
+	}
+	if patch.PartyType != nil && *patch.PartyType != cur.PartyType {
+		return party, nil, invalid(map[string]string{"partyType": "cannot be changed"})
+	}
+	if patch.Status != nil && *patch.Status != cur.Status && !domain.CheckTransition(cur.Status, *patch.Status) {
+		return party, nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeStatusTransition, "status can only move between active and inactive")
+	}
+	if version >= 0 && cur.Version != version {
+		return party, nil, httpx.NewProblem(http.StatusConflict, CodeVersionConflict, "party was changed by another request")
+	}
+	if errs := domain.ValidateParty(cur.PartyType, patch.Fields, false); len(errs) > 0 {
+		return party, nil, invalid(errs)
+	}
+	changed := domain.ApplyPatch(&cur, patch.Fields)
+	if errs := domain.ValidateParty(cur.PartyType, cur.PartyFields, true); len(errs) > 0 {
+		return party, nil, invalid(errs)
+	}
+	if patch.Status != nil && *patch.Status != cur.Status {
+		cur.Status = *patch.Status
+		changed = append(changed, "status")
+	}
+	if len(changed) == 0 {
+		return party, nil, nil
+	}
+	cur.Name = domain.DisplayName(cur.PartyType, cur.PartyFields)
+	cur.SearchName = domain.Normalize(cur.Name)
+	args := append([]any{caller.TenantID, id, cur.Status}, attributes(cur)...)
+	if party, err = scanParty(tx.QueryRow(ctx, updatePartySQL, args...)); err != nil {
+		return party, nil, err
+	}
+	sort.Strings(changed)
+	if err := enqueue(ctx, tx, caller.TenantID, party.ID, partyevents.PartyUpdated, partyevents.PartyUpdatedData{
+		PartyID: party.ID, PartyNumber: party.PartyNumber, PartyType: party.PartyType, Name: party.Name, Status: party.Status,
+		ChangedFields: domain.PublicFields(changed), Version: party.Version,
+	}); err != nil {
+		return party, nil, err
+	}
+	return party, changed, nil
 }

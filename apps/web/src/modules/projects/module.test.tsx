@@ -282,7 +282,7 @@ describe("new project", () => {
     handler = (_url, init) => (init.method === "POST" ? { status: 201, body: project({ id: "ES-3000", stage: "CREATED", version: 1 }) } : { status: 200, body: project({ id: "ES-3000", stage: "CREATED", version: 1 }) });
     const { container } = renderAt("/projects/new");
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.change(screen.getByLabelText("Project id"), { target: { value: "es-3000" } });
+    fireEvent.change(screen.getByLabelText("Project code"), { target: { value: "es-3000" } });
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Project group"), { target: { value: "ENG" } });
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: CUSTOMER } });
@@ -310,7 +310,7 @@ describe("new project", () => {
     expect(screen.getByRole("heading", { name: "New sub-project" })).toBeInTheDocument();
     expect(screen.getByLabelText("Parent project")).toHaveValue("ES-1001");
     expect(screen.getByLabelText("Legal entity")).toHaveValue(LE);
-    fireEvent.change(screen.getByLabelText("Project id"), { target: { value: "ES-1001-02" } });
+    fireEvent.change(screen.getByLabelText("Project code"), { target: { value: "ES-1001-02" } });
     fireEvent.change(screen.getByLabelText("Customer"), { target: { value: "33333333-0000-4000-8000-000000000003" } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByText("The sub-project conflicts with its parent")).toBeInTheDocument();
@@ -321,7 +321,7 @@ describe("new project", () => {
   it("puts server field errors next to their fields", async () => {
     handler = () => problem(400, "COM-0001", "request failed validation", { currency: "must be an ISO 4217 alpha-3 code in capitals" });
     renderAt("/projects/new");
-    fireEvent.change(screen.getByLabelText("Project id"), { target: { value: "ES-4000" } });
+    fireEvent.change(screen.getByLabelText("Project code"), { target: { value: "ES-4000" } });
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Project group"), { target: { value: "ENG" } });
     fireEvent.change(screen.getByLabelText("Project type"), { target: { value: "INTERNAL" } });

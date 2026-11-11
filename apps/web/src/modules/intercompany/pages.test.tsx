@@ -109,7 +109,7 @@ const ac404Legs = [
 ];
 
 describe("intercompany journal page", () => {
-  it("previews AC-40.4 and shows both entities' legs under one pair id", async () => {
+  it("previews AC-40.4 and shows both entities' legs as one linked pair", async () => {
     handler = (url) =>
       url.pathname === "/api/v1/interco/journals:preview"
         ? { status: 200, body: { pairId: "01890a5d-ac96-774b-bcce-b302099a8058", balanced: true, legs: ac404Legs } }
@@ -130,7 +130,7 @@ describe("intercompany journal page", () => {
       offsetAccount: "1000-CASH",
       matrix: [{ entityA: "A", entityB: "B", dueFrom: "1500-DUE-FROM-B", dueTo: "2500-DUE-TO-A" }],
     });
-    expect(screen.getByText("Balanced in each entity").parentElement).toHaveTextContent("01890a5d-ac96-774b-bcce-b302099a8058");
+    expect(screen.getByText("Balanced in each entity").parentElement).toHaveTextContent("one linked pair in A and B");
     const dueFrom = within(table).getByRole("row", { name: /1500-DUE-FROM-B/ });
     expect(within(dueFrom).getAllByRole("cell").map((c) => c.textContent)).toEqual(["A", "1500-DUE-FROM-B", "—", "1000.00", "USD"]);
     const dueTo = within(table).getByRole("row", { name: /2500-DUE-TO-A/ });

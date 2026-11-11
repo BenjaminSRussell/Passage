@@ -63,9 +63,9 @@ describe("VerificationsPage", () => {
     server.handler = (url) => (url.pathname === "/api/v1/reporting/balance-verifications" ? json(200, { items: [] }) : undefined);
     renderAt("/finreport/verifications");
     await screen.findByText("No ledger has been checked yet");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: "ledger-1" } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: "ledger-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Check ledger" }));
-    expect(await screen.findByText(/Enter the ledger id as a UUID/)).toBeInTheDocument();
+    expect(await screen.findByText(/Choose the ledger/)).toBeInTheDocument();
     expect(server.calls.filter((c) => c.method === "POST")).toHaveLength(0);
   });
 
@@ -78,7 +78,7 @@ describe("VerificationsPage", () => {
     };
     renderAt("/finreport/verifications");
     await screen.findByText("No ledger has been checked yet");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: ` ${LEDGER.toUpperCase()} ` } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: ` ${LEDGER.toUpperCase()} ` } });
     fireEvent.click(screen.getByRole("button", { name: "Check ledger" }));
     expect(await screen.findByRole("heading", { name: "Ledger check" })).toBeInTheDocument();
     const post = server.calls.find((c) => c.method === "POST");
@@ -96,7 +96,7 @@ describe("VerificationsPage", () => {
     };
     renderAt("/finreport/verifications");
     await screen.findByText("No ledger has been checked yet");
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.click(screen.getByRole("button", { name: "Check ledger" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("REPORT-0036");

@@ -196,7 +196,7 @@ export function KioskJobs({ workerId, homeResourceId = null, openJobs, onOpenJob
       ) : null}
       {failure ? (
         <Alert tone="danger" title="The job action was not recorded" live="alert">
-          {failure.message} ({failure.code}) Press the button again to retry the same action.
+          <ProblemMessage problem={failure} /> Press the button again to retry the same action.
         </Alert>
       ) : null}
       <Card title={bundled ? "Current bundle" : "Current job"}>

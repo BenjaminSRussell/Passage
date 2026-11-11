@@ -7,6 +7,7 @@ import { parseDimensionFilter } from "./BatchLinesEditor";
 import { ExportButton } from "./ExportButton";
 import { UUID } from "./pages";
 import styles from "./pages.module.css";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 /** Lines per request; the API allows up to 1,000. */
 export const LINES_PAGE_SIZE = 100;
@@ -50,7 +51,7 @@ function draftFrom(params: URLSearchParams): Draft {
 /** Field errors of a draft; empty when it can be sent. */
 export function validateLineFilter(d: Draft): Partial<Record<keyof Draft, string>> {
   const e: Partial<Record<keyof Draft, string>> = {};
-  if (!UUID.test(d.ledgerId.trim())) e.ledgerId = "Enter the ledger id as a UUID.";
+  if (!UUID.test(d.ledgerId.trim())) e.ledgerId = "Choose the ledger.";
   if (d.accountFrom && !ACCOUNT.test(d.accountFrom)) e.accountFrom = "Up to 20 letters, digits, dots, underscores or dashes.";
   if (d.accountTo && !ACCOUNT.test(d.accountTo)) e.accountTo = "Up to 20 letters, digits, dots, underscores or dashes.";
   if (d.dateFrom && !DATE.test(d.dateFrom)) e.dateFrom = "Dates use the form YYYY-MM-DD.";
@@ -171,7 +172,7 @@ export function LedgerLinesPage() {
       <PageHeader title="Ledger transactions" description="Posted journal lines in posting order. Open a line to see its entry, source document and trace." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Ledger transaction filters">
-          {field("ledgerId", "lq-ledger", "Ledger id", { mono: true })}
+          <LookupFormField id="lq-ledger" label="Ledger" entity="ledger" value={draft.ledgerId} error={errors.ledgerId} onChange={(id) => set("ledgerId", id)} />
           {field("accountFrom", "lq-account-from", "Account from", { optional: true, placeholder: "6000" })}
           {field("accountTo", "lq-account-to", "Account to", { optional: true, placeholder: "6999" })}
           {field("dateFrom", "lq-date-from", "Posting date from", { optional: true, placeholder: "2026-01-01" })}
@@ -186,7 +187,7 @@ export function LedgerLinesPage() {
         </form>
       </Card>
       {query === null ? (
-        <p className={styles.note}>Enter a ledger id to list its posted lines.</p>
+        <p className={styles.note}>Choose a ledger to list its posted lines.</p>
       ) : result.isError && rows.length === 0 ? (
         <Alert tone="danger" title="Could not load the ledger lines" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
           {errorText(result.error)}

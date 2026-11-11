@@ -17,7 +17,7 @@ import { addDays, browserZone, daysBetween, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { dayColumns } from "./dayColumns";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 /** One pay:approve call: a worker's contiguous ready days, with no flagged day inside. */
 export interface ApprovalRun {
@@ -199,7 +199,7 @@ export function TimeApprovalPage() {
           <FormField
             id="approval-worker"
             label="Worker"
-            hint={workers.error ? `Workers could not be loaded: ${workers.error.message} (${workers.error.code})` : undefined}
+            hint={workers.error ? `Workers could not be loaded. ${problemSummary(workers.error)}` : undefined}
             error={workerError ?? undefined}
           >
             {(control) => (

@@ -29,6 +29,13 @@ receivables:
 # (POST /v1/payables/opening-batches); empty and the AP load answers 503 MIG-1550. It uses the same signing key.
 payables:
   url: ""
+# inventory.url and treasury.url are the service base addresses the staged opening stock (onhand pack,
+# POST /v1/inventory/opening-batches) and opening bank balances (bank_balances pack, POST /v1/treasury/opening-balances)
+# are loaded into; empty and the opening load answers 503 MIG-1560. They use the same signing key.
+inventory:
+  url: ""
+treasury:
+  url: ""
 signing:
   secretName: ""
   secretKey: PASSAGE_SERVICE_SIGNING_KEY

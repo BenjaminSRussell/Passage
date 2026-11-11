@@ -2,11 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { KillSwitchRegistry } from "../domain/killswitch.js";
 import { type ApprovalStore, handleApprovalDecision } from "./decision.js";
 import { handleKillSwitchCommand, type KillSwitchVersionSource, type Publish, readKillSwitchStatus } from "./killswitch.js";
-import type { CopilotService } from "../runtime/copilot.js";
+import { COPILOT_DUTY, type CopilotService } from "../runtime/copilot.js";
+import { parseChunks, parseSearch, type KnowledgeService } from "../runtime/knowledge.js";
 import type { RunService } from "../runtime/service.js";
 import { handleChat } from "./copilot.js";
 import type { Authenticate } from "./auth.js";
-import { ApiError, toApiError } from "./principal.js";
+import { ApiError, requireDuty, toApiError } from "./principal.js";
 import { bearerToken, handleGetRun, handleListActions, handleStartRun } from "./runs.js";
 
 /** 64 KiB is far above any control payload in this API. */
@@ -23,6 +24,8 @@ export interface AgentsApiDeps {
   runs?: RunService;
   /** The copilot chat endpoint. */
   copilot?: CopilotService;
+  /** The knowledge index and its hybrid search; absent and the knowledge routes answer 404. */
+  knowledge?: KnowledgeService;
   now?: () => Date;
 }
 
@@ -32,6 +35,8 @@ const START_PATH = /^\/api\/v1\/agents\/([a-z][a-z0-9_]{0,63})\/runs$/;
 const RUN_PATH = new RegExp(`^/api/v1/agents/runs/(${UUID})$`);
 const ACTIONS_PATH = new RegExp(`^/api/v1/agents/runs/(${UUID})/actions$`);
 const CHAT_PATH = "/api/v1/copilot/chat";
+const KNOWLEDGE_CHUNKS_PATH = "/api/v1/knowledge/chunks";
+const KNOWLEDGE_SEARCH_PATH = "/api/v1/knowledge/search";
 const DECISION_PATH = new RegExp(`^/api/v1/agents/runs/(${UUID})/actions/(${UUID})/decision$`);
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -136,6 +141,20 @@ export function createAgentsHandler(deps: AgentsApiDeps): (req: IncomingMessage,
         if (req.method !== "POST") throw new MethodNotAllowed("POST");
         const principal = await deps.authenticate(req.headers);
         await handleChat({ principal, token: bearerToken(req.headers), body: await readBody(req), accept: String(req.headers["accept"] ?? ""), copilot: deps.copilot, res });
+        return;
+      }
+      if (path === KNOWLEDGE_CHUNKS_PATH || path === KNOWLEDGE_SEARCH_PATH) {
+        if (deps.knowledge === undefined) throw new ApiError(404, "AGT-0404", "no such route");
+        if (req.method !== "POST") throw new MethodNotAllowed("POST");
+        const principal = await deps.authenticate(req.headers);
+        if (path === KNOWLEDGE_CHUNKS_PATH) {
+          requireDuty(principal, "knowledge.write", "the knowledge index");
+          send(res, 200, await deps.knowledge.index(principal.tenantId, parseChunks(await readBody(req))));
+        } else {
+          requireDuty(principal, COPILOT_DUTY, "the knowledge search");
+          const q = parseSearch(await readBody(req));
+          send(res, 200, await deps.knowledge.search(principal.tenantId, q.query, q.limit));
+        }
         return;
       }
       const start = START_PATH.exec(path);

@@ -596,3 +596,48 @@ describe("ListPage accessibility", () => {
     expect(screen.getByRole("group", { name: "List tools" })).toBeInTheDocument();
   });
 });
+
+describe("ListPage search box", () => {
+  const search = (row: Row) => ({ number: row.number, name: row.status });
+
+  it("offers no search box unless the page says what a row is searched by", () => {
+    renderList();
+    expect(screen.queryByRole("searchbox", { name: "Search invoices" })).toBeNull();
+  });
+
+  it("finds a number by its start and a name by what it holds, the way the record search does", async () => {
+    const user = userEvent.setup();
+    renderList(memory(), { search });
+    const box = screen.getByRole("searchbox", { name: "Search invoices" });
+    await user.type(box, "INV-1");
+    expect(bodyNumbers()).toEqual(["INV-10"]);
+    await user.clear(box);
+    await user.type(box, "paid");
+    expect(bodyNumbers()).toEqual(["INV-9"]);
+    await user.clear(box);
+    expect(bodyNumbers()).toEqual(["INV-10", "INV-9", "=EVIL()"]);
+  });
+
+  it("says so when nothing matches, and clears the search from the empty state", async () => {
+    const user = userEvent.setup();
+    renderList(memory(), { search });
+    await user.type(screen.getByRole("searchbox", { name: "Search invoices" }), "INV-77");
+    expect(screen.getByRole("heading", { name: "No invoices match this search" })).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Clear search" })[0]);
+    expect(bodyNumbers()).toEqual(["INV-10", "INV-9", "=EVIL()"]);
+  });
+
+  it("says the search covers the rows loaded so far when more are available", async () => {
+    const user = userEvent.setup();
+    source = { hasMore: true };
+    renderList(memory(), { search });
+    await user.type(screen.getByRole("searchbox", { name: "Search invoices" }), "INV-1");
+    expect(screen.getByText(/Searching the 3 rows loaded so far/)).toBeInTheDocument();
+  });
+
+  it("has no accessibility violations with the search box", () => {
+    const { container } = renderList(memory(), { search });
+    expect(pageViolations(container)).toEqual([]);
+  });
+});
+
