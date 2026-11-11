@@ -41,6 +41,7 @@
     "modules/receivables/Disputes.tsx",
     "modules/receivables/DownPayments.tsx",
     "modules/receivables/Dunning.tsx",
+    "modules/receivables/GLJournals.tsx",
     "modules/receivables/Lockbox.tsx",
     "modules/receivables/Statements.tsx",
     "modules/sales/AgreementsPage.tsx",
