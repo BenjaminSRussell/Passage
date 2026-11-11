@@ -2746,11 +2746,12 @@ test_agent_run_duties_open_only_their_routes if {
 	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
 }
 
-# #548/#552: any role can resolve user ids to display names without holding the user-maintenance duty.
+# #548/#552: any role can resolve user ids to display names without holding the user-maintenance duty, and user administrators can too.
 test_user_name_lookup if {
 	allowed("identity.user-name.read", "GET", "/v1/identity/user-names")
 	not allowed("identity.user-name.read", "GET", "/v1/identity/users")
 	not allowed("identity.user-name.read", "GET", "/v1/identity/users/u1")
 	not allowed("identity.user-name.read", "POST", "/v1/identity/user-names")
-	not allowed("identity.user.maintain", "GET", "/v1/identity/user-names")
+	allowed("identity.user.maintain", "GET", "/v1/identity/user-names")
+	not allowed("identity.user.maintain", "POST", "/v1/identity/user-names")
 }
