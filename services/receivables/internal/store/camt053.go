@@ -122,6 +122,9 @@ func insertCAMTPayment(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID s
 	if err != nil {
 		return Payment{}, false, err
 	}
+	if saved, err = confirmAdvised(ctx, tx, saved); err != nil {
+		return Payment{}, false, err
+	}
 	if err := receiptJournal(ctx, tx, tenantID, saved); err != nil {
 		return Payment{}, false, err
 	}

@@ -212,6 +212,7 @@ type Store interface {
 	ListRMACredits(ctx context.Context, f RMACreditFilter) ([]RMACreditView, error)
 	SweepRMACredits(ctx context.Context, now time.Time, limit int) (RMASweepResult, error)
 	ApplyRemittanceAdvice(ctx context.Context, legalEntityID string, lines []domain.AdviceLine) (AdviceResult, error)
+	ApplyRemittanceAdviceWith(ctx context.Context, legalEntityID string, lines []domain.AdviceLine, opts AdviceOptions) (AdviceResult, error)
 	AutoApplyPayments(ctx context.Context, paymentIDs []string) (AutoApplyResult, error)
 	SettleCredit(ctx context.Context, req CreditSettlementRequest, idempotencyKey string) (CreditSettlementResult, error)
 	ListGLJournals(ctx context.Context, f GLJournalFilter) ([]GLJournalView, error)
@@ -445,6 +446,9 @@ func (s *Postgres) CreatePayment(ctx context.Context, in Payment, idempotencyKey
 			in.Currency, in.ReceivedDate, in.ValueDate, in.PayerName, remittance, idempotencyKey, in.PayerAccountHash, in.ShortPayReason)
 		out, err = scanPayment(row)
 		if err != nil {
+			return err
+		}
+		if out, err = confirmAdvised(ctx, tx, out); err != nil {
 			return err
 		}
 		if err := receiptJournal(ctx, tx, p.TenantID, out); err != nil {

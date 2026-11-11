@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 )
@@ -22,7 +23,20 @@ const (
 	AdviceAmbiguous = "AMBIGUOUS"
 	AdviceApplied   = "ALREADY_APPLIED"
 	AdviceInvalid   = "INVALID"
+	// AdviceAdvised is a line with no payment to attach to, for which a payment in status ADVISED was recorded (CreateMissing).
+	AdviceAdvised = "ADVISED"
 )
+
+// AdviceOptions says what to do with an advice line that names no payment (30-4). With CreateMissing a payment in status
+// ADVISED is recorded for it: the payer's advice came before the bank credit. It books no cash, cannot be matched or applied
+// and is on no statement until the bank credit arrives (confirmAdvised). Currency is required then; ValueDate defaults to
+// today and PaymentMode to WIRE.
+type AdviceOptions struct {
+	CreateMissing bool
+	Currency      string
+	ValueDate     string
+	PaymentMode   string
+}
 
 // AdviceLineResult is what became of one advice line: the payment it was attached to, or why it was not.
 type AdviceLineResult struct {
@@ -36,7 +50,9 @@ type AdviceLineResult struct {
 type AdviceResult struct {
 	Lines    []AdviceLineResult `json:"lines"`
 	Attached int                `json:"attached"`
-	Skipped  int                `json:"skipped"`
+	// Created counts the payments recorded as ADVISED for lines with no bank credit (CreateMissing).
+	Created int `json:"created"`
+	Skipped int `json:"skipped"`
 	// PaymentIDs are the payments that got an advice, in file order, for the auto-application that follows.
 	PaymentIDs []string `json:"-"`
 }
@@ -48,13 +64,18 @@ type AdviceResult struct {
 // payment is refused for that line, and a reference shared by several payments is ambiguous. The matcher then reads the
 // references as R1 (document number in the remittance); applying is a separate step (AutoApplyPayments or the clerk).
 func (s *Postgres) ApplyRemittanceAdvice(ctx context.Context, legalEntityID string, lines []domain.AdviceLine) (AdviceResult, error) {
+	return s.ApplyRemittanceAdviceWith(ctx, legalEntityID, lines, AdviceOptions{})
+}
+
+// ApplyRemittanceAdviceWith is ApplyRemittanceAdvice with options for the lines that name no payment.
+func (s *Postgres) ApplyRemittanceAdviceWith(ctx context.Context, legalEntityID string, lines []domain.AdviceLine, opts AdviceOptions) (AdviceResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := AdviceResult{Lines: make([]AdviceLineResult, 0, len(lines))}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		for _, l := range lines {
 			res := AdviceLineResult{PaymentRef: l.PaymentRef}
 			rows, err := tx.Query(ctx, `select id::text, status, amount::text from payment
-				where legal_entity_id = $1 and (source_ref = $2 or source_ref like '%:' || $3) and status <> 'REVERSED' for update`,
+				where legal_entity_id = $1 and (source_ref = $2 or source_ref like '%:' || $3) and status not in ('REVERSED', 'CONFIRMED') for update`,
 				legalEntityID, l.PaymentRef, likeEscaper.Replace(l.PaymentRef))
 			if err != nil {
 				return err
@@ -78,6 +99,18 @@ func (s *Postgres) ApplyRemittanceAdvice(ctx context.Context, legalEntityID stri
 				total = total.Add(r.Amount)
 			}
 			switch {
+			case len(hits) == 0 && opts.CreateMissing && total.IsPositive():
+				id, created, err := insertAdvisedPayment(ctx, tx, p.TenantID, legalEntityID, l, total, opts)
+				if err != nil {
+					return err
+				}
+				if !created {
+					res.Outcome, res.Detail = AdviceInvalid, "another legal entity already holds a payment with this reference"
+					break
+				}
+				res.Outcome, res.PaymentID = AdviceAdvised, id
+				res.Detail = "no bank credit carries this reference yet; the payment is recorded as advised and books no cash until it does"
+				out.Created++
 			case len(hits) == 0:
 				res.Outcome, res.Detail = AdviceUnmatched, "no payment carries this reference"
 			case len(hits) > 1:
@@ -189,4 +222,77 @@ func (s *Postgres) autoApplyPlan(ctx context.Context, pay Payment, c domain.Cand
 	}
 	req.Residual = left
 	return req, nil
+}
+
+// insertAdvisedPayment records the ADVISED payment of an advice line: the references the payer listed, their total as the
+// amount, source REMITTANCE and the advice's payment reference as the source reference. It posts no journal and emits no
+// event, because no money has reached the bank. created is false when another legal entity holds the reference.
+func insertAdvisedPayment(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, l domain.AdviceLine, total decimal.Decimal, opts AdviceOptions) (string, bool, error) {
+	mode := opts.PaymentMode
+	if mode == "" {
+		mode = "WIRE"
+	}
+	day := opts.ValueDate
+	if day == "" {
+		day = today()
+	}
+	raw, err := json.Marshal(l.References)
+	if err != nil {
+		return "", false, err
+	}
+	id := ids.New()
+	tag, err := tx.Exec(ctx, `insert into payment (tenant_id, id, legal_entity_id, customer_id, payment_mode, source, source_ref,
+		amount, unapplied_amount, currency, received_date, value_date, payer_name, remittance, status, idempotency_key)
+		values ($1, $2, $3, null, $4, 'REMITTANCE', $5, $6, $6, $7, $8::date, $8::date, null, $9, 'ADVISED', $10)
+		on conflict (tenant_id, source, source_ref) do nothing`,
+		tenantID, id, legalEntityID, mode, l.PaymentRef, total.String(), opts.Currency, day, raw, "advice:"+legalEntityID+":"+l.PaymentRef)
+	if err != nil {
+		return "", false, err
+	}
+	return id, tag.RowsAffected() == 1, nil
+}
+
+// confirmAdvised is the bank credit arriving for an advised payment (30-4): inside the transaction that recorded bank, when
+// exactly one ADVISED payment of the same legal entity, currency and amount carries its reference (equal to the bank payment's
+// source reference or to its last colon-separated part, as a statement entry reference is), that payment becomes CONFIRMED,
+// pointing at bank, and bank takes the advice's references when it has none of its own. It returns bank as stored. A different
+// amount or several candidates change nothing: the advice stays for a person to settle.
+func confirmAdvised(ctx context.Context, tx pgx.Tx, bank Payment) (Payment, error) {
+	if bank.SourceRef == nil || bank.Source == "REMITTANCE" {
+		return bank, nil
+	}
+	rows, err := tx.Query(ctx, `select id::text, remittance from payment
+		where legal_entity_id = $1 and source = 'REMITTANCE' and status = 'ADVISED' and currency = $2 and amount = $3::numeric
+		  and ($4 = source_ref or right($4, length(source_ref) + 1) = ':' || source_ref) for update`,
+		bank.LegalEntityID, bank.Currency, bank.Amount.String(), *bank.SourceRef)
+	if err != nil {
+		return bank, err
+	}
+	type advised struct {
+		id  string
+		raw []byte
+	}
+	var found []advised
+	for rows.Next() {
+		var a advised
+		if err := rows.Scan(&a.id, &a.raw); err != nil {
+			rows.Close()
+			return bank, err
+		}
+		found = append(found, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return bank, err
+	}
+	if len(found) != 1 {
+		return bank, nil
+	}
+	if _, err := tx.Exec(ctx, `update payment set status = 'CONFIRMED', confirmed_by_payment_id = $2::uuid, version = version + 1 where id = $1::uuid`, found[0].id, bank.ID); err != nil {
+		return bank, err
+	}
+	if len(bank.Remittance) > 0 {
+		return bank, nil
+	}
+	return scanPayment(tx.QueryRow(ctx, `update payment set remittance = $2, version = version + 1 where id = $1::uuid returning `+paymentColumns, bank.ID, found[0].raw))
 }

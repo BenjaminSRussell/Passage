@@ -22,18 +22,19 @@ import (
 // fakeStore answers the Store port without a database. It records the last
 // apply call so tests can assert what the handler forwarded.
 type fakeStore struct {
-	lastVersion int
-	lastPlan    store.ApplyRequest
-	lastKey     string
-	lastFilter  store.PaymentFilter
-	payment     store.Payment
-	lockbox     store.LockboxImport
-	seenFiles   map[string]bool
-	statement   statementCall
-	snapshots   store.SnapshotFilter
-	opening     store.OpeningImport
-	rmaRetries  []string
-	rmaFilter   store.RMACreditFilter
+	lastVersion   int
+	lastPlan      store.ApplyRequest
+	lastKey       string
+	lastFilter    store.PaymentFilter
+	payment       store.Payment
+	lockbox       store.LockboxImport
+	adviceOptions store.AdviceOptions
+	seenFiles     map[string]bool
+	statement     statementCall
+	snapshots     store.SnapshotFilter
+	opening       store.OpeningImport
+	rmaRetries    []string
+	rmaFilter     store.RMACreditFilter
 }
 
 func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenItem, error) {
@@ -98,6 +99,11 @@ func (f *fakeStore) ListRMACredits(_ context.Context, rf store.RMACreditFilter) 
 }
 func (f *fakeStore) SweepRMACredits(context.Context, time.Time, int) (store.RMASweepResult, error) {
 	return store.RMASweepResult{Posted: 1}, nil
+}
+
+func (f *fakeStore) ApplyRemittanceAdviceWith(_ context.Context, le string, lines []domain.AdviceLine, opts store.AdviceOptions) (store.AdviceResult, error) {
+	f.adviceOptions = opts
+	return f.ApplyRemittanceAdvice(context.Background(), le, lines)
 }
 
 func (f *fakeStore) ApplyRemittanceAdvice(context.Context, string, []domain.AdviceLine) (store.AdviceResult, error) {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -132,4 +133,93 @@ func TestAutoApplyDue_AppliesSurePaymentsAndRotatesTheRest(t *testing.T) {
 	if entities, _ := s.AutoApplyLegalEntities(ctx); len(entities) != 1 {
 		t.Errorf("the legal entity with a payment left over vanished from the list: %v", entities)
 	}
+}
+
+// 30-4: an advice with no bank credit records an ADVISED payment that books no cash and cannot be applied; the bank credit that
+// arrives later (here a camt.053-style reference) confirms it, takes the advice's references and is the payment that is applied.
+func TestAdvisedPayment_BooksNoCashAndTheBankCreditConfirmsIt(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx)
+	lines := []domain.AdviceLine{{PaymentRef: "WIRE-5521", References: []domain.RemittanceLine{{Reference: "INV-30001", Amount: amt("1000.00")}}}}
+
+	none, err := s.ApplyRemittanceAdviceWith(ctx, legalEntity, lines, AdviceOptions{})
+	if err != nil || none.Created != 0 || none.Lines[0].Outcome != AdviceUnmatched {
+		t.Fatalf("without createMissing: %+v %v", none, err)
+	}
+	res, err := s.ApplyRemittanceAdviceWith(ctx, legalEntity, lines, AdviceOptions{CreateMissing: true, Currency: "USD", ValueDate: "2027-03-18"})
+	if err != nil || res.Created != 1 || res.Lines[0].Outcome != AdviceAdvised || res.Lines[0].PaymentID == "" {
+		t.Fatalf("createMissing: %+v %v", res, err)
+	}
+	advised, err := s.GetPayment(ctx, res.Lines[0].PaymentID)
+	if err != nil || advised.Status != "ADVISED" || advised.Source != "REMITTANCE" || !advised.Amount.Equal(amt("1000.00")) || advised.ValueDate != "2027-03-18" {
+		t.Fatalf("advised payment: %+v %v", advised, err)
+	}
+	// A repeat of the advice finds it instead of recording a second one; it books no journal, cannot be applied, and is not auto-applied.
+	if again, err := s.ApplyRemittanceAdviceWith(ctx, legalEntity, lines, AdviceOptions{CreateMissing: true, Currency: "USD"}); err != nil || again.Created != 0 || again.Attached != 1 {
+		t.Fatalf("repeat: %+v %v", again, err)
+	}
+	if n := journalCount(t, s, ctx, "payment_receipt"); n != 0 {
+		t.Fatalf("an advised payment booked %d receipt journals", n)
+	}
+	if _, err := s.ApplyPayment(ctx, advised.ID, advised.Version+1, ApplyRequest{}, "adv-apply"); err == nil {
+		t.Fatal("an advised payment was applied")
+	}
+	if got, err := s.AutoApplyPayments(ctx, []string{advised.ID}); err != nil || got.Applied != 0 {
+		t.Fatalf("auto-apply of an advised payment: %+v %v", got, err)
+	}
+	// The bank credit arrives with the same reference, currency and amount.
+	bank, err := s.CreatePayment(ctx, Payment{LegalEntityID: legalEntity, PaymentMode: "WIRE", Source: "MANUAL", SourceRef: ptr("WIRE-5521"),
+		Amount: amt("1000.00"), UnappliedAmount: amt("1000.00"), Currency: "USD", ReceivedDate: "2027-03-20", ValueDate: "2027-03-20"}, "adv-bank")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bank.Remittance) != 1 || bank.Remittance[0].Reference != "INV-30001" {
+		t.Fatalf("the bank payment did not take the advice's references: %+v", bank.Remittance)
+	}
+	if was, _ := s.GetPayment(ctx, advised.ID); was.Status != "CONFIRMED" {
+		t.Fatalf("the advised payment is %s, want CONFIRMED", was.Status)
+	}
+	if n := journalCount(t, s, ctx, "payment_receipt"); n != 1 {
+		t.Fatalf("%d receipt journals, want the bank payment's one", n)
+	}
+	if got, err := s.AutoApplyPayments(ctx, []string{bank.ID}); err != nil || got.Applied != 1 {
+		t.Fatalf("auto-apply of the bank payment: %+v %v", got, err)
+	}
+	if it := itemByID(t, s, ctx, item.ID); it.Status != "SETTLED" {
+		t.Fatalf("item %+v", it)
+	}
+	// A confirmed advice is not found by a later advice for the same reference.
+	if late, err := s.ApplyRemittanceAdviceWith(ctx, legalEntity, lines, AdviceOptions{}); err != nil || late.Lines[0].Outcome != AdviceApplied {
+		t.Fatalf("late advice: %+v %v", late, err)
+	}
+}
+
+func TestAdvisedPayment_ADifferentAmountIsNotConfirmed(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	seedInvoice(t, s, ctx)
+	lines := []domain.AdviceLine{{PaymentRef: "WIRE-9", References: []domain.RemittanceLine{{Reference: "INV-30001", Amount: amt("1000.00")}}}}
+	res, err := s.ApplyRemittanceAdviceWith(ctx, legalEntity, lines, AdviceOptions{CreateMissing: true, Currency: "USD"})
+	if err != nil || res.Created != 1 {
+		t.Fatalf("advice: %+v %v", res, err)
+	}
+	if _, err := s.CreatePayment(ctx, Payment{LegalEntityID: legalEntity, PaymentMode: "WIRE", Source: "MANUAL", SourceRef: ptr("WIRE-9"),
+		Amount: amt("999.00"), UnappliedAmount: amt("999.00"), Currency: "USD", ReceivedDate: "2027-03-20", ValueDate: "2027-03-20"}, "adv-short"); err != nil {
+		t.Fatal(err)
+	}
+	if was, _ := s.GetPayment(ctx, res.Lines[0].PaymentID); was.Status != "ADVISED" {
+		t.Fatalf("a short bank payment confirmed the advice: %s", was.Status)
+	}
+}
+
+func journalCount(t *testing.T, s *Postgres, ctx context.Context, sourceType string) int {
+	t.Helper()
+	var n int
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select count(*) from gl_journal where source_type = $1`, sourceType).Scan(&n)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

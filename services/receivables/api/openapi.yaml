@@ -91,7 +91,7 @@ paths:
       summary: Payments, newest received first
       x-passage-duty: receivables.view
       parameters:
-        - { name: status, in: query, schema: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED] } }
+        - { name: status, in: query, schema: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED, ADVISED, CONFIRMED] } }
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
       responses:
@@ -1483,7 +1483,10 @@ paths:
         replaces the payment's remittance, so a repeat changes nothing; a payment already applied, an unknown or shared
         reference, and references that total more than the payment are reported per line and skipped. With `autoApply`
         the payments that got an advice are then matched and applied like an import's. 400 AR-ADVICE-MALFORMED names the
-        row, element or segment.
+        row, element or segment. With `createMissing`, a line that names no payment records one in status ADVISED (the
+        advice came before the bank credit): it books no cash, cannot be matched or applied and is on no statement until
+        a bank payment (statement entry, lockbox check or manual payment) with the same reference, currency and amount
+        arrives; that payment takes the advice's references and the advised one becomes CONFIRMED.
       x-passage-duty: receivables.payment.post
       requestBody:
         required: true
@@ -1498,6 +1501,10 @@ paths:
                 format: { type: string, enum: [CSV, JSON, EDI820] }
                 content: { type: string, minLength: 1, maxLength: 3145728 }
                 autoApply: { type: boolean }
+                createMissing: { type: boolean, description: "Record an ADVISED payment for each line that names no payment. Needs currency." }
+                currency: { type: string, pattern: "^[A-Z]{3}$", description: "Currency of the advised payments; required with createMissing." }
+                valueDate: { type: string, format: date, description: "Value date of the advised payments; defaults to today." }
+                paymentMode: { type: string, enum: [CHECK, ACH, WIRE, CARD, CASH], description: "Defaults to WIRE." }
       responses:
         "200":
           description: Advice processed
@@ -1505,9 +1512,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [lines, attached, skipped]
+                required: [lines, attached, created, skipped]
                 properties:
                   attached: { type: integer }
+                  created: { type: integer, description: "Payments recorded as ADVISED (createMissing)." }
                   skipped: { type: integer }
                   lines:
                     type: array
@@ -1516,7 +1524,7 @@ paths:
                       required: [paymentRef, outcome]
                       properties:
                         paymentRef: { type: string }
-                        outcome: { type: string, enum: [ATTACHED, UNMATCHED, AMBIGUOUS, ALREADY_APPLIED, INVALID] }
+                        outcome: { type: string, enum: [ATTACHED, UNMATCHED, AMBIGUOUS, ALREADY_APPLIED, INVALID, ADVISED] }
                         paymentId: { type: string, format: uuid }
                         detail: { type: string }
                   autoApply: { $ref: "#/components/schemas/AutoApplyResult" }
@@ -2204,7 +2212,7 @@ components:
         remittance:
           type: array
           items: { $ref: "#/components/schemas/RemittanceLine" }
-        status: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED] }
+        status: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED, ADVISED, CONFIRMED] }
         version: { type: integer }
     OpenItem:
       type: object
