@@ -10,7 +10,8 @@ const StatementImported = "dev.passage.treasury.statement.imported.v1"
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{StatementImported, CheckVoided, ReconciliationMatched, ReconciliationUnmatched}
+	return []string{StatementImported, CheckVoided, ReconciliationMatched, ReconciliationUnmatched,
+		CashDeskCreated, CashDeskUpdated, CashDeskDeactivated, CashDeskDayClosed, CashDeskEntryPosted}
 }
 
 // StatementImportedData is the payload of StatementImported. Amounts are decimal strings.

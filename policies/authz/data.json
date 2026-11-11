@@ -3570,7 +3570,15 @@
       {"resource": "/v1/treasury/cash-desks", "methods": ["POST"]},
       {"resource": "/v1/treasury/cash-desks/*/days", "methods": ["POST"]},
       {"resource": "/v1/treasury/cash-desks/*/days/*:close", "methods": ["POST"]},
-      {"resource": "/v1/treasury/cash-desks/*/entries", "methods": ["POST"]}
+      {"resource": "/v1/treasury/cash-desks/*/days/*:post", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/entries", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*", "methods": ["PATCH"]},
+      {"resource": "/v1/treasury/cash-desks/*:activate", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*:deactivate", "methods": ["POST"]}
+    ]},
+    "treasury.cashdesk.approve": {"permissions": [
+      {"resource": "/v1/treasury/cash-desks/*/days/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/days/*:reject", "methods": ["POST"]}
     ]},
     "treasury.statement.import": {"permissions": [
       {"resource": "/v1/treasury/statements/import", "methods": ["POST"]},

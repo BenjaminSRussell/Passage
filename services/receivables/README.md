@@ -16,7 +16,7 @@ with `customerbalance.changed.v1` (§5.30.16, FR-30.10). Everything else in the 
 
 ## What it does now
 
-- **Open items** (`GET /v1/receivables/open-items`): customer and status filters, page limit up to 500.
+- **Open items** (`GET /v1/receivables/open-items`): customer and status filters, a `due_from` and `due_to` window, page limit up to 500 with `cursor` and `nextCursor` (ordered by due date, then id), so the treasury forecast reads every open item of its window.
 - **Aging** (`GET /v1/receivables/aging?asOf=`): totals per currency and bucket (`CURRENT`, `1-30`, `31-60`, `61-90`, `91-180`, `OVER-180`), with due date as the basis.
 - **Payments**: record a manual payment (`POST /payments`, idempotent; optional `payerAccount`, the IBAN or MICR account, of which only the hex SHA-256 of the normalized value is stored as `payerAccountHash`, and `shortPayReason`), list them (`GET /payments?status=&customer=&limit=`), read one (`GET /payments/{id}`, ETag = version), score candidate settlements (`POST /payments/{id}:match`, changes nothing) and apply (`POST /payments/{id}:apply`, requires `If-Match`; an optional `Idempotency-Key` replays the first response).
 - **Apply rules**: settlements plus on-account residual equal the unapplied amount; every item is in the payment's legal entity and currency (no cross-currency settlement yet) and belongs to the payment's customer; an unidentified payment takes the customer of the items it settles; a cash discount needs the value date on or before the discount date and may not exceed the item's discount; write-off tolerance is the larger of 5.00 and 0.5% of the original item amount.
