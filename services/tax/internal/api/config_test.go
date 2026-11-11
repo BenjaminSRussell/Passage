@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/tax/internal/api"
@@ -30,6 +32,8 @@ type fakeConfig struct {
 	putCerts  []domain.Certificate
 	imported  []domain.MasterEntry
 	overwrite bool
+	vat       *domain.VATReturn
+	esl       *domain.ESL
 }
 
 func (f *fakeConfig) ImportMaster(_ context.Context, e []domain.MasterEntry, overwrite bool) (store.ImportResult, error) {
@@ -72,9 +76,15 @@ func (f *fakeConfig) PutMaster(_ context.Context, e domain.MasterEntry) error {
 }
 func (f *fakeConfig) PutEntitySetting(context.Context, store.EntitySetting) error { return f.err }
 func (f *fakeConfig) VATReturn(context.Context, domain.Period) (domain.VATReturn, error) {
+	if f.vat != nil {
+		return *f.vat, f.err
+	}
 	return domain.VATReturn{Boxes: []domain.BoxResult{{Box: "81", Kind: "tax"}}}, f.err
 }
 func (f *fakeConfig) ESL(context.Context, domain.Period) (domain.ESL, error) {
+	if f.esl != nil {
+		return *f.esl, f.err
+	}
 	return domain.ESL{}, f.err
 }
 func (f *fakeConfig) CreateJournal(_ context.Context, flow string, from domain.Date) (store.Journal, error) {
@@ -294,5 +304,55 @@ func TestMasterSeedAndImportRoutes(t *testing.T) {
 	}
 	if rec := post("/v1/tax/intrastat/master:import", `{"overwrite":true,"entries":[{"kind":"commodity","code":"84131100","description":"Pumps"}]}`); rec.Code != http.StatusOK || !fc.overwrite || len(fc.imported) != 1 {
 		t.Errorf("import: %d overwrite %v rows %d", rec.Code, fc.overwrite, len(fc.imported))
+	}
+}
+
+func TestFilingFormatsAndLayoutRoutes(t *testing.T) {
+	zero := decimal.Zero
+	vat := &domain.VATReturn{PeriodFrom: domain.Day("2026-04-01"), PeriodTo: domain.Day("2026-06-30"), Boxes: []domain.BoxResult{
+		{Box: "81", Amount: decimal.RequireFromString("1000.5")}, {Box: "86", Amount: zero}, {Box: "41", Amount: zero},
+		{Box: "61", Amount: zero}, {Box: "66", Amount: decimal.RequireFromString("19")}, {Box: "83", Amount: decimal.RequireFromString("171")}}}
+	esl := &domain.ESL{PeriodFrom: domain.Day("2026-04-01"), PeriodTo: domain.Day("2026-06-30"),
+		Rows: []domain.ESLRow{{Country: "FR", VATID: "FR40303265045", SupplyKind: "goods", Base: decimal.NewFromInt(100)}}}
+	fc := &fakeConfig{vat: vat, esl: esl}
+	r := configRouter(fc)
+	get := func(path, duty string) *httptest.ResponseRecorder {
+		return do(r, http.MethodGet, path, ``, tenantOne, duty)
+	}
+	const period = "?period_from=2026-04-01&period_to=2026-06-30"
+
+	rec := get("/v1/tax/vat-return"+period+"&format=de-ustva-csv", "tax.vatreturn.read")
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/csv") || !strings.Contains(rec.Header().Get("Content-Disposition"), "ustva-2026-04-01_2026-06-30.csv") ||
+		!strings.Contains(rec.Body.String(), "81;1000\n") {
+		t.Errorf("UStVA: %d %v %q", rec.Code, rec.Header(), rec.Body.String())
+	}
+	if rec := get("/v1/tax/vat-return"+period+"&format=gb-mtd-json&period_key=26A2", "tax.vatreturn.read"); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "apply the layout") {
+		t.Errorf("a GB file from a German box set: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := get("/v1/tax/vat-return"+period+"&format=nl-xml", "tax.vatreturn.read"); rec.Code != http.StatusBadRequest {
+		t.Errorf("an unknown format: %d", rec.Code)
+	}
+	if rec := get("/v1/tax/vat-return"+period, "tax.vatreturn.read"); rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+		t.Errorf("no format keeps JSON: %d %v", rec.Code, rec.Header())
+	}
+	if rec := get("/v1/tax/esl"+period+"&format=de-zm-csv", "tax.vatreturn.read"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "FR;40303265045;100;") {
+		t.Errorf("ZM: %d %q", rec.Code, rec.Body.String())
+	}
+	if rec := get("/v1/tax/vat-layouts", "tax.config.read"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"country":"GB"`) {
+		t.Errorf("layouts: %d %s", rec.Code, rec.Body.String())
+	}
+	apply := func(country, body string) int {
+		return do(r, http.MethodPost, "/v1/tax/vat-layouts/"+country+"/apply", body, tenantOne, "tax.config.manage").Code
+	}
+	if code := apply("XX", `{"mapping":{}}`); code != http.StatusBadRequest {
+		t.Errorf("an unknown country: %d", code)
+	}
+	if code := apply("GB", `{"mapping":{"1":[{"code":"UK20","direction":"output"}]}}`); code != http.StatusBadRequest || fc.boxes != nil {
+		t.Errorf("a half-mapped layout: %d, stored %v", code, fc.boxes)
+	}
+	full := `{"mapping":{"1":[{"code":"UK20","direction":"output"}],"2":[{"code":"UK20","direction":"use"}],"4":[{"code":"UK20","direction":"input"}],` +
+		`"6":[{"code":"UK20","direction":"output"}],"7":[{"code":"UK20","direction":"input"}],"8":[{"code":"UK0","direction":"output"}],"9":[{"code":"UK0","direction":"input"}]}}`
+	if code := apply("GB", full); code != http.StatusOK || len(fc.boxes) != 8 {
+		t.Errorf("a full mapping: %d, stored %d boxes", code, len(fc.boxes))
 	}
 }

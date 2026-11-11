@@ -465,12 +465,16 @@ paths:
       parameters:
         - { name: period_from, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
         - { name: period_to, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
+        - { name: format, in: query, required: false, schema: { type: string, enum: [gb-mtd-json, de-ustva-csv] }, description: "Return the figures as a national filing file instead of JSON. Needs the matching layout applied; refused while transactions lack a base amount." }
+        - { name: period_key, in: query, required: false, schema: { type: string, maxLength: 8 }, description: "The authority's period key; required for gb-mtd-json." }
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VatReturn" }
+            text/csv:
+              schema: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -485,12 +489,15 @@ paths:
       parameters:
         - { name: period_from, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
         - { name: period_to, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
+        - { name: format, in: query, required: false, schema: { type: string, enum: [de-zm-csv] }, description: "Return the list as a national filing file instead of JSON; refused while sales lack a VAT number or a base amount." }
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Esl" }
+            text/csv:
+              schema: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -842,6 +849,47 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ImportResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/vat-layouts:
+    get:
+      operationId: listVatLayouts
+      x-passage-duty: tax.config.read
+      summary: National return layouts that ship with the service (box ids, labels and which transactions feed each)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfLayout" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/vat-layouts/{country}/apply:
+    post:
+      operationId: applyVatLayout
+      x-passage-duty: tax.config.manage
+      summary: Replace the legal entity's return boxes with a national layout, mapping its own tax codes to each box
+      parameters:
+        - { name: country, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplyLayoutRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfBox" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -1311,3 +1359,42 @@ components:
       properties:
         added: { type: integer }
         skipped: { type: integer }
+    ApplyLayoutRequest:
+      type: object
+      required: [mapping]
+      properties:
+        mapping:
+          type: object
+          description: Per box id, the tax codes and directions that feed it; a payable box takes none.
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              required: [code, direction]
+              properties:
+                code: { type: string }
+                direction: { type: string, enum: [output, input, use] }
+    ItemsOfBox:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Box" } }
+    ItemsOfLayout:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              country: { type: string }
+              name: { type: string }
+              format: { type: string, enum: [gb-mtd-json, de-ustva-csv] }
+              boxes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    box: { type: string }
+                    label: { type: string }
+                    kind: { type: string, enum: [base, tax, payable] }
+                    role: { type: string }

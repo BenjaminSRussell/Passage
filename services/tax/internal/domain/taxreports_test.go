@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -361,5 +362,103 @@ func TestValidateMasterImport(t *testing.T) {
 		if err := domain.ValidateMasterImport(in); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+}
+
+func fixedReturn(boxes ...domain.BoxResult) domain.VATReturn {
+	return domain.VATReturn{PeriodFrom: domain.Day("2026-04-01"), PeriodTo: domain.Day("2026-06-30"), Boxes: boxes}
+}
+
+func box(id, kind, amount string) domain.BoxResult {
+	return domain.BoxResult{Box: id, Kind: kind, Amount: decimal.RequireFromString(amount)}
+}
+
+func TestLayoutsMapOnlyWhatTheTenantMapsAndRefuseAHalfMappedSet(t *testing.T) {
+	gb, ok := domain.LayoutFor("GB")
+	if !ok || len(domain.Layouts()) < 2 {
+		t.Fatal("the GB layout does not ship")
+	}
+	mapping := map[string][]domain.BoxCode{
+		"1": {{Code: "UK20", Direction: "output"}}, "2": {{Code: "UK20", Direction: "use"}}, "4": {{Code: "UK20", Direction: "input"}},
+		"6": {{Code: "UK20", Direction: "output"}}, "7": {{Code: "UK20", Direction: "input"}},
+		"8": {{Code: "UK0", Direction: "output"}}, "9": {{Code: "UK0", Direction: "input"}},
+	}
+	boxes, err := domain.BoxesFromLayout(gb, mapping)
+	if err != nil || len(boxes) != 8 || boxes[3].Kind != domain.BoxPayable || len(boxes[3].Codes) != 0 {
+		t.Fatalf("boxes = %+v, %v", boxes, err)
+	}
+	half := map[string][]domain.BoxCode{"1": mapping["1"]}
+	if _, err := domain.BoxesFromLayout(gb, half); err == nil || !strings.Contains(err.Error(), "2, 4, 6, 7, 8, 9") {
+		t.Errorf("a half-mapped layout: %v", err)
+	}
+	extra := map[string][]domain.BoxCode{"99": mapping["1"]}
+	for k, v := range mapping {
+		extra[k] = v
+	}
+	if _, err := domain.BoxesFromLayout(gb, extra); err == nil {
+		t.Error("a box the layout lacks was accepted")
+	}
+}
+
+func TestFormatVATReturnGB(t *testing.T) {
+	r := fixedReturn(box("1", "tax", "1200.50"), box("2", "tax", "30"), box("4", "tax", "400.255"), box("5", "payable", "830.245"),
+		box("6", "base", "6000.99"), box("7", "base", "2000"), box("8", "base", "100.5"), box("9", "base", "0"))
+	f, err := domain.FormatVATReturn(domain.FormatGBMTD, r, "26A2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(f.Body, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"periodKey": "26A2", "vatDueSales": 1200.5, "vatDueAcquisitions": 30.0, "totalVatDue": 1230.5,
+		"vatReclaimedCurrPeriod": 400.26, "netVatDue": 830.25, "totalValueSalesExVAT": 6000.0, "totalValuePurchasesExVAT": 2000.0,
+		"totalValueGoodsSuppliedExVAT": 100.0, "totalAcquisitionsExVAT": 0.0, "finalised": true}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %v, want %v", k, got[k], v)
+		}
+	}
+	if f.ContentType != "application/json" || f.Filename != "vat100-26A2.json" {
+		t.Errorf("file = %s %s", f.ContentType, f.Filename)
+	}
+	if _, err := domain.FormatVATReturn(domain.FormatGBMTD, r, ""); err == nil {
+		t.Error("a return without a period key was formatted")
+	}
+	if _, err := domain.FormatVATReturn(domain.FormatGBMTD, fixedReturn(box("1", "tax", "1")), "26A2"); err == nil || !strings.Contains(err.Error(), "apply the layout") {
+		t.Errorf("an unmapped return: %v", err)
+	}
+	r.MissingBase = 2
+	if _, err := domain.FormatVATReturn(domain.FormatGBMTD, r, "26A2"); err == nil || !strings.Contains(err.Error(), "base amount") {
+		t.Errorf("a return missing base amounts: %v", err)
+	}
+	if _, err := domain.FormatVATReturn("nl-xml", r, "x"); err == nil {
+		t.Error("an unknown format was accepted")
+	}
+}
+
+func TestFormatVATReturnDEAndESL(t *testing.T) {
+	r := fixedReturn(box("81", "base", "10000.99"), box("86", "base", "500"), box("41", "base", "2500.40"), box("61", "tax", "0"),
+		box("66", "tax", "1900.1"), box("83", "payable", "100.55"))
+	f, err := domain.FormatVATReturn(domain.FormatDEUStVA, r, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Kz;Betrag\n41;2500\n81;10000\n86;500\n61;0.00\n66;1900.10\n83;100.55\n"
+	if string(f.Body) != want || f.Filename != "ustva-2026-04-01_2026-06-30.csv" {
+		t.Errorf("UStVA = %q (%s)", f.Body, f.Filename)
+	}
+	list := domain.ESL{PeriodFrom: domain.Day("2026-04-01"), PeriodTo: domain.Day("2026-06-30"), Rows: []domain.ESLRow{
+		{Country: "FR", VATID: "FR40303265045", SupplyKind: "goods", Base: decimal.RequireFromString("1000.9")},
+		{Country: "NL", VATID: "NL820646660B01", SupplyKind: "services", Base: decimal.RequireFromString("250")},
+		{Country: "IT", VATID: "IT01234567890", SupplyKind: "triangular", Base: decimal.RequireFromString("75")},
+	}}
+	zm, err := domain.FormatESL(domain.FormatDEZM, list)
+	if err != nil || string(zm.Body) != "Laenderkennzeichen;USt-IdNr;Betrag;Art\nFR;40303265045;1000;\nNL;820646660B01;250;S\nIT;01234567890;75;D\n" {
+		t.Errorf("ZM = %q, %v", zm.Body, err)
+	}
+	list.MissingVATID = 1
+	if _, err := domain.FormatESL(domain.FormatDEZM, list); err == nil {
+		t.Error("an incomplete list was formatted")
 	}
 }

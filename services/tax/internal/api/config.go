@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -87,6 +88,8 @@ func (a *API) registerConfig(r chi.Router) {
 	r.With(manage).Put("/v1/tax/vat-boxes", a.putBoxes)
 	r.With(vat).Get("/v1/tax/vat-return", a.vatReturn)
 	r.With(vat).Get("/v1/tax/esl", a.esl)
+	r.With(read).Get("/v1/tax/vat-layouts", a.listLayouts)
+	r.With(manage).Post("/v1/tax/vat-layouts/{country}/apply", a.applyLayout)
 	a.registerIntrastat(r)
 }
 
@@ -384,11 +387,26 @@ func (a *API) vatReturn(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		out, err = a.config.VATReturn(r.Context(), period)
 	}
+	if err == nil {
+		if format := r.URL.Query().Get("format"); format != "" {
+			var file domain.FilingFile
+			if file, err = domain.FormatVATReturn(format, out, r.URL.Query().Get("period_key")); err == nil {
+				writeFile(w, file)
+				return
+			}
+		}
+	}
 	if err != nil {
 		a.reject(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+func writeFile(w http.ResponseWriter, f domain.FilingFile) {
+	w.Header().Set("Content-Type", f.ContentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, f.Filename))
+	_, _ = w.Write(f.Body)
 }
 
 func (a *API) esl(w http.ResponseWriter, r *http.Request) {
@@ -399,6 +417,15 @@ func (a *API) esl(w http.ResponseWriter, r *http.Request) {
 	var out domain.ESL
 	if err == nil {
 		out, err = a.config.ESL(r.Context(), period)
+	}
+	if err == nil {
+		if format := r.URL.Query().Get("format"); format != "" {
+			var file domain.FilingFile
+			if file, err = domain.FormatESL(format, out); err == nil {
+				writeFile(w, file)
+				return
+			}
+		}
 	}
 	if err != nil {
 		a.reject(w, r, err)
@@ -450,4 +477,42 @@ func (a *API) deleteCertificate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listLayouts(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": domain.Layouts()})
+}
+
+type applyLayoutRequest struct {
+	// Mapping gives, per box of the layout, the tax codes and directions that feed it; a payable box takes none.
+	Mapping map[string][]domain.BoxCode `json:"mapping"`
+}
+
+// applyLayout replaces the legal entity's boxes with a national layout, the tenant's own tax codes mapped to its boxes.
+func (a *API) applyLayout(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	var req applyLayoutRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	layout, ok := domain.LayoutFor(chi.URLParam(r, "country"))
+	if !ok {
+		a.reject(w, r, invalid("country", "no layout ships for %q", chi.URLParam(r, "country")))
+		return
+	}
+	boxes, err := domain.BoxesFromLayout(layout, req.Mapping)
+	if err == nil {
+		err = a.config.PutBoxes(r.Context(), boxes)
+	}
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": boxes})
 }
