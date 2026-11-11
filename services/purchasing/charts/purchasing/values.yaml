@@ -13,7 +13,8 @@ database:
 
 # Public keys of the services that call purchasing with a signed service token
 # (caller[:kid]=base64 Ed25519 public key, comma separated; not secret). receiving
-# reports settled invoicing-plan rows this way (#289).
+# reports settled invoicing-plan rows this way (#289). List edi's public key as edi=<base64 Ed25519 key>: edi creates
+# requisitions from punchout returns (procurement.requisition.create) and, for inbound cXML, confirms purchase orders (#35).
 serviceIdentity:
   publicKeys: ""
   # purchasing signs its call to budgeting (budget.encumbrance.convert) with this Secret's key "signing-key", mounted at
