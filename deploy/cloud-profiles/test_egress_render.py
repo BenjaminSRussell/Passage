@@ -37,6 +37,11 @@ REQUIRED_VALUES = {
         "oidc.redirectUri=https://supplier.dev.passage.dev/bff/callback",
         "appOrigin=https://supplier.dev.passage.dev",
     ],
+    "services/customer-portal-ts/charts/customer-portal": [
+        "oidc.issuer=https://keycloak.dev.passage.dev/realms/passage",
+        "oidc.redirectUri=https://customer.dev.passage.dev/bff/callback",
+        "appOrigin=https://customer.dev.passage.dev",
+    ],
 }
 OWN_SUFFIXES = (".passage.dev", ".svc", ".cluster.local", ".internal", ".local", ".invalid", ".example", ".test", ".localhost")
 URL = re.compile(r"https?://([A-Za-z0-9_.\-]+)")
