@@ -1,6 +1,7 @@
 package fieldcrypt
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hkdf"
@@ -13,6 +14,9 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt/azurekv"
 )
 
 const (
@@ -48,9 +52,36 @@ func NewKeys(current string, keys map[string][]byte) (*Keys, error) {
 	return &Keys{current: current, keys: own}, nil
 }
 
+// WrappedPrefix marks a master key entry that is wrapped by a key-management service (#600):
+// FIELDCRYPT_KEYS=id=wrapped:<vault key version>:<base64 of the wrapped 32-byte key>, or id=wrapped:<base64> for a
+// key wrapped under the configured (or latest) vault key version. Naming the version keeps the entry openable after
+// the vault key is rotated to a new version.
+const WrappedPrefix = "wrapped:"
+
+// Unwrapper unwraps a wrapped master key, for example through Azure Key Vault or a Managed HSM (package azurekv).
+type Unwrapper interface {
+	Unwrap(ctx context.Context, wrapped []byte) ([]byte, error)
+}
+
+// VersionedUnwrapper unwraps a key wrapped under a named version of the wrapping key; entries that name a version
+// need it.
+type VersionedUnwrapper interface {
+	UnwrapVersion(ctx context.Context, version string, wrapped []byte) ([]byte, error)
+}
+
 // FromEnv reads FIELDCRYPT_KEYS (or the mounted secret file named by FIELDCRYPT_KEYS_FILE) as
 // comma-separated id=base64(32 bytes) pairs and FIELDCRYPT_CURRENT_KEY_ID; it returns nil, nil when unset.
+// An entry written id=wrapped:<base64> is a master key wrapped by Azure Key Vault or a Managed HSM
+// (FIELDCRYPT_AZURE_KEY_ID names the wrapping key); it is unwrapped once here and held in memory only.
 func FromEnv(getenv func(string) string) (*Keys, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return FromEnvWith(ctx, getenv, nil)
+}
+
+// FromEnvWith is FromEnv with an explicit Unwrapper for wrapped entries; nil builds the Azure Key Vault client
+// from the environment, and only when an entry is wrapped.
+func FromEnvWith(ctx context.Context, getenv func(string) string, unwrap Unwrapper) (*Keys, error) {
 	raw := strings.TrimSpace(getenv(EnvKeys))
 	if file := getenv(EnvKeysFile); file != "" {
 		b, err := os.ReadFile(file)
@@ -65,7 +96,40 @@ func FromEnv(getenv func(string) string) (*Keys, error) {
 	keys := map[string][]byte{}
 	for _, entry := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' }) {
 		id, enc, ok := strings.Cut(strings.TrimSpace(entry), "=")
-		key, err := base64.StdEncoding.DecodeString(enc)
+		var key []byte
+		var err error
+		if wrapped, isWrapped := strings.CutPrefix(enc, WrappedPrefix); ok && isWrapped {
+			if unwrap == nil {
+				client, cerr := azurekv.FromEnv(getenv)
+				if cerr != nil {
+					return nil, fmt.Errorf("%s entry %q is wrapped: %w", EnvKeys, id, cerr)
+				}
+				unwrap = client
+			}
+			// The base64 alphabet has no ':', so a colon separates a key version from the blob.
+			version, b64, versioned := strings.Cut(wrapped, ":")
+			if !versioned {
+				b64 = wrapped
+			}
+			blob, derr := base64.StdEncoding.DecodeString(b64)
+			if derr != nil || (versioned && !azurekv.ValidVersion(version)) {
+				return nil, fmt.Errorf("%s entry %q is not id=wrapped:[version:]base64", EnvKeys, id)
+			}
+			if versioned {
+				vu, can := unwrap.(VersionedUnwrapper)
+				if !can {
+					return nil, fmt.Errorf("%s entry %q names a key version its unwrapper cannot use", EnvKeys, id)
+				}
+				key, err = vu.UnwrapVersion(ctx, version, blob)
+			} else {
+				key, err = unwrap.Unwrap(ctx, blob)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("%s entry %q: unwrap: %w", EnvKeys, id, err)
+			}
+		} else {
+			key, err = base64.StdEncoding.DecodeString(enc)
+		}
 		if !ok || err != nil || len(key) != keySize {
 			return nil, fmt.Errorf("%s entry %q is not id=base64 %d-byte key", EnvKeys, id, keySize)
 		}
@@ -75,6 +139,33 @@ func FromEnv(getenv func(string) string) (*Keys, error) {
 		keys[id] = key
 	}
 	return NewKeys(getenv(EnvCurrentID), keys)
+}
+
+// WrapEntry generates nothing itself: it wraps an existing master key and returns the FIELDCRYPT_KEYS entry for it.
+// A wrapper that reports the key version it used (azurekv.Client) gets it written into the entry.
+func WrapEntry(ctx context.Context, id string, key []byte, wrap interface {
+	Wrap(ctx context.Context, key []byte) ([]byte, error)
+}) (string, error) {
+	if _, err := NewKeys(id, map[string][]byte{id: key}); err != nil {
+		return "", err
+	}
+	if vw, ok := wrap.(interface {
+		WrapVersioned(ctx context.Context, key []byte) ([]byte, string, error)
+	}); ok {
+		wrapped, version, err := vw.WrapVersioned(ctx, key)
+		if err != nil {
+			return "", err
+		}
+		if azurekv.ValidVersion(version) {
+			return id + "=" + WrappedPrefix + version + ":" + base64.StdEncoding.EncodeToString(wrapped), nil
+		}
+		return id + "=" + WrappedPrefix + base64.StdEncoding.EncodeToString(wrapped), nil
+	}
+	wrapped, err := wrap.Wrap(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	return id + "=" + WrappedPrefix + base64.StdEncoding.EncodeToString(wrapped), nil
 }
 
 func (k *Keys) aead(keyID, tenantID string) (cipher.AEAD, error) {

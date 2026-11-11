@@ -205,5 +205,97 @@ class TestSchema(unittest.TestCase):
         self.assert_rejected("mm2.lagAlertMessages=10", "/mm2/lagAlertMessages")
 
 
+PROFILES = HERE.parent / "cloud-profiles" / "values"
+
+
+def render_profile(values_file: str, profile: str, *sets: str, registry: str = "passage.azurecr.io") -> list[str]:
+    """Render with a cloud profile's global values (deploy/cloud-profiles/values/<profile>.yaml) under a region file."""
+    cmd = [HELM, "template", "mr", str(CHART), "-f", str(PROFILES / f"{profile}.yaml"), "-f", str(HERE / "values" / values_file)]
+    if registry:
+        cmd += ["--set", f"global.imageRegistry={registry}"]
+    for s in sets:
+        cmd += ["--set", s]
+    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    out = "\n".join(line for line in out.splitlines() if not line.lstrip().startswith("#"))
+    return [d for d in re.split(r"^---\s*$", out, flags=re.M) if re.search(r"^kind:", d, re.M)]
+
+
+@unittest.skipUnless(HELM, "helm not installed")
+class TestAzureBlobBackups(unittest.TestCase):
+    """#600 / #601: the US pair archives to Azure Blob in its own US region through barman-cloud."""
+
+    ID = "backup.azure.workloadIdentityClientId=11111111-2222-3333-4444-555555555555"
+
+    def test_primary_archives_to_blob_on_the_profile_suffix_with_workload_identity(self) -> None:
+        docs = render_profile("us/eastus2.yaml", "commercial", self.ID)
+        store = doc(docs, "ObjectStore")
+        self.assertIn('destinationPath: "https://passagepgbkpeastus2.blob.core.windows.net/pg-backups/"', store)
+        self.assertIn("inheritFromAzureAD: true", store)
+        self.assertNotIn("s3Credentials", store)
+        self.assertNotIn("ACCESS_KEY_ID", store)
+        cluster = doc(docs, "Cluster")
+        self.assertIn('azure.workload.identity/use: "true"', cluster)
+        self.assertIn('azure.workload.identity/client-id: "11111111-2222-3333-4444-555555555555"', cluster)
+        self.assertIn("isWALArchiver: true", cluster)
+
+    def test_gcc_profile_keeps_backups_in_us_storage(self) -> None:
+        store = doc(render_profile("us/eastus2.yaml", "gcc", self.ID), "ObjectStore")
+        self.assertIn(".blob.core.windows.net/", store)
+        self.assertNotIn("usgovcloudapi", store)
+        self.assertNotIn("s3://", store)
+
+    def test_gov_cloud_destination_uses_the_gov_blob_suffix(self) -> None:
+        store = doc(render_profile("us/eastus2.yaml", "gcc-high", self.ID), "ObjectStore")
+        self.assertIn("https://passagepgbkpeastus2.blob.core.usgovcloudapi.net/pg-backups/", store)
+
+    def test_storage_key_secret_when_workload_identity_is_off(self) -> None:
+        store = doc(render_profile("us/eastus2.yaml", "commercial", "backup.azure.useWorkloadIdentity=false"), "ObjectStore")
+        self.assertIn("key: AZURE_STORAGE_ACCOUNT", store)
+        self.assertIn("key: AZURE_STORAGE_KEY", store)
+        self.assertNotIn("inheritFromAzureAD", store)
+        self.assertNotIn("azure.workload.identity", doc(render_profile("us/eastus2.yaml", "commercial", "backup.azure.useWorkloadIdentity=false"), "Cluster"))
+
+    def test_blob_needs_a_profile_and_a_storage_account(self) -> None:
+        for args, message in (
+            ([str(CHART), "-f", str(HERE / "values" / "us" / "eastus2.yaml"), "--set", self.ID], "global.endpoints.blobSuffix is required"),
+            ([str(CHART), "-f", str(PROFILES / "commercial.yaml"), "-f", str(HERE / "values" / "us" / "eastus2.yaml"), "--set", "backup.azure.storageAccount=", "--set", "global.imageRegistry=r.azurecr.io", "--set", self.ID], "backup.azure.storageAccount is required"),
+            ([str(CHART), "-f", str(PROFILES / "commercial.yaml"), "-f", str(HERE / "values" / "us" / "eastus2.yaml"), "--set", "global.imageRegistry=r.azurecr.io"], "workloadIdentityClientId is required"),
+        ):
+            proc = subprocess.run([HELM, "template", "mr", *args], capture_output=True, text=True)
+            self.assertNotEqual(proc.returncode, 0, message)
+            self.assertIn(message, proc.stderr)
+
+    def test_passive_centralus_is_a_replica_and_does_not_archive(self) -> None:
+        docs = render_profile("us/centralus.yaml", "gcc")
+        self.assertNotIn("ObjectStore", kinds(docs))
+        self.assertRegex(doc(docs, "Cluster"), r"replica:\n\s+enabled: true")
+
+    def test_s3_is_still_the_default_store(self) -> None:
+        self.assertIn('destinationPath: "s3://passage-pg-backups-eu-west/"', doc(render("eu-west.yaml"), "ObjectStore"))
+
+    def test_schema_rejects_an_unknown_store(self) -> None:
+        proc = subprocess.run([HELM, "template", "mr", str(CHART), "--set", "backup.store=gcs"], capture_output=True, text=True)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("/backup/store", proc.stderr)
+
+
+@unittest.skipUnless(HELM, "helm not installed")
+class TestRegistryMirror(unittest.TestCase):
+    def test_image_comes_from_the_mirror(self) -> None:
+        cluster = doc(render_profile("us/eastus2.yaml", "commercial", TestAzureBlobBackups.ID, registry="passage.azurecr.io"), "Cluster")
+        self.assertIn("imageName: passage.azurecr.io/cloudnative-pg/postgresql:17", cluster)
+
+    def test_a_mirror_only_profile_fails_without_a_mirror(self) -> None:
+        proc = subprocess.run(
+            [HELM, "template", "mr", str(CHART), "-f", str(PROFILES / "gcc.yaml"), "-f", str(HERE / "values" / "us" / "eastus2.yaml"), "--set", TestAzureBlobBackups.ID],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("global.imageRegistry is required", proc.stderr)
+
+    def test_default_render_is_unchanged(self) -> None:
+        self.assertIn("imageName: ghcr.io/cloudnative-pg/postgresql:17", doc(render("eu-west.yaml"), "Cluster"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -51,6 +51,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: KAFKA_BROKERS
               value: {{ required "consumer.kafka.brokers is required" .Values.consumer.kafka.brokers | quote }}
             - name: KAFKA_GROUP

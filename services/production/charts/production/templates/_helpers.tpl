@@ -1,7 +1,7 @@
 {{- define "production.image" -}}
 {{- if .Values.image.digest -}}
-{{ .Values.image.repository }}@{{ .Values.image.digest }}
+{{ (include "passage.imageRepository" $) }}@{{ .Values.image.digest }}
 {{- else -}}
-{{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{ (include "passage.imageRepository" $) }}:{{ .Values.image.tag }}
 {{- end -}}
 {{- end -}}

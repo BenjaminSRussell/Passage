@@ -29,7 +29,7 @@ spec:
 {{- end }}
       containers:
         - name: assets
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ end }}"
+          image: "{{ (include "passage.imageRepository" $) }}:{{ .Values.image.tag }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
@@ -39,6 +39,7 @@ spec:
             - name: admin
               containerPort: {{ .Values.service.adminPort }}
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: SERVICE_NAME
               value: assets
             - name: HTTP_ADDR

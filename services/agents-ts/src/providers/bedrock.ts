@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { assertProviderEndpoint, type EgressOptions } from "../cloudprofile/index.js";
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
@@ -24,6 +25,8 @@ export interface BedrockConfig {
   timeoutMs?: number;
   /** Injected clock for signing tests. Defaults to the current time. */
   now?: () => Date;
+  /** Cloud profile egress check (#599); defaults to PASSAGE_CLOUD_PROFILE. The region defaults to `region`. */
+  egress?: EgressOptions;
 }
 
 /**
@@ -34,6 +37,7 @@ export interface BedrockConfig {
  */
 export function createBedrockProvider(cfg: BedrockConfig): ModelProvider {
   const base = (cfg.baseUrl ?? `https://bedrock-runtime.${cfg.region}.amazonaws.com`).replace(/\/$/, "");
+  assertProviderEndpoint(base, { region: cfg.region, ...cfg.egress });
   // The wire path encodes the model id once (`:` becomes %3A). SigV4 for
   // non-S3 services encodes each path segment again in the canonical request,
   // so the id is encoded twice there. The canonical path is taken from the

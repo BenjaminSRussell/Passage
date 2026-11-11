@@ -9,7 +9,7 @@ PYTHON ?= python3
 IMAGE_DIGEST ?=
 SKIP_VERIFY ?=
 
-.PHONY: deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema test-argocd
+.PHONY: test-tofu test-cloud-profiles deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema test-argocd
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -81,3 +81,23 @@ test-gateway: validate-gateway-schema
 # coverage and Secret references; renders every dev chart when helm is on PATH.
 test-argocd:
 	$(PYTHON) -m unittest scripts/test_argocd_apps.py -v
+
+# Cloud profile (#599): the profile table and its generated copies, the egress allowlist render test over every chart
+# (needs helm), the region pair checker and the multi-region chart (Azure Blob backups, US pair).
+test-cloud-profiles:
+	$(PYTHON) cloud-profiles/cloudprofile.py sync --check
+	$(PYTHON) -m unittest discover -s cloud-profiles -v
+	$(PYTHON) multi-region/tools/check_region_pair.py
+	$(PYTHON) multi-region/tools/check_region_pair.py --values-dir multi-region/values/us --cloud-profile gcc
+	$(PYTHON) multi-region/tools/check_region_pair.py --values-dir multi-region/values/us --cloud-profile commercial
+	$(PYTHON) -m unittest discover -s multi-region -p 'test_chart.py' -v
+	$(PYTHON) -m unittest discover -s multi-region/tools -p 'test_check_region_pair.py' -v
+	$(PYTHON) -m unittest discover -s secret-store -v
+
+# AKS (#600): offline OpenTofu tests (providers mocked, no subscription needed) plus validate.
+test-tofu:
+	tofu -chdir=tofu/cluster init -backend=false -input=false
+	tofu -chdir=tofu/cluster validate
+	tofu -chdir=tofu/cluster test
+	tofu -chdir=tofu/cluster/modules/aks init -backend=false -input=false
+	tofu -chdir=tofu/cluster/modules/aks test

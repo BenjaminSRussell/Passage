@@ -1,0 +1,196 @@
+package cloudprofile
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+)
+
+const (
+	canonicalTable = "../../../deploy/cloud-profiles/profiles.json"
+	valuesDir      = "../../../deploy/cloud-profiles/values/"
+)
+
+func mustResolve(t *testing.T, base string, overlays ...string) *Profile {
+	t.Helper()
+	p, err := Resolve(base, overlays...)
+	if err != nil {
+		t.Fatalf("Resolve(%s %v): %v", base, overlays, err)
+	}
+	return p
+}
+
+// The embedded copy is generated from deploy/cloud-profiles/profiles.json; a drifted copy would give Go
+// services different endpoints than the charts.
+func TestEmbeddedTableIsTheCanonicalFile(t *testing.T) {
+	want, err := os.ReadFile(canonicalTable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(want, profilesJSON) {
+		t.Fatal("platform/go/cloudprofile/profiles.json differs from deploy/cloud-profiles/profiles.json: run python3 deploy/cloud-profiles/cloudprofile.py sync")
+	}
+}
+
+// Key parity: a profile that lacks an endpoint another profile has fails here, as it does in Python and TypeScript.
+func TestEveryProfileHasEveryEndpointWithASource(t *testing.T) {
+	d, err := Table()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.EndpointKeys) == 0 {
+		t.Fatal("endpointKeys is empty")
+	}
+	for _, name := range ProfileNames() {
+		eps := d.Profiles[name].Endpoints
+		for _, key := range d.EndpointKeys {
+			ep, ok := eps[key]
+			switch {
+			case !ok:
+				t.Errorf("%s: endpoint %s is missing", name, key)
+			case ep.Value == "":
+				t.Errorf("%s: endpoint %s has no value", name, key)
+			case !strings.HasPrefix(ep.Source, "https://learn.microsoft.com/"):
+				t.Errorf("%s: endpoint %s needs a Microsoft Learn source, got %q", name, key, ep.Source)
+			}
+		}
+		for key := range eps {
+			if !slices.Contains(d.EndpointKeys, key) {
+				t.Errorf("%s: endpoint %s is not in endpointKeys", name, key)
+			}
+		}
+	}
+}
+
+func TestAuthoritiesPerCloud(t *testing.T) {
+	for name, want := range map[string]struct{ authority, graph string }{
+		"commercial": {"https://login.microsoftonline.com", "https://graph.microsoft.com"},
+		// GCC is a Microsoft 365 environment on the worldwide Entra ID: it must not move to .us.
+		"gcc":      {"https://login.microsoftonline.com", "https://graph.microsoft.com"},
+		"gcc-high": {"https://login.microsoftonline.us", "https://graph.microsoft.us"},
+		"dod":      {"https://login.microsoftonline.us", "https://dod-graph.microsoft.us"},
+		"china":    {"https://login.partner.microsoftonline.cn", "https://microsoftgraph.chinacloudapi.cn"},
+	} {
+		p := mustResolve(t, name)
+		if p.Endpoint("entraAuthority") != want.authority || p.Endpoint("graphRoot") != want.graph {
+			t.Errorf("%s: authority %s graph %s, want %s %s", name, p.Endpoint("entraAuthority"), p.Endpoint("graphRoot"), want.authority, want.graph)
+		}
+	}
+}
+
+func TestFIPSAndRegions(t *testing.T) {
+	for name, wantFIPS := range map[string]bool{"commercial": false, "gcc": true, "gcc-high": true, "dod": true, "china": false} {
+		if got := mustResolve(t, name).FIPS; got != wantFIPS {
+			t.Errorf("%s: fips = %v, want %v", name, got, wantFIPS)
+		}
+	}
+	gcc := mustResolve(t, "gcc")
+	if !gcc.AllowsRegion("eastus2") || !gcc.AllowsRegion("centralus") || gcc.AllowsRegion("westeurope") || gcc.AllowsRegion("usgovvirginia") {
+		t.Errorf("gcc regions = %v, want US commercial regions only", gcc.AllowedRegions)
+	}
+	if !mustResolve(t, "commercial").AllowsRegion("anywhere") {
+		t.Error("commercial has no region restriction")
+	}
+}
+
+func TestOverlays(t *testing.T) {
+	eu := mustResolve(t, "commercial", "eu-data-boundary")
+	if eu.AllowsRegion("eastus2") || !eu.AllowsRegion("westeurope") {
+		t.Errorf("commercial+eu-data-boundary regions = %v", eu.AllowedRegions)
+	}
+	if _, err := Resolve("gcc", "eu-data-boundary"); err == nil {
+		t.Error("gcc cannot be combined with eu-data-boundary: its regions are all in the US")
+	}
+	hipaa := mustResolve(t, "commercial", "hipaa")
+	if hipaa.PagerDutyAllowed || slices.Contains(hipaa.LLMProviders, "anthropic") || hipaa.AllowsHost("events.pagerduty.com") {
+		t.Errorf("hipaa overlay must remove paging and hosted LLMs without a BAA: %v", hipaa.EgressAllowlist)
+	}
+	if hipaa.Keycloak.EventRetentionDays < 2190 {
+		t.Errorf("hipaa retention = %d days", hipaa.Keycloak.EventRetentionDays)
+	}
+	if _, err := Resolve("commercial", "nope"); err == nil {
+		t.Error("an unknown overlay must be an error")
+	}
+	if _, err := Resolve("azure-stack"); err == nil {
+		t.Error("an unknown profile must be an error, not a fallback to commercial")
+	}
+}
+
+func TestParseSelector(t *testing.T) {
+	base, overlays := ParseSelector(" gcc+hipaa + eu-data-boundary ")
+	if base != "gcc" || !slices.Equal(overlays, []string{"hipaa", "eu-data-boundary"}) {
+		t.Errorf("got %q %v", base, overlays)
+	}
+	if base, _ := ParseSelector(""); base != "commercial" {
+		t.Errorf("empty selector = %q, want commercial", base)
+	}
+	if got := mustResolve(t, "gcc", "hipaa").Selector(); got != "gcc+hipaa" {
+		t.Errorf("Selector = %q", got)
+	}
+}
+
+func TestHostMatching(t *testing.T) {
+	for _, c := range []struct {
+		host, pattern string
+		want          bool
+	}{
+		{"login.microsoftonline.com", "login.microsoftonline.com", true},
+		{"kv1.vault.azure.net", "*.vault.azure.net", true},
+		{"vault.azure.net", "*.vault.azure.net", false},
+		{"evil-vault.azure.net", "*.vault.azure.net", false},
+		{"a.b.vault.azure.net", "*.vault.azure.net", true},
+		{"bedrock-runtime.us-east-1.amazonaws.com", "bedrock-runtime.*.amazonaws.com", true},
+		{"bedrock-runtime.amazonaws.com", "bedrock-runtime.*.amazonaws.com", false},
+		{"Login.MicrosoftOnline.com", "login.microsoftonline.com", true},
+	} {
+		if got := HostMatches(c.host, c.pattern); got != c.want {
+			t.Errorf("HostMatches(%q, %q) = %v, want %v", c.host, c.pattern, got, c.want)
+		}
+	}
+	gcc := mustResolve(t, "gcc")
+	if !gcc.AllowsURL("https://res.openai.azure.com/openai/deployments/x") || gcc.AllowsURL("https://api.anthropic.com") || gcc.AllowsURL("https://ghcr.io/x") {
+		t.Errorf("gcc allowlist = %v", gcc.EgressAllowlist)
+	}
+}
+
+// The Helm values are generated by the Python tool; the Go allowlist must come out identical so a chart and a
+// service agree on what is allowed.
+func TestAllowlistMatchesGeneratedHelmValues(t *testing.T) {
+	line := regexp.MustCompile(`(?m)^  egressAllowlist: (\[.*\])$`)
+	for _, name := range ProfileNames() {
+		raw, err := os.ReadFile(valuesDir + name + ".yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := line.FindSubmatch(raw)
+		if m == nil {
+			t.Fatalf("%s.yaml has no egressAllowlist line", name)
+		}
+		var want []string
+		if err := json.Unmarshal(m[1], &want); err != nil {
+			t.Fatal(err)
+		}
+		if got := mustResolve(t, name).EgressAllowlist; !slices.Equal(got, want) {
+			t.Errorf("%s: Go allowlist %v != values file %v", name, got, want)
+		}
+	}
+}
+
+func TestNoAzureHostnameOutsideTheTable(t *testing.T) {
+	// This package's own Go code must not spell an Azure cloud hostname; it reads them from the table.
+	for _, file := range []string{"cloudprofile.go", "fips.go", "idp.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, host := range []string{"microsoftonline", "graph.microsoft", "usgovcloudapi", "chinacloudapi", "vault.azure", "azurecr", "windows.net"} {
+			if bytes.Contains(raw, []byte(host)) {
+				t.Errorf("%s hard-codes %q; read it from the profile table", file, host)
+			}
+		}
+	}
+}
