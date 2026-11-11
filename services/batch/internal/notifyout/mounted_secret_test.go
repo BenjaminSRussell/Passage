@@ -116,8 +116,13 @@ func TestChartExternalSecretMapsEveryAdapterKey(t *testing.T) {
 	}
 	tpl := string(raw)
 	smtpBlock := between(t, tpl, ".Values.notify.smtp.enabled", "{{- end }}")
+	// Only the keys the range walks: the secretKey/remoteRef helpers below it take quoted dict keys of their own.
+	keyList := regexp.MustCompile(`range \$key := list ([^}]*)}}`).FindStringSubmatch(smtpBlock)
+	if keyList == nil {
+		t.Fatalf("no `range $key := list ...` in the smtp block:\n%s", smtpBlock)
+	}
 	var charted []string
-	for _, m := range regexp.MustCompile(`"([a-z-]+)"`).FindAllStringSubmatch(smtpBlock, -1) {
+	for _, m := range regexp.MustCompile(`"([a-z-]+)"`).FindAllStringSubmatch(keyList[1], -1) {
 		charted = append(charted, m[1])
 	}
 	if !slices.Equal(charted, smtpSecretKeys()) {
