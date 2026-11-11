@@ -23,7 +23,6 @@ import (
 
 func (a *API) registerDay(r chi.Router) {
 	r.With(authz.RequireDuty(dutyTechnician)).Get("/v1/service/technicians/{id}/day", a.technicianDay)
-	r.With(authz.RequireDuty(dutyTechnician)).Get("/v1/service/technicians/{id}/day/events", a.routeEvents)
 	r.With(authz.RequireDuty(dutyTechnician)).Put("/v1/service/work-orders/{id}/captures/{captureId}", a.putCapture)
 	r.With(authz.RequireDuty(dutyInquire)).Get("/v1/service/work-orders/{id}/captures/{captureId}", a.getCapture)
 	r.With(authz.RequireDuty(dutyWorkOrder)).Put("/v1/service/work-orders/{id}/checklist", a.putChecklist)

@@ -106,3 +106,17 @@ func TestAPI_RouteEventsRefusals(t *testing.T) {
 		t.Fatalf("unknown technician: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestRouteEventsPathIsOnlyTheStream(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/v1/service/technicians/me/day/events":   true,
+		"/v1/service/technicians/abc/day/events":  true,
+		"/v1/service/technicians/me/day":          false,
+		"/v1/service/work-orders/x/day/events":    false,
+		"/v1/service/technicians/me/day/events/x": false,
+	} {
+		if RouteEventsPath(path) != want {
+			t.Errorf("RouteEventsPath(%q) = %v, want %v", path, !want, want)
+		}
+	}
+}

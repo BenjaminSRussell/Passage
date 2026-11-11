@@ -11,6 +11,9 @@ import (
 	"time"
 	_ "time/tzdata" // SLA time zones resolve without the host zoneinfo
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -82,8 +85,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 	router := httpx.NewRouter()
 	a.Register(router)
 
+	// The route stream lives longer than the router's 30 second request timeout, so it has a router of its own (recovery and
+	// tenant extraction, no timeout).
+	streams := chi.NewRouter()
+	streams.Use(middleware.Recoverer, tenant.Middleware)
+	a.RegisterStreams(streams)
+
 	// Readiness pings Postgres; liveness stays dependency-free.
 	public := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if api.RouteEventsPath(r.URL.Path) {
+			streams.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/readyz" {
 			ctxReady, cancel := context.WithTimeout(r.Context(), readyTimeout)
 			defer cancel()

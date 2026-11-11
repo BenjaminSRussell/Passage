@@ -91,8 +91,8 @@ function day(date: string): TechnicianDay {
 }
 
 route("GET", `${SERVICE}/technicians/me/day`, ({ query }) => day(query.get("date") || today()));
-// The route stream (#45): the demo opens it and says ready; no route changes come from outside, so no route events follow.
-route("GET", `${SERVICE}/technicians/me/day/events`, () => reply.events([{ event: "ready", data: { technicianId: TECH_ID } }]));
+// The route stream (#45) answers 503 SVC-RTE-001 in the demo, as a service without a feed does: the app polls.
+route("GET", `${SERVICE}/technicians/me/day/events`, () => reply.problem(503, "SVC-RTE-001", "route updates are not enabled in the demo; the app polls"));
 
 function apply(v: DayVisit, a: ActionBody): ActionOutcome {
   const base = { id: a.id, kind: a.kind };
