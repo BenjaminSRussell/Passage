@@ -195,3 +195,60 @@ export async function fetchCaptures(q: CaptureQuery = {}, fetchImpl: FetchLike =
   const query = params.size > 0 ? `?${params}` : "";
   return request("GET", `/invoice-captures${query}`, capturePageSchema, fetchImpl);
 }
+
+/** A vendor's invoice submitted against received lines in the supplier portal, waiting for accounts payable (#511). */
+export const SUBMISSION_STATUSES = ["SUBMITTED", "WITHDRAWN", "REJECTED", "POSTED"] as const;
+export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
+
+export const submissionSchema = z.object({
+  id: z.string(),
+  legalEntityId: z.string(),
+  vendorId: z.string().optional(),
+  invoiceNumber: z.string(),
+  invoiceDate: z.string(),
+  currency: z.string(),
+  total: z.string(),
+  note: z.string().optional(),
+  status: z.enum(SUBMISSION_STATUSES),
+  lines: z.array(z.object({ receiptId: z.string(), receiptLineNo: z.number().int(), qty: z.string(), unitPrice: z.string(), amount: z.string() })),
+  createdAt: z.string(),
+  decidedAt: z.string().optional(),
+  decisionNote: z.string().optional(),
+  invoiceId: z.string().optional(),
+});
+export type Submission = z.infer<typeof submissionSchema>;
+
+const submissionPageSchema = z.object({ items: z.array(submissionSchema), nextCursor: z.string().optional() });
+export type SubmissionPage = z.infer<typeof submissionPageSchema>;
+
+export interface SubmissionQuery {
+  vendorId?: string;
+  status?: SubmissionStatus;
+  cursor?: string;
+  limit?: number;
+}
+
+/** GET /invoice-submissions: vendors' submissions newest first, in the caller's legal entities. */
+export async function fetchSubmissions(q: SubmissionQuery = {}, fetchImpl: FetchLike = defaultFetch): Promise<SubmissionPage> {
+  const params = new URLSearchParams();
+  if (q.vendorId) params.set("vendorId", q.vendorId);
+  if (q.status) params.set("status", q.status);
+  if (q.cursor) params.set("cursor", q.cursor);
+  if (q.limit) params.set("limit", String(q.limit));
+  const query = params.size > 0 ? `?${params}` : "";
+  return request("GET", `/invoice-submissions${query}`, submissionPageSchema, fetchImpl);
+}
+
+export async function fetchSubmission(id: string, fetchImpl: FetchLike = defaultFetch): Promise<Submission> {
+  return request("GET", `/invoice-submissions/${encodeURIComponent(id)}`, submissionSchema, fetchImpl);
+}
+
+/** POST /invoice-submissions/{id}:reject closes a submission with a reason the vendor reads. */
+export async function rejectSubmission(id: string, reason: string, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<Submission> {
+  return request("POST", `/invoice-submissions/${encodeURIComponent(id)}:reject`, submissionSchema, fetchImpl, { "Idempotency-Key": idempotencyKey }, { reason });
+}
+
+/** POST /invoice-submissions/{id}:resolve closes a submission with the vendor invoice that was posted from it. */
+export async function resolveSubmission(id: string, invoiceId: string, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<Submission> {
+  return request("POST", `/invoice-submissions/${encodeURIComponent(id)}:resolve`, submissionSchema, fetchImpl, { "Idempotency-Key": idempotencyKey }, { invoiceId });
+}

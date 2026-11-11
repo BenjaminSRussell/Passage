@@ -258,3 +258,66 @@ export function decidePendingChange(changeId: string, action: "approve" | "rejec
     body,
   });
 }
+
+/** A supplier's own registration from the public portal page (services/party vendor_prospect), waiting for a buyer. */
+export const PROSPECT_STATUSES = ["NEW", "ACCEPTED", "REJECTED"] as const;
+export type ProspectStatus = (typeof PROSPECT_STATUSES)[number];
+
+export interface Prospect {
+  id: string;
+  companyName: string;
+  contactName: string;
+  email: string;
+  phone?: string;
+  country: string;
+  taxId?: string;
+  website?: string;
+  message?: string;
+  status: ProspectStatus;
+  createdAt: string;
+  decidedAt?: string;
+  decisionNote?: string;
+  partyId?: string;
+  vendorId?: string;
+  requestId?: string;
+}
+
+/** An onboarding questionnaire a new supplier is asked to answer. */
+export interface Questionnaire {
+  id: string;
+  name: string;
+  version: number;
+  createdAt: string;
+}
+
+/** What accepting a registration creates: the vendor role (blocked until onboarding is approved) and its questionnaire. */
+export interface AcceptProspectInput extends NewVendor {
+  questionnaireId: string;
+}
+
+/** GET /vendor-prospects: registrations newest first, optionally of one status. */
+export async function listProspects(status: ProspectStatus | "", signal?: AbortSignal): Promise<Prospect[]> {
+  const query = new URLSearchParams({ limit: "200" });
+  if (status) query.set("status", status);
+  const body = await send<{ items?: Prospect[] }>(`/vendor-prospects?${query}`, {}, signal);
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+export function getProspect(prospectId: string, signal?: AbortSignal): Promise<Prospect> {
+  return send<Prospect>(`/vendor-prospects/${id(prospectId)}`, {}, signal);
+}
+
+/** POST /vendor-prospects/{id}:accept creates the party, a blocked vendor role and the onboarding questionnaire request. */
+export function acceptProspect(prospectId: string, input: AcceptProspectInput): Promise<Prospect> {
+  return send<Prospect>(`/vendor-prospects/${id(prospectId)}:accept`, post(input));
+}
+
+/** POST /vendor-prospects/{id}:reject closes the registration with a note; nothing is created. */
+export function rejectProspect(prospectId: string, note: string): Promise<Prospect> {
+  return send<Prospect>(`/vendor-prospects/${id(prospectId)}:reject`, post({ note }));
+}
+
+export async function listQuestionnaires(signal?: AbortSignal): Promise<Questionnaire[]> {
+  const body = await send<{ items?: Questionnaire[] }>("/vendor-questionnaires", {}, signal);
+  return Array.isArray(body.items) ? body.items : [];
+}

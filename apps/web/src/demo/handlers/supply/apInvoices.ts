@@ -1,7 +1,7 @@
 // Vendor invoices in the receiving service (/api/v1/receiving/invoices) for the demo: invoices posted against the
 // posted receipts of receiving.ts (matched, with a price variance, held for audit, self-billed and one rejected
 // duplicate), and the captured documents not yet posted. Typed against the module's client so drift fails tsc.
-import type { Capture, Invoice } from "../../../modules/ap-invoices/api/client";
+import type { Capture, Invoice, Submission } from "../../../modules/ap-invoices/api/client";
 import { LEGAL_ENTITY, VENDORS, itemByNumber } from "../../company";
 import { reply, route } from "../../backend";
 import { at, day, dec, uid } from "../../store";
@@ -91,4 +91,60 @@ route("GET", `${BASE}/invoices/{id}`, ({ params }) => invoices.find((i) => i.id 
 route("GET", `${BASE}/invoice-captures`, ({ query }) => {
   const status = query.get("status");
   return { items: captures.filter((c) => !status || c.status === status).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) };
+});
+
+// Invoices vendors submitted in the supplier portal against the receipts above (#511), for accounts payable to post or
+// reject: two waiting, one rejected with a reason, one already posted as invoice AFS-74402.
+const K_SUBMISSION = 392;
+
+function submission(n: number, receipt: number, s: { number: string; qty: number; unitPrice: number; ago: number; status: Submission["status"]; extra?: Partial<Submission> }): Submission {
+  const amount = r2(s.qty * s.unitPrice);
+  return {
+    id: uid(K_SUBMISSION, n),
+    legalEntityId: LEGAL_ENTITY.id,
+    vendorId: vendorOf(receipt),
+    invoiceNumber: s.number,
+    invoiceDate: day(-s.ago),
+    currency: "USD",
+    total: dec(amount),
+    status: s.status,
+    lines: [{ receiptId: uid(K_RECEIPT, receipt), receiptLineNo: 1, qty: dec(s.qty, 0), unitPrice: dec(s.unitPrice), amount: dec(amount) }],
+    createdAt: at(-s.ago + 0.2),
+    ...s.extra,
+  };
+}
+
+const submissions: Submission[] = [
+  submission(1, 4, { number: "PBC-55188", qty: 250, unitPrice: 7.4, ago: 0, status: "SUBMITTED", extra: { note: "Second delivery of the 6206 bearings, per your purchase order." } }),
+  submission(2, 5, { number: "VMW-121102", qty: 4, unitPrice: 395, ago: 1, status: "SUBMITTED" }),
+  submission(3, 3, { number: "KSG-40377", qty: 180, unitPrice: 55, ago: 6, status: "REJECTED", extra: { decidedAt: at(-5), decisionNote: "Unit price does not match the purchase order (48.50). Please resubmit at the agreed price." } }),
+  submission(4, 6, { number: "AFS-74402", qty: 400, unitPrice: 12.8, ago: 29, status: "POSTED", extra: { decidedAt: at(-27), invoiceId: uid(K_INVOICE, 4) } }),
+];
+
+route("GET", `${BASE}/invoice-submissions`, ({ query }) => {
+  const vendor = query.get("vendorId");
+  const status = query.get("status");
+  return { items: submissions.filter((s) => (!vendor || s.vendorId === vendor) && (!status || s.status === status)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) };
+});
+
+route("GET", `${BASE}/invoice-submissions/{id}`, ({ params }) => submissions.find((s) => s.id === params.id) ?? reply.problem(404, "RCV-NF-011", "Invoice submission not found"));
+
+function decide(id: string, patch: Partial<Submission>) {
+  const at0 = submissions.findIndex((s) => s.id === id);
+  if (at0 < 0) return reply.problem(404, "RCV-NF-011", "Invoice submission not found");
+  if (submissions[at0].status !== "SUBMITTED") return reply.problem(409, "SUP-INV-005", "The submission was already decided or withdrawn");
+  submissions[at0] = { ...submissions[at0], ...patch, decidedAt: at(0) };
+  return submissions[at0];
+}
+
+route("POST", `${BASE}/invoice-submissions/{id}:reject`, ({ params, body }) => {
+  const reason = String((body as { reason?: unknown } | undefined)?.reason ?? "").trim();
+  if (reason === "") return reply.problem(400, "COM-0001", "request failed validation", { reason: "is required, at most 1000 characters" });
+  return decide(params.id, { status: "REJECTED", decisionNote: reason });
+});
+
+route("POST", `${BASE}/invoice-submissions/{id}:resolve`, ({ params, body }) => {
+  const invoiceId = String((body as { invoiceId?: unknown } | undefined)?.invoiceId ?? "");
+  if (!invoices.some((i) => i.id === invoiceId)) return reply.problem(400, "COM-0001", "request failed validation", { invoiceId: "must be the id of the posted invoice" });
+  return decide(params.id, { status: "POSTED", invoiceId });
 });

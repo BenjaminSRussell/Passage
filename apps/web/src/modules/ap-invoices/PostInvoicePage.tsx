@@ -84,8 +84,12 @@ export function toInvoiceInput(v: InvoiceDraft): InvoiceInput {
 function initialDraft(state: InvoiceNavState | null): InvoiceDraft {
   const items = state?.items ?? [];
   if (items.length === 0) return emptyInvoice;
+  const header = state?.header ?? {};
   return {
     ...emptyInvoice,
+    ...(header.legalEntityId ? { legalEntityId: header.legalEntityId } : {}),
+    ...(header.invoiceNumber ? { invoiceNumber: header.invoiceNumber } : {}),
+    ...(header.invoiceDate ? { invoiceDate: header.invoiceDate } : {}),
     vendorId: items[0].vendorId,
     currency: items[0].currency,
     lines: items.map((i) => ({ receiptId: i.receiptId, receiptLineNo: String(i.receiptLineNo), qty: i.qty, unitPrice: i.unitPrice, standardCost: false })),

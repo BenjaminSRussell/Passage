@@ -9,7 +9,7 @@
 | Payment status | built | `/payments`: each invoice with open, scheduled, part paid, paid or cancelled and the relevant date. Open: remittance advices (no document channel) |
 | ASN packages, SSCC, serials entry, cancel, partial receipt per line | not built | receiving's notice has no packages and no cancel (see services/receiving/NOT-IMPLEMENTED.md); serial numbers are accepted by the API but the form has no serial field |
 | Catalog upload (FR-20.19), service entry sheets and timesheets (FR-20.20), consignment view (FR-20.22) | not built | each needs its own vendor-scoped service endpoint |
-| Prospective-vendor registration on a public page (FR-20.18) | built | `/register` (no session; honeypot, size and rate limits in the BFF; no CAPTCHA). A buyer reviews it in the party API; there is no buyer screen for it in `apps/web` yet |
+| Prospective-vendor registration on a public page (FR-20.18) | built | `/register` (no session; honeypot, size and rate limits in the BFF; no CAPTCHA). A buyer reviews it at `/party/vendor-prospects` in `apps/web` (accept as a blocked vendor with an onboarding questionnaire, or reject with a note) |
 | Users page: vendor-admin invitations | built | `/users` for the `supplier-admin` role (link shown once) and `/accept-invite`. The invited user is created in Keycloak by an administrator until the Keycloak adapter exists (live infra) |
 | Users page: MFA option | not built | Keycloak user administration (live infra) |
 | Company details change request (PROFILE_CHANGE) with structured fields | built | `/requests`: legal name, trade name, registration number, industry code; approval writes them to the buyer's record and the request shows when |
