@@ -43,7 +43,7 @@ spec:
           {{- end }}
           containers:
             - name: {{ $job.command }}
-              image: "{{ $root.Values.image.repository }}{{ if $root.Values.image.digest }}@{{ $root.Values.image.digest }}{{ else }}:{{ $root.Values.image.tag }}{{ end }}"
+              image: "{{ (include "passage.imageRepository" $root) }}{{ if $root.Values.image.digest }}@{{ $root.Values.image.digest }}{{ else }}:{{ $root.Values.image.tag }}{{ end }}"
               imagePullPolicy: {{ $root.Values.image.pullPolicy }}
               args:
                 - {{ $job.command }}
@@ -53,6 +53,7 @@ spec:
               securityContext:
                 {{- toYaml $root.Values.containerSecurityContext | nindent 16 }}
               env:
+                {{- include "passage.cloudEnv" $root | nindent 16 }}
                 - name: DATABASE_URL
                   valueFrom:
                     secretKeyRef:

@@ -53,7 +53,7 @@ func consume(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
-	return runPostingsConsumer(ctx, getenv, store.New(pool).WithRules(cfg.rules), pool, cfg.negative)
+	return runPostingsConsumer(ctx, getenv, store.New(pool).WithRules(cfg.rules), pool, cfg.negative, cfg.allowNegativeTruck)
 }
 
 func newLogger(w io.Writer) *slog.Logger {
@@ -72,7 +72,9 @@ type config struct {
 	databaseURL string
 	rules       domain.JournalRules
 	negative    domain.NegativePolicy
-	post        store.PostParams
+	// allowNegativeTruck is the service.allow-negative-truck policy (BR-45.7): truck stock may go negative.
+	allowNegativeTruck bool
+	post               store.PostParams
 }
 
 // loadConfig reads and validates the environment. Invalid values stop startup.
@@ -97,6 +99,13 @@ func loadConfig(getenv func(string) string) (config, error) {
 		c.negative = domain.NegativePolicy{PhysicalAllowed: true, FinancialAllowed: true}
 	default:
 		return c, fmt.Errorf("INV_NEGATIVE_DEFAULT must be forbid or allow, got %q", raw)
+	}
+	switch raw := getenv("INV_ALLOW_NEGATIVE_TRUCK"); raw {
+	case "", "false":
+	case "true":
+		c.allowNegativeTruck = true
+	default:
+		return c, fmt.Errorf("INV_ALLOW_NEGATIVE_TRUCK must be true or false, got %q", raw)
 	}
 	for name, target := range map[string]*string{
 		"INV_INVENTORY_ACCOUNT":        &c.post.InventoryAccount,
@@ -137,7 +146,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	s := store.New(pool).WithRules(cfg.rules)
-	a := api.New(s, cfg.post)
+	a := api.New(s, cfg.post).WithTruckStock(s)
 	// Optional: without LEDGER_URL the GL sweep answers 503 INV-GL-005; with it, a signing key is required.
 	ledger, err := ledgerclient.FromEnv(getenv, "inventory")
 	if err != nil {
@@ -149,7 +158,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", a.Metrics())
+	admin.Handle("/metrics", httpx.WithMetrics(a.Metrics()))
 	// The kernel router's /readyz is static; this one checks Postgres. The chart
 	// probes it on the admin port.
 	admin.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {

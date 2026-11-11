@@ -1,0 +1,6 @@
+apiVersion: v2
+name: customer-portal
+description: Passage customer portal BFF (OIDC session, customer-scoped service tokens, read-only; #30)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -48,6 +48,8 @@ type InvoiceContractStore interface {
 	FindContractByKey(ctx context.Context, key string) (store.Contract, bool, error)
 	ListContracts(ctx context.Context, f store.ContractFilter) (store.ContractPage, error)
 	CreateContract(ctx context.Context, c store.Contract) (store.Contract, error)
+	GetContract(ctx context.Context, id string) (store.Contract, error)
+	AddObligations(ctx context.Context, contractID string, increase decimal.Decimal, add []store.Obligation, expectedVersion int) (store.Contract, error)
 	TemplatesFor(ctx context.Context, productIDs []string) (map[string]store.Template, error)
 }
 
@@ -165,51 +167,109 @@ func openContracts(ctx context.Context, s InvoiceContractStore, evt events.Event
 	return nil
 }
 
+func billableOf(lines []orderProduct) []orderProduct {
+	var out []orderProduct
+	for _, l := range lines {
+		if l.net.IsPositive() {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func templatesOf(ctx context.Context, s InvoiceContractStore, billable []orderProduct) (map[string]store.Template, error) {
+	products := make([]string, len(billable))
+	for i, l := range billable {
+		products[i] = l.product
+	}
+	return s.TemplatesFor(ctx, products)
+}
+
+// modifyForLater handles an invoice of an order whose contract this consumer already opened: a cancelled contract takes nothing,
+// otherwise the products the contract lacks are added.
+func modifyForLater(ctx context.Context, s InvoiceContractStore, d invoicePostedData, legalEntityID, order string, date time.Time, lines []orderProduct) error {
+	live, err := s.ListContracts(ctx, store.ContractFilter{LegalEntityID: legalEntityID, OrderID: order, Limit: maxContractsPerOrder})
+	if err != nil {
+		return err
+	}
+	var open []store.Contract
+	for _, c := range live.Items {
+		if c.Status != domain.ContractCancelled {
+			open = append(open, c)
+		}
+	}
+	billable := billableOf(lines)
+	if len(open) != 1 || len(billable) == 0 {
+		return nil
+	}
+	templates, err := templatesOf(ctx, s, billable)
+	if err != nil {
+		return err
+	}
+	return addLaterProducts(ctx, s, open[0], d, date, billable, templates)
+}
+
+// templateObligation is the obligation an invoiced product becomes under its recognition template: its invoiced net as an EXPLICIT
+// SSP, recognized RATABLE over the template's term, as a MILESTONE awaiting satisfaction, as USAGE, or (no template) at the posting
+// date.
+func templateObligation(l orderProduct, t store.Template, postingDate string, date time.Time) contractObligationDTO {
+	o := contractObligationDTO{ProductID: l.product, SSP: l.net.String(), SSPSource: "EXPLICIT", Method: domain.MethodPointInTime}
+	switch {
+	case t.Method == domain.MethodRatable && t.TermMonths != nil:
+		start, end := date.Format(dateLayout), date.AddDate(0, *t.TermMonths, 0).AddDate(0, 0, -1).Format(dateLayout)
+		o.Method, o.TermStart, o.TermEnd = domain.MethodRatable, &start, &end
+	case t.Method == domain.MethodMilestone:
+		o.Method = domain.MethodMilestone
+	case t.Method == domain.MethodUsage:
+		o.Method = domain.MethodUsage
+	default:
+		on := postingDate
+		o.SatisfiedOn = &on
+	}
+	return o
+}
+
 func openContract(ctx context.Context, s InvoiceContractStore, d invoicePostedData, legalEntityID, order string, date time.Time, lines []orderProduct) error {
 	key := InvoiceContractKeyPrefix + legalEntityID + ":" + order
-	if _, found, err := s.FindContractByKey(ctx, key); err != nil || found {
+	// A contract this consumer opened earlier (an earlier invoice of the order) is modified, not opened again.
+	if _, found, err := s.FindContractByKey(ctx, key); err != nil {
 		return err
+	} else if found {
+		return modifyForLater(ctx, s, d, strings.ToLower(d.LegalEntityID), order, date, lines)
 	}
 	live, err := s.ListContracts(ctx, store.ContractFilter{LegalEntityID: legalEntityID, OrderID: order, Limit: maxContractsPerOrder})
 	if err != nil {
 		return err
 	}
+	var existing *store.Contract
 	for _, c := range live.Items {
 		if c.Status != domain.ContractCancelled {
-			return nil
+			if existing != nil {
+				return nil // several live contracts: which one an invoice belongs to is for an operator to say
+			}
+			c := c
+			existing = &c
 		}
 	}
-	var billable []orderProduct
-	price := decimal.Zero
-	for _, l := range lines {
-		if l.net.IsPositive() {
-			billable = append(billable, l)
-			price = price.Add(l.net)
-		}
-	}
+	billable := billableOf(lines)
 	if len(billable) == 0 {
 		return nil
 	}
-	products := make([]string, len(billable))
-	for i, l := range billable {
-		products[i] = l.product
-	}
-	templates, err := s.TemplatesFor(ctx, products)
+	templates, err := templatesOf(ctx, s, billable)
 	if err != nil {
 		return err
+	}
+	if existing != nil {
+		return addLaterProducts(ctx, s, *existing, d, date, billable, templates)
+	}
+	price := decimal.Zero
+	for _, l := range billable {
+		price = price.Add(l.net)
 	}
 	req := contractRequest{LegalEntityID: legalEntityID, OrderID: order, CustomerID: strings.ToLower(d.Customer), Currency: d.Currency,
 		TransactionPrice: price.String(), ContractDate: d.PostingDate}
 	for _, l := range billable {
-		o := contractObligationDTO{ProductID: l.product, SSP: l.net.String(), SSPSource: "EXPLICIT", Method: domain.MethodPointInTime}
-		if t, ok := templates[l.product]; ok && t.Method == domain.MethodRatable && t.TermMonths != nil {
-			start, end := date.Format(dateLayout), date.AddDate(0, *t.TermMonths, 0).AddDate(0, 0, -1).Format(dateLayout)
-			o.Method, o.TermStart, o.TermEnd = domain.MethodRatable, &start, &end
-		} else {
-			on := d.PostingDate
-			o.SatisfiedOn = &on
-		}
-		req.Obligations = append(req.Obligations, o)
+		req.Obligations = append(req.Obligations, templateObligation(l, templates[l.product], d.PostingDate, date))
 	}
 	fields := map[string]string{}
 	c, err := buildContract(req, fields)
@@ -221,5 +281,62 @@ func openContract(ctx context.Context, s InvoiceContractStore, d invoicePostedDa
 	}
 	c.IdempotencyKey, c.RequestHash = key, requestHash(req)
 	_, err = s.CreateContract(ctx, c)
+	return err
+}
+
+// addLaterProducts is the contract modification for an invoice of an order that already has a contract: the products the contract
+// has no obligation for yet (first invoiced now) are added as obligations at their invoiced net, a separate contract in the sense of
+// ASC 606-10-25-12, and the allocation and schedules already there are left alone. Products the contract has, another currency or a
+// contract with nothing to add change nothing, so a replayed event adds nothing twice.
+func addLaterProducts(ctx context.Context, s InvoiceContractStore, existing store.Contract, d invoicePostedData, date time.Time, billable []orderProduct, templates map[string]store.Template) error {
+	if !strings.EqualFold(existing.Currency, d.Currency) {
+		return nil
+	}
+	// Two invoices of one order may be consumed at the same time; the one that adds a product second finds it there (REV-0105)
+	// or a changed version (REV-0103) and reads the contract again, so its own new products are still added and it is not dead-lettered.
+	for range maxModifyAttempts {
+		err := addMissingObligations(ctx, s, existing.ID, d, date, billable, templates)
+		var p *httpx.Problem
+		if errors.As(err, &p) && (p.Code == store.CodeObligationExists || p.Code == store.CodeVersion) {
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("contract %s kept changing while invoice %s added its products; retrying the event", existing.ID, d.InvoiceID)
+}
+
+// maxModifyAttempts bounds the re-reads of a contract another invoice is modifying at the same time.
+const maxModifyAttempts = 3
+
+func addMissingObligations(ctx context.Context, s InvoiceContractStore, contractID string, d invoicePostedData, date time.Time, billable []orderProduct, templates map[string]store.Template) error {
+	c, err := s.GetContract(ctx, contractID)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, o := range c.Obligations {
+		have[strings.ToLower(o.ProductID)] = true
+	}
+	var obligations []contractObligationDTO
+	increase := decimal.Zero
+	for _, l := range billable {
+		if have[l.product] {
+			continue
+		}
+		obligations = append(obligations, templateObligation(l, templates[l.product], d.PostingDate, date))
+		increase = increase.Add(l.net)
+	}
+	if len(obligations) == 0 {
+		return nil
+	}
+	fields := map[string]string{}
+	add, price, err := buildObligations(c.Currency, c.RatableBasis, c.ResidualRule, increase.String(), obligations, 0, fields)
+	if len(fields) > 0 {
+		return httpx.NewProblem(422, "REV-0310", fmt.Sprintf("the invoice lines do not make a contract modification: %v", fields))
+	}
+	if err != nil {
+		return err
+	}
+	_, err = s.AddObligations(ctx, c.ID, price, add, c.Version)
 	return err
 }

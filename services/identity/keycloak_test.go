@@ -11,12 +11,15 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/cloudprofile"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
@@ -44,6 +47,12 @@ type realmExport struct {
 	Clients             []realmClient               `json:"clients"`
 	IdentityProviders   []realmIdP                  `json:"identityProviders"`
 	IdPMappers          []realmIdPMapper            `json:"identityProviderMappers"`
+	PasswordPolicy      string                      `json:"passwordPolicy"`
+	EventsEnabled       bool                        `json:"eventsEnabled"`
+	AdminEventsEnabled  bool                        `json:"adminEventsEnabled"`
+	AdminEventDetails   bool                        `json:"adminEventsDetailsEnabled"`
+	EventsExpiration    int                         `json:"eventsExpiration"`
+	EnabledEventTypes   []string                    `json:"enabledEventTypes"`
 	OTPType             string                      `json:"otpPolicyType"`
 	OTPAlgorithm        string                      `json:"otpPolicyAlgorithm"`
 	OTPDigits           int                         `json:"otpPolicyDigits"`
@@ -255,7 +264,7 @@ func TestKeycloakRealmUserProfileLocksTokenAttributesToAdmins(t *testing.T) {
 			locked[attribute.Name] = true
 		}
 	}
-	for _, name := range []string{"tenant_id", "legal_entity_id", "duties", "tier"} {
+	for _, name := range []string{"tenant_id", "legal_entity_id", "customer_id", "vendor_id", "duties", "tier"} {
 		if !locked[name] {
 			t.Errorf("user attribute %s feeds a token claim and must be admin-edit only", name)
 		}
@@ -653,5 +662,119 @@ func TestKeycloakBrowserLoginNeverCompletesOnPasswordAlone(t *testing.T) {
 	resp := browserPasswordLogin(t, base, "ci-no-factor-user", loginUserSecret)
 	if location := resp.Header.Get("Location"); strings.HasPrefix(location, webCallbackURL) || strings.Contains(location, "code=") {
 		t.Fatalf("password-only login completed: status %d location %q", resp.StatusCode, location)
+	}
+}
+
+// TestKeycloakRealmPasswordPolicyIsFIPSCompatible: Keycloak 26 hashes passwords with argon2 unless told otherwise,
+// and argon2 is not supported in FIPS mode; strict FIPS mode also needs passwords of 14 characters or more
+// (https://www.keycloak.org/server/fips). The realm pins pbkdf2-sha512 and a length that meets every cloud profile.
+func TestKeycloakRealmPasswordPolicyIsFIPSCompatible(t *testing.T) {
+	realm := loadRealm(t)
+	policy := realm.PasswordPolicy
+	if !strings.Contains(policy, "hashAlgorithm(pbkdf2-sha512)") || strings.Contains(strings.ToLower(policy), "argon2") {
+		t.Errorf("passwordPolicy %q must pin hashAlgorithm(pbkdf2-sha512)", policy)
+	}
+	match := regexp.MustCompile(`length\((\d+)\)`).FindStringSubmatch(policy)
+	if match == nil {
+		t.Fatalf("passwordPolicy %q has no length()", policy)
+	}
+	length, _ := strconv.Atoi(match[1])
+	for _, name := range cloudprofile.ProfileNames() {
+		p, err := cloudprofile.Resolve(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Keycloak.PasswordHash != "pbkdf2-sha512" || length < p.Keycloak.PasswordMinLength {
+			t.Errorf("profile %s needs %s and length >= %d, realm has %q", name, p.Keycloak.PasswordHash, p.Keycloak.PasswordMinLength, policy)
+		}
+		if p.FIPS && length < 14 {
+			t.Errorf("profile %s runs Keycloak in strict FIPS mode: passwords need 14 characters, realm has %d", name, length)
+		}
+	}
+	if !strings.Contains(policy, "notUsername") {
+		t.Errorf("passwordPolicy %q lost notUsername", policy)
+	}
+}
+
+// TestKeycloakRealmKeepsLoginAndAdminEvents: FedRAMP AU controls need the login and admin audit trail on, with a set
+// retention that meets every cloud profile (#601).
+func TestKeycloakRealmKeepsLoginAndAdminEvents(t *testing.T) {
+	realm := loadRealm(t)
+	if !realm.EventsEnabled || !realm.AdminEventsEnabled || !realm.AdminEventDetails {
+		t.Errorf("login events %v, admin events %v, admin event details %v: all three must be on", realm.EventsEnabled, realm.AdminEventsEnabled, realm.AdminEventDetails)
+	}
+	if realm.EventsExpiration <= 0 {
+		t.Fatal("eventsExpiration must set a retention in seconds")
+	}
+	days := realm.EventsExpiration / 86400
+	for _, name := range cloudprofile.ProfileNames() {
+		p, err := cloudprofile.Resolve(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if days < p.Keycloak.EventRetentionDays {
+			t.Errorf("profile %s keeps login events %d days, realm keeps %d", name, p.Keycloak.EventRetentionDays, days)
+		}
+	}
+	for _, want := range []string{"LOGIN", "LOGIN_ERROR", "LOGOUT", "UPDATE_PASSWORD", "UPDATE_TOTP", "IDENTITY_PROVIDER_LOGIN", "USER_DISABLED_BY_PERMANENT_LOCKOUT"} {
+		if !slices.Contains(realm.EnabledEventTypes, want) {
+			t.Errorf("enabledEventTypes lacks %s", want)
+		}
+	}
+}
+
+// TestEntraIdPTemplatesKeepMFAAndTokenClaimsLocal applies the federation rules of
+// TestKeycloakRealmFederationKeepsMFAAndTokenClaimsLocal to the Entra ID provider rendered from each cloud profile
+// (deploy/keycloak/idp): the second factor still runs after the broker login, the tenant comes from the realm through
+// a FORCE hardcoded mapper, and no mapper lets an Entra claim write tenant_id, legal_entity_id, duties or tier.
+func TestEntraIdPTemplatesKeepMFAAndTokenClaimsLocal(t *testing.T) {
+	realm := loadRealm(t)
+	tokenAttributes := map[string]bool{"tenant_id": true, "legal_entity_id": true, "duties": true, "tier": true}
+	files, err := filepath.Glob("../../deploy/keycloak/idp/entra-oidc.*.json")
+	if err != nil || len(files) != len(cloudprofile.ProfileNames()) {
+		t.Fatalf("want one rendered Entra IdP per profile (%v), got %v %v", cloudprofile.ProfileNames(), files, err)
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var export struct {
+			Provider realmIdP         `json:"identityProvider"`
+			Mappers  []realmIdPMapper `json:"identityProviderMappers"`
+		}
+		if err := json.Unmarshal(raw, &export); err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		idp := export.Provider
+		if idp.Enabled {
+			t.Errorf("%s: the shipped example must be disabled until a tenant and client are set", file)
+		}
+		if post := findFlow(realm, idp.PostBrokerFlow); post == nil || !secondFactorRequired(realm, post) {
+			t.Errorf("%s: postBrokerLoginFlowAlias %q must require the second factor", file, idp.PostBrokerFlow)
+		}
+		if idp.Config["pkceEnabled"] != "true" || idp.Config["pkceMethod"] != "S256" {
+			t.Errorf("%s: authorization code with PKCE S256 required", file)
+		}
+		for key := range idp.Config {
+			if strings.Contains(strings.ToLower(key), "secret") {
+				t.Errorf("%s: config %s must not hold a secret", file, key)
+			}
+		}
+		var tenantMapped bool
+		for _, mapper := range export.Mappers {
+			attribute := mapper.Config["attribute"] + mapper.Config["user.attribute"]
+			switch {
+			case mapper.Mapper == "hardcoded-attribute-idp-mapper" && attribute == "tenant_id":
+				tenantMapped = mapper.Config["syncMode"] == "FORCE"
+			case tokenAttributes[attribute]:
+				t.Errorf("%s: mapper %s lets Entra set token attribute %s", file, mapper.Mapper, attribute)
+			case mapper.Config["claim"] == "tid":
+				t.Errorf("%s: a mapper copies the Entra tid claim; the Passage tid stays bound to the realm", file)
+			}
+		}
+		if !tenantMapped {
+			t.Errorf("%s: needs a FORCE hardcoded tenant_id mapper", file)
+		}
 	}
 }

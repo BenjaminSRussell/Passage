@@ -1,3 +1,4 @@
+import { assertProviderEndpoint, type EgressOptions } from "../cloudprofile/index.js";
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
@@ -11,11 +12,14 @@ export interface AnthropicConfig {
   baseUrl?: string;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
+  /** Cloud profile egress check (#599); defaults to PASSAGE_CLOUD_PROFILE. `region` is where the endpoint is hosted. */
+  egress?: EgressOptions;
 }
 
 /** Anthropic Messages API adapter (default provider, PRD 9.47.10). */
 export function createAnthropicProvider(cfg: AnthropicConfig): ModelProvider {
   const base = (cfg.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "");
+  assertProviderEndpoint(base, cfg.egress);
   return {
     async complete(req): Promise<ModelResponse> {
       // Defence in depth: the engine redacts first; the adapter refuses raw PII too.

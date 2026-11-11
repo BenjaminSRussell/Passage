@@ -42,6 +42,8 @@ export const STATUS_LABELS: Record<PaymentStatus, string> = {
   APPLIED: "Applied",
   ON_ACCOUNT: "On account",
   REVERSED: "Reversed",
+  ADVISED: "Advised, no bank credit yet",
+  CONFIRMED: "Confirmed by the bank credit",
 };
 
 export const STATUS_TONES: Record<PaymentStatus, BadgeTone> = {
@@ -50,6 +52,8 @@ export const STATUS_TONES: Record<PaymentStatus, BadgeTone> = {
   APPLIED: "success",
   ON_ACCOUNT: "warning",
   REVERSED: "neutral",
+  ADVISED: "warning",
+  CONFIRMED: "neutral",
 };
 
 export const DECISION_LABELS: Record<string, string> = {

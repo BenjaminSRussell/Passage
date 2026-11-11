@@ -15,6 +15,8 @@ release that fails a threshold is blocked.
 | `src/baselines.ts` | Reference predictors that the gate is measured against: vendor history (AP coding), exact remittance amount (cash application), cause keywords (MRP triage) and off-hours posting (anomaly) |
 | `src/askdata-baseline.ts` | Ask-the-data reference predictor: metric lexicon, entity codes, "by entity" grouping and one month with year (real month end). The copilot predictor must beat it |
 | `src/run.ts` | CLI: loads the AP coding, cash application, MRP triage, anomaly and ask-the-data seed datasets, evaluates the baselines, applies the gate, sets a non-zero exit code on failure |
+| `src/generate.ts` | Seeded generator for `ap-coding-v1.jsonl` (400) and `cash-app-v1.jsonl` (300) and the fixture recording; `npm run generate` |
+| `src/replay.ts` | `ReplayPredictor` (recorded outputs keyed by case id and prompt hash; MISSING and STALE are errors), `record` (takes a `ModelProvider`; fakes in tests), default model names `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`. `node dist/run.js --gate --replay datasets/recordings/simulated-v1.jsonl` gates AP coding and cash application with no network |
 | `datasets/` | Seed datasets (`ap-coding-seed.jsonl`, `cash-app-seed.jsonl`, `mrp-triage-seed.jsonl` with 9 action messages, `anomaly-seed.jsonl` with 12 journals of which 4 are anomalies, including a normal night batch and a daytime anomaly, `adversarial-seed.jsonl` with 12 attacks and 4 benign prompts, `ask-data-seed.jsonl` with 8 questions). These are small seeds for the harness, not the held-out sets in FR-47.9 (see NOT-IMPLEMENTED.md) |
 
 ## Run and test

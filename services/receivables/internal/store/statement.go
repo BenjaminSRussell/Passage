@@ -51,7 +51,7 @@ credits as (
 		-(p.amount - coalesce((select sum(st.settled_amount) from settlement st
 			where st.tenant_id = p.tenant_id and st.payment_id = p.id and st.settled_at::date <= $3::date), 0)) as open_as_of
 	from payment p
-	where p.legal_entity_id = $1 and p.customer_id = $2 and p.received_date <= $3::date and p.status <> 'REVERSED'
+	where p.legal_entity_id = $1 and p.customer_id = $2 and p.received_date <= $3::date and p.status not in ('REVERSED', 'ADVISED', 'CONFIRMED')
 )
 select source_type, document_number, document_date::text, due_date::text, currency, amount::text, open_as_of::text
 from (select * from debits union all select * from deductions union all select * from credits) docs

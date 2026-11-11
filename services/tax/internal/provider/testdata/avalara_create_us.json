@@ -1,0 +1,35 @@
+{
+  "id": 85012345,
+  "code": "INV-2026-0042",
+  "companyId": 12345,
+  "date": "2026-03-15",
+  "status": "Saved",
+  "type": "SalesInvoice",
+  "currencyCode": "USD",
+  "totalAmount": 300,
+  "totalTax": 22.6875,
+  "lines": [
+    {
+      "id": 1,
+      "lineNumber": "L1",
+      "lineAmount": 200,
+      "taxableAmount": 200,
+      "tax": 14.5,
+      "details": [
+        {"jurisName": "OHIO", "jurisType": "State", "taxName": "OH STATE TAX", "rate": 0.0575, "tax": 11.5, "taxableAmount": 200},
+        {"jurisName": "FRANKLIN", "jurisType": "County", "taxName": "OH COUNTY TAX", "rate": 0.015, "tax": 3, "taxableAmount": 200}
+      ]
+    },
+    {
+      "id": 2,
+      "lineNumber": "L2",
+      "lineAmount": 100,
+      "taxableAmount": 100,
+      "tax": 8.1875,
+      "details": [
+        {"jurisName": "OHIO", "jurisType": "State", "taxName": "OH STATE TAX", "rate": 0.0575, "tax": 5.75, "taxableAmount": 100},
+        {"jurisName": "FRANKLIN", "jurisType": "County", "taxName": "OH COUNTY TAX", "rate": 0.0244, "tax": 2.4375, "taxableAmount": 100}
+      ]
+    }
+  ]
+}

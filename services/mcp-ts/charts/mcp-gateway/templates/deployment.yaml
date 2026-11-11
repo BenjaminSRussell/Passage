@@ -28,6 +28,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: PASSAGE_API_URL
               value: {{ .Values.apiUrl | quote }}
             - name: PASSAGE_OPENAPI_JSON

@@ -885,6 +885,20 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "ar-clerk.md#settle-it-against-invoices",
   },
   {
+    patterns: ["/receivables/remittance-advice"],
+    title: "Remittance advice",
+    purpose: "A customer's own list of the invoices a payment covers. Importing it lets the matcher settle the payment.",
+    howTo: ["Choose the legal entity and the format, then choose the file or paste its content.", "Tick the options you want, then select Import advice.", "Read the result for each payment reference."],
+    guide: "ar-clerk.md#import-a-remittance-advice",
+  },
+  {
+    patterns: ["/receivables/gl-journals"],
+    title: "Ledger journals",
+    purpose: "What receivables owes the general ledger. Waiting journals post automatically; a parked one needs a retry.",
+    howTo: ["Select Post due journals to post the waiting ones now.", "Open a parked journal and read the last problem.", "Select Retry posting, with a new posting date if the period is closed."],
+    guide: "ar-clerk.md#check-the-journals-posted-to-the-ledger",
+  },
+  {
     patterns: ["/receivables/lockbox", "/receivables/lockbox/new"],
     title: "Lockbox imports",
     purpose: "Bank files of checks, newest first. Each check becomes a Received payment to match and apply.",

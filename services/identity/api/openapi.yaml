@@ -74,6 +74,7 @@ paths:
   /v1/identity/users/{id}:
     get:
       operationId: getUser
+      summary: "Get a user"
       x-passage-duty: identity.user.maintain
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -183,6 +184,7 @@ paths:
   /v1/authz/duties/{name}:
     get:
       operationId: getDuty
+      summary: "Get a duty"
       x-passage-duty: identity.security-role.maintain
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -305,6 +307,7 @@ paths:
   /v1/legal-entities/{id}:
     get:
       operationId: getLegalEntity
+      summary: "Get a legal entity"
       x-passage-duty: identity.legal-entity.maintain
       security: [{ gatewayHeaders: [] }]
       parameters:
@@ -479,6 +482,7 @@ paths:
   /v1/authz/assignments/{id}:
     get:
       operationId: getRoleAssignment
+      summary: "Get a role assignment"
       x-passage-duty: identity.security-role.maintain
       security: [{ gatewayHeaders: [] }]
       parameters:

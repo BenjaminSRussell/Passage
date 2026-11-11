@@ -1,28 +1,35 @@
-# customer-portal (PSG-30, not yet built)
+# customer-portal
 
-The customer portal at `customer.<env>.passage.dev` is a PSG-30 deliverable
-(FR-30.14, FR-30.25, FR-30.26): invited contacts place orders, view invoices and
-documents, pay by card or ACH through the payments gateway, request returns and
-track shipments. WCAG 2.1 AA, mobile-first.
+Customer-facing portal for wave 30 (PSG-30, issue #30; FR-30.14, FR-30.25), served at `customer.<env>.passage.dev`. A standalone Vite +
+React 19 app (like `apps/supplier-portal`), not a shell module: customers are external users who must never reach the internal
+shell. It talks only to its BFF, `services/customer-portal-ts`, and only reads.
 
-**Status: not started in slice 1.** This directory holds only this note. There is
-no Vite app, no package.json and no BFF yet, so nothing here is buildable.
+## Screens
 
-Why it is deferred: the portal needs the receivables read APIs (open items,
-payments, returns) that this slice exposes only partly. It also needs the
-`portal-bff` (cookie session, token handler), the Keycloak `portal` realm and
-OPA scoping to the contact's accounts (edge-identity), and the payments gateway
-(`payments-gateway`, a separate TypeScript service outside this owned path).
+| Route | What a customer sees |
+|---|---|
+| `/` | What they owe, by currency, and how much of it is overdue |
+| `/orders`, `/orders/:id` | Their orders (not drafts) with their own reference, and each order's lines, ship dates and delivered and invoiced quantities |
+| `/invoices`, `/invoices/:id` | Their posted invoices and credit notes with lines and totals |
+| `/open-items` | Their open items and the balance |
+| `/payments` | Payments received from them |
+| `/statement` | The account statement as of a day, by currency, with the closing balance |
+| `/returns`, `/returns/:id` | Their return orders, the credit expected and the lines |
 
-Planned layout when built (React 18 + Vite + TS, no new npm dependencies beyond
-the shared lockfile without review):
+The customer is never in a request: the BFF takes it from the session and signs it into the service token; the services read it only
+from that verified token. The page holds no token. A selector appears when the contact belongs to several of the seller's companies
+(sent as `X-Legal-Entity`, named "Company 1", "Company 2", never by id).
+
+## Run and test
 
 ```
-apps/customer-portal/
-  src/             pages: orders, invoices, payments, returns, shipments, documents
-  src/api/         fetch clients for /portal/api/v1/*
-  e2e/             Playwright + axe (portal-e2e fixture, 0 serious a11y violations)
+npm ci && npm run dev        # :5176, proxies /bff and /api to the BFF on :8080 (run it with COOKIE_SECURE=false)
+npx tsc --noEmit && npx vitest --run && npx vite build
 ```
 
-The full list of what is missing, with status and reason, is in
-[services/receivables/NOT-IMPLEMENTED.md](../../services/receivables/NOT-IMPLEMENTED.md).
+Tests cover each page (rendering, no ids on screen, problems shown), the balance arithmetic, the as-of statement query, that the
+portal sends only GETs and never names a customer, and run axe on every page. That a customer can never read another customer's data
+is tested where it is enforced: in the BFF (`services/customer-portal-ts/test`) and in receivables, billing and sales (their
+`customer_portal_test.go` and store tests).
+
+See [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).

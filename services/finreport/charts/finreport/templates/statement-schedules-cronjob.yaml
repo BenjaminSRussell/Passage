@@ -37,7 +37,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: finreport-statement-schedules
-              image: {{ if .Values.image.digest }}{{ printf "%s@%s" .Values.image.repository .Values.image.digest | quote }}{{ else }}{{ printf "%s:%s" .Values.image.repository (.Values.image.tag | default "latest") | quote }}{{ end }}
+              image: {{ if .Values.image.digest }}{{ printf "%s@%s" (include "passage.imageRepository" $) .Values.image.digest | quote }}{{ else }}{{ printf "%s:%s" (include "passage.imageRepository" $) (.Values.image.tag | default "latest") | quote }}{{ end }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               args:
                 - fire-schedules
@@ -50,6 +50,7 @@ spec:
                 capabilities:
                   drop: [ALL]
               env:
+                {{- include "passage.cloudEnv" $ | nindent 16 }}
                 - name: DATABASE_URL
                   valueFrom:
                     secretKeyRef:

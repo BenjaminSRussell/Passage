@@ -1,0 +1,17 @@
+# The ClusterSecretStore every chart's externalSecret.storeName points at. All charts default to `passage`, so the
+# secrets backend is swapped by installing this chart (Azure Key Vault) instead of a Vault store of the same name.
+# Render with the cloud profile's global values so the Key Vault suffix and the Azure environment come from the profile:
+#   helm template passage-secret-store deploy/secret-store -f deploy/cloud-profiles/values/<profile>.yaml --set azureKeyVault.name=<vault> ...
+storeName: passage
+
+azureKeyVault:
+  name: ""                       # the vault's name; the URL is https://<name>.<global.endpoints.keyVaultSuffix>
+  tenantId: ""                   # Entra tenant that owns the vault
+  workloadIdentityClientId: ""   # client id of the external-secrets identity (tofu output aks.external_secrets_identity_client_id)
+  serviceAccount: external-secrets
+  serviceAccountNamespace: external-secrets
+  # Render the annotated ServiceAccount too. Off when the ESO chart already creates it with the client-id annotation.
+  createServiceAccount: false
+
+# Fallback when no cloud profile values are given; the profile's global.cloudName wins.
+cloudName: AzurePublic

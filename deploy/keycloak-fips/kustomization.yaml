@@ -1,0 +1,17 @@
+# Keycloak in strict FIPS mode (#599, #601). Build the image first: docker build -f deploy/keycloak/Dockerfile.fips deploy/keycloak.
+# The build bakes in --features=fips --fips-mode=strict and the postgres database, so the server starts with
+# --optimized; point `images` at the registry mirror that holds the built image.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../keycloak
+images:
+  - name: quay.io/keycloak/keycloak
+    newName: passage-keycloak-fips   # replace with <mirror registry>/passage-keycloak-fips
+    newTag: 26.0.8
+patches:
+  - target: { kind: Deployment, name: keycloak }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value: ["start", "--optimized", "--import-realm", "--http-enabled=true", "--proxy-headers=xforwarded"]

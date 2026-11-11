@@ -50,7 +50,7 @@ operations:
     action: send
     channel:
       $ref: "#/channels/revenueContract"
-    summary: Revrec publishes contract.allocated when a revenue contract is created (POST /v1/revrec/contracts).
+    summary: Revrec publishes contract.allocated when a revenue contract is created (POST /v1/revrec/contracts), and again with every obligation when a modification adds obligations (POST /v1/revrec/contracts/{id}:allocate).
   publishScheduleRecognized:
     action: send
     channel:

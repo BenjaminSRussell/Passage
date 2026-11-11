@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -38,6 +39,14 @@ type actionRequest struct {
 	SignedBy     string          `json:"signedBy"`
 	SignatureRef string          `json:"signatureRef"`
 	Text         string          `json:"text"`
+	// Latitude and Longitude are where the customer signed (SIGNATURE).
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+	// CaptureIDs are the uploaded photos a PHOTO action attaches (1 to 5).
+	CaptureIDs []string `json:"captureIds"`
+	// ItemID and Done tick or clear a checklist item (CHECKLIST).
+	ItemID string `json:"itemId"`
+	Done   bool   `json:"done"`
 }
 
 type actionsRequest struct {
@@ -81,18 +90,31 @@ func (a *API) recordActions(w http.ResponseWriter, r *http.Request) {
 		case !ids.Valid(x.ID):
 			fields[key] = "id must be a client-generated UUID"
 		case !kind.Valid():
-			fields[key] = "kind must be TRAVEL_START, WORK_START, HOLD, RESUME, PART_USED, SIGNATURE, NOTE or COMPLETE"
+			fields[key] = "kind must be TRAVEL_START, WORK_START, HOLD, RESUME, PART_USED, SIGNATURE, NOTE, COMPLETE, PHOTO or CHECKLIST"
 		case x.DeviceTime.IsZero() || x.DeviceTime.After(now.Add(maxClockSkew)):
 			fields[key] = "deviceTime must be an RFC 3339 instant not ahead of the server clock"
 		case kind == domain.ActPartUsed && (!ids.Valid(x.LineID) || !x.Qty.IsPositive() || x.Qty.Exponent() < -6):
 			fields[key] = "PART_USED needs lineId (a UUID) and a positive qty with at most 6 decimals"
 		case kind == domain.ActSignature && (len([]rune(x.SignedBy)) < 1 || len([]rune(x.SignedBy)) > 120 || len(x.SignatureRef) < 1 || len(x.SignatureRef) > maxAddressLength):
 			fields[key] = "SIGNATURE needs signedBy (1 to 120 characters) and signatureRef (1 to 500 characters)"
+		case kind == domain.ActSignature && (x.Latitude == nil) != (x.Longitude == nil):
+			fields[key] = "SIGNATURE takes latitude and longitude together"
+		case kind == domain.ActSignature && x.Latitude != nil && !validPosition(*x.Latitude, *x.Longitude):
+			fields[key] = "latitude must be -90 to 90 and longitude -180 to 180"
 		case kind == domain.ActNote && len([]rune(x.Text)) > maxDescription:
 			fields[key] = fmt.Sprintf("text must be at most %d characters", maxDescription)
+		case kind == domain.ActPhoto && !validCaptureIDs(x.CaptureIDs):
+			fields[key] = fmt.Sprintf("PHOTO needs 1 to %d distinct captureIds (UUIDs of uploaded photos)", domain.MaxPhotosPerAction)
+		case kind == domain.ActChecklist && !ids.Valid(x.ItemID):
+			fields[key] = "CHECKLIST needs itemId (a UUID) and done"
+		}
+		captures := make([]string, 0, len(x.CaptureIDs))
+		for _, c := range x.CaptureIDs {
+			captures = append(captures, strings.ToLower(c))
 		}
 		in = append(in, store.ActionInput{ID: x.ID, Kind: kind, DeviceTime: x.DeviceTime.UTC(), LineID: x.LineID, Qty: x.Qty,
-			SignedBy: x.SignedBy, SignatureRef: x.SignatureRef, Text: x.Text})
+			SignedBy: x.SignedBy, SignatureRef: x.SignatureRef, Text: x.Text, Latitude: x.Latitude, Longitude: x.Longitude,
+			CaptureIDs: captures, ItemID: strings.ToLower(x.ItemID), Done: x.Done})
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -126,4 +148,23 @@ func (a *API) listActions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func validPosition(lat, lon float64) bool {
+	return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
+}
+
+func validCaptureIDs(in []string) bool {
+	if len(in) < 1 || len(in) > domain.MaxPhotosPerAction {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, id := range in {
+		id = strings.ToLower(id)
+		if !ids.Valid(id) || seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
 }

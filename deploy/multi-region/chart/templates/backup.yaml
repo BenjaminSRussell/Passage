@@ -13,6 +13,21 @@ metadata:
 spec:
   retentionPolicy: {{ .Values.backup.retentionPolicy | quote }}
   configuration:
+    {{- if include "passage-mr.azureBlob" . }}
+    destinationPath: {{ default (include "passage-mr.azureDestination" .) .Values.backup.destinationPath | quote }}
+    {{- if .Values.backup.azure.useWorkloadIdentity }}
+    azureCredentials:
+      inheritFromAzureAD: true
+    {{- else }}
+    azureCredentials:
+      storageAccount:
+        name: {{ .Values.backup.credentialsSecret }}
+        key: AZURE_STORAGE_ACCOUNT
+      storageKey:
+        name: {{ .Values.backup.credentialsSecret }}
+        key: AZURE_STORAGE_KEY
+    {{- end }}
+    {{- else }}
     destinationPath: {{ default (printf "s3://passage-pg-backups-%s/" .Values.region.id) .Values.backup.destinationPath | quote }}
     {{- with .Values.backup.endpointURL }}
     endpointURL: {{ . | quote }}
@@ -24,6 +39,7 @@ spec:
       secretAccessKey:
         name: {{ .Values.backup.credentialsSecret }}
         key: ACCESS_SECRET_KEY
+    {{- end }}
     wal:
       compression: {{ .Values.backup.compression }}
     data:

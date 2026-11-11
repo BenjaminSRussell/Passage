@@ -19,6 +19,9 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 // test keeps them equal.
 var servicePrincipals = map[string][]string{
 	"edi-sales": {"sales.channel.intake"},
+	// The consumer of fulfillment's asn.issued and billing's invoice.posted (#35, 35-1): it sends the 856, DESADV, 810 or
+	// INVOIC the partners of the legal entity asked for, through the same from-source path the route uses.
+	"edi-outbound": {"edi.outbound.from-event"},
 	// The reporter of posted invoices to sales (#29): it signs :record-progress calls, and its token holds only the one duty of
 	// billing's grant on sales that reports invoices (sales.order.record-invoice).
 	"billing-sales-report": {"sales.order.record-invoice"},
@@ -53,6 +56,7 @@ var servicePrincipals = map[string][]string{
 var servicePrincipalIssuers = map[string][]string{
 	"billing-sales-report":     {"billing"},
 	"billing-tax-report":       {"billing"},
+	"edi-outbound":             {"edi"},
 	"edi-sales":                {"edi"},
 	"finreport-ledger":         {"finreport"},
 	"purchasing-inbound":       {"purchasing"},

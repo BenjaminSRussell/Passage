@@ -1,15 +1,10 @@
-import type { IncomingHttpHeaders } from "node:http";
 import { AgentError } from "../errors.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** The platform tenant; server-side only and never accepted from headers (kernel tenant middleware). */
-const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
 /**
- * The caller as the edge described it after the OPA decision (FR-47.2). The
- * agents API trusts `x-passage-tenant`, `x-passage-user` and `x-passage-duties`
- * only because the edge (Envoy) strips client copies and sets them from the
- * verified token, the same contract as the MCP gateway.
+ * The caller of the agents API: the tenant and user of the verified bearer token, and the duties it carries (auth.ts).
+ * The X-Passage-* edge headers are never trusted on their own.
  */
 export interface Principal {
   userId: string;
@@ -23,13 +18,14 @@ export interface Principal {
  */
 export type ApiCode =
   | "AGT-0400" // malformed request
-  | "AGT-0401" // the edge did not identify a tenant and user
+  | "AGT-0401" // no valid bearer token naming a tenant and user
   | "AGT-0403" // a tenant administrator acting on another tenant
   | "AGT-0404" // no such route or resource
   | "AGT-0405" // method not allowed on the route
   | "AGT-0409" // the action was already decided differently
   | "AGT-0413" // request body too large
-  | "AGT-0500"; // unexpected error, never echoed
+  | "AGT-0500" // unexpected error, never echoed
+  | "AGT-0503"; // the signing keys could not be read
 
 /** An error the HTTP layer maps to a problem response (RFC 9457). */
 export class ApiError extends Error {
@@ -46,31 +42,6 @@ export class ApiError extends Error {
 
 export function isUuid(s: string): boolean {
   return UUID.test(s);
-}
-
-function header(h: IncomingHttpHeaders, name: string): string | undefined {
-  const v = h[name];
-  return Array.isArray(v) ? v[0] : v;
-}
-
-/**
- * Reads the caller from the edge headers. A missing, malformed or nil tenant,
- * or a missing user, is 401 (the kernel tenant middleware's rule). Ids are
- * lowercased so one caller always compares equal to itself.
- */
-export function principalFromHeaders(h: IncomingHttpHeaders): Principal {
-  const tenantId = header(h, "x-passage-tenant")?.trim().toLowerCase();
-  const userId = header(h, "x-passage-user")?.trim().toLowerCase();
-  if (tenantId === undefined || !isUuid(tenantId) || tenantId === NIL_UUID || userId === undefined || !isUuid(userId)) {
-    throw new ApiError(401, "AGT-0401", "the edge did not identify a tenant and user");
-  }
-  const duties = new Set(
-    (header(h, "x-passage-duties") ?? "")
-      .split(",")
-      .map((d) => d.trim())
-      .filter((d) => d !== ""),
-  );
-  return { userId, tenantId, duties };
 }
 
 /** 403 AGT-0203 (9.47.18) when the caller lacks the duty. */

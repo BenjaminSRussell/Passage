@@ -65,6 +65,10 @@ events/asyncapi.yaml   event contract
 charts/receivables/    Helm chart (passage-receivables)
 ```
 
+## Jobs and advised payments (FIN-A)
+
+Three optional in-process jobs, each off until its tenants or sources are set (see the chart values): `RECEIVABLES_AUTO_APPLY_TENANT_IDS` with `RECEIVABLES_AUTO_APPLY_INTERVAL` (default 15m) or `RECEIVABLES_AUTO_APPLY_AT` (`HH:MM` UTC) runs the matcher's AUTO_APPLY decision on unapplied payments, oldest consideration first, 200 per entity per pass; `RECEIVABLES_SFTP_SOURCES` (a JSON array of `{tenantId, legalEntityId, addr, user, hostKeyFingerprint, inbox, done, failed, autoApply}`) with `RECEIVABLES_SFTP_KEY_FILE` and `RECEIVABLES_SFTP_POLL_INTERVAL` / `_AT` imports the camt.053 files in each inbox like an upload and moves them to the done or failed directory. `POST /remittance-advices` with `createMissing` records an advice with no bank credit as an ADVISED payment (no cash, no journal, not on statements, cannot be applied); the bank payment with the same reference, currency and amount confirms it and takes its references. `/v1/receivables/bank-accounts` maps a legal entity's bank accounts to ledger accounts, and `POST /gl-journals:backfill` queues the journals owed for history.
+
 ## Run
 
 ```sh

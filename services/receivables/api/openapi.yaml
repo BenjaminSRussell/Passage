@@ -67,6 +67,88 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/customer-portal/open-items:
+    get:
+      operationId: customerPortalOpenItems
+      summary: The signed-in customer's own open items (customer portal)
+      description: |
+        For the customer portal only (#30). The customer is the signed `cus` claim of the customer-portal service token; a
+        `customer` query parameter is ignored. The answer is the customer's view: no dunning state, import keys or internal ids.
+      x-passage-duty: receivables.customer-portal.read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, all], default: open } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
+      responses:
+        "200":
+          description: The customer's open items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortalOpenItem" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/customer-portal/open-items/{id}:
+    get:
+      operationId: customerPortalOpenItem
+      summary: One of the signed-in customer's open items (customer portal)
+      description: An item of another customer is 404 AR-OPEN-ITEM-NOT-FOUND, the same answer as an unknown id.
+      x-passage-duty: receivables.customer-portal.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The open item
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortalOpenItem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/customer-portal/payments:
+    get:
+      operationId: customerPortalPayments
+      summary: The signed-in customer's own payments (customer portal)
+      x-passage-duty: receivables.customer-portal.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
+      responses:
+        "200":
+          description: The customer's payments; payments not yet identified with a customer are not listed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortalPayment" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/customer-portal/statement:
+    get:
+      operationId: customerPortalStatement
+      summary: The signed-in customer's account statement (customer portal)
+      description: The customer and the legal entity are the token's; a `customer` or `legalEntityId` parameter is ignored.
+      x-passage-duty: receivables.customer-portal.read
+      parameters:
+        - { name: asOf, in: query, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: The statement by currency
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asOf, sections]
+                properties:
+                  asOf: { type: string, format: date }
+                  sections: { type: array, items: { type: object } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/receivables/aging:
     get:
       operationId: agingSnapshot
@@ -95,7 +177,7 @@ paths:
       summary: Payments, newest received first
       x-passage-duty: receivables.view
       parameters:
-        - { name: status, in: query, schema: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED] } }
+        - { name: status, in: query, schema: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED, ADVISED, CONFIRMED] } }
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
       responses:
@@ -1487,7 +1569,10 @@ paths:
         replaces the payment's remittance, so a repeat changes nothing; a payment already applied, an unknown or shared
         reference, and references that total more than the payment are reported per line and skipped. With `autoApply`
         the payments that got an advice are then matched and applied like an import's. 400 AR-ADVICE-MALFORMED names the
-        row, element or segment.
+        row, element or segment. With `createMissing`, a line that names no payment records one in status ADVISED (the
+        advice came before the bank credit): it books no cash, cannot be matched or applied and is on no statement until
+        a bank payment (statement entry, lockbox check or manual payment) with the same reference, currency and amount
+        arrives; that payment takes the advice's references and the advised one becomes CONFIRMED.
       x-passage-duty: receivables.payment.post
       requestBody:
         required: true
@@ -1502,6 +1587,10 @@ paths:
                 format: { type: string, enum: [CSV, JSON, EDI820] }
                 content: { type: string, minLength: 1, maxLength: 3145728 }
                 autoApply: { type: boolean }
+                createMissing: { type: boolean, description: "Record an ADVISED payment for each line that names no payment. Needs currency." }
+                currency: { type: string, pattern: "^[A-Z]{3}$", description: "Currency of the advised payments; required with createMissing." }
+                valueDate: { type: string, format: date, description: "Value date of the advised payments; defaults to today." }
+                paymentMode: { type: string, enum: [CHECK, ACH, WIRE, CARD, CASH], description: "Defaults to WIRE." }
       responses:
         "200":
           description: Advice processed
@@ -1509,9 +1598,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [lines, attached, skipped]
+                required: [lines, attached, created, skipped]
                 properties:
                   attached: { type: integer }
+                  created: { type: integer, description: "Payments recorded as ADVISED (createMissing)." }
                   skipped: { type: integer }
                   lines:
                     type: array
@@ -1520,7 +1610,7 @@ paths:
                       required: [paymentRef, outcome]
                       properties:
                         paymentRef: { type: string }
-                        outcome: { type: string, enum: [ATTACHED, UNMATCHED, AMBIGUOUS, ALREADY_APPLIED, INVALID] }
+                        outcome: { type: string, enum: [ATTACHED, UNMATCHED, AMBIGUOUS, ALREADY_APPLIED, INVALID, ADVISED] }
                         paymentId: { type: string, format: uuid }
                         detail: { type: string }
                   autoApply: { $ref: "#/components/schemas/AutoApplyResult" }
@@ -1592,6 +1682,62 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/bank-accounts:
+    get:
+      operationId: listBankAccounts
+      summary: List the legal entity's bank account mappings (30-2)
+      description: |
+        Each mapping names the ledger account the cash of one bank account is booked to, by currency and the
+        statement's own account id (a camt.053 Stmt/Acct/Id, upper case without spaces). A mapping with an empty
+        `accountRef` is the entity's default account for the currency. Receipts and down payments with no mapping
+        book 1000.
+      x-passage-duty: receivables.view
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Mappings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/BankAccount" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: putBankAccount
+      summary: Create or replace a bank account mapping
+      x-passage-duty: receivables.bankaccount.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BankAccount" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BankAccount" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteBankAccount
+      summary: Remove a bank account mapping; its cash books to 1000 again
+      x-passage-duty: receivables.bankaccount.manage
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
+        - { name: accountRef, in: query, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/receivables/gl-journals:
     get:
       operationId: listGLJournals
@@ -1619,6 +1765,48 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/GLJournalView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-journals:backfill:
+    post:
+      operationId: backfillGLJournals
+      summary: Queue the journals owed for payments recorded before the ledger journals existed, and for opening-item imports
+      description: |
+        For each payment of the legal entity with no cash receipt journal (ADVISED and CONFIRMED payments book no cash), queues
+        Dr bank / Cr 1205, and, for such a payment applied before the journals existed, one journal for its applications
+        (Dr 1205, Dr 4100, Dr 6100 / Cr 1200). A payment that already has an application journal is left to them. At
+        most 1000 payments a call; `more` says to call again. With `openingAccount` and `openingDate` (both or neither) it
+        also queues one journal per opening-item import source and currency for the open amount the import set: Dr 1200
+        against the opening account (the other way for a net credit). Use that only when the ledger's own opening balance does
+        not already carry the receivable. Every journal has its own key, so a repeat queues nothing twice; the sweeper
+        posts them. Dunning fees, interest, down payments and deductions are not backfilled.
+      x-passage-duty: receivables.payment.post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                openingAccount: { type: string, maxLength: 20 }
+                openingDate: { type: string, format: date }
+      responses:
+        "200":
+          description: What was queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receipts, applications, openingItems, openingAlreadyQueued, more]
+                properties:
+                  receipts: { type: integer }
+                  applications: { type: integer }
+                  openingItems: { type: integer }
+                  openingAlreadyQueued: { type: integer }
+                  more: { type: boolean }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
   /v1/receivables/gl-journals:sweep:
@@ -2163,6 +2351,16 @@ components:
         dunningLevel: { type: integer, minimum: 0, maximum: 4 }
         riskScore: { type: integer, minimum: 0, maximum: 100 }
         takenAt: { type: string, format: date-time }
+    BankAccount:
+      type: object
+      required: [legalEntityId, currency, glAccount]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        accountRef: { type: string, maxLength: 40, description: "The statement's account id, normalized to upper case letters and digits; empty is the entity's default for the currency." }
+        glAccount: { type: string, maxLength: 20 }
+        name: { type: string, maxLength: 100 }
     CreatePaymentRequest:
       type: object
       additionalProperties: false
@@ -2185,6 +2383,7 @@ components:
             The payer's IBAN or MICR routing and account as on the advice, 8 or more letters and digits (R4). Only its
             SHA-256 hash is stored; the account is never echoed.
         shortPayReason: { type: [string, "null"], minLength: 1, maxLength: 120, description: explains a short payment (R7) }
+        bankAccount: { type: [string, "null"], maxLength: 64, description: "The bank account the money came to (its IBAN or other id); the legal entity's mapping of it picks the ledger account of the cash." }
         remittance:
           type: array
           items: { $ref: "#/components/schemas/RemittanceLine" }
@@ -2205,11 +2404,38 @@ components:
         payerName: { type: [string, "null"] }
         payerAccountHash: { type: string, pattern: "^[0-9a-f]{64}$", description: "SHA-256 of the payer's normalized account (R4); absent when none was given" }
         shortPayReason: { type: string, description: absent when none was given (R7) }
+        bankAccountRef: { type: string, description: "The bank account the money came to, normalized; absent when unknown" }
         remittance:
           type: array
           items: { $ref: "#/components/schemas/RemittanceLine" }
-        status: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED] }
+        status: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED, ADVISED, CONFIRMED] }
         version: { type: integer }
+    PortalOpenItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        documentNumber: { type: string }
+        documentDate: { type: string, format: date }
+        dueDate: { type: string, format: date }
+        currency: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        openAmount: { $ref: "#/components/schemas/Money" }
+        side: { type: string, enum: [DEBIT, CREDIT] }
+        status: { type: string }
+        sourceType: { type: string }
+        cashDiscountDate: { type: string, format: date }
+        cashDiscountAmount: { $ref: "#/components/schemas/Money" }
+    PortalPayment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        paymentMode: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        unappliedAmount: { $ref: "#/components/schemas/Money" }
+        currency: { type: string }
+        receivedDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        status: { type: string }
     OpenItem:
       type: object
       properties:

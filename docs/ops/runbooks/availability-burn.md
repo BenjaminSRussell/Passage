@@ -10,10 +10,10 @@ chart; their runbook is [SLO burn](slo-burn.md).
 Known gaps, both handoffs to wave 5 observability (rows in `docs/ops/NOT-IMPLEMENTED.md`):
 
 - The rule has no `runbook_url` annotation, so the alert does not link here. Responders find this page by alert name.
-- The rule reads `http_requests_total{status=~"5.."}`. The services on main export prefixed series instead
-  (`payables_http_requests_total`, `receiving_http_requests_total`, `engineering_http_requests_total` with a
-  `class="5xx"` label instead of `status`, and so on), so the expression has no data and the alert cannot fire until
-  the names are aligned. Until then, check the per-service series directly, for example
+- The rule reads `http_requests_total{status=~"5.."}`. `platform/go/httpx` now records that series for every service
+  built on `httpx.NewRouter` (labels `route` and `status`), and the services that mount `httpx.WithMetrics` on their
+  admin `/metrics` expose it. A service that does not wrap its metrics handler (budgeting, billing, analytics and the
+  consumers' own admin ports) still shows only its prefixed series, for example
   `sum by (__name__) (rate({__name__=~".+_http_requests_total", status=~"5.."}[5m]))`.
 
 ## First five minutes

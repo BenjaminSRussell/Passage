@@ -45,6 +45,9 @@ EXEMPT = {
     # Per-region CNPG cluster, fence and alert rules; one release per region cluster with
     # deploy/multi-region/values/<region>.yaml. There are no region clusters yet (docs/ops/NOT-IMPLEMENTED.md).
     "deploy/multi-region/chart",
+    # ClusterSecretStore for Azure Key Vault (#600): installed per Azure environment with the cloud profile's global values,
+    # after the External Secrets Operator. The dev cluster uses the Vault store named `passage` instead.
+    "deploy/secret-store",
 }
 # Dev sync-wave order (#106): each group syncs strictly after the one before. The operator, then the Kafka cluster
 # and the databases, then what the cluster's operators reconcile and Temporal, then Connect and its connectors.
@@ -516,6 +519,32 @@ class ArgoApplicationsTest(unittest.TestCase):
         self.assertIn(kafka["username"], users, "deploy/kafka/receivables-consumer.yaml")
         self.assertEqual(users[kafka["username"]], {("topic", topic): {"Read", "Describe"}, ("topic", dlq): {"Write", "Describe"},
                                                     ("group", group): {"Read", "Describe"}})
+        self.assertIn(dlq, topics)
+
+    def test_edi_outbound_consumer_acls(self):
+        # The edi outbound consumer (#35, 35-1): its KafkaUser reads exactly fulfillment's asn channel and billing's invoice
+        # channel, the ones the two AsyncAPI documents declare for asn.issued and invoice.posted, and the group the code
+        # uses, and writes the dead-letter topic it parks on.
+        code = (REPO / "services/edi/internal/autosend/autosend.go").read_text()
+        topics_read = set(re.findall(r'(?:FulfillmentTopic|BillingTopic)\s+=\s+"([^"]+)"', code))
+        (group,) = re.findall(r'ConsumerName\s+=\s+"([^"]+)"', code)
+        (dlq,) = re.findall(r'DeadLetterTopic\s+=\s+"([^"]+)"', code)
+        for service, type_const in (("fulfillment", "ASNIssuedType"), ("billing", "InvoicePostedType")):
+            (event_type,) = re.findall(type_const + r'\s+=\s+"([^"]+)"', code)
+            spec = yaml.safe_load((REPO / f"services/{service}/events/asyncapi.yaml").read_text())
+            channels = {ch["address"] for ch in spec["channels"].values()
+                        for ref in ch["messages"].values()
+                        if spec["components"]["messages"][ref["$ref"].rsplit("/", 1)[1]].get("name") == event_type}
+            self.assertEqual(len(channels & topics_read), 1, event_type)
+        values = yaml.safe_load((REPO / "services/edi/charts/edi/values.yaml").read_text())
+        kafka = values["consumer"]["kafka"]
+        self.assertFalse(values["consumer"]["enabled"], "the edi consumer is off by default, like the other consumers")
+        users, topics = self.synced_kafka_resources()
+        self.assertEqual((kafka["group"], kafka["dlqTopic"]), (group, dlq))
+        self.assertIn(kafka["username"], users, "deploy/kafka/edi-consumer.yaml")
+        expected = {("topic", t): {"Read", "Describe"} for t in topics_read}
+        expected.update({("topic", dlq): {"Write", "Describe"}, ("group", group): {"Read", "Describe"}})
+        self.assertEqual(users[kafka["username"]], expected)
         self.assertIn(dlq, topics)
 
     @unittest.skipUnless(shutil.which("helm"), "helm not on PATH")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -98,7 +99,7 @@ func TestEffectivePermissionsMatchOPAOver100Resources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := catalogue.Evaluate(principals[name], route.Method, resource)
+			got := catalogue.Evaluate(catalogue.HeldIn(principals[name], false), route.Method, resource)
 			if got.Allow != want.Allow || got.DutyMissing != want.DutyMissing {
 				t.Errorf("%s %s %s: engine allow=%v missing=%q, OPA allow=%v missing=%q", name, route.Method, resource, got.Allow, got.DutyMissing, want.Allow, want.DutyMissing)
 			}
@@ -139,7 +140,7 @@ func TestEffectivePermissionsMatchOPAOnEdgePaths(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				got := catalogue.Evaluate(principals[name], method, resource)
+				got := catalogue.Evaluate(catalogue.HeldIn(principals[name], false), method, resource)
 				if got.Allow != want.Allow || got.DutyMissing != want.DutyMissing {
 					t.Errorf("%s %s %s: engine allow=%v missing=%q, OPA allow=%v missing=%q", name, method, resource, got.Allow, got.DutyMissing, want.Allow, want.DutyMissing)
 				}
@@ -159,7 +160,7 @@ func TestEffectiveReportEqualsOPAForEveryRoute(t *testing.T) {
 	putAssignments(t, base, principals)
 
 	for _, name := range []string{"viewer-and-edit", "finance", "identity-admin", "broad"} {
-		report := catalogue.Effective(principals[name])
+		report := catalogue.Effective(catalogue.HeldIn(principals[name], false))
 		if len(report) != len(catalogue.Routes()) {
 			t.Fatalf("%s: report has %d rows, want %d", name, len(report), len(catalogue.Routes()))
 		}
@@ -213,5 +214,22 @@ func TestEvaluateReportsGrantingAndMissingDuty(t *testing.T) {
 				t.Fatalf("got %+v, want allow=%v duty=%q missing=%q", got, tt.allow, tt.duty, tt.missed)
 			}
 		})
+	}
+}
+
+func TestOperatorOnlyDutiesAreHeldOnlyInTheOperatorTenant(t *testing.T) {
+	catalogue := loadSeededCatalogue(t)
+	duties := []string{"ops.failover.execute", "ops.region.view", "party.vendor.view"}
+	if got := catalogue.HeldIn(duties, false); !slices.Equal(got, []string{"party.vendor.view"}) {
+		t.Fatalf("outside the operator tenant: %v", got)
+	}
+	if got := catalogue.HeldIn(duties, true); !slices.Equal(got, duties) {
+		t.Fatalf("in the operator tenant: %v", got)
+	}
+	if g := catalogue.Evaluate(catalogue.HeldIn(duties, false), http.MethodPost, "/v1/ops/failover"); g.Allow || g.DutyMissing != "ops.failover.execute" {
+		t.Fatalf("outside: %+v", g)
+	}
+	if g := catalogue.Evaluate(catalogue.HeldIn(duties, true), http.MethodPost, "/v1/ops/failover"); !g.Allow {
+		t.Fatalf("operator: %+v", g)
 	}
 }

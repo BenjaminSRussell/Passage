@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 
@@ -27,7 +28,7 @@ const postingsDeadLetterTopic = "passage.inventory.postings.dlq"
 
 func postingsKafkaConfig(getenv func(string) string) (kafka.Config, error) {
 	return kafka.ConfigFromEnv(getenv, api.PostingsConsumerName, api.PostingsConsumerName,
-		[]string{api.ReceiptTopic, api.OrderProgressTopic, api.PackingSlipTopic})
+		[]string{api.ReceiptTopic, api.OrderProgressTopic, api.PackingSlipTopic, api.WorkOrderTopic})
 }
 
 // postingsUnits is the unit conversion plain lines are booked with: the
@@ -52,7 +53,7 @@ func postingsSeeded(table map[string][]string) bool {
 // sales' DELIVERED orderprogress.recorded and fulfillment's
 // packingslip.cancelled as inventory transactions (#480) and serves the
 // consumer's admin port.
-func runPostingsConsumer(ctx context.Context, getenv func(string) string, s *store.Postgres, pool *pgxpool.Pool, neg domain.NegativePolicy) error {
+func runPostingsConsumer(ctx context.Context, getenv func(string) string, s *store.Postgres, pool *pgxpool.Pool, neg domain.NegativePolicy, allowNegativeTruck bool) error {
 	if !postingsSeeded(tenant.ServicePrincipalTable()) {
 		return errors.New("postings consumer not started: service principal " + tenant.ServiceActor(api.PostingsConsumerName) + " is not seeded")
 	}
@@ -72,8 +73,10 @@ func runPostingsConsumer(ctx context.Context, getenv func(string) string, s *sto
 		return err
 	}
 	defer client.Close()
+	handlers := api.PostingsConsumerHandlers(s, units, neg)
+	maps.Copy(handlers, api.TruckConsumerHandlers(s, units, allowNegativeTruck, s))
 	consumer, err := eventing.NewConsumer(client, client, eventing.NewPgInbox(pool), eventing.Config{
-		Name: api.PostingsConsumerName, Idempotent: true, Handlers: api.PostingsConsumerHandlers(s, units, neg),
+		Name: api.PostingsConsumerName, Idempotent: true, Handlers: handlers,
 		DeadLetterTopic: postingsDeadLetterTopic, Log: slog.Default(),
 	})
 	if err != nil {

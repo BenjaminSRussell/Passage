@@ -6,6 +6,7 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "eval": "npm run build && node dist/run.js --gate",
+    "generate": "npm run build && node dist/generate.js",
     "test": "vitest --run",
     "typecheck": "tsc --noEmit"
   },

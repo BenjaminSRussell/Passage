@@ -8,7 +8,7 @@
       "type": "object",
       "required": ["id", "role", "provider", "namespace"],
       "properties": {
-        "id": {"type": "string", "pattern": "^[a-z]+-[a-z]+[0-9]*$"},
+        "id": {"type": "string", "pattern": "^[a-z]+(-[a-z]+)?[0-9]*$"},
         "role": {"enum": ["PRIMARY", "PASSIVE", "FENCED"]},
         "provider": {"enum": ["eks", "gke", "aks", "bare"]},
         "namespace": {"type": "string", "minLength": 1}
@@ -45,7 +45,18 @@
         "compression": {"enum": ["gzip", "bzip2", "snappy"]},
         "retentionPolicy": {"type": "string", "pattern": "^[1-9][0-9]*[dwm]$"},
         "schedule": {"type": "string", "pattern": "^\\S+( \\S+){5}$"},
-        "maxAgeHours": {"type": "integer", "minimum": 1}
+        "maxAgeHours": {"type": "integer", "minimum": 1},
+        "store": {"enum": ["s3", "azure-blob"]},
+        "azure": {
+          "type": "object",
+          "properties": {
+            "useWorkloadIdentity": {"type": "boolean"},
+            "workloadIdentityClientId": {"type": "string"},
+            "storageAccount": {"type": "string", "pattern": "^([a-z0-9]{3,24})?$"},
+            "storageAccountRegion": {"type": "string"},
+            "container": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"}
+          }
+        }
       }
     },
     "mm2": {

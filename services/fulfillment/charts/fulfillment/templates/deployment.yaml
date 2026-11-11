@@ -25,9 +25,9 @@ spec:
       containers:
         - name: {{ .Chart.Name }}
           {{- if .Values.image.digest }}
-          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          image: "{{ (include "passage.imageRepository" $) }}@{{ .Values.image.digest }}"
           {{- else }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ (include "passage.imageRepository" $) }}:{{ .Values.image.tag }}"
           {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
@@ -36,6 +36,7 @@ spec:
             - name: admin
               containerPort: 9090
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: HTTP_ADDR
               value: ":{{ .Values.service.port }}"
             - name: ADMIN_ADDR

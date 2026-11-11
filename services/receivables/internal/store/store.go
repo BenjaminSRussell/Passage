@@ -123,6 +123,15 @@ type Payment struct {
 	PayerAccountHash *string `json:"payerAccountHash,omitempty"`
 	// ShortPayReason explains a short payment (R7).
 	ShortPayReason *string `json:"shortPayReason,omitempty"`
+	// BankAccountRef is the account the money came to (the statement's account id, normalized); it picks the ledger account of the cash.
+	BankAccountRef *string `json:"bankAccountRef,omitempty"`
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // ApplyRequest is the settlement plan for one payment. Open amounts and discount
@@ -215,7 +224,12 @@ type Store interface {
 	BackfillRMAReservationFor(ctx context.Context, legalEntityID, rmaID, invoiceID string, lines []RMAInvoiceLine) (RMACreditView, error)
 	ListRMACredits(ctx context.Context, f RMACreditFilter) ([]RMACreditView, error)
 	SweepRMACredits(ctx context.Context, now time.Time, limit int) (RMASweepResult, error)
+	BackfillGLJournals(ctx context.Context, req BackfillRequest) (BackfillResult, error)
+	ListBankAccounts(ctx context.Context, legalEntityID string) ([]BankAccount, error)
+	PutBankAccount(ctx context.Context, b BankAccount) error
+	DeleteBankAccount(ctx context.Context, legalEntityID, currency, accountRef string) error
 	ApplyRemittanceAdvice(ctx context.Context, legalEntityID string, lines []domain.AdviceLine) (AdviceResult, error)
+	ApplyRemittanceAdviceWith(ctx context.Context, legalEntityID string, lines []domain.AdviceLine, opts AdviceOptions) (AdviceResult, error)
 	AutoApplyPayments(ctx context.Context, paymentIDs []string) (AutoApplyResult, error)
 	SettleCredit(ctx context.Context, req CreditSettlementRequest, idempotencyKey string) (CreditSettlementResult, error)
 	ListGLJournals(ctx context.Context, f GLJournalFilter) ([]GLJournalView, error)
@@ -247,7 +261,7 @@ const openItemColumns = `id, legal_entity_id, customer_id, source_type, document
 	currency, amount::text, open_amount::text, cash_discount_date::text, cash_discount_amount::text, dunning_level, dunning_block, status, version, import_source, legacy_key`
 
 const paymentColumns = `id, legal_entity_id, customer_id, payment_mode, source, source_ref, amount::text, unapplied_amount::text,
-	currency, received_date::text, value_date::text, payer_name, remittance, status, version, payer_account_hash, short_pay_reason`
+	currency, received_date::text, value_date::text, payer_name, remittance, status, version, payer_account_hash, short_pay_reason, bank_account_ref`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -282,7 +296,7 @@ func scanPayment(row rowScanner) (Payment, error) {
 	var remittance []byte
 	if err := row.Scan(&p.ID, &p.LegalEntityID, &p.CustomerID, &p.PaymentMode, &p.Source, &p.SourceRef, &amount, &unapplied,
 		&p.Currency, &p.ReceivedDate, &p.ValueDate, &p.PayerName, &remittance, &p.Status, &p.Version,
-		&p.PayerAccountHash, &p.ShortPayReason); err != nil {
+		&p.PayerAccountHash, &p.ShortPayReason, &p.BankAccountRef); err != nil {
 		return Payment{}, err
 	}
 	var err error
@@ -444,13 +458,16 @@ func (s *Postgres) CreatePayment(ctx context.Context, in Payment, idempotencyKey
 		}
 		row := tx.QueryRow(ctx, `insert into payment (tenant_id, id, legal_entity_id, customer_id, payment_mode, source, source_ref,
 			amount, unapplied_amount, currency, received_date, value_date, payer_name, remittance, status, idempotency_key,
-			payer_account_hash, short_pay_reason)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, 'RECEIVED', $14, $15, $16)
+			payer_account_hash, short_pay_reason, bank_account_ref)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, 'RECEIVED', $14, $15, $16, $17)
 			returning `+paymentColumns,
 			p.TenantID, in.ID, in.LegalEntityID, in.CustomerID, in.PaymentMode, in.Source, in.SourceRef, in.Amount.String(),
-			in.Currency, in.ReceivedDate, in.ValueDate, in.PayerName, remittance, idempotencyKey, in.PayerAccountHash, in.ShortPayReason)
+			in.Currency, in.ReceivedDate, in.ValueDate, in.PayerName, remittance, idempotencyKey, in.PayerAccountHash, in.ShortPayReason, in.BankAccountRef)
 		out, err = scanPayment(row)
 		if err != nil {
+			return err
+		}
+		if out, err = confirmAdvised(ctx, tx, out); err != nil {
 			return err
 		}
 		if err := receiptJournal(ctx, tx, p.TenantID, out); err != nil {

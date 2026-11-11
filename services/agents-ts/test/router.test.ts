@@ -4,6 +4,9 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApprovalRequest, RecordedDecision } from "../src/api/decision.js";
 import { createAgentsHandler, MAX_BODY_BYTES } from "../src/api/router.js";
+import { edgeHeaders, testAuthenticate } from "./jwt.js";
+import type { CopilotService } from "../src/runtime/copilot.js";
+import type { RunService } from "../src/runtime/service.js";
 import type { AgentEvent } from "../src/domain/events.js";
 import { KillSwitchRegistry } from "../src/domain/killswitch.js";
 
@@ -31,6 +34,7 @@ describe("agents HTTP surface", () => {
 
   beforeAll(async () => {
     const handler = createAgentsHandler({
+      authenticate: testAuthenticate,
       registry,
       versions: { next: () => ++version },
       approvals: {
@@ -58,12 +62,7 @@ describe("agents HTTP surface", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  const admin = {
-    "content-type": "application/json",
-    "x-passage-tenant": T1,
-    "x-passage-user": ADMIN,
-    "x-passage-duties": "agents.admin",
-  };
+  const admin = edgeHeaders(T1, ADMIN, "agents.admin");
   const kill = (active: boolean, headers: Record<string, string> = admin) =>
     fetch(`${base}/api/v1/agents/kill-switch`, { method: "POST", headers, body: JSON.stringify({ scope: "TENANT", tenantId: T1, active }) });
 
@@ -85,7 +84,7 @@ describe("agents HTTP surface", () => {
   });
 
   it("returns an RFC 9457 problem with a stable code for a refused caller", async () => {
-    const res = await kill(false, { ...admin, "x-passage-duties": "" });
+    const res = await kill(false, edgeHeaders(T1, ADMIN, ""));
     expect(res.status).toBe(403);
     expect(res.headers.get("content-type")).toBe("application/problem+json");
     expect(await res.json()).toEqual({
@@ -122,7 +121,7 @@ describe("agents HTTP surface", () => {
   });
 
   it("records an approval decision and answers 404 for an action that does not exist", async () => {
-    const sup = { ...admin, "x-passage-user": SUP, "x-passage-duties": "APInvoicePost" };
+    const sup = edgeHeaders(T1, SUP, "APInvoicePost");
     const ok = await fetch(`${base}/api/v1/agents/runs/${RUN}/actions/${ACT}/decision`, { method: "POST", headers: sup, body: JSON.stringify({ decision: "APPROVED" }) });
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ runId: RUN, actionId: ACT, decision: "APPROVED", approverUserId: SUP, decidedAt: NOW.toISOString() });
@@ -140,6 +139,7 @@ describe("agents HTTP surface", () => {
 
   it("never echoes an internal error", async () => {
     const failing = createAgentsHandler({
+      authenticate: testAuthenticate,
       registry: new KillSwitchRegistry(() => Date.now()),
       versions: { next: () => 1 },
       approvals: { find: async () => undefined, record: async (_t, _r, _a, d) => d },
@@ -184,14 +184,22 @@ describe("api/openapi.yaml matches the router", () => {
   it("documents exactly the operations the router serves", async () => {
     expect(documentedOperations()).toEqual([
       "GET /api/v1/agents/kill-switch",
+      "GET /api/v1/agents/runs/{runId}",
+      "GET /api/v1/agents/runs/{runId}/actions",
       "POST /api/v1/agents/kill-switch",
       "POST /api/v1/agents/runs/{runId}/actions/{actionId}/decision",
+      "POST /api/v1/agents/{agentId}/runs",
+      "POST /api/v1/copilot/chat",
     ]);
     const handler = createAgentsHandler({
+      authenticate: testAuthenticate,
       registry: new KillSwitchRegistry(() => Date.now()),
       versions: { next: () => 1 },
       approvals: { find: async () => undefined, record: async (_t, _r, _a, d) => d },
       publish: async () => undefined,
+      // Never reached: an anonymous call is refused at the edge identity check.
+      runs: {} as RunService,
+      copilot: {} as CopilotService,
     });
     const s = createServer((req, res) => void handler(req, res));
     await new Promise<void>((resolve) => s.listen(0, "127.0.0.1", resolve));
@@ -199,7 +207,7 @@ describe("api/openapi.yaml matches the router", () => {
       const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
       for (const op of documentedOperations()) {
         const [method, template] = op.split(" ") as [string, string];
-        const url = template.replace("{runId}", RUN).replace("{actionId}", ACT);
+        const url = template.replace("{runId}", RUN).replace("{actionId}", ACT).replace("{agentId}", "ap_coding");
         // Anonymous: a served route answers 401, an unserved one 404 or 405.
         const res = await fetch(`${base}${url}`, { method, ...(method === "GET" ? {} : { body: "{}" }) });
         expect(res.status, op).toBe(401);

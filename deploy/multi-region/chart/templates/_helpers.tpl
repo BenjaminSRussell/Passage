@@ -27,3 +27,19 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 passage.dev/region: {{ .Values.region.id }}
 passage.dev/region-role: {{ .Values.region.role }}
 {{- end -}}
+
+{{/* "true" when backups go to Azure Blob storage. */}}
+{{- define "passage-mr.azureBlob" -}}
+{{- if eq .Values.backup.store "azure-blob" -}}true{{- end -}}
+{{- end -}}
+
+{{/* "true" when this region archives WAL to Azure Blob as a workload identity (no storage key). */}}
+{{- define "passage-mr.azureWorkloadIdentity" -}}
+{{- if and (include "passage-mr.backsUp" .) (include "passage-mr.azureBlob" .) .Values.backup.azure.useWorkloadIdentity -}}true{{- end -}}
+{{- end -}}
+
+{{/* Azure Blob destination: https://<account>.<blob suffix of the cloud profile>/<container>/ */}}
+{{- define "passage-mr.azureDestination" -}}
+{{- $blob := required "global.endpoints.blobSuffix is required for backup.store azure-blob: render with deploy/cloud-profiles/values/<profile>.yaml" ((.Values.global | default dict).endpoints | default dict).blobSuffix -}}
+https://{{ required "backup.azure.storageAccount is required for backup.store azure-blob" .Values.backup.azure.storageAccount }}.{{ $blob }}/{{ .Values.backup.azure.container }}/
+{{- end -}}

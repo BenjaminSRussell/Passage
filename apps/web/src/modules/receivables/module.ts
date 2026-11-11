@@ -7,6 +7,7 @@ import { DeductionDetailPage, DeductionsPage, NewDeductionPage } from "./Deducti
 import { DisputeDetailPage, DisputesPage, NewDisputePage } from "./Disputes";
 import { DownPaymentDetailPage, DownPaymentsPage, NewDownPaymentPage } from "./DownPayments";
 import { DunningRunDetailPage, DunningRunsPage, NewDunningRunPage } from "./Dunning";
+import { GLJournalsPage } from "./GLJournals";
 import { InterestNotesPage, InterestRunPage } from "./Interest";
 import { LockboxImportPage, LockboxPage } from "./Lockbox";
 import { NewPaymentPage } from "./NewPaymentPage";
@@ -14,6 +15,7 @@ import { OpenItemsPage } from "./OpenItemsPage";
 import { OpeningImportsPage } from "./OpeningImports";
 import { PaymentDetailPage } from "./PaymentDetailPage";
 import { PaymentsPage } from "./PaymentsPage";
+import { RemittanceAdvicePage } from "./RemittanceAdvice";
 import { BalanceSnapshotsPage, StatementPage } from "./Statements";
 import { NewPromisePage, PromisesPage } from "./Promises";
 import { WorklistPage } from "./WorklistPage";
@@ -23,7 +25,7 @@ const receivables: PassageModule = {
   id: "receivables",
   title: "Accounts receivable",
   description:
-    "Open items (including those the migration loader imports at cutover), aging and cash application (manual, lockbox and camt.053 bank statements), collections (worklist, cases, disputes, promises to pay, dunning and interest), the deductions workbench, balance confirmations, down payments and security deposits, customer statements and the nightly balance snapshots.",
+    "Open items (including those the migration loader imports at cutover), aging and cash application (manual, lockbox and camt.053 bank statements, payer remittance advices), the journals owed to the ledger, collections (worklist, cases, disputes, promises to pay, dunning and interest), the deductions workbench, balance confirmations, down payments and security deposits, customer statements and the nightly balance snapshots.",
   routes: [
     { path: "/receivables", element: createElement(WorkspacePage), handle: { title: "AR workspace" } },
     { path: "/receivables/open-items", element: createElement(OpenItemsPage), handle: { title: "Open items" } },
@@ -31,6 +33,8 @@ const receivables: PassageModule = {
     { path: "/receivables/payments", element: createElement(PaymentsPage), handle: { title: "Payments" } },
     { path: "/receivables/payments/new", element: createElement(NewPaymentPage), handle: { title: "Record payment" } },
     { path: "/receivables/payments/:id", element: createElement(PaymentDetailPage), handle: { title: "Payment" } },
+    { path: "/receivables/remittance-advice", element: createElement(RemittanceAdvicePage), handle: { title: "Remittance advice" } },
+    { path: "/receivables/gl-journals", element: createElement(GLJournalsPage), handle: { title: "Ledger journals" } },
     { path: "/receivables/lockbox", element: createElement(LockboxPage), handle: { title: "Lockbox imports" } },
     { path: "/receivables/lockbox/new", element: createElement(LockboxImportPage), handle: { title: "Import lockbox file" } },
     { path: "/receivables/bank-statements", element: createElement(BankStatementsPage), handle: { title: "Bank statements" } },
@@ -67,6 +71,7 @@ const receivables: PassageModule = {
     { label: "Imported opening items", to: "/receivables/opening-items", duty: "receivables.view" },
     { label: "Payments", to: "/receivables/payments", duty: "receivables.view" },
     { label: "Record payment", to: "/receivables/payments/new", duty: "receivables.payment.post" },
+    { label: "Remittance advice", to: "/receivables/remittance-advice", duty: "receivables.payment.post" },
     { label: "Lockbox imports", to: "/receivables/lockbox", duty: "receivables.view" },
     { label: "Bank statements", to: "/receivables/bank-statements", duty: "receivables.view" },
     { label: "Collections worklist", to: "/receivables/worklist", duty: "receivables.view" },
@@ -80,6 +85,7 @@ const receivables: PassageModule = {
     { label: "Deductions", to: "/receivables/deductions", duty: "receivables.view" },
     { label: "Customer statements", to: "/receivables/statements", duty: "receivables.view" },
     { label: "Balance snapshots", to: "/receivables/balance-snapshots", duty: "receivables.view" },
+    { label: "Ledger journals", to: "/receivables/gl-journals", duty: "receivables.view" },
   ],
 };
 
