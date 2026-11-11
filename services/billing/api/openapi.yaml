@@ -1179,6 +1179,18 @@ components:
         invoiceDate: { type: string, format: date }
         paymentTermDays: { type: integer, minimum: 0, maximum: 365 }
         chargeAmount: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Header charge, non-negative decimal." }
+        counterparty:
+          type: object
+          required: [country]
+          additionalProperties: false
+          description: >
+            The customer's tax registration, for the EU sales list: the tax report sends it to the tax
+            service with the base amount of each tax code. Optional; an invoice without it reports its
+            base amount only, and a credit note carries its original's.
+          properties:
+            country: { type: string, pattern: "^[A-Z]{2}$" }
+            vatId: { type: string, maxLength: 20 }
+            supplyKind: { type: string, enum: [goods, services, triangular] }
         installmentTerms:
           type: array
           maxItems: 24

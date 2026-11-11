@@ -725,3 +725,24 @@ func TestListInvoices_ByOrderAndPackingSlip(t *testing.T) {
 		t.Errorf("malformed ids: status %d, want 400", bad.Code)
 	}
 }
+
+func TestCreateProposal_CounterpartyIsValidatedAndStored(t *testing.T) {
+	s := newFakeStore()
+	h := setup(t, s, &fakeTax{perLine: "0"})
+	withCounterparty := func(c string) string {
+		return strings.Replace(proposal("1", "100", "4900"), `"lines":`, `"counterparty":`+c+`,"lines":`, 1)
+	}
+	for name, c := range map[string]string{
+		"lowercase country": `{"country":"fr"}`,
+		"spaced VAT number": `{"country":"FR","vatId":"FR 4030"}`,
+		"unknown supply":    `{"country":"FR","supplyKind":"barter"}`,
+	} {
+		rec := do(h, http.MethodPost, "/v1/billing/free-text-invoices", "k-"+name, withCounterparty(c))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "counterparty.") {
+			t.Errorf("%s: status %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	if rec := do(h, http.MethodPost, "/v1/billing/free-text-invoices", "k-ok", withCounterparty(`{"country":"FR","vatId":"FR40303265045","supplyKind":"goods"}`)); rec.Code != http.StatusCreated {
+		t.Fatalf("a valid counterparty: status %d %s", rec.Code, rec.Body)
+	}
+}
