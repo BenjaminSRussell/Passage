@@ -36,6 +36,8 @@ const (
 	DutyMigrationReview = "migration.factory.review"
 	DutyCutoverManager  = "migration.cutover.manage"
 	DutyStepOwner       = "migration.cutover-step.execute"
+	// DutyOpeningTargetRelease frees a legacy company's pinned opening-journal target (#549).
+	DutyOpeningTargetRelease = "migration.opening-target.release"
 )
 
 // Problem codes raised by this service. Rule violations carry the MIG-/CUT- message code in detail.
@@ -87,6 +89,9 @@ type Store interface {
 	CompensationReport(ctx context.Context, planID string) (store.CompensationReport, error)
 	PostOpeningJournal(ctx context.Context, ledger ledgerclient.Ledger, in store.OpeningJournalRequest) (store.OpeningJournalResult, error)
 	OpeningPostings(ctx context.Context, runID string) ([]store.OpeningPosting, error)
+	SetOpeningMapping(ctx context.Context, planID string, system domain.SourceSystem, company, legalEntityID, ledgerID, by string) (store.OpeningMapping, error)
+	ListOpeningMappings(ctx context.Context, planID string) ([]store.OpeningMapping, error)
+	ReleaseOpeningTarget(ctx context.Context, system domain.SourceSystem, company, reason, by string) (store.OpeningRelease, error)
 	ListCoexistence(ctx context.Context, system domain.SourceSystem, company string) ([]domain.CoexistFlag, error)
 	SetCoexistence(ctx context.Context, idem store.Idem, c store.CoexistChange) (domain.CoexistFlag, bool, error)
 	GetProjectOpening(ctx context.Context, f store.OpeningFilter) (store.ProjectOpening, error)
@@ -160,6 +165,9 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/generate", s.generatePlan)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans", s.listPlans)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}", s.getPlan)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/opening-targets", s.listOpeningTargets)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Put("/cutover/plans/{id}/opening-targets/{system}/{company}", s.putOpeningTarget)
+		r.With(authz.RequireDuty(DutyOpeningTargetRelease)).Post("/migration/opening-targets/{system}/{company}/release", s.releaseOpeningTarget)
 		r.With(authz.RequireDuty(DutyStepOwner)).Post("/cutover/plans/{id}/steps/{seq}/start", s.startStep)
 		r.With(authz.RequireDuty(DutyStepOwner)).Post("/cutover/plans/{id}/steps/{seq}/complete", s.completeStep)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/go-no-go", s.readiness)

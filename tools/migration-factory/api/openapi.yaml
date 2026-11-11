@@ -1628,6 +1628,102 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/opening-targets:
+    get:
+      operationId: listOpeningTargets
+      summary: The legal entity and ledger each legacy company's opening journal is assigned to under a plan (#549)
+      x-passage-duty: migration.cutover.manage
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The mappings recorded under the plan.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/opening-targets/{system}/{company}:
+    put:
+      operationId: putOpeningTarget
+      summary: Assign a legacy company's opening journal to one legal entity and ledger (#549)
+      description: |
+        The explicit company-to-legal-entity mapping of the cutover plan. Once a company is mapped, the
+        opening journal refuses any other legal entity or ledger for it (409 MIG-1542) instead of taking
+        whoever posts first. A company without a mapping is still pinned by its first posting. The mapping
+        can be corrected only while no opening journal is posted and no pin names another target (409
+        MIG-1542). `legalEntityId` must be in the caller's scope.
+      x-passage-duty: migration.cutover.manage
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - {name: system, in: path, required: true, schema: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}}
+        - {name: company, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, ledgerId]
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                ledgerId: {type: string}
+      responses:
+        "200":
+          description: The mapping.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/opening-targets/{system}/{company}/release:
+    post:
+      operationId: releaseOpeningTarget
+      summary: Release a legacy company's pinned opening-journal target when nothing is posted to it (#549)
+      description: |
+        An administrator act: the caller needs migration.opening-target.release and tenant.administer and no
+        legal-entity scope, because the check that no opening journal exists reads every legal entity. The
+        reason is required and is stored with the person and time in `gl_opening_target_release`. A company
+        with a posted opening journal is 409 MIG-0004 (reverse the journals in the ledger instead); a company
+        with no pin is 404. Make sure no posting of the company is in flight before releasing.
+      x-passage-duty: migration.opening-target.release
+      parameters:
+        - {name: system, in: path, required: true, schema: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}}
+        - {name: company, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string}
+      responses:
+        "200":
+          description: The audit record of the release.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
   /api/v1/cutover/plans/{id}/rollback/compensations:
     post:
       operationId: postRollbackCompensations

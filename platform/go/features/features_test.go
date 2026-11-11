@@ -332,6 +332,57 @@ func TestCacheMakesOneLookupForConcurrentRequestsDuringAnOutage(t *testing.T) {
 	}
 }
 
+type panickingSource struct {
+	entered chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (s *panickingSource) Enabled(context.Context, string) (map[string]bool, error) {
+	if s.calls.Add(1) == 1 {
+		close(s.entered)
+		<-s.release
+		panic("identity client exploded")
+	}
+	return map[string]bool{"payroll": true}, nil
+}
+
+// A panic in the lookup leader must not strand the requests waiting on it, nor leave the lookup marked in flight.
+func TestCacheLeaderPanicWakesWaitersAndDoesNotWedgeTheTenant(t *testing.T) {
+	src := &panickingSource{entered: make(chan struct{}), release: make(chan struct{})}
+	cache := features.NewCache(src, time.Minute).WithBackoff(0)
+
+	leaderDone := make(chan any, 1)
+	go func() {
+		defer func() { leaderDone <- recover() }()
+		_, _ = cache.Enabled(context.Background(), tenantA)
+	}()
+	<-src.entered
+	waiter := make(chan error, 1)
+	go func() {
+		_, err := cache.Enabled(context.Background(), tenantA)
+		waiter <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(src.release)
+
+	if r := <-leaderDone; r == nil {
+		t.Fatal("the panic must still propagate to the leader's caller")
+	}
+	select {
+	case err := <-waiter:
+		if err == nil {
+			t.Fatal("a waiter of a panicked lookup should see a failed lookup, not a state")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the waiter is stranded behind a lookup that panicked")
+	}
+	state, err := cache.Enabled(context.Background(), tenantA)
+	if err != nil || !state["payroll"] {
+		t.Fatalf("a later request must look again: %v %v", state, err)
+	}
+}
+
 func TestCacheBacksOffAfterAFailedRefreshAndKeepsLastKnownState(t *testing.T) {
 	now := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
 	src := &fakeSource{state: map[string]bool{"payroll": false}}

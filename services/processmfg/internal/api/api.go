@@ -88,8 +88,68 @@ type dutyFirstRouter struct {
 	gate func(http.Handler) http.Handler
 }
 
+// With runs the route's own middlewares (its duty check) first and the feature gate after them, so a caller without the
+// duty is refused as unauthorised, not told which features the tenant has off.
 func (g dutyFirstRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
-	return g.Router.With(append(slices.Clone(middlewares), g.gate)...)
+	return dutyFirstRouter{Router: g.Router.With(append(slices.Clone(middlewares), g.gate)...), gate: noGate}
+}
+
+// noGate marks a router whose routes already carry the gate (the result of With), so a further With on it does not add it twice.
+func noGate(next http.Handler) http.Handler { return next }
+
+// gated is the route handler behind the feature gate, for the verbs that take no middleware of their own.
+func (g dutyFirstRouter) gated(h http.Handler) http.Handler { return g.gate(h) }
+
+// A route registered without With still goes through the gate: every registration method below wraps the handler, so a
+// plain Get, Post, Group, Route or Mount cannot skip the feature check.
+func (g dutyFirstRouter) Handle(pattern string, h http.Handler) { g.Router.Handle(pattern, g.gated(h)) }
+func (g dutyFirstRouter) HandleFunc(pattern string, h http.HandlerFunc) {
+	g.Router.Handle(pattern, g.gated(h))
+}
+func (g dutyFirstRouter) Method(method, pattern string, h http.Handler) {
+	g.Router.Method(method, pattern, g.gated(h))
+}
+func (g dutyFirstRouter) MethodFunc(method, pattern string, h http.HandlerFunc) {
+	g.Router.Method(method, pattern, g.gated(h))
+}
+func (g dutyFirstRouter) Connect(pattern string, h http.HandlerFunc) {
+	g.Router.Connect(pattern, g.gated(h).ServeHTTP)
+}
+func (g dutyFirstRouter) Delete(pattern string, h http.HandlerFunc) {
+	g.Router.Delete(pattern, g.gated(h).ServeHTTP)
+}
+func (g dutyFirstRouter) Get(pattern string, h http.HandlerFunc) {
+	g.Router.Get(pattern, g.gated(h).ServeHTTP)
+}
+func (g dutyFirstRouter) Head(pattern string, h http.HandlerFunc) {
+	g.Router.Head(pattern, g.gated(h).ServeHTTP)
+}
+func (g dutyFirstRouter) Options(pattern string, h http.HandlerFunc) {
+	g.Router.Options(pattern, g.gated(h).ServeHTTP)
+}
+func (g dutyFirstRouter) Patch(pattern string, h http.HandlerFunc) {
+	g.Router.Patch(pattern, g.gated(h).ServeHTTP)
+}
+func (g dutyFirstRouter) Post(pattern string, h http.HandlerFunc) {
+	g.Router.Post(pattern, g.gated(h).ServeHTTP)
+}
+func (g dutyFirstRouter) Put(pattern string, h http.HandlerFunc) {
+	g.Router.Put(pattern, g.gated(h).ServeHTTP)
+}
+func (g dutyFirstRouter) Trace(pattern string, h http.HandlerFunc) {
+	g.Router.Trace(pattern, g.gated(h).ServeHTTP)
+}
+
+// Mount gates the mounted handler as a whole.
+func (g dutyFirstRouter) Mount(pattern string, h http.Handler) { g.Router.Mount(pattern, g.gated(h)) }
+
+// Group and Route hand their function a router that gates too.
+func (g dutyFirstRouter) Group(fn func(r chi.Router)) chi.Router {
+	return g.Router.Group(func(r chi.Router) { fn(dutyFirstRouter{Router: r, gate: g.gate}) })
+}
+
+func (g dutyFirstRouter) Route(pattern string, fn func(r chi.Router)) chi.Router {
+	return g.Router.Route(pattern, func(r chi.Router) { fn(dutyFirstRouter{Router: r, gate: g.gate}) })
 }
 
 func (a *API) WithFeatureGate(gate func(http.Handler) http.Handler) *API {

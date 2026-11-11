@@ -221,6 +221,31 @@ func TestBackfillRMAReservation_ReservesAndCommitsAPostedCreditWithoutOne(t *tes
 	}
 }
 
+// Sales finds the credit by its RMA, not by receivables' id.
+func TestBackfillRMAReservationFor_FindsTheCreditByRMA(t *testing.T) {
+	s, _, bill := reservedSetup(t)
+	ctx := tenantCtx(1)
+	inv := seedInvoice(t, s, ctx)
+	legacy := rmaIn(inv.DocumentNumber)
+	legacy.RMAID, legacy.RMANumber = "00000000-0000-0000-0000-0000000000a8", "RMA-LEGACY-2"
+	s.WithReservations(nil)
+	if _, err := s.PostRMACredit(ctx, legacy); err != nil {
+		t.Fatalf("legacy post: %v", err)
+	}
+	s.WithReservations(bill)
+	lines := []RMAInvoiceLine{{LineNo: 1, Qty: amt("1")}}
+	if _, err := s.BackfillRMAReservationFor(ctx, legacy.LegalEntityID, "00000000-0000-0000-0000-0000000000f0", billingInvoiceID, lines); problemCode(err) != CodeRMACreditNotFound {
+		t.Fatalf("unknown RMA: %v", err)
+	}
+	view, err := s.BackfillRMAReservationFor(ctx, legacy.LegalEntityID, legacy.RMAID, billingInvoiceID, lines)
+	if err != nil || !view.ReservationCommitted || view.RMAID != legacy.RMAID {
+		t.Fatalf("backfill: %+v %v", view, err)
+	}
+	if _, err := s.BackfillRMAReservationFor(ctx, legacy.LegalEntityID, legacy.RMAID, billingInvoiceID, lines); problemCode(err) != CodeRMACreditState {
+		t.Fatalf("repeat answers the state code sales treats as done: %v", err)
+	}
+}
+
 func TestRetryRMACredit_RefusedWhenTheRoomIsGoneAndStaysParked(t *testing.T) {
 	s, gl, bill := reservedSetup(t)
 	ctx := tenantCtx(1)

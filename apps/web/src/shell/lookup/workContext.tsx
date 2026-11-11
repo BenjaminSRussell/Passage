@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { EntityLookup } from "./EntityLookup";
-import { lookupDefs, rememberOption, resolveOption } from "./entities";
+import { isOptionMissing, lookupDefs, rememberOption } from "./entities";
 import { useWorkContext, WorkContext } from "./workContextState";
 
 export { useWorkContext };
@@ -112,8 +112,9 @@ export function ContextPicker() {
       return;
     }
     let live = true;
-    void resolveOption("legalEntity", legalEntityId).then((entry) => {
-      if (live && entry === null) {
+    // Only an answer that says the record is gone clears the choice: a 500 or a lost connection keeps it.
+    void isOptionMissing("legalEntity", legalEntityId).then((missing) => {
+      if (live && missing) {
         setLegalEntityId("");
       }
     });
@@ -127,8 +128,8 @@ export function ContextPicker() {
       return;
     }
     let live = true;
-    void resolveOption("site", siteId).then((entry) => {
-      if (live && entry === null) {
+    void isOptionMissing("site", siteId).then((missing) => {
+      if (live && missing) {
         setSiteId("");
       }
     });

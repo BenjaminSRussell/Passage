@@ -507,7 +507,7 @@ func (a *API) runGL(ctx context.Context, le string, retryParked bool) (glRun, er
 			if aerr != nil {
 				slog.ErrorContext(ctx, "revrec allocation not available; invoice not booked", "documentId", d.ID, "err", aerr, "correlationId", cid)
 				if _, rerr := a.glBooks.RecordGLRefusal(ctx, d.ID, CodeAllocationUnavailable, now, store.GLNoVerdict); rerr != nil && !errors.Is(rerr, store.ErrGLAlreadyBooked) {
-					return glRun{}, rerr
+					return glRun{items: items, failed: failed}, rerr
 				}
 				failed = append(failed, glFailedOut{DocumentID: d.ID, Number: d.Number, LedgerCode: CodeAllocationUnavailable})
 				if !errors.Is(aerr, revrec.ErrNoContract) && !errors.Is(aerr, revrec.ErrAmbiguous) && !errors.Is(aerr, errAllocationsNotConfigured) {
@@ -518,7 +518,7 @@ func (a *API) runGL(ctx context.Context, le string, retryParked bool) (glRun, er
 			}
 			balances, berr := a.glBooks.GLContractBalances(ctx, le, ordersOf(d))
 			if berr != nil {
-				return glRun{}, berr
+				return glRun{items: items, failed: failed}, berr
 			}
 			booking, imbalance = glSplit(profile, d, allocs, balances)
 		}
@@ -530,7 +530,7 @@ func (a *API) runGL(ctx context.Context, le string, retryParked bool) (glRun, er
 		if imbalance == "" && d.Held == nil {
 			held := store.GLHeld{Shares: shares, Contract: store.GLContractMove{Liability: booking.liability, Asset: booking.asset}}
 			if herr := a.glBooks.HoldGLBooking(ctx, d.ID, held); herr != nil {
-				return glRun{}, herr
+				return glRun{items: items, failed: failed}, herr
 			}
 		}
 		var entryID string
@@ -550,7 +550,7 @@ func (a *API) runGL(ctx context.Context, le string, retryParked bool) (glRun, er
 				continue
 			}
 			if rerr != nil {
-				return glRun{}, rerr
+				return glRun{items: items, failed: failed}, rerr
 			}
 			slog.WarnContext(ctx, "general ledger refused an invoice journal", "documentId", d.ID, "ledgerCode", code, "parked", parked, "err", err, "correlationId", cid)
 			failed = append(failed, glFailedOut{DocumentID: d.ID, Number: d.Number, LedgerCode: code, Parked: parked})
@@ -566,7 +566,7 @@ func (a *API) runGL(ctx context.Context, le string, retryParked bool) (glRun, er
 			return glRun{items: items, failed: failed}, p
 		}
 		if newly, err := a.glBooks.MarkGLBooked(ctx, d.ID, entryID, shares); err != nil {
-			return glRun{}, err
+			return glRun{items: items, failed: failed}, err
 		} else if newly {
 			a.glPostings.Add(1)
 		}
