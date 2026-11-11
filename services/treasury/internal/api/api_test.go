@@ -30,7 +30,7 @@ const (
 	allDuties    = "treasury.view,treasury.bank-account.write,treasury.bank-account.approve,treasury.statement.import,treasury.forecast.write," +
 		"treasury.check.write,treasury.facility.write,treasury.facility.override,treasury.loan.write,treasury.reconciliation.write," +
 		"treasury.ebics.write,treasury.ebics.keys,treasury.ebics.approve," +
-		"treasury.reconciliation.view,treasury.reconciliation.close,treasury.reconciliation.reopen,treasury.reconciliation.post,treasury.reconciliation.abandon,treasury.cashdesk.write,treasury.import.write,treasury.import.read"
+		"treasury.reconciliation.view,treasury.reconciliation.close,treasury.reconciliation.reopen,treasury.reconciliation.post,treasury.reconciliation.abandon,treasury.cashdesk.write,treasury.cashdesk.approve,treasury.import.write,treasury.import.read"
 )
 
 // fakeStore is an in-memory store.Store for handler tests.

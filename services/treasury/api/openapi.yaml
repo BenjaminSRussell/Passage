@@ -423,6 +423,7 @@ paths:
                 currency: {type: string, pattern: "^[A-Z]{3}$"}
                 mainAccountId: {type: string, format: uuid}
                 maxBalance: {$ref: "#/components/schemas/PositiveMoney"}
+                dualControl: {type: boolean, description: "A closed day needs a second person's signature (:approve)"}
       responses:
         "201":
           description: Desk created (or the stored one for a repeated key)
@@ -465,6 +466,78 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CashDesk"}
         "404": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+    patch:
+      operationId: updateCashDesk
+      summary: Change a desk's name, maximum balance, cash account or dual control
+      description: Needs If-Match with the desk's ETag (428 without, 412 when stale). A maximum below the cash the open day holds is 422 TRS-0541. A changed cash account or dual control applies to postings and closes from then on.
+      x-passage-duty: treasury.cashdesk.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                name: {type: string, minLength: 1, maxLength: 120}
+                maxBalance: {$ref: "#/components/schemas/PositiveMoney"}
+                mainAccountId: {type: string, format: uuid}
+                dualControl: {type: boolean}
+      responses:
+        "200":
+          description: Desk updated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDesk"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}:deactivate:
+    post:
+      operationId: deactivateCashDesk
+      summary: Deactivate a desk; an inactive desk opens no day and takes no entry
+      description: A desk with an open day is 409 TRS-0555. Needs If-Match.
+      x-passage-duty: treasury.cashdesk.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Desk deactivated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDesk"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}:activate:
+    post:
+      operationId: activateCashDesk
+      summary: Activate an inactive desk
+      x-passage-duty: treasury.cashdesk.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Desk activated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDesk"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
         "503": {$ref: "#/components/responses/Problem"}
   /v1/treasury/cash-desks/{id}/days:
     post:
@@ -519,7 +592,10 @@ paths:
       summary: Close the open day against the counted cash
       description: >-
         The difference is counted less book. A difference needs a reason (422 TRS-0542) and is kept on the day. The counted
-        cash opens the next day. A day that is not open is 409 TRS-0544.
+        cash opens the next day. A day that is not open is 409 TRS-0544. The count is a total, or denominations (value x count,
+        which become the total; with both they must agree, 422 TRS-0556). Journal lines still waiting for the ledger stop the
+        close (409 TRS-0552). On a desk with dualControl the day moves to closing and waits for :approve. Where the desk posts
+        to the ledger, a difference is posted as cash over or short (shortage debits the difference account).
       x-passage-duty: treasury.cashdesk.write
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -530,11 +606,20 @@ paths:
           application/json:
             schema:
               type: object
-              required: [countedBalance]
               additionalProperties: false
               properties:
-                countedBalance: {type: string, description: "Not negative, at most the currency's minor units"}
+                countedBalance: {type: string, description: "Not negative, at most the currency's minor units; required without denominations"}
                 reason: {type: string, maxLength: 200}
+                denominations:
+                  type: array
+                  maxItems: 40
+                  items:
+                    type: object
+                    required: [value, count]
+                    additionalProperties: false
+                    properties:
+                      value: {type: string, description: "A note or coin value, positive, once per value"}
+                      count: {type: integer, minimum: 0, maximum: 1000000}
       responses:
         "200":
           description: Day closed
@@ -544,6 +629,63 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}/days/{date}:approve:
+    post:
+      operationId: approveCashDeskDay
+      summary: Second signature on a counted day of a dual-control desk
+      description: The approver must differ from the person who counted (422 TRS-0553). A day that is not closing is 409 TRS-0554.
+      x-passage-duty: treasury.cashdesk.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - {name: date, in: path, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Day closed
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDeskDay"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}/days/{date}:reject:
+    post:
+      operationId: rejectCashDeskDay
+      summary: Send a counted day back to open so the cash is recounted
+      x-passage-duty: treasury.cashdesk.approve
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - {name: date, in: path, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Day open again, count cleared
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDeskDay"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/cash-desks/{id}/days/{date}:post:
+    post:
+      operationId: postCashDeskDay
+      summary: Post what the day still owes the general ledger
+      description: >-
+        Journal lines saved while the ledger was down or refused them, and the count difference of a closed day. Every post has a
+        stable idempotency key, so repeating it never books twice. 422 TRS-0518 carries the ledger's code in errors.ledgerCode;
+        503 TRS-0519 means the ledger did not answer.
+      x-passage-duty: treasury.cashdesk.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - {name: date, in: path, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Nothing left waiting
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CashDeskDay"}
+        "404": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
         "503": {$ref: "#/components/responses/Problem"}
   /v1/treasury/cash-desks/{id}/days/{date}/entries:
@@ -572,7 +714,7 @@ paths:
       summary: Book a receipt or payment on the desk's open day
       description: >-
         A payment that would take the desk below zero is 422 TRS-0540 and a receipt that would take it above its maximum is 422
-        TRS-0541; the rules run under the desk's row lock. No open day is 409 TRS-0544. A repeated Idempotency-Key replays the entry.
+        TRS-0541; the rules run under the desk's row lock. No open day is 409 TRS-0544. Where the desk posts to the ledger the line is posted at once (key treasury-desk-<id>); when the ledger refuses (422 TRS-0518) or does not answer (503 TRS-0519) the line is saved with postingStatus pending and :post on the day retries it. A repeated Idempotency-Key replays the entry.
       x-passage-duty: treasury.cashdesk.write
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -590,6 +732,8 @@ paths:
                 amount: {$ref: "#/components/schemas/PositiveMoney"}
                 description: {type: string, minLength: 1, maxLength: 200}
                 reference: {type: string, maxLength: 100}
+                counterAccount: {type: string, pattern: "^[A-Za-z0-9._-]{1,20}$", description: "Ledger account on the other side of the cash; required where the desk posts to the ledger unless bankAccountId is given"}
+                bankAccountId: {type: string, format: uuid, description: "A bank transfer: a payment is cash paid into this bank account, a receipt is cash drawn from it. An active account of the desk's legal entity and currency"}
       responses:
         "201":
           description: Entry booked
@@ -1884,7 +2028,7 @@ components:
         totalsMinor: {type: object, additionalProperties: {type: integer, format: int64}}
     CashDesk:
       type: object
-      required: [id, legalEntityId, code, name, currency, mainAccountId, maxBalance, status, version, createdAt]
+      required: [id, legalEntityId, code, name, currency, mainAccountId, maxBalance, status, dualControl, version, createdAt]
       properties:
         id: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
@@ -1894,17 +2038,18 @@ components:
         mainAccountId: {type: string, format: uuid}
         maxBalance: {type: string}
         status: {type: string, enum: [active, inactive]}
+        dualControl: {type: boolean}
         version: {type: integer}
         createdAt: {type: string, format: date-time}
         openDate: {type: string, format: date, description: The open business day, when there is one}
         balance: {type: string, description: Book balance of the open day}
     CashDeskDay:
       type: object
-      required: [deskId, businessDate, status, openingBalance, bookBalance, openedBy, openedAt]
+      required: [deskId, businessDate, status, openingBalance, bookBalance, openedBy, openedAt, differencePosting]
       properties:
         deskId: {type: string, format: uuid}
         businessDate: {type: string, format: date}
-        status: {type: string, enum: [open, closed]}
+        status: {type: string, enum: [open, closing, closed], description: closing is a counted day waiting for the second signature}
         openingBalance: {type: string}
         bookBalance: {type: string}
         countedBalance: {type: string}
@@ -1912,11 +2057,22 @@ components:
         differenceReason: {type: string}
         openedBy: {type: string}
         closedBy: {type: string}
+        approvedBy: {type: string, description: the second signature of a dual-control desk}
+        denominations:
+          type: array
+          items:
+            type: object
+            required: [value, count]
+            properties:
+              value: {type: string}
+              count: {type: integer}
         openedAt: {type: string, format: date-time}
         closedAt: {type: string, format: date-time}
+        differencePosting: {type: string, enum: [not_posted, pending, posted]}
+        differenceLedgerEntryId: {type: string}
     CashDeskEntry:
       type: object
-      required: [id, deskId, businessDate, lineNo, kind, amount, description, createdBy, createdAt, balanceAfter]
+      required: [id, deskId, businessDate, lineNo, kind, amount, description, createdBy, createdAt, balanceAfter, postingStatus]
       properties:
         id: {type: string, format: uuid}
         deskId: {type: string, format: uuid}
@@ -1928,6 +2084,11 @@ components:
         reference: {type: string}
         createdBy: {type: string}
         createdAt: {type: string, format: date-time}
+        counterAccount: {type: string}
+        bankAccountId: {type: string, format: uuid}
+        postingStatus: {type: string, enum: [not_posted, pending, posted], description: not_posted when the desk does not post to the ledger}
+        ledgerEntryId: {type: string}
+        postedAt: {type: string, format: date-time}
         balanceAfter: {type: string}
     ImportedStatement:
       allOf:

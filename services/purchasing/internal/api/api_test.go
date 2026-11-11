@@ -21,6 +21,7 @@ import (
 
 // fakeStore is an in-memory Store recording what the handlers pass down.
 type fakeStore struct {
+	budgetCalls  []store.BudgetCall
 	requisitions map[string]store.Requisition
 	agreements   []domain.TradeAgreement
 	orders       []store.PurchaseOrder
@@ -119,6 +120,41 @@ type fakeStore struct {
 	// Procurement catalogs: what the catalog methods received and answer.
 	cat catalogLog
 	imp importLog
+}
+
+// Budget call queue of the fake.
+func (f *fakeStore) ListBudgetCalls(_ context.Context, status string, _ int) ([]store.BudgetCall, error) {
+	out := []store.BudgetCall{}
+	for _, c := range f.budgetCalls {
+		if status == "" || c.Status == status {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) BudgetCallsFor(_ context.Context, poID, reqID string) ([]store.BudgetCall, error) {
+	out := []store.BudgetCall{}
+	for _, c := range f.budgetCalls {
+		if (poID != "" && c.PurchaseOrderID == poID) || (reqID != "" && c.RequisitionID == reqID) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) RecordBudgetCall(_ context.Context, id string, callErr error) error {
+	for i := range f.budgetCalls {
+		if f.budgetCalls[i].ID == id {
+			f.budgetCalls[i].Attempts++
+			if callErr == nil {
+				f.budgetCalls[i].Status = store.BudgetCallDone
+			} else {
+				f.budgetCalls[i].LastError = callErr.Error()
+			}
+		}
+	}
+	return nil
 }
 
 func newFake() *fakeStore {

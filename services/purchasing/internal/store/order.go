@@ -179,7 +179,7 @@ func (s *Postgres) CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, id
 			out, err = loadPurchaseOrder(ctx, tx, existing)
 			return err
 		}
-		out, err = insertPurchaseOrder(ctx, tx, in)
+		out, err = insertPurchaseOrder(ctx, tx, in, s.queueBudget)
 		return err
 	})
 	if err == nil {
@@ -193,7 +193,7 @@ func (s *Postgres) CreatePurchaseOrder(ctx context.Context, in PurchaseOrder, id
 // orders and releases its lines against their agreement lines (FR-17.5), so a
 // PRC-AGR or PRC-REQ error rolls the whole document back; after writing it links
 // the requisition lines to their PO lines (FR-17.3).
-func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (PurchaseOrder, error) {
+func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder, queueBudget bool) (PurchaseOrder, error) {
 	p, _ := tenant.FromContext(ctx)
 	reqIDs, err := claimRequisitionLines(ctx, tx, in)
 	if err != nil {
@@ -239,8 +239,11 @@ func insertPurchaseOrder(ctx context.Context, tx pgx.Tx, in PurchaseOrder) (Purc
 		return PurchaseOrder{}, err
 	}
 	out, err := loadPurchaseOrder(ctx, tx, in.ID)
+	if err != nil {
+		return out, err
+	}
 	out.Warnings = warnings
-	return out, err
+	return out, enqueueBudgetConvert(ctx, tx, out, queueBudget)
 }
 
 // GetPurchaseOrder returns one PO with its lines and charges.
