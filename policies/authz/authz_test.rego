@@ -2558,3 +2558,15 @@ test_processmfg_may_create_control_recipes_only if {
 	not allowed("shopfloor.controlrecipe.create", "GET", "/v1/shopfloor/edge-nodes/e1/control-recipes")
 	not allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/edge-nodes/e1/control-recipes/r1:report")
 }
+
+# Recipe targets and the control recipe of a released batch order (#25): the targets are set with the formula
+# duty, read with the batch order read duty, and sending the recipe again needs the batch order write duty.
+test_recipe_target_duties if {
+	allowed("production.formula.write", "PUT", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("production.formula.write", "DELETE", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("production.batch-order.read", "PUT", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("production.batch-order.read", "GET", "/v1/production/recipe-targets")
+	allowed("production.batch-order.read", "GET", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/control-recipe")
+	allowed("production.batch-order.write", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
+	not allowed("production.batch-order.read", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
+}

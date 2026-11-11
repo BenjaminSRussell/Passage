@@ -182,6 +182,12 @@ type Store interface {
 	SealRecord(ctx context.Context, id string, version int, idem Idem) (Record, bool, error)
 	PickCandidates(ctx context.Context, itemID string, onHand []OnHand) ([]PickCandidate, string, error)
 	RegisteredBatches(ctx context.Context, batchIDs []string) ([]string, error)
+	PutRecipeTarget(ctx context.Context, t RecipeTarget) (RecipeTarget, error)
+	GetRecipeTarget(ctx context.Context, legalEntityID, itemID string) (RecipeTarget, bool, error)
+	ListRecipeTargets(ctx context.Context, limit int) ([]RecipeTarget, error)
+	DeleteRecipeTarget(ctx context.Context, legalEntityID, itemID string) (bool, error)
+	SetControlRecipe(ctx context.Context, orderID string, recipeID, errText *string) error
+	GetControlRecipeLink(ctx context.Context, orderID string) (ControlRecipeLink, error)
 	Ping(ctx context.Context) error
 }
 

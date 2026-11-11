@@ -18,6 +18,13 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+{{- if or .Values.identityUrl .Values.shopfloorUrl }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ required "serviceIdentity.signingKeySecret is required with identityUrl or shopfloorUrl" .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: processmfg
           image: {{ include "processmfg.image" . | quote }}
@@ -35,6 +42,29 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+{{- if .Values.identityUrl }}
+            - name: IDENTITY_URL
+              value: {{ .Values.identityUrl | quote }}
+{{- end }}
+{{- if .Values.shopfloorUrl }}
+            # Releasing a batch order generates its control recipe in the shop floor service (#25).
+            - name: SHOPFLOOR_URL
+              value: {{ .Values.shopfloorUrl | quote }}
+{{- end }}
+{{- if or .Values.identityUrl .Values.shopfloorUrl }}
+            - name: PASSAGE_SERVICE_NAME
+              value: processmfg
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
+{{- if or .Values.identityUrl .Values.shopfloorUrl }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
           ports:
             - { name: http, containerPort: 8080 }
           startupProbe:

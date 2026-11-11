@@ -3081,11 +3081,14 @@
       {"resource": "/v1/production/inheritance-rules/*", "methods": ["GET"]},
       {"resource": "/v1/production/batch-derivations", "methods": ["GET"]},
       {"resource": "/v1/production/rework-orders", "methods": ["GET"]},
-      {"resource": "/v1/production/rework-orders/*", "methods": ["GET"]}
+      {"resource": "/v1/production/rework-orders/*", "methods": ["GET"]},
+      {"resource": "/v1/production/recipe-targets", "methods": ["GET"]},
+      {"resource": "/v1/production/batch-orders/*/control-recipe", "methods": ["GET"]}
     ]},
     "production.batch-order.write": {"permissions": [
       {"resource": "/v1/production/batch-orders", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:release", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-orders/*:send-recipe", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:report-finished", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:rescale", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:start", "methods": ["POST"]},
@@ -3119,7 +3122,10 @@
       {"resource": "/v1/production/cost-snapshots", "methods": ["GET"]},
       {"resource": "/v1/production/cost-snapshots:run", "methods": ["POST"]}
     ]},
-    "production.formula.write": {"permissions": [{"resource": "/v1/production/formulas", "methods": ["POST"]}]},
+    "production.formula.write": {"permissions": [
+      {"resource": "/v1/production/formulas", "methods": ["POST"]},
+      {"resource": "/v1/production/recipe-targets/*", "methods": ["PUT", "DELETE"]}
+    ]},
     "production.journal.over-consume": {"flag": true, "permissions": []},
     "production.journal.post": {"permissions": [
       {"resource": "/v1/production/as-built/*", "methods": ["POST"]},

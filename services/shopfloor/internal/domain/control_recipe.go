@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
 // Control recipes (FR-25.15, BR-25.11, BR-25.15). A control recipe is the ISA-88 structure of one order
@@ -79,6 +83,17 @@ type Instruction struct {
 	// Node is the OPC-UA node id (pcs-opcua) or topic (pcs-mqtt) a setpoint is written to or a data
 	// request reads from.
 	Node string `json:"node,omitempty"`
+	// Materials is the structured form of a material-list instruction, scaled to the batch: the PI sheet
+	// shows each product by name with its quantity. Text stays required as the plain-language summary.
+	Materials []InstructionMaterial `json:"materials,omitempty"`
+}
+
+// InstructionMaterial is one line of a material-list instruction.
+type InstructionMaterial struct {
+	ItemID string `json:"itemId"`
+	Qty    string `json:"qty"`
+	Unit   string `json:"unit,omitempty"`
+	Role   string `json:"role,omitempty"` // ingredient, co-product or by-product
 }
 
 // Phase, Operation, UnitProcedure and Procedure are the ISA-88 levels.
@@ -196,6 +211,11 @@ func checkInstruction(f map[string]string, path string, want int, in Instruction
 		if strings.TrimSpace(in.Text) == "" {
 			f[path+".text"] = "is required for this category"
 		}
+		if in.Category == InstMaterials {
+			checkMaterials(f, path, in.Materials)
+		} else if len(in.Materials) > 0 {
+			f[path+".materials"] = "applies to a material-list instruction only"
+		}
 	case InstSetpoint, InstDataRequest, InstInspection:
 		c := in.Char
 		if c == nil || strings.TrimSpace(c.Name) == "" || len(c.Name) > 120 {
@@ -217,6 +237,30 @@ func checkInstruction(f map[string]string, path string, want int, in Instruction
 	}
 	if len(in.Node) > 300 {
 		f[path+".node"] = "must be at most 300 characters"
+	}
+}
+
+const maxMaterials = 200
+
+func checkMaterials(f map[string]string, path string, ms []InstructionMaterial) {
+	if len(ms) > maxMaterials {
+		f[path+".materials"] = fmt.Sprintf("holds %d lines; at most %d", len(ms), maxMaterials)
+		return
+	}
+	for i, m := range ms {
+		p := fmt.Sprintf("%s.materials[%d]", path, i)
+		if !ids.Valid(m.ItemID) {
+			f[p+".itemId"] = "must be a product UUID"
+		}
+		if q, err := decimal.NewFromString(strings.TrimSpace(m.Qty)); err != nil || q.IsNegative() {
+			f[p+".qty"] = "must be a decimal quantity, zero or more"
+		}
+		if len(m.Unit) > 20 {
+			f[p+".unit"] = "must be at most 20 characters"
+		}
+		if m.Role != "" && m.Role != "ingredient" && m.Role != "co-product" && m.Role != "by-product" {
+			f[p+".role"] = "must be ingredient, co-product or by-product"
+		}
 	}
 }
 
