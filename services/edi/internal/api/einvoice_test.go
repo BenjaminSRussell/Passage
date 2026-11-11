@@ -160,14 +160,14 @@ func TestEInvoice_MissingProfileBlockingIssuesAndHooks(t *testing.T) {
 		t.Fatalf("rebuilt: %d %+v", code, fixed)
 	}
 
-	// A mixed-rate invoice cannot be mapped: INVALID with EINV-0113.
+	// An invoice with two VAT rates (8.5 percent and zero) builds with one breakdown per rate.
 	f.invoice.ID = "00000000-0000-0000-0000-0000000000b9"
 	f.invoice.Lines = append(f.invoice.Lines, domain.SourceInvoiceLine{LineNo: 2, Qty: decimal.NewFromInt(1), UnitPrice: decimal.NewFromInt(10), Net: decimal.NewFromInt(10),
 		Tax: decimal.Zero, OrderID: srcOrder, OrderLineID: "ol-1", ProductID: "prod-a"})
 	f.invoice.Totals = domain.SourceInvoiceTotals{Net: decimal.NewFromInt(90), Tax: decimal.RequireFromString("6.80"), Gross: decimal.RequireFromString("96.80")}
 	body := `{"legalEntityId":"` + srcLE + `","invoiceId":"` + f.invoice.ID + `","mandate":"PEPPOL"}`
 	rec := do(t, h, http.MethodPost, "/edi/v1/einvoice/invoices", body, "edi.einvoice.operate", srcScope)
-	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), domain.CodeMixedRates) {
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"status":"VALID"`) || strings.Count(rec.Body.String(), "cbc:Percent") < 2 && strings.Count(rec.Body.String(), "Percent") < 2 {
 		t.Fatalf("mixed rates: %d %s", rec.Code, rec.Body.String())
 	}
 }

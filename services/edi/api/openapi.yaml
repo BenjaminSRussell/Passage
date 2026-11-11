@@ -1480,7 +1480,7 @@ paths:
       operationId: createEInvoice
       summary: Build and store the e-invoice of a posted billing invoice for a mandate
       description: >
-        Reads the invoice from billing, maps it (the VAT rate is derived: billing carries tax amounts, so one rate per invoice, EINV-0113 for mixed rates; the payable
+        Reads the invoice from billing, maps it (the VAT rate is derived per line from billing's tax amounts, so an invoice may carry several rates; the payable
         must equal billing's gross, EINV-0112) and builds it with the mandate: PEPPOL (UBL 2.1, Peppol BIS Billing 3.0) here, IT_SDI and MX_CFDI as hooks that refuse
         (EINV-0150) until a country pack installs a generator. The answer is VALID with its XML or INVALID with the blocking issues. A repeat returns the stored
         e-invoice (200); a repeat of an INVALID one builds again. EDI-0027 when the seller or buyer profile is missing.

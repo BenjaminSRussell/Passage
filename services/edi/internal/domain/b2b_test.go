@@ -157,7 +157,7 @@ func TestParsePunchOutSetupResponse(t *testing.T) {
 	}
 }
 
-func TestEInvoiceFromBilling_DiscountChargesAndMixedRates(t *testing.T) {
+func TestEInvoiceFromBilling_DiscountChargesAndMultipleRates(t *testing.T) {
 	seller := UBLParty{Name: "Seller", EndpointScheme: "0088", EndpointID: "0614141000012", CountryCode: "US", VATID: "US1", LegalID: "L1", StreetName: "s", CityName: "c", PostalZone: "1"}
 	buyer := UBLParty{Name: "Buyer", EndpointScheme: "0088", EndpointID: "0614141000029", CountryCode: "US", LegalID: "L2", StreetName: "s", CityName: "c", PostalZone: "2"}
 	inv := SourceInvoice{ID: "i", Number: "INV-9", Type: "SHIPMENT", Status: "POSTED", Currency: "USD", InvoiceDate: "2026-11-01", PaymentTermDays: 30,
@@ -185,12 +185,24 @@ func TestEInvoiceFromBilling_DiscountChargesAndMixedRates(t *testing.T) {
 	if _, is := EInvoiceFromBilling(draft, "PO-1", "", "", "", seller, buyer); len(is) != 1 || is[0].Code != CodeRequired {
 		t.Fatalf("draft: %+v", is)
 	}
-	// Two lines implying 10 and 0 percent cannot be one rate.
+	// Two lines at 10 and 0 percent: one VAT breakdown per rate, the header charge at the rate billing's tax total implies.
 	mixed := inv
 	mixed.Lines = append([]SourceInvoiceLine{}, inv.Lines...)
 	mixed.Lines = append(mixed.Lines, SourceInvoiceLine{LineNo: 2, Qty: dec("1"), UnitPrice: dec("10"), Net: dec("10"), Tax: dec("0")})
-	if _, is := EInvoiceFromBilling(mixed, "PO-1", "", "", "", seller, buyer); len(is) == 0 || is[0].Code != CodeMixedRates {
+	mixed.Totals.Gross = dec("120")
+	md, is := EInvoiceFromBilling(mixed, "PO-1", "", "", "", seller, buyer)
+	if len(is) != 0 {
 		t.Fatalf("mixed: %+v", is)
+	}
+	if st := ComputeUBLTotals(md).TaxSubtotals; len(st) != 2 || st[0].Category != "S" || !st[0].Percent.Equal(dec("10")) || st[1].Category != "Z" {
+		t.Fatalf("mixed breakdowns: %+v", st)
+	}
+	// Snapping: 3.33 net with 0.63 tax is 19 percent, not 18.92.
+	if r := lineRate(dec("3.33"), dec("0.63")); !r.Equal(dec("19")) {
+		t.Fatalf("rate %s", r)
+	}
+	if r := lineRate(dec("10"), dec("0.5")); !r.Equal(dec("5")) {
+		t.Fatalf("rate %s", r)
 	}
 	// A payable that is not billing's gross is refused (EINV-0112).
 	off := inv

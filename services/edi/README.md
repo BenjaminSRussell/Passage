@@ -417,10 +417,10 @@ Migration `0012_b2b_exchange.sql`. Every table is tenant-scoped with the legal-e
   yield one interchange. A document that is not this partner's (another customer, EDI-0011), cannot be mapped (a partly shipped
   shipment, EDI-0007), or a partner without a profile or EDIFACT identity is logged and skipped; a source outage is retried by the
   consumer (2 s doubling, 10 attempts) and then dead-lettered. One 856 per shipment: a second packing slip of a shipment replays the
-  first.
+  first. (Now keyed by shipment and slip, see Slice 11.)
 - **35-2 E-invoice store and mandate framework.** `POST /einvoice/invoices {legalEntityId, invoiceId, mandate}` reads the posted
-  billing invoice (or credit note), maps it (`EInvoiceFromBilling`: the VAT rate is derived from billing's tax amounts, one rate per
-  invoice, EINV-0113 for mixed rates; line discounts become one document allowance, header charges one charge; payable must equal
+  billing invoice (or credit note), maps it (`EInvoiceFromBilling`: the VAT rate is derived per line from billing's tax amounts (several
+  rates per invoice give one VAT breakdown per rate); line discounts become one document allowance per rate, header charges one charge; payable must equal
   billing's gross, EINV-0112), builds it with the mandate and stores it VALID with its XML or INVALID with the blocking issues, one
   per (invoice, mandate); a repeat returns the stored one and a repeat of an INVALID one builds again. Seller and buyer profiles
   (address, VAT id, endpoint, IBAN, buyer reference) come from `PUT /einvoice/parties/{role}/{subjectId}`. Mandates
@@ -647,7 +647,6 @@ signing uses the standard library only.
 | EDI-0034 | 422 | Purchasing refused the requisition of a returned cart |
 | EDI-0035 | 409 | The punchout session is not open, or its cart was not accepted |
 | EINV-0112 | (in issues) | The e-invoice payable differs from billing's gross |
-| EINV-0113 | (in issues) | The invoice implies more than one VAT rate; billing carries none per line |
 | EINV-0150 | (in issues) | The mandate is a hook and no generator is installed |
 | EDI-0133 | (in 200 punchout result) | Punchout line dropped: missing part id, quantity, price, price unit, allowed currency or mapped unit |
 | EDI-0134 | (in 200 punchout result) | Punchout cart total differs from the line sum by more than 0.01; the cart is rejected |
