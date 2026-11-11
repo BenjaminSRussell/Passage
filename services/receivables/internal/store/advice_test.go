@@ -3,8 +3,10 @@ package store
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 )
 
@@ -81,5 +83,53 @@ func TestRemittanceAdvice_FindsABankStatementPaymentByItsEntryReference(t *testi
 		{PaymentRef: "ENTRY-42", References: []domain.RemittanceLine{{Reference: "INV-30001", Amount: amt("500.00")}}}})
 	if err != nil || res.Attached != 1 {
 		t.Fatalf("advice: %+v %v", res, err)
+	}
+}
+
+// 30-4: the scheduled pass applies what the matcher is sure of, leaves the rest, and goes to the payments considered longest ago first.
+func TestAutoApplyDue_AppliesSurePaymentsAndRotatesTheRest(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx)
+	sure, err := s.CreatePayment(ctx, Payment{LegalEntityID: legalEntity, PaymentMode: "WIRE", Source: "MANUAL", SourceRef: ptr("BANK-1"),
+		Amount: amt("1000.00"), UnappliedAmount: amt("1000.00"), Currency: "USD", ReceivedDate: "2027-03-20", ValueDate: "2027-03-20",
+		Remittance: []domain.RemittanceLine{{Reference: "INV-30001", Amount: amt("1000.00")}}}, "due-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsure, err := s.CreatePayment(ctx, Payment{LegalEntityID: legalEntity, PaymentMode: "WIRE", Source: "MANUAL", SourceRef: ptr("BANK-2"),
+		Amount: amt("77.00"), UnappliedAmount: amt("77.00"), Currency: "USD", ReceivedDate: "2027-03-21", ValueDate: "2027-03-21"}, "due-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entities, err := s.AutoApplyLegalEntities(ctx)
+	if err != nil || len(entities) != 1 || entities[0] != legalEntity {
+		t.Fatalf("entities = %v, %v", entities, err)
+	}
+	res, err := s.AutoApplyDue(ctx, 10)
+	if err != nil || res.Applied != 1 || res.OnAccount != 1 || res.AppliedPaymentIDs[0] != sure.ID {
+		t.Fatalf("first pass = %+v, %v", res, err)
+	}
+	if p, _ := s.GetPayment(ctx, sure.ID); p.Status != "APPLIED" {
+		t.Fatalf("the sure payment is %s", p.Status)
+	}
+	if it := itemByID(t, s, ctx, item.ID); it.Status != "SETTLED" {
+		t.Fatalf("item %+v", it)
+	}
+	// Only the payment left over is considered again, and a batch of one still reaches it.
+	if again, err := s.AutoApplyDue(ctx, 1); err != nil || again.Applied != 0 || again.OnAccount != 1 {
+		t.Fatalf("second pass = %+v, %v", again, err)
+	}
+	if p, _ := s.GetPayment(ctx, unsure.ID); p.Status == "APPLIED" {
+		t.Fatalf("an on-account payment was applied")
+	}
+	var stamped int
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select count(*) from payment where auto_apply_at is not null`).Scan(&stamped)
+	}); err != nil || stamped != 2 {
+		t.Fatalf("payments marked considered = %d (%v)", stamped, err)
+	}
+	if entities, _ := s.AutoApplyLegalEntities(ctx); len(entities) != 1 {
+		t.Errorf("the legal entity with a payment left over vanished from the list: %v", entities)
 	}
 }

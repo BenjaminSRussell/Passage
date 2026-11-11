@@ -160,6 +160,13 @@ func run() error {
 	if sweep != nil {
 		go sweep.loop(ctx)
 	}
+	autoApply, err := newAutoApplyJob(os.Getenv, s)
+	if err != nil {
+		return err
+	}
+	if autoApply != nil {
+		go autoApply.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr, r) }()
 	go func() { errs <- httpx.Serve(ctx, adminAddr, admin) }()

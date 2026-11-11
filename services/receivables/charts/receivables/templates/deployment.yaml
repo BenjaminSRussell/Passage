@@ -42,6 +42,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.secretName }}
                   key: {{ .Values.database.secretKey }}
+            {{- if .Values.autoApply.tenantIds }}
+            - name: RECEIVABLES_AUTO_APPLY_TENANT_IDS
+              value: {{ join "," .Values.autoApply.tenantIds | quote }}
+            {{- if .Values.autoApply.at }}
+            - name: RECEIVABLES_AUTO_APPLY_AT
+              value: {{ .Values.autoApply.at | quote }}
+            {{- else }}
+            - name: RECEIVABLES_AUTO_APPLY_INTERVAL
+              value: {{ .Values.autoApply.interval | quote }}
+            {{- end }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
