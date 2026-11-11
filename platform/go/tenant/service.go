@@ -30,6 +30,8 @@ const (
 
 	// VendorPortalIssuer is the one service whose tokens name a vendor (vnd).
 	VendorPortalIssuer = "supplier-portal"
+	// CustomerPortalIssuer is the one service whose tokens name a customer (cus).
+	CustomerPortalIssuer = "customer-portal"
 
 	// DutyPortalRegister is the one duty a supplier portal token may carry without a vendor: the public prospect registration (#511),
 	// where no vendor exists yet. Such a token carries no other duty, and every vendor route refuses a token without a vendor.
@@ -258,6 +260,14 @@ var serviceGrants = map[string]map[string][]string{
 		"party":      {"party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"},
 		"payables":   {"payables.vendor-portal.read"},
 	},
+	// The customer portal BFF acts for one customer contact at a time (#30). Every token it signs carries the customer id (cus)
+	// from the contact's verified session, and the target service scopes every read to that customer. Only customer-portal
+	// duties, which no human role holds and which are read-only, are granted.
+	"customer-portal": {
+		"receivables": {"receivables.customer-portal.read"},
+		"billing":     {"billing.customer-portal.read"},
+		"sales":       {"sales.customer-portal.read"},
+	},
 }
 
 // ServiceGrantTable returns a copy of the static grant table.
@@ -309,7 +319,10 @@ type ServiceClaims struct {
 	Act string `json:"act"`
 	// Vnd is the vendor a supplier portal user acts for. Only the supplier portal may sign it; a target reads it from the
 	// verified principal and never from a header or a body.
-	Vnd    string   `json:"vnd,omitempty"`
+	Vnd string `json:"vnd,omitempty"`
+	// Cus is the customer a customer portal user acts for. Only the customer portal may sign it; a target reads it from the
+	// verified principal and never from a header, a query or a body.
+	Cus    string   `json:"cus,omitempty"`
 	Duties []string `json:"duties"`
 	Iat    int64    `json:"iat"`
 	Exp    int64    `json:"exp"`
@@ -392,6 +405,13 @@ func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, 
 	if s.name == VendorPortalIssuer && p.VendorID == "" && !(len(only) == 1 && only[0] == DutyPortalRegister) {
 		return "", errors.New("the supplier portal signs tokens for a vendor only, except the prospect registration")
 	}
+	if s.name == CustomerPortalIssuer && p.CustomerID == "" {
+		return "", errors.New("the customer portal signs tokens for a customer only")
+	}
+	customer := ""
+	if s.name == CustomerPortalIssuer {
+		customer = p.CustomerID
+	}
 	vendor := ""
 	if s.name == VendorPortalIssuer {
 		// Any other service calling onward for a vendor caller signs no vendor: its own grant is the scope of that call.
@@ -426,7 +446,7 @@ func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, 
 	}
 	now := s.now()
 	payload, err := json.Marshal(ServiceClaims{
-		Iss: s.name, Kid: s.kid, Aud: aud, Tid: tid, Le: le, Act: p.UserID, Vnd: vendor, Duties: duties,
+		Iss: s.name, Kid: s.kid, Aud: aud, Tid: tid, Le: le, Act: p.UserID, Vnd: vendor, Cus: customer, Duties: duties,
 		Iat: now.Unix(), Exp: now.Add(ServiceTokenMaxTTL).Unix(), Jti: hex.EncodeToString(jti),
 	})
 	if err != nil {
@@ -649,6 +669,13 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 	} else if c.Iss == VendorPortalIssuer && !(len(c.Duties) == 1 && c.Duties[0] == DutyPortalRegister) {
 		return ServiceClaims{}, ErrServiceToken
 	}
+	if c.Cus != "" {
+		if cus, ok := canonicalUUID(c.Cus); !ok || cus != c.Cus || cus == ids.Nil || c.Iss != CustomerPortalIssuer || c.Vnd != "" {
+			return ServiceClaims{}, ErrServiceToken
+		}
+	} else if c.Iss == CustomerPortalIssuer {
+		return ServiceClaims{}, ErrServiceToken
+	}
 	if tenantLevel, mixed := tenantLevelToken(c.Duties); mixed || tenantLevel != (c.Le == "") {
 		return ServiceClaims{}, ErrServiceToken
 	} else if !tenantLevel {
@@ -716,7 +743,7 @@ func (c ServiceClaims) Principal() Principal {
 	for _, d := range c.Duties {
 		duties[d] = struct{}{}
 	}
-	return Principal{TenantID: c.Tid, LegalEntityID: c.Le, UserID: c.Act, Duties: duties, Service: c.Iss, VendorID: c.Vnd}
+	return Principal{TenantID: c.Tid, LegalEntityID: c.Le, UserID: c.Act, Duties: duties, Service: c.Iss, VendorID: c.Vnd, CustomerID: c.Cus}
 }
 
 var (

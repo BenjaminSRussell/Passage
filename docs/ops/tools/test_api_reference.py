@@ -20,6 +20,16 @@ def documented_op(**extra):
     return op
 
 
+class TestPublicRoutes(unittest.TestCase):
+    def test_x_passage_public_stands_in_for_the_duty(self):
+        op = documented_op()
+        del op["x-passage-duty"]
+        doc = {"paths": {"/a": {"post": dict(op, **{"x-passage-public": True})}, "/b": {"post": dict(op)}}}
+        by_path = {o.path: ar.gaps(o, doc) for o in ar.operations(doc)}
+        self.assertEqual(by_path["/a"], [])
+        self.assertEqual(by_path["/b"], ["POST /b: missing x-passage-duty"])
+
+
 class TestOperations(unittest.TestCase):
     def test_ordered_by_path_then_method_and_skips_non_operations(self):
         doc = {

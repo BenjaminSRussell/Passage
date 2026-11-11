@@ -101,6 +101,9 @@ func insertLockboxPayment(ctx context.Context, tx pgx.Tx, tenantID string, in Lo
 	if err != nil {
 		return Payment{}, err
 	}
+	if saved, err = confirmAdvised(ctx, tx, saved); err != nil {
+		return Payment{}, err
+	}
 	if err := receiptJournal(ctx, tx, tenantID, saved); err != nil {
 		return Payment{}, err
 	}

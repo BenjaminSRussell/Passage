@@ -2,21 +2,36 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { KillSwitchRegistry } from "../domain/killswitch.js";
 import { type ApprovalStore, handleApprovalDecision } from "./decision.js";
 import { handleKillSwitchCommand, type KillSwitchVersionSource, type Publish, readKillSwitchStatus } from "./killswitch.js";
-import { ApiError, principalFromHeaders, toApiError } from "./principal.js";
+import type { CopilotService } from "../runtime/copilot.js";
+import type { RunService } from "../runtime/service.js";
+import { handleChat } from "./copilot.js";
+import type { Authenticate } from "./auth.js";
+import { ApiError, toApiError } from "./principal.js";
+import { bearerToken, handleGetRun, handleListActions, handleStartRun } from "./runs.js";
 
 /** 64 KiB is far above any control payload in this API. */
 export const MAX_BODY_BYTES = 64 * 1024;
 
 export interface AgentsApiDeps {
+  /** Who the caller is: the verified bearer token (auth.ts createAuthenticator), never the edge headers alone. */
+  authenticate: Authenticate;
   registry: KillSwitchRegistry;
   versions: KillSwitchVersionSource;
   approvals: ApprovalStore;
   publish: Publish;
+  /** Run start and read endpoints; absent in a process that serves only the control routes. */
+  runs?: RunService;
+  /** The copilot chat endpoint. */
+  copilot?: CopilotService;
   now?: () => Date;
 }
 
 const UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 const KILL_PATH = "/api/v1/agents/kill-switch";
+const START_PATH = /^\/api\/v1\/agents\/([a-z][a-z0-9_]{0,63})\/runs$/;
+const RUN_PATH = new RegExp(`^/api/v1/agents/runs/(${UUID})$`);
+const ACTIONS_PATH = new RegExp(`^/api/v1/agents/runs/(${UUID})/actions$`);
+const CHAT_PATH = "/api/v1/copilot/chat";
 const DECISION_PATH = new RegExp(`^/api/v1/agents/runs/(${UUID})/actions/(${UUID})/decision$`);
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -56,6 +71,7 @@ const TITLES: Readonly<Record<number, string>> = {
   413: "Content Too Large",
   422: "Unprocessable Content",
   500: "Internal Server Error",
+  503: "Service Unavailable",
 };
 
 /** RFC 9457 problem details in the kernel's shape: type, title, status, code, detail. */
@@ -99,11 +115,11 @@ export function createAgentsHandler(deps: AgentsApiDeps): (req: IncomingMessage,
     try {
       if (path === KILL_PATH) {
         if (req.method === "GET") {
-          send(res, 200, readKillSwitchStatus(principalFromHeaders(req.headers), deps.registry));
+          send(res, 200, readKillSwitchStatus(await deps.authenticate(req.headers), deps.registry));
           return;
         }
         if (req.method !== "POST") throw new MethodNotAllowed("GET, POST");
-        const principal = principalFromHeaders(req.headers);
+        const principal = await deps.authenticate(req.headers);
         const out = await handleKillSwitchCommand({
           principal,
           body: await readBody(req),
@@ -115,10 +131,33 @@ export function createAgentsHandler(deps: AgentsApiDeps): (req: IncomingMessage,
         send(res, 200, out.body);
         return;
       }
+      if (path === CHAT_PATH) {
+        if (deps.copilot === undefined) throw new ApiError(404, "AGT-0404", "no such route");
+        if (req.method !== "POST") throw new MethodNotAllowed("POST");
+        const principal = await deps.authenticate(req.headers);
+        await handleChat({ principal, token: bearerToken(req.headers), body: await readBody(req), accept: String(req.headers["accept"] ?? ""), copilot: deps.copilot, res });
+        return;
+      }
+      const start = START_PATH.exec(path);
+      if (start !== null && deps.runs !== undefined) {
+        if (req.method !== "POST") throw new MethodNotAllowed("POST");
+        const principal = await deps.authenticate(req.headers);
+        const started = await handleStartRun({ principal, token: bearerToken(req.headers), agentId: start[1] ?? "", body: await readBody(req), runs: deps.runs });
+        send(res, 202, started);
+        return;
+      }
+      const runMatch = RUN_PATH.exec(path) ?? ACTIONS_PATH.exec(path);
+      if (runMatch !== null && deps.runs !== undefined) {
+        if (req.method !== "GET") throw new MethodNotAllowed("GET");
+        const principal = await deps.authenticate(req.headers);
+        const runId = (runMatch[1] ?? "").toLowerCase();
+        send(res, 200, path.endsWith("/actions") ? await handleListActions({ principal, runId, runs: deps.runs }) : await handleGetRun({ principal, runId, runs: deps.runs }));
+        return;
+      }
       const match = DECISION_PATH.exec(path);
       if (match === null) throw new ApiError(404, "AGT-0404", "no such route");
       if (req.method !== "POST") throw new MethodNotAllowed("POST");
-      const principal = principalFromHeaders(req.headers);
+      const principal = await deps.authenticate(req.headers);
       const out = await handleApprovalDecision({
         principal,
         runId: (match[1] ?? "").toLowerCase(),

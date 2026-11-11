@@ -37,6 +37,11 @@ type Request struct {
 	LegacyTB        []domain.TBAccount
 	Revenue         decimal.Decimal
 	ExplainedMaxPct decimal.Decimal
+	// Subledger are the period's subledger documents (AR, AP, INV, FA), posted through Ports (49-4); LegacySubledger
+	// is the optional legacy movement per key, which replaces the documents' own sums as the legacy side.
+	Subledger       []domain.SubledgerDocument
+	LegacySubledger []domain.SubledgerBalance
+	Ports           Ports
 }
 
 // Rejected is a document the ledger refused, with its code; its amounts are missing from the
@@ -45,6 +50,8 @@ type Rejected struct {
 	DocumentID string `json:"documentId"`
 	Seq        int    `json:"seq"`
 	Code       string `json:"code"`
+	// Area is set for a subledger document (AR, AP, INV, FA); a journal document has none.
+	Area string `json:"area,omitempty"`
 }
 
 // Result is the replay's outcome: the parallel-run input to diff and store, the posted entry ids by
@@ -61,8 +68,20 @@ type Result struct {
 // Passage side reads, per account the replay or the legacy trial balance touched, the ledger's
 // balance for the period, so other accounts of the ledger are not compared.
 func Run(ctx context.Context, ledger ledgerclient.Ledger, in Request) (Result, error) {
+	if len(in.Documents) == 0 && len(in.Subledger) > 0 {
+		return runSubledgerOnly(ctx, in)
+	}
 	if err := domain.ValidateReplay(in.Period, in.Documents); err != nil {
 		return Result{}, err
+	}
+	// Subledger documents are validated and their ports checked before the first journal is posted.
+	if err := domain.ValidateSubledger(in.Period, in.Subledger); err != nil {
+		return Result{}, err
+	}
+	for _, d := range in.Subledger {
+		if in.Ports[d.Area] == nil {
+			return Result{}, fmt.Errorf("%w: %s", ErrNoSubledgerPort, d.Area)
+		}
 	}
 	owner, err := ledger.LegalEntity(ctx, in.LegalEntityID, in.LedgerID)
 	if err != nil {
@@ -123,5 +142,41 @@ func Run(ctx context.Context, ledger ledgerclient.Ledger, in Request) (Result, e
 		Revenue: in.Revenue, ExplainedMaxPct: in.ExplainedMaxPct,
 		Legacy:  domain.TBLines(legacy, in.Period, "legacy", domain.DocumentCounts(in.Documents, in.Period)),
 		Passage: domain.TBLines(passage, in.Period, "passage", nil)}
+	if len(in.Subledger) > 0 {
+		sl, err := RunSubledger(ctx, in.Ports, in)
+		if err != nil {
+			return Result{}, err
+		}
+		for id, entry := range sl.Posted {
+			res.Posted[id] = entry
+		}
+		res.Rejected = append(res.Rejected, sl.Rejected...)
+		addSubledger(&res.Input, in, sl, len(sl.Posted))
+	}
 	return res, nil
+}
+
+// runSubledgerOnly replays subledger documents without journals: no rehearsal ledger is read, and the parallel run
+// holds the subledger tuples only.
+func runSubledgerOnly(ctx context.Context, in Request) (Result, error) {
+	sl, err := RunSubledger(ctx, in.Ports, in)
+	if err != nil {
+		return Result{}, err
+	}
+	res := Result{Posted: sl.Posted, Rejected: sl.Rejected}
+	res.Input = domain.ParallelInput{Period: in.Period, SourceSystem: in.System, Revenue: in.Revenue, ExplainedMaxPct: in.ExplainedMaxPct}
+	addSubledger(&res.Input, in, sl, len(sl.Posted))
+	return res, nil
+}
+
+// addSubledger adds the INV, AP, AR and FA tuples to the parallel-run input: the legacy side is the legacy movement
+// when the request carries one, else the documents' own sums, and the Passage side is what the ports read back.
+func addSubledger(input *domain.ParallelInput, in Request, sl SubledgerResult, posted int) {
+	legacy := in.LegacySubledger
+	if len(legacy) == 0 {
+		legacy = domain.SubledgerFromDocuments(in.Subledger)
+	}
+	input.DocumentsReplayed += posted
+	input.Legacy = append(input.Legacy, domain.SubledgerLines(legacy, in.Period, "legacy", domain.SubledgerDocumentCounts(in.Subledger, in.Period))...)
+	input.Passage = append(input.Passage, domain.SubledgerLines(sl.Passage, in.Period, "passage", nil)...)
 }

@@ -201,6 +201,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyParameter)).Put(deliveryTerms+"/{id}", a.replaceDeliveryTerms)
 	a.registerDeliveryTolerances(r)
 	a.registerReturnOrders(r)
+	a.registerCustomerPortal(r)
 }
 
 // Metrics serves the admin port's Prometheus text.

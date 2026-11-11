@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
@@ -108,6 +109,8 @@ export interface TechnicianValues {
   overtimeAllowed: boolean;
   homeLatitude: string;
   homeLongitude: string;
+  truckSiteId: string;
+  truckWarehouseId: string;
   active: boolean;
 }
 
@@ -128,6 +131,8 @@ export function emptyTechnician(): TechnicianValues {
     overtimeAllowed: false,
     homeLatitude: "",
     homeLongitude: "",
+    truckSiteId: "",
+    truckWarehouseId: "",
     active: true,
   };
 }
@@ -147,6 +152,8 @@ export function valuesOf(t: Technician): TechnicianValues {
     overtimeAllowed: t.overtimeAllowed,
     homeLatitude: t.homeLatitude == null ? "" : String(t.homeLatitude),
     homeLongitude: t.homeLongitude == null ? "" : String(t.homeLongitude),
+    truckSiteId: t.truckSiteId ?? "",
+    truckWarehouseId: t.truckWarehouseId ?? "",
     active: t.active,
   };
 }
@@ -183,6 +190,7 @@ export function validateTechnician(values: TechnicianValues, creating: boolean):
   else if (lat !== "" && !(Math.abs(Number(lat)) <= 90 && Math.abs(Number(lon)) <= 180 && !Number.isNaN(Number(lat)) && !Number.isNaN(Number(lon)))) {
     errors.homeLatitude = "Latitude is -90 to 90 and longitude -180 to 180.";
   }
+  if ((values.truckSiteId === "") !== (values.truckWarehouseId === "")) errors.truckSiteId = "Choose both the truck's site and its warehouse, or neither.";
   if (Object.keys(errors).length > 0) return { errors };
   return {
     errors,
@@ -198,6 +206,8 @@ export function validateTechnician(values: TechnicianValues, creating: boolean):
       shiftEndMinute: end,
       homeLatitude: lat === "" ? null : Number(lat),
       homeLongitude: lon === "" ? null : Number(lon),
+      truckSiteId: values.truckSiteId === "" ? null : values.truckSiteId,
+      truckWarehouseId: values.truckWarehouseId === "" ? null : values.truckWarehouseId,
       maxDailyMinutes: max,
       overtimeAllowed: values.overtimeAllowed,
       active: values.active,
@@ -279,6 +289,12 @@ function TechnicianForm({ creating, initial, submitLabel, onSubmit, failure, fie
         {text("maxDailyMinutes", "Daily maximum minutes", "Work plus buffers per local day.")}
         {text("homeLatitude", "Home latitude", undefined, { optional: true })}
         {text("homeLongitude", "Home longitude", undefined, { optional: true })}
+        <FormField id="tech-truckSiteId" label="Truck site" hint="Where the truck's parts are kept; completed jobs take their parts from it." error={shown.truckSiteId} optional>
+          {(control) => <EntityLookup {...control} entity="site" value={values.truckSiteId} onChange={(e) => update({ truckSiteId: e.target.value })} invalid={Boolean(shown.truckSiteId)} />}
+        </FormField>
+        <FormField id="tech-truckWarehouseId" label="Truck warehouse" optional>
+          {(control) => <EntityLookup {...control} entity="warehouse" value={values.truckWarehouseId} onChange={(e) => update({ truckWarehouseId: e.target.value })} />}
+        </FormField>
         <fieldset className={`${styles.groups} ${styles.wide}`}>
           <legend className={styles.groupsLegend}>Working days</legend>
           {DAYS.map((d) => (

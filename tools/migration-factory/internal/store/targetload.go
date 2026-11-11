@@ -44,6 +44,8 @@ type TargetStage struct {
 	LegalEntityID string
 	ImportSource  string
 	Rows          []domain.StagedRow
+	// Payables is true when the run's AP lines are staged for the payables load (domain.TargetConfig.Payables).
+	Payables bool
 }
 
 const loadColumns = `run_id::text, target, legal_entity_id::text, import_source, status, staged, created, updated, unchanged, skipped,
@@ -77,6 +79,9 @@ func stageTarget(ctx context.Context, tx pgx.Tx, runID string, st *TargetStage) 
 	}
 	pending, rejected, na := 0, 0, 0
 	for _, r := range st.Rows {
+		if st.Payables && r.Ledger == domain.LedgerAP {
+			continue // counted by payables_load
+		}
 		switch r.Status {
 		case domain.RowPending:
 			pending++
@@ -88,12 +93,17 @@ func stageTarget(ctx context.Context, tx pgx.Tx, runID string, st *TargetStage) 
 	}
 	if _, err := tx.Exec(ctx, `insert into target_load (tenant_id, run_id, target, legal_entity_id, import_source, status, staged, rejected, not_available, pending)
 		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		runID, domain.TargetReceivables, st.LegalEntityID, st.ImportSource, domain.LoadStaged, len(st.Rows), rejected, na, pending); err != nil {
+		runID, domain.TargetReceivables, st.LegalEntityID, st.ImportSource, domain.LoadStaged, len(st.Rows)-apStaged(st), rejected, na, pending); err != nil {
 		return fmt.Errorf("insert target_load: %w", err)
 	}
 	if na > 0 {
 		if _, err := tx.Exec(ctx, `update pack_run set payables_staged = $2 where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1`, runID, countLedger(st.Rows, domain.LedgerAP)); err != nil {
 			return fmt.Errorf("update pack_run payables_staged: %w", err)
+		}
+	}
+	if st.Payables {
+		if err := stagePayables(ctx, tx, runID, st); err != nil {
+			return err
 		}
 	}
 	if err := setReceivablesLoad(ctx, tx, runID, domain.LoadStaged); err != nil {
@@ -108,9 +118,16 @@ func stageTarget(ctx context.Context, tx pgx.Tx, runID string, st *TargetStage) 
 	for i, r := range st.Rows {
 		seqs[i], legacy[i], ledgers[i], hashes[i], statuses[i], codes[i], details[i] = int32(r.Seq), r.LegacyID, r.Ledger, r.Hash, r.Status, r.Code, r.Detail
 		payload := []byte("{}")
-		if r.Row != nil {
+		var v any
+		switch {
+		case r.Row != nil:
+			v = r.Row
+		case r.AP != nil:
+			v = r.AP
+		}
+		if v != nil {
 			var err error
-			if payload, err = json.Marshal(r.Row); err != nil {
+			if payload, err = json.Marshal(v); err != nil {
 				return err
 			}
 		}
@@ -238,12 +255,12 @@ func (s *Postgres) ClaimTargetLoad(ctx context.Context, runID, startedBy string,
 		}
 		if _, err := tx.Exec(ctx, `update target_row r set status = 'SKIPPED', outcome = 'UNCHANGED', passage_id = l.passage_id, updated_at = now()
 			from target_loaded l
-			where r.tenant_id = current_setting('passage.tenant_id', true)::uuid and r.run_id = $1 and r.status = 'PENDING'
+			where r.tenant_id = current_setting('passage.tenant_id', true)::uuid and r.run_id = $1 and r.status = 'PENDING' and r.ledger = 'AR'
 			  and l.tenant_id = r.tenant_id and l.import_source = $2 and l.legacy_id = r.legacy_id and l.row_hash = r.row_hash`, runID, load.ImportSource); err != nil {
 			return fmt.Errorf("skip rows the target already holds: %w", err)
 		}
 		rows, err := tx.Query(ctx, `select seq, legacy_id, row_hash, payload from target_row
-			where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1 and status = 'PENDING' order by seq`, runID)
+			where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1 and status = 'PENDING' and ledger = 'AR' order by seq`, runID)
 		if err != nil {
 			return err
 		}
@@ -376,7 +393,8 @@ func (s *Postgres) FinishTargetLoad(ctx context.Context, runID string, fin Targe
 			return err
 		}
 		counts := map[string]int{}
-		rows, err := tx.Query(ctx, `select status, outcome, count(*) from target_row where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1 group by status, outcome`, runID)
+		rows, err := tx.Query(ctx, `select status, outcome, count(*) from target_row where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1
+			and (ledger = 'AR' or status = 'NOT_AVAILABLE') group by status, outcome`, runID)
 		if err != nil {
 			return err
 		}
@@ -521,4 +539,22 @@ func setReceivablesLoad(ctx context.Context, tx pgx.Tx, runID, status string) er
 		return fmt.Errorf("update pack_run receivables_load: %w", err)
 	}
 	return nil
+}
+
+// apStaged counts the AP rows a payables load takes over from the receivables load's counts.
+func apStaged(st *TargetStage) int {
+	if !st.Payables {
+		return 0
+	}
+	return countAP(st.Rows)
+}
+
+func countAP(rows []domain.StagedRow) int {
+	n := 0
+	for _, r := range rows {
+		if r.Ledger == domain.LedgerAP {
+			n++
+		}
+	}
+	return n
 }

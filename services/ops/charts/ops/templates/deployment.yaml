@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: ops
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ops
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ops
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ops
+          image: {{ include "ops.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseSecret }}
+                  key: DATABASE_URL
+            - name: PASSAGE_SERVICE_NAME
+              value: ops
+{{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+{{- end }}
+            - name: MIGRATE_ON_START
+              value: {{ .Values.migrateOnStart | quote }}
+            - name: REGION_NAME
+              value: {{ .Values.region.name | quote }}
+            - name: OPS_REGIONS
+              value: {{ .Values.region.registered | quote }}
+            - name: FAILOVER_MAX_LAG_S
+              value: {{ .Values.failoverMaxLagSeconds | quote }}
+            - name: OPS_OPERATOR_TENANT_ID
+              value: {{ .Values.operatorTenantId | quote }}
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

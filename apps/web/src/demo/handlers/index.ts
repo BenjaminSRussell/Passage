@@ -15,4 +15,5 @@ import "./hr";
 import "./shell";
 import "./fx";
 import "./print";
+import "./technician";
 import "./analytics";

@@ -399,3 +399,5 @@ func customerAgreements(ctx context.Context, tx pgx.Tx, tenantID, customer, lega
 	}
 	return out, rows.Err()
 }
+
+func marshalJSON(v any) ([]byte, error) { return json.Marshal(v) }

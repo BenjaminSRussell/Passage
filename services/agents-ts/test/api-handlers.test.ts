@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { type ApprovalRequest, type ApprovalStore, handleApprovalDecision, type RecordedDecision } from "../src/api/decision.js";
 import { handleKillSwitchCommand, parseKillSwitchCommand, readKillSwitchStatus } from "../src/api/killswitch.js";
-import { ApiError, type Principal, principalFromHeaders } from "../src/api/principal.js";
+import { createAuthenticator } from "../src/api/auth.js";
+import { ApiError, type Principal } from "../src/api/principal.js";
 import type { AgentEvent } from "../src/domain/events.js";
 import { KILL_PROPAGATION_MS, KillSwitchRegistry } from "../src/domain/killswitch.js";
 import { KillSwitchFeed } from "../src/runtime/killswitch-feed.js";
+import { AUDIENCE, edgeHeaders, foreignKey, ISSUER, JWK, KID, signToken, testAuthenticate, tokenFor } from "./jwt.js";
 
 const HOUR_MS = 3_600_000;
 const T1 = "00000000-0000-7000-8000-000000000001";
@@ -42,21 +44,77 @@ function recorder() {
   return { events, publish: async (e: AgentEvent<unknown>) => void events.push(e) };
 }
 
-describe("principalFromHeaders", () => {
-  it("reads tenant, user and comma-separated duties, lowercasing the ids", () => {
-    const p = principalFromHeaders({ "x-passage-tenant": T1.toUpperCase(), "x-passage-user": ADMIN, "x-passage-duties": "agents.admin, agents.view," });
+describe("caller authentication (verified bearer token)", () => {
+  const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+  it("takes tenant, user and duties from the verified token, lowercasing the ids", async () => {
+    const p = await testAuthenticate(bearer(signToken({ tid: T1.toUpperCase(), sub: ADMIN, duties: "agents.admin, agents.view," })));
     expect(p.tenantId).toBe(T1);
     expect(p.userId).toBe(ADMIN);
     expect([...p.duties].sort()).toEqual(["agents.admin", "agents.view"]);
+    const arr = await testAuthenticate(bearer(signToken({ tid: T1, sub: ADMIN, duties: ["agents.view"] })));
+    expect([...arr.duties]).toEqual(["agents.view"]);
+  });
+
+  it("accepts edge headers that match the token", async () => {
+    const p = await testAuthenticate(edgeHeaders(T1, ADMIN, "agents.admin"));
+    expect(p).toMatchObject({ tenantId: T1, userId: ADMIN });
   });
 
   it.each([
-    ["no headers", {}],
-    ["tenant not a uuid", { "x-passage-tenant": "t1", "x-passage-user": ADMIN }],
-    ["the nil platform tenant", { "x-passage-tenant": "00000000-0000-0000-0000-000000000000", "x-passage-user": ADMIN }],
-    ["no user", { "x-passage-tenant": T1 }],
+    ["edge headers alone, no token", { "x-passage-tenant": T1, "x-passage-user": ADMIN, "x-passage-duties": "agents.admin" }],
+    ["a non-bearer authorization", { authorization: `Basic ${tokenFor(T1, ADMIN, "agents.admin")}` }],
+    ["a malformed token", bearer("not.a.jwt.at-all")],
+    ["a token signed by another key", bearer(signToken({ tid: T1, sub: ADMIN, duties: "agents.admin" }, { key: foreignKey }))],
+    ["an unknown key id", bearer(signToken({ tid: T1, sub: ADMIN }, { kid: "other" }))],
+    ["alg none", bearer(signToken({ tid: T1, sub: ADMIN }, { alg: "none" }))],
+    ["another issuer", bearer(signToken({ tid: T1, sub: ADMIN, iss: "https://evil.example/realms/x" }))],
+    ["another audience", bearer(signToken({ tid: T1, sub: ADMIN, aud: "other-api" }))],
+    ["an expired token", bearer(signToken({ tid: T1, sub: ADMIN, exp: 1_000 }))],
+    ["a token not valid yet", bearer(signToken({ tid: T1, sub: ADMIN, nbf: 4_000_000_000 }))],
+    ["no tenant", bearer(signToken({ sub: ADMIN }))],
+    ["the nil platform tenant", bearer(signToken({ tid: "00000000-0000-0000-0000-000000000000", sub: ADMIN }))],
+    ["no user", bearer(signToken({ tid: T1 }))],
+    ["a tenant header naming another tenant", { ...edgeHeaders(T1, ADMIN, "agents.admin"), "x-passage-tenant": T2 }],
+    ["a user header naming another user", { ...edgeHeaders(T1, ADMIN, "agents.admin"), "x-passage-user": SUP }],
+    ["a duties header adding a duty", { ...edgeHeaders(T1, CLERK, "agents.view"), "x-passage-duties": "agents.view,agents.admin" }],
   ])("refuses %s with 401 AGT-0401", async (_name, headers) => {
-    expect(await thrown(() => principalFromHeaders(headers))).toMatchObject({ status: 401, code: "AGT-0401" });
+    expect(await thrown(() => testAuthenticate(headers))).toMatchObject({ status: 401, code: "AGT-0401" });
+  });
+
+  it("fetches the realm keys from the JWKS URL, once, and refetches for a rotated key", async () => {
+    let fetches = 0;
+    let now = 1_000_000;
+    const auth = createAuthenticator(
+      { issuer: ISSUER, audience: AUDIENCE, jwksUrl: "https://idp.test/certs" },
+      async () => {
+        fetches += 1;
+        return new Response(JSON.stringify({ keys: [JWK] }), { status: 200 });
+      },
+      () => now,
+    );
+    const token = signToken({ tid: T1, sub: ADMIN, duties: "agents.view" });
+    await auth(bearer(token));
+    await auth(bearer(token));
+    expect(fetches).toBe(1);
+    // An unknown kid refetches at most once per 30 s.
+    await thrown(() => auth(bearer(signToken({ tid: T1, sub: ADMIN }, { kid: "rotated" }))));
+    await thrown(() => auth(bearer(signToken({ tid: T1, sub: ADMIN }, { kid: "rotated" }))));
+    expect(fetches).toBe(1);
+    now += 31_000;
+    await thrown(() => auth(bearer(signToken({ tid: T1, sub: ADMIN }, { kid: "rotated" }))));
+    expect(fetches).toBe(2);
+    expect(KID).toBe("test-key-1");
+  });
+
+  it("answers 503 when the realm keys cannot be read", async () => {
+    const auth = createAuthenticator({ issuer: ISSUER, audience: AUDIENCE, jwksUrl: "https://idp.test/certs" }, async () => new Response("", { status: 500 }));
+    expect(await thrown(() => auth(bearer(tokenFor(T1, ADMIN, ""))))).toMatchObject({ status: 503, code: "AGT-0503" });
+  });
+
+  it("refuses to start without an issuer, audience or keys", () => {
+    expect(() => createAuthenticator({ issuer: "", audience: AUDIENCE, jwks: { keys: [JWK] } })).toThrow(TypeError);
+    expect(() => createAuthenticator({ issuer: ISSUER, audience: AUDIENCE })).toThrow(TypeError);
   });
 });
 

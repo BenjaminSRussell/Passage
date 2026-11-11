@@ -38,6 +38,7 @@ type Store interface {
 	Ping(ctx context.Context) error
 	FindContractByKey(ctx context.Context, key string) (store.Contract, bool, error)
 	CreateContract(ctx context.Context, c store.Contract) (store.Contract, error)
+	AddObligations(ctx context.Context, contractID string, increase decimal.Decimal, add []store.Obligation, expectedVersion int) (store.Contract, error)
 	GetContract(ctx context.Context, id string) (store.Contract, error)
 	ListContracts(ctx context.Context, f store.ContractFilter) (store.ContractPage, error)
 	SatisfyMilestone(ctx context.Context, obligationID string, on time.Time, expectedVersion int) (store.Satisfaction, error)
@@ -214,6 +215,65 @@ func (a *API) createContract(w http.ResponseWriter, r *http.Request) {
 	}
 	a.contractsCreated.Add(1)
 	writeContract(w, http.StatusCreated, created)
+}
+
+type allocateRequest struct {
+	// TransactionPriceIncrease is the price of the added obligations, allocated over them (and only them).
+	TransactionPriceIncrease string                  `json:"transactionPriceIncrease"`
+	Obligations              []contractObligationDTO `json:"obligations"`
+}
+
+// allocateContract is the modification of an existing contract (#29): it adds obligations for products first invoiced later,
+// accounted for as a separate contract at their own price, and leaves the allocation and schedules already there as they are. An
+// If-Match header, when sent, must carry the contract version the caller reviewed (412 REV-0103 otherwise).
+func (a *API) allocateContract(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "contract not found"))
+		return
+	}
+	expected := 0
+	if raw := r.Header.Get("If-Match"); raw != "" {
+		var ok bool
+		if expected, ok = parseIfMatch(raw); !ok {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", `If-Match must be the contract version as an entity tag, for example "1"`))
+			return
+		}
+	}
+	var req allocateRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	c, err := a.store.GetContract(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if !inScope(r, c.LegalEntityID) {
+		httpx.Fail(w, r, outOfScope())
+		return
+	}
+	fields := map[string]string{}
+	if !decimalText.MatchString(req.TransactionPriceIncrease) {
+		fields["transactionPriceIncrease"] = "must be a non-negative decimal with at most 6 fraction digits"
+		writeFields(w, r, fields)
+		return
+	}
+	add, price, err := buildObligations(c.Currency, c.RatableBasis, c.ResidualRule, req.TransactionPriceIncrease, req.Obligations, 0, fields)
+	if len(fields) > 0 {
+		writeFields(w, r, fields)
+		return
+	}
+	if err == nil {
+		c, err = a.store.AddObligations(r.Context(), id, price, add, expected)
+	}
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	a.contractsModified.Add(1)
+	writeContract(w, http.StatusOK, c)
 }
 
 // listContracts is the revenue contracts inquiry (§5.29.14): headers with the
@@ -526,14 +586,33 @@ func buildContract(req contractRequest, fields map[string]string) (store.Contrac
 	if err != nil {
 		fields["contractDate"] = "must be a date as YYYY-MM-DD"
 	}
-	if n := len(req.Obligations); n == 0 || n > maxObligations {
+	obligations, price, err := buildObligations(req.Currency, basis, req.ResidualRule, req.TransactionPrice, req.Obligations, 0, fields)
+	if err != nil || len(fields) > 0 {
+		return store.Contract{}, err
+	}
+	c := store.Contract{
+		ID: ids.New(), LegalEntityID: req.LegalEntityID, OrderID: req.OrderID, CustomerID: req.CustomerID,
+		Currency: req.Currency, TransactionPrice: price, ResidualRule: req.ResidualRule, RatableBasis: basis,
+		ContractDate: contractDate, Obligations: obligations,
+	}
+	for i := range c.Obligations {
+		c.Obligations[i].ContractID = c.ID
+	}
+	return c, nil
+}
+
+// buildObligations validates the obligations of a contract, or of a modification that adds to one, and allocates price across them.
+// The first new line is numbered startLine+1. Field problems go into fields (nothing is returned then); a domain rejection is
+// returned as the error. It returns the obligations and the price rounded to the currency.
+func buildObligations(currency, basis, residualRule, priceText string, in []contractObligationDTO, startLine int, fields map[string]string) ([]store.Obligation, decimal.Decimal, error) {
+	if n := len(in); n == 0 || n > maxObligations {
 		fields["obligations"] = "must hold 1 to 50 obligations"
 	}
 	// The allocation identifies obligations by line, so one product may appear
 	// on several lines (a bundle with two support terms, for example).
-	dtos := make([]obligationDTO, len(req.Obligations))
-	satisfied := make([]*time.Time, len(req.Obligations))
-	for i, o := range req.Obligations {
+	dtos := make([]obligationDTO, len(in))
+	satisfied := make([]*time.Time, len(in))
+	for i, o := range in {
 		dtos[i] = obligationDTO{ID: strconv.Itoa(i + 1), SSP: o.SSP, SSPSource: o.SSPSource, Method: o.Method, TermStart: o.TermStart, TermEnd: o.TermEnd}
 		key := func(name string) string { return fmt.Sprintf("obligations[%d].%s", i, name) }
 		if !ids.Valid(o.ProductID) {
@@ -555,33 +634,29 @@ func buildContract(req contractRequest, fields map[string]string) (store.Contrac
 	}
 	obs, terms, ok := toDomain(dtos, fields)
 	if !ok || len(fields) > 0 {
-		return store.Contract{}, nil
+		return nil, decimal.Zero, nil
 	}
 	if err := domain.CheckSSPSources(obs); err != nil {
-		return store.Contract{}, problemFrom(err)
+		return nil, decimal.Zero, problemFrom(err)
 	}
-	price := money.Amount{Value: decimal.RequireFromString(req.TransactionPrice), Currency: req.Currency}.Round()
-	allocated, err := domain.Allocate(price, obs, req.ResidualRule)
+	price := money.Amount{Value: decimal.RequireFromString(priceText), Currency: currency}.Round()
+	allocated, err := domain.Allocate(price, obs, residualRule)
 	if err != nil {
-		return store.Contract{}, problemFrom(err)
+		return nil, decimal.Zero, problemFrom(err)
 	}
-	c := store.Contract{
-		ID: ids.New(), LegalEntityID: req.LegalEntityID, OrderID: req.OrderID, CustomerID: req.CustomerID,
-		Currency: req.Currency, TransactionPrice: price.Value, ResidualRule: req.ResidualRule, RatableBasis: basis,
-		ContractDate: contractDate,
-	}
+	out := make([]store.Obligation, 0, len(allocated))
 	for i, o := range allocated {
 		ob := store.Obligation{
-			ID: ids.New(), ContractID: c.ID, LineNo: i + 1, ProductID: req.Obligations[i].ProductID,
+			ID: ids.New(), LineNo: startLine + i + 1, ProductID: in[i].ProductID,
 			SSP: o.SSP, SSPSource: o.SSPSource, Allocated: o.Allocated, Method: o.Method, SatisfiedOn: satisfied[i],
 		}
 		if t := terms[i]; t != nil {
 			start, end := t[0], t[1]
 			ob.TermStart, ob.TermEnd = &start, &end
 		}
-		lines, err := domain.ScheduleLines(o, req.Currency, basis, ob.TermStart, ob.TermEnd, ob.SatisfiedOn)
+		lines, err := domain.ScheduleLines(o, currency, basis, ob.TermStart, ob.TermEnd, ob.SatisfiedOn)
 		if err != nil {
-			return store.Contract{}, problemFrom(err)
+			return nil, decimal.Zero, problemFrom(err)
 		}
 		for _, l := range lines {
 			sc := store.Schedule{ID: ids.New(), Seq: l.Seq, Date: l.Date, Amount: l.Amount, Status: domain.InitialStatus(o.Method, l.Date)}
@@ -590,9 +665,9 @@ func buildContract(req contractRequest, fields map[string]string) (store.Contrac
 			}
 			ob.Schedule = append(ob.Schedule, sc)
 		}
-		c.Obligations = append(c.Obligations, ob)
+		out = append(out, ob)
 	}
-	return c, nil
+	return out, price.Value, nil
 }
 
 func requestHash(req contractRequest) string {

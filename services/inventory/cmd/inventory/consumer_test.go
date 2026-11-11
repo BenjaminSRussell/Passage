@@ -17,7 +17,7 @@ func TestPostingsSeeded(t *testing.T) {
 		t.Fatal("platform table does not seed service:" + api.PostingsConsumerName)
 	}
 	cfg, err := postingsKafkaConfig(func(k string) string { return map[string]string{"KAFKA_BROKERS": "kafka:9092"}[k] })
-	if err != nil || cfg.Group != api.PostingsConsumerName || len(cfg.Topics) != 3 || cfg.Topics[0] != api.ReceiptTopic || cfg.Topics[1] != api.OrderProgressTopic || cfg.Topics[2] != api.PackingSlipTopic {
+	if err != nil || cfg.Group != api.PostingsConsumerName || len(cfg.Topics) != 4 || cfg.Topics[0] != api.ReceiptTopic || cfg.Topics[1] != api.OrderProgressTopic || cfg.Topics[2] != api.PackingSlipTopic || cfg.Topics[3] != api.WorkOrderTopic {
 		t.Fatalf("kafka config %+v %v", cfg, err)
 	}
 }

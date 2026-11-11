@@ -27,6 +27,7 @@ paths:
   /v1/budget/control-rules:
     get:
       operationId: listBudgetControlRules
+      summary: "List budget control rules"
       x-passage-duty: budget.view
       parameters:
         - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
@@ -37,6 +38,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createBudgetControlRule
+      summary: "Create a budget control rule"
       x-passage-duty: budget.configure
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -51,6 +53,7 @@ paths:
   /v1/budget/control-rules/{id}:
     get:
       operationId: getBudgetControlRule
+      summary: "Get a budget control rule"
       x-passage-duty: budget.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -62,6 +65,7 @@ paths:
   /v1/budget/register-entries:
     get:
       operationId: listBudgetRegisterEntries
+      summary: "List budget register entries"
       x-passage-duty: budget.view
       parameters:
         - { $ref: '#/components/parameters/Rule' }
@@ -72,6 +76,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: postBudgetRegisterEntry
+      summary: "Post a budget register entry"
       x-passage-duty: budget.maintain
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -86,6 +91,7 @@ paths:
   /v1/budget/available:
     get:
       operationId: getAvailableFunds
+      summary: "Get the available funds"
       x-passage-duty: budget.view
       parameters:
         - { $ref: '#/components/parameters/Rule' }
@@ -99,6 +105,7 @@ paths:
   /v1/budget/checks:
     get:
       operationId: listBudgetChecks
+      summary: "List budget checks"
       x-passage-duty: budget.view
       parameters:
         - { $ref: '#/components/parameters/Rule' }
@@ -110,6 +117,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: checkBudget
+      summary: "Check a request against the budget"
       x-passage-duty: budget.check
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -128,6 +136,7 @@ paths:
   /v1/budget/checks/{id}:
     get:
       operationId: getBudgetCheck
+      summary: "Get a budget check"
       x-passage-duty: budget.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -139,6 +148,7 @@ paths:
   /v1/budget/encumbrances:
     get:
       operationId: listEncumbrances
+      summary: "List encumbrances"
       x-passage-duty: budget.view
       parameters:
         - { $ref: '#/components/parameters/Rule' }
@@ -151,6 +161,7 @@ paths:
   /v1/budget/encumbrances/{id}:
     get:
       operationId: getEncumbrance
+      summary: "Get an encumbrance"
       x-passage-duty: budget.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -162,6 +173,7 @@ paths:
   /v1/budget/encumbrances/{id}:relieve:
     post:
       operationId: relieveEncumbrance
+      summary: "Relieve an encumbrance"
       x-passage-duty: budget.check
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -295,6 +307,7 @@ paths:
   /v1/budget/reservations/{id}:
     get:
       operationId: getBudgetReservation
+      summary: "Get a budget reservation"
       x-passage-duty: budget.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -338,6 +351,7 @@ paths:
   /v1/budget/plans:
     get:
       operationId: listBudgetPlans
+      summary: "List budget plans"
       x-passage-duty: budget.view
       parameters:
         - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
@@ -359,6 +373,7 @@ paths:
   /v1/budget/plans/{id}:
     get:
       operationId: getBudgetPlan
+      summary: "Get a budget plan"
       x-passage-duty: budget.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -532,6 +547,7 @@ paths:
   /v1/budget/investment-programs:
     get:
       operationId: listInvestmentPrograms
+      summary: "List investment programs"
       x-passage-duty: budget.view
       parameters:
         - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
@@ -557,6 +573,7 @@ paths:
   /v1/budget/investment-programs/{id}:
     get:
       operationId: getInvestmentProgram
+      summary: "Get an investment program"
       x-passage-duty: budget.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }

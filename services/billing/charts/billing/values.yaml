@@ -44,6 +44,14 @@ salesReportInterval: "30s"
 # that records booked invoices and credit notes with the tax service (TAX_URL, BILLING_TAX_REPORT_INTERVAL). Unset, reports wait.
 taxUrl: ""
 taxReportInterval: "30s"
+# With tenantIds set, every replica runs the subscription billing job (BILLING_SUBSCRIPTION_JOB_*): it creates the invoice
+# proposal of every period due for the tenants' legal entities; posting stays with the billing workspace. It ticks every
+# interval, or once a day at `at` (UTC, "03:00") when that is set; set one of the two. A period is invoiced once, so several
+# replicas running together are safe.
+subscriptionJob:
+  tenantIds: []
+  interval: 1h
+  at: ""
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits: { cpu: 500m, memory: 256Mi }

@@ -1,0 +1,31 @@
+{
+  "data": null,
+  "documentNumber": "INV-2026-0042",
+  "saleMessageType": "INVOICE",
+  "currency": {"isoCurrencyCodeAlpha": "USD"},
+  "subTotal": 300,
+  "totalTax": 22.69,
+  "total": 322.69,
+  "lineItems": [
+    {
+      "lineItemNumber": 1,
+      "lineItemId": "L1",
+      "extendedPrice": 200,
+      "totalTax": 14.5,
+      "taxes": [
+        {"jurisdiction": {"jurisdictionLevel": "STATE", "jurisdictionId": 31152, "value": "OHIO"}, "impositionType": {"value": "General Sales and Use Tax"}, "effectiveRate": 0.0575, "calculatedTax": 11.5},
+        {"jurisdiction": {"jurisdictionLevel": "COUNTY", "jurisdictionId": 31153, "value": "FRANKLIN"}, "impositionType": {"value": "County Sales and Use Tax"}, "effectiveRate": 0.015, "calculatedTax": 3}
+      ]
+    },
+    {
+      "lineItemNumber": 2,
+      "lineItemId": "L2",
+      "extendedPrice": 100,
+      "totalTax": 8.19,
+      "taxes": [
+        {"jurisdiction": {"jurisdictionLevel": "STATE", "jurisdictionId": 31152, "value": "OHIO"}, "impositionType": {"value": "General Sales and Use Tax"}, "effectiveRate": 0.0575, "calculatedTax": 5.75},
+        {"jurisdiction": {"jurisdictionLevel": "COUNTY", "jurisdictionId": 31153, "value": "FRANKLIN"}, "impositionType": {"value": "County Sales and Use Tax"}, "effectiveRate": 0.0244, "calculatedTax": 2.44}
+      ]
+    }
+  ]
+}

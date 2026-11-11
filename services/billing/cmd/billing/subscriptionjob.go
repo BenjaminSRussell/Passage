@@ -35,11 +35,16 @@ type periodBiller interface {
 // scoped to that legal entity. A period is invoiced once, so the interval only sets how soon a due period is picked up; a run
 // another replica makes at the same time loses on the period's uniqueness and counts as a failure that the next tick repeats.
 // It creates the invoice proposals; posting them stays with the billing workspace.
+//
+// By default it ticks every BILLING_SUBSCRIPTION_JOB_INTERVAL. With BILLING_SUBSCRIPTION_JOB_AT ("03:00", UTC) it runs once a day
+// at that time instead (FR-29.10's daily job) and not at start.
 type subscriptionJob struct {
 	interval time.Duration
-	tenants  []string
-	billing  periodBiller
-	now      func() time.Time
+	// at is the time of day (UTC, as minutes after midnight) of a daily run; negative means tick by interval.
+	at      int
+	tenants []string
+	billing periodBiller
+	now     func() time.Time
 }
 
 func newSubscriptionJob(getenv func(string) string, billing periodBiller) (*subscriptionJob, error) {
@@ -58,7 +63,17 @@ func newSubscriptionJob(getenv func(string) string, billing periodBiller) (*subs
 			tenants = append(tenants, id)
 		}
 	}
-	interval := defaultSubscriptionJob
+	interval, at := defaultSubscriptionJob, -1
+	if v := getenv("BILLING_SUBSCRIPTION_JOB_AT"); v != "" {
+		if getenv("BILLING_SUBSCRIPTION_JOB_INTERVAL") != "" {
+			return nil, errors.New("set BILLING_SUBSCRIPTION_JOB_AT or BILLING_SUBSCRIPTION_JOB_INTERVAL, not both")
+		}
+		t, err := time.Parse("15:04", v)
+		if err != nil {
+			return nil, errors.New("BILLING_SUBSCRIPTION_JOB_AT must be a UTC time of day as HH:MM, got " + v)
+		}
+		at = t.Hour()*60 + t.Minute()
+	}
 	if v := getenv("BILLING_SUBSCRIPTION_JOB_INTERVAL"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d < minSubscriptionJob {
@@ -66,10 +81,32 @@ func newSubscriptionJob(getenv func(string) string, billing periodBiller) (*subs
 		}
 		interval = d
 	}
-	return &subscriptionJob{interval: interval, tenants: tenants, billing: billing, now: time.Now}, nil
+	return &subscriptionJob{interval: interval, at: at, tenants: tenants, billing: billing, now: time.Now}, nil
+}
+
+// nextDaily is the next moment at minutes after midnight UTC that is after now.
+func nextDaily(now time.Time, at int) time.Time {
+	now = now.UTC()
+	next := time.Date(now.Year(), now.Month(), now.Day(), at/60, at%60, 0, 0, time.UTC)
+	if !next.After(now) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
 }
 
 func (j *subscriptionJob) loop(ctx context.Context) {
+	if j.at >= 0 {
+		for {
+			timer := time.NewTimer(nextDaily(j.now(), j.at).Sub(j.now()))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+				j.once(ctx)
+			}
+		}
+	}
 	j.once(ctx)
 	ticker := time.NewTicker(j.interval)
 	defer ticker.Stop()

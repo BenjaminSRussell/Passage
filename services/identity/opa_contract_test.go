@@ -159,6 +159,26 @@ func putAssignments(t *testing.T, base string, assignments map[string][]string) 
 	}
 }
 
+func putData(t *testing.T, base, path string, value any) {
+	t.Helper()
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPut, base+"/v1/data/"+path, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("seed %s status = %d", path, resp.StatusCode)
+	}
+}
+
 type contractHarness struct {
 	duties  map[string]seededDuty
 	names   []string
@@ -197,6 +217,9 @@ func newContractHarness(t *testing.T) contractHarness {
 		assignments[user] = []string{name}
 	}
 	putAssignments(t, base, assignments)
+	// The harness tenant is the operator tenant, so operator-only duties (ops.*) grant like any other here; authz_test.rego
+	// covers their refusal in other tenants.
+	putData(t, base, "operator_tenant_id", contractTenant)
 
 	client, err := NewOPAClient(base, &http.Client{Timeout: 5 * time.Second})
 	if err != nil {

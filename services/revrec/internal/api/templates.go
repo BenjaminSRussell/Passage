@@ -43,7 +43,7 @@ func (a *API) putTemplate(w http.ResponseWriter, r *http.Request) {
 		fields["productId"] = "must be a UUID"
 	}
 	switch req.Method {
-	case domain.MethodPointInTime:
+	case domain.MethodPointInTime, domain.MethodMilestone, domain.MethodUsage:
 		if req.TermMonths != nil {
 			fields["termMonths"] = "only a RATABLE template has a term"
 		}
@@ -52,7 +52,7 @@ func (a *API) putTemplate(w http.ResponseWriter, r *http.Request) {
 			fields["termMonths"] = "a RATABLE template needs a term of 1 to 120 months"
 		}
 	default:
-		fields["method"] = "must be POINT_IN_TIME or RATABLE"
+		fields["method"] = "must be POINT_IN_TIME, RATABLE, MILESTONE or USAGE"
 	}
 	if len(fields) > 0 {
 		writeFields(w, r, fields)

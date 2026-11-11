@@ -1,0 +1,10 @@
+/* The layout lives in the shared module so the web /technician host and this PWA match. */
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1a1a1a;
+  background: #ffffff;
+}
+
+body {
+  margin: 0;
+}

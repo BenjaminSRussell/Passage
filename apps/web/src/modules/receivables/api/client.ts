@@ -10,7 +10,7 @@ export type Bucket = (typeof BUCKETS)[number];
 export const PAYMENT_MODES = ["CHECK", "ACH", "WIRE", "CARD", "CASH"] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const PAYMENT_STATUSES = ["RECEIVED", "SUGGESTED", "APPLIED", "ON_ACCOUNT", "REVERSED"] as const;
+export const PAYMENT_STATUSES = ["RECEIVED", "SUGGESTED", "APPLIED", "ON_ACCOUNT", "REVERSED", "ADVISED", "CONFIRMED"] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export interface AgingTotal {
@@ -997,4 +997,99 @@ export function listBalanceSnapshots(filter: SnapshotFilter, signal?: AbortSigna
 /** POST /aging-snapshots - runs the nightly snapshot now; a re-run for the date announces only moved balances. */
 export function runAgingSnapshot(legalEntityId: string, asOf?: string): Promise<SnapshotResult> {
   return send<SnapshotResult>("/aging-snapshots", { method: "POST", body: JSON.stringify(asOf ? { legalEntityId, asOf } : { legalEntityId }) });
+}
+
+
+// ---- Ledger journals (30-2) and remittance advices (FR-30.4, 30-4) ----
+
+export type JournalStatus = "PENDING" | "POSTED";
+
+export interface GLJournalLine {
+  account: string;
+  side: "D" | "C";
+  amount: string;
+  text?: string;
+}
+
+export interface GLJournal {
+  id: string;
+  legalEntityId: string;
+  sourceType: string;
+  sourceId: string;
+  documentId: string;
+  postingDate: string;
+  currency: string;
+  status: JournalStatus;
+  journalPostingId?: string | null;
+  attempts: number;
+  nextAttemptAt?: string | null;
+  parked: boolean;
+  lastError?: string | null;
+  createdAt: string;
+  debit: string;
+  lines: GLJournalLine[];
+}
+
+export interface GLJournalFilter {
+  legalEntityId?: string;
+  status?: JournalStatus | "";
+  parked?: boolean;
+  limit?: number;
+}
+
+/** GET /gl-journals - the journals receivables owes the ledger or has posted, newest first. */
+export function listGLJournals(filter: GLJournalFilter = {}, signal?: AbortSignal): Promise<GLJournal[]> {
+  return items<GLJournal>(`/gl-journals${query({ legalEntityId: filter.legalEntityId, status: filter.status, parked: filter.parked ? "true" : undefined, limit: filter.limit })}`, signal);
+}
+
+export interface JournalSweepResult {
+  posted: number;
+  failed: number;
+  parked: number;
+}
+
+/** POST /gl-journals:sweep - posts the due journals of the caller's legal entity. */
+export function sweepGLJournals(): Promise<JournalSweepResult> {
+  return send<JournalSweepResult>("/gl-journals:sweep", { method: "POST" });
+}
+
+/** POST /gl-journals/{id}:retry - a parked journal goes back to pending, optionally under a new posting date. */
+export function retryGLJournal(id: string, postingDate?: string): Promise<GLJournal> {
+  return send<GLJournal>(`/gl-journals/${id}:retry`, { method: "POST", body: postingDate ? JSON.stringify({ postingDate }) : undefined });
+}
+
+export const ADVICE_FORMATS = ["CSV", "JSON", "EDI820"] as const;
+export type AdviceFormat = (typeof ADVICE_FORMATS)[number];
+
+export interface AdviceInput {
+  legalEntityId: string;
+  format: AdviceFormat;
+  content: string;
+  autoApply?: boolean;
+  createMissing?: boolean;
+  currency?: string;
+  valueDate?: string;
+  paymentMode?: PaymentMode;
+}
+
+export type AdviceOutcome = "ATTACHED" | "UNMATCHED" | "AMBIGUOUS" | "ALREADY_APPLIED" | "INVALID" | "ADVISED";
+
+export interface AdviceLineResult {
+  paymentRef: string;
+  outcome: AdviceOutcome;
+  paymentId?: string;
+  detail?: string;
+}
+
+export interface AdviceResult {
+  lines: AdviceLineResult[];
+  attached: number;
+  created: number;
+  skipped: number;
+  autoApply?: { applied: number; suggested: number; onAccount: number; failed: number };
+}
+
+/** POST /remittance-advices - 400 AR-ADVICE-MALFORMED names the row or segment. */
+export function importAdvice(input: AdviceInput): Promise<AdviceResult> {
+  return send<AdviceResult>("/remittance-advices", { method: "POST", body: JSON.stringify(input) });
 }

@@ -194,7 +194,7 @@ jobs:
       matrix:
         # excluded until clean: services/close engineering fx migration org party payables tax,
         # tools/connectors.
-        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/mobile, services/numbering, services/platform-health, services/product, services/receiving, services/search, tools/importexport, tools/rlscheck, tools/tenant-restore, tools/e2e]
+        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/mobile, services/numbering, services/ops, services/platform-health, services/product, services/receiving, services/search, tools/importexport, tools/rlscheck, tools/tenant-restore, tools/e2e]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -335,6 +335,9 @@ jobs:
             extras: dev
           - package: routing-py
             ortools: true
+            extras: dev
+          - package: prediction-py
+            ortools: false
             extras: dev
     defaults:
       run:

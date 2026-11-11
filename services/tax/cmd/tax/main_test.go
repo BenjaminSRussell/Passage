@@ -61,3 +61,20 @@ func TestProviderTimeout(t *testing.T) {
 		}
 	}
 }
+
+func TestProvidersFromEnv(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	if got, err := providersFromEnv(env(nil)); err != nil || len(got) != 0 {
+		t.Fatalf("no provider configured: %v %v", got, err)
+	}
+	got, err := providersFromEnv(env(map[string]string{
+		"AVALARA_URL": "https://sandbox-rest.avatax.com", "AVALARA_ACCOUNT_ID": "a", "AVALARA_LICENSE_KEY": "k", "AVALARA_COMPANY_CODE": "C",
+		"VERTEX_URL": "https://vertex.example", "VERTEX_TOKEN_URL": "https://vertex.example/token", "VERTEX_CLIENT_ID": "i", "VERTEX_CLIENT_SECRET": "s",
+		"VERTEX_USERNAME": "u", "VERTEX_PASSWORD": "p", "VERTEX_COMPANY": "C"}))
+	if err != nil || got["avalara"] == nil || got["vertex"] == nil {
+		t.Fatalf("both configured: %v %v", got, err)
+	}
+	if _, err := providersFromEnv(env(map[string]string{"VERTEX_URL": "https://vertex.example"})); err == nil {
+		t.Error("a Vertex URL without credentials started the service")
+	}
+}

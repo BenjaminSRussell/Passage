@@ -29,6 +29,19 @@ type Principal struct {
 	Service       string
 	// VendorID is the vendor a supplier portal caller acts for, from a verified service token. Empty for every other caller.
 	VendorID string
+	// CustomerID is the customer a customer portal caller acts for, from a verified service token. Empty for every other caller.
+	CustomerID string
+}
+
+// PortalCustomer is the customer a customer portal service token acts for. It reports false for every other caller, including
+// a principal that happens to carry a customer id without the portal's signature, so a handler that narrows to it never
+// trusts a header, a query or a body.
+func PortalCustomer(ctx context.Context) (string, bool) {
+	p, ok := FromContext(ctx)
+	if !ok || p.Service != CustomerPortalIssuer || p.CustomerID == "" {
+		return "", false
+	}
+	return strings.ToLower(p.CustomerID), true
 }
 
 // LegalEntityScopeList is the one parser of the legal-entity claim: each

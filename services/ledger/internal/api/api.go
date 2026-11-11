@@ -169,7 +169,7 @@ func (a *API) Register(r chi.Router) {
 // the ledger's readiness check (SELECT 1 through the pool) lives here.
 func (a *API) Admin() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", a.Metrics())
+	mux.Handle("/metrics", httpx.WithMetrics(a.Metrics()))
 	mux.HandleFunc("/readyz", a.ready)
 	return mux
 }
