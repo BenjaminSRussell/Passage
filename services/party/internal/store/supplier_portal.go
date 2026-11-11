@@ -24,7 +24,6 @@ const (
 	CodeProspectState    = "PTY-PROSPECT-STATE"
 	CodeProspectLimit    = "PTY-PROSPECT-LIMIT"
 	CodeInviteInvalid    = "PTY-INVITE-INVALID"
-	CodeInviteExists     = "PTY-INVITE-EXISTS"
 
 	// MaxOpenProspects bounds the registrations waiting for a buyer in one legal entity, so the public page cannot fill the table.
 	MaxOpenProspects = 2000
