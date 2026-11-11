@@ -408,7 +408,7 @@ func readScratch(ctx context.Context, scratch *pgx.Conn, schema, tenantID string
 	return shared, batch, rows.Err()
 }
 
-func copyTable(ctx context.Context, scratch *pgx.Conn, live pgx.Tx, schema, tenantID string, t table) (TableResult, error) {
+func copyTable(ctx context.Context, scratch *pgx.Conn, live pgx.Tx, schema, tenantID string, t table, masks *Masks) (TableResult, error) {
 	res := TableResult{Table: t.Name}
 	var before int
 	if err := live.QueryRow(ctx, fmt.Sprintf("select count(*) from %s where tenant_id = $1::uuid", qualified(schema, t.Name)), tenantID).Scan(&before); err != nil {
@@ -417,6 +417,11 @@ func copyTable(ctx context.Context, scratch *pgx.Conn, live pgx.Tx, schema, tena
 	shared, batch, err := readScratch(ctx, scratch, schema, tenantID, t)
 	if err != nil {
 		return res, err
+	}
+	if masks != nil {
+		if batch, err = masks.Apply(shared, batch); err != nil {
+			return res, err
+		}
 	}
 	if batch, err = parentFirst(shared, batch); err != nil {
 		return res, err
@@ -463,6 +468,19 @@ func copyTable(ctx context.Context, scratch *pgx.Conn, live pgx.Tx, schema, tena
 }
 
 func RestoreTenant(ctx context.Context, scratch, live *pgx.Conn, schema, tenantID string, apply bool) (Result, error) {
+	return restoreTenant(ctx, scratch, live, schema, tenantID, apply, nil)
+}
+
+// CloneTenantMasked copies one tenant's rows from source into target like RestoreTenant, replacing the masked columns
+// on the way, so a non-production environment gets realistic data without the personal and commercial values.
+func CloneTenantMasked(ctx context.Context, source, target *pgx.Conn, schema, tenantID string, apply bool, masks *Masks) (Result, error) {
+	if masks == nil {
+		return Result{}, errors.New("a masked clone needs a mask configuration")
+	}
+	return restoreTenant(ctx, source, target, schema, tenantID, apply, masks)
+}
+
+func restoreTenant(ctx context.Context, scratch, live *pgx.Conn, schema, tenantID string, apply bool, masks *Masks) (Result, error) {
 	if !uuidPattern.MatchString(tenantID) {
 		return Result{}, fmt.Errorf("tenant %q is not a lower-case uuid", tenantID)
 	}
@@ -483,7 +501,7 @@ func RestoreTenant(ctx context.Context, scratch, live *pgx.Conn, schema, tenantI
 	}
 	result := Result{Applied: apply}
 	for _, t := range tables {
-		r, err := copyTable(ctx, scratch, tx, schema, tenantID, t)
+		r, err := copyTable(ctx, scratch, tx, schema, tenantID, t, masks)
 		if err != nil {
 			return Result{}, err
 		}
