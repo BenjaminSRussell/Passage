@@ -37,6 +37,11 @@
     <!-- The service runs as a virtual service account by default; pass SERVICE_ACCOUNT=DOMAIN\gmsa$ for a group managed service account. -->
     <Property Id="SERVICE_ACCOUNT" Secure="yes" Value="NT SERVICE\Passage" />
 
+    <!-- FIPS variant (built with -d Fips=1 and GOFIPS140=v1.0.0): the server refuses to start unless crypto/fips140.Enabled() is true. -->
+    <?ifdef Fips?>
+    <SetProperty Id="REQUIRE_FIPS" Value="1" After="AppSearch" Condition="NOT REQUIRE_FIPS" />
+    <?endif?>
+
     <!-- Pre-upgrade backup prompt: an upgrade runs migrations that expand the schema, and database rollback is a restore. -->
     <Launch Condition="Installed OR NOT WIX_UPGRADE_DETECTED OR BACKUP_CONFIRMED=&quot;1&quot;"
             Message="Passage is already installed. Back up the Passage databases first (docs/ops/windows-install.md, Backup and restore), then run the upgrade again with BACKUP_CONFIRMED=1." />

@@ -50,7 +50,7 @@ func serviceLogs(dataDir string) func(string) io.Writer {
 	}
 }
 
-// runServe runs the supervisor and the gateway until ctx ends. extraLog, when set, also receives the server's own log (Event Log).
+// runServe runs the supervisor and the gateway until ctx ends or a required service keeps failing.
 func runServe(ctx context.Context, getenv func(string) string, log *slog.Logger) error {
 	cfg, procs, err := loadConfig(getenv)
 	if err != nil {
