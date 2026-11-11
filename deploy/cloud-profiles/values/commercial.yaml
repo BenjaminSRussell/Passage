@@ -19,4 +19,4 @@ global:
     postgresSuffix: "postgres.database.azure.com"
     azureOpenAISuffix: "openai.azure.com"
     keyVaultPrivateLinkZone: "privatelink.vaultcore.azure.net"
-  egressAllowlist: ["login.microsoftonline.com", "graph.microsoft.com", "management.azure.com", "*.vault.azure.net", "*.blob.core.windows.net", "*.azurecr.io", "*.postgres.database.azure.com", "api.anthropic.com", "bedrock-runtime.*.amazonaws.com", "api.openai.com", "*.openai.azure.com", "events.pagerduty.com", "ghcr.io"]
+  egressAllowlist: ["login.microsoftonline.com", "graph.microsoft.com", "management.azure.com", "*.vault.azure.net", "*.blob.core.windows.net", "*.azurecr.io", "*.postgres.database.azure.com", "api.anthropic.com", "bedrock-runtime.*.amazonaws.com", "api.openai.com", "*.openai.azure.com", "events.pagerduty.com", "ghcr.io", "docker.io"]

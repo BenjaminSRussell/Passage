@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: postgres
-          image: {{ .Values.image | quote }}
+          image: {{ include "passage.mirrorImage" (dict "root" $ "ref" .Values.image) | quote }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

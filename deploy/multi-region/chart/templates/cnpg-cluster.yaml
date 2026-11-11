@@ -21,9 +21,20 @@ metadata:
   {{- end }}
 spec:
   instances: {{ .Values.postgres.instances }}
-  imageName: {{ .Values.postgres.imageName }}
+  imageName: {{ include "passage.mirrorImage" (dict "root" $ "ref" .Values.postgres.imageName) }}
   primaryUpdateStrategy: unsupervised
   enableSuperuserAccess: false
+  {{- if include "passage-mr.azureWorkloadIdentity" . }}
+  # AKS workload identity (#600): the instance pods and the barman-cloud sidecar authenticate to Blob storage as the
+  # Entra managed identity bound to this service account, so no storage key is stored.
+  inheritedMetadata:
+    labels:
+      azure.workload.identity/use: "true"
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        azure.workload.identity/client-id: {{ required "backup.azure.workloadIdentityClientId is required with backup.azure.useWorkloadIdentity" .Values.backup.azure.workloadIdentityClientId | quote }}
+  {{- end }}
   {{- if include "passage-mr.backsUp" . }}
   plugins:
     - name: barman-cloud.cloudnative-pg.io

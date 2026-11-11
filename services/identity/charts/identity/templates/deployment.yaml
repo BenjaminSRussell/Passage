@@ -50,6 +50,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             {{- include "identity.env" . | nindent 12 }}
           {{- if $secretVolumes }}
           volumeMounts:

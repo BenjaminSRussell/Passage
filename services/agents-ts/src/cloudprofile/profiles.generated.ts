@@ -75,7 +75,9 @@ export const CLOUD_PROFILE_DATA = {
         ],
         "enforceProviders": false,
         "pagerDuty": true,
-        "extraAllow": []
+        "extraAllow": [
+          "docker.io"
+        ]
       },
       "keycloak": {
         "passwordHash": "pbkdf2-sha512",
