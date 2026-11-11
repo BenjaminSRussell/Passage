@@ -2624,6 +2624,17 @@ test_bank_account_mappings_are_read_by_view_and_written_by_their_own_duty if {
 	not allowed("receivables.bankaccount.manage", "GET", "/v1/receivables/bank-accounts")
 }
 
+test_receivables_fx_settings_and_payment_reversal_have_their_own_duties if {
+	allowed("receivables.view", "GET", "/v1/receivables/fx-settings")
+	allowed("receivables.fxsetting.manage", "PUT", "/v1/receivables/fx-settings")
+	not allowed("receivables.view", "PUT", "/v1/receivables/fx-settings")
+	not allowed("receivables.bankaccount.manage", "PUT", "/v1/receivables/fx-settings")
+	allowed("receivables.payment.reverse", "POST", "/v1/receivables/payments/p1:reverse")
+	not allowed("receivables.payment.post", "POST", "/v1/receivables/payments/p1:reverse")
+	not allowed("receivables.payment.reverse", "POST", "/v1/receivables/payments/p1:apply")
+	data.service_grants.receivables.fx == ["fx.rate.lookup"]
+}
+
 test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")

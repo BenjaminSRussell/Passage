@@ -29,6 +29,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/billingclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 	rcvevents "github.com/BenjaminSRussell/passage/services/receivables/internal/events"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/fxclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/taxclient"
 )
 
@@ -145,6 +146,11 @@ type SettlementRecord struct {
 	WriteOff     decimal.Decimal `json:"writeOff"`
 	OpenAfter    decimal.Decimal `json:"openAfter"`
 	ItemStatus   string          `json:"itemStatus"`
+	// ItemCurrency, ItemAmount and RealizedFX are set for a cross-currency settlement: the item's currency, what the settlement took
+	// off the item in it, and the realized exchange difference in the legal entity's functional currency (positive for a gain).
+	ItemCurrency string          `json:"itemCurrency,omitempty"`
+	ItemAmount   decimal.Decimal `json:"itemAmount,omitempty"`
+	RealizedFX   decimal.Decimal `json:"realizedFx,omitempty"`
 }
 
 // ApplyResult is the payment after apply and the settlements it created.
@@ -232,6 +238,9 @@ type Store interface {
 	PostDueJournals(ctx context.Context, now time.Time, limit int) (JournalSweepResult, error)
 	RetryGLJournal(ctx context.Context, id, postingDate string) (GLJournalView, error)
 	GLReconcile(ctx context.Context, legalEntityID, currency, asOf string) (GLReconciliation, error)
+	GetFXSetting(ctx context.Context, legalEntityID string) (FXSetting, error)
+	PutFXSetting(ctx context.Context, f FXSetting) (FXSetting, error)
+	ReversePayment(ctx context.Context, id string, version int) (Payment, error)
 	Ping(ctx context.Context) error
 }
 
@@ -245,6 +254,7 @@ type Postgres struct {
 	tax         taxclient.Recorder
 	billing     billingclient.Reader
 	reserver    billingclient.Reserver
+	rates       fxclient.Rates
 }
 
 // New returns a Postgres store over pool.
@@ -612,6 +622,8 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 			return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch, "the payment is already on account; name the open items to settle")
 		}
 		customer := pay.CustomerID
+		var fxSet *FXSetting
+		crossItems := map[string]OpenItem{}
 		allocs := make([]domain.Allocation, 0, len(req.Allocations))
 		for _, a := range req.Allocations {
 			item, err := lockOpenItem(ctx, tx, a.OpenItemID)
@@ -622,8 +634,25 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 				return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch, "open item "+a.OpenItemID+" belongs to another legal entity")
 			}
 			if item.Currency != pay.Currency {
+				if fxSet == nil {
+					set, err := loadFXSetting(ctx, tx, pay.LegalEntityID)
+					if err != nil {
+						return err
+					}
+					fxSet = &set
+				}
+				if !fxSet.CrossCurrencyEnabled {
+					return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,
+						"open item "+a.OpenItemID+" is in "+item.Currency+", the payment in "+pay.Currency+"; cross-currency settlement is not enabled")
+				}
+				if !a.ItemCurrencyAmount.IsPositive() {
+					return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,
+						"open item "+a.OpenItemID+" is in "+item.Currency+", the payment in "+pay.Currency+"; give itemAmount, what the settlement takes off the item in "+item.Currency)
+				}
+				crossItems[a.OpenItemID] = item
+			} else if a.ItemCurrencyAmount.IsPositive() {
 				return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,
-					"open item "+a.OpenItemID+" is in "+item.Currency+", the payment in "+pay.Currency+"; cross-currency settlement is not enabled")
+					"open item "+a.OpenItemID+" is in the payment's currency; itemAmount is only for an item in another currency")
 			}
 			if customer == nil {
 				c := item.CustomerID
@@ -643,6 +672,18 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 		if err := domain.ValidateApply(parseDay(pay.ValueDate), pay.UnappliedAmount, allocs, req.Residual); err != nil {
 			return domainProblemFrom(err)
 		}
+		prices := map[string]settlementPricing{}
+		var priced []settlementPricing
+		for _, a := range allocs {
+			if item, ok := crossItems[a.OpenItemID]; ok {
+				price, err := s.priceCrossCurrency(ctx, *fxSet, pay, item, a)
+				if err != nil {
+					return err
+				}
+				prices[a.OpenItemID] = price
+				priced = append(priced, price)
+			}
+		}
 		out.Settlements = []SettlementRecord{}
 		settled := []rcvevents.SettlementData{}
 		for _, a := range allocs {
@@ -652,13 +693,22 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 				where tenant_id = $1 and id = $2`, p.TenantID, a.OpenItemID, newOpen.String(), status); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `insert into settlement (tenant_id, id, legal_entity_id, payment_id, open_item_id, settled_amount, cash_discount_taken, write_off_amount)
+			rec := SettlementRecord{OpenItemID: a.OpenItemID, Amount: a.Amount, CashDiscount: a.CashDiscount,
+				WriteOff: a.WriteOff, OpenAfter: newOpen, ItemStatus: status}
+			if price, ok := prices[a.OpenItemID]; ok {
+				if _, err := tx.Exec(ctx, `insert into settlement (tenant_id, id, legal_entity_id, payment_id, open_item_id, settled_amount, cash_discount_taken, write_off_amount,
+						item_currency, item_amount, payment_rate, item_rate, fx_gain_loss)
+					values ($1, $2, $3, $4, $5, $6, 0, 0, $7, $8, $9, $10, $11)`, p.TenantID, ids.New(), pay.LegalEntityID, pay.ID, a.OpenItemID,
+					a.Amount.String(), price.itemCurrency, a.ItemCurrencyAmount.String(), price.paymentRate.String(), price.itemRate.String(), price.fx.Difference.String()); err != nil {
+					return err
+				}
+				rec.ItemCurrency, rec.ItemAmount, rec.RealizedFX = price.itemCurrency, a.ItemCurrencyAmount, price.fx.Difference
+			} else if _, err := tx.Exec(ctx, `insert into settlement (tenant_id, id, legal_entity_id, payment_id, open_item_id, settled_amount, cash_discount_taken, write_off_amount)
 				values ($1, $2, $3, $4, $5, $6, $7, $8)`, p.TenantID, ids.New(), pay.LegalEntityID, pay.ID, a.OpenItemID,
 				a.Amount.String(), a.CashDiscount.String(), a.WriteOff.String()); err != nil {
 				return err
 			}
-			out.Settlements = append(out.Settlements, SettlementRecord{OpenItemID: a.OpenItemID, Amount: a.Amount, CashDiscount: a.CashDiscount,
-				WriteOff: a.WriteOff, OpenAfter: newOpen, ItemStatus: status})
+			out.Settlements = append(out.Settlements, rec)
 			settled = append(settled, rcvevents.SettlementData{OpenItemID: a.OpenItemID, Amount: a.Amount, CashDiscount: a.CashDiscount, WriteOff: a.WriteOff})
 		}
 		newStatus := "APPLIED"
@@ -673,6 +723,11 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 		out.Payment = pay
 		if err := applyJournal(ctx, tx, p.TenantID, pay, allocs); err != nil {
 			return err
+		}
+		if len(priced) > 0 {
+			if err := realizedFXJournal(ctx, tx, p.TenantID, *fxSet, pay, priced); err != nil {
+				return err
+			}
 		}
 		// Learn the payer's account and name for the customer it paid (R4, R5).
 		if err := learnPayer(ctx, tx, p.TenantID, pay.LegalEntityID, pay.CustomerID, pay.PayerAccountHash, pay.PayerName); err != nil {
@@ -693,7 +748,7 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 func applyHash(id string, version int, req ApplyRequest) string {
 	parts := []string{"apply", id, strconv.Itoa(version), req.Residual.String()}
 	for _, a := range req.Allocations {
-		parts = append(parts, a.OpenItemID, a.Amount.String(), a.CashDiscount.String(), a.WriteOff.String())
+		parts = append(parts, a.OpenItemID, a.Amount.String(), a.CashDiscount.String(), a.WriteOff.String(), a.ItemCurrencyAmount.String())
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(sum[:])

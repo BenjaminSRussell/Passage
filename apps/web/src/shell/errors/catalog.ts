@@ -880,6 +880,7 @@ const p2pMore: Record<string, ProblemCatalogEntry> = {
   "AR-PROMISE-STATE": { message: "This promise to pay can't be changed in its current status.", action: "Reload the open item to see the promise as it is now." },
   "AR-ADVICE-MALFORMED": { message: "The remittance advice file couldn't be read.", action: "Check the row or segment named in the details, or upload the original file from the customer." },
   "AR-BANK-NOT-FOUND": { message: "We couldn't find that bank account mapping. It may have been removed, or the link is out of date.", action: "Reload the list of bank accounts and try again." },
+  "AR-FX-UNAVAILABLE": { message: "We couldn't work out the exchange difference for this payment, because there's no exchange rate for it or the rate service isn't available.", action: "Check that the exchange rates for both currencies are published for the dates involved, then try again." },
   "AR-GL-UNAVAILABLE": { message: "The general ledger isn't available or isn't set up for this legal entity.", action: "Try again in a few minutes. If it keeps happening, contact support with the details below." },
   "AR-JOURNAL-NOT-FOUND": { message: "We couldn't find that ledger journal. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
   "AR-JOURNAL-STATE": { message: "This ledger journal is already posted.", action: "Reload the list to see its current status." },
