@@ -117,8 +117,10 @@ func (s *Store) Apply(ctx context.Context, r Record) (bool, error) {
 				columns, values = "legal_entity_id, ", "$11, "
 				args = append(args, r.LegalEntityID)
 			}
-			title := "$5"
+			title, partySet := "$5", ""
 			if r.Type == TypeWorker && r.PartyID != "" {
+				// A replay over a worker indexed before the party id was kept fills it in.
+				partySet = "party_id = coalesce(excluded.party_id, t.party_id), "
 				// The worker takes its person's name when the party is already indexed; otherwise the
 				// party's own event names it later (below).
 				columns, values = "party_id, ", "$11::uuid, "
@@ -133,8 +135,8 @@ func (s *Store) Apply(ctx context.Context, r Record) (bool, error) {
 				  title = coalesce(nullif(excluded.title, ''), t.title),
 				  subtitle = coalesce(nullif(excluded.subtitle, ''), t.subtitle),
 				  status = coalesce(nullif(excluded.status, ''), t.status),
-				  removed = excluded.removed, source_at = excluded.source_at, source_version = excluded.source_version, indexed_at = now()
-				where (t.source_version, t.source_at) <= (excluded.source_version, excluded.source_at)`, table, columns, values, title), args...)
+				  %[5]sremoved = excluded.removed, source_at = excluded.source_at, source_version = excluded.source_version, indexed_at = now()
+				where (t.source_version, t.source_at) <= (excluded.source_version, excluded.source_at)`, table, columns, values, title, partySet), args...)
 		}
 		applied = err == nil && tag.RowsAffected() == 1
 		if applied && r.Type == TypeParty && !r.Removed && r.Title != "" {

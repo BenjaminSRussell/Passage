@@ -479,6 +479,38 @@ func TestWorkersAreFoundByTheirPersonsName(t *testing.T) {
 	}
 }
 
+// A worker indexed before its party id was kept (search 0005) gets it from a
+// replay of worker.created, and party renames reach it from then on.
+func TestReplayedWorkerTakesItsPartyAndItsRenames(t *testing.T) {
+	st, admin := setupWithAdmin(t)
+	ctx := asScope(testkit.TenantID(1), "")
+	person, workerID := ids.New(), ids.New()
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: person, Number: "P-000501", Title: "Ines Navarro", Subtitle: "person", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	// The row as the consumer wrote it before 0005: no party id, the number as the title.
+	if _, err := st.Apply(ctx, Record{Type: TypeWorker, ID: workerID, Number: "WRK-000501", Title: "WRK-000501", Subtitle: "employee", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeWorker, ID: workerID, Number: "WRK-000501", Title: "WRK-000501", Subtitle: "employee", PartyID: person, At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	var party *string
+	if err := admin.QueryRow(context.Background(), `select party_id::text from search_record_tenant where record_type = 'worker' and record_id = $1`, workerID).Scan(&party); err != nil {
+		t.Fatal(err)
+	}
+	if party == nil || *party != person {
+		t.Fatalf("party_id after the replay = %v, want %s", party, person)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: person, Number: "P-000501", Title: "Ines Navarro Gil", Version: 2, At: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := st.Search(ctx, Query{Text: "wrk-000501", Types: []string{TypeWorker}, Limit: 5})
+	if err != nil || len(hits) != 1 || hits[0].Title != "Ines Navarro Gil" {
+		t.Fatalf("worker after the rename = %+v, %v", hits, err)
+	}
+}
+
 // testdata/matching.json is the shared statement of what a query finds. The
 // web app's browser-side matcher (apps/web/src/shell/search/match.ts), which
 // lists use to filter loaded rows, runs the same cases, so the palette and a
