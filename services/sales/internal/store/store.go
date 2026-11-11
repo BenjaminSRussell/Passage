@@ -277,6 +277,7 @@ type Store interface {
 	CreateOrder(ctx context.Context, in NewOrder) (Order, bool, error)
 	GetOrder(ctx context.Context, id string) (Order, error)
 	ListOrders(ctx context.Context, f OrderFilter) (OrderPage, error)
+	PortalProducts(ctx context.Context, f PortalProductFilter) ([]PortalProduct, error)
 	ConfirmOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ConfirmResult, error)
 	ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error)
 	RejectHold(ctx context.Context, orderID, holdID string, version int, comment, actor string, now time.Time) (Order, error)

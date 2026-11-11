@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -18,15 +20,46 @@ import (
 
 // Customer portal routes (#30): a customer's own orders and returns. The customer comes from the verified customer-portal
 // service token (the principal's CustomerID) and never from the request: a `customerId` query parameter on these routes is
-// ignored, and an order or return of another customer, or an order still in DRAFT, reads as not found. The duty is service-only
-// and read-only. The answers are the customer's view: no holds or credit check, no costs, no warehouse or site, no versions.
+// ignored, and an order or return of another customer, or an order still in DRAFT, reads as not found. The duties are
+// service-only. The answers are the customer's view: no holds or credit check, no costs, no warehouse or site, no versions.
+//
+// The portal also writes, for the customer itself and nobody else (FR-30.14): it places an order and requests a return. Both
+// take the customer from the token and refuse a body that names one. An order is a reorder: the sales service holds no price
+// list, so every line takes its price, unit, site and warehouse from the customer's own last committed order of that product, and
+// a product the customer never bought is refused. The order is committed through the normal confirm, so the credit check and the
+// holds apply as for any order. A return names one of the customer's own posted invoices; the invoice's customer is checked
+// against the token's by the return-order flow.
 const (
-	dutyCustomerPortal = "sales.customer-portal.read"
-	customerPortal     = "/v1/sales/customer-portal"
+	dutyCustomerPortal       = "sales.customer-portal.read"
+	dutyCustomerPortalOrder  = "sales.customer-portal.order"
+	dutyCustomerPortalReturn = "sales.customer-portal.return"
+	customerPortal           = "/v1/sales/customer-portal"
+
+	codePortalProduct = "SAL-CUS-002"
+	codePortalInvoice = "SAL-CUS-003"
+	// portalChannel is the order channel of a portal order, suffixed with the customer so the (channel, external reference) and
+	// idempotency-key dedup of intake can never match another customer's order.
+	portalChannel    = "PORTAL-"
+	maxPortalLines   = 100
+	portalHistoryMax = 2000
 )
+
+// ProductNamer reads product display names from the product service, which owns them.
+type ProductNamer interface {
+	ProductNames(ctx context.Context, legalEntityID string, productIDs []string) (map[string]string, error)
+}
+
+// WithProductNames sets the product-name source; without it the portal views carry no product names.
+func (a *API) WithProductNames(n ProductNamer) *API {
+	a.names = n
+	return a
+}
 
 func (a *API) registerCustomerPortal(r chi.Router) {
 	read := authz.RequireDuty(dutyCustomerPortal)
+	r.With(authz.RequireDuty(dutyCustomerPortalOrder)).Post(customerPortal+"/orders", portalCustomerOnly(a.portalPlaceOrder))
+	r.With(authz.RequireDuty(dutyCustomerPortalReturn)).Post(customerPortal+"/returns", portalCustomerOnly(a.portalRequestReturn))
+	r.With(read).Get(customerPortal+"/products", portalCustomerOnly(a.portalListProducts))
 	r.With(read).Get(customerPortal+"/orders", portalCustomerOnly(a.portalListOrders))
 	r.With(read).Get(customerPortal+"/orders/{id}", portalCustomerOnly(a.portalGetOrder))
 	r.With(read).Get(customerPortal+"/returns", portalCustomerOnly(a.portalListReturns))
@@ -67,6 +100,8 @@ type portalOrder struct {
 
 type portalLine struct {
 	LineNo            int             `json:"lineNo"`
+	ProductID         string          `json:"productId"`
+	ProductName       string          `json:"productName,omitempty"`
 	Quantity          decimal.Decimal `json:"quantity"`
 	Unit              string          `json:"unit"`
 	UnitPrice         decimal.Decimal `json:"unitPrice"`
@@ -137,19 +172,76 @@ func (a *API) portalGetOrder(w http.ResponseWriter, r *http.Request, customer st
 		httpx.Fail(w, r, notFound)
 		return
 	}
+	out := toPortalOrder(o)
+	a.nameOrderLines(r.Context(), &out)
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func toPortalOrder(o store.Order) portalOrder {
 	out := portalOrder{ID: o.ID, OrderNumber: o.OrderNumber, OrderType: o.OrderType, Status: o.Status, Currency: o.Currency,
 		RequestedShipDate: o.RequestedShipDate, ExternalRef: o.ExternalRef, NetTotal: o.NetTotal, LineCount: len(o.Lines), CreatedAt: o.CreatedAt,
 		Lines: make([]portalLine, 0, len(o.Lines))}
 	for _, l := range o.Lines {
-		out.Lines = append(out.Lines, portalLine{LineNo: l.LineNo, Quantity: l.Quantity, Unit: l.Unit, UnitPrice: l.UnitPrice, LineNet: l.LineNet,
+		out.Lines = append(out.Lines, portalLine{LineNo: l.LineNo, ProductID: l.ProductID, Quantity: l.Quantity, Unit: l.Unit, UnitPrice: l.UnitPrice, LineNet: l.LineNet,
 			RequestedShipDate: l.RequestedShipDate, ConfirmedShipDate: l.ConfirmedShipDate, LineStatus: l.LineStatus,
 			DeliveredQty: l.DeliveredQty, InvoicedQty: l.InvoicedQty})
 	}
-	httpx.JSON(w, http.StatusOK, out)
+	return out
+}
+
+// productNames answers the display names of ids, or an empty map when the product service is not wired or cannot answer: a
+// screen without names is still correct, so a name read never fails a request.
+func (a *API) productNames(ctx context.Context, ids []string) map[string]string {
+	if a.names == nil || len(ids) == 0 {
+		return map[string]string{}
+	}
+	p, _ := tenant.FromContext(ctx)
+	names, err := a.names.ProductNames(ctx, p.LegalEntityID, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "product names unavailable for the customer portal", "err", err)
+		return map[string]string{}
+	}
+	return names
+}
+
+func (a *API) nameOrderLines(ctx context.Context, o *portalOrder) {
+	seen := map[string]bool{}
+	var want []string
+	for _, l := range o.Lines {
+		if !seen[l.ProductID] {
+			seen[l.ProductID] = true
+			want = append(want, l.ProductID)
+		}
+	}
+	names := a.productNames(ctx, want)
+	for i := range o.Lines {
+		o.Lines[i].ProductName = names[strings.ToLower(o.Lines[i].ProductID)]
+	}
+}
+
+func (a *API) nameReturnLines(ctx context.Context, rs []portalReturn) {
+	seen := map[string]bool{}
+	var want []string
+	for _, r := range rs {
+		for _, l := range r.Lines {
+			if !seen[l.ProductID] {
+				seen[l.ProductID] = true
+				want = append(want, l.ProductID)
+			}
+		}
+	}
+	names := a.productNames(ctx, want)
+	for i := range rs {
+		for j := range rs[i].Lines {
+			rs[i].Lines[j].ProductName = names[strings.ToLower(rs[i].Lines[j].ProductID)]
+		}
+	}
 }
 
 type portalReturnLine struct {
 	LineNo           int             `json:"lineNo"`
+	ProductID        string          `json:"productId"`
+	ProductName      string          `json:"productName,omitempty"`
 	QuantityExpected decimal.Decimal `json:"quantityExpected"`
 	QuantityReceived decimal.Decimal `json:"quantityReceived"`
 	QuantityAccepted decimal.Decimal `json:"quantityAccepted"`
@@ -178,7 +270,7 @@ func toPortalReturn(o store.ReturnOrder) portalReturn {
 		Status: o.Status, Currency: o.Currency, ExpiresAt: o.ExpiresAt, Gross: o.Gross, Restocking: o.Restocking, Net: o.Net, Tax: o.Tax,
 		CreatedAt: o.CreatedAt, Lines: make([]portalReturnLine, 0, len(o.Lines))}
 	for _, l := range o.Lines {
-		out.Lines = append(out.Lines, portalReturnLine{LineNo: l.LineNo, QuantityExpected: l.QuantityExpected, QuantityReceived: l.QuantityReceived,
+		out.Lines = append(out.Lines, portalReturnLine{LineNo: l.LineNo, ProductID: l.ProductID, QuantityExpected: l.QuantityExpected, QuantityReceived: l.QuantityReceived,
 			QuantityAccepted: l.QuantityAccepted, Unit: l.Unit, UnitPrice: l.UnitPrice})
 	}
 	return out
@@ -212,6 +304,7 @@ func (a *API) portalListReturns(w http.ResponseWriter, r *http.Request, customer
 			items = append(items, toPortalReturn(o))
 		}
 	}
+	a.nameReturnLines(r.Context(), items)
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
@@ -231,5 +324,7 @@ func (a *API) portalGetReturn(w http.ResponseWriter, r *http.Request, customer s
 		httpx.Fail(w, r, notFound)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toPortalReturn(o))
+	out := []portalReturn{toPortalReturn(o)}
+	a.nameReturnLines(r.Context(), out)
+	httpx.JSON(w, http.StatusOK, out[0])
 }

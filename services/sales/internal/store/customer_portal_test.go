@@ -53,3 +53,54 @@ func TestPostgres_ListOrdersForOneCustomer(t *testing.T) {
 		t.Fatalf("a third customer sees %+v err %v", none.Items, err)
 	}
 }
+
+// The portal reorders from the customer's own committed orders: the latest price per product and unit, never a draft, another
+// customer's order or a cancelled one.
+func TestPostgres_PortalProductsAreTheCustomersOwnLatestCommittedLines(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := principalCtx("sales-rep")
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := New(appOf(t, pool))
+	le, custA, custB := ids.New(), ids.New(), ids.New()
+	pump, valve, site, wh := ids.New(), ids.New(), ids.New(), ids.New()
+	create := func(customer, hash, product string, price int64) Order {
+		line := Line{LineNo: 1, ProductID: product, Quantity: d(1), Unit: "EA", SiteID: site, WarehouseID: wh, UnitPrice: d(price), DiscPct: d(0), LineNet: d(price), RequestedShipDate: "2027-03-04"}
+		o, _, err := s.CreateOrder(ctx, NewOrder{LegalEntityID: le, CustomerID: customer, InvoiceAccountID: customer, OrderType: "ORDER", Currency: "USD", RequestedShipDate: "2027-03-04", Channel: "UI", RequestHash: hash, Lines: []Line{line}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	confirm := func(o Order) {
+		t.Helper()
+		if res, err := s.ConfirmOrder(ctx, o.ID, o.Version, "sales-rep", time.Now()); err != nil || !res.Confirmed {
+			t.Fatalf("confirm %s: %v", o.ID, err)
+		}
+	}
+	old, newer := create(custA, "h1", pump, 100), create(custA, "h2", pump, 120)
+	confirm(old)
+	time.Sleep(10 * time.Millisecond)
+	confirm(newer)
+	_ = create(custA, "h3", valve, 7) // a draft: not bought yet
+	other := create(custB, "h4", valve, 9)
+	confirm(other)
+
+	rows, err := s.PortalProducts(ctx, PortalProductFilter{LegalEntityID: le, CustomerID: custA, Limit: 50})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("customer A products %+v err %v, want only the pump", rows, err)
+	}
+	if r := rows[0]; r.ProductID != pump || !r.UnitPrice.Equal(d(120)) || r.SiteID != site || r.WarehouseID != wh || r.Currency != "USD" || r.InvoiceAccountID != custA || r.Unit != "EA" {
+		t.Fatalf("row %+v, want the latest pump line", r)
+	}
+	if rows, err := s.PortalProducts(ctx, PortalProductFilter{LegalEntityID: le, CustomerID: custA, ProductIDs: []string{valve}, Limit: 50}); err != nil || len(rows) != 0 {
+		t.Fatalf("A asks for the valve only B bought: %+v %v", rows, err)
+	}
+	if rows, err := s.PortalProducts(ctx, PortalProductFilter{LegalEntityID: le, CustomerID: custB, ProductIDs: []string{valve, pump}, Limit: 50}); err != nil || len(rows) != 1 || rows[0].ProductID != valve {
+		t.Fatalf("B: %+v %v", rows, err)
+	}
+	if rows, err := s.PortalProducts(ctx, PortalProductFilter{LegalEntityID: ids.New(), CustomerID: custA, Limit: 50}); err != nil || len(rows) != 0 {
+		t.Fatalf("another legal entity: %+v %v", rows, err)
+	}
+}
