@@ -46,6 +46,11 @@ channels:
     messages:
       chargePosted:
         $ref: "#/components/messages/ChargePosted"
+  chargeInvoiceRequested:
+    address: passage.interco.charge
+    messages:
+      chargeInvoiceRequested:
+        $ref: "#/components/messages/ChargeInvoiceRequested"
   reconciliationFlagged:
     address: passage.interco.reconciliation
     messages:
@@ -67,6 +72,9 @@ operations:
   publishChargePosted:
     action: send
     channel: { $ref: "#/channels/chargePosted" }
+  publishChargeInvoiceRequested:
+    action: send
+    channel: { $ref: "#/channels/chargeInvoiceRequested" }
   publishReconciliationFlagged:
     action: send
     channel: { $ref: "#/channels/reconciliationFlagged" }
@@ -97,6 +105,27 @@ components:
           price: { type: string }
           margin: { type: string }
           journalId: { type: string, format: uuid }
+    ChargeInvoiceRequested:
+      name: dev.passage.interco.chargeinvoice.requested.v1
+      title: IC charge in Invoice settlement mode, to be settled by the pairing's invoice documents (FR-40.13)
+      payload:
+        type: object
+        required: [id, sourceId, version, lender, borrower, category, transactionDate, currency, cost, price, margin, tax]
+        properties:
+          id: { type: string, format: uuid }
+          sourceId: { type: string }
+          version: { type: integer, minimum: 1 }
+          lender: { type: string }
+          borrower: { type: string }
+          category: { type: string, enum: [Expense, Hour, Item, Fee] }
+          resourceRole: { type: string }
+          transactionDate: { type: string, format: date }
+          currency: { type: string }
+          cost: { type: string }
+          price: { type: string, description: What the lender invoices, before tax }
+          margin: { type: string }
+          tax: { type: string, description: Cross-border tax the tax service worked out; 0 when none applies }
+          taxCode: { type: string }
     ReconciliationFlagged:
       name: dev.passage.interco.reconciliation.flagged.v1
       title: A reconciliation run left Timing or Mismatch items (FR-40.6)

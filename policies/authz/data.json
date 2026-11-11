@@ -1618,8 +1618,12 @@
     "intercompany.configure": {"permissions": [
       {"resource": "/v1/interco/centralized-payments/reversals:preview", "methods": ["POST"]},
       {"resource": "/v1/interco/centralized-payments:preview", "methods": ["POST"]},
+      {"resource": "/v1/interco/entities/*", "methods": ["PUT"]},
+      {"resource": "/v1/interco/matrix", "methods": ["PUT"]},
       {"resource": "/v1/interco/partners", "methods": ["POST"]},
-      {"resource": "/v1/interco/partners/*", "methods": ["PATCH"]}
+      {"resource": "/v1/interco/partners/*", "methods": ["PATCH"]},
+      {"resource": "/v1/interco/settings", "methods": ["PUT"]},
+      {"resource": "/v1/interco/transfer-prices", "methods": ["POST"]}
     ]},
     "intercompany.plan": {"permissions": [{"resource": "/v1/interco/planning-groups:sequence", "methods": ["POST"]}]},
     "intercompany.post": {"permissions": [
@@ -1629,6 +1633,7 @@
       {"resource": "/v1/interco/journals:preview", "methods": ["POST"]}
     ]},
     "intercompany.reconcile": {"permissions": [
+      {"resource": "/v1/interco/reconciliations/items/*/fx-adjust", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations/items/*/resolve", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations/run", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations:classify", "methods": ["POST"]}
@@ -1637,15 +1642,19 @@
       {"resource": "/v1/interco/chains:preview", "methods": ["POST"]},
       {"resource": "/v1/interco/charges", "methods": ["GET"]},
       {"resource": "/v1/interco/charges/*", "methods": ["GET"]},
+      {"resource": "/v1/interco/entities", "methods": ["GET"]},
       {"resource": "/v1/interco/journals", "methods": ["GET"]},
       {"resource": "/v1/interco/journals/*", "methods": ["GET"]},
+      {"resource": "/v1/interco/matrix", "methods": ["GET"]},
       {"resource": "/v1/interco/reconciliations", "methods": ["GET"]},
       {"resource": "/v1/interco/reconciliations/*", "methods": ["GET"]},
       {"resource": "/v1/interco/partners", "methods": ["GET"]},
       {"resource": "/v1/interco/partners/*", "methods": ["GET"]},
       {"resource": "/v1/interco/partners/*/changes:evaluate", "methods": ["POST"]},
       {"resource": "/v1/interco/partners/*/lines:price", "methods": ["POST"]},
-      {"resource": "/v1/interco/transfer-pricing/evidence:export", "methods": ["POST"]}
+      {"resource": "/v1/interco/settings", "methods": ["GET"]},
+      {"resource": "/v1/interco/transfer-pricing/evidence:export", "methods": ["POST"]},
+      {"resource": "/v1/interco/transfer-prices", "methods": ["GET"]}
     ]},
     "receivables.interest.post": {"permissions": [
       {"resource": "/v1/receivables/interest-notes:calculate", "methods": ["POST"]},

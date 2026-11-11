@@ -2742,3 +2742,33 @@ test_agent_run_duties_open_only_their_routes if {
 	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
 	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
 }
+
+# #40 round 3: the entity registry, accounting matrix, transfer prices and settings are configured with
+# intercompany.configure and read with intercompany.view; booking the FX difference of a pair needs the reconcile duty.
+test_intercompany_registry_matrix_prices_settings_and_fx_adjust if {
+	allowed("intercompany.configure", "PUT", "/v1/interco/entities/A")
+	allowed("intercompany.configure", "PUT", "/v1/interco/matrix")
+	allowed("intercompany.configure", "POST", "/v1/interco/transfer-prices")
+	allowed("intercompany.configure", "PUT", "/v1/interco/settings")
+	not allowed("intercompany.view", "PUT", "/v1/interco/entities/A")
+	not allowed("intercompany.view", "PUT", "/v1/interco/matrix")
+	not allowed("intercompany.view", "POST", "/v1/interco/transfer-prices")
+	not allowed("intercompany.post", "PUT", "/v1/interco/settings")
+	allowed("intercompany.view", "GET", "/v1/interco/entities")
+	allowed("intercompany.view", "GET", "/v1/interco/matrix")
+	allowed("intercompany.view", "GET", "/v1/interco/transfer-prices")
+	allowed("intercompany.view", "GET", "/v1/interco/settings")
+	not allowed("intercompany.configure", "GET", "/v1/interco/settings")
+	allowed("intercompany.reconcile", "POST", "/v1/interco/reconciliations/items/i1/fx-adjust")
+	not allowed("intercompany.post", "POST", "/v1/interco/reconciliations/items/i1/fx-adjust")
+	not allowed("intercompany.view", "POST", "/v1/interco/reconciliations/items/i1/fx-adjust")
+}
+
+# #40 round 3: consolidation and intercompany read rates, fiscal calendars and tax through service grants only.
+test_consolidation_and_intercompany_service_grants if {
+	"fx.rate.lookup" in data.service_grants.consolidation.fx
+	"org.read" in data.service_grants.consolidation.org
+	"tax.tax.calculate" in data.service_grants.intercompany.tax
+	"ledger.balance.read" in data.service_grants.intercompany.ledger
+	count([d | some d in data.service_grants.intercompany.ledger; d == "ledger.period.postclosed"]) == 0
+}

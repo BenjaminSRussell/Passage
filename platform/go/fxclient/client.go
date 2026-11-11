@@ -141,7 +141,9 @@ func (c *Client) Rate(ctx context.Context, legalEntityID, rateType, from, to str
 type Fake map[string]decimal.Decimal
 
 // Set stores a rate.
-func (f Fake) Set(rateType, from, to string, rate decimal.Decimal) { f[rateType+"|"+from+"|"+to] = rate }
+func (f Fake) Set(rateType, from, to string, rate decimal.Decimal) {
+	f[rateType+"|"+from+"|"+to] = rate
+}
 
 // Rate implements Rater.
 func (f Fake) Rate(_ context.Context, _ string, rateType, from, to string, _ time.Time) (decimal.Decimal, error) {

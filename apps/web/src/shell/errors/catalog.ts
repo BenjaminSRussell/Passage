@@ -1008,6 +1008,14 @@ const groupFinance: Record<string, ProblemCatalogEntry> = {
   "IC-0850": { message: "We couldn't find that reconciliation run.", action: "Go back to the runs and open it again." },
   "IC-0851": { message: "We couldn't find that reconciliation pair.", action: "Reload the run and open the pair again." },
   "IC-0852": { message: "This pair has nothing left to resolve.", action: "Reload the run to see its current state." },
+  "IC-0853": { message: "One of the entities is not in the intercompany registry yet.", action: "Add the entity with its legal entity, ledger and currency in the registry, then try again." },
+  "IC-0854": { message: "A transfer price for the same pair, category and role is already in force from that date.", action: "Give the new price a later effective date; prices are not edited." },
+  "IC-0855": { message: "A cross-border charge needs a tax account on both entities, and one is missing.", action: "Set the output tax account of the lender and the input tax account of the borrower in the registry, then send the charge again." },
+  "IC-0856": { message: "The tax service could not price this cross-border charge, so nothing was posted.", action: "Send the same charge again in a moment; it continues where it stopped." },
+  "IC-0857": { message: "The entity has no account for FX differences.", action: "Set the FX-difference account of the entity in the registry, then book the difference again." },
+  "IC-0858": { message: "This pair has no FX difference to book.", action: "Only a pair in two currencies with a difference can be booked to the FX-difference account." },
+  "IC-0859": { message: "The rate tables have no rate to convert this pair.", action: "Publish the closing rate for the two currencies and the period end, then run the reconciliation again." },
+  "IC-0860": { message: "Intercompany is not fully set up for this step.", action: "Store the accounting matrix and the entities first, or ask an administrator to connect the ledger." },
 };
 
 /** Field service: the technician's day, captures, checklist and truck stock (#45). */
