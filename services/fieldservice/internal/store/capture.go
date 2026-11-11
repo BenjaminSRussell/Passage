@@ -109,7 +109,7 @@ func (s *Postgres) PutCapture(ctx context.Context, in CaptureInput) (Capture, er
 		}
 		// With an object store the bytes go there under a key made of tenant, work order and capture id, so a retry after a
 		// failed commit writes the same object again; the row then carries the key and no bytes.
-		var data []byte = in.Data
+		data := in.Data
 		var objectKey *string
 		if s.objects != nil {
 			key := objectstore.Key(tid, in.WorkOrderID, in.ID)

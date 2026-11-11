@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -120,5 +121,117 @@ func TestStore_CapturesInTheObjectStoreAndTheRetentionJob(t *testing.T) {
 	}
 	if les, err := d.s.CaptureLegalEntities(d.ctx); err != nil || len(les) != 0 {
 		t.Fatalf("entities with bytes left: %v %v", les, err)
+	}
+}
+
+// hookedStore runs a function inside Put or Delete, to stand for another replica acting at that moment.
+type hookedStore struct {
+	*objectstore.Memory
+	afterPut     func(key string)
+	beforeDelete func(key string)
+}
+
+func (h *hookedStore) Put(ctx context.Context, key, ct string, data []byte) error {
+	if err := h.Memory.Put(ctx, key, ct, data); err != nil {
+		return err
+	}
+	if h.afterPut != nil {
+		h.afterPut(key)
+	}
+	return nil
+}
+
+func (h *hookedStore) Delete(ctx context.Context, key string) error {
+	if h.beforeDelete != nil {
+		h.beforeDelete(key)
+	}
+	return h.Memory.Delete(ctx, key)
+}
+
+// Two replicas running the retention job at once (#45): a purge that lands while an offload is uploading wins, and the
+// offload deletes the object it wrote; an offload that moved the bytes while a purge was deleting leaves the capture to the
+// next pass instead of purging a row whose key changed.
+func TestStore_OffloadAndPurgeRaceBetweenReplicas(t *testing.T) {
+	d := newDispatch(t, 36)
+	wo, tech := d.dispatchedWith(t, "RAC", nil, nil)
+	dev := d.device(tech)
+	id := ids.New()
+	if _, err := d.s.PutCapture(dev, CaptureInput{ID: id, WorkOrderID: wo.ID, TechnicianID: tech.ID, Kind: domain.CapturePhoto, ContentType: "image/png", Width: 32, Height: 24,
+		Data: pngBytes(t, 32, 24, 7), CapturedAt: at(10)}); err != nil {
+		t.Fatal(err)
+	}
+	complete := func() {
+		if err := dbx.WithTenantTx(d.ctx, d.s.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(d.ctx, `update service_work_order set status = 'COMPLETED', completed_at = now() - interval '400 days' where tenant_id = $1 and id = $2`, tenantOf(d.ctx), wo.ID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	complete()
+	retention := 30 * 24 * time.Hour
+
+	// 1. The purge marks the row purged while the offload's upload is in flight.
+	store := &hookedStore{Memory: objectstore.NewMemory()}
+	d.s.WithObjects(store)
+	store.afterPut = func(string) {
+		if _, err := d.s.PurgeCaptures(d.ctx, time.Now().UTC(), retention, 10); err != nil {
+			t.Error(err)
+		}
+	}
+	if n, err := d.s.OffloadCaptures(d.ctx, 10); err != nil || n != 0 {
+		t.Fatalf("offload %d %v", n, err)
+	}
+	if len(store.Objects) != 0 {
+		t.Fatalf("the offload left the object it wrote for a purged capture: %d objects", len(store.Objects))
+	}
+	if _, _, err := d.s.GetCapture(dev, wo.ID, id); problemCode(err) != domain.CodeCaptureGone {
+		t.Fatalf("read: %v", err)
+	}
+
+	// 2. An offload moves the bytes while the purge is deleting: the purge must not mark the row purged.
+	id2 := ids.New()
+	d.s.WithObjects(nil)
+	if err := dbx.WithTenantTx(d.ctx, d.s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(d.ctx, `update service_work_order set status = 'IN_PROGRESS', completed_at = null where tenant_id = $1 and id = $2`, tenantOf(d.ctx), wo.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.s.PutCapture(dev, CaptureInput{ID: id2, WorkOrderID: wo.ID, TechnicianID: tech.ID, Kind: domain.CapturePhoto, ContentType: "image/png", Width: 32, Height: 24,
+		Data: pngBytes(t, 32, 24, 9), CapturedAt: at(11)}); err != nil {
+		t.Fatal(err)
+	}
+	complete()
+	store2 := &hookedStore{Memory: objectstore.NewMemory()}
+	d.s.WithObjects(store2)
+	if err := dbx.WithTenantTx(d.ctx, d.s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(d.ctx, `update service_wo_capture set object_key = $3, data = null where tenant_id = $1 and id = $2`, tenantOf(d.ctx), id2, objectstore.Key(tenantOf(d.ctx), wo.ID, id2))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store2.Objects[objectstore.Key(tenantOf(d.ctx), wo.ID, id2)] = []byte("x")
+	store2.beforeDelete = func(string) {
+		// another replica re-keys the row between this purge's select and update
+		if err := dbx.WithTenantTx(d.ctx, d.s.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(d.ctx, `update service_wo_capture set object_key = 'moved/key' where tenant_id = $1 and id = $2`, tenantOf(d.ctx), id2)
+			return err
+		}); err != nil {
+			t.Error(err)
+		}
+	}
+	res, err := d.s.PurgeCaptures(d.ctx, time.Now().UTC(), retention, 10)
+	if err != nil || res.Purged != 0 {
+		t.Fatalf("purge of a row whose key changed: %+v %v", res, err)
+	}
+	if n := func() int {
+		var c int
+		_ = dbx.WithTenantTx(d.ctx, d.s.pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(d.ctx, `select count(*) from service_wo_capture where tenant_id = $1 and id = $2 and purged_at is null and object_key = 'moved/key'`, tenantOf(d.ctx), id2).Scan(&c)
+		})
+		return c
+	}(); n != 1 {
+		t.Fatal("the re-keyed capture must stay unpurged")
 	}
 }

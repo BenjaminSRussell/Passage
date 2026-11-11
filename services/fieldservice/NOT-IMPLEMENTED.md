@@ -27,7 +27,7 @@ to COMPLETED refuses an open required checklist item (`SVC-WO-003`; have the tec
 first); the `outbox-fieldservice` Debezium connector delivers the events (migrations 0013 and 0014). The inventory truck
 consumer books at the truck's location, concurrent replenishment is serialized per truck, and a nightly job replenishes.
 
-Still open after slice 10: photo count per work order is not capped (per action only), a part action that arrives after
+Still open after slice 10: the object store write in `PutCapture` happens inside the work order's row-locked transaction (a slow bucket holds the lock; a failed commit leaves an orphaned object under its deterministic key, which a retry overwrites), the S3 adapter reads at most 8 MiB per object (captures are 2 MB, so this is a guard, not a limit anyone meets), photo count per work order is not capped (per action only), a part action that arrives after
 the completion is still REJECTED (see BR-45.6), the object store has no virus scan or server-side encryption setting of its
 own (use the bucket's), the route stream does not replay a notification sent while a pod reconnects (the device reads its day on
 every reconnect and polls every five minutes), and live checks of the connector, the bucket and the stream need real

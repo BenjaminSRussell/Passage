@@ -80,16 +80,39 @@ func (s *Postgres) OffloadCaptures(ctx context.Context, limit int) (int, error) 
 		if err := s.objects.Put(ctx, key, b.contentType, data); err != nil {
 			return moved, fmt.Errorf("offload capture %s: %w", b.id, err)
 		}
+		var changed int64
 		err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `update service_wo_capture set data = null, object_key = $3 where tenant_id = $1 and id = $2 and object_key is null and purged_at is null`, tid, b.id, key)
+			tag, err := tx.Exec(ctx, `update service_wo_capture set data = null, object_key = $3 where tenant_id = $1 and id = $2 and object_key is null and purged_at is null`, tid, b.id, key)
+			changed = tag.RowsAffected()
 			return err
 		})
 		if err != nil {
 			return moved, err
 		}
+		if changed == 0 {
+			// Another replica offloaded it first (the object is theirs and stays) or the purge got there (the object we just
+			// wrote belongs to nothing and goes).
+			s.dropOrphanedUpload(ctx, b.id, key)
+			continue
+		}
 		moved++
 	}
 	return moved, nil
+}
+
+// dropOrphanedUpload deletes the object an offload wrote when no row names it any more.
+func (s *Postgres) dropOrphanedUpload(ctx context.Context, id, key string) {
+	tid := tenantOf(ctx)
+	var named bool
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select exists (select 1 from service_wo_capture where tenant_id = $1 and id = $2 and object_key = $3)`, tid, id, key).Scan(&named)
+	})
+	if err != nil || named {
+		return
+	}
+	if err := s.objects.Delete(ctx, key); err != nil {
+		slog.ErrorContext(ctx, "orphaned capture object not deleted", "captureId", id, "err", err)
+	}
 }
 
 // PurgeCaptures deletes the bytes of the captures of work orders that were completed, posted or cancelled more than
@@ -138,8 +161,17 @@ func (s *Postgres) PurgeCaptures(ctx context.Context, now time.Time, retention t
 				continue
 			}
 		}
+		// Only the row still holding the key that was selected is purged: an offload that moved the bytes meanwhile changed the
+		// key, and that capture is left for the next pass.
+		var changed int64
+		var selectedKey *string
+		if b.key != "" {
+			selectedKey = &b.key
+		}
 		err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `update service_wo_capture set data = null, object_key = null, purged_at = $3 where tenant_id = $1 and id = $2 and purged_at is null`, tid, b.id, now)
+			tag, err := tx.Exec(ctx, `update service_wo_capture set data = null, object_key = null, purged_at = $3
+				where tenant_id = $1 and id = $2 and purged_at is null and object_key is not distinct from $4`, tid, b.id, now, selectedKey)
+			changed = tag.RowsAffected()
 			return err
 		})
 		if err != nil {
@@ -147,7 +179,9 @@ func (s *Postgres) PurgeCaptures(ctx context.Context, now time.Time, retention t
 			res.Failed++
 			continue
 		}
-		res.Purged++
+		if changed == 1 {
+			res.Purged++
+		}
 	}
 	return res, nil
 }
