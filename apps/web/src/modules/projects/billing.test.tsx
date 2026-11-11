@@ -190,7 +190,7 @@ describe("project categories", () => {
     expect(table).toHaveTextContent("Travel");
     expect(pageViolations(container)).toEqual([]);
 
-    fireEvent.change(screen.getByLabelText("Category id"), { target: { value: "fees" } });
+    fireEvent.change(screen.getByLabelText("Category code"), { target: { value: "fees" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Fees" } });
     fireEvent.change(screen.getByLabelText("Transaction type"), { target: { value: "FEE" } });
     fireEvent.click(screen.getByRole("button", { name: "Add category" }));
@@ -200,7 +200,7 @@ describe("project categories", () => {
     expect(writes()[0].body).toEqual({ name: "Fees", txnType: "FEE" });
 
     fireEvent.click(within(await findTable({ name: "Project categories" })).getByRole("button", { name: "LABOR" }));
-    expect(screen.getByLabelText("Category id")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Category code")).toHaveAttribute("readonly");
     expect(screen.getByLabelText("Transaction type")).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Professional labour" } });
     fireEvent.click(screen.getByRole("button", { name: "Save category" }));
@@ -217,7 +217,7 @@ describe("project categories", () => {
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No categories yet")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Category id"), { target: { value: "bad id" } });
+    fireEvent.change(screen.getByLabelText("Category code"), { target: { value: "bad id" } });
     fireEvent.click(screen.getByRole("button", { name: "Add category" }));
     expect(await screen.findByText("Use 1 to 20 capitals, digits, hyphens or underscores.")).toBeInTheDocument();
     expect(writes()).toHaveLength(0);

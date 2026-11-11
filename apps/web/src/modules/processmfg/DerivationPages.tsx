@@ -20,6 +20,7 @@ import { dash, formatDateTime, QUANTITY, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 /** Duty that records batch attribute values, which a derivation does; enforced by the service (FR-24.15). */
 export const DERIVE_DUTY = "production.batch-attribute.write";
@@ -110,14 +111,10 @@ export function DeriveStoredPage() {
       <PageHeader title="Derive batch attributes" description="Fill a batch's attributes from the batches it was made from, with the inheritance rules of its item. Running it again derives again from the senders you list." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="derive-receiver" label="Receiver batch id" error={errors.receiverId}>
-            {(c) => <Input {...c} value={receiverId} onChange={(e) => { touch(); setReceiverId(e.target.value); }} invalid={Boolean(errors.receiverId)} />}
-          </FormField>
+          <LookupFormField id="derive-receiver" label="Receiver batch" entity="batch" value={receiverId} error={errors.receiverId} onChange={(id) => { touch(); setReceiverId(id); }} />
           {rows.map((row, i) => (
             <div className={styles.lineRow} key={i}>
-              <FormField id={`derive-sender-${i}`} label={`Sender ${i + 1} batch id`}>
-                {(c) => <Input {...c} value={row.batchId} onChange={(e) => setRow(i, { batchId: e.target.value })} invalid={Boolean(errors.senders)} />}
-              </FormField>
+              <LookupFormField id={`derive-sender-${i}`} label={`Sender ${i + 1} batch`} entity="batch" value={row.batchId} onChange={(id) => setRow(i, { batchId: id })} />
               <FormField id={`derive-qty-${i}`} label={`Sender ${i + 1} quantity`}>
                 {(c) => <Input {...c} inputMode="decimal" value={row.qty} onChange={(e) => setRow(i, { qty: e.target.value })} invalid={Boolean(errors.senders)} />}
               </FormField>
@@ -199,9 +196,7 @@ export function DerivationMonitorPage() {
     <div className={styles.stack}>
       <PageHeader title="Derivation monitor" description="Every derivation of an inheritance rule on a batch, newest first: the value before and after, the senders used and the senders that had no value." />
       <div className={styles.toolbar}>
-        <FormField id="mon-batch" label="Receiver batch id" error={batch !== "" && !UUID.test(batch) ? "Enter the batch id as a UUID." : undefined}>
-          {(c) => <Input {...c} value={batchId} onChange={(e) => setBatchId(e.target.value)} invalid={batch !== "" && !UUID.test(batch)} />}
-        </FormField>
+        <LookupFormField id="mon-batch" label="Receiver batch" entity="batch" optional value={batchId} error={batch !== "" && !UUID.test(batch) ? "Choose the batch." : undefined} onChange={setBatchId} />
         <FormField id="mon-item" label="Item" error={item !== "" && !UUID.test(item) ? "Enter the item id as a UUID." : undefined}>
           {(c) => <EntityLookup entity="product" {...c} value={itemId} onChange={(e) => setItemId(e.target.value)} invalid={item !== "" && !UUID.test(item)} />}
         </FormField>

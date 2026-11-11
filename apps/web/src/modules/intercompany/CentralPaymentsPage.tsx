@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, EmptyState, PageHeader } from "../../shell/ui";
 import { previewCentralPayment, previewReversal, type CentralPaymentRequest, type PaymentDirection } from "./api/client";
 import { Fields, type FieldSpec } from "./Fields";
-import { isCurrency, isPositive } from "./format";
+import { isCurrency, isPositive, legEntities } from "./format";
 import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey } from "./matrix";
 import { RowGrid } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
@@ -145,7 +145,7 @@ export function CentralPaymentsPage() {
       ) : result ? (
         <>
           <Alert tone={result.balanced ? "success" : "danger"} title={result.balanced ? "Balanced in each entity" : "Not balanced"}>
-            Both entities post under pair <span className={styles.mono}>{result.pairId}</span>.
+            Both sides post as one linked pair in {legEntities(result.legs)}.
           </Alert>
           <DataTable
             label="Payment legs"

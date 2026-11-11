@@ -45,6 +45,7 @@ import { dash, formatDateTime, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 /** Review duty: compiles records, raises and decides exceptions, maintains profiles; enforced by the service (FR-24.21, PRD 4.24.17). */
 export const RECORD_WRITE_DUTY = "production.batch-record.write";
@@ -168,9 +169,7 @@ export function BatchRecordsPage() {
       {canWrite ? (
         <Card title="Compile a record">
           <form className={styles.form} onSubmit={compile} noValidate>
-            <FormField id="rec-compile-batch" label="Batch id" hint="A registered batch linked to a batch order." error={error}>
-              {(c) => <Input {...c} value={batchId} onChange={(e) => { setBatchId(e.target.value); key.current = newKey(); }} invalid={Boolean(error)} />}
-            </FormField>
+            <LookupFormField id="rec-compile-batch" label="Batch" entity="batch" hint="A registered batch linked to a batch order." value={batchId} error={error} onChange={(id) => { setBatchId(id); key.current = newKey(); }} />
             {failure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not compile the record" live="alert">

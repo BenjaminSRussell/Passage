@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { describeProblem, previewJournal, type JournalPreview, type JournalPreviewRequest, type Problem, type Side } from "./api/client";
-import { isCurrency, isPositive } from "./format";
+import { isCurrency, isPositive, legEntities } from "./format";
 import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey } from "./matrix";
 import { RowGrid } from "./RowGrid";
 import styles from "./pages.module.css";
@@ -175,7 +175,7 @@ export function JournalPreviewPage() {
       ) : preview ? (
         <>
           <Alert tone={preview.balanced ? "success" : "danger"} title={preview.balanced ? "Balanced in each entity" : "Not balanced"}>
-            Both entities post under pair <span className={styles.mono}>{preview.pairId}</span>.
+            Both sides post as one linked pair in {legEntities(preview.legs)}.
           </Alert>
           <DataTable
             label="Journal legs"

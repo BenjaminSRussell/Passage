@@ -25,7 +25,11 @@ export type LookupEntityKey =
   | "openItem"
   | "arPayment"
   | "salesOrder"
-  | "packingSlip";
+  | "packingSlip"
+  | "batch"
+  | "formula"
+  | "ecr"
+  | "purchaseOrder";
 
 export interface LookupOption {
   id: string;
@@ -499,6 +503,40 @@ function ledgerOption(row: Raw): LookupOption | null {
 }
 
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  purchaseOrder: listedEntity(
+    "purchase order",
+    "/api/v1/procurement/purchase-orders",
+    (row) => {
+      const hit = option(row, ["number"], []);
+      const number = [text(row, "currency"), text(row, "documentStatus")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+    () => ({ limit: "100" }),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
+  batch: listedEntity(
+    "batch",
+    "/api/v1/production/batches",
+    (row) => {
+      const hit = option(row, ["batchNumber"], []);
+      const number = [text(row, "disposition")?.replace(/_/g, " ").toLowerCase(), text(row, "expiryDate") ? `expires ${text(row, "expiryDate")}` : undefined].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined } : null;
+    },
+    () => ({ limit: "100" }),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
+  formula: listedEntity("formula", "/api/v1/production/formulas", codeAndName, () => ({ limit: "100" })),
+  ecr: listedEntity(
+    "engineering change request",
+    "/api/v1/engineering/ecrs",
+    (row) => {
+      const id = text(row, "id");
+      const number = text(row, "number");
+      const title = text(row, "title");
+      return id && (number || title) ? { id, name: title ?? number ?? "", number: title ? number : undefined } : null;
+    },
+    () => ({ limit: "100" }),
+  ),
   openItem: listedEntity(
     "open item",
     "/api/v1/receivables/open-items",

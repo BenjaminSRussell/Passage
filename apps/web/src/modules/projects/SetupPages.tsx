@@ -130,7 +130,7 @@ export function ProjectGroupsPage() {
       </Alert>
       <Card title={editing ? `Edit group ${editing.id}` : "New project group"}>
         <form className={styles.form} onSubmit={submit} noValidate aria-label={editing ? "Edit project group" : "New project group"}>
-          <FormField id="group-id" label="Group id" hint="Up to 10 capital letters, digits or hyphens." error={errors.id}>
+          <FormField id="group-id" label="Group code" hint="Up to 10 capital letters, digits or hyphens." error={errors.id}>
             {(control) => (
               <Input
                 {...control}

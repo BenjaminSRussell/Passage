@@ -4,132 +4,125 @@
       "labels": [
         "Report id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Picks a saved report; there is no lookup entity for reports yet (follow-up to #500)."
     },
     "modules/ap-invoices/PostInvoicePage.tsx": {
       "labels": [
         "receipt ID"
       ],
-      "reason": "Vendor and legal entity are lookups. The ledger service has no list route to search yet, and receipt lines arrive from the GR/IR selection; neither has a lookup adapter."
+      "reason": "Receipt lines arrive from the GR/IR selection; a receipt has no lookup entity yet (vendor, legal entity and ledger are lookups)."
     },
     "modules/billing/NewShipmentProposalPage.tsx": {
       "labels": [
         "Order line id",
         "Slip line id"
       ],
-      "reason": "Legal entity, customers and products are lookups. Packing slips, their lines, sales orders and order lines have no search route or lookup adapter yet."
+      "reason": "Slip lines and order lines belong to the packing slip and sales order chosen above; no lookup entity lists them on their own (the slip, order, customer and product are lookups)."
     },
     "modules/budgeting/CheckPage.tsx": {
       "labels": [
         "Document id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "A budget document is any source document (requisition, PO, invoice); no single list spans them, so the field stays a typed id."
     },
     "modules/budgeting/EncumbrancePage.tsx": {
       "labels": [
-        "Invoice id",
-        "Purchase order id"
+        "Invoice id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "The invoice to relieve from has no lookup entity yet (the purchase order is a lookup)."
     },
     "modules/budgeting/ReservationsPage.tsx": {
       "labels": [
         "Document id",
         "Document line id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "A reservation names any source document and one of its lines; no single list spans them, so the fields stay typed ids."
     },
     "modules/compliance/AuditRunPage.tsx": {
       "labels": [
         "Policy id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Picks a retention or audit policy; no lookup entity for policies yet (follow-up to #500)."
     },
     "modules/compliance/ScreeningCheckPage.tsx": {
       "labels": [
         "Subject id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "The subject is a party, worker or order depending on the check kind; the id stays typed until the kind selects a lookup."
     },
     "modules/eam/WorkOrderCare.tsx": {
       "labels": [
         "Production resource id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/engineering/eco.tsx": {
-      "labels": [
-        "Change request ID"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Picks a production resource through the module's own resource select elsewhere; a shell lookup entity for resources is not built yet."
     },
     "modules/fulfillment/ShipmentActions.tsx": {
       "labels": [
         "Cost snapshot id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "No shell lookup entity for this record yet; the field stays a typed id until one is built (follow-up to #500)."
     },
     "modules/hr/ChecklistsPage.tsx": {
       "labels": [
         "Template id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "The checklist template list needs the setup administrator duty, so a lookup would fail for the people who start checklists; the field stays a typed id."
     },
     "modules/hr/NewIncidentPage.tsx": {
       "labels": [
         "Corrects incident id"
       ],
-      "reason": "Worker, legal entity and site are lookups. Incidents have no search route or lookup adapter yet."
+      "reason": "Picks the closed incident being corrected; the incident list needs the safety administrator duty, so a lookup is not offered (follow-up to #500)."
     },
     "modules/hr/NewPersonnelActionPage.tsx": {
       "labels": [
         "Employment id"
       ],
-      "reason": "Worker, legal entity, position and compensation plan are lookups. Employments have no list route to search yet."
+      "reason": "An employment is found through its worker; no lookup entity for employments yet (worker and position are lookups)."
     },
     "modules/hr/QuestionnairesPage.tsx": {
       "labels": [
         "Schedule id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Picks a questionnaire schedule; no lookup entity for schedules yet (follow-up to #500)."
     },
     "modules/integration/NewClientPage.tsx": {
       "labels": [
         "Sandbox tenant id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "A sandbox tenant is another tenant; there is no tenant directory to look it up in."
     },
     "modules/integration/NewSyncSubscriptionPage.tsx": {
       "labels": [
         "Outbound mapping id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Picks an outbound mapping; no lookup entity for integration mappings yet (follow-up to #500)."
     },
     "modules/inventory/CountVariancePage.tsx": {
       "labels": [
         "Plan id",
         "Sheet id"
       ],
-      "reason": "Legal entity is a lookup. Count plans and count sheets have no search route or lookup adapter yet."
+      "reason": "Count plans and count sheets have no lookup entity yet (follow-up to #500)."
     },
     "modules/inventory/StatusChangesPage.tsx": {
       "labels": [
         "Transaction id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Inventory transactions carry no document number to search by, so there is nothing readable to pick from."
     },
     "modules/lean/FlowPages.tsx": {
       "labels": [
         "Output location id",
         "Value stream id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Value streams and warehouse locations have no lookup entity yet (follow-up to #500)."
     },
     "modules/lean/WorkCellBoardPage.tsx": {
       "labels": [
         "Work cell id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Work cells have no lookup entity yet (follow-up to #500)."
     },
     "modules/party/PartyWriteCards.tsx": {
       "labels": [
@@ -144,206 +137,166 @@
         "payment term id",
         "posting profile id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Customer groups, payment terms, customer roles and posting profiles are party setup records without a lookup entity yet (follow-up to #500)."
     },
     "modules/party/PendingChangesPage.tsx": {
       "labels": [
         "Pending change id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "A pending credit-limit change is opened by the id returned when it was requested; it has no number or name to search by."
     },
     "modules/pricing/CommissionStatementPage.tsx": {
       "labels": [
         "Rep id"
       ],
-      "reason": "Legal entity is a lookup. A rep is shown by id only on this page by design (names never leave the workforce module)."
+      "reason": "Picks a sales representative; reps have no lookup entity yet (follow-up to #500)."
     },
     "modules/pricing/NewBrokerPage.tsx": {
       "labels": [
         "Customer group id"
       ],
-      "reason": "Legal entity, broker vendor and customer are lookups. Customer groups have no list route or lookup adapter yet."
+      "reason": "Customer groups have no lookup entity yet (follow-up to #500)."
     },
     "modules/pricing/NewCommodityCalculationPage.tsx": {
       "labels": [
         "Cost basis type id"
       ],
-      "reason": "Legal entity is a lookup. Cost basis types have no text search or lookup adapter yet."
+      "reason": "Cost basis types have no lookup entity yet (follow-up to #500)."
     },
     "modules/pricing/NewPromotionPage.tsx": {
       "labels": [
         "Product id"
       ],
-      "reason": "Legal entity, fund and campaign are lookups. The pricing service keys a promotion on an opaque product key of up to 64 characters, as the other price records do."
+      "reason": "The promotion's product is a key the pricing service keeps as free text (it does not validate it as a product record), so a product lookup would store a different value."
     },
     "modules/pricing/NewRebatePage.tsx": {
       "labels": [
-        "Customer group id",
-        "Product group id"
+        "Customer group id"
       ],
-      "reason": "Legal entity, customer, vendor and product are lookups. Customer groups and product groups have no list route or lookup adapter yet."
+      "reason": "Customer groups have no lookup entity yet (follow-up to #500); the product group is a lookup."
     },
     "modules/pricing/NewSalesGroupPage.tsx": {
       "labels": [
         "Rep id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Picks a sales representative; reps have no lookup entity yet (follow-up to #500)."
     },
     "modules/processmfg/CustomerRequirementPages.tsx": {
       "labels": [
         "Customer group id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/processmfg/DerivationPages.tsx": {
-      "labels": [
-        "Receiver batch id",
-        "Receiver batch id",
-        "Sender ${i + 1} batch id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/processmfg/EbrPages.tsx": {
-      "labels": [
-        "Batch id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/processmfg/FormulaPages.tsx": {
-      "labels": [
-        "Product item id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/processmfg/ReworkOrderPages.tsx": {
-      "labels": [
-        "Batch id",
-        "Rework formula id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Customer groups have no lookup entity yet (follow-up to #500)."
     },
     "modules/productcost/AdHocEstimatePage.tsx": {
       "labels": [
         "Object id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/projects/BillingPages.tsx": {
-      "labels": [
-        "Category id"
-      ],
-      "reason": "The project category's own code, typed when the category is created and read-only after; it does not point at another record."
-    },
-    "modules/projects/SetupPages.tsx": {
-      "labels": [
-        "Group id"
-      ],
-      "reason": "The project group's own code, typed when the group is created and read-only after; it does not point at another record."
+      "reason": "The estimated object is a product, order or project depending on its type; the id stays typed until the type selects a lookup."
     },
     "modules/purchasing/ChargePages.tsx": {
       "labels": [
         "Credit account id",
         "Debit account id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Ledger main accounts have no lookup entity yet (a chart is read per ledger; follow-up to #500)."
     },
     "modules/purchasing/PurchaseOrderPages.tsx": {
       "labels": [
         "Agreement line id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "An agreement line is picked from the trade agreement's lines; no lookup entity lists them on their own."
     },
     "modules/purchasing/ServicePages.tsx": {
       "labels": [
         "Contract agreement line id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "An agreement line is picked from the contract's lines; no lookup entity lists them on their own."
     },
     "modules/purchasing/TradeAgreementPages.tsx": {
       "labels": [
         "Product or group id",
         "Vendor or group id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "The scope is a product or a product group, a vendor or a vendor group, depending on the type chosen; the id stays typed until the type selects a lookup."
     },
     "modules/quality/CertificatesPanel.tsx": {
       "labels": [
         "Certificate outcome id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Inspection outcomes are rows of an order, with no number of their own; no lookup entity lists them."
     },
     "modules/quality/ResultsEntry.tsx": {
       "labels": [
         "Outcome id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Inspection outcomes are rows of an order, with no number of their own; no lookup entity lists them."
     },
     "modules/quality/SpcPage.tsx": {
       "labels": [
         "Test id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Quality tests have no lookup entity yet (follow-up to #500)."
     },
     "modules/transport/BuildLoadsPage.tsx": {
       "labels": [
         "Shipment id"
       ],
-      "reason": "The ship-from site is a lookup. A shipment here can be a sales, transfer or inbound shipment; no single search route covers them."
+      "reason": "Shipments have no lookup entity yet (follow-up to #500)."
     },
     "modules/transport/CheckInPage.tsx": {
       "labels": [
         "Appointment id"
       ],
-      "reason": "Site and load are lookups. Dock appointments have no route to search, and a driver license id is a number the guard types."
+      "reason": "Dock appointments have no lookup entity yet (follow-up to #500)."
     },
     "modules/transport/LoadPlanPage.tsx": {
       "labels": [
         "Pallet id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Pallets have no number to search by (follow-up to #500)."
     },
     "modules/transport/NewCarrierInvoicePage.tsx": {
       "labels": [
         "Freight bill id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Freight bills read by load and carrier, with no number of their own; the carrier is a vendor lookup."
     },
     "modules/transport/NewGoodsInTransitPage.tsx": {
       "labels": [
         "Voyage id"
       ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
+      "reason": "Voyages have no lookup entity yet (follow-up to #500)."
     },
     "modules/transport/NewRateCardPage.tsx": {
       "labels": [
         "Service id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Carrier services are carrier/party master data the transport service does not list yet; the carrier is a vendor lookup."
     },
     "modules/transport/NewRoutePlanPage.tsx": {
       "labels": [
         "Stop id",
         "Vehicle id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Stops and vehicles have no lookup entity yet (follow-up to #500)."
     },
     "modules/transport/RateShopPage.tsx": {
       "labels": [
         "Shipment id"
       ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
+      "reason": "Shipments have no lookup entity yet (follow-up to #500)."
     },
     "modules/treasury/BankAccounts.tsx": {
       "labels": [
         "GL main account id"
       ],
-      "reason": "Legal entity is a lookup. Main accounts are listed per chart of accounts by number, and there is no main account lookup adapter yet."
+      "reason": "Ledger main accounts have no lookup entity yet (a chart is read per ledger; follow-up to #500)."
     },
     "modules/treasury/CashDesks.tsx": {
       "labels": [
         "General ledger account id"
       ],
-      "reason": "No ledger account lookup adapter exists yet (the same gap as the bank account's GL main account id); tracked with the follow-up to #500."
+      "reason": "Ledger main accounts have no lookup entity yet (a chart is read per ledger; follow-up to #500)."
     }
   }
 }

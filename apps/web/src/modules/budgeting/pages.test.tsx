@@ -339,12 +339,12 @@ describe("EncumbrancePage", () => {
     const { container } = at(`/budgeting/encumbrances/${E1}`);
     expect(await screen.findByRole("heading", { name: "Release on PO cancellation or close" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
-    expect(screen.getByLabelText("Purchase order id")).toHaveValue(D1);
-    fireEvent.change(screen.getByLabelText("Purchase order id"), { target: { value: "not-a-po" } });
+    expect(screen.getByLabelText("Purchase order")).toHaveAttribute("data-value", D1);
+    fireEvent.click(screen.getByRole("button", { name: "Clear purchase order" }));
     fireEvent.click(screen.getByRole("button", { name: "Release remaining funds" }));
-    expect(await screen.findByText("Enter the purchase order id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the purchase order.")).toBeInTheDocument();
     expect(calls(fetchMock, "POST", ":release")).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Purchase order id"), { target: { value: D1 } });
+    fireEvent.change(screen.getByLabelText("Purchase order"), { target: { value: D1 } });
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Closed" } });
     fireEvent.click(screen.getByRole("button", { name: "Release remaining funds" }));
     expect(await screen.findByText("Release 180.00?")).toBeInTheDocument();
