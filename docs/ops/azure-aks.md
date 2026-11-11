@@ -30,7 +30,7 @@ Key Vault secret names allow only letters, digits and dashes and hold a plain va
 
 ## fieldcrypt master keys wrapped by Key Vault
 
-`FIELDCRYPT_KEYS` entries may be `id=wrapped:<base64>`: a 32-byte master key wrapped by the vault key (RSA-OAEP-256, or A256KW for a symmetric Managed HSM key). The service unwraps it once at start through `FIELDCRYPT_AZURE_KEY_ID` (`https://<vault>/keys/fieldcrypt-kek[/<version>]`, a host of the profile's Key Vault suffix) using its workload identity, and holds the plain key in memory only. The sealed-value envelope still names the master key id, so old values open and nothing is re-sealed by wrapping. Charts pass `global.fieldcryptKeyId` as `FIELDCRYPT_AZURE_KEY_ID`.
+`FIELDCRYPT_KEYS` entries may be `id=wrapped:<key version>:<base64>` (what `fieldcrypt-wrap` prints) or `id=wrapped:<base64>`: a 32-byte master key wrapped by the vault key (RSA-OAEP-256, or A256KW for a symmetric Managed HSM key). The service unwraps it once at start through `FIELDCRYPT_AZURE_KEY_ID` (`https://<vault>/keys/fieldcrypt-kek[/<version>]`, a host of the profile's Key Vault suffix) using its workload identity, and holds the plain key in memory only. The sealed-value envelope still names the master key id, so old values open and nothing is re-sealed by wrapping. Charts pass `global.fieldcryptKeyId` as `FIELDCRYPT_AZURE_KEY_ID`.
 
 Create a wrapped key, and rotate:
 
@@ -40,7 +40,7 @@ FIELDCRYPT_AZURE_KEY_ID=https://<vault>/keys/fieldcrypt-kek PASSAGE_CLOUD_PROFIL
   go run ./fieldcrypt/cmd/fieldcrypt-wrap -id 2027-01          # prints id=wrapped:...
 ```
 
-Rotation: wrap a new key under a new id; add its entry to the secret that fills `FIELDCRYPT_KEYS` and keep the old entries; set `FIELDCRYPT_CURRENT_KEY_ID` to the new id; roll the services; run the service's re-seal job until no value names the old id (`hr reseal-pii` today); then drop the old entry. Rotating the vault key itself: create a new key version, wrap the same master keys again under it, and keep the old version enabled until every deployed entry has been replaced.
+Rotation: wrap a new key under a new id; add its entry to the secret that fills `FIELDCRYPT_KEYS` and keep the old entries; set `FIELDCRYPT_CURRENT_KEY_ID` to the new id; roll the services; run the service's re-seal job until no value names the old id (`hr reseal-pii` today); then drop the old entry. Rotating the vault key itself: an entry that names its key version is unwrapped by that version, so creating a new version breaks nothing; wrap the master keys again under the new version, replace the entries, and keep the old version enabled until every deployed entry has been replaced. An entry without a version is unwrapped by the latest version and stops opening as soon as a new version exists, so rewrap such entries before rotating.
 
 Not yet wired per service: the pod needs the workload identity label `azure.workload.identity/use: "true"` and a service account annotated with the `fieldcrypt` identity's client id; add them to the chart of each service that holds field-encrypted data.
 

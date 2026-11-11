@@ -249,3 +249,53 @@ func TestWrappedEntryErrorsFailClosedAndNameNoKeyMaterial(t *testing.T) {
 		t.Error("a short key must fail")
 	}
 }
+
+// versionedKMS reports the version its wrap used and unwraps only by that version, as a vault does once its key is rotated.
+type versionedKMS struct {
+	fakeKMS
+	version string
+}
+
+func (v *versionedKMS) WrapVersioned(ctx context.Context, key []byte) ([]byte, string, error) {
+	out, err := v.Wrap(ctx, key)
+	return out, v.version, err
+}
+
+func (v *versionedKMS) UnwrapVersion(ctx context.Context, version string, wrapped []byte) ([]byte, error) {
+	if version != v.version {
+		return nil, fmt.Errorf("no key version %s", version)
+	}
+	return v.fakeKMS.Unwrap(ctx, wrapped)
+}
+
+func (v *versionedKMS) Unwrap(context.Context, []byte) ([]byte, error) {
+	return nil, fmt.Errorf("the latest key version cannot open this")
+}
+
+// An entry names the vault key version that wrapped it, so it still opens after the vault key gets a new version.
+func TestWrappedEntryNamesItsKeyVersion(t *testing.T) {
+	kms := &versionedKMS{version: "0123abcd"}
+	key := bytes.Repeat([]byte{9}, 32)
+	entry, err := fieldcrypt.WrapEntry(context.Background(), "k", key, kms)
+	if err != nil || !strings.HasPrefix(entry, "k=wrapped:0123abcd:") {
+		t.Fatalf("entry = %q, %v", entry, err)
+	}
+	env := map[string]string{fieldcrypt.EnvKeys: entry, fieldcrypt.EnvCurrentID: "k"}
+	keys, err := fieldcrypt.FromEnvWith(context.Background(), func(k string) string { return env[k] }, kms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, _ := fieldcrypt.NewKeys("k", map[string][]byte{"k": key})
+	sealed, _ := plain.Seal("t", "f", []byte("v"))
+	if got, err := keys.Open("t", "f", sealed); err != nil || string(got) != "v" {
+		t.Fatalf("open = %q, %v", got, err)
+	}
+	// An unwrapper that cannot address a version refuses a versioned entry rather than trying the latest key.
+	if _, err := fieldcrypt.FromEnvWith(context.Background(), func(k string) string { return env[k] }, &fakeKMS{}); err == nil {
+		t.Error("a versioned entry was opened by an unwrapper with no versions")
+	}
+	bad := map[string]string{fieldcrypt.EnvKeys: "k=wrapped:../x:" + base64.StdEncoding.EncodeToString(key), fieldcrypt.EnvCurrentID: "k"}
+	if _, err := fieldcrypt.FromEnvWith(context.Background(), func(k string) string { return bad[k] }, kms); err == nil {
+		t.Error("a malformed version was accepted")
+	}
+}

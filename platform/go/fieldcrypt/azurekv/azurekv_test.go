@@ -28,6 +28,9 @@ type fakeAzure struct {
 	server    *httptest.Server
 	client    *http.Client
 	priv      *rsa.PrivateKey
+	// older holds the private keys of earlier key versions, by version; priv is the latest, reported as latest.
+	older     map[string]*rsa.PrivateKey
+	latest    string
 	tokens    atomic.Int32
 	wantScope string
 	paths     []string
@@ -39,7 +42,7 @@ func newFakeAzure(t *testing.T) *fakeAzure {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeAzure{priv: priv}
+	f := &fakeAzure{priv: priv, latest: "0123abcd", older: map[string]*rsa.PrivateKey{}}
 	// A plain handler, not a ServeMux: a mux would clean "//" (the empty key-version segment) and redirect.
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.paths = append(f.paths, r.Method+" "+r.Host+r.URL.Path)
@@ -65,17 +68,29 @@ func newFakeAzure(t *testing.T) *fakeAzure {
 				return
 			}
 			data, _ := base64.RawURLEncoding.DecodeString(in.Value)
+			// /keys/<name>/<version>/<op>; an empty or the latest version is the current key.
+			segs := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			version, key := segs[2], f.priv
+			if version == "" {
+				version = f.latest
+			} else if old, ok := f.older[version]; ok {
+				key = old
+			} else if version != f.latest {
+				http.Error(w, `{"error":{"code":"KeyNotFound"}}`, http.StatusNotFound)
+				return
+			}
 			var out []byte
 			if strings.HasSuffix(r.URL.Path, "/wrapkey") {
-				out, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, &priv.PublicKey, data, nil)
+				out, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, &key.PublicKey, data, nil)
 			} else {
-				out, err = rsa.DecryptOAEP(sha256.New(), nil, priv, data, nil)
+				out, err = rsa.DecryptOAEP(sha256.New(), nil, key, data, nil)
 			}
 			if err != nil {
 				http.Error(w, `{"error":{"code":"BadParameter"}}`, http.StatusBadRequest)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"kid": "k", "value": base64.RawURLEncoding.EncodeToString(out)})
+			kid := "https://" + r.Host + "/keys/" + segs[1] + "/" + version
+			_ = json.NewEncoder(w).Encode(map[string]string{"kid": kid, "value": base64.RawURLEncoding.EncodeToString(out)})
 		default:
 			http.NotFound(w, r)
 		}
@@ -228,5 +243,36 @@ func TestFromEnvNeedsAKeyInTheProfilesVault(t *testing.T) {
 	}
 	if _, err := FromEnv(env(map[string]string{EnvKeyID: "https://kv.vault.azure.net/keys/kek"})); err != nil {
 		t.Errorf("commercial default: %v", err)
+	}
+}
+
+// The vault key is rotated to a new version: a master key wrapped under the old version still unwraps by the version
+// its wrap reported, while an unversioned unwrap (the latest version) cannot open it.
+func TestAWrappedKeyStillUnwrapsAfterTheVaultKeyIsRotated(t *testing.T) {
+	f := newFakeAzure(t)
+	c := newClient(t, f, "commercial", "https://kv-passage.vault.azure.net/keys/fieldcrypt-kek")
+	master := make([]byte, 32)
+	_, _ = rand.Read(master)
+	wrapped, version, err := c.WrapVersioned(context.Background(), master)
+	if err != nil || version != "0123abcd" {
+		t.Fatalf("wrap: version %q, %v", version, err)
+	}
+	next, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.older[f.latest], f.priv, f.latest = f.priv, next, "4567ef01"
+	if _, err := c.Unwrap(context.Background(), wrapped); err == nil {
+		t.Fatal("the latest version opened a key wrapped under the previous one")
+	}
+	got, err := c.UnwrapVersion(context.Background(), version, wrapped)
+	if err != nil || string(got) != string(master) {
+		t.Fatalf("unwrap by version = %x, %v", got, err)
+	}
+	if !slices.Contains(f.paths, "POST kv-passage.vault.azure.net/keys/fieldcrypt-kek/0123abcd/unwrapkey") {
+		t.Errorf("paths = %v", f.paths)
+	}
+	if _, err := c.UnwrapVersion(context.Background(), "../x", wrapped); err == nil {
+		t.Error("a version with a path separator was sent")
 	}
 }

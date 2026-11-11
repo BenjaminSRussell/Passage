@@ -106,6 +106,7 @@ type operation struct {
 }
 
 type result struct {
+	Kid   string `json:"kid"`
 	Value string `json:"value"`
 	Error *struct {
 		Code    string `json:"code"`
@@ -113,33 +114,41 @@ type result struct {
 	} `json:"error"`
 }
 
-func (c *Client) do(ctx context.Context, op string, in []byte) ([]byte, error) {
+// do runs a key operation. version, when set, names the key version explicitly (an unwrap of a key wrapped under an
+// older version); otherwise the configured key URL decides, and a versionless URL means the latest version. It returns
+// the result and the version the vault used (the last segment of the answer's kid).
+func (c *Client) do(ctx context.Context, op, version string, in []byte) ([]byte, string, error) {
 	token, err := c.tokens.Token(ctx, c.scope)
 	if err != nil {
-		return nil, fmt.Errorf("azurekv: token: %w", err)
+		return nil, "", fmt.Errorf("azurekv: token: %w", err)
 	}
 	u := *c.keyURL
-	u.Path = strings.TrimRight(u.Path, "/") + "/" + op
-	if strings.Count(strings.Trim(c.keyURL.Path, "/"), "/") == 1 {
+	parts := strings.Split(strings.Trim(c.keyURL.Path, "/"), "/")
+	switch {
+	case version != "":
+		u.Path = "/" + parts[0] + "/" + parts[1] + "/" + version + "/" + op
+	case len(parts) == 2:
 		// No version given: Key Vault takes an empty version segment to mean the latest.
 		u.Path = strings.TrimRight(c.keyURL.Path, "/") + "//" + op
+	default:
+		u.Path = strings.TrimRight(u.Path, "/") + "/" + op
 	}
 	u.RawQuery = url.Values{"api-version": {apiVersion}}.Encode()
 	body, _ := json.Marshal(operation{Alg: c.algorithm, Value: base64.RawURLEncoding.EncodeToString(in)})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(string(body)))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("azurekv: %s: %w", op, err)
+		return nil, "", fmt.Errorf("azurekv: %s: %w", op, err)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, maxBody))
 	if err != nil {
-		return nil, fmt.Errorf("azurekv: %s: read: %w", op, err)
+		return nil, "", fmt.Errorf("azurekv: %s: read: %w", op, err)
 	}
 	var out result
 	_ = json.Unmarshal(raw, &out)
@@ -149,23 +158,60 @@ func (c *Client) do(ctx context.Context, op string, in []byte) ([]byte, error) {
 			code = out.Error.Code
 		}
 		// The key material and the request never appear in the error; the vault's own error code does.
-		return nil, fmt.Errorf("azurekv: %s refused: %s", op, code)
+		return nil, "", fmt.Errorf("azurekv: %s refused: %s", op, code)
 	}
 	plain, err := base64.RawURLEncoding.DecodeString(out.Value)
 	if err != nil {
-		return nil, fmt.Errorf("azurekv: %s: response is not base64url: %w", op, err)
+		return nil, "", fmt.Errorf("azurekv: %s: response is not base64url: %w", op, err)
 	}
-	return plain, nil
+	used := version
+	if kid, perr := url.Parse(out.Kid); perr == nil {
+		if segs := strings.Split(strings.Trim(kid.Path, "/"), "/"); len(segs) == 3 && segs[0] == "keys" && ValidVersion(segs[2]) {
+			used = segs[2]
+		}
+	}
+	return plain, used, nil
+}
+
+// ValidVersion reports whether v can be a Key Vault key version (32 hex characters in practice).
+func ValidVersion(v string) bool {
+	if v == "" || len(v) > 64 {
+		return false
+	}
+	for _, r := range v {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // Wrap encrypts a master key under the vault key.
 func (c *Client) Wrap(ctx context.Context, key []byte) ([]byte, error) {
-	return c.do(ctx, "wrapkey", key)
+	out, _, err := c.do(ctx, "wrapkey", "", key)
+	return out, err
 }
 
-// Unwrap decrypts a wrapped master key. It implements fieldcrypt.Unwrapper.
+// WrapVersioned encrypts a master key under the vault key and returns the key version that wrapped it, so the entry
+// can name it and still unwrap after the vault key is rotated to a new version.
+func (c *Client) WrapVersioned(ctx context.Context, key []byte) ([]byte, string, error) {
+	return c.do(ctx, "wrapkey", "", key)
+}
+
+// Unwrap decrypts a wrapped master key with the configured key (the latest version when the URL names none). It
+// implements fieldcrypt.Unwrapper.
 func (c *Client) Unwrap(ctx context.Context, wrapped []byte) ([]byte, error) {
-	return c.do(ctx, "unwrapkey", wrapped)
+	out, _, err := c.do(ctx, "unwrapkey", "", wrapped)
+	return out, err
+}
+
+// UnwrapVersion decrypts a key wrapped under the named version of the vault key.
+func (c *Client) UnwrapVersion(ctx context.Context, version string, wrapped []byte) ([]byte, error) {
+	if !ValidVersion(version) {
+		return nil, fmt.Errorf("azurekv: %q is not a key version", version)
+	}
+	out, _, err := c.do(ctx, "unwrapkey", version, wrapped)
+	return out, err
 }
 
 // WorkloadIdentity exchanges the AKS workload identity federated token for an Entra access token.
