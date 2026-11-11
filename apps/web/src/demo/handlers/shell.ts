@@ -171,7 +171,7 @@ route("POST", "/api/v1/org/demo-company", () => ({ package: "demo-manufacturer",
 // Record search (GET /api/v1/search): customers, vendors and products from the company data, and the documents
 // the other areas hold, read back through their own list routes so the numbers always agree with those screens.
 // Matching and order are the search service's own (shell/search/match.ts): a number by its start, a name by what it
-// holds or a near miss. Workers are left out: the demo has no sample data for the worker page a result would open.
+// holds or a near miss. Workers are found by personnel number or by their person's name, as the service titles them.
 interface SearchHit {
   type: string;
   id: string;
@@ -230,6 +230,7 @@ route("GET", "/api/v1/search", async ({ query }) => {
   const masters: SearchHit[] = [
     ...[...CUSTOMERS, ...VENDORS].map((p) => ({ type: "party", id: p.id, number: p.number, title: p.name, subtitle: "organization", status: "active", link: `/party/${p.id}` })),
     ...ITEMS.map((i) => ({ type: "product", id: i.id, number: i.number, title: i.name, status: "active", link: `/product/${encodeURIComponent(i.number)}` })),
+    ...PEOPLE.map((p) => ({ type: "worker", id: p.id, number: p.number, title: p.preferredName ?? p.name, subtitle: "employee", link: `/hr/workers/${p.id}` })),
   ];
   const all = [...masters, ...(await documents())].filter((h) => wanted.size === 0 || wanted.has(h.type));
   return { results: limit(rankBySearch(all, needle, (h) => ({ number: h.number, name: h.title })), query) };
