@@ -23,7 +23,7 @@ create policy gl_opening_posting_lease_tenant_access on gl_opening_posting_lease
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
-    EXECUTE 'GRANT SELECT, INSERT, DELETE ON gl_opening_posting_lease TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON gl_opening_posting_lease TO passage_app';
   END IF;
 END
 $$;

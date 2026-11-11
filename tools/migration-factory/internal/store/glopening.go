@@ -213,6 +213,9 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 		}
 	}
 	if pending {
+		if err := s.renewPostingLease(ctx, run, lease); err != nil {
+			return OpeningJournalResult{}, err
+		}
 		owner, err := ledger.LegalEntity(ctx, in.LegalEntityID, in.LedgerID)
 		if err != nil {
 			if ledgerclient.Rejected(err) {
@@ -238,6 +241,9 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 			p.EntryID, p.Posted, p.AlreadyPosted = have.EntryID, true, true
 			res.Journals = append(res.Journals, p)
 			continue
+		}
+		if err := s.renewPostingLease(ctx, run, lease); err != nil {
+			return res, err
 		}
 		entryID, err := ledger.Post(ctx, j.Entry)
 		if err != nil {
@@ -281,6 +287,29 @@ func takePostingLease(ctx context.Context, tx pgx.Tx, run domain.PackRun, in Ope
 		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, now() + make_interval(secs => $5))`,
 		string(run.SourceSystem), run.SourceCompany, holder, in.By, postingLeaseTTL.Seconds())
 	return err
+}
+
+// ErrPostingLeaseLost is returned when the lease expired (another process may have released the pin) before the next ledger call.
+var ErrPostingLeaseLost = errors.New("opening posting lease lost")
+
+// renewPostingLease extends the call's lease before a ledger call and fails when the lease is gone: an expired lease no longer
+// protects the pin from a release, so the call stops before it books anything more.
+func (s *Postgres) renewPostingLease(ctx context.Context, run domain.PackRun, holder string) error {
+	var renewed int64
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `update gl_opening_posting_lease set expires_at = now() + make_interval(secs => $4)
+			where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_company = $2 and holder = $3 and expires_at > now()`,
+			string(run.SourceSystem), run.SourceCompany, holder, postingLeaseTTL.Seconds())
+		renewed = tag.RowsAffected()
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if renewed != 1 {
+		return fmt.Errorf("%w: the posting of %s took longer than its lease; call again, the ledger books each journal once", ErrPostingLeaseLost, run.SourceCompany)
+	}
+	return nil
 }
 
 // releasePostingLease gives the lease back; it uses its own context so a cancelled request still releases it.

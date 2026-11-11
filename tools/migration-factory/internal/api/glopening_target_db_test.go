@@ -204,3 +204,48 @@ func TestOpeningJournal_AnExpiredLeaseDoesNotBlockTheRelease(t *testing.T) {
 		t.Fatalf("release with an expired lease: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// expiringLedger expires the posting lease right after its first journal, as a stall longer than the lease would.
+type expiringLedger struct {
+	*ledgerclient.Fake
+	expire func()
+	posts  int
+}
+
+func (e *expiringLedger) Post(ctx context.Context, en ledgerclient.Entry) (string, error) {
+	id, err := e.Fake.Post(ctx, en)
+	if e.posts++; e.posts == 1 {
+		e.expire()
+	}
+	return id, err
+}
+
+// The lease is renewed before every ledger call and the call stops when it has expired, because an expired lease no longer
+// keeps the pin from being released.
+func TestOpeningJournal_StopsWhenItsPostingLeaseExpired(t *testing.T) {
+	_, admin, st, fake, c := ledgerServer(t)
+	el := &expiringLedger{Fake: fake}
+	el.expire = func() {
+		if _, err := admin.Exec(context.Background(), `update gl_opening_posting_lease set expires_at = now() - interval '1 second'`); err != nil {
+			t.Error(err)
+		}
+	}
+	h := New(st).WithLedger(el).WithClock(c.now).Routes()
+	records := append(append([]string{}, cleanGL...), glCurRec("GL-4", "1100", "EUR", "100.50"), glCurRec("GL-5", "3000", "EUR", "-100.50"))
+	run := startGL(t, h, "", records...)
+	rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US"))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "lease") {
+		t.Fatalf("post with an expired lease: %d %s", rec.Code, rec.Body)
+	}
+	if n := count(t, admin, `select count(*) from gl_opening_posting`); n != 1 || len(fake.Entries()) != 1 {
+		t.Fatalf("postings %d, ledger entries %d; want only the journal posted before the lease expired", n, len(fake.Entries()))
+	}
+	if n := count(t, admin, `select count(*) from gl_opening_posting_lease`); n != 0 {
+		t.Fatalf("the lease stays: %d", n)
+	}
+	// Calling again posts the rest (the ledger books each key once).
+	el.posts = 1
+	if rec := postOpening(t, h, run.RunID, openingBody(le1, "L-US")); rec.Code != http.StatusOK || len(fake.Entries()) != 2 {
+		t.Fatalf("second call: %d %s, entries %d", rec.Code, rec.Body, len(fake.Entries()))
+	}
+}
