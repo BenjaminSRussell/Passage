@@ -13,11 +13,13 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
   <?ifndef Version?><?define Version = "0.0.0" ?><?endif?>
+  <!-- The standard bootstrapper's license link; a release passes -d LicenseUrl=<the customer licence terms>. -->
+  <?ifndef LicenseUrl?><?define LicenseUrl = "https://github.com/BenjaminSRussell/Passage/blob/main/docs/ops/windows-install.md" ?><?endif?>
   <?ifdef Fips?><?define BundleUpgradeCode = "9a1d7b3c-52e4-4a6f-8f21-0c5e6d7a8b19" ?><?else?><?define BundleUpgradeCode = "e7a50757-87b4-46af-8668-5914ce6e927d" ?><?endif?>
   <Bundle Name="Passage" Manufacturer="Passage" Version="$(Version)" UpgradeCode="$(BundleUpgradeCode)"
           Compressed="yes">
     <BootstrapperApplication>
-      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" SuppressOptionsUI="yes" />
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" LicenseUrl="$(LicenseUrl)" SuppressOptionsUI="yes" />
     </BootstrapperApplication>
 
     <!-- Optional prerequisite switches (all default off). -->
@@ -52,7 +54,7 @@
     <Variable Name="SERVICE_ACCOUNT" Type="string" Value="NT SERVICE\Passage" bal:Overridable="yes" />
 
     <util:RegistrySearch Id="PostgresInstalled" Variable="PostgresInstalled" Root="HKLM" Key="SOFTWARE\PostgreSQL\Installations\postgresql-x64-17"
-                         Value="Base Directory" Result="exists" Win64="yes" />
+                         Value="Base Directory" Result="exists" Bitness="always64" />
 
     <Chain>
       <?ifdef PostgresInstaller?>
@@ -65,7 +67,7 @@
       <MsiPackage Id="PassageTemporal" SourceFile="$(TemporalMsi)" Visible="no" Vital="yes"
                   InstallCondition="InstallTemporal=1" />
       <?endif?>
-      <MsiPackage Id="PassageServer" SourceFile="$(PassageMsi)" Vital="yes" Visible="yes" DisplayInternalUI="no">
+      <MsiPackage Id="PassageServer" SourceFile="$(PassageMsi)" Vital="yes" Visible="yes">
         <MsiProperty Name="PG_DSN" Value="[PG_DSN]" />
         <MsiProperty Name="PG_APP_DSN" Value="[PG_APP_DSN]" />
         <MsiProperty Name="OIDC_ISSUER" Value="[OIDC_ISSUER]" />
