@@ -10,8 +10,6 @@
     "modules/fulfillment/ReturnablePackagingPage.tsx",
     "modules/fulfillment/ShipmentDetailPage.tsx",
     "modules/fulfillment/WaveDetailPage.tsx",
-    "modules/fulfillment/WavesPage.tsx",
-    "modules/payables/ProposalsPage.tsx",
     "modules/purchasing/AgreementPages.tsx",
     "modules/purchasing/ApprovalPages.tsx",
     "modules/purchasing/CatalogImportPages.tsx",
@@ -37,7 +35,6 @@
     "modules/receivables/Statements.tsx",
     "modules/sales/AgreementsPage.tsx",
     "modules/sales/CreditExposurePage.tsx",
-    "modules/sales/CreditProfilesPage.tsx",
     "modules/sales/ScheduleReleasesPage.tsx"
   ]
 }
