@@ -1879,6 +1879,9 @@ test_revrec_allocate_belongs_to_maintain_only if {
 	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:allocate")
 	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:allocate")
 	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:allocate")
+	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:modify")
+	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:modify")
+	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:modify")
 }
 
 test_tax_duties_reach_only_their_routes if {
@@ -2704,6 +2707,24 @@ test_bank_account_mappings_are_read_by_view_and_written_by_their_own_duty if {
 	not allowed("receivables.view", "PUT", "/v1/receivables/bank-accounts")
 	not allowed("receivables.payment.post", "DELETE", "/v1/receivables/bank-accounts")
 	not allowed("receivables.bankaccount.manage", "GET", "/v1/receivables/bank-accounts")
+}
+
+test_receivables_fx_settings_and_payment_reversal_have_their_own_duties if {
+	allowed("receivables.view", "GET", "/v1/receivables/fx-settings")
+	allowed("receivables.fxsetting.manage", "PUT", "/v1/receivables/fx-settings")
+	not allowed("receivables.view", "PUT", "/v1/receivables/fx-settings")
+	not allowed("receivables.bankaccount.manage", "PUT", "/v1/receivables/fx-settings")
+	allowed("receivables.payment.reverse", "POST", "/v1/receivables/payments/p1:reverse")
+	not allowed("receivables.payment.post", "POST", "/v1/receivables/payments/p1:reverse")
+	not allowed("receivables.payment.reverse", "POST", "/v1/receivables/payments/p1:apply")
+	data.service_grants.receivables.fx == ["fx.rate.lookup"]
+}
+
+test_payables_records_withholding_with_tax_under_its_own_service_duty if {
+	data.service_grants.payables.tax == ["tax.withholding.calculate", "tax.withholding.record"]
+	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.calculate", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/calculate")
 }
 
 test_asn_duties_do_not_cross if {

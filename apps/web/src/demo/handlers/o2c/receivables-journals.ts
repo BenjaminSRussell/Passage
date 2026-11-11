@@ -95,6 +95,56 @@ route("POST", "/api/v1/receivables/gl-journals/{id}:retry", ({ params, body }) =
   return j;
 });
 
+// Ledger setup: the bank accounts Cedar Ridge Pumps maps, its exchange settings, and the backfill of earlier journals.
+interface DemoBank {
+  legalEntityId: string;
+  currency: string;
+  accountRef: string;
+  glAccount: string;
+  name: string;
+}
+
+const banks: DemoBank[] = [
+  { legalEntityId: LEGAL_ENTITY.id, currency: "USD", accountRef: "", glAccount: "1010", name: "Operating account USD" },
+  { legalEntityId: LEGAL_ENTITY.id, currency: "USD", accountRef: "US00001234", glAccount: "1020", name: "Lockbox account" },
+];
+
+route("GET", "/api/v1/receivables/bank-accounts", ({ query }) => {
+  const le = query.get("legalEntityId");
+  return { items: banks.filter((b) => !le || b.legalEntityId === le) };
+});
+
+route("PUT", "/api/v1/receivables/bank-accounts", ({ body }) => {
+  const input = (body ?? {}) as DemoBank;
+  const at = banks.findIndex((b) => b.legalEntityId === input.legalEntityId && b.currency === input.currency && b.accountRef === input.accountRef);
+  if (at >= 0) banks[at] = input;
+  else banks.push(input);
+  return input;
+});
+
+route("DELETE", "/api/v1/receivables/bank-accounts", ({ query }) => {
+  const at = banks.findIndex((b) => b.legalEntityId === query.get("legalEntityId") && b.currency === query.get("currency") && b.accountRef === (query.get("accountRef") ?? ""));
+  if (at < 0) return reply.problem(404, "AR-BANK-NOT-FOUND", "No such bank account mapping.");
+  banks.splice(at, 1);
+  return reply.noContent();
+});
+
+let fxSetting = { legalEntityId: LEGAL_ENTITY.id, crossCurrencyEnabled: true, functionalCurrency: "USD", gainAccount: "7100", lossAccount: "7200" };
+
+route("GET", "/api/v1/receivables/fx-settings", ({ query }) =>
+  query.get("legalEntityId") === fxSetting.legalEntityId ? fxSetting : { legalEntityId: query.get("legalEntityId") ?? "", crossCurrencyEnabled: false, functionalCurrency: "", gainAccount: "7100", lossAccount: "7200" },
+);
+
+route("PUT", "/api/v1/receivables/fx-settings", ({ body }) => {
+  fxSetting = { ...fxSetting, ...((body ?? {}) as typeof fxSetting) };
+  return fxSetting;
+});
+
+route("POST", "/api/v1/receivables/gl-journals:backfill", ({ body }) => {
+  const opening = typeof body === "object" && body !== null && Boolean((body as { openingAccount?: string }).openingAccount);
+  return { receipts: 14, applications: 11, openingItems: opening ? 2 : 0, openingAlreadyQueued: 0, dunningFees: 3, interest: 2, downPayments: 1, deductions: 1, more: false };
+});
+
 route("POST", "/api/v1/receivables/remittance-advices", ({ body }) => {
   const input = (body ?? {}) as { content?: string; format?: string; createMissing?: boolean };
   const refs = [...new Set((input.content ?? "").split("\n").slice(1).map((line) => line.split(",")[0]?.trim()).filter((r): r is string => Boolean(r)))];

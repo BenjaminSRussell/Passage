@@ -167,6 +167,49 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/revrec/contracts/{id}:modify:
+    post:
+      operationId: modifyContract
+      summary: Re-allocate a contract's existing obligations after a price change or an SSP revision (prospective or cumulative catch-up).
+      x-passage-duty: revrec.maintain (RevRecMaintain)
+      description: >
+        ASC 606-10-25-10 to 25-13 and IFRS 15.20 to 15.21. `PROSPECTIVE` (the remaining goods are distinct): the consideration
+        still to recognize, the new transaction price less what is already recognized or booked by the invoice, is allocated over
+        the obligations with performance left by their SSP weighted by the share left, and spread over their unrecognized lines;
+        recognized revenue is untouched. `CATCH_UP` (the remaining goods are not distinct): the whole new price is allocated again
+        over the obligations (point in time and usage obligations keep their amount) and each obligation recognizes the cumulative
+        catch-up so that its revenue to date equals its new allocation times its progress at `effectiveDate`; a satisfied milestone's
+        catch-up is recognized at once, a ratable one is a line dated on the effective date that the next recognition run takes.
+        `obligations` revises the SSP of the named obligations at the modification date. A change that would take revenue back out of
+        what is recognized is 422 REV-0402 (use a credit note); a prospective change with nothing left is 422 REV-0404; a date before
+        the contract date is 422 REV-0401; a contract that credit notes touched is 409 REV-0405. Each modification stores each
+        obligation's allocation change on its effective date, and the roll-forward adds it in that period. Adding goods or services is
+        `:allocate`. If-Match is required and must carry the contract version the caller reviewed. Emits
+        dev.passage.revrec.contract.allocated.v1 again, and schedule.recognized for a milestone catch-up.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, schema: { type: string }, description: 'Contract version as an entity tag, e.g. "1". Required (428 without it): the price change is relative, so a repeat of the same call finds the version moved on and is refused with 412 instead of applying twice.' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModifyRequest" }
+      responses:
+        "200":
+          description: The re-allocated contract with the outcome of the modification.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModifyResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
   /v1/revrec/milestones/{id}:satisfy:
     post:
       operationId: satisfyMilestone
@@ -561,6 +604,54 @@ components:
       properties:
         transactionPriceIncrease: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "The price of the added obligations, allocated over them." }
         obligations: { $ref: "#/components/schemas/ContractRequest/properties/obligations" }
+    ModifyRequest:
+      type: object
+      required: [type, effectiveDate, transactionPriceChange]
+      additionalProperties: false
+      properties:
+        type: { type: string, enum: [PROSPECTIVE, CATCH_UP] }
+        effectiveDate: { type: string, format: date }
+        transactionPriceChange: { type: string, pattern: "^-?[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Signed change of the transaction price; 0 when only SSPs are revised." }
+        obligations:
+          type: array
+          description: Obligations whose standalone selling price is revised at the modification date.
+          items:
+            type: object
+            required: [obligationId, ssp]
+            additionalProperties: false
+            properties:
+              obligationId: { type: string, format: uuid }
+              ssp: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$" }
+        reason: { type: string, maxLength: 500 }
+    ModifyResponse:
+      allOf:
+        - { $ref: "#/components/schemas/Contract" }
+        - type: object
+          required: [modification]
+          properties:
+            modification:
+              type: object
+              required: [id, type, effectiveDate, priceBefore, priceAfter, catchUp, obligations]
+              properties:
+                id: { type: string, format: uuid }
+                type: { type: string, enum: [PROSPECTIVE, CATCH_UP] }
+                effectiveDate: { type: string, format: date }
+                priceBefore: { type: string }
+                priceAfter: { type: string }
+                catchUp: { type: string, description: Total cumulative catch-up revenue recognized on the effective date. }
+                obligations:
+                  type: array
+                  items:
+                    type: object
+                    required: [obligationId, allocatedBefore, allocatedAfter, sspBefore, sspAfter, catchUp]
+                    properties:
+                      obligationId: { type: string, format: uuid }
+                      allocatedBefore: { type: string }
+                      allocatedAfter: { type: string }
+                      sspBefore: { type: string }
+                      sspAfter: { type: string }
+                      progress: { type: string, description: Share transferred at the effective date (CATCH_UP only). }
+                      catchUp: { type: string }
     ContractSummary:
       type: object
       required: [id, legalEntityId, orderId, customerId, currency, transactionPrice, recognized, remaining, residualRule, ratableBasis, contractDate, status, version]
