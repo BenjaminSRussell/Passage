@@ -37,6 +37,11 @@ export class RedisSessionStore implements SessionStore {
   async create(identity: CustomerIdentity, idToken: string, now: number): Promise<Session> {
     const session = newSession(identity, idToken, now);
     await this.run("SET", this.sessionKey(session.id), JSON.stringify(session), "PX", ABSOLUTE_TIMEOUT_MS);
+    // Indexes for back-channel logout: the sessions of a Keycloak session and of a user. Members outlive their session harmlessly.
+    for (const key of this.indexKeys(identity.sessionId, identity.userId)) {
+      await this.run("SADD", key, session.id);
+      await this.run("PEXPIRE", key, ABSOLUTE_TIMEOUT_MS);
+    }
     return session;
   }
 
@@ -56,13 +61,32 @@ export class RedisSessionStore implements SessionStore {
     }
     if (now - session.lastSeenAt > TOUCH_AFTER_MS) {
       session.lastSeenAt = now;
-      await this.run("SET", this.sessionKey(id), JSON.stringify(session), "KEEPTTL");
+      // XX: only while the session exists, so a touch that races a logout cannot bring the session back.
+      await this.run("SET", this.sessionKey(id), JSON.stringify(session), "KEEPTTL", "XX");
     }
     return session;
   }
 
   async delete(id: string): Promise<void> {
     await this.run("DEL", this.sessionKey(id));
+  }
+
+  async deleteByKeycloak(sid: string, sub: string): Promise<number> {
+    const key = sid !== "" ? this.indexKeys(sid, "")[0] : this.indexKeys("", sub)[0];
+    if (!key) return 0;
+    const members = await this.run("SMEMBERS", key);
+    let ended = 0;
+    for (const id of Array.isArray(members) ? members : []) {
+      if (typeof id === "string" && /^[A-Za-z0-9_-]{20,100}$/.test(id)) ended += Number(await this.run("DEL", this.sessionKey(id)));
+    }
+    await this.run("DEL", key);
+    return ended;
+  }
+
+  /** The index sets a session belongs to: by Keycloak session id and by user. */
+  private indexKeys(sid: string, sub: string): string[] {
+    const safe = (v: string) => /^[A-Za-z0-9_.:@-]{1,200}$/.test(v);
+    return [...(safe(sid) ? [`${this.prefix}sid:${sid}`] : []), ...(safe(sub) ? [`${this.prefix}sub:${sub}`] : [])];
   }
 
   async putLogin(state: string, login: PendingLogin): Promise<void> {

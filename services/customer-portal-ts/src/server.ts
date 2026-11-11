@@ -4,7 +4,7 @@
 // routes.ts, with a CSRF token, an Origin check and an Idempotency-Key. The browser never sees a token.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { authorizationUrl, endSessionUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
+import { authorizationUrl, endSessionUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, verifyLogoutToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
 import { FORBIDDEN_BODY_FIELDS, IDEMPOTENCY_KEY, matchRoute, QUERY_ALLOWLIST, type Route } from "./routes.ts";
 import type { Audience, ServiceTokenSigner } from "./serviceToken.ts";
 import { LOGIN_TTL_MS, parseCookies, SESSION_COOKIE, sameToken, StoreUnavailable, type RateLimiter, type Session, type SessionStore } from "./session.ts";
@@ -257,12 +257,43 @@ export function createHttpServer(deps: ServerDeps): Server {
     send(res, 200, { items });
   }
 
+  /**
+   * OIDC back-channel logout: Keycloak calls this (no cookie, no CSRF) when a contact's single sign-on session ends, including when
+   * identity disables or remaps the contact. The logout token is verified (signature, issuer, audience, event) and every portal
+   * session of that Keycloak session, or of that user when none is named, is deleted, so a disabled or moved contact is signed out of
+   * the portal at once instead of keeping its old customer for the rest of the 8 hours.
+   */
+  async function backchannelLogout(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let token = "";
+    try {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += (chunk as Buffer).length;
+        if (size > 16 * 1024) return send(res, 400, { error: "invalid_request" });
+        chunks.push(chunk as Buffer);
+      }
+      token = new URLSearchParams(Buffer.concat(chunks).toString("utf8")).get("logout_token") ?? "";
+      const { sid, sub } = await verifyLogoutToken(token, deps.oidc, deps.jwks, now());
+      const ended = await deps.sessions.deleteByKeycloak(sid, sub);
+      log({ msg: "back-channel logout", sessions: ended });
+      send(res, 200, {});
+    } catch (err) {
+      if (err instanceof LoginRefused) {
+        log({ msg: "back-channel logout refused", reason: err.message });
+        return send(res, 400, { error: "invalid_request" });
+      }
+      throw err;
+    }
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://bff.invalid");
     const method = req.method ?? "GET";
     if (url.pathname === "/healthz" || url.pathname === "/readyz") return send(res, 200, { status: "ok" });
     if (method === "GET" && url.pathname === "/bff/login") return login(res);
     if (method === "GET" && url.pathname === "/bff/callback") return callback(url, res);
+    if (method === "POST" && url.pathname === "/bff/backchannel-logout") return backchannelLogout(req, res);
 
     const session = await deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
     if (!session) return problem(res, 401, "CUS-BFF-401", "sign in first");

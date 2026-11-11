@@ -16,19 +16,18 @@ export interface RespOptions {
   username?: string | undefined;
   password?: string | undefined;
   db?: number | undefined;
+  /** Bounds connect, the TLS handshake and AUTH/SELECT together (default 5 s). */
   connectTimeoutMs?: number;
   commandTimeoutMs?: number;
+  /** PEM of the certificate authority that signed the server's certificate, for rediss:// with a private CA. */
+  ca?: string | Buffer | undefined;
 }
 
 export type Dial = (opts: RespOptions) => Socket;
 
 const defaultDial: Dial = (o) => {
-  const connectTimeout = o.connectTimeoutMs ?? 5000;
-  const socket = o.tls ? tlsConnect({ host: o.host, port: o.port, servername: o.host }) : netConnect({ host: o.host, port: o.port });
+  const socket = o.tls ? tlsConnect({ host: o.host, port: o.port, servername: o.host, ...(o.ca ? { ca: o.ca } : {}) }) : netConnect({ host: o.host, port: o.port });
   socket.setNoDelay(true);
-  socket.setTimeout(connectTimeout, () => {
-    if (socket.connecting) socket.destroy(new Error("connect timeout"));
-  });
   return socket;
 };
 
@@ -110,12 +109,31 @@ export class RespClient {
 
   private open(): Promise<void> {
     if (this.ready) return this.ready;
-    const ready = this.connectAndHandshake();
+    const ready = this.connectWithin();
     this.ready = ready;
     ready.catch(() => {
       if (this.ready === ready) this.ready = undefined;
     });
     return ready;
+  }
+
+  /** The whole handshake (TCP, TLS, AUTH, SELECT) under one deadline; a failed or late one drops the socket so nothing leaks. */
+  private async connectWithin(): Promise<void> {
+    const limit = this.opts.connectTimeoutMs ?? 5000;
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("the store did not accept the connection in time")), limit);
+    });
+    const attempt = this.connectAndHandshake();
+    try {
+      await Promise.race([attempt, late]);
+    } catch (err) {
+      attempt.catch(() => undefined);
+      this.drop(err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async connectAndHandshake(): Promise<void> {
@@ -127,10 +145,7 @@ export class RespClient {
     socket.on("close", () => this.drop(new Error("the connection closed"), socket));
     await new Promise<void>((resolve, reject) => {
       const event = this.opts.tls ? "secureConnect" : "connect";
-      socket.once(event, () => {
-        socket.setTimeout(0);
-        resolve();
-      });
+      socket.once(event, () => resolve());
       socket.once("error", reject);
     });
     if (this.opts.password !== undefined) {

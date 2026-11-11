@@ -6,7 +6,7 @@ import { sessionStoreFromEnv } from "../src/main.ts";
 import { api, CUSTOMER_A, LE_1, signIn, startRig, TENANT, type Rig } from "./helpers.ts";
 import { startFakeRedis, type FakeRedis } from "./fakeRedis.ts";
 
-const identity = { userId: "user-1", tenantId: TENANT, customerId: CUSTOMER_A, legalEntityIds: [LE_1], name: "Pat Buyer" };
+const identity = { userId: "user-1", tenantId: TENANT, customerId: CUSTOMER_A, legalEntityIds: [LE_1], name: "Pat Buyer", sessionId: "kc-sid-1" };
 const T0 = 1_000_000;
 
 let redis: FakeRedis | undefined;
@@ -95,7 +95,7 @@ describe("the Redis store on the wire", () => {
     expect(redis.commands.filter((c) => c[0] === "SET")).toHaveLength(1); // fresh enough: no write
     await store.get(s.id, T0 + 5 * 60_000);
     const touch = redis.commands.filter((c) => c[0] === "SET").at(-1)!;
-    expect(touch.at(-1)).toBe("KEEPTTL");
+    expect(touch.slice(-2)).toEqual(["KEEPTTL", "XX"]);
     expect(JSON.parse(redis.dump().get(`p:session:${s.id}`) as string).lastSeenAt).toBe(T0 + 5 * 60_000);
   });
 
@@ -136,7 +136,53 @@ describe("the Redis store on the wire", () => {
   });
 });
 
+describe("session store: touch and back-channel deletion", () => {
+  it("a touch after the session was deleted does not bring it back", async () => {
+    redis = await startFakeRedis();
+    const c = client(redis);
+    const store = new RedisSessionStore(c);
+    const s = await store.create(identity, "t", T0);
+    // The touch is a SET ... KEEPTTL XX: when the key is gone (a logout raced it) nothing is written.
+    await c.command("DEL", `customer-portal:session:${s.id}`);
+    const answer = await c.command("SET", `customer-portal:session:${s.id}`, "x", "KEEPTTL", "XX");
+    expect(answer).toBeNull();
+    expect(redis.dump().has(`customer-portal:session:${s.id}`)).toBe(false);
+    const again = await store.create(identity, "t", T0);
+    await store.get(again.id, T0 + 5 * 60_000);
+    expect(redis.commands.filter((x) => x[0] === "SET").at(-1)).toContain("XX");
+  });
+
+  it("ends the sessions of a Keycloak session or of a user, on any pod", async () => {
+    redis = await startFakeRedis();
+    const a = new RedisSessionStore(client(redis));
+    const b = new RedisSessionStore(client(redis));
+    const one = await a.create(identity, "t", T0);
+    const two = await a.create({ ...identity, sessionId: "kc-sid-2" }, "t", T0);
+    const other = await a.create({ ...identity, userId: "user-2", sessionId: "kc-sid-3" }, "t", T0);
+    expect(await b.deleteByKeycloak("kc-sid-1", "")).toBe(1);
+    expect(await a.get(one.id, T0 + 1)).toBeUndefined();
+    expect(await a.get(two.id, T0 + 1)).toBeDefined();
+    expect(await b.deleteByKeycloak("", "user-1")).toBe(1); // the index still names the ended one, which counts for nothing
+    expect(await a.get(two.id, T0 + 2)).toBeUndefined();
+    expect(await a.get(other.id, T0 + 2)).toBeDefined();
+    expect(await b.deleteByKeycloak("unknown", "")).toBe(0);
+    expect(await b.deleteByKeycloak("bad key with spaces", "")).toBe(0);
+  });
+});
+
 describe("the RESP client", () => {
+  it("gives up on a handshake that does not finish, and leaves no connection behind", async () => {
+    redis = await startFakeRedis({ password: "pw" });
+    redis.mute = true;
+    const c = new RespClient({ host: "127.0.0.1", port: redis.port, tls: false, password: "pw", connectTimeoutMs: 200, commandTimeoutMs: 5000 });
+    clients.push(c);
+    const started = Date.now();
+    await expect(c.command("PING")).rejects.toThrow(/in time/);
+    expect(Date.now() - started).toBeLessThan(2000);
+    redis.mute = false;
+    expect(await c.command("PING")).toBe("PONG");
+  });
+
   it("answers concurrent commands in order", async () => {
     redis = await startFakeRedis();
     const c = client(redis);

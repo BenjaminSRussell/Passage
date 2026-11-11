@@ -42,6 +42,8 @@ export interface Rig {
   answer: (r: Response) => void;
   /** Answers every upstream call whose URL starts with prefix, ahead of `answer`; a later call for the same prefix replaces it, and the handler may return undefined to pass. */
   on: (prefix: string, handler: (call: Call) => Response | undefined) => void;
+  /** Signs a token with the identity provider's key, as Keycloak signs a logout token. */
+  signToken: (claims: Record<string, unknown>) => string;
   /** The IDs of the ID tokens the fake identity provider issued, in order. */
   idTokens: string[];
   /** Claims the fake identity provider puts in the next ID token. */
@@ -69,6 +71,7 @@ export async function startRig(opts: { limit?: number; sessions?: SessionStore }
     next = r;
   };
   const handlers: Array<{ prefix: string; handler: (call: Call) => Response | undefined }> = [];
+  rig.signToken = (claims) => idToken(privateKey, claims);
   rig.on = (prefix, handler) => {
     const i = handlers.findIndex((h) => h.prefix === prefix);
     if (i >= 0) handlers.splice(i, 1);
@@ -111,7 +114,7 @@ export async function startRig(opts: { limit?: number; sessions?: SessionStore }
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   rig.server = server;
   rig.base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  rig.claims = { sub: "user-1", tid: TENANT, customer_id: CUSTOMER_A, le: LE_1, roles: ["customer-user"], name: "Pat Buyer" };
+  rig.claims = { sub: "user-1", tid: TENANT, customer_id: CUSTOMER_A, le: LE_1, roles: ["customer-user"], name: "Pat Buyer", sid: "kc-sid-1" };
   rig.close = () => new Promise((resolve) => server.close(() => resolve()));
   (rig as Rig & { setNonce: (n: string) => void }).setNonce = (n) => {
     lastNonce = n;

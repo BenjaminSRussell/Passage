@@ -4,7 +4,7 @@
 // OIDC_POST_LOGOUT_REDIRECT_URI (default: APP_ORIGIN/); APP_ORIGIN; COOKIE_SECURE=false for local http;
 // RECEIVABLES_URL, BILLING_URL, SALES_URL, PARTY_URL, IDENTITY_URL; PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE;
 // SESSION_STORE_URL (redis:// or rediss:// of a Valkey or Redis server shared by the pods; unset keeps sessions in this pod's memory,
-// which suits development and a single pod only) with SESSION_STORE_PASSWORD or SESSION_STORE_PASSWORD_FILE.
+// which suits development and a single pod only) with SESSION_STORE_PASSWORD or SESSION_STORE_PASSWORD_FILE and, for rediss:// with a private CA, SESSION_STORE_CA_FILE (PEM).
 
 import { readFileSync } from "node:fs";
 import { Jwks, type OidcConfig } from "./oidc.ts";
@@ -45,7 +45,8 @@ export function sessionStoreFromEnv(env: Record<string, string | undefined>, rea
   }
   const file = env["SESSION_STORE_PASSWORD_FILE"];
   const password = (file ? readFile(file).trim() : env["SESSION_STORE_PASSWORD"]) || undefined;
-  return new RedisSessionStore(new RespClient(parseStoreUrl(url, password)));
+  const caFile = env["SESSION_STORE_CA_FILE"];
+  return new RedisSessionStore(new RespClient({ ...parseStoreUrl(url, password), ca: caFile ? readFile(caFile) : undefined }));
 }
 
 export function listenAddress(raw: string | undefined): { host?: string; port: number } {

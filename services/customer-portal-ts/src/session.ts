@@ -37,6 +37,8 @@ export interface SessionStore {
   /** The live session of id (refreshing its idle clock), or undefined when unknown, idle too long or past its absolute lifetime. */
   get(id: string | undefined, now: number): Promise<Session | undefined>;
   delete(id: string): Promise<void>;
+  /** Ends every session of a Keycloak session id and/or user (back-channel logout); answers how many were ended. */
+  deleteByKeycloak(sid: string, sub: string): Promise<number>;
   putLogin(state: string, login: PendingLogin): Promise<void>;
   /** A state is used once: a replayed callback finds nothing. */
   takeLogin(state: string, now: number): Promise<PendingLogin | undefined>;
@@ -75,6 +77,17 @@ export class MemorySessionStore implements SessionStore {
 
   async delete(id: string): Promise<void> {
     this.sessions.delete(id);
+  }
+
+  async deleteByKeycloak(sid: string, sub: string): Promise<number> {
+    let n = 0;
+    for (const [id, s] of this.sessions) {
+      if ((sid !== "" && s.identity.sessionId === sid) || (sid === "" && sub !== "" && s.identity.userId === sub)) {
+        this.sessions.delete(id);
+        n++;
+      }
+    }
+    return n;
   }
 
   async putLogin(state: string, login: PendingLogin): Promise<void> {

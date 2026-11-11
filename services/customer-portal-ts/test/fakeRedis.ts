@@ -23,6 +23,7 @@ export interface FakeRedis {
 export async function startFakeRedis(opts: { password?: string } = {}): Promise<FakeRedis> {
   const store = new Map<string, { value: string; expiresAt: number | undefined }>();
   const sockets = new Set<Socket>();
+  const sets = new Map<string, Set<string>>();
   const clock = { ms: 1_000_000 };
   const fake = { commands: [] as string[][], clock, mute: false, password: opts.password } as FakeRedis;
 
@@ -57,20 +58,41 @@ export async function startFakeRedis(opts: { password?: string } = {}): Promise<
       }
       case "DEL": {
         let n = 0;
-        for (const k of rest) if (live(k)) n += store.delete(k) ? 1 : 0;
+        for (const k of rest) {
+          if (live(k)) n += store.delete(k) ? 1 : 0;
+          else if (sets.delete(k)) n += 1;
+        }
         return `:${n}\r\n`;
+      }
+      case "SADD": {
+        const set = sets.get(rest[0]!) ?? new Set<string>();
+        set.add(rest[1]!);
+        sets.set(rest[0]!, set);
+        return ":1\r\n";
+      }
+      case "PEXPIRE":
+        return ":1\r\n";
+      case "SMEMBERS": {
+        const m = [...(sets.get(rest[0]!) ?? [])];
+        return `*${m.length}\r\n${m.map((x) => `$${Buffer.byteLength(x)}\r\n${x}\r\n`).join("")}`;
       }
       case "SET": {
         const [key, value, ...options] = rest as [string, string, ...string[]];
         let expiresAt: number | undefined;
         let keepTtl = false;
+        let onlyIfExists = false;
         for (let i = 0; i < options.length; i++) {
           const o = options[i]!.toUpperCase();
+          if (o === "XX") {
+            onlyIfExists = true;
+            continue;
+          }
           if (o === "EX") expiresAt = clock.ms + Number(options[++i]) * 1000;
           else if (o === "PX") expiresAt = clock.ms + Number(options[++i]);
           else if (o === "KEEPTTL") keepTtl = true;
           else return "-ERR syntax error\r\n";
         }
+        if (onlyIfExists && !live(key)) return "$-1\r\n";
         if (keepTtl) expiresAt = live(key)?.expiresAt;
         store.set(key, { value, expiresAt });
         return "+OK\r\n";

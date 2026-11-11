@@ -11,7 +11,7 @@ The back end of `apps/customer-portal`. TypeScript on Node 24 (types stripped, n
 | `src/session.ts`, `src/redisStore.ts`, `src/resp.ts` | Sessions behind an HttpOnly `__Host-` cookie (30 min idle, 8 h absolute), single-use login state, CSRF token, per-session rate limit. The store is an interface: in memory for development, or a Valkey or Redis server shared by the pods (`SESSION_STORE_URL`; a small RESP client, no dependency). An unreachable store is 503, never a sign-out |
 | `src/serviceToken.ts` | Signs service tokens (Ed25519, `platform/go/tenant` format) with `iss: customer-portal`, the session's tenant and one legal entity, `act` = contact, and `cus` = the customer. Grants: the read-only customer-portal duties on receivables, billing and sales only |
 | `src/routes.ts` | The table of `/api/v1/*` routes and the one upstream call each becomes, with the one duty each carries. Reads are GET; the only writes are `POST /orders` and `POST /returns` |
-| `src/server.ts` | `/bff/login`, `/bff/callback`, `/bff/me`, `/bff/logout` (answers the Keycloak end-session URL), `/healthz`, `/readyz`, `/api/v1/companies` (names from identity) and the `/api/v1` proxy |
+| `src/server.ts` (`POST /bff/backchannel-logout`) | `/bff/login`, `/bff/callback`, `/bff/me`, `/bff/logout` (answers the Keycloak end-session URL), `/healthz`, `/readyz`, `/api/v1/companies` (names from identity) and the `/api/v1` proxy |
 
 ## Customer scoping
 
@@ -41,3 +41,12 @@ Tests use a fake identity provider, fake upstreams and an in-process Valkey stan
 and `platform/go/tenant/service.go`.
 
 See [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
+
+## Ending sessions when a contact is disabled or remapped
+
+A portal session keeps the contact's customer and companies for up to 8 hours, so ending the Keycloak account is not enough by itself.
+The BFF implements OIDC back-channel logout (`POST /bff/backchannel-logout`, no cookie or CSRF): it verifies the logout token (RS256
+signature from the realm keys, issuer, audience, the logout event, `jti`, a recent `iat`, no `nonce`, a `sid` or `sub`) and deletes the
+portal sessions of that Keycloak session (or of that user when only `sub` is named), in memory or in the shared store (indexes by `sid`
+and `sub`). Identity's disable and remap call Keycloak's user logout, which sends the logout token to the client's
+`backchannel.logout.url` (set in `deploy/keycloak/realm-passage.json`); the edge must route that path to the BFF from Keycloak.
