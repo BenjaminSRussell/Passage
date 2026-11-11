@@ -204,3 +204,34 @@ func TestStore_AutomationArrivalConfirmsInOneTransaction(t *testing.T) {
 	}
 }
 
+// Two batches from one reader posted at the same time (a portal resending after a timeout) store a tag read once.
+func TestStore_RFIDConcurrentRepeatIsOneRead(t *testing.T) {
+	st, ctx, _ := setup(t)
+	reader := "portal-" + ids.New()[:8]
+	at := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	var wg sync.WaitGroup
+	results := make([]RFIDIngest, 8)
+	errs := make([]error, len(results))
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = st.IngestRFID(ctx, []RFIDRead{{ReaderID: reader, EPC: "3074257BF7194E4000001A85", ReadAt: at.Add(time.Duration(i) * time.Millisecond)}})
+		}(i)
+	}
+	wg.Wait()
+	accepted := 0
+	for i, r := range results {
+		if errs[i] != nil {
+			t.Fatalf("batch %d: %v", i, errs[i])
+		}
+		accepted += r.Accepted
+	}
+	stored, err := st.ListRFIDReads(ctx, RFIDFilter{ReaderID: reader, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted != 1 || len(stored) != 1 {
+		t.Fatalf("accepted %d, stored %d; want one read", accepted, len(stored))
+	}
+}

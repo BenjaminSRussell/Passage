@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,12 +56,25 @@ type RFIDStored struct {
 const DedupeWindow = 5 * time.Second
 
 // IngestRFID decodes and stores a batch of reads. A read with an unreadable EPC is rejected and the rest stored. A
-// read of the same tag at the same reader within DedupeWindow of one held (earlier in the batch or in the store) is a
-// duplicate. A tag that is an SSCC the warehouse labelled names its receipt and pallet.
+// read of the same tag at the same reader within DedupeWindow of one held (earlier in the batch, in the store, or in a
+// batch from the same reader committed meanwhile) is a duplicate. A tag that is an SSCC the warehouse labelled names its receipt and pallet.
 func (s *Store) IngestRFID(ctx context.Context, reads []RFIDRead) (RFIDIngest, error) {
 	out := RFIDIngest{Rejected: []RFIDRejected{}, Reads: []RFIDStored{}}
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		out = RFIDIngest{Rejected: []RFIDRejected{}, Reads: []RFIDStored{}}
+		// A duplicate is a read within a sliding window of another, which no unique key can hold, so the check and the
+		// insert run under a lock per reader: two batches from one reader (a portal resending) cannot both store a read.
+		// The readers are locked in order, so two batches naming the same readers cannot deadlock.
+		readers := make([]string, 0, len(reads))
+		for _, rd := range reads {
+			readers = append(readers, rd.ReaderID)
+		}
+		slices.Sort(readers)
+		for _, r := range slices.Compact(readers) {
+			if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('warehouse.rfid_read:' || $1::text || ':' || $2::text, 0))`, tenantID(ctx), r); err != nil {
+				return err
+			}
+		}
 		type seenKey struct{ reader, epc string }
 		seen := map[seenKey][]time.Time{}
 		for i, rd := range reads {
