@@ -2,12 +2,15 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -114,6 +117,12 @@ func (a *Automation) session(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// The PLC numbers its telegrams per link session, from 1 again on this connection: the session name
+	// travels with each event so the warehouse does not take a reused number for a repeat.
+	session, err := newLinkSession(now())
+	if err != nil {
+		return err
+	}
 	cfg := a.Link
 	cfg.Receiver = a.Station
 	cfg.Handler = func(t mfs.Telegram) error {
@@ -121,6 +130,7 @@ func (a *Automation) session(ctx context.Context) error {
 		if err != nil {
 			return nil // a telegram that is no event (a stray MOVE) is acknowledged and ignored
 		}
+		ev.Session = session
 		// A failure NACKs busy: the PLC holds the telegram and sends it again, so nothing is lost.
 		if err := a.Plane.PostEvents(ctx, a.Station, []mfs.Event{ev}); err != nil {
 			a.log().Warn("automation event not delivered to the warehouse; the PLC will resend", "kind", ev.Kind, "err", err)
@@ -183,6 +193,16 @@ func (a *Automation) dispatch(ctx context.Context, link *mfs.Link) error {
 		}
 	}
 	return nil
+}
+
+// newLinkSession names one link session: the time it started and a random part, so two connectors of one
+// station, or a restart within the same clock tick, never share a name.
+func newLinkSession(start time.Time) (string, error) {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("link session name: %w", err)
+	}
+	return strconv.FormatInt(start.UTC().Unix(), 36) + "-" + hex.EncodeToString(b[:]), nil
 }
 
 func (a *Automation) refuse(ctx context.Context, o TransportOrder, reason string) {

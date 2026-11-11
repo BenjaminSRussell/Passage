@@ -169,3 +169,55 @@ func TestAutomationReportsAFaultAndSurvivesAMissingPLC(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The link drops and the connector dials the PLC again: the PLC's sequence starts at 1 again, so the
+// events of the new session carry another session name and the warehouse does not take the second
+// arrival, seq 1 again, for a repeat of the first.
+func TestAutomationNamesEachLinkSession(t *testing.T) {
+	lu1, lu2 := goodSSCC(t, "00012345670000004"), goodSSCC(t, "00012345670000005")
+	w := &fakeWarehouse{orders: []TransportOrder{{ID: "o1", TransportOrder: mfs.TransportOrder{LoadUnit: lu1, From: "A", To: "B"}}}}
+	plc := &mfs.SimPLC{ArriveAfter: 10 * time.Millisecond}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go plc.Serve(ctx, ln)
+	var mu sync.Mutex
+	var conns []net.Conn
+	a := &Automation{Plane: w, Station: "PLC", PollEvery: 20 * time.Millisecond, BackoffMin: 10 * time.Millisecond, BackoffMax: 20 * time.Millisecond,
+		Dial: func(ctx context.Context) (net.Conn, error) {
+			c, err := (&net.Dialer{}).DialContext(ctx, "tcp", ln.Addr().String())
+			if err == nil {
+				mu.Lock()
+				conns = append(conns, c)
+				mu.Unlock()
+			}
+			return c, err
+		},
+		Link: mfs.Config{AckWait: 300 * time.Millisecond, KeepAlive: time.Second}}
+	done := make(chan struct{})
+	go func() { _ = a.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	eventually(t, "the first arrival", func() bool { _, ev := w.snapshot(); return len(ev) == 1 })
+	mu.Lock()
+	_ = conns[0].Close() // the link drops
+	mu.Unlock()
+	eventually(t, "the reconnect", func() bool { mu.Lock(); defer mu.Unlock(); return a.Stats().LinkDrops >= 1 && len(conns) >= 2 })
+	w.mu.Lock()
+	w.orders = append(w.orders, TransportOrder{ID: "o2", TransportOrder: mfs.TransportOrder{LoadUnit: lu2, From: "A", To: "B"}})
+	w.mu.Unlock()
+	eventually(t, "the second arrival", func() bool { _, ev := w.snapshot(); return len(ev) == 2 })
+
+	_, ev := w.snapshot()
+	if ev[0].LoadUnit != lu1 || ev[1].LoadUnit != lu2 {
+		t.Fatalf("events %+v", ev)
+	}
+	if ev[0].Seq != 1 || ev[1].Seq != 1 {
+		t.Fatalf("the PLC's sequence did not restart with the link: %d then %d", ev[0].Seq, ev[1].Seq)
+	}
+	if ev[0].Session == "" || ev[1].Session == "" || ev[0].Session == ev[1].Session {
+		t.Fatalf("link sessions %q and %q, want two different names", ev[0].Session, ev[1].Session)
+	}
+}

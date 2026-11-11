@@ -68,6 +68,8 @@ Tests run the link against a fake PLC over `net.Pipe`. `internal/mfs/sim.go` is 
 and reports the arrival, a fault or a divert) used by the tests and the demo plant. `internal/runtime/automation.go`
 dials the PLC (`EDGE_PLC_ADDR`), sends the warehouse's pending transport orders as MOVE telegrams, reports each as
 SENT or REFUSED, and forwards the PLC's events to the warehouse ingest (`POST /v1/warehouse/automation/events`).
+Each link session has a name that travels with its events: the PLC numbers telegrams from 1 again after every
+reconnect, so the warehouse de-duplicates by station, session and sequence, not by sequence alone.
 Mapping a vendor's telegram profile onto this one is open (NOT-IMPLEMENTED.md).
 
 ## Adapters, buffer and writers (#25)
