@@ -52,7 +52,11 @@ func TestOnhandSuiteFlagsWhatTheGoValidatorQuarantines(t *testing.T) {
 		{check: "serial_unique_per_item", partner: onhandRow("OH-3", "PUMP", "S1", "SN1", "1", "9", "USD"), row: onhandRow("OH-4", "PUMP", "S2", "SN1", "1", "9", "USD")},
 		{check: "item_in_master", row: onhandRow("OH-5", "NOPE", "S1", "", "1", "1", "USD")},
 		{check: "site_required", row: onhandRow("OH-6", "BOLT", "", "", "1", "1", "USD")},
-		{check: "warehouse_required", row: func() dq.Row { r := onhandRow("OH-12", "BOLT", "S9", "", "1", "1", "USD"); r["warehouse"] = ""; return r }()},
+		{check: "warehouse_required", row: func() dq.Row {
+			r := onhandRow("OH-12", "BOLT", "S9", "", "1", "1", "USD")
+			r["warehouse"] = ""
+			return r
+		}()},
 		{check: "unit_required", row: func() dq.Row { r := onhandRow("OH-7", "BOLT", "S4", "", "1", "1", "USD"); r["unit"] = ""; return r }()},
 		{check: "quantity_positive", row: onhandRow("OH-8", "BOLT", "S5", "", "0", "1", "USD")},
 		{check: "value_not_negative", row: onhandRow("OH-9", "BOLT", "S6", "", "1", "-1", "USD")},
