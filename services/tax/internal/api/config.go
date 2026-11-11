@@ -33,6 +33,9 @@ type ConfigStore interface {
 	PutGroup(ctx context.Context, g domain.Group) error
 	DeleteGroup(ctx context.Context, kind, code string) error
 	LoadConfig(ctx context.Context) (domain.Config, error)
+	ListCertificates(ctx context.Context) ([]domain.Certificate, error)
+	PutCertificate(ctx context.Context, c domain.Certificate) error
+	DeleteCertificate(ctx context.Context, number string) error
 
 	GetEntitySetting(ctx context.Context) (store.EntitySetting, error)
 	PutEntitySetting(ctx context.Context, e store.EntitySetting) error
@@ -74,6 +77,9 @@ func (a *API) registerConfig(r chi.Router) {
 	r.With(manage).Put("/v1/tax/groups/{kind}/{code}", a.putGroup)
 	r.With(manage).Delete("/v1/tax/groups/{kind}/{code}", a.deleteGroup)
 	r.With(read).Get("/v1/tax/config", a.getConfig)
+	r.With(read).Get("/v1/tax/exemption-certificates", a.listCertificates)
+	r.With(manage).Put("/v1/tax/exemption-certificates/{number}", a.putCertificate)
+	r.With(manage).Delete("/v1/tax/exemption-certificates/{number}", a.deleteCertificate)
 	r.With(read).Get("/v1/tax/entity-settings", a.getEntitySettings)
 	r.With(manage).Put("/v1/tax/entity-settings", a.putEntitySettings)
 	r.With(read).Get("/v1/tax/vat-boxes", a.listBoxes)
@@ -398,4 +404,49 @@ func (a *API) esl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (a *API) listCertificates(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	out, err := a.config.ListCertificates(r.Context())
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func (a *API) putCertificate(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	var c domain.Certificate
+	if err := httpx.Decode(r, &c); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	number := chi.URLParam(r, "number")
+	if c.Number != "" && c.Number != number {
+		a.reject(w, r, invalid("number", "the number in the body must match the number in the path"))
+		return
+	}
+	c.Number = number
+	if err := a.config.PutCertificate(r.Context(), c); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, c)
+}
+
+func (a *API) deleteCertificate(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	if err := a.config.DeleteCertificate(r.Context(), chi.URLParam(r, "number")); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

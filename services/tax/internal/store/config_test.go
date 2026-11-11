@@ -392,3 +392,65 @@ func TestIntrastatJournalsAreScopedToTheLegalEntity(t *testing.T) {
 		t.Errorf("another legal entity lists %d journals: %v", len(list), err)
 	}
 }
+
+func TestStoredCertificatesExemptACalculationAndProtectTheirCodes(t *testing.T) {
+	s, _, ctx := setup(t)
+	seedConfig(t, s, ctx)
+	cert := domain.Certificate{
+		Exemption: domain.Exemption{Number: "CERT/2026-1", Codes: []string{"VAT19"}, ValidFrom: domain.Day("2026-01-01"), ValidTo: domain.Day("2026-12-31")},
+		PartyRef:  "customer-7", Note: "Resale certificate",
+	}
+	if err := s.PutCertificate(ctx, cert); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListCertificates(ctx)
+	if err != nil || len(got) != 1 || got[0].Number != "CERT/2026-1" || got[0].PartyRef != "customer-7" || got[0].ValidTo.IsZero() {
+		t.Fatalf("certificates = %+v, %v", got, err)
+	}
+	cfg, err := s.LoadConfig(ctx)
+	if err != nil || len(cfg.Exemptions) != 1 {
+		t.Fatalf("stored config carries %d exemptions (%v)", len(cfg.Exemptions), err)
+	}
+	doc := domain.Document{
+		Currency: "EUR", Direction: domain.DirOutput, DocumentDate: domain.Day("2026-03-15"),
+		Party: domain.Party{TaxGroup: "DOMESTIC-DE", Certificate: "CERT/2026-1"},
+		Lines: []domain.Line{{LineRef: "L1", Amount: domain.D("200"), ItemTaxGroup: "STANDARD"}},
+	}
+	res, err := domain.Calculate(doc, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, total := range res.DocumentTaxesByCode {
+		if total.Code == "VAT19" && total.TaxAmount.String() != "0" {
+			t.Errorf("the certificate did not exempt VAT19: %+v", total)
+		}
+	}
+	// An open-ended certificate round trips with no end date.
+	open := cert
+	open.Number, open.ValidTo = "CERT-OPEN", domain.Date{}
+	if err := s.PutCertificate(ctx, open); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.PutCertificate(ctx, domain.Certificate{Exemption: domain.Exemption{Number: "BAD", Codes: []string{"GONE"}, ValidFrom: domain.Day("2026-01-01")}}); asDomainError(err) == nil {
+		t.Errorf("a certificate for a missing code was accepted: %v", err)
+	}
+	if err := s.PutCertificate(ctx, domain.Certificate{Exemption: domain.Exemption{Number: "BAD", Codes: []string{"VAT19"}, ValidFrom: domain.Day("2026-05-01"), ValidTo: domain.Day("2026-04-01")}}); asDomainError(err) == nil {
+		t.Errorf("a certificate that ends before it starts was accepted: %v", err)
+	}
+	if err := s.DeleteGroup(ctx, "item", "STANDARD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteGroup(ctx, "party", "DOMESTIC-DE"); err != nil {
+		t.Fatal(err)
+	}
+	if de := asDomainError(s.DeleteCode(ctx, "VAT19")); de == nil || de.Code != domain.CodeConfigInUse {
+		t.Errorf("deleting a code a certificate names: %v, want TAX-0013", de)
+	}
+	if err := s.DeleteCertificate(ctx, "CERT/2026-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCertificate(ctx, "CERT/2026-1"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("deleting twice: %v", err)
+	}
+}

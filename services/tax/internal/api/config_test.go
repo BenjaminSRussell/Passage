@@ -27,6 +27,15 @@ type fakeConfig struct {
 	err       error
 	putCodes  []domain.ConfigCode
 	putGroups []domain.Group
+	putCerts  []domain.Certificate
+}
+
+func (f *fakeConfig) PutCertificate(_ context.Context, c domain.Certificate) error {
+	f.putCerts = append(f.putCerts, c)
+	return f.err
+}
+func (f *fakeConfig) ListCertificates(context.Context) ([]domain.Certificate, error) {
+	return f.putCerts, f.err
 }
 
 func (f *fakeConfig) LoadConfig(context.Context) (domain.Config, error) { return f.cfg, f.err }
@@ -231,5 +240,29 @@ func TestIntrastatExportIsACSVFile(t *testing.T) {
 	}
 	if rec := do(configRouter(fc), http.MethodGet, "/v1/tax/intrastat/journals/j/export", ``, tenantOne, "tax.intrastat.read"); rec.Code != http.StatusForbidden {
 		t.Errorf("export with only the read duty: %d", rec.Code)
+	}
+}
+
+func TestCertificateRoutes(t *testing.T) {
+	fc := &fakeConfig{}
+	r := configRouter(fc)
+	put := func(path, body string) int {
+		return do(r, http.MethodPut, path, body, tenantOne, "tax.config.manage").Code
+	}
+	if code := put("/v1/tax/exemption-certificates/C-1", `{"number":"C-2","codes":["VAT19"],"valid_from":"2026-01-01"}`); code != http.StatusBadRequest {
+		t.Errorf("a body number that differs from the path: %d", code)
+	}
+	if code := put("/v1/tax/exemption-certificates/C-1", `{"codes":["VAT19"],"valid_from":"2026-01-01","surprise":1}`); code != http.StatusBadRequest {
+		t.Errorf("an unknown field: %d", code)
+	}
+	if len(fc.putCerts) != 0 {
+		t.Fatal("an invalid body reached the store")
+	}
+	if code := put("/v1/tax/exemption-certificates/C-1", `{"codes":["VAT19"],"valid_from":"2026-01-01"}`); code != http.StatusOK || fc.putCerts[0].Number != "C-1" {
+		t.Errorf("a valid certificate: %d, stored %+v", code, fc.putCerts)
+	}
+	rec := do(r, http.MethodGet, "/v1/tax/exemption-certificates", ``, tenantOne, "tax.config.read")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"number":"C-1"`) {
+		t.Errorf("list: %d %s", rec.Code, rec.Body.String())
 	}
 }
