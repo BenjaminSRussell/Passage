@@ -46,7 +46,7 @@ import { AddressAction } from "./AddressAction";
 import { EditAction } from "./RowEdit";
 import { FilterSelect, StatusAction, useRows } from "./referenceParts";
 import { parentCell, useUnitParents } from "./unitParents";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const dash = "—";
 const ouCode = /^[A-Za-z0-9][A-Za-z0-9_-]{1,19}$/;
@@ -520,7 +520,7 @@ export function SitesPage() {
                     id={`site-edit-wh-${row.id}`}
                     label="Default warehouse"
                     optional
-                    hint={warehouses.error ? `Warehouses could not be loaded (${warehouses.error.code}).` : undefined}
+                    hint={warehouses.error ? `Warehouses could not be loaded. ${problemSummary(warehouses.error)}` : undefined}
                     error={errors.defaultWarehouseId}
                   >
                     {(control) => (
@@ -539,7 +539,7 @@ export function SitesPage() {
                     id={`site-edit-cal-${row.id}`}
                     label="Fiscal calendar"
                     optional
-                    hint={calendars.error ? `Fiscal calendars could not be loaded (${calendars.error.code}).` : "Blank uses the legal entity's calendar."}
+                    hint={calendars.error ? `Fiscal calendars could not be loaded. ${problemSummary(calendars.error)}` : "Blank uses the legal entity's calendar."}
                     error={errors.fiscalCalendarId}
                   >
                     {(control) => (

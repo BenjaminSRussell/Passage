@@ -145,7 +145,7 @@ describe("data-quality rule detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save rule" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Someone else changed this rule");
-    expect(alert).toHaveTextContent("(ANA-0113)");
+    expect(alert).toHaveTextContent("Reload the page to see the current version");
   });
 
   it("mutes the rule for 7 days through the same versioned save", async () => {

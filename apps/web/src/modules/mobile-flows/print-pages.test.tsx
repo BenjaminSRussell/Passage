@@ -473,7 +473,7 @@ describe("print document (FR-32.13)", () => {
     fireEvent.change(screen.getByLabelText("PDF file"), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Print document" }));
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("no printer is routed for COA (MOB-0112)");
+    expect(alert).toHaveTextContent("No printer queue is set up for this document");
     fireEvent.click(within(alert).getByRole("button", { name: "Print from the browser" }));
     expect(createObjectURL).toHaveBeenCalledWith(file);
     expect(open).toHaveBeenCalledWith("blob:coa", "_blank", "noopener");

@@ -135,7 +135,7 @@ describe("ValuationSetupPage", () => {
       "GET /api/v1/costing/valuation-categories": () => json(200, { items: [] }),
     });
     at("/costing/valuation-setup");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     expect(await screen.findByText("No valuation categories yet")).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -184,7 +184,7 @@ describe("CreateLedgerPage", () => {
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "TAX" } });
     fireEvent.click(screen.getByLabelText("Primary ledger"));
     fireEvent.click(screen.getByRole("button", { name: "Create ledger" }));
-    expect(await findAlert()).toHaveTextContent("CST-VLG-003");
+    expect(await findAlert()).toHaveTextContent("the legal entity already has a primary valuation ledger");
   });
 });
 

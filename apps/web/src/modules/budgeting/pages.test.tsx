@@ -158,7 +158,7 @@ describe("RulesPage", () => {
       "GET /api/v1/budget/control-rules": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/budgeting");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No budget control rules yet")).toBeInTheDocument();
@@ -221,7 +221,7 @@ describe("RuleDetailPage", () => {
   it("shows the problem when the rule cannot be loaded", async () => {
     stubRoutes({ [`GET /api/v1/budget/control-rules/${R1}`]: () => json(404, { title: "Not Found", code: "BUD-0001", detail: "budget control rule version not found" }) });
     at(`/budgeting/rules/${R1}`);
-    expect(await findAlert()).toHaveTextContent("BUD-0001");
+    expect(await findAlert()).toHaveTextContent("budget control rule version not found");
   });
 });
 
@@ -288,7 +288,7 @@ describe("BudgetCheckPage", () => {
     fireEvent.change(screen.getByLabelText("Time span"), { target: { value: "FY2026" } });
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Run check" }));
-    expect(await screen.findByText(/BUD-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/already reserved against another control combination/)).toBeInTheDocument();
   });
 
   it("shows a recorded check", async () => {
@@ -367,6 +367,6 @@ describe("EncumbrancePage", () => {
     at(`/budgeting/encumbrances/${E1}`);
     fireEvent.click(await screen.findByRole("button", { name: "Release remaining funds" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm release" }));
-    expect(await screen.findByText("BUD-0010: the encumbrance has nothing open to release")).toBeInTheDocument();
+    expect(await screen.findByText("the encumbrance has nothing open to release")).toBeInTheDocument();
   });
 });

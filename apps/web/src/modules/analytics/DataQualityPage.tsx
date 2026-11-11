@@ -362,7 +362,7 @@ function RuleForm({ initial, existing, onSaved }: { initial: Draft; existing: DQ
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title={failure.code === "ANA-0113" ? "Someone else changed this rule" : "The rule was not saved"} live="alert">
-              {failure.code === "ANA-0113" ? "Reload the page to see the current version, then make your change again." : failure.message} ({failure.code})
+              <ProblemMessage problem={failure} message={failure.code === "ANA-0113" ? "Reload the page to see the current version, then make your change again." : undefined} />
             </Alert>
           </div>
         ) : null}

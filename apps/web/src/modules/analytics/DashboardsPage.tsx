@@ -243,7 +243,7 @@ function DashboardForm({
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title={conflict ? "Someone else changed this dashboard" : "The dashboard was not saved"} live="alert">
-              {conflict ? "Reload the page to see the current version, then make your change again." : failure.message} ({failure.code})
+              <ProblemMessage problem={failure} message={conflict ? "Reload the page to see the current version, then make your change again." : undefined} />
             </Alert>
           </div>
         ) : null}

@@ -174,7 +174,7 @@ describe("dashboards", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save dashboard" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Someone else changed this dashboard");
-    expect(alert).toHaveTextContent("(ANA-0113)");
+    expect(alert).toHaveTextContent("Reload the page to see the current version");
     fireEvent.click(screen.getByRole("button", { name: "Save dashboard" }));
     expect(await screen.findByText("MTD, QTD, YTD or TRAILING_12M")).toBeInTheDocument();
   });

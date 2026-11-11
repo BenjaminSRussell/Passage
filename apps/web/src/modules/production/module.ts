@@ -1,3 +1,4 @@
+import { ProblemMessage } from "../../shell/errors";
 import { createElement } from "react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -157,7 +158,7 @@ function IntakeConvertRoute() {
     return createElement(
       "div",
       null,
-      createElement(Alert, { tone: "danger", title: "The planned order is not available", live: "alert" }, `${error.message} (${error.code})`),
+      createElement(Alert, { tone: "danger", title: "The planned order is not available", live: "alert" }, createElement(ProblemMessage, { problem: error })),
       createElement(Button, { onClick: () => navigate(`${list}/planned-intake`) }, "Back to planned orders"),
     );
   }

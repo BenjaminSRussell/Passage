@@ -5,7 +5,7 @@ import { createRun, CURRENCY_TYPES, describeProblem, listDefinitions, listHierar
 import { CURRENCY_TYPE_LABELS, fiscalCalendar, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 export interface RunValues {
   definition: string;
@@ -237,7 +237,7 @@ export function NewRunPage() {
             optional
             hint={
               hierarchies.error
-                ? `The hierarchies could not be loaded (${hierarchies.error.code}). The run uses the definition's own rows.`
+                ? `The hierarchies could not be loaded. ${problemSummary(hierarchies.error)} The run uses the definition's own rows.`
                 : "One row per node of a published hierarchy, with the definition's columns. Empty uses the definition's own rows."
             }
             error={errors.hierarchy}
@@ -278,7 +278,7 @@ export function NewRunPage() {
             optional
             hint={
               trees.error
-                ? `The trees could not be loaded (${trees.error.code}). The run covers the whole ledger.`
+                ? `The trees could not be loaded. ${problemSummary(trees.error)} The run covers the whole ledger.`
                 : "Run the statement for one unit of a tree, rolled up over the units below it. Empty covers the whole ledger."
             }
           >

@@ -1,5 +1,6 @@
 // API client for the budgeting service (services/budgeting/api/openapi.yaml).
 // Browser calls use /api/v1/budget/... which the web BFF rewrites to the service's /v1/budget/... paths.
+import { problemSummary } from "../../../shell/errors";
 import type { CheckLineResult, DocumentType } from "../logic";
 import { apiFetch } from "../../../shell/api/http";
 
@@ -270,7 +271,7 @@ export function describeError(err: unknown, fallback: string): string {
   const fields = Object.entries(err.problem.errors ?? {})
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([field, msg]) => `${field} ${msg}`);
-  return [`${err.problem.code}: ${err.message}`, ...fields].join("; ");
+  return [problemSummary(err, err.message), ...fields].join("; ");
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

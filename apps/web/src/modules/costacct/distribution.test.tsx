@@ -152,7 +152,7 @@ describe("Top-down runs", () => {
     let fail = true;
     stubRoutes({ "GET /api/v1/controlling/top-down-runs": () => (fail ? json(503, { title: "down", code: "COM-0500" }) : json(200, { items: [] })) });
     at("/costacct/top-down-runs");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No top-down runs yet")).toBeInTheDocument();
@@ -190,7 +190,7 @@ describe("Top-down runs", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Run distribution" }));
-    expect(await screen.findByText(/CST-0012/)).toBeInTheDocument();
+    expect(await screen.findByText(/exceeds the 11000.00 booked on the source/)).toBeInTheDocument();
     refuse = false;
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "11000" } });
     fireEvent.click(screen.getByRole("button", { name: "Run distribution" }));

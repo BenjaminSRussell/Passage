@@ -240,7 +240,7 @@ describe("CreateAdjustmentPage", () => {
     fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: "NRV" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview adjustment" }));
     fireEvent.click(await screen.findByRole("button", { name: "Post adjustment" }));
-    expect(await screen.findByText(/CST-ADJ-006/)).toBeInTheDocument();
+    expect(await screen.findByText(/the value changed since the preview/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Post adjustment" })).not.toBeInTheDocument();
   });
 
@@ -336,7 +336,7 @@ describe("Reconciliation pages", () => {
     expect(balances.value.split("\n")[0]).toBe("product,site,balance");
     fireEvent.change(balances, { target: { value: `product,site,balance\n${P1},${S1},10` } });
     fireEvent.click(screen.getByRole("button", { name: "Run and store" }));
-    expect(await screen.findByText(/CST-RPT-002/)).toBeInTheDocument();
+    expect(await screen.findByText(/must name exactly the grouping dimensions/)).toBeInTheDocument();
   });
 
   it("says when a run is not found", async () => {
