@@ -84,3 +84,29 @@ func TestBankAccountRoutes(t *testing.T) {
 		t.Errorf("delete without an entity: %d", rec.Code)
 	}
 }
+
+func TestBackfillRoute(t *testing.T) {
+	f := &fakeStore{}
+	h := router(f)
+	post := func(body, duty string) int {
+		return do(h, http.MethodPost, "/v1/receivables/gl-journals:backfill", body, duty, nil).Code
+	}
+	if code := post(`{"legalEntityId":"`+testLE+`"}`, "receivables.view"); code != http.StatusForbidden {
+		t.Errorf("a viewer may not backfill: %d", code)
+	}
+	for name, body := range map[string]string{
+		"no entity":              `{}`,
+		"account without a date": `{"legalEntityId":"` + testLE + `","openingAccount":"3900"}`,
+		"date without account":   `{"legalEntityId":"` + testLE + `","openingDate":"2027-01-01"}`,
+		"bad account":            `{"legalEntityId":"` + testLE + `","openingAccount":"39 00","openingDate":"2027-01-01"}`,
+		"bad date":               `{"legalEntityId":"` + testLE + `","openingAccount":"3900","openingDate":"new year"}`,
+	} {
+		if code := post(body, "receivables.payment.post"); code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", name, code)
+		}
+	}
+	if code := post(`{"legalEntityId":"`+testLE+`","openingAccount":"3900","openingDate":"2027-01-01"}`, "receivables.payment.post"); code != http.StatusOK ||
+		f.backfill.OpeningAccount != "3900" || f.backfill.OpeningDate != "2027-01-01" || f.backfill.LegalEntityID != testLE {
+		t.Errorf("valid backfill: %d %+v", code, f.backfill)
+	}
+}

@@ -1681,6 +1681,48 @@ paths:
                     items: { $ref: "#/components/schemas/GLJournalView" }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/gl-journals:backfill:
+    post:
+      operationId: backfillGLJournals
+      summary: Queue the journals owed for payments recorded before the ledger journals existed, and for opening-item imports
+      description: |
+        For each payment of the legal entity with no cash receipt journal (ADVISED and CONFIRMED payments book no cash), queues
+        Dr bank / Cr 1205, and, for such a payment applied before the journals existed, one journal for its applications
+        (Dr 1205, Dr 4100, Dr 6100 / Cr 1200). A payment that already has an application journal is left to them. At
+        most 1000 payments a call; `more` says to call again. With `openingAccount` and `openingDate` (both or neither) it
+        also queues one journal per opening-item import source and currency for the open amount the import set: Dr 1200
+        against the opening account (the other way for a net credit). Use that only when the ledger's own opening balance does
+        not already carry the receivable. Every journal has its own key, so a repeat queues nothing twice; the sweeper
+        posts them. Dunning fees, interest, down payments and deductions are not backfilled.
+      x-passage-duty: receivables.payment.post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                openingAccount: { type: string, maxLength: 20 }
+                openingDate: { type: string, format: date }
+      responses:
+        "200":
+          description: What was queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receipts, applications, openingItems, openingAlreadyQueued, more]
+                properties:
+                  receipts: { type: integer }
+                  applications: { type: integer }
+                  openingItems: { type: integer }
+                  openingAlreadyQueued: { type: integer }
+                  more: { type: boolean }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/receivables/gl-journals:sweep:
     post:
       operationId: sweepGLJournals

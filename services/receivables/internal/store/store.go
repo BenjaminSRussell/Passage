@@ -220,6 +220,7 @@ type Store interface {
 	BackfillRMAReservationFor(ctx context.Context, legalEntityID, rmaID, invoiceID string, lines []RMAInvoiceLine) (RMACreditView, error)
 	ListRMACredits(ctx context.Context, f RMACreditFilter) ([]RMACreditView, error)
 	SweepRMACredits(ctx context.Context, now time.Time, limit int) (RMASweepResult, error)
+	BackfillGLJournals(ctx context.Context, req BackfillRequest) (BackfillResult, error)
 	ListBankAccounts(ctx context.Context, legalEntityID string) ([]BankAccount, error)
 	PutBankAccount(ctx context.Context, b BankAccount) error
 	DeleteBankAccount(ctx context.Context, legalEntityID, currency, accountRef string) error

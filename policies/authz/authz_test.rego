@@ -2401,6 +2401,8 @@ test_subscription_usage_and_due_job_belong_to_invoice_maintain if {
 test_gl_journal_routes_split_between_view_and_payment_duties if {
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals/j1:retry")
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:sweep")
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:backfill")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:backfill")
 	allowed("receivables.view", "GET", "/v1/receivables/gl-journals")
 	allowed("receivables.view", "GET", "/v1/receivables/gl-reconciliation")
 	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:sweep")

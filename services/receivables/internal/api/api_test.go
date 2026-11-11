@@ -30,6 +30,7 @@ type fakeStore struct {
 	lockbox       store.LockboxImport
 	adviceOptions store.AdviceOptions
 	banks         []store.BankAccount
+	backfill      store.BackfillRequest
 	deletedBank   string
 	seenFiles     map[string]bool
 	statement     statementCall
@@ -103,6 +104,10 @@ func (f *fakeStore) SweepRMACredits(context.Context, time.Time, int) (store.RMAS
 	return store.RMASweepResult{Posted: 1}, nil
 }
 
+func (f *fakeStore) BackfillGLJournals(_ context.Context, req store.BackfillRequest) (store.BackfillResult, error) {
+	f.backfill = req
+	return store.BackfillResult{Receipts: 2}, nil
+}
 func (f *fakeStore) ListBankAccounts(context.Context, string) ([]store.BankAccount, error) {
 	return f.banks, nil
 }

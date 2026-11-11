@@ -959,6 +959,7 @@
       {"resource": "/v1/receivables/rma-credits/*:retry", "methods": ["POST"]},
       {"resource": "/v1/receivables/rma-credits:sweep", "methods": ["POST"]},
       {"resource": "/v1/receivables/gl-journals/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/receivables/gl-journals:backfill", "methods": ["POST"]},
       {"resource": "/v1/receivables/gl-journals:sweep", "methods": ["POST"]}
     ]},
     "receivables.payment.refund": {"permissions": [{"resource": "/v1/receivables/down-payments/*:release", "methods": ["POST"]}]},
