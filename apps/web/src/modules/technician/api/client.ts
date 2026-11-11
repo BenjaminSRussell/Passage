@@ -19,7 +19,11 @@ async function problem(res: Response): Promise<RefusedError> {
   return new RefusedError(detail, res.status, code);
 }
 
-/** Runs a request; a lost connection or a passing server fault is an OfflineError, a 4xx a RefusedError. */
+/**
+ * Runs a request; a lost connection, a passing server fault or an ended session is an OfflineError, any other 4xx a
+ * RefusedError. A 401 must not be a refusal: the sync drops refused entries, and a session that expired during an
+ * offline day would otherwise throw away the day's queued work instead of keeping it until the technician signs in.
+ */
 async function call(url: string, init: RequestInit): Promise<Response> {
   let res: Response;
   try {
@@ -28,6 +32,7 @@ async function call(url: string, init: RequestInit): Promise<Response> {
     throw new OfflineError("offline");
   }
   if (res.ok) return res;
+  if (res.status === 401) throw new OfflineError("signed out");
   if (res.status >= 500 || res.status === 408 || res.status === 429) throw new OfflineError(`server ${res.status}`);
   throw await problem(res);
 }
