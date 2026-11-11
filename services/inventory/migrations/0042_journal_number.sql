@@ -30,7 +30,7 @@ BEGIN
     INSERT INTO inventory_journal_counter AS c (tenant_id, legal_entity_id, last_number) VALUES (NEW.tenant_id, NEW.legal_entity_id, 1)
       ON CONFLICT (tenant_id, legal_entity_id) DO UPDATE SET last_number = c.last_number + 1
       RETURNING last_number INTO n;
-    NEW.number := 'IJ-' || lpad(n::text, 6, '0');
+    NEW.number := 'IJ-' || lpad(n::text, greatest(6, length(n::text)), '0');
   END IF;
   RETURN NEW;
 END
@@ -38,10 +38,11 @@ $$;
 DROP TRIGGER IF EXISTS inventory_journal_number ON inventory_journal;
 CREATE TRIGGER inventory_journal_number BEFORE INSERT ON inventory_journal FOR EACH ROW EXECUTE FUNCTION inventory_journal_assign_number();
 
--- Backfill: existing journals are numbered per legal entity in the order they
--- were created, and the counter continues after them. It reads every tenant, so
--- it runs only under a role that bypasses row-level security; under passage_app
--- it is skipped with a notice.
+-- Backfill: journals without a number are numbered per legal entity in the
+-- order they were created, after the legal entity's counter (so a re-run never
+-- reuses a number the trigger already gave out), and the counter moves on past
+-- them. It reads every tenant, so it runs only under a role that bypasses
+-- row-level security; under passage_app it is skipped with a notice.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolbypassrls)) THEN
@@ -49,13 +50,18 @@ BEGIN
     RETURN;
   END IF;
   WITH numbered AS (
-    SELECT tenant_id, id, row_number() OVER (PARTITION BY tenant_id, legal_entity_id ORDER BY created_at, id) AS n
-    FROM inventory_journal WHERE number IS NULL
+    SELECT j.tenant_id, j.legal_entity_id, j.id,
+           coalesce(c.last_number, 0) + row_number() OVER (PARTITION BY j.tenant_id, j.legal_entity_id ORDER BY j.created_at, j.id) AS n
+    FROM inventory_journal j
+    LEFT JOIN inventory_journal_counter c ON c.tenant_id = j.tenant_id AND c.legal_entity_id = j.legal_entity_id
+    WHERE j.number IS NULL
+  ), assigned AS (
+    UPDATE inventory_journal j SET number = 'IJ-' || lpad(numbered.n::text, greatest(6, length(numbered.n::text)), '0')
+    FROM numbered WHERE j.tenant_id = numbered.tenant_id AND j.id = numbered.id
+    RETURNING numbered.tenant_id, numbered.legal_entity_id, numbered.n
   )
-  UPDATE inventory_journal j SET number = 'IJ-' || lpad(numbered.n::text, 6, '0')
-  FROM numbered WHERE j.tenant_id = numbered.tenant_id AND j.id = numbered.id;
   INSERT INTO inventory_journal_counter (tenant_id, legal_entity_id, last_number)
-    SELECT tenant_id, legal_entity_id, count(*) FROM inventory_journal GROUP BY tenant_id, legal_entity_id
+    SELECT tenant_id, legal_entity_id, max(n) FROM assigned GROUP BY tenant_id, legal_entity_id
     ON CONFLICT (tenant_id, legal_entity_id) DO UPDATE SET last_number = greatest(inventory_journal_counter.last_number, excluded.last_number);
 END
 $$;

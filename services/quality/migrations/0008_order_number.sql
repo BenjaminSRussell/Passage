@@ -23,7 +23,7 @@ BEGIN
     INSERT INTO quality_order_counter AS c (tenant_id, last_number) VALUES (NEW.tenant_id, 1)
       ON CONFLICT (tenant_id) DO UPDATE SET last_number = c.last_number + 1
       RETURNING last_number INTO n;
-    NEW.number := 'QO-' || lpad(n::text, 6, '0');
+    NEW.number := 'QO-' || lpad(n::text, greatest(6, length(n::text)), '0');
   END IF;
   RETURN NEW;
 END
@@ -31,10 +31,12 @@ $$;
 DROP TRIGGER IF EXISTS quality_order_number ON quality_order;
 CREATE TRIGGER quality_order_number BEFORE INSERT ON quality_order FOR EACH ROW EXECUTE FUNCTION quality_order_assign_number();
 
--- Backfill: existing orders are numbered per tenant in the order they were
--- created, and the counter continues after them. It reads every tenant, so it
--- runs only under a role that bypasses row-level security; under passage_app it
--- is skipped with a notice (the orders keep no number and show their short id).
+-- Backfill: orders without a number are numbered per tenant in the order they
+-- were created, after the tenant's counter (so a re-run never reuses a number
+-- the trigger already gave out), and the counter moves on past them. It reads
+-- every tenant, so it runs only under a role that bypasses row-level security;
+-- under passage_app it is skipped with a notice (the orders keep no number and
+-- show their short id).
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolbypassrls)) THEN
@@ -42,13 +44,17 @@ BEGIN
     RETURN;
   END IF;
   WITH numbered AS (
-    SELECT tenant_id, id, row_number() OVER (PARTITION BY tenant_id ORDER BY created_at, id) AS n
-    FROM quality_order WHERE number IS NULL
+    SELECT o.tenant_id, o.id,
+           coalesce(c.last_number, 0) + row_number() OVER (PARTITION BY o.tenant_id ORDER BY o.created_at, o.id) AS n
+    FROM quality_order o LEFT JOIN quality_order_counter c ON c.tenant_id = o.tenant_id
+    WHERE o.number IS NULL
+  ), assigned AS (
+    UPDATE quality_order o SET number = 'QO-' || lpad(numbered.n::text, greatest(6, length(numbered.n::text)), '0')
+    FROM numbered WHERE o.tenant_id = numbered.tenant_id AND o.id = numbered.id
+    RETURNING numbered.tenant_id, numbered.n
   )
-  UPDATE quality_order o SET number = 'QO-' || lpad(numbered.n::text, 6, '0')
-  FROM numbered WHERE o.tenant_id = numbered.tenant_id AND o.id = numbered.id;
   INSERT INTO quality_order_counter (tenant_id, last_number)
-    SELECT tenant_id, count(*) FROM quality_order GROUP BY tenant_id
+    SELECT tenant_id, max(n) FROM assigned GROUP BY tenant_id
     ON CONFLICT (tenant_id) DO UPDATE SET last_number = greatest(quality_order_counter.last_number, excluded.last_number);
 END
 $$;
