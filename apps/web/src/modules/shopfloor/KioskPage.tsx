@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Input, PageHeader } from "../../shell/u
 import { badgeLogin, describeProblem, newKey, type KioskSession, type Problem, type RegistrationInput } from "./api/client";
 import { formatDateTime } from "./format";
 import { KIOSK_DEVICE_ID, KioskJobs } from "./KioskJobs";
+import { KioskPiList } from "./KioskPiList";
 import { KioskSyncStatus } from "./KioskSyncStatus";
 import { kioskQueue, OfflineQueueFullError, submitOrQueue } from "./offlineQueue";
 import styles from "./pages.module.css";
@@ -163,6 +164,7 @@ export function KioskPage() {
             onOpenJobsChange={(openJobs) => setSession((s) => (s ? { ...s, openJobs } : s))}
           />
         ) : null}
+        {session?.clockedInAt ? <KioskPiList key={`pi-${session.workerId}`} resourceId={session.defaultResourceId ?? null} /> : null}
       </div>
     </div>
   );
