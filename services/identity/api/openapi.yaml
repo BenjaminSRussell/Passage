@@ -132,6 +132,166 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/identity/customer-contacts:
+    get:
+      operationId: listCustomerContacts
+      x-passage-duty: identity.customer-contact.maintain
+      description: The customer portal contacts of the tenant, optionally for one customer or one status, ordered by contact id (page with after).
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [enabled, disabled] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: after, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: One page of contacts., content: { application/json: { schema: { $ref: '#/components/schemas/CustomerContactList' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: inviteCustomerContact
+      x-passage-duty: identity.customer-contact.maintain
+      description: >-
+        Invites a person to the customer portal for one customer and the named legal entities (#30). Creates the user in the
+        tenant's Keycloak realm with the role customer-user, the claims tenant_id, legal_entity_id (comma separated) and customer_id as
+        attributes, and the required actions verify email, set a password and configure an authenticator (MFA enrolment), then asks
+        Keycloak to email the link. A retry adopts the user an earlier attempt created. invitationSent is false when Keycloak could not
+        send the email; :resend sends it again. The caller needs scope over every named legal entity. Identity does not read customers,
+        so the customerId is taken as given. 409 IDN-CONTACT-EXISTS for an address already invited; 502 IDN-CONTACT-KEYCLOAK when
+        Keycloak refused and nothing was stored; 503 IDN-CONTACT-KEYCLOAK-OFF when Keycloak administration is not configured. Audited
+        and emitted as dev.passage.identity.customercontact.invited.v1 (ids only, never the address).
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, customerId, legalEntityIds]
+              properties:
+                email: { type: string, format: email }
+                givenName: { type: string, maxLength: 100 }
+                familyName: { type: string, maxLength: 100 }
+                customerId: { type: string, format: uuid }
+                legalEntityIds: { type: array, minItems: 1, maxItems: 20, items: { type: string, format: uuid } }
+      responses:
+        '201': { description: The contact., content: { application/json: { schema: { $ref: '#/components/schemas/CustomerContact' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/identity/customer-contacts/{id}:
+    patch:
+      operationId: remapCustomerContact
+      x-passage-duty: identity.customer-contact.maintain
+      description: >-
+        Maps the contact to another customer and set of legal entities: the Keycloak attributes are rewritten and the contact's
+        sessions end, so the next sign-in carries the new claims; the registry row follows. The caller needs scope over the new and the
+        old legal entities. 409 IDN-CONTACT-DISABLED for a disabled contact. Audited and emitted as
+        dev.passage.identity.customercontact.remapped.v1.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId, legalEntityIds]
+              properties:
+                customerId: { type: string, format: uuid }
+                legalEntityIds: { type: array, minItems: 1, maxItems: 20, items: { type: string, format: uuid } }
+      responses:
+        '200': { description: The contact with its new mapping., content: { application/json: { schema: { $ref: '#/components/schemas/CustomerContact' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/identity/customer-contacts/{id}:resend:
+    post:
+      operationId: resendCustomerContactInvitation
+      x-passage-duty: identity.customer-contact.maintain
+      description: Asks Keycloak to email the invitation link again (the link lasts seven days). 409 IDN-CONTACT-DISABLED for a disabled contact.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The contact with invitationSent true., content: { application/json: { schema: { $ref: '#/components/schemas/CustomerContact' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/identity/customer-contacts/{id}:disable:
+    post:
+      operationId: disableCustomerContact
+      x-passage-duty: identity.customer-contact.maintain
+      description: Disables the Keycloak account, ends its sessions and marks the contact disabled. Idempotent. Audited and emitted as dev.passage.identity.customercontact.disabled.v1.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The disabled contact., content: { application/json: { schema: { $ref: '#/components/schemas/CustomerContact' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/identity/customer-portal/legal-entity:
+    get:
+      operationId: customerPortalLegalEntity
+      x-passage-duty: identity.customer-portal.read
+      description: >-
+        For the customer portal only (#30): the service-only duty, and the caller must be the customer-portal service token acting for a
+        customer (a staff caller is 403). Answers the display name of the one legal entity of the token, for the portal's company
+        selector; no id is taken from the request.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+      responses:
+        '200':
+          description: The legal entity of the token.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  legalEntityId: { type: string, format: uuid }
+                  displayName: { type: string }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/authz/roles:
     get:
       operationId: listRoles
@@ -592,6 +752,28 @@ components:
       description: Cursor; the next value of the previous page.
       schema: { type: string, format: uuid }
   schemas:
+    CustomerContact:
+      type: object
+      required: [contactId, email, customerId, legalEntityIds, status, invitationSent]
+      properties:
+        contactId: { type: string, format: uuid }
+        email: { type: string }
+        displayName: { type: string }
+        customerId: { type: string, format: uuid }
+        legalEntityIds: { type: array, items: { type: string, format: uuid } }
+        status: { type: string, enum: [enabled, disabled] }
+        invitationSent: { type: boolean }
+        invitedBy: { type: string }
+        invitedAt: { type: string, format: date-time }
+        lastInvitationSentAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    CustomerContactList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CustomerContact' } }
+        next: { type: string }
     User:
       type: object
       required: [userId, idpSubject, displayName, status, createdAt]

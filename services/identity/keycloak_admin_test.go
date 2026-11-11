@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,6 +42,19 @@ type fakeKeycloak struct {
 	failures int // how many admin calls answer status before it clears; 0 means all of them
 	expire   bool
 	gate     chan struct{} // when set, each admin call sends on it and then waits for a receive-side send
+
+	// What the customer contact calls leave behind.
+	created     int
+	roleMaps    []string // realm/user/role
+	emails      []sentEmail
+	noRole      bool // the realm has no customer-user role
+	emailStatus int  // when set, execute-actions-email answers it
+}
+
+type sentEmail struct {
+	realm, user string
+	query       url.Values
+	actions     []string
 }
 
 func newFakeKeycloak(t *testing.T) *fakeKeycloak {
@@ -159,6 +173,49 @@ func (f *fakeKeycloak) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		f.puts = append(f.puts, rep)
 		users[parts[1]] = rep
+		w.WriteHeader(http.StatusNoContent)
+	case rest == "users" && r.Method == http.MethodPost:
+		var rep map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&rep); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		for _, u := range users {
+			if strings.EqualFold(u["username"].(string), fmt.Sprint(rep["username"])) {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+		}
+		if f.users[realm] == nil {
+			f.users[realm] = map[string]map[string]any{}
+		}
+		f.created++
+		id := fmt.Sprintf("40000000-0000-0000-0000-0000000002%02d", f.created)
+		rep["id"] = id
+		f.users[realm][id] = rep
+		w.Header().Set("Location", r.URL.Path+"/"+id)
+		w.WriteHeader(http.StatusCreated)
+	case len(parts) == 2 && parts[0] == "roles" && r.Method == http.MethodGet:
+		if f.noRole || parts[1] != "customer-user" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "role-1", "name": parts[1]})
+	case len(parts) == 4 && parts[0] == "users" && parts[2] == "role-mappings" && r.Method == http.MethodPost:
+		var roles []map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&roles)
+		for _, role := range roles {
+			f.roleMaps = append(f.roleMaps, realm+"/"+parts[1]+"/"+fmt.Sprint(role["name"]))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case len(parts) == 3 && parts[0] == "users" && parts[2] == "execute-actions-email" && r.Method == http.MethodPut:
+		if f.emailStatus != 0 {
+			w.WriteHeader(f.emailStatus)
+			return
+		}
+		var actions []string
+		_ = json.NewDecoder(r.Body).Decode(&actions)
+		f.emails = append(f.emails, sentEmail{realm: realm, user: parts[1], query: r.URL.Query(), actions: actions})
 		w.WriteHeader(http.StatusNoContent)
 	case len(parts) == 3 && parts[0] == "users" && parts[2] == "logout" && r.Method == http.MethodPost:
 		if _, ok := users[parts[1]]; !ok {

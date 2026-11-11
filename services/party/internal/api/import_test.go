@@ -42,6 +42,10 @@ func (f *fakeCustomers) GetCustomer(_ context.Context, id string) (domain.Custom
 	return domain.Customer{ID: knownID, PartyID: importPartyID, AccountNumber: "C-1", CurrencyCode: "EUR", Version: 3}, f.err
 }
 
+func (f *fakeCustomers) PortalAccounts(context.Context, string) ([]store.PortalAccount, error) {
+	return nil, nil
+}
+
 func (f *fakeCustomers) CreateCustomer(ctx context.Context, partyID string, in store.NewCustomerRole) (domain.Customer, bool, error) {
 	caller, _ := tenant.FromContext(ctx)
 	f.scopes = tenant.LegalEntityScopeList(caller)

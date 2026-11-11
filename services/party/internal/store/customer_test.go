@@ -286,3 +286,71 @@ func TestCustomer_IdempotencyKeyIsScopedToTheLegalEntity(t *testing.T) {
 		t.Fatalf("same key in legal entity B = %+v created=%v err=%v", second, created, err)
 	}
 }
+
+// A contact acts for its own customer and for the accounts tied to it by the invoice-account relation in the same customer group:
+// the bill-to account of a ship-to customer, and the ship-to accounts of a bill-to customer. Sharing a group alone, another group,
+// another legal entity or another tenant never relates two customers.
+func TestCustomer_PortalAccountsFollowTheInvoiceAccountRelationInOneGroup(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	seed := seedCustomerRefs(t, app)
+	ctx := principalContext(1, "")
+	group, otherGroup := ids.New(), ids.New()
+	mk := func(account, name, group string, invoiceParty *string, blocked string) (customer, party string) {
+		t.Helper()
+		partyID, err := insertParty(ctx, app, testkit.TenantID(1), "P-"+account)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `update party set name = $3 where tenant_id = $1 and id = $2`, testkit.TenantID(1), partyID, name)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		in := newCustomer(seed, account)
+		in.In.CustomerGroupID, in.In.InvoiceAccountPartyID, in.In.Blocked = group, invoiceParty, blocked
+		c, _, err := s.CreateCustomer(asUser(1, legalEntityA, "loader"), partyID, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID, partyID
+	}
+	hq, hqParty := mk("C-HQ", "Head office", group, nil, "none")
+	s1, _ := mk("C-S1", "Store one", group, &hqParty, "none")
+	s2, _ := mk("C-S2", "Store two", group, &hqParty, "none")
+	_, _ = mk("C-S3", "Store three, blocked", group, &hqParty, "all")
+	_, _ = mk("C-S4", "Store four, other group", otherGroup, &hqParty, "none")
+	loner, _ := mk("C-X", "Same group, unrelated", group, nil, "none")
+
+	names := func(accounts []store.PortalAccount) string {
+		out := ""
+		for _, a := range accounts {
+			out += a.AccountNumber + ":" + a.Relation + " "
+		}
+		return out
+	}
+	user := asUser(1, legalEntityA, "portal")
+	got, err := s.PortalAccounts(user, hq)
+	if err != nil || names(got) != "C-HQ:self C-S1:ship-to C-S2:ship-to " || got[0].Name != "Head office" {
+		t.Fatalf("head office accounts: %s err %v", names(got), err)
+	}
+	got, err = s.PortalAccounts(user, s1)
+	if err != nil || names(got) != "C-S1:self C-HQ:bill-to " {
+		t.Fatalf("store one accounts (a sibling is not related): %s err %v", names(got), err)
+	}
+	if got, _ = s.PortalAccounts(user, s2); names(got) != "C-S2:self C-HQ:bill-to " {
+		t.Fatalf("store two accounts: %s", names(got))
+	}
+	if got, _ = s.PortalAccounts(user, loner); names(got) != "C-X:self " {
+		t.Fatalf("an unrelated customer of the same group sees %s", names(got))
+	}
+	for name, c := range map[string]context.Context{"other legal entity": asUser(1, legalEntityB, "x"), "other tenant": asUser(2, legalEntityA, "x")} {
+		if _, err := s.PortalAccounts(c, hq); problemCode(t, err) != store.CodeCustomerNotFound {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := s.PortalAccounts(user, "not-a-uuid"); problemCode(t, err) != store.CodeCustomerNotFound {
+		t.Errorf("bad id: %v", err)
+	}
+}

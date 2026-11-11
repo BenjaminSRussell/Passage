@@ -42,6 +42,8 @@ type CustomerStore interface {
 	CreateCustomer(ctx context.Context, partyID string, in NewCustomerRole) (domain.Customer, bool, error)
 	// GetCustomer reads one customer role; row-level security keeps it to the caller's legal entities.
 	GetCustomer(ctx context.Context, customerID string) (domain.Customer, error)
+	// PortalAccounts lists the accounts a customer contact of customerID may act for in the customer portal.
+	PortalAccounts(ctx context.Context, customerID string) ([]PortalAccount, error)
 }
 
 func (s *Postgres) GetCustomer(ctx context.Context, customerID string) (domain.Customer, error) {
@@ -196,4 +198,57 @@ func (s *Postgres) createCustomerOnce(ctx context.Context, partyID string, in Ne
 		return domain.Customer{}, false, err
 	}
 	return out, created, nil
+}
+
+// PortalAccount is an account a customer contact may act for in the customer portal: its own, or a bill-to or ship-to account of
+// the same customer group.
+type PortalAccount struct {
+	ID            string `json:"id"`
+	AccountNumber string `json:"accountNumber"`
+	Name          string `json:"name"`
+	// Relation is "self", "bill-to" (the account this customer's invoices go to) or "ship-to" (an account whose invoices come to
+	// this customer).
+	Relation string `json:"relation"`
+}
+
+// PortalAccounts lists the customer itself and the accounts related to it through the invoice-account relation, in the same legal
+// entity and the same customer group, and not blocked for all transactions. A customer group alone is a classification, not a
+// relationship, so two customers that merely share a group are never listed for each other.
+func (s *Postgres) PortalAccounts(ctx context.Context, customerID string) ([]PortalAccount, error) {
+	caller, _ := tenant.FromContext(ctx)
+	id, err := canonicalID(customerID)
+	if err != nil {
+		return nil, notFound(CodeCustomerNotFound, "customer not found")
+	}
+	out := []PortalAccount{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select c.id::text, c.account_number, p.name,
+				case when c.id = me.id then 'self' when c.party_id = me.invoice_account_party_id then 'bill-to' else 'ship-to' end as relation
+			from customer_role me
+			join customer_role c on c.tenant_id = me.tenant_id and c.legal_entity_id = me.legal_entity_id
+			join party p on p.tenant_id = c.tenant_id and p.id = c.party_id
+			where me.tenant_id = $1 and me.id = $2
+				and (c.id = me.id or (c.customer_group_id = me.customer_group_id and c.blocked <> 'all'
+					and (c.party_id = me.invoice_account_party_id or c.invoice_account_party_id = me.party_id)))
+			order by (c.id = me.id) desc, c.account_number, c.id`, caller.TenantID, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a PortalAccount
+			if err := rows.Scan(&a.ID, &a.AccountNumber, &a.Name, &a.Relation); err != nil {
+				return err
+			}
+			out = append(out, a)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, notFound(CodeCustomerNotFound, "customer not found")
+	}
+	return out, nil
 }
