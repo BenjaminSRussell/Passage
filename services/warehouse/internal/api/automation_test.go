@@ -20,6 +20,9 @@ import (
 func (f *fakeStore) GetGS1Company(context.Context) (store.GS1Company, error) {
 	return store.GS1Company{CompanyPrefix: "0614141", NextSerial: 1}, f.err
 }
+func (f *fakeStore) GetPalletLabel(context.Context, string) (store.PalletLabel, error) {
+	return store.PalletLabel{}, f.err
+}
 func (f *fakeStore) PutGS1Company(_ context.Context, prefix string, ext int, by string) (store.GS1Company, error) {
 	return store.GS1Company{CompanyPrefix: prefix, Extension: ext, NextSerial: 1, UpdatedBy: by}, f.err
 }
@@ -73,6 +76,7 @@ func TestAutomationRoutes_DutiesAndValidation(t *testing.T) {
 		"events kind is checked":          {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"PLC","events":[{"kind":"melted","seq":1,"at":"2026-10-27T09:00:00Z"}]}`}, 400, "events[0].kind"},
 		"events station is checked":       {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"","events":[{"kind":"fault","seq":1,"at":"2026-10-27T09:00:00Z"}]}`}, 400, "station"},
 		"events are accepted":             {req{method: "POST", path: "/v1/warehouse/automation/events", duties: dutyAutomation, body: `{"station":"PLC","events":[{"kind":"fault","seq":1,"code":"0042","at":"2026-10-27T09:00:00Z"}]}`}, 200, ""},
+		"pallet label needs inquiry":      {req{method: "GET", path: "/v1/warehouse/pallets/306141410000000013/label", duties: dutyReceive}, 403, ""},
 		"gs1 settings need setup":         {req{method: "PUT", path: "/v1/warehouse/gs1-settings", duties: dutySetupView, body: `{"companyPrefix":"0614141"}`}, 403, ""},
 		"gs1 prefix is validated":         {req{method: "PUT", path: "/v1/warehouse/gs1-settings", duties: dutySetupMaintain, body: `{"companyPrefix":"12"}`}, 400, "companyPrefix"},
 		"gs1 extension is validated":      {req{method: "PUT", path: "/v1/warehouse/gs1-settings", duties: dutySetupMaintain, body: `{"companyPrefix":"0614141","extension":12}`}, 400, "extension"},
@@ -139,6 +143,20 @@ func TestPalletFromReceiptToPLCArrival(t *testing.T) {
 	rec = call(h, req{method: "GET", path: "/v1/warehouse/work/" + got.Work.ID, duties: all})
 	if !strings.Contains(rec.Body.String(), `"sscc":"`+sscc+`"`) {
 		t.Fatalf("work API: %s", rec.Body)
+	}
+
+	// The device asks for the label data by the SSCC it scanned and prints from it.
+	rec = call(h, req{method: "GET", path: "/v1/warehouse/pallets/" + sscc + "/label", duties: dutyInquiry})
+	var label store.PalletLabel
+	_ = json.Unmarshal(rec.Body.Bytes(), &label)
+	if rec.Code != 200 || label.ItemID != "BOLT" || label.Lot != "L-9" || label.ExpiryDate != "2027-03-31" || label.LPID != sscc || label.WorkID != got.Work.ID || !label.Received {
+		t.Fatalf("pallet label: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(h, req{method: "GET", path: "/v1/warehouse/pallets/306141410000000020/label", duties: dutyInquiry}); rec.Code != 404 {
+		t.Fatalf("a pallet that does not exist: %d", rec.Code)
+	}
+	if rec := call(h, req{method: "GET", path: "/v1/warehouse/pallets/123/label", duties: dutyInquiry}); rec.Code != 400 {
+		t.Fatalf("a bad SSCC: %d", rec.Code)
 	}
 
 	// A portal reads the pallet's tag: the SSCC-96 of the label.

@@ -92,6 +92,7 @@ type Store interface {
 	ReportAutomationOrder(ctx context.Context, id, status, reason string, now time.Time) (store.AutomationOrder, error)
 	IngestAutomationEvents(ctx context.Context, station string, events []store.AutomationEvent, now time.Time) (store.AutomationIngest, error)
 	GetGS1Company(ctx context.Context) (store.GS1Company, error)
+	GetPalletLabel(ctx context.Context, sscc string) (store.PalletLabel, error)
 	PutGS1Company(ctx context.Context, prefix string, extension int, by string) (store.GS1Company, error)
 }
 

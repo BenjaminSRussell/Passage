@@ -696,6 +696,38 @@ paths:
           content: { application/json: { schema: { $ref: "#/components/schemas/GS1Settings" } } }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { description: WMS-GS1-NOT-SET, no prefix is set yet. }
+  /v1/warehouse/pallets/{sscc}/label:
+    get:
+      operationId: getPalletLabel
+      summary: What a pallet's label shows, by its SSCC (#32)
+      description: >
+        The license plate, item, lot and expiry date the receipt holds for the pallet, and the put-away work it created, so
+        a device prints the label from the warehouse's own data with no second scan. 404 WMS-PALLET-NOT-FOUND for an SSCC
+        that is not a pallet of this tenant.
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - { name: sscc, in: path, required: true, schema: { type: string, pattern: "^[0-9]{18}$" } }
+      responses:
+        "200":
+          description: The label data.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sscc, lpId, itemId, receiptId, lineNo, received]
+                properties:
+                  sscc: { type: string }
+                  lpId: { type: string }
+                  itemId: { type: string }
+                  lot: { type: string }
+                  expiryDate: { type: string, format: date }
+                  receiptId: { type: string, format: uuid }
+                  lineNo: { type: integer }
+                  workId: { type: string, format: uuid }
+                  received: { type: boolean }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/warehouse/rfid-reads:ingest:
     post:
       operationId: ingestRFIDReads

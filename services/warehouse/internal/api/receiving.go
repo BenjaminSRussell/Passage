@@ -38,6 +38,7 @@ const (
 const (
 	codeDoorNotFound    = "WMS-DOOR-NOT-FOUND"
 	codeReceiptNotFound = "WMS-RECEIPT-NOT-FOUND"
+	codePalletNotFound  = "WMS-PALLET-NOT-FOUND"
 )
 
 // registerReceiving mounts the dock and receiving routes inside the
@@ -52,6 +53,7 @@ func (a *API) registerReceiving(r chi.Router) {
 	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/receipts", a.listReceipts)
 	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/receipts/{id}", a.getReceipt)
 	r.With(authz.RequireDuty(dutyReceive)).Post("/v1/warehouse/receipts/{id}/lines/{n}:receive", a.receiveLine)
+	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/pallets/{sscc}/label", a.getPalletLabel)
 	r.With(authz.RequireDuty(dutySetupMaintain)).Put("/v1/warehouse/gs1-settings", a.putGS1)
 	r.With(authz.RequireDuty(dutySetupView)).Get("/v1/warehouse/gs1-settings", a.getGS1)
 }
@@ -498,6 +500,22 @@ func (a *API) getGS1(w http.ResponseWriter, r *http.Request) {
 	out, err := a.st.GetGS1Company(r.Context())
 	if err != nil {
 		fail(w, r, err, codeReceiptNotFound)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// getPalletLabel returns what a device prints on a pallet's label, found by its SSCC: the plate, item, lot and expiry
+// the receipt holds, so the device needs no second scan (#32).
+func (a *API) getPalletLabel(w http.ResponseWriter, r *http.Request) {
+	sscc := chi.URLParam(r, "sscc")
+	if !domain.ValidSSCC(sscc) {
+		validationFailed(w, r, map[string]string{"sscc": "must be an 18-digit SSCC with a valid check digit"})
+		return
+	}
+	out, err := a.st.GetPalletLabel(r.Context(), sscc)
+	if err != nil {
+		fail(w, r, err, codePalletNotFound)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)

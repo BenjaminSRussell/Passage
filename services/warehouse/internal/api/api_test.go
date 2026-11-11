@@ -407,6 +407,7 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"GET /v1/warehouse/receipts":                                 dutyInquiry,
 		"GET /v1/warehouse/receipts/{id}":                            dutyInquiry,
 		"POST /v1/warehouse/receipts/{id}/lines/{n}:receive":         dutyReceive,
+		"GET /v1/warehouse/pallets/{sscc}/label":                     dutyInquiry,
 		"PUT /v1/warehouse/gs1-settings":                             dutySetupMaintain,
 		"GET /v1/warehouse/gs1-settings":                             dutySetupView,
 		"POST /v1/warehouse/rfid-reads:ingest":                       dutyRFIDIngest,

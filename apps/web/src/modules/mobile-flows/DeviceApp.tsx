@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { DEFAULT_MENU_ID } from "./api/client";
+import { flushLabelOutbox, printPalletLabel } from "./api/palletLabel";
 import { makeApplier, type ReplayStop } from "./api/replayApply";
 import { endSession, heartbeat, startSession } from "./api/session";
 import { ClusterPanel } from "./ClusterPanel";
@@ -20,6 +21,7 @@ import {
   type KeyValueStore,
   type SealCipher,
 } from "./domain/offlineStore";
+import { LabelOutbox } from "./domain/labelOutbox";
 import { labelOffer } from "./domain/receiveLabel";
 import { RfidAggregator, listenForRfid } from "./domain/rfid";
 import { listenForScans } from "./domain/scanBridge";
@@ -45,6 +47,25 @@ function readSetting(key: string): string {
   } catch {
     return "";
   }
+}
+
+function browserStorage(): { getItem(key: string): string | null; setItem(key: string, value: string): void } {
+  return {
+    getItem: (key) => {
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (key, value) => {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        // blocked or full; the outbox then keeps nothing
+      }
+    },
+  };
 }
 
 interface DeviceStorage {
@@ -118,6 +139,10 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID, w
   const [, bump] = useState(0);
   const [session, setSession] = useState<KeeperState>({ status: "idle" });
   const [labelFor, setLabelFor] = useState<string | null>(null);
+  // Labels that could not print yet (offline, print service away): kept on the device and printed when it is back (#32).
+  const labelOutbox = useMemo(() => new LabelOutbox(browserStorage()), []);
+  const [labelsWaiting, setLabelsWaiting] = useState(() => labelOutbox.waiting());
+  const [labelNote, setLabelNote] = useState<string | null>(null);
   const keeperRef = useRef<SessionKeeper | null>(null);
   const stopRef = useRef<ReplayStop | null>(null);
   const rfid = useRef(new RfidAggregator());
@@ -152,6 +177,20 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID, w
       void keeper.stop();
     };
   }, [deviceId, warehouse, menuId]);
+
+  // Print the waiting labels at start and whenever the device comes back online.
+  useEffect(() => {
+    const flush = () => {
+      if (labelOutbox.waiting() === 0) return;
+      void flushLabelOutbox(labelOutbox, UUID.test(warehouse) ? warehouse : undefined).then((report) => {
+        setLabelsWaiting(labelOutbox.waiting());
+        if (report.printed.length > 0) setLabelNote(`${report.printed.length} saved ${report.printed.length === 1 ? "label" : "labels"} printed.`);
+      });
+    };
+    flush();
+    window.addEventListener("online", flush);
+    return () => window.removeEventListener("online", flush);
+  }, [labelOutbox, warehouse]);
 
   // Open the sealed queue and the device key once per device.
   useEffect(() => {
@@ -233,10 +272,20 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID, w
 
   function openMenu() {
     setLabelFor(null);
+    setLabelNote(null);
     setFlow(null);
     setTool(null);
     setNotice(null);
     setTyped("");
+  }
+
+  /** Prints the pallet's label from the warehouse's data (#32): scanned nothing twice, queued when offline. */
+  async function printLabel(sscc: string) {
+    const outcome = await printPalletLabel(sscc, labelOutbox, UUID.test(warehouse) ? warehouse : undefined);
+    setLabelsWaiting(labelOutbox.waiting());
+    if (outcome.kind === "printed") setLabelNote("The label printed.");
+    else if (outcome.kind === "queued") setLabelNote("The label is saved on this device and prints when it is back online.");
+    else setLabelFor(sscc); // the warehouse has no label data for this pallet: the worker scans the item label
   }
 
   async function queueConfirmation(done: RunnerState) {
@@ -248,7 +297,7 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID, w
       const offer = labelOffer(done);
       restart();
       setNotice({ tone: "info", text: "Confirmation queued." });
-      if (offer && navigator.onLine) setLabelFor(offer.sscc);
+      if (offer) void printLabel(offer.sscc);
     } catch (e) {
       // MOB-0106: the queue is full or too old; the worker must reconnect and sync first.
       setNotice({ tone: "error", text: e instanceof Error ? e.message : "The confirmation could not be queued." });
@@ -386,6 +435,7 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID, w
         <h1>{flow ? flowLabel(flow.code) : tool ? TOOL_LABEL[tool] : "menu"}</h1>
         <span className="app__status">
           {waiting} queued, {DEFAULT_LIMITS.maxTx - waiting} left
+          {labelsWaiting > 0 ? `, ${labelsWaiting} ${labelsWaiting === 1 ? "label" : "labels"} waiting to print` : ""}
         </span>
       </header>
 
@@ -400,6 +450,11 @@ export function DeviceApp({ deviceId, userId, flows, menuId = DEFAULT_MENU_ID, w
         </p>
       ) : null}
 
+      {labelNote ? (
+        <p role="status" className="app__message">
+          {labelNote}
+        </p>
+      ) : null}
       {labelFor ? <ReceiveLabelPanel sscc={labelFor} warehouseId={UUID.test(warehouse) ? warehouse : undefined} onClose={() => setLabelFor(null)} /> : null}
 
       {fatal ? (

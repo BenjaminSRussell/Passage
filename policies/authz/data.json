@@ -3667,6 +3667,7 @@
       {"resource": "/v1/warehouse/work", "methods": ["GET"]},
       {"resource": "/v1/warehouse/work/*", "methods": ["GET"]},
       {"resource": "/v1/warehouse/rfid-reads", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/pallets/*/label", "methods": ["GET"]},
       {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]}
     ]},
     "warehouse.rfid.ingest": {"permissions": [{"resource": "/v1/warehouse/rfid-reads:ingest", "methods": ["POST"]}]},

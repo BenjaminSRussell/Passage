@@ -114,3 +114,31 @@ func identifyPallet(ctx context.Context, tx pgx.Tx, l *domain.ReceiptLine) error
 	}
 	return nil
 }
+
+// PalletLabel is what a device needs to print the label of a pallet the warehouse received: the plate, the SSCC, the
+// item and the lot and expiry date, with where it came from (#32, 32-3).
+type PalletLabel struct {
+	SSCC       string `json:"sscc"`
+	LPID       string `json:"lpId"`
+	ItemID     string `json:"itemId"`
+	Lot        string `json:"lot,omitempty"`
+	ExpiryDate string `json:"expiryDate,omitempty"`
+	ReceiptID  string `json:"receiptId"`
+	LineNo     int    `json:"lineNo"`
+	WorkID     string `json:"workId,omitempty"`
+	Received   bool   `json:"received"`
+}
+
+// GetPalletLabel finds a pallet by its SSCC.
+func (s *Store) GetPalletLabel(ctx context.Context, sscc string) (PalletLabel, error) {
+	var out PalletLabel
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select sscc, lp_id, item_id, lot, coalesce(expiry_date::text, ''), receipt_id::text, line_no, coalesce(work_id::text, ''), status = 'RECEIVED'
+			from receipt_line where sscc = $1`, sscc).Scan(&out.SSCC, &out.LPID, &out.ItemID, &out.Lot, &out.ExpiryDate, &out.ReceiptID, &out.LineNo, &out.WorkID, &out.Received)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	return out, err
+}

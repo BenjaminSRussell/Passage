@@ -359,9 +359,9 @@ route("POST", `${BASE}/process-messages`, (req) => {
 // PI sheets (FR-25.16): the designer's versioned templates.
 const sheetBase = { createdBy: "Maya Okafor", updatedBy: "Maya Okafor" };
 const piSheets = table<PISheet>([
-  { ...sheetBase, id: uid(238, 1), code: "PUMP-ASSY", version: 2, name: "Pump assembly", status: "released", recipe: assemblySheet(), rev: 4, createdAt: at(-20), updatedAt: at(-9), releasedBy: "Maya Okafor", releasedAt: at(-9) },
-  { ...sheetBase, id: uid(238, 2), code: "PUMP-ASSY", version: 1, name: "Pump assembly", status: "obsolete", recipe: recipeDoc(), rev: 5, createdAt: at(-60), updatedAt: at(-9), releasedBy: "Maya Okafor", releasedAt: at(-50) },
-  { ...sheetBase, id: uid(238, 3), code: "IMPELLER-BAL", version: 1, name: "Impeller balancing", status: "draft", recipe: recipeDoc({ node: "ns=2;s=Balancer1.SpeedSP", value: 1800 }), rev: 2, createdAt: at(-3), updatedAt: at(-1), releasedBy: null, releasedAt: null },
+  { ...sheetBase, id: uid(388, 1), code: "PUMP-ASSY", version: 2, name: "Pump assembly", status: "released", recipe: assemblySheet(), rev: 4, createdAt: at(-20), updatedAt: at(-9), releasedBy: "Maya Okafor", releasedAt: at(-9) },
+  { ...sheetBase, id: uid(388, 2), code: "PUMP-ASSY", version: 1, name: "Pump assembly", status: "obsolete", recipe: recipeDoc(), rev: 5, createdAt: at(-60), updatedAt: at(-9), releasedBy: "Maya Okafor", releasedAt: at(-50) },
+  { ...sheetBase, id: uid(388, 3), code: "IMPELLER-BAL", version: 1, name: "Impeller balancing", status: "draft", recipe: recipeDoc({ node: "ns=2;s=Balancer1.SpeedSP", value: 1800 }), rev: 2, createdAt: at(-3), updatedAt: at(-1), releasedBy: null, releasedAt: null },
 ]);
 const NO_SHEET = () => reply.problem(404, "SF-0180", "PI sheet not found.");
 route("GET", `${BASE}/pi-sheets`, (req) => {
