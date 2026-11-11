@@ -77,6 +77,56 @@ spec:
               value: /var/run/passage/edge/token
 {{- end }}
 {{- end }}
+{{- if .Values.shopfloor.url }}
+{{- if .Values.shopfloor.bufferPersistent }}
+            - name: EDGE_BUFFER_FILE
+              value: /var/lib/iot-edge/buffer.log
+{{- end }}
+{{- if or (eq .Values.shopfloor.source "opcua") (contains "opcua" (.Values.shopfloor.writer | default "")) }}
+            - name: EDGE_OPCUA_ENDPOINT
+              value: {{ required "opcua.endpoint is required for source or writer opcua" .Values.opcua.endpoint | quote }}
+            - name: EDGE_OPCUA_SECURITY_POLICY
+              value: {{ .Values.opcua.securityPolicy | quote }}
+            - name: EDGE_OPCUA_SECURITY_MODE
+              value: {{ .Values.opcua.securityMode | quote }}
+            - name: EDGE_OPCUA_INTERVAL_MS
+              value: {{ .Values.opcua.intervalMs | quote }}
+{{- if .Values.opcua.secret }}
+            - name: EDGE_OPCUA_CERT_FILE
+              value: /var/run/passage/opcua/client.crt
+            - name: EDGE_OPCUA_KEY_FILE
+              value: /var/run/passage/opcua/client.key
+{{- if .Values.opcua.username }}
+            - name: EDGE_OPCUA_USER
+              value: {{ .Values.opcua.username | quote }}
+            - name: EDGE_OPCUA_PASSWORD_FILE
+              value: /var/run/passage/opcua/password
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if or (eq .Values.shopfloor.source "mqtt") (contains "mqtt" (.Values.shopfloor.writer | default "")) }}
+            - name: EDGE_MQTT_BROKER
+              value: {{ required "mqtt.broker (host:port) is required for source or writer mqtt" .Values.mqtt.broker | quote }}
+            - name: EDGE_MQTT_TLS
+              value: {{ .Values.mqtt.tls | quote }}
+{{- if .Values.mqtt.secret }}
+            - name: EDGE_MQTT_USER
+              value: {{ .Values.mqtt.username | quote }}
+            - name: EDGE_MQTT_PASSWORD_FILE
+              value: /var/run/passage/mqtt/password
+            - name: EDGE_MQTT_CA_FILE
+              value: /var/run/passage/mqtt/ca.crt
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.plc.addr }}
+            - name: EDGE_PLC_ADDR
+              value: {{ .Values.plc.addr | quote }}
+            - name: EDGE_PLC_STATION
+              value: {{ .Values.plc.station | quote }}
+            - name: EDGE_WAREHOUSE_URL
+              value: {{ required "plc.warehouseUrl is required with plc.addr" .Values.plc.warehouseUrl | quote }}
+{{- end }}
           volumeMounts:
             - { name: state, mountPath: /var/lib/iot-edge }
 {{- if .Values.shopfloor.tokenSecret }}
@@ -87,6 +137,12 @@ spec:
 {{- end }}
 {{- if .Values.shopfloor.serverCaSecret }}
             - { name: server-ca, mountPath: /var/run/passage/server-ca, readOnly: true }
+{{- end }}
+{{- if .Values.opcua.secret }}
+            - { name: opcua, mountPath: /var/run/passage/opcua, readOnly: true }
+{{- end }}
+{{- if .Values.mqtt.secret }}
+            - { name: mqtt, mountPath: /var/run/passage/mqtt, readOnly: true }
 {{- end }}
           securityContext:
             runAsNonRoot: true
@@ -119,4 +175,14 @@ spec:
           secret:
             secretName: {{ .Values.shopfloor.serverCaSecret | quote }}
             items: [{ key: ca.crt, path: ca.crt }]
+{{- end }}
+{{- if .Values.opcua.secret }}
+        - name: opcua
+          secret:
+            secretName: {{ .Values.opcua.secret | quote }}
+{{- end }}
+{{- if .Values.mqtt.secret }}
+        - name: mqtt
+          secret:
+            secretName: {{ .Values.mqtt.secret | quote }}
 {{- end }}

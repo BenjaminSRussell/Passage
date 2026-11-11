@@ -86,11 +86,15 @@ type Options struct {
 	// Recipes and Writer run control recipes (FR-25.15): the connector pulls its recipes and writes their
 	// setpoints to the process control system under BR-25.15. Both are needed; without either the runtime
 	// does not touch recipes. AutoComplete reports a recipe completed after its writes (the demo plant).
-	Recipes         RecipePlane
-	Writer          Writer
-	AutoComplete    bool
-	RecipeEvery     time.Duration // default 5 s
-	State           SeqState
+	Recipes      RecipePlane
+	Writer       Writer            // the pcs-opcua writer
+	Writers      map[string]Writer // writers by destination (pcs-opcua, pcs-mqtt); Writer is pcs-opcua's
+	AutoComplete bool
+	RecipeEvery  time.Duration // default 5 s
+	State        SeqState
+	// Buffer is the queue events wait in; the default is an in-memory ring (BufferAge, BufferCapacity). A
+	// FileBuffer keeps unsent events across a restart.
+	Buffer          EventBuffer
 	BufferAge       time.Duration
 	BufferCapacity  int
 	BatchSize       int           // events per send, at most 500 (the ingest limit)
@@ -117,7 +121,7 @@ type Stats struct {
 // Runtime wires a Source to the buffer and the server.
 type Runtime struct {
 	o   Options
-	buf *domain.Buffer
+	buf EventBuffer
 	log *slog.Logger
 
 	mu      sync.Mutex
@@ -183,7 +187,11 @@ func New(o Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Runtime{o: o, buf: domain.NewBuffer(o.BufferAge, o.BufferCapacity), log: o.Log, seqr: domain.NewSequencer(),
+	var buf EventBuffer = o.Buffer
+	if buf == nil {
+		buf = domain.NewBuffer(o.BufferAge, o.BufferCapacity)
+	}
+	r := &Runtime{o: o, buf: buf, log: o.Log, seqr: domain.NewSequencer(),
 		prev: map[string]uint32{}, hasPrev: map[string]bool{}, states: map[string]string{}, seqs: seqs, written: map[string]bool{}}
 	r.intervalNanos.Store(int64(o.HeartbeatEvery))
 	return r, nil
@@ -199,6 +207,9 @@ func (r *Runtime) Apply(c domain.EdgeConfig) (int, error) {
 		return r.applied, err
 	}
 	r.cfg, r.applied = c, v
+	if ta, ok := r.o.Source.(TagAware); ok {
+		ta.SetTags(c.Tags)
+	}
 	// A new mapping starts its counters from the next reading, never from a stale baseline.
 	r.prev, r.hasPrev = map[string]uint32{}, map[string]bool{}
 	return v, nil
@@ -418,7 +429,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 	errs := make(chan error, 3)
 	go func() { errs <- r.publishLoop(ctx) }()
 	go func() { errs <- r.heartbeatLoop(ctx) }()
-	if r.o.Recipes != nil && r.o.Writer != nil {
+	if r.o.Recipes != nil && r.hasWriters() {
 		go func() { errs <- r.recipeLoop(ctx) }()
 	}
 	if r.o.Source == nil {

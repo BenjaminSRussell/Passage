@@ -106,3 +106,40 @@ func TestEnrollIfNeeded_NeedsACertificateOrAToken(t *testing.T) {
 		t.Fatalf("missing token file: %v", err)
 	}
 }
+
+func TestLoadConfig_AdaptersBufferAndPLC(t *testing.T) {
+	node := "0195f0a0-0000-7000-8000-0000000000a1"
+	cfg := func(extra map[string]string) (config, error) {
+		m := map[string]string{"EDGE_SITE": "plant-1", "EDGE_ID": "edge-7", "PASSAGE_ENV": "dev", "EDGE_SHOPFLOOR_URL": "http://localhost:8080", "EDGE_NODE_ID": node}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return loadConfig(env(m))
+	}
+	c, err := cfg(map[string]string{"EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://plc:4840", "EDGE_OPCUA_INTERVAL_MS": "250", "EDGE_BUFFER_FILE": "/var/lib/iot-edge/buffer.log", "EDGE_WRITER": "opcua,mqtt", "EDGE_MQTT_BROKER": "broker:1883"})
+	if err != nil || c.OPCUA.Endpoint != "opc.tcp://plc:4840" || c.OPCUA.Interval.Milliseconds() != 250 || c.BufferFile == "" || c.MQTTBroker != "broker:1883" {
+		t.Fatalf("opcua source: %+v, %v", c, err)
+	}
+	if c, err := cfg(map[string]string{"EDGE_SOURCE": "mqtt", "EDGE_MQTT_BROKER": "broker:1883"}); err != nil || c.MQTTClientID != "passage-edge-7" {
+		t.Fatalf("mqtt source: %+v, %v", c, err)
+	}
+	if c, err := cfg(map[string]string{"EDGE_SOURCE": "simulator", "EDGE_PLC_ADDR": "simulator", "EDGE_WAREHOUSE_URL": "http://warehouse:8080"}); err != nil || c.PLCStation != "PLC" {
+		t.Fatalf("plc: %+v, %v", c, err)
+	}
+	for name, extra := range map[string]map[string]string{
+		"opcua needs an endpoint":         {"EDGE_SOURCE": "opcua"},
+		"opcua security needs a cert":     {"EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840", "EDGE_OPCUA_SECURITY_POLICY": "Basic256Sha256", "EDGE_OPCUA_SECURITY_MODE": "SignAndEncrypt"},
+		"opcua interval out of range":     {"EDGE_SOURCE": "opcua", "EDGE_OPCUA_ENDPOINT": "opc.tcp://p:4840", "EDGE_OPCUA_INTERVAL_MS": "5"},
+		"mqtt needs a broker":             {"EDGE_SOURCE": "mqtt"},
+		"mqtt without tls outside dev":    {"PASSAGE_ENV": "prod", "EDGE_SHOPFLOOR_URL": "https://s", "EDGE_SOURCE": "mqtt", "EDGE_MQTT_BROKER": "b:8883"},
+		"unknown writer":                  {"EDGE_SOURCE": "simulator", "EDGE_WRITER": "modbus"},
+		"plc station too long":            {"EDGE_SOURCE": "simulator", "EDGE_PLC_ADDR": "simulator", "EDGE_PLC_STATION": "TOOLONGNAME", "EDGE_WAREHOUSE_URL": "http://w"},
+		"plc needs a warehouse":           {"EDGE_SOURCE": "simulator", "EDGE_PLC_ADDR": "plc:2000"},
+		"plc address without a port":      {"EDGE_SOURCE": "simulator", "EDGE_PLC_ADDR": "plc", "EDGE_WAREHOUSE_URL": "http://w"},
+		"cleartext warehouse outside dev": {"PASSAGE_ENV": "prod", "EDGE_SHOPFLOOR_URL": "https://s", "EDGE_SOURCE": "simulator", "EDGE_PLC_ADDR": "plc:2000", "EDGE_WAREHOUSE_URL": "http://w"},
+	} {
+		if _, err := cfg(extra); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
