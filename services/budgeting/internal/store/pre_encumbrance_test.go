@@ -122,3 +122,68 @@ func TestPreEncumbrance_ReleaseReturnsFundsFromThePreColumn(t *testing.T) {
 	}
 	assertEncumbranceInvariant(t, ctx, st, rule.ID)
 }
+
+func TestActiveRule_TakesTheLatestEffectiveVersionOnOrBeforeTheDate(t *testing.T) {
+	ctx, st, _, rule := setup(t)
+	if _, ok, err := st.ActiveRule(ctx, rule.LegalEntityID, "2025-12-31"); err != nil || ok {
+		t.Fatalf("before the first rule: ok %v, %v; want none", ok, err)
+	}
+	got, ok, err := st.ActiveRule(ctx, rule.LegalEntityID, "2026-06-01")
+	if err != nil || !ok || got.ID != rule.ID {
+		t.Fatalf("2026-06-01 = %+v, %v, %v; want %s", got, ok, err, rule.ID)
+	}
+	_, raw, err := st.CreateRule(ctx, "rule-2", "h-rule-2", NewRule{LegalEntityID: rule.LegalEntityID, Code: "DEPT", WarnPct: d("0"), BlockPct: d("3"), Currency: "USD", EffectiveFrom: "2026-07-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var next Rule
+	if err := json.Unmarshal(raw, &next); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := st.ActiveRule(ctx, rule.LegalEntityID, "2026-06-30"); got.ID != rule.ID {
+		t.Fatalf("2026-06-30 picked %s, want the first version", got.ID)
+	}
+	if got, _, _ := st.ActiveRule(ctx, rule.LegalEntityID, "2026-07-01"); got.ID != next.ID {
+		t.Fatalf("2026-07-01 picked %s, want version 2", got.ID)
+	}
+	if _, ok, _ := st.ActiveRule(ctx, ids.New(), "2026-07-01"); ok {
+		t.Fatal("another legal entity has no rule")
+	}
+}
+
+func TestReleasePreEncumbranceByLine_GivesBackOnlyAnOpenPreEncumbrance(t *testing.T) {
+	ctx, st, _, rule := setup(t)
+	req := requisitionReq(rule.ID, "800")
+	lineID := req.Lines[0].LineID
+	if _, _, err := st.CheckBudget(ctx, "req-rel", "h", req, false); err != nil {
+		t.Fatal(err)
+	}
+	status, _, err := st.ReleasePreEncumbranceByLine(ctx, "rel-1", "h-rel", lineID, req.DocumentID)
+	if err != nil || status != 200 {
+		t.Fatalf("release: %d %v", status, err)
+	}
+	if _, pre := preColumn(t, func() ([]BalanceView, error) { return st.Available(ctx, rule.ID, "dept-10", "FY2026") }); pre != "0.00" {
+		t.Fatalf("pre-encumbrances after the release = %s, want 0", pre)
+	}
+	if got := availableOf(t, ctx, st, rule.ID); !got.Equal(d("100000")) {
+		t.Fatalf("available after the release = %s, want the full 100000", got)
+	}
+	if _, _, err := st.ReleasePreEncumbranceByLine(ctx, "rel-2", "h-rel-2", lineID, req.DocumentID); !hasCode(err, CodeNothingToRelease) {
+		t.Fatalf("second release: %v, want %s", err, CodeNothingToRelease)
+	}
+	if _, _, err := st.ReleasePreEncumbranceByLine(ctx, "rel-3", "h-rel-3", ids.New(), req.DocumentID); !hasCode(err, CodeEncumbranceNotFound) {
+		t.Fatalf("a line never checked: %v, want %s", err, CodeEncumbranceNotFound)
+	}
+	// A converted line is a PO line's encumbrance now, so a late release of the requisition line finds nothing.
+	req2 := requisitionReq(rule.ID, "300")
+	_, raw, err := st.CheckBudget(ctx, "req-rel-2", "h", req2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ConvertPreEncumbrance(ctx, "conv-rel", "h-conv", ConvertRequest{EncumbranceID: decodeCheck(t, raw).Lines[0].EncumbranceID, PurchaseOrderID: ids.New(), PurchaseOrderLineID: ids.New()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ReleasePreEncumbranceByLine(ctx, "rel-4", "h-rel-4", req2.Lines[0].LineID, req2.DocumentID); !hasCode(err, CodeEncumbranceNotFound) {
+		t.Fatalf("a converted line: %v, want %s", err, CodeEncumbranceNotFound)
+	}
+}
