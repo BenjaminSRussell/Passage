@@ -127,13 +127,8 @@ describe("lookup tables list", () => {
   it("asks for a valid ledger id first, then lists tables and opens one", async () => {
     fake();
     const { container } = renderAt("/ledger/lookup-tables");
-    expect(screen.getByText("Enter a ledger id to see its lookup tables.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: "nope" } });
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
-    expect(await screen.findByText("Enter the ledger id as a UUID.")).toBeInTheDocument();
-    expect(server.calls).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
+    expect(screen.getByText("Choose a ledger to see its lookup tables.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     const open = await screen.findByRole("button", { name: table.name });
     const row = open.closest("tr") as HTMLElement;
     expect(row.textContent).toContain("ACCOUNT, CC");

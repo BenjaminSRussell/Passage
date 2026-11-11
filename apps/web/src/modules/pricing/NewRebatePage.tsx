@@ -259,7 +259,7 @@ export function NewRebatePage() {
           {values.productScope === "product" ? (
             <LookupFormField id="rb-product-key" label="Product" entity="product" value={values.productKey} error={errors.productKey} onChange={(productKey) => update({ productKey })} />
           ) : values.productScope === "group" ? (
-            text("rb-product-key", "productKey", "Product group id", { mono: true })
+            <LookupFormField id="rb-product-key" label="Product group" entity="itemGroup" value={values.productKey} error={errors.productKey} onChange={(productKey) => update({ productKey })} />
           ) : null}
           <FormField id="rb-basis" label="Basis">
             {(c) => (

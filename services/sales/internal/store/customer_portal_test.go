@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +43,13 @@ func TestPostgres_ListOrdersForOneCustomer(t *testing.T) {
 		if o.CustomerID != custA || o.ID == b1.ID || o.ID == draft.ID || (o.ID != a1.ID && o.ID != a2.ID) {
 			t.Fatalf("leaked %+v", o)
 		}
+	}
+	// q finds an order by part of its number, ignoring case.
+	if found, err := s.ListOrders(ctx, OrderFilter{Q: strings.ToLower(a2.OrderNumber), Limit: 50}); err != nil || len(found.Items) != 1 || found.Items[0].ID != a2.ID {
+		t.Fatalf("search %q: %+v %v", a2.OrderNumber, found.Items, err)
+	}
+	if none, err := s.ListOrders(ctx, OrderFilter{Q: "no-such-order", Limit: 50}); err != nil || len(none.Items) != 0 {
+		t.Fatalf("search for nothing: %+v %v", none.Items, err)
 	}
 	if all, err := s.ListOrders(ctx, OrderFilter{CustomerID: custA, Limit: 50}); err != nil || len(all.Items) != 3 {
 		t.Fatalf("without ExcludeDraft the draft is listed: %d %v", len(all.Items), err)

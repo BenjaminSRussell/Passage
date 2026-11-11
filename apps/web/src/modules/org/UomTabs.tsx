@@ -252,7 +252,7 @@ function AddConversionForm({ units, onCreated }: { units: Unit[]; onCreated(): v
         </FormField>
         {failure ? (
           <Alert tone="danger" title="Could not add the conversion" live="alert">
-            {conversionMessages[failure.code] ?? failure.message} ({failure.code})
+            <ProblemMessage problem={failure} message={conversionMessages[failure.code]} />
           </Alert>
         ) : null}
         <div>

@@ -1,11 +1,12 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, Card, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { createVerification, describeProblem, listVerifications, newKey, type Problem, type VerificationSummary } from "./api/client";
 import { UUID, VERIFICATION_LABELS, VERIFICATION_TONES } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export const verificationColumns: DataTableColumn<VerificationSummary>[] = [
   { key: "verifiedAt", header: "Checked", mono: true, render: (v) => <time dateTime={v.verifiedAt}>{v.verifiedAt}</time> },
@@ -32,7 +33,7 @@ export function VerificationsPage() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!UUID.test(trimmed)) {
-      setError("Enter the ledger id as a UUID, such as 0190f0a0-0000-7000-8000-000000000201.");
+      setError("Choose the ledger.");
       return;
     }
     setError(undefined);
@@ -58,9 +59,7 @@ export function VerificationsPage() {
       />
       <Card title="Check a ledger">
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Check a ledger">
-          <FormField id="fr-verify-ledger" label="Ledger id" error={error} hint="The check reads the ledger's trial balance, so it needs the ledger duty to read balances, and stores the result.">
-            {(c) => <Input {...c} className={styles.mono} value={ledger} onChange={(e) => setLedger(e.target.value)} />}
-          </FormField>
+          <LookupFormField id="fr-verify-ledger" label="Ledger" entity="ledger" error={error} hint="The check reads the ledger's trial balance, so it needs the ledger duty to read balances, and stores the result." value={ledger} onChange={setLedger} />
           {failure ? (
             <Alert tone="danger" title="The check could not run" live="alert">
               <ProblemMessage problem={failure} />
@@ -84,7 +83,7 @@ export function VerificationsPage() {
           rows={list.data ?? []}
           getRowKey={(v) => v.id}
           loading={list.loading}
-          empty={{ title: "No ledger has been checked yet", description: "Enter a ledger id above to compare its read model with the ledger." }}
+          empty={{ title: "No ledger has been checked yet", description: "Choose a ledger above to compare its read model with the ledger." }}
           onRowOpen={(v) => navigate(`/finreport/verifications/${v.id}`)}
         />
       )}

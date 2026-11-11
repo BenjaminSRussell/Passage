@@ -105,7 +105,7 @@ function EditForm({ initial, onReload, onSaved }: { initial: Network; onReload: 
                 </Button>
               }
             >
-              {failure.message} ({failure.code}). Loading the latest version discards your changes on this screen.
+              <ProblemMessage problem={failure} /> Loading the latest version discards your changes on this screen.
             </Alert>
           ) : (
             <Alert tone="danger" title="Could not save the network" live="alert">

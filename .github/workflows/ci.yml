@@ -238,7 +238,39 @@ jobs:
             fi
             sleep $((attempt * 20))
           done
-      - run: npx playwright test
+      # The demo-flows project has its own job below, so a failure there names the demo flows.
+      - run: npx playwright test --project=chromium --project=warehouse-mobile
+
+  # The procure-to-pay and order-to-cash flows, the keyboard-only requisition run and the axe scan of every P2P/O2C
+  # route (WCAG 2.2 AA), run against the demo build: the real UI over the in-browser fake backend, every duty held.
+  # The scan fails on a serious or critical violation and on a route missing from the list (e2e/flowRoutes.ts).
+  web-demo-flows:
+    if: inputs.web
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx vite build --mode demo
+      - run: |
+          for attempt in 1 2 3; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
+            npx playwright install --with-deps chromium && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "::warning::Chromium's system packages could not be installed; installing the browser alone"
+              npx playwright install chromium
+              break
+            fi
+            sleep $((attempt * 20))
+          done
+      - run: npx playwright test --project=demo-flows
 
   warehouse-mobile:
     if: inputs.warehouse

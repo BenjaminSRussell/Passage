@@ -144,7 +144,7 @@ function HireForm({ offerId, onConverted }: { offerId: string; onConverted(): vo
             ]}
           />
           <LookupField entity="party" id="hire-partyPersonId" label="Party" hint="The person record of the new worker." value={values.partyPersonId ?? ""} error={form.errors.partyPersonId} onChange={(partyPersonId) => set({ partyPersonId })} />
-          {text("nationalId", "National id")}
+          {text("nationalId", "National identification number")}
           {text("legalName", "Legal name", true, "Leave empty to use the candidate's name.")}
         </>
       ) : (

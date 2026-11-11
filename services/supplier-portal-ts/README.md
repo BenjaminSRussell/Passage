@@ -11,7 +11,13 @@ The back end of `apps/supplier-portal`. TypeScript on Node 24 (types stripped, n
 | `src/session.ts` | In-memory sessions behind an HttpOnly `__Host-` cookie (30 min idle, 8 h absolute), single-use login state, CSRF token, per-session rate limit |
 | `src/serviceToken.ts` | Signs service tokens (Ed25519, `platform/go/tenant` format) with `iss: supplier-portal`, the session's tenant and one legal entity, `act` = user, and `vnd` = the vendor. Grants: the vendor-portal duties on purchasing, receiving and party only |
 | `src/routes.ts` | The table of `/api/v1/*` routes and the one upstream call each becomes. Nothing else is proxied |
-| `src/server.ts` | `/bff/login`, `/bff/callback`, `/bff/me`, `/bff/logout`, `/healthz`, `/readyz`, and the `/api/v1` proxy |
+| `src/server.ts` | `/bff/login`, `/bff/callback`, `/bff/me`, `/bff/logout`, `/healthz`, `/readyz`, the `/api/v1` proxy, and the public routes below |
+| `src/scan.ts` | The upload scanner interface, a ClamAV adapter (clamd INSTREAM over TCP) and a fake; `screenUpload` applies the policy |
+| `src/provision.ts` | The `UserProvisioner` interface for the identity-provider user of an accepted invitation, the default `PendingProvisioner`, and a fake |
+
+## Public routes and remainders (#511)
+
+`GET /bff/registration`, `POST /bff/prospects`, `POST /bff/invites/verify` and `POST /bff/invites/accept` need no session. Each refuses another origin, reads at most 16 KiB, and takes a slot from a per-client-address limit (`PUBLIC_RATE_PER_HOUR`, default 10) before a slot of the budget all public requests share (the general limiter, 300 a minute), so a client over its own allowance is refused without spending the shared budget and one client cannot exhaust it. The client address (`src/clientAddress.ts`, the rule of `platform/go/httpx` `TrustedRealIP`) is the TCP peer, unless the peer is one of `PASSAGE_TRUSTED_PROXIES`; then it is the rightmost `X-Forwarded-For` entry that is not itself a trusted proxy (a malformed entry stops at the peer). An IPv6 client counts by its /64. With no trusted proxies configured (the default) the header is never believed, so behind the edge every client shares one allowance until the edge's CIDR is set. A registration is signed with a vendorless token holding only `party.vendor-portal.register`; an invitation call is signed for the vendor named in the token with only `party.vendor-portal.invite-accept`, and party checks the secret: nothing in the token is trusted. `/api/v1/invites` is for vendor administrators (the `supplier-admin` role): the role is checked here and those calls alone are signed with `party.vendor-portal.admin`, the duty party requires on the invitation routes, so a supplier user's token (`party.vendor-portal.read` and `.write`) cannot reach them even if this check were bypassed; the invitation token and its accept link are in the one answer that creates the invitation. Uploads (`/api/v1/documents` and `/api/v1/invoice-documents`) go through the scanner first.
 
 ## Vendor scoping
 
@@ -24,8 +30,19 @@ upstream 401 into 502 so a misconfigured key never reads as "sign in again".
 ## Run
 
 Environment: `OIDC_ISSUER`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `APP_ORIGIN`, `PURCHASING_URL`, `RECEIVING_URL`, `PARTY_URL`,
-`PASSAGE_SERVICE_SIGNING_KEY` (or `_FILE`); optional `OIDC_CLIENT_ID`, endpoint overrides, `HTTP_ADDR`, `COOKIE_SECURE=false`
-(local http). The services trust this key through `PASSAGE_SERVICE_PUBLIC_KEYS` (`supplier-portal=<base64 public key>`).
+`PAYABLES_URL`, `PASSAGE_SERVICE_SIGNING_KEY` (or `_FILE`); optional `OIDC_CLIENT_ID`, endpoint overrides, `HTTP_ADDR`,
+`COOKIE_SECURE=false` (local http). The services trust this key through `PASSAGE_SERVICE_PUBLIC_KEYS` (`supplier-portal=<base64 public key>`).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CLAMAV_ADDR` | unset | `host:port` of clamd. Set: every upload is scanned and a failed scan refuses it |
+| `CLAMAV_TIMEOUT_MS` | 30000 | bound on one scan (at least 1000) |
+| `SCAN_ALLOW_UNSCANNED` | `false` | `true` accepts uploads when no scanner is configured (dev); ignored when a scanner is configured |
+| `REGISTRATION_TENANT_ID`, `REGISTRATION_LEGAL_ENTITY_ID` | unset | both set opens the public registration page into that tenant and legal entity |
+| `PUBLIC_RATE_PER_HOUR` | 10 | public requests per client address per hour |
+| `PASSAGE_TRUSTED_PROXIES` | empty | comma-separated CIDRs or addresses of the proxies in front (the edge) whose `X-Forwarded-For` is believed; empty believes none and the client is the TCP peer. An entry that is not an address or CIDR stops the service at start |
+
+The chart (`charts/supplier-portal`) exposes these as `scan.*`, `registration.*`, `publicRatePerHour`, `trustedProxies` and `upstreams.payables`.
 
 ```
 npm ci && npm test && npm run typecheck

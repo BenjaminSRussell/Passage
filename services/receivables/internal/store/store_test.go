@@ -343,6 +343,19 @@ func TestAgingRowsAndPaymentList(t *testing.T) {
 	if err != nil || len(applied) != 0 {
 		t.Fatalf("APPLIED payments = %+v (%v), want none", applied, err)
 	}
+	// q searches the payer, the source reference and the amount; the open items by document number, ignoring case.
+	if found, err := s.ListPayments(ctx, PaymentFilter{Q: "10.0"}, 10); err != nil || len(found) != 1 {
+		t.Fatalf("payments matching 10.0 = %+v (%v), want 1", found, err)
+	}
+	if none, err := s.ListPayments(ctx, PaymentFilter{Q: "no such payer"}, 10); err != nil || len(none) != 0 {
+		t.Fatalf("payments matching nothing = %+v (%v), want none", none, err)
+	}
+	if found, err := s.ListOpenItems(ctx, OpenItemFilter{Q: "inv-30002"}, 10); err != nil || len(found) != 1 || found[0].DocumentNumber != "INV-30002" {
+		t.Fatalf("open items matching inv-30002 = %+v (%v), want INV-30002", found, err)
+	}
+	if found, err := s.ListOpenItems(ctx, OpenItemFilter{Q: "INV-3000"}, 10); err != nil || len(found) != 2 {
+		t.Fatalf("open items matching INV-3000 = %+v (%v), want 2", found, err)
+	}
 	if n := countOutbox(t, s, ctx, "dev.passage.receivables.payment.received.v1"); n != 1 {
 		t.Fatalf("received events = %d, want 1", n)
 	}

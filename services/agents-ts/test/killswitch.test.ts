@@ -213,6 +213,8 @@ describe("event payloads match events/asyncapi.yaml", () => {
     ["BudgetThresholdData", () => budgetThresholdEvent({ tenantId: T1, month: "2026-10", previous: "OK", current: { state: "SOFT", pct: 81 } })?.data],
     ["KillSwitchChangedData", () => killSwitchChangedEvent(globalChange(1, true), OPERATOR).data],
   ])("%s carries exactly the documented fields", (schema, build) => {
-    expect(Object.keys(build() ?? {}).sort()).toEqual(asyncApiRequired(schema));
+    // risk_score is optional in the schema; this fixture gives one
+    const optional = schema === "ApprovalRequestedData" ? ["risk_score"] : [];
+    expect(Object.keys(build() ?? {}).sort()).toEqual([...asyncApiRequired(schema), ...optional].sort());
   });
 });

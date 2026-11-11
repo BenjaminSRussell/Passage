@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -244,6 +245,14 @@ func TestPostAndCancelPackingSlip_AC28_1_AC28_2(t *testing.T) {
 	slips, err := s.ListPackingSlips(ctx, store.PackingSlipFilter{ShipmentID: f.shipment.ID, Limit: 10})
 	if err != nil || len(slips) != 3 {
 		t.Fatalf("slips for shipment = %d, %v; want 3 (original, reversal, repost)", len(slips), err)
+	}
+	// q finds a slip by part of its number, ignoring case.
+	number := slips[0].Number
+	if found, err := s.ListPackingSlips(ctx, store.PackingSlipFilter{Q: strings.ToLower(number), Limit: 10}); err != nil || len(found) != 1 || found[0].Number != number {
+		t.Fatalf("slips matching %q = %+v, %v", number, found, err)
+	}
+	if none, err := s.ListPackingSlips(ctx, store.PackingSlipFilter{Q: "no-such-slip", Limit: 10}); err != nil || len(none) != 0 {
+		t.Fatalf("slips matching nothing = %+v, %v", none, err)
 	}
 }
 

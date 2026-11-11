@@ -119,7 +119,7 @@ export function SetTolerancePage() {
           {state.error ? (
             <div className={styles.formActions}>
               <Alert tone="warning" title="Could not read the current tolerances" live="status">
-                {state.error.message} ({state.error.code}). Saving an existing tolerance needs its version.
+                <ProblemMessage problem={state.error} /> Saving an existing tolerance needs its version.
               </Alert>
             </div>
           ) : null}

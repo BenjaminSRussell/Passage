@@ -130,7 +130,7 @@ describe("NewRunPage with hierarchies", () => {
     fireEvent.change(await screen.findByLabelText("Amounts shown as"), { target: { value: "credit" } });
 
     fireEvent.change(screen.getByLabelText("Definition"), { target: { value: "TB-STD" } });
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "3" } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Run statement" }));
@@ -145,7 +145,7 @@ describe("NewRunPage with hierarchies", () => {
     server.handler = (url, init) =>
       url.pathname === "/api/v1/reporting/hierarchies" ? { status: 403, body: { type: "x", title: "Forbidden", status: 403, code: "AUTH-0003", detail: "no" } } : ok(url, init);
     renderAt("/finreport/runs/new");
-    expect(await screen.findByText(/The hierarchies could not be loaded \(AUTH-0003\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/The hierarchies could not be loaded\./)).toBeInTheDocument();
     expect(screen.getByLabelText("Rows from hierarchy")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Run statement" })).toBeEnabled();
   });

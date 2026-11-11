@@ -107,7 +107,9 @@ type NewBatch struct {
 type BatchFilter struct {
 	ItemID      string
 	Disposition string
-	Limit       int
+	// Q keeps the batches whose number contains it, ignoring case.
+	Q     string
+	Limit int
 }
 
 // AttributeCheck is the outcome for one recorded value.
@@ -302,7 +304,8 @@ func (s *Postgres) ListBatches(ctx context.Context, f BatchFilter) ([]Batch, err
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+batchCols+` from batch_record
 			where ($1 = '' or item_id::text = $1) and ($2 = '' or disposition = $2)
-			order by created_at desc, id desc limit $3`, f.ItemID, f.Disposition, f.Limit)
+			and ($4 = '' or strpos(lower(batch_number), lower($4)) > 0)
+			order by created_at desc, id desc limit $3`, f.ItemID, f.Disposition, f.Limit, f.Q)
 		if err != nil {
 			return err
 		}

@@ -42,7 +42,7 @@ export function ClearingsPage() {
       <PageHeader title="Clearing documents" description="Each document groups the open items one clearing cleared. A document is reset as a whole, which opens its items again." />
       <LedgerPicker id="cl-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={(id) => setParams(id ? (status ? { ledger: id, status } : { ledger: id }) : {})} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its clearing documents.</p>
+        <p className={styles.note}>Choose a ledger to see its clearing documents.</p>
       ) : (
         <>
           <Card>

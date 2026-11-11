@@ -164,3 +164,15 @@
   outline: 2px solid transparent;
   box-shadow: var(--focus-ring);
 }
+
+.searchBox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-inline-size: 28rem;
+}
+
+.searchBox input {
+  flex: 1 1 14rem;
+}

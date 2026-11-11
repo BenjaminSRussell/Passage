@@ -33,10 +33,9 @@ export function IssueList({ issues, label }: { issues: Issue[]; label: string })
   return (
     <ul className={styles.plainList} aria-label={label}>
       {issues.map((issue, i) => (
-        <li key={`${issue.code}-${i}`} className={styles.issue}>
+        <li key={i} className={styles.issue}>
           <Badge tone={issue.reject ? "danger" : "warning"}>{issue.reject ? "Rejects" : "Warning"}</Badge>
-          <span className={styles.mono}>{issue.code}</span>
-          <span>{issue.detail}</span>
+          <ProblemMessage problem={issue} />
         </li>
       ))}
     </ul>

@@ -173,7 +173,7 @@ describe("ValueReportPage", () => {
         fail ? json(422, { title: "Unprocessable", code: "CST-RPT-004", detail: "the valuation ledger values in USD but holds cost transactions in EUR" }) : json(200, { ...report, rows: [], total: { qty: "0", physicalValue: "0.00", financialValue: "0.00", value: "0.00" } }),
     });
     at(`/costing/value-report?legalEntityId=${LE}&asOf=2026-03-31`);
-    expect(await findAlert()).toHaveTextContent("CST-RPT-004");
+    expect(await findAlert()).toHaveTextContent("the valuation ledger values in USD but holds cost transactions in EUR");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No stock is valued at this date")).toBeInTheDocument();
@@ -250,7 +250,7 @@ describe("CostTransactionsPage", () => {
       "GET /api/v1/costing/cost-transactions": () => (fail ? json(404, { title: "Not Found", code: "CST-VLG-005", detail: "the legal entity has no such valuation ledger" }) : json(200, { items: [] })),
     });
     at(`/costing/cost-transactions?legalEntityId=${LE}`);
-    expect(await findAlert()).toHaveTextContent("CST-VLG-005");
+    expect(await findAlert()).toHaveTextContent("the legal entity has no such valuation ledger");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No cost transactions match")).toBeInTheDocument();

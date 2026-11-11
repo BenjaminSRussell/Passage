@@ -106,6 +106,11 @@ func enqueueJournal(ctx context.Context, tx pgx.Tx, tenantID string, j journalSp
 		}
 		lines[i].Account = bank
 	}
+	return insertJournal(ctx, tx, tenantID, j, lines)
+}
+
+// insertJournal stores a journal whose lines are final (the bank account already resolved).
+func insertJournal(ctx context.Context, tx pgx.Tx, tenantID string, j journalSpec, lines []journalLine) error {
 	raw, err := json.Marshal(lines)
 	if err != nil {
 		return err

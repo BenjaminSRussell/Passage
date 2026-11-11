@@ -70,36 +70,38 @@ type Ports struct {
 }
 
 type API struct {
-	store           store.Store
-	ports           Ports
-	resolveMinAge   time.Duration
-	resolveLease    time.Duration
-	evaluated       atomic.Int64
-	rejected        atomic.Int64
-	arrived         atomic.Int64
-	registered      atomic.Int64
-	posted          atomic.Int64
-	adjusted        atomic.Int64
-	invoiced        atomic.Int64
-	adjustments     atomic.Int64
-	settlements     atomic.Int64
-	planMarkFailed  atomic.Int64
-	ersSettled      atomic.Int64
-	auditBlocked    atomic.Int64
-	resolveFallback atomic.Int64
-	auditReleased   atomic.Int64
-	auditRejected   atomic.Int64
-	payeesCreated   atomic.Int64
-	payeesErased    atomic.Int64
-	payeesRetained  atomic.Int64
-	payeesHeld      atomic.Int64
-	groupMissing    atomic.Int64
-	capturesCreated atomic.Int64
-	capturesReview  atomic.Int64
-	sheetsCreated   atomic.Int64
-	sheetsDecided   atomic.Int64
-	asnsCreated     atomic.Int64
-	asnReceipts     atomic.Int64
+	store              store.Store
+	submissions        store.SubmissionStore
+	ports              Ports
+	resolveMinAge      time.Duration
+	resolveLease       time.Duration
+	evaluated          atomic.Int64
+	rejected           atomic.Int64
+	arrived            atomic.Int64
+	registered         atomic.Int64
+	posted             atomic.Int64
+	adjusted           atomic.Int64
+	invoiced           atomic.Int64
+	adjustments        atomic.Int64
+	settlements        atomic.Int64
+	planMarkFailed     atomic.Int64
+	ersSettled         atomic.Int64
+	auditBlocked       atomic.Int64
+	resolveFallback    atomic.Int64
+	auditReleased      atomic.Int64
+	auditRejected      atomic.Int64
+	payeesCreated      atomic.Int64
+	payeesErased       atomic.Int64
+	payeesRetained     atomic.Int64
+	payeesHeld         atomic.Int64
+	groupMissing       atomic.Int64
+	capturesCreated    atomic.Int64
+	capturesReview     atomic.Int64
+	sheetsCreated      atomic.Int64
+	sheetsDecided      atomic.Int64
+	asnsCreated        atomic.Int64
+	submissionsCreated atomic.Int64
+	asnReceipts        atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -169,6 +171,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyAsnMaintain, dutyAsnReceive)).Get("/v1/receiving/asns/{id}", a.getAsn)
 	r.With(authz.RequireDuty(dutyAsnReceive)).Post("/v1/receiving/asns/{id}:start-receipt", a.idempotent(a.startAsnReceipt))
 	a.registerVendorPortal(r)
+	a.registerSubmissions(r)
 	r.With(authz.RequireDuty(dutyPayeeErase)).Post("/v1/receiving/one-time-payees:erase", a.idempotent(a.eraseOneTimePayees))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-adjustments:post", a.idempotent(a.postInvoiceAdjustment))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/plan-settlements:run", a.idempotent(a.runPlanSettlement))
