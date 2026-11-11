@@ -1,6 +1,8 @@
-# The edge gateway (listed in networkPolicy.ingressNamespaces) reaches the API; Prometheus reaches
-# only the admin port. The runtime itself needs egress to Postgres, the MCP gateway and the model
-# provider, which the cluster's egress policy grants.
+# The API port admits only the callers listed in values: the edge gateway's namespaces and pods matching
+# networkPolicy.ingressPodLabels in this namespace. Other pods of the namespace are not admitted (an empty from list would
+# admit every source, so the rule is rendered only when a caller is listed). Prometheus reaches only the admin port.
+# The runtime still verifies each caller's bearer token itself (values: auth). Egress to Postgres, the MCP gateway and
+# the model provider is granted by the cluster's egress policy.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -13,18 +15,24 @@ spec:
       app.kubernetes.io/name: agent-runtime
   policyTypes: [Ingress]
   ingress:
+    {{- if or .Values.networkPolicy.ingressNamespaces .Values.networkPolicy.ingressPodLabels }}
     - from:
-        - podSelector: {}
         {{- range .Values.networkPolicy.ingressNamespaces }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ . }}
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+        {{- range .Values.networkPolicy.ingressPodLabels }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
         {{- end }}
       ports:
         - { protocol: TCP, port: 8080 }
+    {{- end }}
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace }}
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace | quote }}
       ports:
         - { protocol: TCP, port: 9090 }

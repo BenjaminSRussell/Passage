@@ -7,10 +7,12 @@ info:
     eval triggers. This build serves the kill switch (read and toggle), the
     approval decision, run start and run read, and the copilot chat
     (src/api/router.ts). The budget, eval and promotion endpoints are not
-    served yet; NOT-IMPLEMENTED.md lists them. Callers reach
-    these routes through the edge, which verifies the user's token and sets
-    x-passage-tenant, x-passage-user and x-passage-duties (client copies are
-    stripped). Errors are RFC 9457 problems with a stable `code`: AGT-04xx and
+    served yet; NOT-IMPLEMENTED.md lists them. Every route needs the
+    caller's bearer token (Authorization: Bearer), which the runtime verifies
+    itself (RS256, issuer, audience, expiry) and takes the tenant, user and
+    duties from; the x-passage-tenant, x-passage-user and x-passage-duties
+    headers the edge sets must match it, and are never trusted alone (401
+    AGT-0401). Errors are RFC 9457 problems with a stable `code`: AGT-04xx and
     AGT-0500 for HTTP-level errors, AGT-02xx from the PRD 9.47.18 catalog for
     business refusals (README, Error codes).
 servers:

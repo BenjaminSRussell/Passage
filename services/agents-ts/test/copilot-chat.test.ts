@@ -4,7 +4,8 @@ import { CopilotAnswerCache } from "../src/domain/copilot.js";
 import { createCopilotService } from "../src/runtime/copilot.js";
 import type { ModelResponse } from "../src/runtime/engine.js";
 import { REAL_IBAN, ScriptedProvider } from "./fakes.js";
-import { FakeMcp, headers, MemoryStore, serve, tool, USER } from "./surface-fakes.js";
+import { tokenFor } from "./jwt.js";
+import { FakeMcp, headers, MemoryStore, serve, T1, tool, USER } from "./surface-fakes.js";
 
 const GET = "passage.ap.invoice.get";
 const LIST = "passage.ap.vendor.list";
@@ -56,7 +57,7 @@ describe("POST /api/v1/copilot/chat", () => {
       refusal: null,
       generated: true,
     });
-    expect(s.mcp.connects[0]).toMatchObject({ userId: USER, token: "user-token-abc" });
+    expect(s.mcp.connects[0]).toMatchObject({ userId: USER, token: tokenFor(T1, USER, DUTIES) });
     expect(s.mcp.calls).toEqual([{ name: GET, args: { invoiceId: "INV-7" } }]);
     // The second prompt carries the tool result; only read tools were offered.
     expect(s.provider.seen[1]?.user).toContain("Result of passage.ap.invoice.get");

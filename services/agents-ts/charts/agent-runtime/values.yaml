@@ -34,5 +34,20 @@ resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { cpu: 500m, memory: 512Mi }
 serviceMonitor: { enabled: false }
-# Namespaces allowed to call the runtime (the edge gateway's); metricsNamespace may reach only the admin port.
-networkPolicy: { metricsNamespace: observability, ingressNamespaces: [] }
+# Caller authentication: the runtime verifies every caller's bearer token itself (RS256, issuer, audience, expiry) and
+# never trusts the X-Passage-* edge headers on their own. issuer is the realm that signs the tokens; the keys come from
+# jwksUrl (the realm's certs endpoint) or from a ConfigMap holding the key set (the gateway's localJWKS). The process
+# refuses to start without an issuer and keys.
+auth:
+  issuer: ""
+  audience: passage-api
+  jwksUrl: ""
+  jwksConfigMap: { name: "", key: jwks }
+# Who may open a connection to the API port: the edge gateway's namespaces and, for an in-cluster caller such as a
+# copilot BFF, pods matching one of ingressPodLabels in this namespace. Nothing else in the namespace is admitted, and
+# with both lists empty no one reaches the API. metricsNamespace may reach only the admin port.
+networkPolicy:
+  metricsNamespace: observability
+  ingressNamespaces: []
+  # For example: [{ app.kubernetes.io/name: copilot-bff }]
+  ingressPodLabels: []

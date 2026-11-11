@@ -88,6 +88,18 @@ spec:
               value: {{ .Values.selfApprovalLimit.currency | quote }}
             - name: AGENTS_EVAL_PASSED
               value: {{ .Values.evalPassed | quote }}
+            - name: AGENTS_JWT_ISSUER
+              value: {{ .Values.auth.issuer | quote }}
+            - name: AGENTS_JWT_AUDIENCE
+              value: {{ .Values.auth.audience | quote }}
+            {{- if .Values.auth.jwksUrl }}
+            - name: AGENTS_JWKS_URL
+              value: {{ .Values.auth.jwksUrl | quote }}
+            {{- end }}
+            {{- if .Values.auth.jwksConfigMap.name }}
+            - name: AGENTS_JWKS_FILE
+              value: /etc/passage/jwks/jwks.json
+            {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
@@ -101,3 +113,15 @@ spec:
             httpGet: { path: /readyz, port: http }
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.auth.jwksConfigMap.name }}
+          volumeMounts:
+            - { name: jwks, mountPath: /etc/passage/jwks, readOnly: true }
+          {{- end }}
+      {{- if .Values.auth.jwksConfigMap.name }}
+      volumes:
+        - name: jwks
+          configMap:
+            name: {{ .Values.auth.jwksConfigMap.name | quote }}
+            items:
+              - { key: {{ .Values.auth.jwksConfigMap.key | quote }}, path: jwks.json }
+      {{- end }}

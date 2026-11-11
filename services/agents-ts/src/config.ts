@@ -34,6 +34,8 @@ export interface Config {
   anthropic: { apiKey: string; baseUrl: string | undefined };
   openai: { apiKey: string; baseUrl: string; auth: "bearer" | "api-key"; apiVersion: string | undefined };
   bedrock: { region: string; accessKeyId: string; secretAccessKey: string; sessionToken: string | undefined };
+  /** Caller authentication: the realm that signs the bearer tokens callers send (auth.ts). */
+  jwt: { issuer: string; audience: string; jwksUrl: string | undefined; jwksFile: string | undefined };
 }
 
 export function parseAddr(value: string, name: string): { host: string; port: number } {
@@ -81,6 +83,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const approvalExpiryHours = expiry === undefined || expiry === "" ? undefined : positiveInt(env, "AGENTS_APPROVAL_EXPIRY_H", 72);
   if (approvalExpiryHours !== undefined && approvalExpiryHours > 240) throw new Error("AGENTS_APPROVAL_EXPIRY_H must be 1 to 240");
   const model = env["AGENTS_MODEL"] ?? MODEL_SONNET;
+  const issuer = env["AGENTS_JWT_ISSUER"] ?? "";
+  if (!/^https?:\/\//.test(issuer)) throw new Error("AGENTS_JWT_ISSUER must be the issuer (realm URL) of the callers' bearer tokens");
+  const jwksUrl = env["AGENTS_JWKS_URL"] || undefined;
+  const jwksFile = env["AGENTS_JWKS_FILE"] || undefined;
+  if (jwksUrl === undefined && jwksFile === undefined) throw new Error("AGENTS_JWKS_URL or AGENTS_JWKS_FILE (the realm's signing keys) is required");
+  if (jwksUrl !== undefined && !/^https?:\/\//.test(jwksUrl)) throw new Error("AGENTS_JWKS_URL must be an http(s) URL");
   return {
     host: http.host,
     port: http.port,
@@ -111,6 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       secretAccessKey: env["AWS_SECRET_ACCESS_KEY"] ?? "",
       sessionToken: env["AWS_SESSION_TOKEN"],
     },
+    jwt: { issuer, audience: env["AGENTS_JWT_AUDIENCE"] || "passage-api", jwksUrl, jwksFile },
   };
 }
 

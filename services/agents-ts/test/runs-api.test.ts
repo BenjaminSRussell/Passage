@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { defaultCatalog } from "../src/agents/catalog.js";
 import { createRunService } from "../src/runtime/service.js";
 import { proposal, ScriptedProvider } from "./fakes.js";
+import { tokenFor } from "./jwt.js";
 import { FakeMcp, headers, MemoryStore, OTHER, serve, T1, tool, USER } from "./surface-fakes.js";
 
 const AP_DUTIES = "agents.invoke,ap.invoice.read,ap.vendor.read,ledger.account.read,tax.code.read,ap.invoice.propose";
@@ -46,7 +47,7 @@ describe("POST /api/v1/agents/{agent_id}/runs", () => {
     const started = (await res.json()) as { runId: string; status: string; agentId: string };
     expect(started).toMatchObject({ status: "RUNNING", agentId: "ap_coding" });
     // The gateway session was opened as the caller, with the caller's bearer token and the run id.
-    expect(s.mcp.connects).toEqual([{ userId: USER, token: "user-token-abc", runId: started.runId }]);
+    expect(s.mcp.connects).toEqual([{ userId: USER, token: tokenFor(T1, USER, AP_DUTIES), runId: started.runId }]);
 
     // The run waits for approval; the view lists what waits.
     let view: { run: { status: string }; pendingApprovals: Array<{ actionId: string; tool: string; approvalDuty: string }> } | undefined;

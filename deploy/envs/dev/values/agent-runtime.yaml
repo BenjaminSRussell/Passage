@@ -1,0 +1,8 @@
+# agent-runtime in dev: callers' bearer tokens are verified against the same realm and key set the edge gateway uses
+# (deploy/gateway/securitypolicy.yaml, ConfigMap passage-dev-jwks). Only the edge gateway's namespace reaches the API.
+auth:
+  issuer: https://idp.dev.passage.dev/realms/dev
+  audience: passage-api
+  jwksConfigMap: { name: passage-dev-jwks, key: jwks }
+networkPolicy:
+  ingressNamespaces: [envoy-gateway-system]

@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ApprovalRequest, RecordedDecision } from "../src/api/decision.js";
 import { createAgentsHandler, type AgentsApiDeps } from "../src/api/router.js";
+import { edgeHeaders, testAuthenticate } from "./jwt.js";
 import type { ActionRecord } from "../src/domain/audit.js";
 import { KillSwitchRegistry } from "../src/domain/killswitch.js";
 import type { NewApproval, PendingApproval } from "../src/store/approvals.js";
@@ -135,7 +136,7 @@ export class MemoryStore implements RunStore {
 
 export async function serve(deps: Partial<AgentsApiDeps> & Pick<AgentsApiDeps, "approvals">): Promise<{ base: string; close(): Promise<void>; registry: KillSwitchRegistry }> {
   const registry = deps.registry ?? new KillSwitchRegistry(() => Date.now());
-  const handler = createAgentsHandler({ registry, versions: { next: () => 1 }, publish: async () => undefined, ...deps });
+  const handler = createAgentsHandler({ registry, versions: { next: () => 1 }, publish: async () => undefined, authenticate: testAuthenticate, ...deps });
   const server: Server = createServer((req, res) => void handler(req, res));
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return {
@@ -145,10 +146,4 @@ export async function serve(deps: Partial<AgentsApiDeps> & Pick<AgentsApiDeps, "
   };
 }
 
-export const headers = (duties: string, user = USER, tenant = T1): Record<string, string> => ({
-  "content-type": "application/json",
-  authorization: "Bearer user-token-abc",
-  "x-passage-tenant": tenant,
-  "x-passage-user": user,
-  "x-passage-duties": duties,
-});
+export const headers = (duties: string, user = USER, tenant = T1): Record<string, string> => edgeHeaders(tenant, user, duties);

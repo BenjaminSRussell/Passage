@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { KillSwitchRegistry } from "../src/domain/killswitch.js";
 import { MemoryStore, USER, T1 } from "./surface-fakes.js";
+import { testAuthenticate } from "./jwt.js";
 
 const caller = { userId: USER, tenantId: T1, duties: new Set(["ap.invoice.read", "agents.invoke"]) };
 const rpcResult = (result: unknown): Response => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
@@ -58,12 +59,13 @@ describe("MCP connector", () => {
 });
 
 describe("config", () => {
-  const base = { MCP_URL: "http://mcp:8080" };
+  const base = { MCP_URL: "http://mcp:8080", AGENTS_JWT_ISSUER: "https://idp.dev.passage.dev/realms/dev", AGENTS_JWKS_URL: "https://idp.dev.passage.dev/realms/dev/protocol/openid-connect/certs" };
 
   it("defaults to the Claude Sonnet model on the Anthropic provider and keeps every model configurable", () => {
     const cfg = loadConfig(base);
     expect([MODEL_OPUS, MODEL_SONNET, MODEL_HAIKU]).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
     expect(cfg).toMatchObject({ provider: "anthropic", model: "claude-sonnet-5-5", copilotModel: "claude-sonnet-5-5", port: 8080, adminPort: 9090 });
+    expect(cfg.jwt).toEqual({ issuer: base.AGENTS_JWT_ISSUER, audience: "passage-api", jwksUrl: base.AGENTS_JWKS_URL, jwksFile: undefined });
     const tuned = loadConfig({ ...base, AGENTS_MODEL: MODEL_OPUS, AGENTS_COPILOT_MODEL: MODEL_HAIKU, AGENTS_MODEL_OVERRIDES: `{"anomaly":"${MODEL_HAIKU}"}` });
     expect(tuned.copilotModel).toBe("claude-haiku-5-5");
     const models = Object.fromEntries(agentCatalog(tuned).map((a) => [a.agentId, a.modelId]));
@@ -78,6 +80,9 @@ describe("config", () => {
     [{ ...base, AGENTS_MODEL_OVERRIDES: "[1]" }, /AGENTS_MODEL_OVERRIDES/],
     [{ ...base, AGENTS_APPROVAL_EXPIRY_H: "500" }, /1 to 240/],
     [{ ...base, AGENTS_SELF_APPROVAL_LIMIT: "ten" }, /decimal/],
+    [{ MCP_URL: base.MCP_URL, AGENTS_JWKS_URL: base.AGENTS_JWKS_URL }, /AGENTS_JWT_ISSUER/],
+    [{ MCP_URL: base.MCP_URL, AGENTS_JWT_ISSUER: base.AGENTS_JWT_ISSUER }, /AGENTS_JWKS_URL or AGENTS_JWKS_FILE/],
+    [{ ...base, AGENTS_JWKS_URL: "file:///etc/keys" }, /AGENTS_JWKS_URL/],
   ])("refuses invalid settings %#", (env, message) => {
     expect(() => loadConfig(env)).toThrow(message);
   });
@@ -106,7 +111,7 @@ describe("server wiring", () => {
     const metrics = new Metrics();
     let ready = true;
     const handler = createRequestHandler({
-      api: { registry: new KillSwitchRegistry(() => Date.now()), versions: { next: () => 1 }, approvals: store, publish: async () => undefined },
+      api: { authenticate: testAuthenticate, registry: new KillSwitchRegistry(() => Date.now()), versions: { next: () => 1 }, approvals: store, publish: async () => undefined },
       metrics,
       ready: async () => ready,
     });

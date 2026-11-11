@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { AGENT_IDS, defaultCatalog } from "./agents/catalog.js";
+import { createAuthenticator } from "./api/auth.js";
 import type { AgentsApiDeps } from "./api/router.js";
 import { createProviderFactory, loadConfig, type Config } from "./config.js";
 import { CopilotAnswerCache } from "./domain/copilot.js";
@@ -63,6 +65,12 @@ async function main(): Promise<void> {
     modelId: cfg.copilotModel,
   });
   const api: AgentsApiDeps = {
+    authenticate: createAuthenticator({
+      issuer: cfg.jwt.issuer,
+      audience: cfg.jwt.audience,
+      jwksUrl: cfg.jwt.jwksUrl,
+      jwks: cfg.jwt.jwksFile !== undefined ? (JSON.parse(readFileSync(cfg.jwt.jwksFile, "utf8")) as { keys: [] }) : undefined,
+    }),
     registry,
     versions: { next: () => (version += 1) },
     approvals: inbox,
