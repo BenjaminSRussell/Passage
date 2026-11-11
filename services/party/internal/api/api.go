@@ -51,6 +51,7 @@ type API struct {
 	vendors   store.VendorStore
 	customers store.CustomerStore
 	suppliers store.SupplierStore
+	portal    store.PortalStore
 	merges    MergeStore
 	search    store.SearchStore
 	sequence  Sequencer
@@ -120,6 +121,9 @@ func (a *API) Register(r chi.Router) {
 	}
 	if a.suppliers != nil {
 		a.registerSuppliers(r)
+	}
+	if a.portal != nil {
+		a.registerPortal(r)
 	}
 	if a.merges != nil {
 		a.registerMerge(r)

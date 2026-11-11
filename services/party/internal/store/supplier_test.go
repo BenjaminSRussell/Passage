@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -130,7 +131,7 @@ func TestSupplier_ARejectedOnboardingKeepsTheVendorBlocked(t *testing.T) {
 
 func TestSupplier_VendorRequestsAreScoped(t *testing.T) {
 	r := newSupplierRig(t)
-	mine, err := r.s.CreateRequest(r.buyer, r.vendorA, domain.RequestProfileChange, "New address", "We moved.")
+	mine, err := r.s.CreateRequest(r.buyer, r.vendorA, domain.RequestProfileChange, "New address", "We moved.", map[string]string{"tradeName": "Acme West"})
 	if err != nil || mine.Status != domain.RequestSubmitted {
 		t.Fatalf("create %+v %v", mine, err)
 	}
@@ -250,5 +251,79 @@ func TestSupplier_ControlledDistributionNeedsAnAcknowledgementPerVendorAndRevisi
 	}
 	if acks != 1 {
 		t.Errorf("audit holds %d acknowledgements, want 1", acks)
+	}
+}
+
+func TestSupplier_ApprovingAProfileChangeAppliesItToTheVendorsParty(t *testing.T) {
+	r := newSupplierRig(t)
+	v, _ := r.s.GetVendor(r.buyer, r.vendorA)
+	before, _, err := r.s.GetParty(r.buyer, v.PartyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := r.s.CreateRequest(r.buyer, r.vendorA, domain.RequestProfileChange, "Rename", "We rebranded.", map[string]string{"legalName": "Acme Industrial Ltd", "tradeName": "Acme Industrial", "languageCode": "en"})
+	if err != nil || req.Changes["legalName"] != "Acme Industrial Ltd" {
+		t.Fatalf("create %+v %v", req, err)
+	}
+	// Nothing changes until a buyer approves.
+	if p, _, _ := r.s.GetParty(r.buyer, v.PartyID); p.Version != before.Version || *p.LegalName != "Acme" {
+		t.Fatalf("party changed before approval: %+v", p)
+	}
+	done, err := r.s.DecideRequest(r.approve, req.ID, true, "ok")
+	if err != nil || done.Status != domain.RequestApproved || done.AppliedAt == nil {
+		t.Fatalf("approve %+v %v", done, err)
+	}
+	after, _, _ := r.s.GetParty(r.buyer, v.PartyID)
+	if *after.LegalName != "Acme Industrial Ltd" || *after.TradeName != "Acme Industrial" || *after.LanguageCode != "en" || after.Name != "Acme Industrial Ltd" || after.Version != before.Version+1 {
+		t.Fatalf("party after approval: %+v", after)
+	}
+	audit, _ := r.s.ListAudit(r.buyer, r.vendorA, 50)
+	var applied string
+	for _, e := range audit {
+		if e.Action == "profile.applied" {
+			applied = e.Detail
+		}
+	}
+	if applied != "languageCode,legalName,tradeName" {
+		t.Errorf("audit detail %q, want the changed fields", applied)
+	}
+	if got := outboxTypes(t, r.app); !strings.Contains(got, "dev.passage.party.party.updated.v1") {
+		t.Errorf("outbox %s has no party.updated.v1", got)
+	}
+	// Another vendor's party is untouched.
+	vb, _ := r.s.GetVendor(r.buyer, r.vendorB)
+	if p, _, _ := r.s.GetParty(r.buyer, vb.PartyID); p.Version != 1 {
+		t.Errorf("vendor B's party version %d, want untouched", p.Version)
+	}
+}
+
+func TestSupplier_RejectingOrWithdrawingAProfileChangeLeavesThePartyAlone(t *testing.T) {
+	r := newSupplierRig(t)
+	v, _ := r.s.GetVendor(r.buyer, r.vendorA)
+	req, _ := r.s.CreateRequest(r.buyer, r.vendorA, domain.RequestProfileChange, "Rename", "x", map[string]string{"legalName": "Other Name"})
+	if d, err := r.s.DecideRequest(r.approve, req.ID, false, "no"); err != nil || d.AppliedAt != nil {
+		t.Fatalf("reject %+v %v", d, err)
+	}
+	if p, _, _ := r.s.GetParty(r.buyer, v.PartyID); *p.LegalName != "Acme" {
+		t.Errorf("rejected change was applied: %v", *p.LegalName)
+	}
+}
+
+func TestSupplier_AProfileChangeThePartyCannotTakeFailsTheApprovalAndKeepsItOpen(t *testing.T) {
+	r := newSupplierRig(t)
+	v, _ := r.s.GetVendor(r.buyer, r.vendorA)
+	// A change that would empty the legal name is refused at creation by the API; the store refuses it again at approval.
+	req, err := r.s.CreateRequest(r.buyer, r.vendorA, domain.RequestProfileChange, "Rename", "x", map[string]string{"legalName": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.s.DecideRequest(r.approve, req.ID, true, ""); problemCode(t, err) != store.CodeSupplierInvalid {
+		t.Fatalf("approve an invalid change: %v", err)
+	}
+	if got, _ := r.s.GetRequest(r.buyer, "", req.ID); got.Status != domain.RequestSubmitted || got.AppliedAt != nil {
+		t.Errorf("request after a failed approval: %+v", got)
+	}
+	if p, _, _ := r.s.GetParty(r.buyer, v.PartyID); p.Version != 1 {
+		t.Errorf("party version %d after a failed approval", p.Version)
 	}
 }
