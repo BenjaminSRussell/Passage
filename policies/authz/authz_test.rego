@@ -2356,8 +2356,8 @@ test_dev_seed_every_user_reads_features_but_cannot_change_them if {
 	not dev_seed_decision("clerk", "PUT", "/v1/tenant/features").allow
 }
 
-test_processmfg_service_grant_reads_features_only if {
-	data.service_grants.processmfg == {"identity": ["identity.feature.view"]}
+test_processmfg_service_grant_reads_features_and_creates_recipes if {
+	data.service_grants.processmfg == {"identity": ["identity.feature.view"], "shopfloor": ["shopfloor.controlrecipe.create"]}
 	allowed("identity.feature.view", "GET", "/v1/tenant/features")
 	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
 	not allowed("identity.feature.view", "GET", "/v1/tenants")
@@ -2540,4 +2540,21 @@ test_receiving_document_flow_is_read_only_and_separate if {
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
+}
+
+# The shopfloor sweeper reads the registry of active tenants and nothing else of identity (#25).
+test_shopfloor_service_grant_reads_the_tenant_registry_only if {
+	data.service_grants.shopfloor == {"identity": ["identity.tenant-registry.read"]}
+	allowed("identity.tenant-registry.read", "GET", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "POST", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "PATCH", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "GET", "/v1/tenants/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("identity.tenant-registry.read", "GET", "/v1/legal-entities")
+}
+
+# A released batch order may create control recipes and nothing else of the shop floor (#25).
+test_processmfg_may_create_control_recipes_only if {
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes")
+	not allowed("shopfloor.controlrecipe.create", "GET", "/v1/shopfloor/edge-nodes/e1/control-recipes")
+	not allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/edge-nodes/e1/control-recipes/r1:report")
 }

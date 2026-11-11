@@ -49,6 +49,7 @@
     "platform.promotion.approve": {"permissions": [{"resource": "/v1/platform/releases{,/**}", "methods": ["POST"]}]},
     "platform.environment.rollback": {"permissions": [{"resource": "/v1/platform/releases{,/**}", "methods": ["POST"]}]},
     "identity.tenant.maintain": {"permissions": [{"resource": "/v1/tenants{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "identity.tenant-registry.read": {"permissions": [{"resource": "/v1/tenants", "methods": ["GET"]}]},
     "identity.legal-entity.maintain": {"permissions": [{"resource": "/v1/legal-entities{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.feature.view": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET"]}]},
     "identity.feature.maintain": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET", "PUT"]}]},
@@ -3889,7 +3890,11 @@
       "dispatch": ["dispatch.run.create", "dispatch.run.read"]
     },
     "processmfg": {
-      "identity": ["identity.feature.view"]
+      "identity": ["identity.feature.view"],
+      "shopfloor": ["shopfloor.controlrecipe.create"]
+    },
+    "shopfloor": {
+      "identity": ["identity.tenant-registry.read"]
     },
     "supplier-portal": {
       "purchasing": ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],

@@ -60,7 +60,15 @@ consumer:
 # auto clock-out (1h) and process message retry (1m) for the listed tenants. "0" switches a job off.
 sweeper:
   enabled: false
-  tenantIds: ""        # comma-separated tenant UUIDs
+  tenantIds: ""        # comma-separated tenant UUIDs; with tenantSource identity, extra tenants on top of the registry's
+  # config: sweep tenantIds. identity: also sweep every active tenant of the identity registry (read at the
+  # start of every run). That needs identityUrl, the platform operator tenant, and a service signing key whose
+  # public key identity trusts for the caller "shopfloor" (the grant shopfloor -> identity.tenant-registry.read).
+  tenantSource: config
+  identityUrl: ""
+  operatorTenantId: ""
+  signingKeySecret: ""  # Secret with key signing-key (base64 Ed25519 seed)
+  keyId: ""
   andonInterval: 1m
   rollupInterval: 15m
   autoClockInterval: 1h

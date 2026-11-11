@@ -87,7 +87,9 @@ func startAutomation(t *testing.T, w *fakeWarehouse, plc *mfs.SimPLC) (*Automati
 	ctx, cancel := context.WithCancel(context.Background())
 	go plc.Serve(ctx, ln)
 	a := &Automation{Plane: w, Station: "PLC", PollEvery: 20 * time.Millisecond, BackoffMin: 10 * time.Millisecond, BackoffMax: 20 * time.Millisecond,
-		Dial: func(ctx context.Context) (net.Conn, error) { return (&net.Dialer{}).DialContext(ctx, "tcp", ln.Addr().String()) },
+		Dial: func(ctx context.Context) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", ln.Addr().String())
+		},
 		Link: mfs.Config{AckWait: 300 * time.Millisecond, KeepAlive: time.Second}}
 	done := make(chan struct{})
 	go func() { a.Run(ctx); close(done) }()

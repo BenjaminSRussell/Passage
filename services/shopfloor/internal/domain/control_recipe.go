@@ -293,3 +293,60 @@ func ResendCheck(status string, sendCount int, messagesForOrder bool, force bool
 	}
 	return "", nil
 }
+
+// PhasePaths lists the path of every phase of the recipe in order (procedure/unit procedure/operation/phase),
+// the form a process message names a phase in.
+func (d RecipeDoc) PhasePaths() []string {
+	var out []string
+	for _, up := range d.Procedure.UnitProcedures {
+		for _, op := range up.Operations {
+			for _, ph := range op.Phases {
+				out = append(out, strings.Join([]string{d.Procedure.Name, up.Name, op.Name, ph.Name}, "/"))
+			}
+		}
+	}
+	return out
+}
+
+// Process message values a process control system sends to end a recipe it runs (FR-25.17, 25-5).
+const (
+	// StatusCharacteristic is the characteristic of an order-status message that carries the outcome.
+	StatusCharacteristic = "status"
+	// StatusMessageCharacteristic optionally carries the reason of an aborted or failed batch.
+	StatusMessageCharacteristic = "message"
+)
+
+// RecipeEnd decides whether a process message ends a recipe that is in-execution on a process control
+// system. Two messages do: an order-status message whose status is completed (the recipe completes) or
+// aborted or error (the recipe goes to error, with the message characteristic as the reason), and a
+// phase-end message for the last phase of the recipe (the recipe completes). Every other message leaves the
+// recipe as it is. It returns the status the recipe moves to and the error text for the error status.
+func RecipeEnd(category, phasePath string, values []Characteristic, doc RecipeDoc) (to, errText string, ends bool) {
+	switch category {
+	case "order-status":
+		status, reason := "", ""
+		for _, v := range values {
+			switch v.Name {
+			case StatusCharacteristic:
+				status = strings.ToLower(strings.TrimSpace(v.Value))
+			case StatusMessageCharacteristic:
+				reason = strings.TrimSpace(v.Value)
+			}
+		}
+		switch status {
+		case "completed":
+			return RecipeCompleted, "", true
+		case "aborted", "error", "failed":
+			if reason == "" {
+				reason = "the process control system reported the batch as " + status
+			}
+			return RecipeError, reason, true
+		}
+	case "phase-end":
+		paths := doc.PhasePaths()
+		if len(paths) > 0 && phasePath == paths[len(paths)-1] {
+			return RecipeCompleted, "", true
+		}
+	}
+	return "", "", false
+}

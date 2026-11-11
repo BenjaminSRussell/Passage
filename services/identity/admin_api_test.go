@@ -972,3 +972,34 @@ func TestDeprovisionedAdministratorDoesNotCountAsLast(t *testing.T) {
 	}
 	wantProblem(t, f.do(admin, http.MethodDelete, "/v1/authz/assignments/"+live.AssignmentID, nil), http.StatusConflict, "IDN-LAST-TENANT-ADMIN")
 }
+
+// A scheduled job of another service reads the active tenants with the read-only registry duty, from the
+// operator tenant, and can do nothing else with the tenant routes (#25).
+func TestTenantRegistryReadDutyListsActiveTenantsOnly(t *testing.T) {
+	f := newAdminFixture(t)
+	reader := caller{tenantID: f.operator, user: "service:shopfloor", duties: []string{"identity.tenant-registry.read"}}
+	if _, err := f.admin.Exec(context.Background(), `update identity_tenants set status = 'suspended' where tenant_id = $1`, f.tenantB); err != nil {
+		t.Fatal(err)
+	}
+	all := decode[pageOf[tenantRow]](t, f.do(reader, http.MethodGet, "/v1/tenants?limit=50", nil), http.StatusOK)
+	active := decode[pageOf[tenantRow]](t, f.do(reader, http.MethodGet, "/v1/tenants?status=active&limit=50", nil), http.StatusOK)
+	if len(all.Items) != 3 || len(active.Items) != 2 {
+		t.Fatalf("all %d (want 3), active %d (want 2)", len(all.Items), len(active.Items))
+	}
+	for _, it := range active.Items {
+		if it.Status != "active" || it.TenantID == f.tenantB {
+			t.Fatalf("active listing holds %+v", it)
+		}
+	}
+	wantProblem(t, f.do(reader, http.MethodGet, "/v1/tenants?status=gone", nil), http.StatusBadRequest, "COM-0001")
+	for _, call := range []struct{ method, path string }{{http.MethodPost, "/v1/tenants"}, {http.MethodGet, "/v1/tenants/" + f.tenantA}} {
+		if rec := f.do(reader, call.method, call.path, map[string]string{"realmName": "x-co", "displayName": "X"}); rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s: status %d, want 403", call.method, call.path, rec.Code)
+		}
+	}
+	// The duty from a tenant that is not the operator sees nothing of the registry.
+	other := caller{tenantID: f.tenantA, user: "service:shopfloor", duties: []string{"identity.tenant-registry.read"}}
+	if rec := f.do(other, http.MethodGet, "/v1/tenants", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("non-operator tenant: status %d, want 403", rec.Code)
+	}
+}
