@@ -89,7 +89,7 @@ func TestResolveFeatureGate(t *testing.T) {
 	c := DefaultConfig()
 	c.InstallDir, c.DataDir = "i", "d"
 	c.Features = map[string]bool{"node": true}
-	c.Services = []ServiceSpec{{Name: "agents-ts", Feature: "node", Exe: "node.exe", NoDB: true}}
+	c.Services = []ServiceSpec{{Name: "agents-ts", Feature: "node", Exe: "{install}/runtime/node/node.exe", Args: []string{"{data}/x.js"}, NoDB: true}}
 	_, procs, err := c.Resolve(func(string) string { return "" }, func(string) ([]string, error) { return nil, nil })
 	if err != nil || len(procs) != 1 {
 		t.Fatalf("procs=%v err=%v", procs, err)
@@ -97,9 +97,27 @@ func TestResolveFeatureGate(t *testing.T) {
 	if _, ok := procs[0].Env["DATABASE_URL"]; ok {
 		t.Fatal("noDb service got a DATABASE_URL")
 	}
+	if !strings.Contains(procs[0].Exe, "node.exe") {
+		t.Fatalf("exe = %s", procs[0].Exe)
+	}
 	c.Features = nil
 	_, procs, _ = c.Resolve(func(string) string { return "" }, func(string) ([]string, error) { return nil, nil })
 	if len(procs) != 0 {
 		t.Fatal("feature off must drop the service")
+	}
+}
+
+func TestConfDMergesFeatureServices(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "conf.d"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	frag := "services:\n  - name: workflow-ts\n    exe: C:/Passage/runtime/node/node.exe\n    feature: node\n    noDb: true\n"
+	if err := os.WriteFile(filepath.Join(dir, "conf.d", "node.yaml"), []byte(frag), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(filepath.Join(dir, "passage.yaml"), map[string]string{"FEATURE_NODE": "1"})
+	if err != nil || len(cfg.Services) != 1 || cfg.Services[0].Name != "workflow-ts" || !cfg.Features["node"] {
+		t.Fatalf("cfg=%+v err=%v", cfg, err)
 	}
 }

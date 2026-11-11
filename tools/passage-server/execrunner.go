@@ -18,7 +18,8 @@ type ExecRunner struct {
 
 type execHandle struct {
 	cmd  *exec.Cmd
-	done chan error
+	done chan struct{}
+	err  error
 }
 
 // Start launches p with its environment on top of the parent's.
@@ -42,12 +43,12 @@ func (r ExecRunner) Start(ctx context.Context, p Process) (Handle, error) {
 		return nil, fmt.Errorf("start %s: %w", p.Name, err)
 	}
 	attachToJob(cmd)
-	h := &execHandle{cmd: cmd, done: make(chan error, 1)}
-	go func() { h.done <- cmd.Wait() }()
+	h := &execHandle{cmd: cmd, done: make(chan struct{})}
+	go func() { h.err = cmd.Wait(); close(h.done) }()
 	return h, nil
 }
 
-func (h *execHandle) Wait() error { err := <-h.done; h.done <- err; return err }
+func (h *execHandle) Wait() error { <-h.done; return h.err }
 
 // Stop interrupts the child (a no-op error on Windows, where the job object and Kill apply) and kills it after grace.
 func (h *execHandle) Stop(grace time.Duration) error {

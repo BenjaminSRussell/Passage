@@ -91,6 +91,16 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// started wraps a probe so a process that was never started is not healthy, as with a real HTTP probe.
+func started(r *fakeRunner, probe Prober) Prober {
+	return func(ctx context.Context, p Process) error {
+		if r.startCount(p.Name) == 0 {
+			return errors.New("not running")
+		}
+		return probe(ctx, p)
+	}
+}
+
 func testSupervisor(r Runner, probe Prober) *Supervisor {
 	s := NewSupervisor(r, probe, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	s.After = func(time.Duration) <-chan time.Time { c := make(chan time.Time, 1); c <- time.Now(); return c }
@@ -109,7 +119,7 @@ func state(s *Supervisor, name string) State {
 
 func TestStartsAllAndStopsInReverseOrder(t *testing.T) {
 	r := newFakeRunner()
-	s := testSupervisor(r, func(context.Context, Process) error { return nil })
+	s := testSupervisor(r, started(r, func(context.Context, Process) error { return nil }))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- s.Run(ctx, []Process{{Name: "a"}, {Name: "b"}, {Name: "c"}}) }()
@@ -118,7 +128,11 @@ func TestStartsAllAndStopsInReverseOrder(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(r.stops) != 3 {
+	stopped := map[string]bool{}
+	for _, n := range r.stops {
+		stopped[n] = true
+	}
+	if len(stopped) != 3 {
 		t.Fatalf("stops = %v", r.stops)
 	}
 	if s := state(s, "a"); s != StateStopped {
@@ -128,7 +142,7 @@ func TestStartsAllAndStopsInReverseOrder(t *testing.T) {
 
 func TestRestartsAnExitedService(t *testing.T) {
 	r := newFakeRunner()
-	s := testSupervisor(r, func(context.Context, Process) error { return nil })
+	s := testSupervisor(r, started(r, func(context.Context, Process) error { return nil }))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = s.Run(ctx, []Process{{Name: "a"}}) }()
@@ -158,7 +172,7 @@ func TestGivesUpAfterMaxRestartsAndFailsRequiredService(t *testing.T) {
 func TestOptionalServiceFailureDoesNotStopTheServer(t *testing.T) {
 	r := newFakeRunner()
 	r.failing["opt"] = errors.New("no runtime")
-	s := testSupervisor(r, func(context.Context, Process) error { return nil })
+	s := testSupervisor(r, started(r, func(context.Context, Process) error { return nil }))
 	s.Policy = RestartPolicy{MaxRestarts: 1, Window: time.Hour, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -182,14 +196,14 @@ func TestHealthAggregation(t *testing.T) {
 	r := newFakeRunner()
 	var mu sync.Mutex
 	bad := map[string]bool{}
-	s := testSupervisor(r, func(_ context.Context, p Process) error {
+	s := testSupervisor(r, started(r, func(_ context.Context, p Process) error {
 		mu.Lock()
 		defer mu.Unlock()
 		if bad[p.Name] {
 			return errors.New("not ready")
 		}
 		return nil
-	})
+	}))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = s.Run(ctx, []Process{{Name: "a"}, {Name: "b"}}) }()
@@ -208,11 +222,11 @@ func TestHealthAggregation(t *testing.T) {
 
 func TestMigrateSucceedsWhenEveryServiceIsReady(t *testing.T) {
 	r := newFakeRunner()
-	s := testSupervisor(r, func(context.Context, Process) error { return nil })
+	s := testSupervisor(r, started(r, func(context.Context, Process) error { return nil }))
 	if err := migrateWith(context.Background(), s, []Process{{Name: "a"}, {Name: "b"}}, 5*time.Second); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if len(r.stops) != 2 {
+	if len(r.stops) < 2 {
 		t.Fatalf("services must be stopped after migrating, stops = %v", r.stops)
 	}
 }
@@ -220,7 +234,13 @@ func TestMigrateSucceedsWhenEveryServiceIsReady(t *testing.T) {
 func TestMigrateFailsWhenAServiceCrashes(t *testing.T) {
 	r := newFakeRunner()
 	r.failing["b"] = errors.New("migration 0007 failed")
-	s := testSupervisor(r, func(context.Context, Process) error { return nil })
+	// Like a real probe, this one fails for a process that never started.
+	s := testSupervisor(r, func(_ context.Context, p Process) error {
+		if r.startCount(p.Name) == 0 || p.Name == "b" {
+			return errors.New("not running")
+		}
+		return nil
+	})
 	err := migrateWith(context.Background(), s, []Process{{Name: "a"}, {Name: "b"}}, 5*time.Second)
 	if err == nil {
 		t.Fatal("expected failure")

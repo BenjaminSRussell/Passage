@@ -1,0 +1,16 @@
+# Installed to %ProgramData%\Passage\conf.d\node.yaml by the "TypeScript services" MSI feature. The server merges it into passage.yaml.
+# {install} and {data} expand to the install and data directories. Each service is a Node process under the private runtime in the install directory (ADR-0004: no Node single executable applications).
+# The bundles under apps/ are produced by the CI workflow's "node services" step; adjust paths to the layout it publishes.
+services:
+  - name: workflow-ts
+    exe: "{install}/runtime/node/node.exe"
+    args: ["{install}/runtime/node/apps/workflow-ts/dist/main.js"]
+    feature: node
+    optional: true
+    noDb: true
+  - name: agents-ts
+    exe: "{install}/runtime/node/node.exe"
+    args: ["{install}/runtime/node/apps/agents-ts/dist/main.js"]
+    feature: node
+    optional: true
+    noDb: true

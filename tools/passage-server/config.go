@@ -99,11 +99,38 @@ func LoadConfig(path string, overrides map[string]string) (Config, error) {
 	case !errors.Is(err, os.ErrNotExist):
 		return cfg, err
 	}
+	if err := cfg.mergeConfD(filepath.Join(filepath.Dir(path), "conf.d")); err != nil {
+		return cfg, err
+	}
 	cfg.applyOverrides(overrides)
 	if cfg.Features == nil {
 		cfg.Features = map[string]bool{}
 	}
 	return cfg, cfg.Validate()
+}
+
+// mergeConfD appends the services listed in conf.d/*.yaml. The optional MSI features (node, python) drop their service lists
+// there, so installing or removing a feature adds or removes its services without editing passage.yaml.
+func (c *Config) mergeConfD(dir string) error {
+	files, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
+	if err != nil {
+		return err
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		var frag struct {
+			Services []ServiceSpec `yaml:"services"`
+		}
+		if err := yaml.Unmarshal(data, &frag); err != nil {
+			return fmt.Errorf("parse %s: %w", f, err)
+		}
+		c.Services = append(c.Services, frag.Services...)
+	}
+	return nil
 }
 
 // applyOverrides maps MSI property names (and the registry policy value names) onto the config.
@@ -231,7 +258,10 @@ func (c Config) Resolve(getenv func(string) string, listDir func(string) ([]stri
 	procs := make([]Process, 0, len(names))
 	for i, n := range names {
 		s := specs[n]
-		exe := s.Exe
+		exe := c.expand(s.Exe)
+		for j, a := range s.Args {
+			s.Args[j] = c.expand(a)
+		}
 		if exe == "" {
 			return c, nil, fmt.Errorf("service %q has no exe", n)
 		}
@@ -251,6 +281,11 @@ func (c Config) Resolve(getenv func(string) string, listDir func(string) ([]stri
 		procs = append(procs, p)
 	}
 	return c, procs, nil
+}
+
+// expand replaces {install} and {data} in a service's exe and args.
+func (c Config) expand(v string) string {
+	return strings.NewReplacer("{install}", c.InstallDir, "{data}", c.DataDir).Replace(v)
 }
 
 // routeOf maps a service name onto its gateway path segment; purchasing is served as procurement, as passage-dev does.

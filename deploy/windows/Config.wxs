@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated shape: one Property + one RegistrySearch + one SetProperty + one Registry value per MSI property. Edit by hand if a property is added; keep names equal to tools/passage-server/policy_windows.go registryValueNames. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <!-- Postgres URL for the services (role passage_app, NOBYPASSRLS). Secret. -->
+    <Property Id="PG_DSN" Secure="yes" Hidden="yes" />
+    <Property Id="PREV_PG_DSN" Secure="yes" Hidden="yes">
+      <RegistrySearch Id="Search_PG_DSN" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="PG_DSN" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="PG_DSN" Value="[PREV_PG_DSN]" After="AppSearch" Condition="NOT PG_DSN AND PREV_PG_DSN" />
+    <!-- Optional separate passage_app URL when PG_DSN is an admin URL. -->
+    <Property Id="PG_APP_DSN" Secure="yes" Hidden="yes" />
+    <Property Id="PREV_PG_APP_DSN" Secure="yes" Hidden="yes">
+      <RegistrySearch Id="Search_PG_APP_DSN" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="PG_APP_DSN" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="PG_APP_DSN" Value="[PREV_PG_APP_DSN]" After="AppSearch" Condition="NOT PG_APP_DSN AND PREV_PG_APP_DSN" />
+    <!-- OIDC issuer URL (Keycloak realm). -->
+    <Property Id="OIDC_ISSUER" Secure="yes" />
+    <Property Id="PREV_OIDC_ISSUER" Secure="yes">
+      <RegistrySearch Id="Search_OIDC_ISSUER" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OIDC_ISSUER" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="OIDC_ISSUER" Value="[PREV_OIDC_ISSUER]" After="AppSearch" Condition="NOT OIDC_ISSUER AND PREV_OIDC_ISSUER" />
+    <!-- Token audience, default passage-api. -->
+    <Property Id="OIDC_AUDIENCE" Secure="yes" />
+    <Property Id="PREV_OIDC_AUDIENCE" Secure="yes">
+      <RegistrySearch Id="Search_OIDC_AUDIENCE" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OIDC_AUDIENCE" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="OIDC_AUDIENCE" Value="[PREV_OIDC_AUDIENCE]" After="AppSearch" Condition="NOT OIDC_AUDIENCE AND PREV_OIDC_AUDIENCE" />
+    <!-- JWKS URL when it is not the issuer's default. -->
+    <Property Id="OIDC_JWKS_URL" Secure="yes" />
+    <Property Id="PREV_OIDC_JWKS_URL" Secure="yes">
+      <RegistrySearch Id="Search_OIDC_JWKS_URL" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OIDC_JWKS_URL" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="OIDC_JWKS_URL" Value="[PREV_OIDC_JWKS_URL]" After="AppSearch" Condition="NOT OIDC_JWKS_URL AND PREV_OIDC_JWKS_URL" />
+    <!-- Tenant id the gateway accepts. -->
+    <Property Id="TENANT_ID" Secure="yes" />
+    <Property Id="PREV_TENANT_ID" Secure="yes">
+      <RegistrySearch Id="Search_TENANT_ID" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TENANT_ID" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="TENANT_ID" Value="[PREV_TENANT_ID]" After="AppSearch" Condition="NOT TENANT_ID AND PREV_TENANT_ID" />
+    <!-- Base URL of the OPA server. -->
+    <Property Id="OPA_URL" Secure="yes" />
+    <Property Id="PREV_OPA_URL" Secure="yes">
+      <RegistrySearch Id="Search_OPA_URL" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OPA_URL" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="OPA_URL" Value="[PREV_OPA_URL]" After="AppSearch" Condition="NOT OPA_URL AND PREV_OPA_URL" />
+    <!-- Comma-separated Kafka bootstrap servers. -->
+    <Property Id="KAFKA_BOOTSTRAP" Secure="yes" />
+    <Property Id="PREV_KAFKA_BOOTSTRAP" Secure="yes">
+      <RegistrySearch Id="Search_KAFKA_BOOTSTRAP" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="KAFKA_BOOTSTRAP" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="KAFKA_BOOTSTRAP" Value="[PREV_KAFKA_BOOTSTRAP]" After="AppSearch" Condition="NOT KAFKA_BOOTSTRAP AND PREV_KAFKA_BOOTSTRAP" />
+    <!-- Temporal frontend host:port. -->
+    <Property Id="TEMPORAL_HOSTPORT" Secure="yes" />
+    <Property Id="PREV_TEMPORAL_HOSTPORT" Secure="yes">
+      <RegistrySearch Id="Search_TEMPORAL_HOSTPORT" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TEMPORAL_HOSTPORT" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="TEMPORAL_HOSTPORT" Value="[PREV_TEMPORAL_HOSTPORT]" After="AppSearch" Condition="NOT TEMPORAL_HOSTPORT AND PREV_TEMPORAL_HOSTPORT" />
+    <!-- Gateway listen address, default 127.0.0.1:8443. -->
+    <Property Id="LISTEN" Secure="yes" />
+    <Property Id="PREV_LISTEN" Secure="yes">
+      <RegistrySearch Id="Search_LISTEN" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="LISTEN" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="LISTEN" Value="[PREV_LISTEN]" After="AppSearch" Condition="NOT LISTEN AND PREV_LISTEN" />
+    <!-- PASSAGE_CLOUD_PROFILE, for example commercial or gcc. -->
+    <Property Id="CLOUD_PROFILE" Secure="yes" />
+    <Property Id="PREV_CLOUD_PROFILE" Secure="yes">
+      <RegistrySearch Id="Search_CLOUD_PROFILE" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="CLOUD_PROFILE" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="CLOUD_PROFILE" Value="[PREV_CLOUD_PROFILE]" After="AppSearch" Condition="NOT CLOUD_PROFILE AND PREV_CLOUD_PROFILE" />
+    <!-- PEM certificate path. -->
+    <Property Id="TLS_CERT_FILE" Secure="yes" />
+    <Property Id="PREV_TLS_CERT_FILE" Secure="yes">
+      <RegistrySearch Id="Search_TLS_CERT_FILE" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TLS_CERT_FILE" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="TLS_CERT_FILE" Value="[PREV_TLS_CERT_FILE]" After="AppSearch" Condition="NOT TLS_CERT_FILE AND PREV_TLS_CERT_FILE" />
+    <!-- PEM private key path. -->
+    <Property Id="TLS_KEY_FILE" Secure="yes" />
+    <Property Id="PREV_TLS_KEY_FILE" Secure="yes">
+      <RegistrySearch Id="Search_TLS_KEY_FILE" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TLS_KEY_FILE" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="TLS_KEY_FILE" Value="[PREV_TLS_KEY_FILE]" After="AppSearch" Condition="NOT TLS_KEY_FILE AND PREV_TLS_KEY_FILE" />
+    <!-- 1 makes the server refuse to start without FIPS mode. -->
+    <Property Id="REQUIRE_FIPS" Secure="yes" />
+    <Property Id="PREV_REQUIRE_FIPS" Secure="yes">
+      <RegistrySearch Id="Search_REQUIRE_FIPS" Root="HKLM" Key="SOFTWARE\Passage\Config" Name="REQUIRE_FIPS" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="REQUIRE_FIPS" Value="[PREV_REQUIRE_FIPS]" After="AppSearch" Condition="NOT REQUIRE_FIPS AND PREV_REQUIRE_FIPS" />
+  </Fragment>
+  <Fragment>
+    <ComponentGroup Id="ConfigRegistry" Directory="INSTALLFOLDER">
+      <Component Id="Cfg_PG_DSN" Guid="*" Bitness="always64" Condition="PG_DSN">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="PG_DSN" Type="string" Value="[PG_DSN]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_PG_APP_DSN" Guid="*" Bitness="always64" Condition="PG_APP_DSN">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="PG_APP_DSN" Type="string" Value="[PG_APP_DSN]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_OIDC_ISSUER" Guid="*" Bitness="always64" Condition="OIDC_ISSUER">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OIDC_ISSUER" Type="string" Value="[OIDC_ISSUER]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_OIDC_AUDIENCE" Guid="*" Bitness="always64" Condition="OIDC_AUDIENCE">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OIDC_AUDIENCE" Type="string" Value="[OIDC_AUDIENCE]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_OIDC_JWKS_URL" Guid="*" Bitness="always64" Condition="OIDC_JWKS_URL">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OIDC_JWKS_URL" Type="string" Value="[OIDC_JWKS_URL]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_TENANT_ID" Guid="*" Bitness="always64" Condition="TENANT_ID">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TENANT_ID" Type="string" Value="[TENANT_ID]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_OPA_URL" Guid="*" Bitness="always64" Condition="OPA_URL">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="OPA_URL" Type="string" Value="[OPA_URL]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_KAFKA_BOOTSTRAP" Guid="*" Bitness="always64" Condition="KAFKA_BOOTSTRAP">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="KAFKA_BOOTSTRAP" Type="string" Value="[KAFKA_BOOTSTRAP]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_TEMPORAL_HOSTPORT" Guid="*" Bitness="always64" Condition="TEMPORAL_HOSTPORT">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TEMPORAL_HOSTPORT" Type="string" Value="[TEMPORAL_HOSTPORT]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_LISTEN" Guid="*" Bitness="always64" Condition="LISTEN">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="LISTEN" Type="string" Value="[LISTEN]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_CLOUD_PROFILE" Guid="*" Bitness="always64" Condition="CLOUD_PROFILE">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="CLOUD_PROFILE" Type="string" Value="[CLOUD_PROFILE]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_TLS_CERT_FILE" Guid="*" Bitness="always64" Condition="TLS_CERT_FILE">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TLS_CERT_FILE" Type="string" Value="[TLS_CERT_FILE]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_TLS_KEY_FILE" Guid="*" Bitness="always64" Condition="TLS_KEY_FILE">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="TLS_KEY_FILE" Type="string" Value="[TLS_KEY_FILE]" KeyPath="yes" />
+      </Component>
+      <Component Id="Cfg_REQUIRE_FIPS" Guid="*" Bitness="always64" Condition="REQUIRE_FIPS">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="REQUIRE_FIPS" Type="string" Value="[REQUIRE_FIPS]" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

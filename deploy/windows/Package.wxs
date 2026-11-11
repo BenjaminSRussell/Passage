@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Passage-<version>-<arch>.msi: one per-machine package that installs passage-server.exe as the "Passage" Windows service.
+  Build (see .github/workflows/windows-msi.yml):
+    wix build -arch x64 -d Version=1.2.3 -d BinDir=out\bin [-d NodeDir=... -d PythonDir=...]
+      -ext WixToolset.Util.wixext -ext WixToolset.Firewall.wixext Package.wxs Config.wxs -o Passage-1.2.3-x64.msi
+  The decision record is docs/adr/0004-windows-packaging.md; the property table is docs/ops/windows-install.md.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
+
+  <?ifndef Version?><?define Version = "0.0.0" ?><?endif?>
+
+  <Package Name="Passage" Manufacturer="Passage"
+           Version="$(Version)"
+           UpgradeCode="6b6b0137-599b-4c52-98b9-2c0380210543"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+
+    <SummaryInformation Description="Passage ERP server (Windows service)" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Major upgrade: the old version is removed after the new files are laid down, so a failed migration (a deferred custom action
+         below) rolls the transaction back and leaves N-1 files installed. The service is stopped for the migration only. -->
+    <MajorUpgrade Schedule="afterInstallExecute"
+                  DowngradeErrorMessage="A newer version of Passage is already installed. Uninstall it first if you really want to go back; restore the database backup taken before that upgrade." />
+
+    <!-- Public properties. All are Secure so they survive elevation; PG_DSN and PG_APP_DSN are Hidden so they stay out of the log. -->
+    <Property Id="REMOVE_DATA" Secure="yes" Value="0" />
+    <Property Id="SKIP_DOCTOR" Secure="yes" Value="0" />
+    <Property Id="SKIP_MIGRATE" Secure="yes" Value="0" />
+    <Property Id="BACKUP_CONFIRMED" Secure="yes" Value="0" />
+    <Property Id="LISTEN_PORT" Secure="yes" Value="8443" />
+    <Property Id="OPEN_FIREWALL" Secure="yes" Value="1" />
+    <!-- The service runs as a virtual service account by default; pass SERVICE_ACCOUNT=DOMAIN\gmsa$ for a group managed service account. -->
+    <Property Id="SERVICE_ACCOUNT" Secure="yes" Value="NT SERVICE\Passage" />
+
+    <!-- Pre-upgrade backup prompt: an upgrade runs migrations that expand the schema, and database rollback is a restore. -->
+    <Launch Condition="Installed OR NOT WIX_UPGRADE_DETECTED OR BACKUP_CONFIRMED=&quot;1&quot;"
+            Message="Passage is already installed. Back up the Passage databases first (docs/ops/windows-install.md, Backup and restore), then run the upgrade again with BACKUP_CONFIRMED=1." />
+    <Launch Condition="Installed OR VersionNT64" Message="Passage needs 64-bit Windows." />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Passage">
+        <Directory Id="BINFOLDER" Name="bin" />
+        <Directory Id="RUNTIMEFOLDER" Name="runtime">
+          <Directory Id="NODEFOLDER" Name="node" />
+          <Directory Id="PYTHONFOLDER" Name="python" />
+        </Directory>
+        <Directory Id="SCRIPTSFOLDER" Name="scripts" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="Passage">
+        <Directory Id="LOGSFOLDER" Name="logs" />
+        <Directory Id="KEYSFOLDER" Name="keys" />
+        <Directory Id="CERTSFOLDER" Name="certs" />
+        <Directory Id="CONFDFOLDER" Name="conf.d" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- ===== Core feature ===== -->
+    <Feature Id="Core" Title="Passage server" Level="1" AllowAdvertise="no" Display="expand">
+      <ComponentGroupRef Id="ServerFiles" />
+      <ComponentGroupRef Id="ServiceBinaries" />
+      <ComponentGroupRef Id="ConfigRegistry" />
+      <ComponentGroupRef Id="DataFolders" />
+      <ComponentRef Id="FirewallRule" />
+      <ComponentRef Id="DataWipe" />
+    </Feature>
+
+    <!-- ===== Optional features: pinned private runtimes for the TS and Python services (ADR-0004). Present only when the build
+         was given -d NodeDir / -d PythonDir. ===== -->
+    <?ifdef NodeDir?>
+    <Feature Id="NodeServices" Title="TypeScript services (Node runtime)" Level="2" AllowAdvertise="no">
+      <ComponentGroupRef Id="NodeRuntime" />
+    </Feature>
+    <?endif?>
+    <?ifdef PythonDir?>
+    <Feature Id="PythonServices" Title="Python services (embedded runtime)" Level="2" AllowAdvertise="no">
+      <ComponentGroupRef Id="PythonRuntime" />
+    </Feature>
+    <?endif?>
+
+    <!-- ===== Files ===== -->
+    <ComponentGroup Id="ServerFiles" Directory="BINFOLDER">
+      <Component Id="PassageServerExe" Guid="*" Bitness="always64">
+        <File Id="PassageServerExe" Source="$(BinDir)\passage-server.exe" KeyPath="yes" />
+        <!-- One Windows service under a virtual account (not LocalSystem), automatic start, restart on failure. -->
+        <ServiceInstall Id="PassageService" Name="Passage" DisplayName="Passage ERP server"
+                        Description="Runs the Passage services, gateway and web app."
+                        Type="ownProcess" Start="auto" ErrorControl="normal"
+                        Account="[SERVICE_ACCOUNT]" Arguments="serve">
+          <ServiceDependency Id="Tcpip" />
+          <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="30" ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="PassageServiceControl" Name="Passage" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        <!-- Event Log source for warnings and errors; the full log is %ProgramData%\Passage\logs\passage-server.log. -->
+        <util:EventSource Log="Application" Name="Passage" EventMessageFile="[#PassageServerExe]" SupportsErrors="yes" SupportsWarnings="yes" SupportsInformationals="yes" />
+      </Component>
+      <Component Id="AclScript" Directory="SCRIPTSFOLDER" Guid="*" Bitness="always64">
+        <File Id="AclScript" Source="scripts\Set-PassageAcl.ps1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Every other service executable in BinDir (the Go services built with CGO_ENABLED=0). -->
+    <ComponentGroup Id="ServiceBinaries" Directory="BINFOLDER">
+      <Files Include="$(BinDir)\*.exe">
+        <Exclude Files="$(BinDir)\passage-server.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <!-- Data folders are created, never removed on uninstall (REMOVE_DATA below). Permissions are set by Set-PassageAcl.ps1 after the
+         service account exists. -->
+    <ComponentGroup Id="DataFolders">
+      <Component Id="DataFolder" Directory="DATAFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
+      <Component Id="LogsFolder" Directory="LOGSFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
+      <Component Id="KeysFolder" Directory="KEYSFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
+      <Component Id="CertsFolder" Directory="CERTSFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
+      <Component Id="ConfDFolder" Directory="CONFDFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
+    </ComponentGroup>
+
+    <Component Id="FirewallRule" Directory="INSTALLFOLDER" Guid="*" Bitness="always64" Condition="OPEN_FIREWALL=&quot;1&quot;">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Passage" Name="FirewallRule" Type="integer" Value="1" KeyPath="yes" />
+      <fw:FirewallException Id="PassageHttps" Name="Passage gateway" Protocol="tcp" Port="[LISTEN_PORT]" Scope="any" Profile="all" />
+    </Component>
+
+    <!-- REMOVE_DATA=1 on uninstall deletes %ProgramData%\Passage (config, logs, signing keys, certificates). Default: keep it. -->
+    <SetProperty Id="PASSAGE_DATA_PATH" Value="[CommonAppDataFolder]Passage" Sequence="both" Before="CostInitialize" />
+    <Component Id="DataWipe" Directory="INSTALLFOLDER" Guid="*" Bitness="always64" Condition="REMOVE_DATA=&quot;1&quot;">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Passage" Name="DataWipeArmed" Type="integer" Value="1" KeyPath="yes" />
+      <util:RemoveFolderEx On="uninstall" Property="PASSAGE_DATA_PATH" />
+    </Component>
+
+    <!-- ===== Custom actions (deferred, after InstallServices and before StartServices) ===== -->
+    <!-- 1. Lock down the data folder and the config registry key to SYSTEM, Administrators and the service account. -->
+    <SetProperty Id="PassageSetAcl" Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[SCRIPTSFOLDER]Set-PassageAcl.ps1&quot; -DataDir &quot;[CommonAppDataFolder]Passage&quot; -Account &quot;[SERVICE_ACCOUNT]&quot;"
+                 Sequence="execute" Before="PassageSetAcl" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    <CustomAction Id="PassageSetAcl" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
+
+    <!-- 2. doctor: fails the install with readable lines in the MSI log when a dependency check fails (bad DSN, a BYPASSRLS role, an
+         unreachable issuer). SKIP_DOCTOR=1 skips it, for staging an install before the dependencies exist. -->
+    <SetProperty Id="PassageDoctor" Value="&quot;[BINFOLDER]passage-server.exe&quot; doctor" Sequence="execute" Before="PassageDoctor"
+                 Condition="NOT REMOVE~=&quot;ALL&quot; AND SKIP_DOCTOR&lt;&gt;&quot;1&quot;" />
+    <CustomAction Id="PassageDoctor" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
+
+    <!-- 3. migrate: applies every service's migrations once. A failure aborts the transaction; MSI restores the N-1 files and the
+         old service is started again. The migrations are expand/contract-safe (deploy/multi-region/tools/expand_contract_lint.py),
+         so N-1 keeps working against the expanded schema. -->
+    <SetProperty Id="PassageMigrate" Value="&quot;[BINFOLDER]passage-server.exe&quot; migrate" Sequence="execute" Before="PassageMigrate"
+                 Condition="NOT REMOVE~=&quot;ALL&quot; AND SKIP_MIGRATE&lt;&gt;&quot;1&quot;" />
+    <CustomAction Id="PassageMigrate" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
+
+    <InstallExecuteSequence>
+      <Custom Action="PassageSetAcl" After="InstallServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="PassageDoctor" After="PassageSetAcl" Condition="NOT REMOVE~=&quot;ALL&quot; AND SKIP_DOCTOR&lt;&gt;&quot;1&quot;" />
+      <Custom Action="PassageMigrate" After="PassageDoctor" Condition="NOT REMOVE~=&quot;ALL&quot; AND SKIP_MIGRATE&lt;&gt;&quot;1&quot;" />
+    </InstallExecuteSequence>
+  </Package>
+
+  <!-- Optional runtimes. Each is a harvested directory tree plus a conf.d file that registers the services and the registry flag the
+       server reads as FEATURE_NODE / FEATURE_PYTHON. -->
+  <?ifdef NodeDir?>
+  <Fragment>
+    <ComponentGroup Id="NodeRuntime" Directory="NODEFOLDER">
+      <Files Include="$(NodeDir)\**" />
+      <Component Id="NodeFlag" Directory="INSTALLFOLDER" Guid="*" Bitness="always64">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="FEATURE_NODE" Type="string" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="NodeServicesConf" Directory="CONFDFOLDER" Guid="*" Bitness="always64">
+        <File Id="NodeServicesConf" Name="node.yaml" Source="features\node.yaml" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+  <?endif?>
+  <?ifdef PythonDir?>
+  <Fragment>
+    <ComponentGroup Id="PythonRuntime" Directory="PYTHONFOLDER">
+      <Files Include="$(PythonDir)\**" />
+      <Component Id="PythonFlag" Directory="INSTALLFOLDER" Guid="*" Bitness="always64">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="FEATURE_PYTHON" Type="string" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="PythonServicesConf" Directory="CONFDFOLDER" Guid="*" Bitness="always64">
+        <File Id="PythonServicesConf" Name="python.yaml" Source="features\python.yaml" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+  <?endif?>
+</Wix>

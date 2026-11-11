@@ -158,6 +158,10 @@ func (s *Supervisor) supervise(ctx context.Context, p Process) {
 			s.mu.Lock()
 			s.handles[p.Name] = h
 			s.mu.Unlock()
+			if ctx.Err() != nil {
+				// Shutdown began while Start was running, after stopAll may have looked at the handle table.
+				_ = h.Stop(s.StopGrace)
+			}
 			s.set(p.Name, StateStarting, "")
 			err = h.Wait()
 			s.mu.Lock()
@@ -209,16 +213,10 @@ func (s *Supervisor) probeLoop(ctx context.Context, procs []Process) {
 			if ctx.Err() != nil {
 				return
 			}
-			s.mu.Lock()
-			st := s.status[p.Name].State
-			s.mu.Unlock()
-			if st == StateBackoff || st == StateFailed || st == StateStopped {
-				continue
-			}
 			if err := s.Probe(ctx, p); err != nil {
-				s.set(p.Name, StateUnhealthy, err.Error())
+				s.setProbed(p.Name, StateUnhealthy, err.Error())
 			} else {
-				s.set(p.Name, StateHealthy, "")
+				s.setProbed(p.Name, StateHealthy, "")
 			}
 		}
 		select {
@@ -259,6 +257,21 @@ func (s *Supervisor) set(name string, st State, msg string) {
 		if msg != "" || st == StateHealthy {
 			x.LastErr = msg
 		}
+	}
+}
+
+// setProbed records a probe result unless the process is backing off, failed or stopped: those states belong to the restart loop, and a probe
+// that raced with it must not overwrite them.
+func (s *Supervisor) setProbed(name string, st State, msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	x := s.status[name]
+	if x == nil || x.State == StateBackoff || x.State == StateFailed || x.State == StateStopped {
+		return
+	}
+	x.State = st
+	if msg != "" || st == StateHealthy {
+		x.LastErr = msg
 	}
 }
 
