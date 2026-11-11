@@ -13,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
@@ -91,7 +92,7 @@ const invoiceableSQL = `
 	FROM receiving_grir_open_item g
 	JOIN receiving_receipt r ON r.tenant_id = g.tenant_id AND r.id = g.receipt_id
 	JOIN receiving_receipt_line l ON l.tenant_id = g.tenant_id AND l.receipt_id = g.receipt_id AND l.line_no = g.line_no
-	WHERE g.tenant_id = $1 AND r.vendor_id::text = $2 AND r.state = 'POSTED' AND g.status IN ('OPEN', 'PARTIAL') AND g.received_qty > g.invoiced_qty`
+	WHERE g.tenant_id = $1 AND r.vendor_id = $2::uuid AND r.state = 'POSTED' AND g.status IN ('OPEN', 'PARTIAL') AND g.received_qty > g.invoiced_qty`
 
 func scanInvoiceable(row pgx.Row) (InvoiceableLine, error) {
 	var l InvoiceableLine
@@ -110,7 +111,7 @@ func (s *Postgres) InvoiceableLines(ctx context.Context, vendorID, purchaseOrder
 	limit = min(max(limit, 1), maxListLimit)
 	out := []InvoiceableLine{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, invoiceableSQL+` AND ($3 = '' OR r.purchase_order_id::text = $3) ORDER BY r.receipt_date DESC, r.id, l.line_no LIMIT $4`, tenantID, vendorID, purchaseOrderID, limit)
+		rows, err := tx.Query(ctx, invoiceableSQL+` AND ($3 = '' OR r.purchase_order_id = NULLIF($3, '')::uuid) ORDER BY r.receipt_date DESC, r.id, l.line_no LIMIT $4`, tenantID, vendorID, purchaseOrderID, limit)
 		if err != nil {
 			return err
 		}
@@ -144,11 +145,14 @@ func (s *Postgres) CreateSubmission(ctx context.Context, in Submission) (Submiss
 		})
 		for _, k := range keys {
 			// The same answer for a line that does not exist, belongs to another vendor or is not posted: a vendor learns nothing about them.
+			if !ids.Valid(k.ReceiptID) {
+				return submissionError(domain.CodeSubmissionLine, "receipt %s line %d is not a received line of yours that can be invoiced", k.ReceiptID, k.ReceiptLineNo)
+			}
 			var vendor, state, currency string
 			var received, invoiced decimal.Decimal
 			err := tx.QueryRow(ctx, `SELECT r.vendor_id::text, r.state, g.currency, g.received_qty, g.invoiced_qty
 				FROM receiving_grir_open_item g JOIN receiving_receipt r ON r.tenant_id = g.tenant_id AND r.id = g.receipt_id
-				WHERE g.tenant_id = $1 AND g.receipt_id::text = $2 AND g.line_no = $3 FOR UPDATE OF g`, tenantID, k.ReceiptID, k.ReceiptLineNo).Scan(&vendor, &state, &currency, &received, &invoiced)
+				WHERE g.tenant_id = $1 AND g.receipt_id = $2::uuid AND g.line_no = $3 FOR UPDATE OF g`, tenantID, k.ReceiptID, k.ReceiptLineNo).Scan(&vendor, &state, &currency, &received, &invoiced)
 			if errors.Is(err, pgx.ErrNoRows) || (err == nil && (!strings.EqualFold(vendor, in.VendorID) || state != "POSTED")) {
 				return submissionError(domain.CodeSubmissionLine, "receipt %s line %d is not a received line of yours that can be invoiced", k.ReceiptID, k.ReceiptLineNo)
 			}
@@ -160,7 +164,7 @@ func (s *Postgres) CreateSubmission(ctx context.Context, in Submission) (Submiss
 			}
 			var reserved decimal.Decimal
 			if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(sl.qty), 0) FROM receiving_invoice_submission_line sl JOIN receiving_invoice_submission s ON s.tenant_id = sl.tenant_id AND s.id = sl.submission_id
-				WHERE sl.tenant_id = $1 AND sl.receipt_id::text = $2 AND sl.receipt_line_no = $3 AND s.status = 'SUBMITTED'`, tenantID, k.ReceiptID, k.ReceiptLineNo).Scan(&reserved); err != nil {
+				WHERE sl.tenant_id = $1 AND sl.receipt_id = $2::uuid AND sl.receipt_line_no = $3 AND s.status = 'SUBMITTED'`, tenantID, k.ReceiptID, k.ReceiptLineNo).Scan(&reserved); err != nil {
 				return err
 			}
 			if left := received.Sub(invoiced).Sub(reserved); k.Qty.GreaterThan(left) {
@@ -200,7 +204,7 @@ func scanSubmission(row pgx.Row) (Submission, error) {
 func submissionLines(ctx context.Context, tx pgx.Tx, tenantID string, submissionIDs []string) (map[string][]domain.SubmissionLine, error) {
 	out := map[string][]domain.SubmissionLine{}
 	rows, err := tx.Query(ctx, `SELECT submission_id::text, receipt_id::text, receipt_line_no, qty, unit_price, amount FROM receiving_invoice_submission_line
-		WHERE tenant_id = $1 AND submission_id::text = ANY($2) ORDER BY submission_id, line_no`, tenantID, submissionIDs)
+		WHERE tenant_id = $1 AND submission_id = ANY($2::uuid[]) ORDER BY submission_id, line_no`, tenantID, submissionIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -217,6 +221,9 @@ func submissionLines(ctx context.Context, tx pgx.Tx, tenantID string, submission
 }
 
 func (s *Postgres) GetSubmission(ctx context.Context, id string) (Submission, error) {
+	if !ids.Valid(id) {
+		return Submission{}, ErrSubmissionNotFound
+	}
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return Submission{}, err
@@ -224,7 +231,7 @@ func (s *Postgres) GetSubmission(ctx context.Context, id string) (Submission, er
 	var out Submission
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		if out, err = scanSubmission(tx.QueryRow(ctx, `SELECT `+submissionColumns+` FROM receiving_invoice_submission s WHERE s.tenant_id = $1 AND s.id::text = $2`, tenantID, id)); err != nil {
+		if out, err = scanSubmission(tx.QueryRow(ctx, `SELECT `+submissionColumns+` FROM receiving_invoice_submission s WHERE s.tenant_id = $1 AND s.id = $2::uuid`, tenantID, id)); err != nil {
 			return err
 		}
 		lines, err := submissionLines(ctx, tx, tenantID, []string{out.ID})
@@ -251,7 +258,7 @@ func (s *Postgres) ListSubmissions(ctx context.Context, f SubmissionFilter) ([]S
 	out := []Submission{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+submissionColumns+` FROM receiving_invoice_submission s
-			WHERE s.tenant_id = $1 AND ($2 = '' OR s.vendor_id::text = $2) AND ($3 = '' OR s.status = $3)
+			WHERE s.tenant_id = $1 AND ($2 = '' OR s.vendor_id = NULLIF($2, '')::uuid) AND ($3 = '' OR s.status = $3)
 			AND ($4::timestamptz IS NULL OR (s.created_at, s.id) < ($4, $5::uuid))
 			ORDER BY s.created_at DESC, s.id DESC LIMIT $6`, tenantID, f.VendorID, f.Status, nullTime(f.CursorCreatedAt), cursorID, limit+1)
 		if err != nil {
@@ -282,12 +289,18 @@ func (s *Postgres) ListSubmissions(ctx context.Context, f SubmissionFilter) ([]S
 
 // moveSubmission changes the status of a SUBMITTED submission; vendorID, when set, must own it.
 func (s *Postgres) moveSubmission(ctx context.Context, id, vendorID, status, by, note, invoiceID string) (Submission, error) {
+	if !ids.Valid(id) {
+		return Submission{}, ErrSubmissionNotFound
+	}
+	if invoiceID != "" && !ids.Valid(invoiceID) {
+		return Submission{}, submissionError(domain.CodeSubmissionInvalid, "invoiceId is not a posted invoice")
+	}
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return Submission{}, err
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		cur, err := scanSubmission(tx.QueryRow(ctx, `SELECT `+submissionColumns+` FROM receiving_invoice_submission s WHERE s.tenant_id = $1 AND s.id::text = $2 FOR UPDATE`, tenantID, id))
+		cur, err := scanSubmission(tx.QueryRow(ctx, `SELECT `+submissionColumns+` FROM receiving_invoice_submission s WHERE s.tenant_id = $1 AND s.id = $2::uuid FOR UPDATE`, tenantID, id))
 		if err != nil {
 			return err
 		}
@@ -299,7 +312,7 @@ func (s *Postgres) moveSubmission(ctx context.Context, id, vendorID, status, by,
 		}
 		if invoiceID != "" {
 			var vendor string
-			if err := tx.QueryRow(ctx, `SELECT vendor_id::text FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id::text = $2`, tenantID, invoiceID).Scan(&vendor); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT vendor_id::text FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2::uuid`, tenantID, invoiceID).Scan(&vendor); err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return submissionError(domain.CodeSubmissionInvalid, "invoiceId is not a posted invoice")
 				}
@@ -310,7 +323,7 @@ func (s *Postgres) moveSubmission(ctx context.Context, id, vendorID, status, by,
 			}
 		}
 		_, err = tx.Exec(ctx, `UPDATE receiving_invoice_submission SET status = $3, decided_by = NULLIF($4, ''), decided_at = CASE WHEN $3 IN ('REJECTED', 'POSTED') THEN now() END,
-			decision_note = $5, invoice_id = NULLIF($6, '')::uuid WHERE tenant_id = $1 AND id::text = $2`, tenantID, id, status, by, note, invoiceID)
+			decision_note = $5, invoice_id = NULLIF($6, '')::uuid WHERE tenant_id = $1 AND id = $2::uuid`, tenantID, id, status, by, note, invoiceID)
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

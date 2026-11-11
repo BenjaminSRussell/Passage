@@ -8,6 +8,8 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 // Payment status for the supplier portal (#511). The vendor reads its own invoices as accounts payable holds them: when they are
@@ -77,7 +79,7 @@ const vendorPaymentsSQL = `
 	           ELSE CASE WHEN EXISTS (SELECT 1 FROM ap_payment_proposal_line pl JOIN ap_payment_proposal p ON p.tenant_id = pl.tenant_id AND p.id = pl.proposal_id
 	                                  WHERE pl.tenant_id = o.tenant_id AND pl.open_item_id = o.id AND p.status IN ('APPROVED', 'EXECUTING', 'EXECUTED')) THEN 'SCHEDULED' ELSE 'OPEN' END END AS vstatus
 	  FROM ap_open_item o
-	  WHERE o.vendor_id::text = $1 AND ($2::date IS NULL OR (o.invoice_date, o.id) < ($2::date, $3::uuid))
+	  WHERE o.tenant_id = $6 AND o.vendor_id = $1::uuid AND ($2::date IS NULL OR (o.invoice_date, o.id) < ($2::date, $3::uuid))
 	) x
 	WHERE $4 = '' OR x.vstatus = $4
 	ORDER BY x.inv_date DESC, x.item_uuid DESC LIMIT $5`
@@ -94,8 +96,12 @@ func (s *Postgres) VendorPayments(ctx context.Context, vendorID string, f Vendor
 		cursorDate, cursorID = f.CursorDate, f.CursorID
 	}
 	out := []VendorPayment{}
+	if !ids.Valid(vendorID) {
+		return out, nil
+	}
+	p, _ := tenant.FromContext(ctx)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, vendorPaymentsSQL, vendorID, cursorDate, cursorID, f.Status, limit+1)
+		rows, err := tx.Query(ctx, vendorPaymentsSQL, vendorID, cursorDate, cursorID, f.Status, limit+1, p.TenantID)
 		if err != nil {
 			return err
 		}
