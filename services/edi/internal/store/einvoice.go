@@ -152,10 +152,104 @@ func (s *Store) ListEInvoices(ctx context.Context, status, mandate string, limit
 	return out, err
 }
 
-// MarkEInvoiceSubmitted records that the document was handed to its network (VALID or REJECTED to SUBMITTED) and publishes
-// einvoice.submitted. The reference is the network's.
+// SubmitClaimTTL is how long a SUBMITTING claim holds before another caller may take it over: a process that died between the
+// claim and the answer of the access point. The access point must still deduplicate by invoice number for that takeover.
+const SubmitClaimTTL = 10 * time.Minute
+
+// ClaimEInvoiceSubmit takes the right to hand the e-invoice to the access point: a VALID or REJECTED one becomes SUBMITTING in one
+// statement, so of two concurrent :submit calls exactly one gets it and the other is told ErrEInvoiceState (409). A claim older than
+// SubmitClaimTTL (its caller died) can be taken over. The status the e-invoice came from is kept to return it to on a failure.
+func (s *Store) ClaimEInvoiceSubmit(ctx context.Context, id string) (EInvoice, error) {
+	var out EInvoice
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := scanEInvoice(tx.QueryRow(ctx, `update einvoice set submit_from = case when status = 'SUBMITTING' then submit_from else status end,
+			status = 'SUBMITTING', submitting_at = now(), version = version + 1, updated_at = now()
+			where id = $1 and (status in ('VALID', 'REJECTED') or (status = 'SUBMITTING' and submitting_at < now() - make_interval(secs => $2)))
+			returning `+einvoiceReturning, id, SubmitClaimTTL.Seconds()), &out)
+		if errors.Is(err, ErrNotFound) {
+			// Nothing claimed: the e-invoice does not exist, or it is not in a status that can be submitted.
+			var exists bool
+			if qerr := tx.QueryRow(ctx, `select exists (select 1 from einvoice where id = $1)`, id).Scan(&exists); qerr != nil {
+				return qerr
+			}
+			if exists {
+				return ErrEInvoiceState
+			}
+		}
+		return err
+	})
+	return out, err
+}
+
+// ReleaseEInvoiceClaim returns a SUBMITTING e-invoice to the status it was claimed from (the access point did not take it).
+func (s *Store) ReleaseEInvoiceClaim(ctx context.Context, id string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update einvoice set status = coalesce(submit_from, 'VALID'), submitting_at = null, version = version + 1, updated_at = now()
+			where id = $1 and status = 'SUBMITTING'`, id)
+		return err
+	})
+}
+
+// MarkEInvoiceSubmitted records that the access point took the document (SUBMITTING to SUBMITTED) and publishes einvoice.submitted.
+// The reference is the network's.
 func (s *Store) MarkEInvoiceSubmitted(ctx context.Context, id, reference string) (EInvoice, error) {
-	return s.moveEInvoice(ctx, id, []string{"VALID", "REJECTED"}, "SUBMITTED", reference, "", ediev.EInvoiceSubmitted)
+	return s.moveEInvoice(ctx, id, []string{"SUBMITTING"}, "SUBMITTED", reference, "", ediev.EInvoiceSubmitted)
+}
+
+// MandateCustomer is a customer that is e-invoiced under a mandate when its invoice posts.
+type MandateCustomer struct {
+	LegalEntityID string `json:"legalEntityId"`
+	CustomerID    string `json:"customerId"`
+	Mandate       string `json:"mandate"`
+	AutoSubmit    bool   `json:"autoSubmit"`
+}
+
+// PutMandateCustomer sets (or changes) the automatic e-invoicing of a customer under a mandate.
+func (s *Store) PutMandateCustomer(ctx context.Context, m MandateCustomer) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tid, err := tenantID(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `insert into einvoice_mandate_customer (tenant_id, legal_entity_id, customer_id, mandate, auto_submit) values ($1,$2,$3,$4,$5)
+			on conflict (tenant_id, legal_entity_id, customer_id, mandate) do update set auto_submit = excluded.auto_submit, updated_at = now()`,
+			tid, m.LegalEntityID, m.CustomerID, m.Mandate, m.AutoSubmit)
+		return err
+	})
+}
+
+// DeleteMandateCustomer turns the automatic e-invoicing of a customer under a mandate off; ErrNotFound when it was not on.
+func (s *Store) DeleteMandateCustomer(ctx context.Context, legalEntityID, customerID, mandate string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `delete from einvoice_mandate_customer where legal_entity_id = $1 and customer_id = $2 and mandate = $3`,
+			legalEntityID, customerID, mandate)
+		if err == nil && tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return err
+	})
+}
+
+// ListMandateCustomers lists the automatic e-invoicing settings, of one customer when customerID is not empty.
+func (s *Store) ListMandateCustomers(ctx context.Context, legalEntityID, customerID string) ([]MandateCustomer, error) {
+	out := []MandateCustomer{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select legal_entity_id::text, customer_id::text, mandate, auto_submit from einvoice_mandate_customer
+			where ($1 = '' or legal_entity_id::text = $1) and ($2 = '' or customer_id::text = $2) order by legal_entity_id, customer_id, mandate`, legalEntityID, customerID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var m MandateCustomer
+			if err := rows.Scan(&m.LegalEntityID, &m.CustomerID, &m.Mandate, &m.AutoSubmit); err != nil {
+				return err
+			}
+			out = append(out, m)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 // RecordEInvoiceResponse records the network's answer to a submitted document: ACCEPTED or REJECTED with its text.
@@ -187,7 +281,7 @@ func (s *Store) moveEInvoice(ctx context.Context, id string, from []string, to, 
 		if reference == "" {
 			reference = out.Reference
 		}
-		if err := scanEInvoice(tx.QueryRow(ctx, `update einvoice set status = $2, submission_ref = nullif($3,''), response_text = nullif($4,''), version = version + 1, updated_at = now()
+		if err := scanEInvoice(tx.QueryRow(ctx, `update einvoice set status = $2, submission_ref = nullif($3,''), response_text = nullif($4,''), submitting_at = null, version = version + 1, updated_at = now()
 			where id = $1 returning `+einvoiceReturning, id, to, reference, text), &out); err != nil {
 			return err
 		}

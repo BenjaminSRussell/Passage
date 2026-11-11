@@ -10,6 +10,9 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/events"
+
+	"github.com/BenjaminSRussell/passage/services/edi/internal/autosend"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 )
@@ -189,5 +192,167 @@ func TestEInvoice_PartyRoutesValidateAndScope(t *testing.T) {
 	other := map[string]string{"X-Passage-Legal-Entity": "00000000-0000-0000-0000-0000000000e2"}
 	if rec := do(t, h, http.MethodPut, "/edi/v1/einvoice/parties/BUYER/"+srcCustomer, buyerProfile, "edi.einvoice.operate", other); rec.Code != http.StatusBadRequest {
 		t.Fatalf("outside scope: %d", rec.Code)
+	}
+}
+
+// blockingAccessPoint holds the first Submit until released, so a second :submit arrives while the first is at the access point.
+type blockingAccessPoint struct {
+	entered chan struct{}
+	release chan struct{}
+	calls   int
+}
+
+func (b *blockingAccessPoint) Submit(_ context.Context, _, number, _ string) (string, error) {
+	b.calls++
+	close(b.entered)
+	<-b.release
+	return "AP-" + number, nil
+}
+
+func TestEInvoice_ConcurrentSubmitReachesTheAccessPointOnce(t *testing.T) {
+	f := newFake()
+	a, h := eiSetup(t, f)
+	_, e := createEI(t, h, "PEPPOL")
+	ap := &blockingAccessPoint{entered: make(chan struct{}), release: make(chan struct{})}
+	a.AccessPoint = ap
+	sub := "/edi/v1/einvoice/invoices/" + e.ID + ":submit"
+	done := make(chan int, 1)
+	go func() {
+		done <- do(t, h, http.MethodPost, sub, "", "edi.einvoice.operate", srcScope).Code
+	}()
+	<-ap.entered
+	// The first call is inside the access point: the e-invoice is SUBMITTING and a second call is refused.
+	if rec := do(t, h, http.MethodPost, sub, "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusConflict || problemCode(t, rec) != CodeEInvoiceState {
+		t.Fatalf("second submit: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodGet, "/edi/v1/einvoice/invoices/"+e.ID, "", "edi.einvoice.operate", srcScope); !strings.Contains(rec.Body.String(), `"status":"SUBMITTING"`) {
+		t.Fatalf("the claimed e-invoice is not SUBMITTING: %s", rec.Body.String())
+	}
+	close(ap.release)
+	if code := <-done; code != http.StatusOK {
+		t.Fatalf("first submit: %d", code)
+	}
+	if ap.calls != 1 {
+		t.Fatalf("the access point was reached %d times", ap.calls)
+	}
+}
+
+func TestEInvoice_FailedSubmitReleasesTheClaim(t *testing.T) {
+	f := newFake()
+	a, h := eiSetup(t, f)
+	_, e := createEI(t, h, "PEPPOL")
+	a.AccessPoint = &fakeAccessPoint{err: errors.New("access point down")}
+	sub := "/edi/v1/einvoice/invoices/" + e.ID + ":submit"
+	if rec := do(t, h, http.MethodPost, sub, "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusBadGateway {
+		t.Fatalf("failing access point: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := do(t, h, http.MethodGet, "/edi/v1/einvoice/invoices/"+e.ID, "", "edi.einvoice.operate", srcScope)
+	if !strings.Contains(rec.Body.String(), `"status":"VALID"`) {
+		t.Fatalf("the claim was not released: %s", rec.Body.String())
+	}
+	a.AccessPoint = &fakeAccessPoint{}
+	if rec := do(t, h, http.MethodPost, sub, "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusOK {
+		t.Fatalf("retry: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEInvoice_ValidateRunsThePeppolRulesOnTheStoredDocument(t *testing.T) {
+	f := newFake()
+	_, h := eiSetup(t, f)
+	_, e := createEI(t, h, "PEPPOL")
+	rec := do(t, h, http.MethodPost, "/edi/v1/einvoice/invoices/"+e.ID+":validate", "", "edi.einvoice.operate", srcScope)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"valid":true`) {
+		t.Fatalf("validate: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEInvoice_AutoOnInvoicePostedForRegisteredCustomers(t *testing.T) {
+	f := newFake()
+	a, h := eiSetup(t, f)
+	handlers := map[string]func(context.Context, events.Event) error{}
+	for typ, hd := range autosend.Handlers(a.store, a) {
+		hd := hd
+		handlers[typ] = func(ctx context.Context, evt events.Event) error { return hd.Handle(ctx, nil, evt) }
+	}
+	evt := event(t, autosend.InvoicePostedType, autosend.BillingSource, map[string]string{"invoice_id": srcInvoice, "legal_entity_id": srcLE, "customer": srcCustomer})
+	list := func() string {
+		return do(t, h, http.MethodGet, "/edi/v1/einvoice/invoices", "", "edi.einvoice.operate", srcScope).Body.String()
+	}
+	// An unregistered customer is not e-invoiced.
+	if err := handlers[autosend.InvoicePostedType](consumerCtx(t), evt); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(list(), "INV-1") {
+		t.Fatal("an e-invoice was built for an unregistered customer")
+	}
+	path := "/edi/v1/einvoice/mandates/" + srcCustomer + "/PEPPOL"
+	if rec := do(t, h, http.MethodPut, path, `{"legalEntityId":"`+srcLE+`","autoSubmit":true}`, "edi.einvoice.operate", srcScope); rec.Code != http.StatusOK {
+		t.Fatalf("register: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPut, "/edi/v1/einvoice/mandates/"+srcCustomer+"/ZATCA", `{"legalEntityId":"`+srcLE+`"}`, "edi.einvoice.operate", srcScope); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown mandate: %d", rec.Code)
+	}
+	ap := &fakeAccessPoint{}
+	a.AccessPoint = ap
+	for i := 0; i < 2; i++ { // the second is a redelivery
+		if err := handlers[autosend.InvoicePostedType](consumerCtx(t), evt); err != nil {
+			t.Fatalf("delivery %d: %v", i, err)
+		}
+	}
+	if !strings.Contains(list(), `"status":"SUBMITTED"`) || strings.Join(ap.submitted, ",") != "PEPPOL:INV-1" {
+		t.Fatalf("auto e-invoice: %s %v", list(), ap.submitted)
+	}
+	if rec := do(t, h, http.MethodGet, "/edi/v1/einvoice/mandates?legalEntityId="+srcLE, "", "edi.einvoice.operate", srcScope); !strings.Contains(rec.Body.String(), `"autoSubmit":true`) {
+		t.Fatalf("list: %s", rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodDelete, path+"?legalEntityId="+srcLE, "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d", rec.Code)
+	}
+	if rec := do(t, h, http.MethodDelete, path+"?legalEntityId="+srcLE, "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusNotFound {
+		t.Fatalf("delete again: %d", rec.Code)
+	}
+}
+
+// A SUBMITTING claim whose caller died (older than the claim TTL) is taken over by the next :submit.
+func TestEInvoice_StaleSubmitClaimIsTakenOver(t *testing.T) {
+	f := newFake()
+	a, h, pool, _, _ := autoSetup(t, f)
+	f.invoice.Currency, f.invoice.DueDate = "USD", "2026-11-20"
+	for role, body := range map[string]string{"SELLER/" + srcLE: sellerProfile, "BUYER/" + srcCustomer: buyerProfile} {
+		do(t, h, http.MethodPut, "/edi/v1/einvoice/parties/"+role, body, "edi.einvoice.operate", srcScope)
+	}
+	_, e := createEI(t, h, "PEPPOL")
+	ap := &fakeAccessPoint{}
+	a.AccessPoint = ap
+	if _, err := pool.Exec(context.Background(), `update einvoice set status = 'SUBMITTING', submit_from = 'VALID', submitting_at = now()`); err != nil {
+		t.Fatal(err)
+	}
+	sub := "/edi/v1/einvoice/invoices/" + e.ID + ":submit"
+	if rec := do(t, h, http.MethodPost, sub, "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusConflict {
+		t.Fatalf("a fresh claim holds: %d", rec.Code)
+	}
+	if _, err := pool.Exec(context.Background(), `update einvoice set submitting_at = now() - interval '1 hour'`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(t, h, http.MethodPost, sub, "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusOK || len(ap.submitted) != 1 {
+		t.Fatalf("a stale claim is taken over: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEInvoice_FacturXBuildAndPDF(t *testing.T) {
+	f := newFake()
+	_, h := eiSetup(t, f)
+	code, e := createEI(t, h, "FACTURX")
+	if code != http.StatusCreated || e.Status != "VALID" || e.Format != "FACTURX_EN16931" || !strings.Contains(e.XML, "CrossIndustryInvoice") {
+		t.Fatalf("create: %d %+v", code, e)
+	}
+	rec := do(t, h, http.MethodGet, "/edi/v1/einvoice/invoices/"+e.ID+"/facturx.pdf", "", "edi.einvoice.operate", srcScope)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/pdf" || !strings.HasPrefix(rec.Body.String(), "%PDF-1.7") || !strings.Contains(rec.Body.String(), "factur-x.xml") {
+		t.Fatalf("pdf: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	// A Peppol e-invoice has no Factur-X PDF.
+	_, p := createEI(t, h, "PEPPOL")
+	if rec := do(t, h, http.MethodGet, "/edi/v1/einvoice/invoices/"+p.ID+"/facturx.pdf", "", "edi.einvoice.operate", srcScope); rec.Code != http.StatusConflict {
+		t.Fatalf("peppol pdf: %d", rec.Code)
 	}
 }

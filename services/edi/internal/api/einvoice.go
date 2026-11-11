@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -157,72 +158,13 @@ func (a *API) createEInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 	mandate, known := a.mandates()[req.Mandate]
 	if !known {
-		fields["mandate"] = "must be PEPPOL, IT_SDI or MX_CFDI"
+		fields["mandate"] = "must be PEPPOL, IT_SDI, MX_CFDI or FACTURX"
 	}
 	if len(fields) > 0 {
 		httpx.Fail(w, r, validation(fields))
 		return
 	}
-	if a.Sources == nil {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeSourceDown, "source services are not configured"))
-		return
-	}
-	inv, err := a.Sources.Invoice(r.Context(), req.LegalEntityID, req.InvoiceID)
-	if err != nil {
-		httpx.Fail(w, r, sourceProblem(err))
-		return
-	}
-	if inv.LegalEntityID != req.LegalEntityID {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeSourceScope, "the invoice belongs to another legal entity"))
-		return
-	}
-	sellerRaw, err := a.store.GetEInvoiceParty(r.Context(), req.LegalEntityID, roleSeller, req.LegalEntityID)
-	if err == nil {
-		var buyerRaw json.RawMessage
-		if buyerRaw, err = a.store.GetEInvoiceParty(r.Context(), req.LegalEntityID, roleBuyer, inv.CustomerID); err == nil {
-			a.buildAndSaveEInvoice(w, r, req, mandate, inv, sellerRaw, buyerRaw)
-			return
-		}
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodePartyProfile,
-			"the seller profile of the legal entity and the buyer profile of the customer are needed first (PUT /einvoice/parties/{role}/{subjectId})"))
-		return
-	}
-	httpx.Fail(w, r, err)
-}
-
-func (a *API) buildAndSaveEInvoice(w http.ResponseWriter, r *http.Request, req einvoiceRequest, mandate domain.Mandate, inv domain.SourceInvoice, sellerRaw, buyerRaw json.RawMessage) {
-	var seller, buyer einvoicePartyBody
-	if json.Unmarshal(sellerRaw, &seller) != nil || json.Unmarshal(buyerRaw, &buyer) != nil {
-		httpx.Fail(w, r, errors.New("stored party profile is unreadable"))
-		return
-	}
-	orderRef := ""
-	if orderID, err := domain.InvoiceOrderID(inv); err == nil {
-		if o, err := a.Sources.Order(r.Context(), req.LegalEntityID, orderID); err == nil {
-			orderRef = o.ExternalRef
-		} else if !errors.Is(err, sources.ErrNotFound) {
-			httpx.Fail(w, r, sourceProblem(err))
-			return
-		}
-	}
-	doc, issues := domain.EInvoiceFromBilling(inv, orderRef, buyer.BuyerReference, seller.IBAN, seller.PaymentMeansCode, toUBLParty(seller.Party), toUBLParty(buyer.Party))
-	xmlOut := ""
-	if len(issues) == 0 {
-		xmlOut, issues = mandate.Build(doc)
-	}
-	e := store.EInvoice{LegalEntityID: req.LegalEntityID, InvoiceID: inv.ID, Number: inv.Number, Mandate: mandate.Code(), Format: mandate.Format(),
-		DocumentType: "INVOICE", Status: "VALID", XML: xmlOut, Issues: issues}
-	if inv.Type == "CREDIT_NOTE" {
-		e.DocumentType = "CREDIT_NOTE"
-	}
-	if len(issues) > 0 {
-		e.Status, e.XML = "INVALID", ""
-	} else {
-		e.Issues = []domain.Issue{}
-	}
-	saved, created, err := a.store.SaveEInvoice(r.Context(), e)
+	saved, created, err := a.BuildEInvoice(r.Context(), mandate, req.LegalEntityID, req.InvoiceID)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -232,6 +174,65 @@ func (a *API) buildAndSaveEInvoice(w http.ResponseWriter, r *http.Request, req e
 		status = http.StatusCreated
 	}
 	httpx.JSON(w, status, saved)
+}
+
+// BuildEInvoice reads the posted billing invoice, maps it, builds it with the mandate and stores it (VALID with its document or
+// INVALID with the issues). The route and the automatic e-invoicing on invoice.posted share it. Errors are problems.
+func (a *API) BuildEInvoice(ctx context.Context, mandate domain.Mandate, legalEntityID, invoiceID string) (store.EInvoice, bool, error) {
+	if a.Sources == nil {
+		return store.EInvoice{}, false, httpx.NewProblem(http.StatusServiceUnavailable, CodeSourceDown, "source services are not configured")
+	}
+	inv, err := a.Sources.Invoice(ctx, legalEntityID, invoiceID)
+	if err != nil {
+		return store.EInvoice{}, false, sourceProblem(err)
+	}
+	if inv.LegalEntityID != legalEntityID {
+		return store.EInvoice{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeSourceScope, "the invoice belongs to another legal entity")
+	}
+	sellerRaw, err := a.store.GetEInvoiceParty(ctx, legalEntityID, roleSeller, legalEntityID)
+	var buyerRaw json.RawMessage
+	if err == nil {
+		buyerRaw, err = a.store.GetEInvoiceParty(ctx, legalEntityID, roleBuyer, inv.CustomerID)
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return store.EInvoice{}, false, httpx.NewProblem(http.StatusConflict, CodePartyProfile,
+			"the seller profile of the legal entity and the buyer profile of the customer are needed first (PUT /einvoice/parties/{role}/{subjectId})")
+	}
+	if err != nil {
+		return store.EInvoice{}, false, err
+	}
+	return a.buildAndSaveEInvoice(ctx, legalEntityID, mandate, inv, sellerRaw, buyerRaw)
+}
+
+func (a *API) buildAndSaveEInvoice(ctx context.Context, legalEntityID string, mandate domain.Mandate, inv domain.SourceInvoice, sellerRaw, buyerRaw json.RawMessage) (store.EInvoice, bool, error) {
+	var seller, buyer einvoicePartyBody
+	if json.Unmarshal(sellerRaw, &seller) != nil || json.Unmarshal(buyerRaw, &buyer) != nil {
+		return store.EInvoice{}, false, errors.New("stored party profile is unreadable")
+	}
+	orderRef := ""
+	if orderID, err := domain.InvoiceOrderID(inv); err == nil {
+		if o, err := a.Sources.Order(ctx, legalEntityID, orderID); err == nil {
+			orderRef = o.ExternalRef
+		} else if !errors.Is(err, sources.ErrNotFound) {
+			return store.EInvoice{}, false, sourceProblem(err)
+		}
+	}
+	doc, issues := domain.EInvoiceFromBilling(inv, orderRef, buyer.BuyerReference, seller.IBAN, seller.PaymentMeansCode, toUBLParty(seller.Party), toUBLParty(buyer.Party))
+	xmlOut := ""
+	if len(issues) == 0 {
+		xmlOut, issues = mandate.Build(doc)
+	}
+	e := store.EInvoice{LegalEntityID: legalEntityID, InvoiceID: inv.ID, Number: inv.Number, Mandate: mandate.Code(), Format: mandate.Format(),
+		DocumentType: "INVOICE", Status: "VALID", XML: xmlOut, Issues: issues}
+	if inv.Type == "CREDIT_NOTE" {
+		e.DocumentType = "CREDIT_NOTE"
+	}
+	if len(issues) > 0 {
+		e.Status, e.XML = "INVALID", ""
+	} else {
+		e.Issues = []domain.Issue{}
+	}
+	return a.store.SaveEInvoice(ctx, e)
 }
 
 func (a *API) mandates() domain.Mandates {
@@ -245,12 +246,12 @@ func (a *API) listEInvoices(w http.ResponseWriter, r *http.Request) {
 	status, mandate := r.URL.Query().Get("status"), strings.ToUpper(r.URL.Query().Get("mandate"))
 	fields := map[string]string{}
 	switch status {
-	case "", "VALID", "INVALID", "SUBMITTED", "ACCEPTED", "REJECTED":
+	case "", "VALID", "INVALID", "SUBMITTING", "SUBMITTED", "ACCEPTED", "REJECTED":
 	default:
-		fields["status"] = "must be VALID, INVALID, SUBMITTED, ACCEPTED or REJECTED"
+		fields["status"] = "must be VALID, INVALID, SUBMITTING, SUBMITTED, ACCEPTED or REJECTED"
 	}
 	if _, ok := a.mandates()[mandate]; mandate != "" && !ok {
-		fields["mandate"] = "must be PEPPOL, IT_SDI or MX_CFDI"
+		fields["mandate"] = "must be PEPPOL, IT_SDI, MX_CFDI or FACTURX"
 	}
 	if len(fields) > 0 {
 		httpx.Fail(w, r, validation(fields))
@@ -299,35 +300,47 @@ func (a *API) submitEInvoice(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, notFound("e-invoice"))
 		return
 	}
-	if a.AccessPoint == nil {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeAccessPointOff, "no access point is configured for e-invoice submission"))
-		return
-	}
-	e, err := a.store.GetEInvoice(r.Context(), id)
+	out, err := a.SubmitEInvoice(r.Context(), id)
 	if err != nil {
-		httpx.Fail(w, r, eInvoiceProblem(err))
-		return
-	}
-	switch e.Status {
-	case "VALID", "REJECTED":
-	case "INVALID":
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeEInvoiceNotValid, "the e-invoice has blocking issues; fix them and build it again before submitting"))
-		return
-	default:
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeEInvoiceState, "the e-invoice is already "+strings.ToLower(e.Status)))
-		return
-	}
-	ref, err := a.AccessPoint.Submit(r.Context(), e.Mandate, e.Number, e.XML)
-	if err != nil {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeAccessPointOff, "the access point did not take the document: "+err.Error()))
-		return
-	}
-	out, err := a.store.MarkEInvoiceSubmitted(r.Context(), id, ref)
-	if err != nil {
-		httpx.Fail(w, r, eInvoiceProblem(err))
+		httpx.Fail(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// SubmitEInvoice claims the e-invoice (VALID or REJECTED to SUBMITTING, atomically, so a concurrent submit gets 409 EDI-0030 and
+// never reaches the access point), hands it over, and records SUBMITTED with the network's reference; when the access point does
+// not take it the claim is released and the e-invoice returns to the status it had. Errors are problems.
+func (a *API) SubmitEInvoice(ctx context.Context, id string) (store.EInvoice, error) {
+	if a.AccessPoint == nil {
+		return store.EInvoice{}, httpx.NewProblem(http.StatusServiceUnavailable, CodeAccessPointOff, "no access point is configured for e-invoice submission")
+	}
+	e, err := a.store.GetEInvoice(ctx, id)
+	if err != nil {
+		return store.EInvoice{}, eInvoiceProblem(err)
+	}
+	switch e.Status {
+	case "VALID", "REJECTED", "SUBMITTING": // the claim decides on SUBMITTING: only a stale one can be taken over
+	case "INVALID":
+		return store.EInvoice{}, httpx.NewProblem(http.StatusConflict, CodeEInvoiceNotValid, "the e-invoice has blocking issues; fix them and build it again before submitting")
+	default:
+		return store.EInvoice{}, httpx.NewProblem(http.StatusConflict, CodeEInvoiceState, "the e-invoice is already "+strings.ToLower(e.Status))
+	}
+	if e, err = a.store.ClaimEInvoiceSubmit(ctx, id); err != nil {
+		return store.EInvoice{}, eInvoiceProblem(err)
+	}
+	ref, err := a.AccessPoint.Submit(ctx, e.Mandate, e.Number, e.XML)
+	if err != nil {
+		if rerr := a.store.ReleaseEInvoiceClaim(ctx, id); rerr != nil {
+			slog.ErrorContext(ctx, "e-invoice claim not released", "einvoice", id, "err", rerr)
+		}
+		return store.EInvoice{}, httpx.NewProblem(http.StatusBadGateway, CodeAccessPointOff, "the access point did not take the document: "+err.Error())
+	}
+	out, err := a.store.MarkEInvoiceSubmitted(ctx, id, ref)
+	if err != nil {
+		return store.EInvoice{}, eInvoiceProblem(err)
+	}
+	return out, nil
 }
 
 type einvoiceResponseBody struct {

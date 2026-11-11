@@ -83,6 +83,13 @@ func (d asnData) slip() *domain.SlipRef {
 type invoiceData struct {
 	InvoiceID     string `json:"invoice_id"`
 	LegalEntityID string `json:"legal_entity_id"`
+	Customer      string `json:"customer"`
+}
+
+// EInvoicer builds (and where registered submits) the e-invoices of a posted invoice. API.AutoEInvoice implements it; a Sender that
+// also implements it makes the consumer e-invoice the customers registered under a mandate (35-2).
+type EInvoicer interface {
+	AutoEInvoice(ctx context.Context, legalEntityID, customerID, invoiceID string) error
 }
 
 // Handlers returns the consumer's handlers by event type. Register them with a consumer named ConsumerName with Idempotent set.
@@ -100,7 +107,10 @@ func Handlers(p Partners, s Sender) map[string]eventing.Handler {
 			if err := json.Unmarshal(evt.Data, &d); err != nil {
 				return eventing.Permanent(fmt.Errorf("invoice.posted data: %w", err))
 			}
-			return send(ctx, p, s, evt, BillingSource, d.LegalEntityID, d.InvoiceID, nil, []string{"810", "INVOIC"})
+			if err := send(ctx, p, s, evt, BillingSource, d.LegalEntityID, d.InvoiceID, nil, []string{"810", "INVOIC"}); err != nil {
+				return err
+			}
+			return autoEInvoice(ctx, s, evt, d)
 		}),
 	}
 }
@@ -150,6 +160,28 @@ func send(ctx context.Context, p Partners, s Sender, evt events.Event, source, l
 	return retry
 }
 
+// autoEInvoice builds the e-invoices of the posted invoice for the mandates its customer is registered under.
+func autoEInvoice(ctx context.Context, s Sender, evt events.Event, d invoiceData) error {
+	ei, ok := s.(EInvoicer)
+	if !ok || !ids.Valid(d.Customer) {
+		return nil
+	}
+	actor, ok := tenant.FromContext(ctx)
+	if !ok {
+		return eventing.Permanent(errors.New("outbound consumer has no principal"))
+	}
+	scoped, err := tenant.ServicePrincipal(ConsumerName, actor.TenantID, d.LegalEntityID)
+	if err != nil {
+		return eventing.Permanent(err)
+	}
+	err = ei.AutoEInvoice(tenant.With(ctx, scoped), d.LegalEntityID, d.Customer, d.InvoiceID)
+	if classify(err) == outcomeSkip {
+		slog.WarnContext(ctx, "e-invoice skipped", "type", evt.Type, "invoice", d.InvoiceID, "reason", err.Error())
+		return nil
+	}
+	return err
+}
+
 type outcome int
 
 const (
@@ -161,7 +193,8 @@ const (
 // SkipCodes are the problem codes that mean this document is not sendable to this partner, whatever the retries: the document
 // belongs to another customer (EDI-0011), the partner has no trade profile or EDIFACT identity (EDI-0012, EDI-0017), the
 // document cannot be mapped (EDI-0007), the partner is inactive (EDI-0008) or a body was sent under the key before (idempotency).
-var SkipCodes = map[string]bool{"EDI-0007": true, "EDI-0008": true, "EDI-0011": true, "EDI-0012": true, "EDI-0017": true, "idempotency_key_reuse": true}
+var SkipCodes = map[string]bool{"EDI-0007": true, "EDI-0008": true, "EDI-0011": true, "EDI-0012": true, "EDI-0017": true, "idempotency_key_reuse": true,
+	"EDI-0027": true, "EDI-0030": true, "EDI-0031": true}
 
 func classify(err error) outcome {
 	if err == nil {

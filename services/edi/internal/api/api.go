@@ -181,6 +181,11 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.einvoice.operate")).Get("/einvoice/invoices/{id}", a.getEInvoice)
 		r.With(authz.RequireDuty("edi.einvoice.operate")).Post("/einvoice/invoices/{id}:submit", a.submitEInvoice)
 		r.With(authz.RequireDuty("edi.einvoice.operate")).Post("/einvoice/invoices/{id}:response", a.recordEInvoiceResponse)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Post("/einvoice/invoices/{id}:validate", a.validateEInvoice)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Get("/einvoice/invoices/{id}/facturx.pdf", a.getFacturXPDF)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Get("/einvoice/mandates", a.listEInvoiceMandates)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Put("/einvoice/mandates/{customerId}/{mandate}", a.putEInvoiceMandate)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Delete("/einvoice/mandates/{customerId}/{mandate}", a.deleteEInvoiceMandate)
 	})
 	return r
 }

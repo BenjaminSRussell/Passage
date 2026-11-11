@@ -1353,7 +1353,11 @@
       {"resource": "/edi/v1/einvoice/invoices", "methods": ["GET", "POST"]},
       {"resource": "/edi/v1/einvoice/invoices/*", "methods": ["GET"]},
       {"resource": "/edi/v1/einvoice/invoices/*:submit", "methods": ["POST"]},
-      {"resource": "/edi/v1/einvoice/invoices/*:response", "methods": ["POST"]}
+      {"resource": "/edi/v1/einvoice/invoices/*:response", "methods": ["POST"]},
+      {"resource": "/edi/v1/einvoice/invoices/*:validate", "methods": ["POST"]},
+      {"resource": "/edi/v1/einvoice/invoices/*/facturx.pdf", "methods": ["GET"]},
+      {"resource": "/edi/v1/einvoice/mandates", "methods": ["GET"]},
+      {"resource": "/edi/v1/einvoice/mandates/*/*", "methods": ["PUT", "DELETE"]}
     ]},
     "edi.outbound.from-event": {"flag": true, "permissions": []},
     "eam.asset.maintain": {"permissions": [

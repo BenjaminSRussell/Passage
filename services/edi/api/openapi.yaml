@@ -1482,7 +1482,7 @@ paths:
       description: >
         Reads the invoice from billing, maps it (the VAT rate is derived per line from billing's tax amounts, so an invoice may carry several rates; the payable
         must equal billing's gross, EINV-0112) and builds it with the mandate: PEPPOL (UBL 2.1, Peppol BIS Billing 3.0) here, IT_SDI and MX_CFDI as hooks that refuse
-        (EINV-0150) until a country pack installs a generator. The answer is VALID with its XML or INVALID with the blocking issues. A repeat returns the stored
+        (EINV-0150) until a country pack installs a generator, and FACTURX (the EN 16931 CII XML of Factur-X/ZUGFeRD; its PDF is GET .../facturx.pdf). The answer is VALID with its XML or INVALID with the blocking issues. A repeat returns the stored
         e-invoice (200); a repeat of an INVALID one builds again. EDI-0027 when the seller or buyer profile is missing.
       x-passage-duty: edi.einvoice.operate
       requestBody:
@@ -1495,7 +1495,7 @@ paths:
               properties:
                 legalEntityId: { type: string, format: uuid }
                 invoiceId: { type: string, format: uuid }
-                mandate: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI] }
+                mandate: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI, FACTURX] }
       responses:
         '201':
           description: Built and stored
@@ -1519,8 +1519,8 @@ paths:
       summary: List e-invoices newest first, without their XML
       x-passage-duty: edi.einvoice.operate
       parameters:
-        - { name: status, in: query, required: false, description: 'Only this status', schema: { type: string, enum: [VALID, INVALID, SUBMITTED, ACCEPTED, REJECTED] } }
-        - { name: mandate, in: query, required: false, description: 'Only this mandate', schema: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI] } }
+        - { name: status, in: query, required: false, description: 'Only this status', schema: { type: string, enum: [VALID, INVALID, SUBMITTING, SUBMITTED, ACCEPTED, REJECTED] } }
+        - { name: mandate, in: query, required: false, description: 'Only this mandate', schema: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI, FACTURX] } }
         - { name: limit, in: query, required: false, description: 'Page size', schema: { type: integer, minimum: 1, maximum: 200 } }
       responses:
         '200':
@@ -1548,7 +1548,7 @@ paths:
       operationId: submitEInvoice
       summary: Hand a VALID (or rejected) e-invoice to its network through the access point
       description: >
-        VALID or REJECTED moves to SUBMITTED with the network's reference and publishes einvoice.submitted. 503 EDI-0029 while no access point is configured
+        VALID or REJECTED is claimed as SUBMITTING in one statement (a concurrent submit gets 409 EDI-0030 and never reaches the access point; a claim older than ten minutes can be taken over, so the access point must deduplicate by invoice number), then moves to SUBMITTED with the network's reference and publishes einvoice.submitted; when the access point fails (502) the claim is released. 503 EDI-0029 while no access point is configured
         (a live Peppol access point or government portal is injected by the deployment); 409 EDI-0031 for an INVALID e-invoice.
       x-passage-duty: edi.einvoice.operate
       parameters:
@@ -1575,6 +1575,99 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+  /edi/v1/einvoice/invoices/{id}:validate:
+    post:
+      operationId: validateEInvoice
+      summary: Run the Peppol rule subset on the stored document of an e-invoice
+      description: >
+        Runs the Go-native subset of the Peppol BIS Billing 3.0 rules (BR-*, BR-CO-*, BR-S-08, PEPPOL-EN16931-R* and PEPPOL-COMMON-R040) on the stored UBL.
+        It is not the official schematron, which needs an XSLT 2 processor; the schematron was run offline over the builder's output (testdata/peppol).
+        409 EDI-0030 for an e-invoice that is not a built PEPPOL one.
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The verdict and the failed rules (EINV-0114)
+          content:
+            application/json:
+              schema: { type: object, properties: { valid: { type: boolean }, issues: { type: array, items: { type: object } }, rules: { type: string } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /edi/v1/einvoice/invoices/{id}/facturx.pdf:
+    get:
+      operationId: getFacturXPDF
+      summary: The Factur-X PDF of a FACTURX e-invoice
+      description: >
+        An A4 page of the invoice with the CII XML embedded as factur-x.xml (AFRelationship Data) and the PDF/A-3 and Factur-X XMP metadata. The structure
+        is PDF/A-3b but not certified: the fonts are not embedded and there is no ICC output intent. 409 EDI-0030 for an e-invoice that is not FACTURX.
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /edi/v1/einvoice/mandates:
+    get:
+      operationId: listEInvoiceMandates
+      summary: The customers e-invoiced automatically when their invoice posts
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - { name: legalEntityId, in: query, required: false, description: 'Only this legal entity', schema: { type: string, format: uuid } }
+        - { name: customerId, in: query, required: false, description: 'Only this customer', schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { type: object } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /edi/v1/einvoice/mandates/{customerId}/{mandate}:
+    put:
+      operationId: putEInvoiceMandate
+      summary: Register a customer for automatic e-invoicing under a mandate
+      description: >
+        When the customer's invoice posts (dev.passage.billing.invoice.posted.v1, consumed by `edi consume`) its e-invoice is built under the mandate; with
+        autoSubmit it is also handed to the access point once VALID. Needs the seller and buyer profiles (EDI-0027 otherwise, logged and skipped by the consumer).
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - { name: customerId, in: path, required: true, description: 'The billing customer', schema: { type: string, format: uuid } }
+        - { name: mandate, in: path, required: true, description: 'The mandate', schema: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI, FACTURX] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                autoSubmit: { type: boolean }
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteEInvoiceMandate
+      summary: Turn the automatic e-invoicing of a customer under a mandate off
+      x-passage-duty: edi.einvoice.operate
+      parameters:
+        - { name: customerId, in: path, required: true, description: 'The billing customer', schema: { type: string, format: uuid } }
+        - { name: mandate, in: path, required: true, description: 'The mandate', schema: { type: string, enum: [PEPPOL, IT_SDI, MX_CFDI, FACTURX] } }
+        - { name: legalEntityId, in: query, required: true, description: 'The legal entity', schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removed }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /edi/v1/einvoice/invoices/{id}:response:
     post:
       operationId: recordEInvoiceResponse

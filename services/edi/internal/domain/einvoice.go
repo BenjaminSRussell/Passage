@@ -67,13 +67,14 @@ func (h HookMandate) Build(inv UBLInvoice) (string, []Issue) {
 // Mandates is the registry the service builds with.
 type Mandates map[string]Mandate
 
-// DefaultMandates has Peppol built and the Italian and Mexican mandates as hooks without a generator. Pass the generators a country
+// DefaultMandates has Peppol and Factur-X (the CII XML; the PDF is built on demand) built and the Italian and Mexican mandates as hooks without a generator. Pass the generators a country
 // pack provides to replace the hooks.
 func DefaultMandates(extra ...Mandate) Mandates {
 	m := Mandates{
-		MandatePeppol: peppolMandate{},
-		MandateITSDI:  HookMandate{MandateCode: MandateITSDI, MandateFormat: "FATTURAPA"},
-		MandateMXCFDI: HookMandate{MandateCode: MandateMXCFDI, MandateFormat: "CFDI40"},
+		MandatePeppol:  peppolMandate{},
+		MandateITSDI:   HookMandate{MandateCode: MandateITSDI, MandateFormat: "FATTURAPA"},
+		MandateMXCFDI:  HookMandate{MandateCode: MandateMXCFDI, MandateFormat: "CFDI40"},
+		MandateFacturX: facturxMandate{},
 	}
 	for _, e := range extra {
 		m[e.Code()] = e
