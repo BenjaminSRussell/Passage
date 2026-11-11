@@ -38,6 +38,17 @@ serviceMonitor:
 edgeCa:
   secret: ""
 
+# The platform issuer of the same certificates (25-4): cert-manager signs a CertificateRequest the service creates,
+# 90 days of life, no CA key in the service. mode `cert-manager` replaces edgeCa (set one, not both). With
+# createIssuer the chart makes a CA and its issuer; otherwise issuerName names an Issuer (or issuerKind
+# ClusterIssuer) that already exists. The connector's request names edge:<node id>, which the service checks.
+edgePki:
+  mode: ""              # "" (edgeCa or none) | cert-manager
+  createIssuer: true
+  issuerName: ""        # default <release>-edge-ca
+  issuerKind: Issuer    # Issuer | ClusterIssuer
+  caDuration: 87600h
+
 # The production operation status consumer (slice 17). It exits at start until
 # service:shopfloor-production is seeded in the service principal table.
 consumer:

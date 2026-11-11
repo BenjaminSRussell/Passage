@@ -55,3 +55,35 @@ func TestSweepConfig_TenantRegistrySource(t *testing.T) {
 		t.Error("an unknown source was accepted")
 	}
 }
+
+func TestEdgeIssuerCertManagerSettings(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	ok := map[string]string{"SHOPFLOOR_EDGE_ISSUER": "cert-manager", "SHOPFLOOR_EDGE_ISSUER_NAME": "edge-ca", "SHOPFLOOR_EDGE_ISSUER_NAMESPACE": "shopfloor",
+		"KUBERNETES_SERVICE_HOST": "10.0.0.1", "KUBERNETES_SERVICE_PORT": "443"}
+	iss, err := edgeIssuer(env(ok))
+	if err != nil || iss == nil {
+		t.Fatalf("cert-manager issuer: %v %v", iss, err)
+	}
+	with := func(k, v string) map[string]string {
+		m := map[string]string{}
+		for kk, vv := range ok {
+			m[kk] = vv
+		}
+		m[k] = v
+		return m
+	}
+	for name, m := range map[string]map[string]string{
+		"no issuer name":        with("SHOPFLOOR_EDGE_ISSUER_NAME", ""),
+		"bad kind":              with("SHOPFLOOR_EDGE_ISSUER_KIND", "Cluster"),
+		"two issuers":           with("SHOPFLOOR_EDGE_CA_CERT_FILE", "/ca.crt"),
+		"not in a pod":          with("KUBERNETES_SERVICE_HOST", ""),
+		"namespace outside pod": with("SHOPFLOOR_EDGE_ISSUER_NAMESPACE", ""),
+	} {
+		if _, err := edgeIssuer(env(m)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if iss, err := edgeIssuer(env(map[string]string{})); iss != nil || err != nil {
+		t.Fatalf("no issuer configured: %v %v", iss, err)
+	}
+}

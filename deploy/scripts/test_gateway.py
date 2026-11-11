@@ -16,6 +16,9 @@ API_GATEWAY = "passage-api"
 AS2_GATEWAY = "passage-as2"
 AS2_ROUTE = "edi-as2"
 AS2_SERVICE = "edi-as2"
+# The plant edge for iot-edge connectors (#25): mTLS with the edge CA, a token-less enrollment route, one route.
+EDGE_GATEWAY = "passage-edge"
+EDGE_ROUTE = "shopfloor-edge"
 
 
 def render():
@@ -198,14 +201,15 @@ class AS2Edge(unittest.TestCase):
         (cls.listener,) = cls.gateway["spec"]["listeners"]
         cls.route = named(cls.docs, "HTTPRoute", AS2_ROUTE)
 
-    def test_only_two_gateways_and_every_route_on_exactly_one(self):
-        self.assertEqual({g["metadata"]["name"] for g in of_kind(self.docs, "Gateway")}, {API_GATEWAY, AS2_GATEWAY})
+    def test_only_three_gateways_and_every_route_on_exactly_one(self):
+        self.assertEqual({g["metadata"]["name"] for g in of_kind(self.docs, "Gateway")}, {API_GATEWAY, AS2_GATEWAY, EDGE_GATEWAY})
         for route in of_kind(self.docs, "HTTPRoute"):
             name = route["metadata"]["name"]
             gateways = parent_gateways(route)
             self.assertEqual(len(route["spec"]["parentRefs"]), 1, name)
-            # Only edi-as2 attaches to the AS2 edge, and it attaches nowhere else.
-            self.assertEqual(gateways, {AS2_GATEWAY} if name == AS2_ROUTE else {API_GATEWAY}, name)
+            # Only edi-as2 attaches to the AS2 edge and only shopfloor-edge to the plant edge; each attaches nowhere else.
+            expected = {AS2_GATEWAY} if name == AS2_ROUTE else {EDGE_GATEWAY} if name == EDGE_ROUTE else {API_GATEWAY}
+            self.assertEqual(gateways, expected, name)
 
     def test_api_routes_still_require_a_jwt_and_the_as2_edge_never_does(self):
         (sp,) = of_kind(self.docs, "SecurityPolicy")
@@ -216,6 +220,7 @@ class AS2Edge(unittest.TestCase):
         # No SecurityPolicy reaches the AS2 edge, by Gateway or by route; partners authenticate by AS2 signature.
         for policy in of_kind(self.docs, "SecurityPolicy"):
             self.assertFalse(target_names(policy) & {("Gateway", AS2_GATEWAY), ("HTTPRoute", AS2_ROUTE)})
+            self.assertFalse(target_names(policy) & {("Gateway", EDGE_GATEWAY), ("HTTPRoute", EDGE_ROUTE)})
         # Nothing on the API gateway reaches the AS2 listener, and nothing on the AS2 edge reaches anything else.
         for route in api_routes(self.docs):
             self.assertNotIn(AS2_SERVICE, {b["name"] for rule in route["spec"]["rules"] for b in rule["backendRefs"]})
@@ -297,6 +302,97 @@ class AS2Edge(unittest.TestCase):
             "gateway.envoyproxy.io/owning-gateway-namespace": self.gateway["metadata"]["namespace"],
         })
         self.assertEqual(np["as2Gateway"]["namespaces"], ["envoy-gateway-system"])
+
+
+class PlantEdge(unittest.TestCase):
+    """The plant edge terminates the connectors' mTLS and exposes only the connector's seven operations."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.docs = render()
+        cls.gateway = named(cls.docs, "Gateway", EDGE_GATEWAY)
+        (cls.listener,) = cls.gateway["spec"]["listeners"]
+        cls.route = named(cls.docs, "HTTPRoute", EDGE_ROUTE)
+        cls.ctp = named(cls.docs, "ClientTrafficPolicy", "passage-edge-client")
+
+    def test_edge_listener_is_https_only_on_its_own_hostname_with_a_certificate(self):
+        self.assertEqual((self.listener["protocol"], self.listener["port"], self.listener["tls"]["mode"]), ("HTTPS", 443, "Terminate"))
+        (ref,) = self.listener["tls"]["certificateRefs"]
+        cert = named(self.docs, "Certificate", ref["name"])
+        self.assertEqual(cert["spec"]["secretName"], ref["name"])
+        self.assertEqual(cert["spec"]["dnsNames"], [self.listener["hostname"]])
+        self.assertEqual(self.listener["hostname"], "edge." + named(self.docs, "Gateway", AS2_GATEWAY)["spec"]["listeners"][0]["hostname"].split(".", 1)[1])
+        self.assertEqual(self.listener["allowedRoutes"]["kinds"], [{"kind": "HTTPRoute"}])
+
+    def test_edge_validates_client_certificates_against_the_edge_ca_but_lets_enrollment_in(self):
+        self.assertEqual(target_names(self.ctp), {("Gateway", EDGE_GATEWAY)})
+        validation = self.ctp["spec"]["tls"]["clientValidation"]
+        # A connector has no certificate when it redeems its token, so the certificate is optional at the listener.
+        self.assertIs(validation["optional"], True)
+        self.assertEqual([(r["kind"], r["name"]) for r in validation["caCertificateRefs"]], [("Secret", "passage-edge-ca-trust")])
+        self.assertIn(self.ctp["spec"]["tls"]["minVersion"], {"1.2", "1.3"})
+
+    def test_the_certificate_subject_is_forwarded_from_the_verified_certificate_only(self):
+        xfcc = self.ctp["spec"]["headers"]["xForwardedClientCert"]
+        # SanitizeSet builds the header from the verified certificate and drops what a client sent.
+        self.assertEqual(xfcc["mode"], "SanitizeSet")
+        self.assertEqual(xfcc["certDetailsToAdd"], ["Subject"])
+        # The shop floor service reads exactly this header, and its name, in EdgeCertIdentity.
+        edgecert = (DEPLOY.parent / "services/shopfloor/internal/api/edgecert.go").read_text()
+        self.assertIn('"X-Forwarded-Client-Cert"', edgecert)
+
+    def test_edge_strips_identity_headers_like_the_other_edges(self):
+        header_consts = set(re.findall(r'Header\w+\s*=\s*"(X-Passage-[A-Za-z-]+)"', TENANT_GO.read_text()))
+        removed = set(self.ctp["spec"]["headers"]["earlyRequestHeaders"]["remove"])
+        self.assertTrue(header_consts <= removed, header_consts - removed)
+
+    def test_edge_route_exposes_only_the_connectors_operations_to_the_shopfloor_service(self):
+        spec = self.route["spec"]
+        self.assertEqual(spec["parentRefs"], [{"name": EDGE_GATEWAY, "sectionName": self.listener["name"]}])
+        self.assertEqual(spec["hostnames"], [self.listener["hostname"]])
+        (rule,) = spec["rules"]
+        self.assertEqual(rule["backendRefs"], [{"name": "shopfloor", "port": 8080}])
+        self.assertNotIn("filters", rule)
+        matches = {(m["method"], m["path"]["type"], m["path"]["value"]) for m in rule["matches"]}
+        patterns = {v for (_, t, v) in matches if t == "RegularExpression"}
+        node = "00000000-0000-0000-0000-000000000001"
+        calls = [
+            ("POST", f"/v1/shopfloor/edge-nodes/{node}:enroll", True),
+            ("POST", f"/v1/shopfloor/edge-nodes/{node}:renew-certificate", True),
+            ("POST", f"/v1/shopfloor/edge-nodes/{node}:heartbeat", True),
+            ("GET", f"/v1/shopfloor/edge-nodes/{node}/config", True),
+            ("GET", f"/v1/shopfloor/edge-nodes/{node}/control-recipes", True),
+            ("POST", f"/v1/shopfloor/edge-nodes/{node}/control-recipes/{node}:report", True),
+            ("POST", "/v1/shopfloor/machine-events", True),
+            # the people's routes and the token minting stay on the API gateway
+            ("POST", f"/v1/shopfloor/edge-nodes/{node}:enrollment-token", False),
+            ("GET", f"/v1/shopfloor/edge-nodes/{node}", False),
+            ("PUT", f"/v1/shopfloor/edge-nodes/{node}/config", False),
+            ("POST", f"/v1/shopfloor/edge-nodes/{node}/control-recipes", False),
+            ("GET", "/v1/shopfloor/machine-events", False),
+            ("POST", "/v1/shopfloor/registrations", False),
+        ]
+        for method, path, routed in calls:
+            hit = any(
+                m == method and ((t == "Exact" and v == path) or (t == "RegularExpression" and re.fullmatch(v, path)))
+                for (m, t, v) in matches
+            )
+            self.assertEqual(hit, routed, f"{method} {path}")
+        self.assertTrue(patterns)
+
+    def test_every_connector_call_is_a_shopfloor_route_and_the_connector_makes_no_other(self):
+        routes = (DEPLOY.parent / "services/shopfloor/internal/api").glob("*.go")
+        served = "\n".join(p.read_text() for p in routes if not p.name.endswith("_test.go"))
+        for path in ("/v1/shopfloor/edge-nodes/{id}:enroll", "/v1/shopfloor/edge-nodes/{id}:renew-certificate",
+                     "/v1/shopfloor/edge-nodes/{id}:heartbeat", "/v1/shopfloor/edge-nodes/{id}/config",
+                     "/v1/shopfloor/edge-nodes/{id}/control-recipes", "/v1/shopfloor/machine-events"):
+            self.assertIn(path, served)
+        client = (DEPLOY.parent / "services/iot-edge/internal/runtime").glob("*.go")
+        calls = set(re.findall(r'"(/v1/shopfloor/[^"]+)"', "\n".join(p.read_text() for p in client if not p.name.endswith("_test.go"))))
+        self.assertTrue(calls)
+        for call in calls:
+            shape = re.sub(r"/v1/shopfloor/edge-nodes/\"\+[^+]+\+\"", "/v1/shopfloor/edge-nodes/N", call)
+            self.assertRegex(shape, r"^/v1/shopfloor/(machine-events|edge-nodes/.*)$", call)
 
 
 if __name__ == "__main__":
