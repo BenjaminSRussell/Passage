@@ -31,7 +31,7 @@ export interface TenderValues {
 }
 
 const carrierFields: RowField[] = [
-  { key: "carrierId", label: "Carrier id", mono: true, hint: "Rank order: the first carrier is asked first." },
+  { key: "carrierId", label: "Carrier", lookup: "vendor", hint: "Rank order: the first carrier is asked first." },
   { key: "rateQuoted", label: "Rate quoted", decimal: true, hint: "Optional, such as the rate shop total." },
 ];
 
@@ -46,7 +46,7 @@ export function validateTender(v: TenderValues): { errors: Record<string, string
   const carriers = v.carriers.map((c, i) => {
     const carrierId = c.carrierId.trim();
     const rate = (c.rateQuoted ?? "").trim();
-    if (!UUID.test(carrierId)) errors[`carriers[${i}]`] = "Enter the carrier id as a lower-case UUID.";
+    if (!UUID.test(carrierId)) errors[`carriers[${i}]`] = "Choose the carrier.";
     else if (seen.has(carrierId)) errors[`carriers[${i}]`] = "List each carrier once.";
     else if (rate !== "" && !/^\d{1,14}(\.\d{1,2})?$/.test(rate)) errors[`carriers[${i}]`] = "Enter the rate with at most two decimals, such as 412.50.";
     seen.add(carrierId);

@@ -25,6 +25,7 @@ paths:
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [open, all], default: open } }
         - { name: importSource, in: query, description: Only items loaded by this opening-item import source, schema: { type: string } }
+        - { name: q, in: query, description: "Only items whose document number contains it, ignoring case.", schema: { type: string, maxLength: 100 } }
         - { name: due_from, in: query, description: Only items due on or after this date, schema: { type: string, format: date } }
         - { name: due_to, in: query, description: Only items due on or before this date, schema: { type: string, format: date } }
         - { name: cursor, in: query, description: The nextCursor of the previous page; the list is ordered by due date, then id, schema: { type: string } }
@@ -179,6 +180,7 @@ paths:
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED, ADVISED, CONFIRMED] } }
         - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { name: q, in: query, description: "Only payments whose payer name, source reference or amount contains it, ignoring case.", schema: { type: string, maxLength: 100 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
       responses:
         "200":

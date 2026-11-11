@@ -136,7 +136,7 @@ function Form({ initial, onReload }: { initial: CapacityBlock; onReload: () => v
                   </Button>
                 }
               >
-                {failure.message} ({failure.code}). Loading the latest version discards your changes on this screen.
+                <ProblemMessage problem={failure} /> Loading the latest version discards your changes on this screen.
               </Alert>
             ) : (
               <Alert tone="danger" title="Could not save the block" live="alert">

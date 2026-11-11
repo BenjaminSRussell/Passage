@@ -139,7 +139,7 @@ describe("ValuationLedgersPage", () => {
     stubFetch(422, { title: "Unprocessable Entity", code: "CST-VLG-001", detail: "exactly one primary valuation ledger is required, got 0" });
     page(ValuationLedgersPage);
     fireEvent.click(screen.getByRole("button", { name: "Preview ledgers" }));
-    expect(await findAlert()).toHaveTextContent("CST-VLG-001: exactly one primary valuation ledger is required");
+    expect(await findAlert()).toHaveTextContent("exactly one primary valuation ledger is required");
     expect(screen.queryByRole("table", { name: "Ledger results" })).toBeNull();
   });
 });
@@ -222,7 +222,7 @@ describe("AgingPage", () => {
 
     fireEvent.change(screen.getByLabelText("Bucket bounds"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Run aging" }));
-    expect(await findAlert()).toHaveTextContent("COM-0001: request failed validation; transactions[2].financialDate is after asOf");
+    expect(await findAlert()).toHaveTextContent("transactions[2].financialDate is after asOf");
     expect(screen.queryByRole("table", { name: "Aging buckets" })).toBeNull();
   });
 });
@@ -230,6 +230,6 @@ describe("AgingPage", () => {
 describe("describeError", () => {
   it("falls back for non-API errors", () => {
     expect(describeError(new Error("boom"), "The preview failed.")).toBe("The preview failed.");
-    expect(describeError(new CostingApiError({ title: "x", status: 422, code: "CST-VAL-001", detail: "name a type" }), "f")).toBe("CST-VAL-001: name a type");
+    expect(describeError(new CostingApiError({ title: "x", status: 422, code: "CST-VAL-001", detail: "name a type" }), "f")).toBe("name a type");
   });
 });

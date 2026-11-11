@@ -21,7 +21,7 @@ import { DATE, DECIMAL, sentence, shortId, today, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const columns: DataTableColumn<Agreement>[] = [
   { key: "number", header: "Agreement", mono: true },
@@ -258,7 +258,7 @@ export function NewAgreementPage() {
           <FormField
             id="agreement-slaProfileId"
             label="SLA profile"
-            hint={profiles.error ? `Profiles could not be loaded (${profiles.error.code}).` : profiles.data?.items.length === 0 ? "Create an SLA profile first." : undefined}
+            hint={profiles.error ? `Profiles could not be loaded. ${problemSummary(profiles.error)}` : profiles.data?.items.length === 0 ? "Create an SLA profile first." : undefined}
             error={errors.slaProfileId}
           >
             {(control) => (

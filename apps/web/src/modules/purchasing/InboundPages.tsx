@@ -306,8 +306,8 @@ export function InboundChangeDetailPage() {
               { label: "Settled by", value: c.resolvedBy ?? "" },
               { label: "Settled at", value: c.resolvedAt ?? "", mono: true },
               { label: "Settlement note", value: c.resolutionNote ?? "" },
-              { label: "Source id", value: c.sourceKey, mono: true },
-              { label: "Event id", value: c.eventId, mono: true },
+              { label: "Source key", value: c.sourceKey, mono: true },
+              { label: "Event key", value: c.eventId, mono: true },
               { label: "Received", value: c.createdAt, mono: true },
             ]}
           />

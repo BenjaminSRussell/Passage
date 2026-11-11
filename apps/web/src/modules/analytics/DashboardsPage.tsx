@@ -168,7 +168,7 @@ function DashboardForm({
   return (
     <Card title={existing ? "Dashboard definition" : "New dashboard"}>
       <form className={styles.form} onSubmit={(e) => void submit(e)} noValidate aria-label="Dashboard">
-        <FormField id="dashboard-id" label="Dashboard id" error={errors.dashboardId} hint={existing ? "A dashboard id cannot change." : "Used in the workspace URL, for example sales_overview."}>
+        <FormField id="dashboard-id" label="Dashboard key" error={errors.dashboardId} hint={existing ? "A dashboard key cannot change." : "Used in the workspace URL, for example sales_overview."}>
           {(control) => (
             <Input
               {...control}
@@ -243,7 +243,7 @@ function DashboardForm({
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title={conflict ? "Someone else changed this dashboard" : "The dashboard was not saved"} live="alert">
-              {conflict ? "Reload the page to see the current version, then make your change again." : failure.message} ({failure.code})
+              <ProblemMessage problem={failure} message={conflict ? "Reload the page to see the current version, then make your change again." : undefined} />
             </Alert>
           </div>
         ) : null}

@@ -1,10 +1,16 @@
 // Entry point. Environment: HTTP_ADDR (default :8080); OIDC_ISSUER, OIDC_CLIENT_ID (default passage-portal-supplier),
 // OIDC_CLIENT_SECRET, OIDC_REDIRECT_URI; optionally OIDC_AUTHORIZATION_ENDPOINT, OIDC_TOKEN_ENDPOINT and OIDC_JWKS_URI
 // (default to the Keycloak paths under the issuer); APP_ORIGIN; COOKIE_SECURE=false for local http;
-// PURCHASING_URL, RECEIVING_URL, PARTY_URL; PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE.
+// PURCHASING_URL, RECEIVING_URL, PARTY_URL, PAYABLES_URL; PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE.
+// Virus scan of uploads: CLAMAV_ADDR (host:port of clamd; when set the scan is required and a failed scan refuses the upload),
+// CLAMAV_TIMEOUT_MS, SCAN_ALLOW_UNSCANNED=true (accept uploads when no scanner is configured; default false).
+// Public registration page: REGISTRATION_TENANT_ID and REGISTRATION_LEGAL_ENTITY_ID (both, or registration is closed),
+// PUBLIC_RATE_PER_HOUR (per client address, default 10).
 
 import { readFileSync } from "node:fs";
 import { Jwks, type OidcConfig } from "./oidc.ts";
+import { PendingProvisioner } from "./provision.ts";
+import { scanPolicyFromEnv } from "./scan.ts";
 import { createHttpServer } from "./server.ts";
 import { serviceTokenSignerFromEnv } from "./serviceToken.ts";
 import { RateLimiter, SessionStore } from "./session.ts";
@@ -37,19 +43,32 @@ export function listenAddress(raw: string | undefined): { host?: string; port: n
   return host ? { host, port } : { port };
 }
 
+export function registrationFromEnv(env: Record<string, string | undefined>): { tenantId: string; legalEntityId: string } | undefined {
+  const tenantId = env["REGISTRATION_TENANT_ID"];
+  const legalEntityId = env["REGISTRATION_LEGAL_ENTITY_ID"];
+  if (!tenantId && !legalEntityId) return undefined;
+  if (!tenantId || !legalEntityId) throw new Error("REGISTRATION_TENANT_ID and REGISTRATION_LEGAL_ENTITY_ID are set together or not at all");
+  return { tenantId, legalEntityId };
+}
+
 function main(): void {
   const env = process.env;
   const oidc = oidcFromEnv(env);
+  const registration = registrationFromEnv(env);
   const server = createHttpServer({
     oidc,
     jwks: new Jwks(oidc.jwksUri, fetch),
     fetcher: fetch,
     sessions: new SessionStore(),
     signer: serviceTokenSignerFromEnv(env, (p) => readFileSync(p, "utf8")),
-    upstreams: { purchasing: required(env, "PURCHASING_URL"), receiving: required(env, "RECEIVING_URL"), party: required(env, "PARTY_URL") },
+    upstreams: { purchasing: required(env, "PURCHASING_URL"), receiving: required(env, "RECEIVING_URL"), party: required(env, "PARTY_URL"), payables: required(env, "PAYABLES_URL") },
     appOrigin: required(env, "APP_ORIGIN"),
     cookieSecure: env["COOKIE_SECURE"] !== "false",
     limiter: new RateLimiter(300, 60_000),
+    scan: scanPolicyFromEnv(env),
+    provisioner: new PendingProvisioner((entry) => console.log(JSON.stringify(entry))),
+    ...(registration ? { registration } : {}),
+    publicLimiter: new RateLimiter(Number(env["PUBLIC_RATE_PER_HOUR"] ?? 10), 3_600_000),
   });
   const { host, port } = listenAddress(env["HTTP_ADDR"]);
   server.listen(port, host, () => console.log(JSON.stringify({ msg: "supplier-portal listening", host: host ?? "", port })));

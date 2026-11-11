@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, EmptyState, PageHeader, StatGroup, StatTile } from "../../shell/ui";
 import { previewCharge, type ChargeCategory, type ChargePreviewRequest, type TransferMethod, type TransferPriceRow } from "./api/client";
 import { Fields, type FieldSpec } from "./Fields";
-import { amount, isCurrency, isDate, isDecimal, isPositive } from "./format";
+import { amount, isCurrency, isDate, isDecimal, isPositive, legEntities } from "./format";
 import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey } from "./matrix";
 import { RowGrid, type RowField } from "./RowGrid";
 import { usePreview, type Checked } from "./usePreview";
@@ -231,7 +231,7 @@ export function ChargesPage() {
             Priced by {methodLabel[result.transferPrice.method]}
             {result.transferPrice.markupPct ? ` ${result.transferPrice.markupPct}%` : ""}
             {result.transferPrice.unitPrice ? ` at ${amount(result.transferPrice.unitPrice)}` : ""}, effective from{" "}
-            {result.transferPrice.effectiveFrom}. Both entities post under pair <span className={styles.mono}>{result.pairId}</span>.
+            {result.transferPrice.effectiveFrom}. Both sides post as one linked pair in {legEntities(result.legs)}.
           </Alert>
           <DataTable
             label="Charge legs"

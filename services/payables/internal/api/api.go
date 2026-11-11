@@ -18,6 +18,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 )
 
 const (
@@ -48,6 +49,7 @@ type API struct {
 	withholding      *withholdingDeps
 	employeeVendors  *employeeVendorDeps
 	opening          *openingDeps
+	vendorPayments   store.VendorPaymentStore
 	// vendorGroupDim is the ledger dimension attribute that carries the vendor group code on the AP control account; empty posts and compares none.
 	vendorGroupDim string
 }
@@ -106,6 +108,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerRuns(r)
 	a.registerEmployeeVendors(r)
 	a.registerOpening(r)
+	a.registerVendorPayments(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {

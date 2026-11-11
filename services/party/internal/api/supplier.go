@@ -121,6 +121,8 @@ type requestBody struct {
 	Kind    string `json:"kind"`
 	Subject string `json:"subject"`
 	Details string `json:"details"`
+	// Changes are the party fields a PROFILE_CHANGE asks for (domain.ProfileChangeFields); approving it applies them.
+	Changes map[string]string `json:"changes"`
 }
 
 func (a *API) vendorCreateRequest(w http.ResponseWriter, r *http.Request) {
@@ -144,11 +146,22 @@ func (a *API) vendorCreateRequest(w http.ResponseWriter, r *http.Request) {
 	if n := len([]rune(req.Details)); n < 1 || n > 4000 {
 		errs["details"] = "must be 1 to 4000 characters"
 	}
+	switch req.Kind {
+	case domain.RequestProfileChange:
+		_, changeErrs := domain.ProfileChange(req.Changes)
+		for k, v := range changeErrs {
+			errs[k] = v
+		}
+	case domain.RequestOther:
+		if len(req.Changes) > 0 {
+			errs["changes"] = "only a PROFILE_CHANGE carries changes"
+		}
+	}
 	if len(errs) > 0 {
 		invalid(w, r, errs)
 		return
 	}
-	out, err := a.suppliers.CreateRequest(r.Context(), vendor, req.Kind, req.Subject, req.Details)
+	out, err := a.suppliers.CreateRequest(r.Context(), vendor, req.Kind, req.Subject, req.Details, req.Changes)
 	if err != nil {
 		failParty(w, r, err)
 		return

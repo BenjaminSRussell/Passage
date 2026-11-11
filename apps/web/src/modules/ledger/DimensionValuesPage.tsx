@@ -188,7 +188,7 @@ export function DimensionValuesPage() {
       />
       <LedgerPicker id="dv-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={(id) => { setDraft(emptyValue); setLedgerId(id); }} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its dimension values.</p>
+        <p className={styles.note}>Choose a ledger to see its dimension values.</p>
       ) : error ? (
         <Alert
           tone="danger"

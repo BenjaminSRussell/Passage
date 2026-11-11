@@ -68,7 +68,7 @@ export function OpenItemAccountsPage() {
       />
       <LedgerPicker id="oa-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its open-item accounts.</p>
+        <p className={styles.note}>Choose a ledger to see its open-item accounts.</p>
       ) : (
         <>
           <Card>

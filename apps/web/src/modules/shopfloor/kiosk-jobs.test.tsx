@@ -205,7 +205,7 @@ describe("Kiosk job actions", () => {
     await findTable({ name: "Dispatch list" });
     fireEvent.click(screen.getByRole("checkbox", { name: "Select MO-1 OP-10" }));
     fireEvent.click(screen.getByRole("button", { name: "Start job" }));
-    expect(await findAlert()).toHaveTextContent("Service unavailable (COM-0503)");
+    expect(await findAlert()).toHaveTextContent("This service is unavailable right now");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Start job" }));
     expect(await screen.findByRole("heading", { name: "Current job" })).toBeInTheDocument();

@@ -71,7 +71,7 @@ export function emptyContract(day = today()): ContractValues {
 export function validateContract(v: ContractValues): Errors {
   const errors: Errors = {};
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
-  if (!UUID.test(v.orderId.trim())) errors.orderId = "Enter the sales order id (a UUID).";
+  if (!UUID.test(v.orderId.trim())) errors.orderId = "Choose the sales order.";
   if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as USD.";
   if (!DECIMAL.test(v.transactionPrice.trim())) errors.transactionPrice = "Enter the contract price as a number such as 10800.00.";
@@ -203,7 +203,7 @@ export function NewRevenueContractPage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           <LookupFormField id="rc-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
-          {header("rc-order", "orderId", "Sales order id", { mono: true })}
+          <LookupFormField id="rc-order" label="Sales order" entity="salesOrder" scope={{ legalEntityId: values.legalEntityId || undefined }} value={values.orderId} error={errors.orderId} onChange={(orderId) => update({ orderId })} />
           <LookupFormField
             id="rc-customer"
             label="Customer"

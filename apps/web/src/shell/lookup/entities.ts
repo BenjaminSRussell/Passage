@@ -20,7 +20,16 @@ export type LookupEntityKey =
   | "campaign"
   | "fund"
   | "user"
-  | "load";
+  | "load"
+  | "ledger"
+  | "openItem"
+  | "arPayment"
+  | "salesOrder"
+  | "packingSlip"
+  | "batch"
+  | "formula"
+  | "ecr"
+  | "purchaseOrder";
 
 export interface LookupOption {
   id: string;
@@ -411,6 +420,29 @@ function listedEntity(
   };
 }
 
+/**
+ * A lookup over a document list route that searches on the server: the typed text goes as `q` (the service keeps the documents
+ * whose number, or for a payment payer, reference or amount, contains it), so a document past the first pages is still found.
+ * The legal entity in scope is kept in the browser, as the routes take it from the caller's scope.
+ */
+function searchedEntity(
+  noun: string,
+  path: string,
+  map: (row: Raw) => LookupOption | null,
+  params: Record<string, string> = {},
+): LookupDef {
+  return {
+    noun,
+    search: async (q, scope, signal) =>
+      present(
+        (await listRows(path, { ...params, limit: "100", q: q.trim() || undefined }, signal))
+          .filter((row) => !scope.legalEntityId || text(row, "legalEntityId") === undefined || text(row, "legalEntityId") === scope.legalEntityId)
+          .map(map),
+      ).slice(0, PAGE_SIZE),
+    resolve: async (id, signal) => map(await getOne(path, id, signal)),
+  };
+}
+
 /** A bank account reads "OPS-EUR (DE89 **** 3000 · EUR · DE01)": accounts carry a code, not a name. */
 function bankAccountOption(row: Raw, entityCode?: string): LookupOption | null {
   const hit = option(row, ["accountCode"], []);
@@ -486,7 +518,88 @@ function userOption(row: Raw): LookupOption | null {
   return option(row, ["displayName", "email"], ["email"], ["userId", "id"]);
 }
 
+/** A ledger reads "General ledger (GL · USD)": the ledger service lists them per legal entity. */
+function ledgerOption(row: Raw): LookupOption | null {
+  const hit = option(row, ["name"], ["code"]);
+  const currency = text(row, "currency");
+  return hit ? { ...hit, number: [hit.number, currency].filter(Boolean).join(" · ") || undefined, currency } : null;
+}
+
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  purchaseOrder: searchedEntity(
+    "purchase order",
+    "/api/v1/procurement/purchase-orders",
+    (row) => {
+      const hit = option(row, ["number"], []);
+      const number = [text(row, "currency"), text(row, "documentStatus")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+  ),
+  batch: searchedEntity(
+    "batch",
+    "/api/v1/production/batches",
+    (row) => {
+      const hit = option(row, ["batchNumber"], []);
+      const number = [text(row, "disposition")?.replace(/_/g, " ").toLowerCase(), text(row, "expiryDate") ? `expires ${text(row, "expiryDate")}` : undefined].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined } : null;
+    },
+  ),
+  formula: listedEntity("formula", "/api/v1/production/formulas", codeAndName, () => ({ limit: "100" })),
+  ecr: listedEntity(
+    "engineering change request",
+    "/api/v1/engineering/ecrs",
+    (row) => {
+      const id = text(row, "id");
+      const number = text(row, "number");
+      const title = text(row, "title");
+      return id && (number || title) ? { id, name: title ?? number ?? "", number: title ? number : undefined } : null;
+    },
+    () => ({ limit: "100" }),
+  ),
+  openItem: searchedEntity(
+    "open item",
+    "/api/v1/receivables/open-items",
+    (row) => {
+      const hit = option(row, ["documentNumber"], []);
+      const open = text(row, "openAmount");
+      const currency = text(row, "currency");
+      const due = text(row, "dueDate");
+      const number = [open && currency ? `${open} ${currency} open` : undefined, due ? `due ${due}` : undefined].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency } : null;
+    },
+    { status: "open" },
+  ),
+  arPayment: searchedEntity(
+    "payment",
+    "/api/v1/receivables/payments",
+    (row) => {
+      const id = text(row, "id");
+      const amount = text(row, "amount");
+      const currency = text(row, "currency");
+      const received = text(row, "receivedDate");
+      if (!id || !amount) return null;
+      return { id, name: `${amount} ${currency ?? ""}${received ? ` received ${received}` : ""}`.trim(), number: text(row, "payerName", "sourceRef"), currency };
+    },
+  ),
+  salesOrder: searchedEntity(
+    "sales order",
+    "/api/v1/sales/orders",
+    (row) => {
+      const hit = option(row, ["orderNumber"], []);
+      const number = [text(row, "orderType"), text(row, "status")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+  ),
+  packingSlip: searchedEntity(
+    "packing slip",
+    "/api/v1/fulfillment/packing-slips",
+    (row) => {
+      const hit = option(row, ["packingSlipNumber"], []);
+      const number = [text(row, "status")?.replace(/_/g, " ").toLowerCase(), text(row, "postingDate")].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+  ),
+  ledger: listedEntity("ledger", "/api/v1/ledger/ledgers", ledgerOption, (scope) => ({ legalEntityId: scope.legalEntityId })),
   bankAccount: bankAccountDef,
   position: positionDef,
   compensationPlan: compensationPlanDef,

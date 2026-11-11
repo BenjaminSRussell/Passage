@@ -388,7 +388,7 @@ describe("Down payments and deposits", () => {
     expect(ifMatch(":receive")).toBe('"1"');
     expect(server.calls.find((c) => c.url.pathname.endsWith(":receive"))!.body).toEqual({ receivedDate: "2027-03-02" });
 
-    const item = await screen.findByLabelText("Open item id");
+    const item = await screen.findByLabelText("Open item");
     fireEvent.change(item, { target: { value: ITEM } });
     fill("Amount", "2000.01");
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -410,7 +410,7 @@ describe("Down payments and deposits", () => {
       return json(200, deposit);
     };
     renderAt(`/receivables/down-payments/${DP}`);
-    fireEvent.change(await screen.findByLabelText("Open item id"), { target: { value: ITEM } });
+    fireEvent.change(await screen.findByLabelText("Open item"), { target: { value: ITEM } });
     fireEvent.click(screen.getByRole("button", { name: "Offset" }));
     expect(await findAlert()).toHaveTextContent("AR-0017");
     fireEvent.click(screen.getByRole("button", { name: "Release 700.00 USD for refund" }));

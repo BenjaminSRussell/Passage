@@ -816,6 +816,7 @@ paths:
         - { name: shipmentId, in: query, schema: { type: string, format: uuid } }
         - { name: orderId, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [PENDING, POSTED, CANCELLED, INVOICED] } }
+        - { name: q, in: query, description: "Only slips whose number contains it, ignoring case.", schema: { type: string, maxLength: 100 } }
         - { $ref: "#/components/parameters/Limit" }
       responses:
         "200":

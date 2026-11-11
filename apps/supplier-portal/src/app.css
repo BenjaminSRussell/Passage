@@ -28,3 +28,4 @@ fieldset { border: 1px solid var(--line); margin: 0.75rem 0; }
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 0.5rem; top: 0.5rem; background: var(--bg); padding: 0.5rem; z-index: 10; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+.hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }

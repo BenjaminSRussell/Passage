@@ -114,6 +114,7 @@
       {"resource": "/v1/ledger/journal-batches", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches/*/attachments", "methods": ["GET"]},
+      {"resource": "/v1/ledger/ledgers", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledger-sets", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledger-sets/*", "methods": ["GET"]},
       {"resource": "/v1/reporting/runs/*/cells/*/*/lines", "methods": ["GET"]},
@@ -776,7 +777,9 @@
       {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]},
       {"resource": "/v1/receiving/ers-settlements:run", "methods": ["POST"]},
       {"resource": "/v1/receiving/one-time-payees", "methods": ["POST"]},
-      {"resource": "/v1/receiving/invoice-captures", "methods": ["POST"]}
+      {"resource": "/v1/receiving/invoice-captures", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoice-submissions/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoice-submissions/*:resolve", "methods": ["POST"]}
     ]},
     "receiving.invoice-audit.release": {"permissions": [
       {"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]},
@@ -808,7 +811,11 @@
       {"resource": "/v1/receiving/vendor/invoice-captures", "methods": ["POST", "GET"]},
       {"resource": "/v1/receiving/vendor/invoice-captures/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/vendor/invoices", "methods": ["GET"]},
-      {"resource": "/v1/receiving/vendor/invoices/*", "methods": ["GET"]}
+      {"resource": "/v1/receiving/vendor/invoices/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoiceable-lines", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoice-submissions", "methods": ["POST", "GET"]},
+      {"resource": "/v1/receiving/vendor/invoice-submissions/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoice-submissions/*:withdraw", "methods": ["POST"]}
     ]},
     "receiving.ers-price.confirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
@@ -823,6 +830,8 @@
       {"resource": "/v1/receiving/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoice-submissions", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoice-submissions/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
     ]},
     "receiving.admin": {"permissions": [
@@ -883,6 +892,7 @@
       {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-questionnaires", "methods": ["POST"]},
       {"resource": "/v1/party/vendors/*/onboarding", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-prospects/*:accept", "methods": ["POST"]},
       {"resource": "/v1/party/vendors/*/documents", "methods": ["POST"]},
       {"resource": "/v1/party/controlled-documents", "methods": ["POST"]},
       {"resource": "/v1/party/controlled-documents/*:distribute", "methods": ["POST"]}
@@ -916,6 +926,8 @@
       {"resource": "/v1/party/vendor-questionnaires", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-requests", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-requests/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-prospects", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-prospects/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-documents", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-documents/*/content", "methods": ["GET"]},
       {"resource": "/v1/party/controlled-documents", "methods": ["GET"]},
@@ -951,7 +963,8 @@
     ]},
     "party.vendor-request.decide": {"permissions": [
       {"resource": "/v1/party/vendor-requests/*:approve", "methods": ["POST"]},
-      {"resource": "/v1/party/vendor-requests/*:reject", "methods": ["POST"]}
+      {"resource": "/v1/party/vendor-requests/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-prospects/*:reject", "methods": ["POST"]}
     ]},
     "receivables.customer-portal.read": {"service_only": true, "permissions": [
       {"resource": "/v1/receivables/customer-portal/open-items", "methods": ["GET"]},
@@ -975,14 +988,27 @@
       {"resource": "/v1/party/vendor-portal/documents", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-portal/documents/*/content", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-portal/distributions", "methods": ["GET"]},
-      {"resource": "/v1/party/vendor-portal/distributions/*/content", "methods": ["GET"]}
+      {"resource": "/v1/party/vendor-portal/distributions/*/content", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-portal/invites", "methods": ["GET"]}
     ]},
     "party.vendor-portal.write": {"service_only": true, "permissions": [
       {"resource": "/v1/party/vendor-portal/requests", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/requests/*:submit", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/requests/*:withdraw", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/documents", "methods": ["POST"]},
-      {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]}
+      {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/invites", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/invites/*:revoke", "methods": ["POST"]}
+    ]},
+    "party.vendor-portal.invite-accept": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/invites/*:verify", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/invites/*:accept", "methods": ["POST"]}
+    ]},
+    "party.vendor-portal.register": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/prospects", "methods": ["POST"]}
+    ]},
+    "payables.vendor-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/payables/vendor/payments", "methods": ["GET"]}
     ]},
     "party.approval-policy.write": {"permissions": [
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
@@ -3970,7 +3996,8 @@
     "supplier-portal": {
       "purchasing": ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],
       "receiving": ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"],
-      "party": ["party.vendor-portal.read", "party.vendor-portal.write"]
+      "party": ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"],
+      "payables": ["payables.vendor-portal.read"]
     },
     "customer-portal": {
       "receivables": ["receivables.customer-portal.read"],

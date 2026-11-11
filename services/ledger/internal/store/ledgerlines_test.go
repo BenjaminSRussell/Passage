@@ -186,6 +186,25 @@ func TestPostgres_ListLedgerSetsAndAccountMappingsRespectScope(t *testing.T) {
 	}
 }
 
+func TestPostgres_ListLedgersRespectsScopeAndFilter(t *testing.T) {
+	e := setupLedgerSet(t)
+	all, _, err := e.store.ListLedgers(e.ctx, "", "")
+	if err != nil || len(all) < 3 {
+		t.Fatalf("ledgers: %+v %v", all, err)
+	}
+	one, _, err := e.store.ListLedgers(e.ctx, all[0].LegalEntityID, "")
+	if err != nil || len(one) == 0 || one[0].LegalEntityID != all[0].LegalEntityID {
+		t.Fatalf("filtered ledgers: %+v %v", one, err)
+	}
+	other := principalCtx(e.tenant, ids.New())
+	if none, _, err := e.store.ListLedgers(other, "", ""); err != nil || len(none) != 0 {
+		t.Errorf("another legal entity sees ledgers: %+v %v", none, err)
+	}
+	if _, _, err := e.store.ListLedgers(e.ctx, "", ids.New()); problemCode(err) != "COM-0001" {
+		t.Errorf("an unknown cursor must be refused: %v", err)
+	}
+}
+
 func TestPostgres_LedgerLinesPostIsIdempotentAndRespectsLegalEntityScope(t *testing.T) {
 	e := setupLedgerSet(t)
 	in := vendorInvoice("", "LL-IDEM", "100.00")

@@ -12,7 +12,7 @@ const columns: DataTableColumn<Xref>[] = [
   { key: "system", header: "System", render: (row) => SOURCE_LABELS[row.system] ?? row.system },
   { key: "company", header: "Company", mono: true },
   { key: "table", header: "Table", mono: true },
-  { key: "legacyId", header: "Legacy id", mono: true },
+  { key: "legacyId", header: "Legacy identifier", mono: true },
   { key: "passageEntity", header: "Passage record", mono: true },
   { key: "passageId", header: "Passage id", mono: true },
   { key: "runId", header: "Loaded by run", render: (row) => <Link to={`/migration-factory/runs/${row.runId}`}>Open run</Link> },
@@ -84,7 +84,7 @@ export function XrefLookupPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="xref-id" label="Legacy id" error={idError}>
+          <FormField id="xref-id" label="Legacy identifier" error={idError}>
             {(control) => <Input {...control} value={query.id} invalid={Boolean(idError)} onChange={(event) => setQuery({ ...query, id: event.target.value })} />}
           </FormField>
           <div className={styles.formActions}>

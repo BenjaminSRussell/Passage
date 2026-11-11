@@ -40,7 +40,7 @@ export function DerivationStrategiesPage() {
       />
       <LedgerPicker id="ds-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its derivation strategies.</p>
+        <p className={styles.note}>Choose a ledger to see its derivation strategies.</p>
       ) : result.isError ? (
         <Alert tone="danger" title="Could not load the derivation strategies" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
           {errorText(result.error)}
