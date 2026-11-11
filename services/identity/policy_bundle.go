@@ -44,7 +44,7 @@ const (
 
 var errOperatorNotRegistered = errors.New("operator tenant is not registered in identity_operator; refusing to publish an empty policy")
 
-var bundleRoots = []string{"authz", "assignments", "duties", "service_grants", "service_principals"}
+var bundleRoots = []string{"authz", "assignments", "duties", "service_grants", "service_principals", "operator_tenant_id"}
 
 const compiledAssignmentsQuery = `select a.tenant_id::text, u.idp_subject, a.role
 from identity_role_assignments a
@@ -167,6 +167,10 @@ func (c *PolicyBundleCompiler) assignments(ctx context.Context) (map[string]map[
 			if !c.catalogue.PersonAssignable(role) {
 				continue
 			}
+			// An operator-only duty assigned in any other tenant is dropped here as well as refused by the policy.
+			if c.catalogue.OperatorOnly(role) && tenantID != c.operatorTenantID {
+				continue
+			}
 			if out[tenantID] == nil {
 				out[tenantID] = map[string][]string{}
 			}
@@ -215,6 +219,7 @@ func (c *PolicyBundleCompiler) dataFile(assignments map[string]map[string][]stri
 		return nil, fmt.Errorf("parse duty catalogue: %w", err)
 	}
 	doc["assignments"] = assignments
+	doc["operator_tenant_id"] = c.operatorTenantID
 	return json.Marshal(doc)
 }
 

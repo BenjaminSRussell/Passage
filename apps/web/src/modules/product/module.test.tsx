@@ -339,7 +339,7 @@ describe("create product", () => {
     await screen.findByText("Could not create the product");
     const hint = screen.getByLabelText("Product number").getAttribute("aria-describedby") ?? "";
     expect(hint).toContain("product-number-error");
-    expect(document.getElementById("product-number-error")).toHaveTextContent("Enter an unused number in the format your company uses.");
+    expect(document.getElementById("product-number-error")).toHaveTextContent("Enter a number or code that isn't used yet and follows that format.");
     expect(screen.getByTestId("where")).toHaveTextContent("/product/items/new");
   });
 

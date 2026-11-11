@@ -292,8 +292,8 @@ export const routeHelp: readonly RouteHelp[] = [
   {
     patterns: ["/payables/open-items"],
     title: "Vendor open items",
-    purpose: "Invoices you owe vendors. Put one on hold to keep it out of payment.",
-    howTo: ["Filter by vendor, due date or status.", "Select Hold payment of an invoice and give a reason.", "Select Release hold on an invoice when it can be paid."],
+    purpose: "Invoices you owe vendors. Put an invoice or a whole vendor on hold to keep it out of payment.",
+    howTo: ["Filter by vendor, due date or status.", "Select Hold payment of an invoice and give a reason.", "Select Release hold on an invoice when it can be paid.", "Select Hold payments to a vendor to stop every payment to that vendor."],
     guide: "ap-clerk.md#check-what-is-due",
   },
   {
@@ -307,7 +307,7 @@ export const routeHelp: readonly RouteHelp[] = [
     patterns: ["/payables/proposals/:id"],
     title: "Payment proposal",
     purpose: "One list of invoices to pay, grouped by vendor, with totals.",
-    howTo: ["Check the totals and any invoices left out.", "Select Show invoices on a row for the detail.", "A different person from the creator selects Approve proposal.", "Select Cancel proposal to send the invoices back."],
+    howTo: ["Check the totals and any invoices left out.", "Select Show invoices on a row for the detail.", "A different person from the creator selects Approve proposal.", "Select Cancel proposal to send the invoices back.", "Select Open payment run once the run has started."],
     guide: "ap-clerk.md#approve-a-payment-proposal",
   },
   {
@@ -321,7 +321,7 @@ export const routeHelp: readonly RouteHelp[] = [
     patterns: ["/payables/runs/:id"],
     title: "Payment run",
     purpose: "Sends an approved proposal to the bank, one step at a time, and shows where the payment stands.",
-    howTo: ["Select the button for the next step: the bank file, the ledger posting, settling the invoices, completing the run.", "Select Download bank file to send it to your bank.", "Select Mark run as failed and give a reason if the bank refuses the file."],
+    howTo: ["Select the button for the next step: the bank file, the ledger posting, settling the invoices, completing the run.", "Select Download bank file to send it to your bank.", "Select Mark run as failed and give a reason if the bank refuses the file.", "When the run is complete, select Remittance advice for a vendor to see and download what was paid."],
     guide: "ap-clerk.md#run-the-payment",
   },
   {
@@ -883,6 +883,20 @@ export const routeHelp: readonly RouteHelp[] = [
     purpose: "One payment. Match it to open items, then apply it.",
     howTo: ["Select Find matches and use a suggestion.", "Set Apply, Cash discount and Write-off per row.", "Select Apply payment. Anything left stays on account."],
     guide: "ar-clerk.md#settle-it-against-invoices",
+  },
+  {
+    patterns: ["/receivables/remittance-advice"],
+    title: "Remittance advice",
+    purpose: "A customer's own list of the invoices a payment covers. Importing it lets the matcher settle the payment.",
+    howTo: ["Choose the legal entity and the format, then choose the file or paste its content.", "Tick the options you want, then select Import advice.", "Read the result for each payment reference."],
+    guide: "ar-clerk.md#import-a-remittance-advice",
+  },
+  {
+    patterns: ["/receivables/gl-journals"],
+    title: "Ledger journals",
+    purpose: "What receivables owes the general ledger. Waiting journals post automatically; a parked one needs a retry.",
+    howTo: ["Select Post due journals to post the waiting ones now.", "Open a parked journal and read the last problem.", "Select Retry posting, with a new posting date if the period is closed."],
+    guide: "ar-clerk.md#check-the-journals-posted-to-the-ledger",
   },
   {
     patterns: ["/receivables/lockbox", "/receivables/lockbox/new"],

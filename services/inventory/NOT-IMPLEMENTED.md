@@ -702,3 +702,20 @@ Built: counting vendor-owned stock with a quantity-only variance (row 4 above; s
 | - | `INV-LCK-001` bounded lock timeout with 200 ms backoff; policy (FIFO / FEFO / LIFO) reservations over expected receipts | later slice of PSG-16 | Unchanged; see the rows above. |
 | - | Vendor liability for a counted loss of consignment stock (SAP 702 K / MRKO) | decision for Ben; handoff to wave 18 FR-18.16 if SAP's rule is chosen | A vendor-owned count loss posts DEDUCTED at value 0 and emits only `inventory.onhand.changed` (bucket DEDUCTED) and `inventory.transaction.posted`; no `ownership.changed`, so payables never settles the lost quantity with the vendor and the company books no loss. In SAP a consignment inventory difference is a withdrawal that creates the vendor liability. Doing that here means posting the loss as an OWNERSHIP_CHANGE at the consignment price (Dr inventory / Cr consignment accrual, `ownership.changed` to payables) followed by a valued COUNT loss on company stock, and its GL leg waits on #477 (inventory GL through ledgerclient). Until decided, a clerk who must pay the vendor posts that ownership change of the missing quantity by hand and writes the now company-owned quantity off with an ADJUSTMENT, instead of posting the loss through the count. The lost quantity stays traceable: the COUNT transaction keeps the `owner` dimension and the journal id. |
 | - | Count plan filter by a named owner (vendor) | later slice of PSG-16 | The PRD maps MIK1 to "count plans filter by owner"; `includeVendorOwned` only adds every vendor's stock to the sheet. The location, ABC and warehouse filters narrow it. |
+
+## Truck stock for field service (issue #45, FR-45.9, BR-45.7)
+
+Built: the postings consumer also books `dev.passage.service.workorder.completed.v1` (topic
+`passage.service.workorder.completed`): each PART line with a product and a consumed quantity is issued
+from the truck (the event's site and warehouse) at DEDUCTED under the origin `SERVICE_LINE`, once per line,
+converted into the inventory unit, valued at the truck's running average (the work order's currency when the
+truck holds nothing). Negative truck stock is refused (`INV-NEG-001`, the event parks) unless
+`INV_ALLOW_NEGATIVE_TRUCK=true` (the `service.allow-negative-truck` policy). `PUT/GET /v1/inventory/truck-stock-levels`
+(duty `inventory.truck-stock.write` / `inventory.read`) keep min and max per truck and product; a draft
+transfer order from the truck's source warehouse up to the maximum is created when stock plus open inbound
+transfers is below the minimum, after every truck issue and by `POST /v1/inventory/truck-stock:replenish`
+(duty `inventory.transfer.write`). Migration 0040 (`SERVICE_LINE` origin, `inventory_truck_level`).
+
+Not built: a truck as a wave-16 location type (the truck is a warehouse; the location in the event is
+informational), a scheduler for the nightly replenishment pass, automatic confirmation or shipment of the
+draft order, a web screen for the levels, and a correction for a part keyed after the completion event.

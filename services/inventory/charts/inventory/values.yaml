@@ -30,6 +30,8 @@ serviceMonitor:
   enabled: false
 inventory:
   negativeDefault: forbid
+  # service.allow-negative-truck (BR-45.7): let a technician's truck stock go negative when a completed work order consumes more than the truck holds.
+  allowNegativeTruck: false
   reservationTTLHours: 0
   journalMaxLines: 10000
   reconCron: "0 2 * * *"

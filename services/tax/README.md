@@ -21,6 +21,10 @@ DATABASE_URL=postgres://... go run ./cmd/tax
 | `MIGRATE_ON_START` | `true` applies `migrations/` at start (the chart sets it from `migrateOnStart`) |
 | `LEDGER_URL` | base URL of the ledger service; unset leaves `POST /v1/tax/settlements:run` answering 503 |
 | `LEDGER_TIMEOUT` | ledger call timeout, default 3s |
+| `AVALARA_URL`, `AVALARA_ACCOUNT_ID`, `AVALARA_LICENSE_KEY`, `AVALARA_COMPANY_CODE` | turn on the `avalara` provider (a calculate request names it in `provider`); the credentials come from a Secret. A URL without credentials stops the service at start |
+| `VERTEX_URL`, `VERTEX_TOKEN_URL`, `VERTEX_CLIENT_ID`, `VERTEX_CLIENT_SECRET`, `VERTEX_USERNAME`, `VERTEX_PASSWORD`, `VERTEX_COMPANY` | turn on the `vertex` provider, authenticated with an OAuth password grant whose token is cached until shortly before it expires |
+| `TAX_SETTLEMENT_TENANT_IDS`, `TAX_SETTLEMENT_DAY` (1 to 28, default 5), `TAX_SETTLEMENT_AT` (UTC, default `04:00`) | run the settlement of the previous calendar month for every legal entity with a ledger configuration, once a month; needs `LEDGER_URL`. A month that differs from the GL is refused (TAX-0008) and logged |
+| `TAX_RECOMMIT_TENANT_IDS`, `TAX_RECOMMIT_INTERVAL` (default 5m) | drain the recommit queue of the tenants' legal entities on a timer |
 | `PASSAGE_SERVICE_SIGNING_KEY` or `PASSAGE_SERVICE_SIGNING_KEY_FILE`, `PASSAGE_SERVICE_NAME` | the service identity the ledger call is signed with; required when `LEDGER_URL` is set. `service_grants.tax.ledger` in `policies/authz/data.json` (mirrored in `platform/go/tenant`) grants it `ledger.balance.read`, plus `ledger.entry.lookup`, `ledger.ledger.lookup` and `ledger.account.lookup` for the SAF-T export, and nothing else |
 
 ## API
@@ -42,6 +46,8 @@ Configuration is stored per tenant (migration `0003`): a jurisdiction tree (`/v1
 `/v1/tax/entity-settings` holds the legal entity's country and VAT number. `/v1/tax/vat-boxes` holds the return boxes: a `base` or `tax` box sums the mapped code and direction pairs, a `payable` box is output and use tax less input tax. `GET /v1/tax/vat-return?period_from&period_to` (duty `tax.vatreturn.read`) computes the boxes from recorded tax transactions and reports `missing_base` and `unmapped` counts. `POST /v1/tax/transactions` accepts the optional `base_amount`, `counterparty_country`, `counterparty_vat_id` and `supply_kind` (goods, services, triangular). `GET /v1/tax/esl` lists output transactions to other EU member states grouped by country, VAT number and kind (indicator L, S or T); sales without a VAT number are counted in `missing_vat_id`, not listed.
 
 Intrastat master data is one row per kind (`commodity`, `transaction_code`, `transport_mode`, `port`, `country`, `delivery_terms`) at `/v1/tax/intrastat/master/{kind}`. A journal is one flow (arrival or dispatch) and month: `transfer` adds source lines idempotently by `source_ref` (the caller supplies them; no shipping or receiving feed is wired), `validate` checks every line against the master data and the entity country and stores plain-language problems on the lines, `compress` merges lines that agree on partner, commodity, transaction, transport, terms, port and origin, and lines can be edited or removed while the journal is a draft. `export` returns a CSV only for a validated journal and locks it; `correct` opens a new draft copying an exported journal's lines, and its export marks every row `A`. Duties: `tax.intrastat.read`, `tax.intrastat.manage`, `tax.intrastatmaster.manage`, `tax.intrastat.export`.
+
+Added in FIN-A (#13), all under the tax duties of the table above unless stated: stored exemption certificates (`/v1/tax/exemption-certificates`, read by `stored_config` calculations through `party.certificate`); recovery policies (`/v1/tax/recovery-policies`, per code and item tax group) and the reclaim report (`GET /v1/tax/vat-reclaim`); national return layouts and filing formats (`GET /v1/tax/vat-layouts`, `POST /v1/tax/vat-layouts/{country}/apply`, `format=` on `vat-return` and `esl`); seeded Intrastat lists (`POST /v1/tax/intrastat/master:seed`, `:import`) and the movement feed (`/v1/tax/intrastat/products`, `POST /movements` with duty `tax.intrastat.feed`, `POST /journals/{id}/transfer-movements`); withholding entries, remittance runs and certificates (`/v1/tax/withholding/entries`, `/remittance-runs`, `/certificates`; duties `tax.withholding.record`, `tax.withholding.remit`, `tax.withholding.read`). `POST /v1/tax/transactions` also takes `recoverable_amount` on an input tax. Error TAX-0014: nothing waits to be remitted in the period.
 
 ### SAF-T
 
@@ -68,6 +74,7 @@ Naming: the PRD calls the chart `passage-tax`; existing charts are named after t
 | TAX-0008 | 422 | settlement differs from the GL tax account movement |
 | TAX-0009 | 422 | no open tax transaction in the settlement period |
 | TAX-0013 | 422 | a jurisdiction, tax code or group is still used and cannot be deleted |
+| TAX-0014 | 422 | no withholding is waiting to be remitted in the period |
 | COM-0404 | 404 | no such configuration row or journal |
 | COM-0502 | 502 | the general ledger could not be read |
 | COM-0503 | 503 | the store or the ledger is not configured |

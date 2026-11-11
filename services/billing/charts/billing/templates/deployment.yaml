@@ -101,6 +101,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            {{- if .Values.subscriptionJob.tenantIds }}
+            - name: BILLING_SUBSCRIPTION_JOB_TENANT_IDS
+              value: {{ join "," .Values.subscriptionJob.tenantIds | quote }}
+            {{- if .Values.subscriptionJob.at }}
+            - name: BILLING_SUBSCRIPTION_JOB_AT
+              value: {{ .Values.subscriptionJob.at | quote }}
+            {{- else }}
+            - name: BILLING_SUBSCRIPTION_JOB_INTERVAL
+              value: {{ .Values.subscriptionJob.interval | quote }}
+            {{- end }}
+            {{- end }}
           {{- if .Values.serviceIdentity.signingKeySecret }}
           volumeMounts:
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }

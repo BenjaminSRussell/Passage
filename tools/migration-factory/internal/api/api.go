@@ -25,6 +25,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/replay"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -35,6 +36,8 @@ const (
 	DutyMigrationReview = "migration.factory.review"
 	DutyCutoverManager  = "migration.cutover.manage"
 	DutyStepOwner       = "migration.cutover-step.execute"
+	// DutyOpeningTargetRelease frees a legacy company's pinned opening-journal target (#549).
+	DutyOpeningTargetRelease = "migration.opening-target.release"
 )
 
 // Problem codes raised by this service. Rule violations carry the MIG-/CUT- message code in detail.
@@ -86,6 +89,9 @@ type Store interface {
 	CompensationReport(ctx context.Context, planID string) (store.CompensationReport, error)
 	PostOpeningJournal(ctx context.Context, ledger ledgerclient.Ledger, in store.OpeningJournalRequest) (store.OpeningJournalResult, error)
 	OpeningPostings(ctx context.Context, runID string) ([]store.OpeningPosting, error)
+	SetOpeningMapping(ctx context.Context, planID string, system domain.SourceSystem, company, legalEntityID, ledgerID, by string) (store.OpeningMapping, error)
+	ListOpeningMappings(ctx context.Context, planID string) ([]store.OpeningMapping, error)
+	ReleaseOpeningTarget(ctx context.Context, system domain.SourceSystem, company, reason, by string) (store.OpeningRelease, error)
 	ListCoexistence(ctx context.Context, system domain.SourceSystem, company string) ([]domain.CoexistFlag, error)
 	SetCoexistence(ctx context.Context, idem store.Idem, c store.CoexistChange) (domain.CoexistFlag, bool, error)
 	GetProjectOpening(ctx context.Context, f store.OpeningFilter) (store.ProjectOpening, error)
@@ -94,6 +100,11 @@ type Store interface {
 	ClaimTargetLoad(ctx context.Context, runID, startedBy string, lease time.Duration) (domain.TargetLoad, []store.PendingRow, error)
 	RecordTargetChunk(ctx context.Context, runID string, lease time.Duration, outs []store.RowOutcome) error
 	FinishTargetLoad(ctx context.Context, runID string, fin store.TargetFinish) (domain.TargetLoad, []domain.ControlTotal, error)
+	GetPayablesLoad(ctx context.Context, runID string) (domain.PayablesLoad, error)
+	ClaimPayablesLoad(ctx context.Context, runID, startedBy string, lease time.Duration) (domain.PayablesLoad, []store.PendingPayable, error)
+	RecordPayablesBatch(ctx context.Context, runID string, lease time.Duration, b store.PayablesBatchSent) error
+	RejectPayablesRows(ctx context.Context, runID string, lease time.Duration, rejects []store.PayablesReject) error
+	FinishPayablesLoad(ctx context.Context, runID string, fin store.PayablesFinish) (domain.PayablesLoad, []domain.ControlTotal, error)
 }
 
 // Server serves the API over a Store.
@@ -101,7 +112,11 @@ type Server struct {
 	store  Store
 	now    func() time.Time
 	target Target
-	ledger ledgerclient.Ledger
+	// payables is the target of the AP lines of an open_items run (49-3).
+	payables PayablesTarget
+	ledger   ledgerclient.Ledger
+	// subledgers post the subledger documents of a parallel-run replay (49-4).
+	subledgers replay.Ports
 }
 
 // New returns a server over st.
@@ -129,6 +144,8 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/control-totals", s.controlTotals)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/quarantine/{rec}/release", s.releaseQuarantined)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/load", s.runTargetLoad)
+		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/load-payables", s.runPayablesLoad)
+		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/payables-load", s.getPayablesLoad)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/opening-journal", s.postOpeningJournal)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/opening-journal", s.getOpeningJournal)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/target-load", s.getTargetLoad)
@@ -148,6 +165,9 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/generate", s.generatePlan)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans", s.listPlans)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}", s.getPlan)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/opening-targets", s.listOpeningTargets)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Put("/cutover/plans/{id}/opening-targets/{system}/{company}", s.putOpeningTarget)
+		r.With(authz.RequireDuty(DutyOpeningTargetRelease)).Post("/migration/opening-targets/{system}/{company}/release", s.releaseOpeningTarget)
 		r.With(authz.RequireDuty(DutyStepOwner)).Post("/cutover/plans/{id}/steps/{seq}/start", s.startStep)
 		r.With(authz.RequireDuty(DutyStepOwner)).Post("/cutover/plans/{id}/steps/{seq}/complete", s.completeStep)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/go-no-go", s.readiness)

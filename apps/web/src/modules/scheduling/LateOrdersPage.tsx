@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { fetchLateOrders, type LateOrder } from "./api/client";
-import { dash, formatDateTime, formatMinutes, shortId } from "./format";
+import { dash, formatDateTime, formatMinutes } from "./format";
+import { OrderNumber } from "../mfg-shared/orders";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -22,7 +23,7 @@ export function LateOrdersPage() {
   const state = useLoad((signal) => fetchLateOrders(minutes, signal), String(minutes));
 
   const columns: DataTableColumn<LateOrder>[] = [
-    { key: "orderId", header: "Order", mono: true, render: (row) => shortId(row.orderId) },
+    { key: "orderId", header: "Order", mono: true, render: (row) => <OrderNumber id={row.orderId} /> },
     { key: "dueAt", header: "Due", render: (row) => (row.dueAt ? formatDateTime(row.dueAt) : dash) },
     { key: "plannedEnd", header: "Planned end", render: (row) => (row.plannedEnd ? formatDateTime(row.plannedEnd) : dash) },
     { key: "lateMinutes", header: "Late by", align: "end", render: (row) => (row.lateMinutes > 0 ? formatMinutes(row.lateMinutes) : dash) },

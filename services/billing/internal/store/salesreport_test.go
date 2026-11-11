@@ -70,6 +70,54 @@ func TestSalesReport_OnlyAPostedInvoiceQueuesAndACreditNoteDoesNot(t *testing.T)
 	}
 }
 
+// #553: the list pages newest first with a cursor, so a backlog beyond one page can be reached.
+func TestSalesReport_ListPagesWithACursor(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	ctx := context.Background()
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	for range 5 {
+		inv, err := s.CreateProposal(tctx, shipmentInvoice(t, ids.New(), ids.New()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.PostProposal(tctx, inv.ID, time.Date(2027, 3, 12, 0, 0, 0, 0, time.UTC), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	after, pages := "", 0
+	for {
+		items, next, err := s.ListSalesReportsPage(tctx, "", 2, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range items {
+			if seen[it.ID] {
+				t.Fatalf("report %s on two pages", it.ID)
+			}
+			seen[it.ID] = true
+		}
+		pages++
+		if next == "" {
+			break
+		}
+		if len(items) != 2 {
+			t.Fatalf("a page with a next cursor holds %d items", len(items))
+		}
+		after = next
+	}
+	if len(seen) != 5 || pages != 3 {
+		t.Fatalf("saw %d reports on %d pages, want 5 on 3", len(seen), pages)
+	}
+	if _, _, err := s.ListSalesReportsPage(tctx, "", 2, "garbage"); !errors.Is(err, ErrBadReportCursor) {
+		t.Fatalf("bad cursor: %v", err)
+	}
+}
+
 // #29: an operator lists parked reports and retries one: PARKED goes back to PENDING due now with attempts from zero, a
 // REPORTED report is a 409 and an unknown one a 404; the list filters by status.
 func TestSalesReport_ListAndRetryParked(t *testing.T) {

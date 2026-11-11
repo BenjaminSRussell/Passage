@@ -104,6 +104,14 @@ type API struct {
 	// every request. Asynchronous MDNs we owe are stored and posted by the
 	// delivery dispatcher, not from the listener.
 	AS2Limit *AS2Limiter
+	// Mandates are the e-invoice mandates (35-2); nil means the defaults: Peppol built, IT SDI and MX CFDI as hooks.
+	Mandates domain.Mandates
+	// AccessPoint submits e-invoices to their network (a Peppol access point, the SDI, a PAC); nil answers 503 on submit.
+	AccessPoint AccessPoint
+	// Requisitions creates the requisition of a returned punchout cart in purchasing (35-3); nil answers 503.
+	Requisitions Requisitions
+	// PunchoutHTTP sends the cXML PunchOutSetupRequest; nil uses a client with a 10 second timeout that follows no redirect.
+	PunchoutHTTP *http.Client
 }
 
 // New returns the API. The store may be nil for routes that do not persist
@@ -129,6 +137,8 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.admin")).Delete("/partners/{id}/item-xrefs/{xrefId}", a.deleteXref)
 		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/sales-defaults", a.getSalesDefaults)
 		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/sales-defaults", a.putSalesDefaults)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/auto-outbound", a.getAutoOutbound)
+		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/auto-outbound", a.putAutoOutbound)
 		r.With(authz.RequireDuty("edi.operate")).Post("/partners/{id}/outbound:from-source", a.outboundFromSource)
 		if a.AllowBodyOutbound {
 			r.With(authz.RequireDuty("edi.operate")).Post("/partners/{id}/outbound", a.createOutbound)
@@ -147,8 +157,30 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.operate")).Post("/messages/{id}:post", a.postMessage)
 		r.With(authz.RequireDuty("edi.operate")).Get("/partners/sla", a.partnerSLA)
 		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/returns:parse", a.punchoutParse)
+		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/sessions", a.createPunchoutSession)
+		r.With(authz.RequireDuty("edi.requisition.create")).Get("/punchout/sessions", a.listPunchoutSessions)
+		r.With(authz.RequireDuty("edi.requisition.create")).Get("/punchout/sessions/{id}", a.getPunchoutSession)
+		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/sessions/{id}:cancel", a.cancelPunchoutSession)
+		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/sessions/{id}:create-requisition", a.createRequisitionFromSession)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/cxml", a.getPartnerCXML)
+		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/cxml", a.putPartnerCXML)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/punchout", a.getPunchoutSupplier)
+		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/punchout", a.putPunchoutSupplier)
 		r.With(authz.RequireDuty("edi.self-billing.reconcile")).Post("/self-billing:match", a.selfBillingMatch)
+		r.With(authz.RequireDuty("edi.self-billing.reconcile")).Post("/self-billing:sweep", a.selfBillSweep)
+		r.With(authz.RequireDuty("edi.self-billing.reconcile")).Get("/self-billing/documents", a.listSelfBillDocuments)
+		r.With(authz.RequireDuty("edi.self-billing.reconcile")).Get("/self-billing/disputes", a.listDisputes)
+		r.With(authz.RequireDuty("edi.self-billing.reconcile")).Post("/self-billing/disputes/{id}:resolve", a.resolveDispute)
+		r.With(authz.RequireDuty("edi.admin")).Get("/partners/{id}/self-billing", a.getSelfBillConfig)
+		r.With(authz.RequireDuty("edi.admin")).Put("/partners/{id}/self-billing", a.putSelfBillConfig)
 		r.With(authz.RequireDuty("edi.einvoice.operate")).Post("/peppol/invoices:build", a.ublBuild)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Put("/einvoice/parties/{role}/{subjectId}", a.putEInvoiceParty)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Get("/einvoice/parties/{role}/{subjectId}", a.getEInvoiceParty)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Post("/einvoice/invoices", a.createEInvoice)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Get("/einvoice/invoices", a.listEInvoices)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Get("/einvoice/invoices/{id}", a.getEInvoice)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Post("/einvoice/invoices/{id}:submit", a.submitEInvoice)
+		r.With(authz.RequireDuty("edi.einvoice.operate")).Post("/einvoice/invoices/{id}:response", a.recordEInvoiceResponse)
 	})
 	return r
 }
@@ -725,11 +757,25 @@ func (a *API) createOutbound(w http.ResponseWriter, r *http.Request) {
 // carries the delivery); the message stays MAPPED until the transport
 // confirms receipt and then becomes SENT.
 func (a *API) sendOutbound(w http.ResponseWriter, r *http.Request, key, partnerID, setID string, document json.RawMessage) {
+	res, created, err := a.recordOutbound(r.Context(), key, partnerID, setID, document)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	httpx.JSON(w, status, res)
+}
+
+// recordOutbound builds the interchange for one canonical document, numbers it from the partner's counter and records it (and
+// queues its delivery) in one transaction. It is what the routes and the event consumer share; problems come back as *httpx.Problem.
+func (a *API) recordOutbound(ctx context.Context, key, partnerID, setID string, document json.RawMessage) (store.OutboundResult, bool, error) {
 	edifact := domain.IsEdifactOutbound(setID)
 	if domain.FunctionalIDOf(setID) == "" && !edifact {
-		httpx.Fail(w, r, validation(map[string]string{"transactionSet": "must be " + strings.Join(domain.OutboundSets, ", ") +
-			" or " + strings.Join(domain.EdifactOutboundTypes, ", ")}))
-		return
+		return store.OutboundResult{}, false, validation(map[string]string{"transactionSet": "must be " + strings.Join(domain.OutboundSets, ", ") +
+			" or " + strings.Join(domain.EdifactOutboundTypes, ", ")})
 	}
 	var (
 		tr        domain.Transaction
@@ -743,32 +789,26 @@ func (a *API) sendOutbound(w http.ResponseWriter, r *http.Request, key, partnerI
 		tr, canonical, err = domain.BuildOutbound(setID, document)
 	}
 	if errors.Is(err, domain.ErrOutbound) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
-		return
+		return store.OutboundResult{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error())
 	}
 	if err != nil {
-		httpx.Fail(w, r, err)
-		return
+		return store.OutboundResult{}, false, err
 	}
-	partner, err := a.store.GetPartner(r.Context(), partnerID)
+	partner, err := a.store.GetPartner(ctx, partnerID)
 	if errors.Is(err, store.ErrNotFound) {
-		httpx.Fail(w, r, notFound("partner"))
-		return
+		return store.OutboundResult{}, false, notFound("partner")
 	}
 	if err != nil {
-		httpx.Fail(w, r, err)
-		return
+		return store.OutboundResult{}, false, err
 	}
 	if partner.Status != "active" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodePartnerInactive, "partner is inactive; no documents can be sent to it"))
-		return
+		return store.OutboundResult{}, false, httpx.NewProblem(http.StatusConflict, CodePartnerInactive, "partner is inactive; no documents can be sent to it")
 	}
 	at := a.now()
 	out := store.Outbound{PartnerID: partner.ID, TransactionSet: setID, Canonical: canonical}
 	if edifact {
 		if partner.Edifact() == nil {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeNoEdifactID, "partner has no EDIFACT identity (edifactId); "+setID+" cannot be addressed to it"))
-			return
+			return store.OutboundResult{}, false, httpx.NewProblem(http.StatusConflict, CodeNoEdifactID, "partner has no EDIFACT identity (edifactId); "+setID+" cannot be addressed to it")
 		}
 		to := domain.EdifactParty{ID: partner.EdifactID, Qualifier: partner.EdifactQualifier}
 		out.Standard = domain.SyntaxEdifact
@@ -794,22 +834,12 @@ func (a *API) sendOutbound(w http.ResponseWriter, r *http.Request, key, partnerI
 		}
 	}
 	sum := sha256.Sum256(append([]byte("outbound\x00"+partner.ID+"\x00"+setID+"\x00"), canonical...))
-	res, created, err := a.store.CreateOutbound(r.Context(), key, hex.EncodeToString(sum[:]), out)
+	res, created, err := a.store.CreateOutbound(ctx, key, hex.EncodeToString(sum[:]), out)
 	if errors.Is(err, store.ErrIdempotencyReuse) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body"))
-		return
+		return store.OutboundResult{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request body")
 	}
 	if errors.Is(err, domain.ErrSyntax) || errors.Is(err, domain.ErrEdifactSyntax) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error()))
-		return
+		return store.OutboundResult{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOutbound, err.Error())
 	}
-	if err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-	}
-	httpx.JSON(w, status, res)
+	return res, created, err
 }

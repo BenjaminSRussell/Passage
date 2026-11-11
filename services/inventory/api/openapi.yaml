@@ -238,7 +238,7 @@ paths:
         - { name: owner, in: query, description: Only transactions of stock owned by this vendor id, schema: { type: string, maxLength: 100 } }
         - { name: segment, in: query, description: 'Only transactions of this segment (SALES_ORDER:<ref> or PROJECT:<ref>)', schema: { type: string, maxLength: 100 } }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/TransactionStatus' } }
-        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE] } }
+        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE, SERVICE_LINE] } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
         - $ref: '#/components/parameters/Limit'
@@ -1570,6 +1570,90 @@ paths:
                     items: { $ref: '#/components/schemas/InTransitItem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/truck-stock-levels:
+    put:
+      operationId: setTruckStockLevels
+      summary: Replace the stock levels of one technician's truck (FR-45.9)
+      description: |
+        A truck is a warehouse of its own at a site (UUIDs, the ids field service holds on the technician).
+        Each level gives the minimum below which the truck is replenished and the maximum it is replenished
+        up to, in the product's inventory unit; the truck is replenished from sourceWarehouseId. Levels of
+        products not listed are removed. The response lists the truck's levels with what it holds.
+      x-passage-duty: inventory.truck-stock.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TruckLevelsRequest' }
+      responses:
+        '200':
+          description: The levels of the truck
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TruckLevelList' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listTruckStockLevels
+      summary: Truck stock levels with what each truck holds and what is on its way (FR-45.9)
+      description: |
+        onHandQty is the available physical stock of the truck's site and warehouse; inboundQty is what open
+        transfer orders (DRAFT, CREATED, SHIPPED, PARTIALLY_RECEIVED) still have to deliver to it. short is
+        true when the two together are below the minimum.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string }, description: With warehouseId, one truck }
+        - { name: warehouseId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: The levels
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TruckLevelList' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/truck-stock:replenish:
+    post:
+      operationId: replenishTrucks
+      summary: Create draft transfer orders for trucks below their minimum (BR-45.7)
+      description: |
+        For each truck of the legal entity (or the one named by siteId and warehouseId) whose stock plus open
+        inbound transfers is below the minimum of a level, a DRAFT transfer order is created from the truck's
+        source warehouse for the quantity that brings every short product up to its maximum. The order is
+        keyed by the truck, the day and the lines, so a repeated run adds nothing, and a truck whose shortfall
+        is already on its way gets no second order. Completing a work order runs the same check for its truck.
+      x-passage-duty: inventory.transfer.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId]
+              additionalProperties: false
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                siteId: { type: string }
+                warehouseId: { type: string }
+                shipDate: { type: string, format: date, description: Default today (UTC). }
+      responses:
+        '200':
+          description: The draft orders created (none when no truck is short)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders: { type: array, items: { $ref: '#/components/schemas/TransferOrder' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /v1/inventory/transfer-order-lines:
     get:
       operationId: listTransferOrderLines
@@ -3242,7 +3326,7 @@ components:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         originId: { type: string, format: uuid }
-        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE], description: 'PURCH_LINE, RECEIPT_LINE, SALES_LINE and PROD_LINE are registered by other services through transactions:apply' }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE, SERVICE_LINE], description: 'PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE and SERVICE_LINE are registered by other services through transactions:apply' }
         sourceId: { type: string, format: uuid }
         journalId: { type: string, format: uuid, description: 'Set for journal lines, the receipt leg of an ownership change and the destination leg (TRANSFER_IN) of a transfer journal line' }
         reference: { type: string, description: 'Source document of other origins (blocking, transfer or replenishment order id, or the reference given to transactions:apply)' }
@@ -3659,6 +3743,48 @@ components:
         overdeliveryPct: { $ref: '#/components/schemas/Decimal' }
         unshippedQty: { $ref: '#/components/schemas/Decimal', description: Ordered quantity not shipped yet; 0 once shipped or closed }
         closed: { type: boolean }
+    TruckLevelsRequest:
+      type: object
+      required: [legalEntityId, siteId, warehouseId, sourceSiteId, sourceWarehouseId, levels]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid, description: The truck's site. }
+        warehouseId: { type: string, format: uuid, description: The truck's warehouse. }
+        sourceSiteId: { type: string, maxLength: 60 }
+        sourceWarehouseId: { type: string, maxLength: 60, description: Must differ from the truck's warehouse. }
+        levels:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [productId, unit, minQty, maxQty]
+            additionalProperties: false
+            properties:
+              productId: { type: string, format: uuid }
+              unit: { type: string, description: The product's inventory unit. }
+              minQty: { type: string, description: Decimal, 0 or more. }
+              maxQty: { type: string, description: Decimal, positive and not below minQty. }
+    TruckLevelList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              legalEntityId: { type: string, format: uuid }
+              siteId: { type: string }
+              warehouseId: { type: string }
+              sourceSiteId: { type: string }
+              sourceWarehouseId: { type: string }
+              productId: { type: string, format: uuid }
+              unit: { type: string }
+              minQty: { type: string }
+              maxQty: { type: string }
+              onHandQty: { type: string }
+              inboundQty: { type: string }
+              short: { type: boolean }
     TransferOrder:
       type: object
       required: [id, legalEntityId, number, status, fromWarehouseId, toWarehouseId, useTransit, shipDate, version, createdAt, lines]

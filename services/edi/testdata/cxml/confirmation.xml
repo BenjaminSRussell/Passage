@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="20261105.0003@ariba.example" timestamp="2026-11-05T08:00:00-05:00">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>AN-DEMO-DISTRIBUTOR</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>AN-DEMO-MANUFACTURER</Identity></Credential></To>
+    <Sender>
+      <Credential domain="NetworkId"><Identity>AN-DEMO-DISTRIBUTOR</Identity><SharedSecret>correct-horse-battery</SharedSecret></Credential>
+      <UserAgent>Ariba Supplier Network</UserAgent>
+    </Sender>
+  </Header>
+  <Request>
+    <ConfirmationRequest>
+      <ConfirmationHeader type="detail" noticeDate="2026-11-05T08:00:00-05:00" confirmID="CONF-9"/>
+      <OrderReference orderID="PO-1001" orderDate="2026-10-15T00:00:00-05:00"/>
+      <ConfirmationItem lineNumber="1" quantity="10">
+        <UnitOfMeasure>EA</UnitOfMeasure>
+        <ConfirmationStatus type="accept" quantity="10" shipmentDate="2026-11-04T00:00:00-05:00"><UnitOfMeasure>EA</UnitOfMeasure></ConfirmationStatus>
+      </ConfirmationItem>
+    </ConfirmationRequest>
+  </Request>
+</cXML>

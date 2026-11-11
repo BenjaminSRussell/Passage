@@ -29,7 +29,7 @@ import (
 // transactions:apply (waves 17–21, 27): purchase order lines, receipt lines,
 // sales order lines and production order lines. The service's own documents
 // (journals, blockings, transfers, consignment) never come through it.
-var ExternalSourceTypes = []string{"PURCH_LINE", "RECEIPT_LINE", "SALES_LINE", "PROD_LINE"}
+var ExternalSourceTypes = []string{"PURCH_LINE", "RECEIPT_LINE", "SALES_LINE", "PROD_LINE", "SERVICE_LINE"}
 
 // CodeKeyInFlight is the 409 answered when the unique idempotency key of a
 // status change is taken by a request this caller cannot see (another legal

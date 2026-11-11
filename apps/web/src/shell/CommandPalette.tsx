@@ -42,6 +42,8 @@ const RECORD_ICON: Record<RecordType, IconName> = {
   sales_order: "note",
   packing_slip: "box",
   customer_invoice: "receipt",
+  production_order: "cog",
+  worker: "database",
 };
 
 const statusWord = (status: string) => status.charAt(0).toUpperCase() + status.slice(1).toLowerCase().replace(/_/g, " ");

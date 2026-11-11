@@ -222,6 +222,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getMergeRequest
+      summary: "Get a party merge request and its approvals"
       x-passage-duty: party.read
       responses:
         '200': { description: The merge request., content: { application/json: { schema: { $ref: '#/components/schemas/MergeApproval' } } } }

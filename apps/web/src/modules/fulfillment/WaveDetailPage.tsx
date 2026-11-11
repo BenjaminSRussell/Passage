@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useNames } from "../mfg-shared/names";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { confirmWavePick, describeProblem, getWave, type Problem, type ShortPickReason, type Wave, type WaveLine, type WavePickResult, type WaveShipment } from "./api/client";
@@ -40,6 +41,7 @@ export function WavePickCard({ wave, onDone }: { wave: Wave; onDone(): void }) {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [result, setResult] = useState<WavePickResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const productNames = useNames("product", open.map((l) => l.productId));
   const key = useCommandKey();
 
   async function submit(event: FormEvent) {
@@ -92,7 +94,7 @@ export function WavePickCard({ wave, onDone }: { wave: Wave; onDone(): void }) {
             <div key={l.shipmentLineId} className={styles.form}>
               <FormField
                 id={`wp-${l.shipmentLineId}`}
-                label={`${l.shipmentNumber}, product ${shortId(l.productId)} (${l.unit}) picked of ${l.qtyPlanned}`}
+                label={`${l.shipmentNumber}, product ${productNames[l.productId] ?? shortId(l.productId)} (${l.unit}) picked of ${l.qtyPlanned}`}
                 error={errors[l.shipmentLineId]}
               >
                 {(control) => (
@@ -109,7 +111,7 @@ export function WavePickCard({ wave, onDone }: { wave: Wave; onDone(): void }) {
                 )}
               </FormField>
               {short ? (
-                <FormField id={`wr-${l.shipmentLineId}`} label={`Reason for ${l.shipmentNumber}, product ${shortId(l.productId)} short pick`} optional>
+                <FormField id={`wr-${l.shipmentLineId}`} label={`Reason for ${l.shipmentNumber}, product ${productNames[l.productId] ?? shortId(l.productId)} short pick`} optional>
                   {(control) => (
                     <Select {...control} value={reasons[l.shipmentLineId] ?? ""} onChange={(event) => {
                         setReasons({ ...reasons, [l.shipmentLineId]: event.target.value });

@@ -22,6 +22,11 @@ type InvoiceLine struct {
 	UOM       string          `json:"uom"`
 	UnitPrice decimal.Decimal `json:"unitPrice"`
 	ItemRefs  []ItemRef       `json:"itemRefs"`
+	// DeliveryNote (RFF AAK), POLine (RFF LI) and Tax (a TAX with MOA 124 inside the line) are read from a customer's
+	// self-billing INVOIC (#35, 35-5); the builders never write them.
+	DeliveryNote string           `json:"deliveryNote,omitempty"`
+	POLine       string           `json:"poLine,omitempty"`
+	Tax          *decimal.Decimal `json:"tax,omitempty"`
 }
 
 // TaxLine is one TXI tax amount (ST sales, VA value added, GS goods and services).
@@ -45,11 +50,13 @@ type InvoiceCharge struct {
 // DTM*011 and BOL feeds REF*BM, both optional. Total is the invoice total and
 // TDS01 carries it times 100.
 type Invoice struct {
-	Number     string          `json:"number"`
-	Date       string          `json:"date"`
-	PONumber   string          `json:"poNumber"`
-	PODate     string          `json:"poDate"`
-	CreditNote bool            `json:"creditNote,omitempty"`
+	Number     string `json:"number"`
+	Date       string `json:"date"`
+	PONumber   string `json:"poNumber"`
+	PODate     string `json:"poDate"`
+	CreditNote bool   `json:"creditNote,omitempty"`
+	// SelfBilled marks an INVOIC 389 (or 390) the customer issued for our deliveries.
+	SelfBilled bool            `json:"selfBilled,omitempty"`
 	ShipDate   string          `json:"shipDate,omitempty"`
 	BOL        string          `json:"bol,omitempty"`
 	Terms      Terms           `json:"terms"`

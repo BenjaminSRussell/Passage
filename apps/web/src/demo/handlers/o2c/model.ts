@@ -7,6 +7,7 @@ import type { Invoice, InvoiceLine } from "../../../modules/billing/api/client";
 import type { CreditEvaluation, CreditProfile, Hold, LimitType, Order, OrderLine, OrderProgress, OrderStatus, OrderVersion, ScheduleLine } from "../../../modules/sales/api/client";
 import { CUSTOMERS, ITEMS, LEGAL_ENTITY, PLANT, WH_FG, itemByNumber, type Party } from "../../company";
 import { at, day, dec, table, uid } from "../../store";
+import { arExtras } from "./arLedger";
 
 // uid() kinds claimed by this area (100-102 are the sales order, line and hold ids).
 export const K = { order: 100, line: 101, hold: 102, schedule: 103, progress: 104, shipment: 105, shipLine: 106, container: 107, slip: 108, invoice: 109, condition: 110, change: 111, quotation: 112 } as const;
@@ -263,14 +264,16 @@ export function exposureOf(customerId: string): Exposure {
     }
   }
   const today = Date.parse(day(0));
+  // Opening items, interest, fees and deductions the receivables ledger holds besides the invoices.
+  const ar = arExtras(customerId, open.map((i) => i.id));
   return {
-    openAr: r2(open.reduce((s, i) => s + invoiceOpen(i), 0)),
-    unapplied: UNAPPLIED[index] ?? 0,
+    openAr: r2(open.reduce((s, i) => s + invoiceOpen(i), 0) + ar.open),
+    unapplied: ar.unapplied ?? UNAPPLIED[index] ?? 0,
     deliveredNotInvoiced: r2(dni),
     openOrders: r2(openOrders),
-    overdueAr: r2(overdue.reduce((s, i) => s + invoiceOpen(i), 0)),
-    oldestItemDays: Math.max(0, ...open.map((i) => Math.round((today - Date.parse(i.invoiceDate)) / 86_400_000))),
-    dunningLevel: overdue.length > 0 ? 1 : 0,
+    overdueAr: r2(overdue.reduce((s, i) => s + invoiceOpen(i), 0) + ar.overdue),
+    oldestItemDays: Math.max(ar.oldestDays, ...open.map((i) => Math.round((today - Date.parse(i.invoiceDate)) / 86_400_000))),
+    dunningLevel: Math.max(ar.dunningLevel, overdue.length > 0 ? 1 : 0),
   };
 }
 

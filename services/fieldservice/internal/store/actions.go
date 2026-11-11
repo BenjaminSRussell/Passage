@@ -32,6 +32,13 @@ type ActionInput struct {
 	SignatureRef string
 	// NOTE: free text, last writer wins by device time.
 	Text string
+	// SIGNATURE: where the device was when the customer signed.
+	Latitude, Longitude *float64
+	// PHOTO: the uploaded captures (1 to 5) the action attaches.
+	CaptureIDs []string
+	// CHECKLIST: the item and whether it is done now; the later device time wins.
+	ItemID string
+	Done   bool
 }
 
 func (in ActionInput) payload() []byte {
@@ -41,8 +48,15 @@ func (in ActionInput) payload() []byte {
 		m["lineId"], m["qty"] = in.LineID, in.Qty.String()
 	case domain.ActSignature:
 		m["signedBy"], m["signatureRef"] = in.SignedBy, in.SignatureRef
+		if in.Latitude != nil && in.Longitude != nil {
+			m["lat"], m["lon"] = *in.Latitude, *in.Longitude
+		}
 	case domain.ActNote:
 		m["text"] = in.Text
+	case domain.ActPhoto:
+		m["captureIds"] = in.CaptureIDs
+	case domain.ActChecklist:
+		m["itemId"], m["done"] = in.ItemID, in.Done
 	}
 	b, _ := json.Marshal(m)
 	return b
@@ -131,6 +145,60 @@ type mergeState struct {
 	floor        time.Time
 	now          time.Time
 	completedNow bool
+	// captures are the images uploaded for the work order, by id; checklist is the latest
+	// applied tick per item with the device time it was made.
+	captures  map[string]domain.CaptureKind
+	checklist map[string]tick
+}
+
+// tick is the state of one checklist item.
+type tick struct {
+	done bool
+	at   time.Time
+}
+
+func (st *mergeState) checklistDone() map[string]bool {
+	out := make(map[string]bool, len(st.checklist))
+	for id, t := range st.checklist {
+		out[id] = t.done
+	}
+	return out
+}
+
+// loadCaptureState reads the captures and checklist ticks that decide needs.
+func loadCaptureState(ctx context.Context, tx pgx.Tx, tenantID, workOrderID string, st *mergeState) error {
+	st.captures, st.checklist = map[string]domain.CaptureKind{}, map[string]tick{}
+	rows, err := tx.Query(ctx, `select id::text, kind from service_wo_capture where tenant_id = $1 and work_order_id = $2`, tenantID, workOrderID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id, kind string
+		if err := rows.Scan(&id, &kind); err != nil {
+			rows.Close()
+			return err
+		}
+		st.captures[id] = domain.CaptureKind(kind)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows, err = tx.Query(ctx, `select payload->>'itemId', (payload->>'done')::boolean, device_time from service_wo_action
+		where tenant_id = $1 and work_order_id = $2 and kind = 'CHECKLIST' and outcome = 'APPLIED' order by device_time, seq`, tenantID, workOrderID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var t tick
+		if err := rows.Scan(&id, &t.done, &t.at); err != nil {
+			return err
+		}
+		st.checklist[id] = t
+	}
+	return rows.Err()
 }
 
 // RecordActions merges a batch of technician actions into a work order (BR-45.6). The
@@ -158,6 +226,9 @@ func (s *Postgres) RecordActions(ctx context.Context, workOrderID, technicianID 
 		}
 		st := mergeState{now: now}
 		if st.consumed, err = consumedQty(ctx, tx, tid, workOrderID); err != nil {
+			return err
+		}
+		if err = loadCaptureState(ctx, tx, tid, workOrderID, &st); err != nil {
 			return err
 		}
 		var created time.Time
@@ -217,9 +288,11 @@ func (s *Postgres) RecordActions(ctx context.Context, workOrderID, technicianID 
 		}
 		if wo.Status != before.Status || wo.SignedAt != before.SignedAt || wo.TechnicianNote != before.TechnicianNote {
 			if _, err := tx.Exec(ctx, `update service_work_order set status = $3, completed_at = $4, first_time_fix = case when $4::timestamptz is not null then coalesce(first_time_fix, true) else first_time_fix end,
-				signed_by = $5, signed_at = $6, signature_ref = $7, technician_note = $8, note_at = $9, version = version + 1, updated_at = $10
+				signed_by = $5, signed_at = $6, signature_ref = $7, technician_note = $8, note_at = $9, version = version + 1, updated_at = $10,
+				signed_lat = $11, signed_lon = $12
 				where tenant_id = $1 and id = $2`,
-				tid, workOrderID, wo.Status, wo.CompletedAt, wo.SignedBy, wo.SignedAt, wo.SignatureRef, wo.TechnicianNote, wo.noteAt, now); err != nil {
+				tid, workOrderID, wo.Status, wo.CompletedAt, wo.SignedBy, wo.SignedAt, wo.SignatureRef, wo.TechnicianNote, wo.noteAt, now,
+				wo.SignedLatitude, wo.SignedLongitude); err != nil {
 				return err
 			}
 		}
@@ -254,6 +327,9 @@ func decide(wo *WorkOrder, technicianID string, a ActionInput, st *mergeState) (
 		if a.Kind == domain.ActComplete {
 			if !wo.SignatureExempt && wo.SignedAt == nil {
 				return domain.OutcomeRejected, domain.CodeSignatureRequired, "the customer's signature is required to complete this work order"
+			}
+			if open := domain.ChecklistOpen(wo.Checklist, st.checklistDone()); len(open) > 0 {
+				return domain.OutcomeRejected, domain.CodeChecklistOpen, fmt.Sprintf("%d required checklist items are open, first: %s", len(open), open[0].Text)
 			}
 			// The completion time is the device's, but never ahead of the server nor
 			// before a status move already applied (a skewed second device).
@@ -307,18 +383,49 @@ func decide(wo *WorkOrder, technicianID string, a ActionInput, st *mergeState) (
 		consumed[line.ID] = consumed[line.ID].Add(a.Qty)
 		return domain.OutcomeApplied, "", ""
 	}
-	// SIGNATURE and NOTE: allowed from dispatch until posting.
+	if a.Kind == domain.ActChecklist {
+		switch status {
+		case domain.WODispatched, domain.WOTraveling, domain.WOInProgress, domain.WOOnHold:
+		default:
+			return domain.OutcomeRejected, domain.CodeActionStatus, fmt.Sprintf("a %s work order takes no checklist changes", status)
+		}
+		known := false
+		for _, it := range wo.Checklist {
+			known = known || it.ID == a.ItemID
+		}
+		if !known {
+			return domain.OutcomeRejected, domain.CodeChecklistItem, "the work order's checklist has no such item"
+		}
+		if prev, ok := st.checklist[a.ItemID]; ok && a.DeviceTime.Before(prev.at) {
+			return domain.OutcomeSuperseded, "", "a later tick of this item is already stored"
+		}
+		st.checklist[a.ItemID] = tick{done: a.Done, at: a.DeviceTime}
+		return domain.OutcomeApplied, "", ""
+	}
+	// SIGNATURE, NOTE and PHOTO: allowed from dispatch until posting.
 	switch status {
 	case domain.WODispatched, domain.WOTraveling, domain.WOInProgress, domain.WOOnHold, domain.WOCompleted:
 	default:
 		return domain.OutcomeRejected, domain.CodeActionStatus, fmt.Sprintf("a %s work order takes no %s", status, a.Kind)
 	}
 	at := a.DeviceTime.UTC()
+	if a.Kind == domain.ActPhoto {
+		for _, id := range a.CaptureIDs {
+			if st.captures[id] != domain.CapturePhoto {
+				return domain.OutcomeRejected, domain.CodeCaptureUnknown, fmt.Sprintf("the photo %s has not been uploaded for this work order", id)
+			}
+		}
+		return domain.OutcomeApplied, "", ""
+	}
 	if a.Kind == domain.ActSignature {
+		if id, ok := domain.CaptureIDOf(a.SignatureRef); ok && st.captures[id] != domain.CaptureSignature {
+			return domain.OutcomeRejected, domain.CodeCaptureUnknown, "the signature image has not been uploaded for this work order"
+		}
 		if wo.SignedAt != nil && at.Before(*wo.SignedAt) {
 			return domain.OutcomeSuperseded, "", "a later signature is already stored"
 		}
 		wo.SignedBy, wo.SignatureRef, wo.SignedAt = &a.SignedBy, &a.SignatureRef, &at
+		wo.SignedLatitude, wo.SignedLongitude = a.Latitude, a.Longitude
 		return domain.OutcomeApplied, "", ""
 	}
 	if wo.noteAt != nil && at.Before(*wo.noteAt) {
@@ -360,7 +467,19 @@ func enqueueCompleted(ctx context.Context, tx pgx.Tx, tenantID string, wo WorkOr
 	}
 	lines := make([]svcevents.CompletedLine, 0, len(wo.Lines))
 	for _, l := range wo.Lines {
-		lines = append(lines, svcevents.CompletedLine{LineID: l.ID, Kind: string(l.Kind), Qty: l.Qty.String(), ConsumedQty: consumed[l.ID].String()})
+		lines = append(lines, svcevents.CompletedLine{LineID: l.ID, Kind: string(l.Kind), Qty: l.Qty.String(), ConsumedQty: consumed[l.ID].String(),
+			ProductID: l.ProductID, Unit: l.Unit})
+	}
+	var truck *svcevents.CompletedTruck
+	if wo.TechnicianID != nil {
+		var site, warehouse, location *string
+		if err := tx.QueryRow(ctx, `select truck_site_id::text, truck_warehouse_id::text, truck_location_id::text from service_technician where tenant_id = $1 and id = $2`,
+			tenantID, *wo.TechnicianID).Scan(&site, &warehouse, &location); err != nil {
+			return err
+		}
+		if site != nil && warehouse != nil {
+			truck = &svcevents.CompletedTruck{SiteID: *site, WarehouseID: *warehouse, LocationID: location}
+		}
 	}
 	at := now
 	if wo.CompletedAt != nil {
@@ -369,7 +488,7 @@ func enqueueCompleted(ctx context.Context, tx pgx.Tx, tenantID string, wo WorkOr
 	return enqueue(ctx, tx, "workorder", wo.ID, svcevents.WorkOrderCompleted, tenantID, svcevents.WorkOrderCompletedData{
 		WorkOrderID: wo.ID, Number: wo.Number, CustomerPartyID: wo.CustomerPartyID, LegalEntityID: wo.LegalEntityID, CaseID: wo.CaseID,
 		TechnicianID: wo.TechnicianID, FirstTimeFix: wo.FirstTimeFix == nil || *wo.FirstTimeFix, DurationMinutes: domain.WorkMinutes(marks),
-		CompletedAt: at.UTC().Format(time.RFC3339), Lines: lines,
+		CompletedAt: at.UTC().Format(time.RFC3339), Currency: wo.Currency, Truck: truck, Lines: lines,
 	})
 }
 

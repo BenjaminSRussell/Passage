@@ -1,4 +1,6 @@
 import { Button, FormField, Input, Select } from "../../shell/ui";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 import styles from "./pages.module.css";
 
 export interface RowField {
@@ -6,6 +8,8 @@ export interface RowField {
   label: string;
   /** A select over these values; otherwise a text input. */
   options?: readonly string[];
+  /** Picks a record by name through the shared entity lookup; the row holds its id. */
+  lookup?: LookupEntityKey;
   decimal?: boolean;
   mono?: boolean;
   upper?: boolean;
@@ -45,7 +49,9 @@ export function RowsEditor({ field, legend, noun, fields, rows, errors, min = 1,
               {fields.map((f) => (
                 <FormField key={f.key} id={`${field}-${i}-${f.key}`} label={label(f, i)} hint={i === 0 ? f.hint : undefined}>
                   {(control) =>
-                    f.options ? (
+                    f.lookup ? (
+                      <EntityLookup {...control} entity={f.lookup} value={row[f.key] ?? ""} onChange={(e) => update(i, f.key, e.target.value)} invalid={Boolean(rowError)} />
+                    ) : f.options ? (
                       <Select {...control} value={row[f.key] ?? ""} onChange={(e) => update(i, f.key, e.target.value)} invalid={Boolean(rowError)}>
                         {f.options.map((o) => (
                           <option key={o} value={o}>

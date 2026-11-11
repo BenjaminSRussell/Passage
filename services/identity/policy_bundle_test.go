@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -160,6 +161,36 @@ func TestCompiledBundleCarriesOnlyActiveTenantWideAssignmentsBySubject(t *testin
 	var manifest struct{ Revision string }
 	if err := json.Unmarshal(files[".manifest"], &manifest); err != nil || manifest.Revision != bundle.Revision || bundle.Revision == "" {
 		t.Fatalf("manifest = %s err = %v revision = %q", files[".manifest"], err, bundle.Revision)
+	}
+}
+
+func TestCompiledBundleKeepsOperatorOnlyDutiesInTheOperatorTenant(t *testing.T) {
+	f := newBundleFixture(t, "")
+	ctx := context.Background()
+	for _, tid := range []string{f.tenantA, f.tenantB} {
+		if _, err := f.admin.Exec(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, gen_random_uuid(), $2, 'ops.failover.execute')`, tid, userID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundle, err := f.compiler.Compile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data struct {
+		Assignments      map[string]map[string][]string `json:"assignments"`
+		OperatorTenantID string                         `json:"operator_tenant_id"`
+	}
+	if err := json.Unmarshal(untar(t, bundle.Archive)["data.json"], &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.OperatorTenantID != f.tenantA {
+		t.Fatalf("operator_tenant_id = %q, want %q", data.OperatorTenantID, f.tenantA)
+	}
+	if !slices.Contains(data.Assignments[f.tenantA]["subject-"+f.tenantA], "ops.failover.execute") {
+		t.Errorf("operator tenant lost its ops duty: %v", data.Assignments[f.tenantA])
+	}
+	if slices.Contains(data.Assignments[f.tenantB]["subject-"+f.tenantB], "ops.failover.execute") {
+		t.Errorf("a non-operator tenant kept an operator-only duty: %v", data.Assignments[f.tenantB])
 	}
 }
 

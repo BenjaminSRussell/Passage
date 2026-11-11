@@ -25,6 +25,10 @@ database:
 # service must hold the matching public key for the service "migration-factory").
 receivables:
   url: ""
+# payables.url is the payables service base address the AP lines of an open_items run are loaded into
+# (POST /v1/payables/opening-batches); empty and the AP load answers 503 MIG-1550. It uses the same signing key.
+payables:
+  url: ""
 signing:
   secretName: ""
   secretKey: PASSAGE_SERVICE_SIGNING_KEY

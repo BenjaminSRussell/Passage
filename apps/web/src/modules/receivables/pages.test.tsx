@@ -155,16 +155,45 @@ describe("Payments", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "ON_ACCOUNT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("status") === "ON_ACCOUNT")).toBe(true));
+    expect(server.calls.at(-1)?.url.searchParams.get("limit")).toBe("500");
 
     fireEvent.click(within(await findTable({ name: "Payments" })).getByRole("button", { name: "2027-03-08" }));
     expect(await screen.findByRole("heading", { name: "Payment ACH-7" })).toBeInTheDocument();
   });
 
-  it("shows the empty state", async () => {
+  it("shows the empty state with the next step", async () => {
     server.handler = () => json(200, { items: [] });
     renderAt("/receivables/payments");
     expect(await screen.findByText("No payments")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Record the first payment" })).toHaveAttribute("href", "/receivables/payments/new");
+  });
+
+  it("says nothing matches the filters and clears them", async () => {
+    server.handler = (url) => json(200, { items: url.searchParams.get("status") === "REVERSED" ? [] : [payment] });
+    renderAt("/receivables/payments");
+    await waitFor(() => expect(screen.getByRole("table", { name: "Payments" })).toHaveTextContent("ACH-7"));
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "REVERSED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No payments match these filters")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(screen.getByRole("table", { name: "Payments" })).toHaveTextContent("ACH-7"));
+  });
+
+  it("explains a failure with a retry, and no access without one", async () => {
+    server.handler = () => json(500, { code: "COM-0500", detail: "store unavailable" });
+    const { unmount } = renderAt("/receivables/payments");
+    expect(await screen.findByText("Could not load payments")).toBeInTheDocument();
+    server.handler = () => json(200, { items: [payment] });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByRole("table", { name: "Payments" })).toHaveTextContent("ACH-7"));
+    unmount();
+
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
+    renderAt("/receivables/payments");
+    expect(await screen.findByText("You can't view payments")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 });
 

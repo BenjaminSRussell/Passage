@@ -143,6 +143,9 @@ type Config struct {
 	ItemGroups      map[string][]string `json:"item_groups"`
 	Codes           []Code              `json:"codes"`
 	Exemptions      []Exemption         `json:"exemptions"`
+	// Recovery says how much of an input tax is recoverable for a code, and for an item tax group within it; it replaces the code's
+	// own recoverable_pct where one applies on the tax date.
+	Recovery []RecoveryPolicy `json:"recovery,omitempty"`
 }
 
 type Party struct {
@@ -165,8 +168,11 @@ type Document struct {
 	DocumentDate    Date   `json:"document_date"`
 	TaxDate         Date   `json:"tax_date"`
 	ShipFromCountry string `json:"ship_from_country"`
-	Party           Party  `json:"party"`
-	Lines           []Line `json:"lines"`
+	// DocumentRef names the document at an external provider, which keeps it for a later commit or void.
+	// Without one a provider only quotes.
+	DocumentRef string `json:"document_ref,omitempty"`
+	Party       Party  `json:"party"`
+	Lines       []Line `json:"lines"`
 }
 
 type TaxLine struct {

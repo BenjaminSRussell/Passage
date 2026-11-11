@@ -85,7 +85,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		router.ServeHTTP(w, r)
 	})
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", a.Metrics())
+	admin.Handle("/metrics", httpx.WithMetrics(a.Metrics()))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

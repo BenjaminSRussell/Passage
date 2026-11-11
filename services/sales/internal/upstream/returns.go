@@ -21,17 +21,18 @@ const (
 	inventoryAudience   = "inventory"
 	receivablesAudience = "receivables"
 
-	dutyInvoiceRead      = "billing.invoice.read"
-	dutyPackingSlipRead  = "fulfillment.packing-slip.read"
-	dutyInventoryRead    = "inventory.read"
-	dutyReturnReceipt    = "inventory.return-receipt.post"
-	dutyRMACreditPost    = "ar.rmacredit.post"
-	returnReceiptPath    = "/internal/v1/inventory/return-receipts"
-	journalTypeMovement  = "MOVEMENT"
-	journalStatusPosted  = "POSTED"
-	invoiceTypeCredit    = "CREDIT_NOTE"
-	invoiceStatusReverse = "REVERSED"
-	invoiceStatusProp    = "PROPOSAL"
+	dutyInvoiceRead       = "billing.invoice.read"
+	dutyPackingSlipRead   = "fulfillment.packing-slip.read"
+	dutyInventoryRead     = "inventory.read"
+	dutyReturnReceipt     = "inventory.return-receipt.post"
+	dutyRMACreditPost     = "ar.rmacredit.post"
+	dutyRMACreditBackfill = "ar.rmacredit.backfill"
+	returnReceiptPath     = "/internal/v1/inventory/return-receipts"
+	journalTypeMovement   = "MOVEMENT"
+	journalStatusPosted   = "POSTED"
+	invoiceTypeCredit     = "CREDIT_NOTE"
+	invoiceStatusReverse  = "REVERSED"
+	invoiceStatusProp     = "PROPOSAL"
 )
 
 var ErrNotConfigured = errors.New("upstream service is not configured")
@@ -283,6 +284,22 @@ func (r *Returns) PostRMACredit(ctx context.Context, in store.ARCredit) (store.C
 		return store.CreditNote{}, err
 	}
 	return store.CreditNote{OpenItemID: out.OpenItemID, DocumentNumber: out.DocumentNumber, JournalPostingID: out.JournalPostingID}, nil
+}
+
+// BackfillRMAReservation asks receivables to reserve and commit, in billing, the invoice lines of a credit it posted
+// before reservations existed. A credit that already holds one answers store.ErrReservationHeld.
+func (r *Returns) BackfillRMAReservation(ctx context.Context, legalEntityID, rmaID, invoiceID string, lines []store.ARInvoiceLine) error {
+	invoiceLines := make([]map[string]any, 0, len(lines))
+	for _, l := range lines {
+		invoiceLines = append(invoiceLines, map[string]any{"lineNo": l.LineNo, "qty": l.Qty.String()})
+	}
+	body := map[string]any{"rmaId": rmaID, "legalEntityId": legalEntityID, "invoiceId": invoiceID, "invoiceLines": invoiceLines}
+	err := r.call(ctx, r.receivablesURL, receivablesAudience, http.MethodPost, "/v1/receivables/rma-credits:backfill-reservation", dutyRMACreditBackfill, legalEntityID, "", body, nil)
+	var refused *StatusError
+	if errors.As(err, &refused) && refused.Status == http.StatusConflict && refused.Code == "AR-RMA-STATE" {
+		return store.ErrReservationHeld
+	}
+	return err
 }
 
 func optionalDecimal(s string) (decimal.Decimal, error) {

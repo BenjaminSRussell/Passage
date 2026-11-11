@@ -93,6 +93,8 @@ type technicianFields struct {
 	HomeLatitude     *float64 `json:"homeLatitude"`
 	HomeLongitude    *float64 `json:"homeLongitude"`
 	TruckLocationID  *string  `json:"truckLocationId"`
+	TruckSiteID      *string  `json:"truckSiteId"`
+	TruckWarehouseID *string  `json:"truckWarehouseId"`
 	MaxDailyMinutes  *int     `json:"maxDailyMinutes"`
 	OvertimeAllowed  bool     `json:"overtimeAllowed"`
 	Active           *bool    `json:"active"`
@@ -107,13 +109,18 @@ type technicianRequest struct {
 // 08:00 to 17:00, 480 daily minutes, active.
 func technicianOf(fields map[string]string, f technicianFields) store.Technician {
 	t := store.Technician{Name: strings.TrimSpace(f.Name), WorkerID: f.WorkerID, LegalEntityID: f.LegalEntityID, TimeZone: f.TimeZone,
-		HomeLatitude: f.HomeLatitude, HomeLongitude: f.HomeLongitude, TruckLocationID: f.TruckLocationID, OvertimeAllowed: f.OvertimeAllowed,
+		HomeLatitude: f.HomeLatitude, HomeLongitude: f.HomeLongitude, TruckLocationID: f.TruckLocationID, TruckSiteID: f.TruckSiteID, TruckWarehouseID: f.TruckWarehouseID, OvertimeAllowed: f.OvertimeAllowed,
 		ShiftDays: f.ShiftDays, ShiftStartMinute: 480, ShiftEndMinute: 1020, MaxDailyMinutes: 480, Active: true}
 	if n := len([]rune(t.Name)); n < 1 || n > 120 {
 		fields["name"] = "must be 1 to 120 characters"
 	}
 	optionalUUID(fields, "workerId", f.WorkerID)
 	optionalUUID(fields, "truckLocationId", f.TruckLocationID)
+	optionalUUID(fields, "truckSiteId", f.TruckSiteID)
+	optionalUUID(fields, "truckWarehouseId", f.TruckWarehouseID)
+	if (f.TruckSiteID == nil) != (f.TruckWarehouseID == nil) || (f.TruckLocationID != nil && f.TruckSiteID == nil) {
+		fields["truckSiteId"] = "the truck needs both truckSiteId and truckWarehouseId (and them before a truckLocationId)"
+	}
 	uuidField(fields, "legalEntityId", f.LegalEntityID)
 	if len(f.TerritoryIDs) < 1 || len(f.TerritoryIDs) > maxTerritories {
 		fields["territoryIds"] = fmt.Sprintf("must hold 1 to %d territories", maxTerritories)

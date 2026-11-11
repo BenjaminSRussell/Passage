@@ -9,4 +9,5 @@ RUN CGO_ENABLED=0 GOFIPS140=$GOFIPS140 go build -trimpath -ldflags="-s -w -build
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/print /print
+COPY --from=build /src/services/print/third_party /licenses
 ENTRYPOINT ["/print"]

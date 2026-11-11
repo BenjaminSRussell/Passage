@@ -253,8 +253,7 @@ describe("Dimension combinations", () => {
     renderAt("/inventory/reports/dimension-combinations");
     await screen.findByText("No dimension combinations");
     fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: "nope" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("Enter the product id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Product/)).toHaveAttribute("data-value", "");
     expect(calls).toHaveLength(1);
     fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: PRODUCT_ID } });
     handler = () => json(500, { title: "Server error", status: 500, code: "internal" });

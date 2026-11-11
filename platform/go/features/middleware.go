@@ -2,6 +2,7 @@ package features
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -60,7 +61,7 @@ func (c *Cache) WithBackoff(d time.Duration) *Cache {
 	return c
 }
 
-func (c *Cache) Enabled(ctx context.Context, tenantID string) (map[string]bool, error) {
+func (c *Cache) Enabled(ctx context.Context, tenantID string) (state map[string]bool, err error) {
 	c.mu.Lock()
 	entry, cached := c.entries[tenantID]
 	if cached && c.now().Before(entry.expires) {
@@ -80,25 +81,32 @@ func (c *Cache) Enabled(ctx context.Context, tenantID string) (map[string]bool, 
 	c.inflight[tenantID] = l
 	c.mu.Unlock()
 
-	state, err := c.source.Enabled(context.WithoutCancel(ctx), tenantID)
-
-	c.mu.Lock()
-	switch {
-	case err == nil:
-		c.store(tenantID, cacheEntry{state: state, expires: c.now().Add(c.ttl)})
-	case cached && entry.state != nil:
-		slog.WarnContext(ctx, "feature lookup failed; using the last known state", "err", err)
-		state, err = entry.state, nil
-		c.store(tenantID, cacheEntry{state: state, expires: c.now().Add(c.backoff)})
-	default:
-		c.store(tenantID, cacheEntry{err: err, expires: c.now().Add(c.backoff)})
-	}
-	delete(c.inflight, tenantID)
-	l.state, l.err = state, err
-	c.mu.Unlock()
-	close(l.done)
+	// The leader finishes the lookup in a defer: if the source panics, the waiters still wake (with an error, which the
+	// gate treats as a failed lookup and lets the request through) and the in-flight marker is dropped, so a later request
+	// looks again instead of waiting forever on a lookup that will never end.
+	err = errLookupPanicked
+	defer func() {
+		c.mu.Lock()
+		switch {
+		case err == nil:
+			c.store(tenantID, cacheEntry{state: state, expires: c.now().Add(c.ttl)})
+		case cached && entry.state != nil:
+			slog.WarnContext(ctx, "feature lookup failed; using the last known state", "err", err)
+			state, err = entry.state, nil
+			c.store(tenantID, cacheEntry{state: state, expires: c.now().Add(c.backoff)})
+		default:
+			c.store(tenantID, cacheEntry{err: err, expires: c.now().Add(c.backoff)})
+		}
+		delete(c.inflight, tenantID)
+		l.state, l.err = state, err
+		c.mu.Unlock()
+		close(l.done)
+	}()
+	state, err = c.source.Enabled(context.WithoutCancel(ctx), tenantID)
 	return state, err
 }
+
+var errLookupPanicked = errors.New("feature lookup panicked")
 
 func (c *Cache) store(tenantID string, e cacheEntry) {
 	if _, present := c.entries[tenantID]; !present && len(c.entries) >= MaxTenants {

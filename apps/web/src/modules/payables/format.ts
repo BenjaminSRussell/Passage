@@ -41,8 +41,9 @@ function minorUnits(currency: string): number {
   return known;
 }
 
-export function formatAmount(value: string, currency: string): string {
-  if (typeof value !== "string" || !/^-?\d+(\.\d*)?$/.test(value.trim())) return "Not available";
+/** The amount with the currency's minor units and thousands separators, without the currency; null when it isn't a number. */
+export function formatDecimal(value: string, currency: string): string | null {
+  if (typeof value !== "string" || !/^-?\d+(\.\d*)?$/.test(value.trim())) return null;
   value = value.trim();
   const digits = minorUnits(currency);
   const negative = value.startsWith("-");
@@ -50,7 +51,38 @@ export function formatAmount(value: string, currency: string): string {
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const extra = fraction.slice(digits).replace(/0+$/, "");
   const decimals = (fraction.slice(0, digits).padEnd(digits, "0") + extra);
-  return `${negative ? "-" : ""}${grouped}${decimals === "" ? "" : `.${decimals}`} ${currency}`;
+  return `${negative ? "-" : ""}${grouped}${decimals === "" ? "" : `.${decimals}`}`;
+}
+
+export function formatAmount(value: string, currency: string): string {
+  const amount = formatDecimal(value, currency);
+  return amount === null ? "Not available" : `${amount} ${currency}`;
+}
+
+/** Adds decimal strings exactly (no floating point); a value that isn't a number counts as zero. */
+export function sumDecimals(values: string[]): string {
+  const clean = values.map((v) => (typeof v === "string" ? v.trim() : "")).filter((v) => /^-?\d+(\.\d*)?$/.test(v));
+  const scale = Math.max(0, ...clean.map((v) => (v.split(".")[1] ?? "").length));
+  let total = 0n;
+  for (const v of clean) {
+    const negative = v.startsWith("-");
+    const [whole, fraction = ""] = (negative ? v.slice(1) : v).split(".");
+    const units = BigInt(whole + fraction.padEnd(scale, "0"));
+    total += negative ? -units : units;
+  }
+  const digits = (total < 0n ? -total : total).toString().padStart(scale + 1, "0");
+  const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+  return `${total < 0n ? "-" : ""}${text}`;
+}
+
+/** Hands a downloaded file to the browser under the given name. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function today(now: Date = new Date()): string {

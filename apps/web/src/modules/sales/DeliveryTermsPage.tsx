@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { PlainName } from "./OrderNumber";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -15,7 +16,7 @@ import {
   type Problem,
   type Versioned,
 } from "./api/client";
-import { dash, formatDateTime, shortId, UUID } from "./format";
+import { dash, formatDateTime, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -109,7 +110,7 @@ function WeekdayFields({ values, errors, readOnly, onChange }: WeekdayFieldsProp
 }
 
 const columns: DataTableColumn<DeliveryTerms>[] = [
-  { key: "customerId", header: "Customer", mono: true, render: (t) => <Link to={`/sales/delivery-terms/${t.id}`}>{shortId(t.customerId)}</Link> },
+  { key: "customerId", header: "Customer", render: (t) => <Link to={`/sales/delivery-terms/${t.id}`}><PlainName short entity="customer" id={t.customerId} /></Link> },
   { key: "legalEntityId", header: "Legal entity", render: (t) => <EntityName entity="legalEntity" id={t.legalEntityId} /> },
   { key: "transportDays", header: "Transport days", align: "end" },
   { key: "receivingDays", header: "Receives", render: (t) => weekdayNames(t.receivingDays) },

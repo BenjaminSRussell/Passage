@@ -41,30 +41,48 @@ func newLogger(w io.Writer) *slog.Logger {
 	return slog.New(handler).With("service", "migration-factory")
 }
 
-// receivablesTarget reads RECEIVABLES_URL and the service signing key the factory's calls are signed with. The key must
-// belong to the service named "migration-factory" (PASSAGE_SERVICE_NAME), the caller the service grants are written
-// for. With neither set the service starts and the load step answers 503 MIG-1520; an address without a key, or a key
+// targetConfig reads the base address in envURL and the service signing key the factory's calls are signed with. The
+// key must belong to the service named "migration-factory" (PASSAGE_SERVICE_NAME), the caller the service grants are
+// written for. With neither set the service starts and the load step answers 503; an address without a key, or a key
 // for another service, stops it, because every call would be refused.
-func receivablesTarget(getenv func(string) string) (*target.Receivables, error) {
-	base := getenv("RECEIVABLES_URL")
+func targetConfig(getenv func(string) string, envURL string) (target.Config, error) {
+	base := getenv(envURL)
 	signer, err := tenant.ServiceSignerFromEnv(getenv)
 	if err != nil {
-		return nil, err
+		return target.Config{}, err
 	}
 	if base != "" {
 		if u, err := url.Parse(base); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			return nil, errors.New("RECEIVABLES_URL must be an http or https base address such as http://receivables:8080")
+			return target.Config{}, fmt.Errorf("%s must be an http or https base address such as http://receivables:8080", envURL)
 		}
 	}
 	switch {
 	case base != "" && signer == nil:
-		return nil, errors.New("RECEIVABLES_URL is set but no service signing key is (PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
+		return target.Config{}, fmt.Errorf("%s is set but no service signing key is (PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)", envURL)
 	case signer != nil && getenv(tenant.EnvServiceName) != target.ServiceName:
-		return nil, fmt.Errorf("%s must be %q for the factory's service grants", tenant.EnvServiceName, target.ServiceName)
+		return target.Config{}, fmt.Errorf("%s must be %q for the factory's service grants", tenant.EnvServiceName, target.ServiceName)
 	case base == "" || signer == nil:
-		return target.NewReceivables(target.Config{}), nil
+		return target.Config{}, nil
 	}
-	return target.NewReceivables(target.Config{BaseURL: base, Signer: signer}), nil
+	return target.Config{BaseURL: base, Signer: signer}, nil
+}
+
+// receivablesTarget reads RECEIVABLES_URL (see targetConfig); without it the load step answers 503 MIG-1520.
+func receivablesTarget(getenv func(string) string) (*target.Receivables, error) {
+	cfg, err := targetConfig(getenv, "RECEIVABLES_URL")
+	if err != nil {
+		return nil, err
+	}
+	return target.NewReceivables(cfg), nil
+}
+
+// payablesTarget reads PAYABLES_URL (see targetConfig); without it the AP load answers 503 MIG-1550.
+func payablesTarget(getenv func(string) string) (*target.Payables, error) {
+	cfg, err := targetConfig(getenv, "PAYABLES_URL")
+	if err != nil {
+		return nil, err
+	}
+	return target.NewPayables(cfg), nil
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
@@ -73,6 +91,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return errors.New("DATABASE_URL is required")
 	}
 	receivables, err := receivablesTarget(getenv)
+	if err != nil {
+		return err
+	}
+	payables, err := payablesTarget(getenv)
 	if err != nil {
 		return err
 	}
@@ -96,7 +118,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if addr == "" {
 		addr = ":8080"
 	}
-	srv := api.New(store.New(pool)).WithTarget(receivables)
+	srv := api.New(store.New(pool)).WithTarget(receivables).WithPayables(payables)
 	if ledger != nil {
 		srv = srv.WithLedger(ledger)
 	}

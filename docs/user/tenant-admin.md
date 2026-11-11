@@ -5,6 +5,7 @@ For administrators. You create the legal entity, calendar, sites and people so o
 ## Before you start
 
 - You have administrator access. If menu items are missing, ask the person who created your account.
+- Open **Company setup**, then **Setup guide**, to follow the steps in order. Your progress is saved, so you can leave and come back. **See the checklist** shows what is still missing, such as a fiscal calendar or a first warehouse. It checks only what your role lets you see.
 
 ## Create a legal entity
 
@@ -51,6 +52,26 @@ You can also copy an existing legal entity with the copy form on the same page.
 ## Numbering
 
 Open **Sequences** under **Admin** to see and change how document numbers are issued.
+
+## Import vendors, customers and products
+
+The **Import your first records** step of the setup guide checks a CSV file before anything is loaded.
+
+1. Under **What to import**, choose **Vendors**, **Customers** or **Products**.
+2. Select **Download the CSV template**, fill in one row for each record and keep the header row as it is.
+3. Choose your file under **Try a file**, then select **Preview rows**. Each row shows the record it becomes, or what to fix.
+4. When no row is rejected, select **Start the import**.
+
+If the step says no file import is set up yet, an administrator first creates a file connection, a mapping and a binding under **Data migration**. The step links to each one.
+
+## Try Passage with the demo company
+
+Open **Company setup**, then **Demo company**, to fill a trial tenant with a sample manufacturer.
+
+- **Load the demo company** adds the sample records. It never deletes or changes your own records, so it is safe to repeat.
+- **Reset the demo company** deletes the records the demo created, with any changes made to them, and loads them fresh. Your own records are kept. If you added records under a demo record, for example a warehouse at a demo site, nothing is reset and you are told what is in the way.
+
+Only a tenant administrator whose access covers every legal entity can load or reset the demo company.
 
 ## Common messages
 

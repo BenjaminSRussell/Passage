@@ -324,7 +324,18 @@ unit by the product service at `PRODUCT_URL` (optional; it needs the service sig
 trust inventory's public key). Without `PRODUCT_URL` plain lines are parked with `INV-PST-002`.
 Kafka user, ACLs and dead-letter topic: `deploy/kafka/inventory-consumer.yaml`.
 
-Optional: `INV_NEGATIVE_DEFAULT` (`forbid`, default, or `allow`), `INV_JOURNAL_MAX_LINES`
+Truck stock (field service, FR-45.9, BR-45.7): the consumer also books field service's
+`workorder.completed.v1` (topic `passage.service.workorder.completed`): each PART line with a
+product and a consumed quantity is issued from the technician's truck, a warehouse of its own
+at a site, at DEDUCTED under the origin `SERVICE_LINE`. A truck that does not hold the quantity
+is refused with `INV-NEG-001` (the event parks on the dead-letter topic) unless
+`INV_ALLOW_NEGATIVE_TRUCK=true` (the `service.allow-negative-truck` policy; it does not follow
+`INV_NEGATIVE_DEFAULT`). `PUT/GET /v1/inventory/truck-stock-levels` keep the min and max per truck
+and product; `POST /v1/inventory/truck-stock:replenish`, and every truck issue, draft a transfer
+order from the truck's source warehouse up to the maximum when stock plus open inbound transfers
+is below the minimum. Migration 0040.
+
+Optional: `INV_NEGATIVE_DEFAULT` (`forbid`, default, or `allow`), `INV_ALLOW_NEGATIVE_TRUCK`, `INV_JOURNAL_MAX_LINES`
 (1000 to 50000, default 10000), `HTTP_ADDR` (`:8080`), `ADMIN_ADDR` (`:9090`).
 Configuration is validated at startup; the process exits non-zero when a required
 variable is missing. The HTTP port serves the API and `/healthz`; the admin port serves

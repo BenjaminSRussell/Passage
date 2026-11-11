@@ -67,3 +67,11 @@ export type DemoCompanyResult = z.infer<typeof demoCompanyResponse>;
 export function loadDemoCompany(fetchImpl: FetchLike = defaultFetch): Promise<DemoCompanyResult> {
   return requestUrl("POST", DEMO_COMPANY_PATH, demoCompanyResponse, fetchImpl, {}, undefined);
 }
+
+const demoResetResponse = z.object({ package: z.string(), removed: z.number(), created: z.number(), present: z.number() });
+export type DemoCompanyReset = z.infer<typeof demoResetResponse>;
+
+/** Removes the records the demo company created in this tenant and loads the demo again. Nothing else is deleted. */
+export function resetDemoCompany(fetchImpl: FetchLike = defaultFetch): Promise<DemoCompanyReset> {
+  return requestUrl("POST", `${DEMO_COMPANY_PATH}:reset`, demoResetResponse, fetchImpl, {}, undefined);
+}

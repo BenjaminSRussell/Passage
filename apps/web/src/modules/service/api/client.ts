@@ -1332,6 +1332,9 @@ export interface TechnicianInput {
   homeLatitude?: number | null;
   homeLongitude?: number | null;
   truckLocationId?: string | null;
+  /** Where the truck's stock sits in inventory (BR-45.7): both or neither. */
+  truckSiteId?: string | null;
+  truckWarehouseId?: string | null;
   maxDailyMinutes: number;
   overtimeAllowed: boolean;
   active: boolean;

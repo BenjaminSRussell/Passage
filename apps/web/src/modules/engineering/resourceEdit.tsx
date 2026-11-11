@@ -3,6 +3,7 @@ import { Alert, Button, Card, FormField, Input, Select } from "../../shell/ui";
 import { ApiError, deleteResource, updateResource, type Resource } from "./api/client";
 import { errorText } from "./screens";
 import styles from "./pages.module.css";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const resourceTypes = ["machine", "tool", "labor", "vendor", "location"];
 const forbiddenStatus = 403;
@@ -146,13 +147,13 @@ export function ResourceActions({ resource, onSaved, onDeleted }: { resource: Re
               </div>
             ) : null}
             <div className={styles.field}>
-              <FormField id="res-group" label="Group id" hint="A resource group at the same site; leave empty for none.">
-                {(control) => <Input {...control} value={groupId} onChange={(e) => setGroupId(e.target.value)} />}
+              <FormField id="res-group" label="Resource group" optional hint="A resource group at the same site; leave empty for none.">
+                {(control) => <EntityLookup {...control} entity="resourceGroup" value={groupId} onChange={(e) => setGroupId(e.target.value)} />}
               </FormField>
             </div>
             <div className={styles.field}>
-              <FormField id="res-calendar" label="Calendar id" hint="Leave empty to use the group's calendar.">
-                {(control) => <Input {...control} value={calendarId} onChange={(e) => setCalendarId(e.target.value)} />}
+              <FormField id="res-calendar" label="Calendar" optional hint="Leave empty to use the group's calendar.">
+                {(control) => <EntityLookup {...control} entity="calendar" value={calendarId} onChange={(e) => setCalendarId(e.target.value)} />}
               </FormField>
             </div>
             <span className={styles.check}>

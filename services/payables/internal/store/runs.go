@@ -535,3 +535,89 @@ func (s *Postgres) FailRun(ctx context.Context, id, reason string) (PaymentRun, 
 		return failRun(ctx, tx, id, l.proposalID, reason)
 	})
 }
+
+// Remittance is what one vendor was paid in a payment run: each payment and the invoices it settled.
+type Remittance struct {
+	RunID         string              `json:"runId"`
+	ProposalID    string              `json:"proposalId"`
+	LegalEntityID string              `json:"legalEntityId"`
+	VendorID      string              `json:"vendorId"`
+	PaymentDate   string              `json:"paymentDate"`
+	CompletedAt   *time.Time          `json:"completedAt,omitempty"`
+	Payments      []RemittancePayment `json:"payments"`
+}
+
+type RemittancePayment struct {
+	EndToEndID string           `json:"endToEndId"`
+	Currency   string           `json:"currency"`
+	Method     string           `json:"paymentMethod"`
+	Amount     decimal.Decimal  `json:"amount"`
+	Lines      []RemittanceLine `json:"lines"`
+}
+
+// RemittanceLine is one invoice settled by a payment: its open amount, the cash discount taken, the tax withheld and
+// the amount paid to the vendor (open amount less discount and withholding); the lines of a payment add up to its amount.
+type RemittanceLine struct {
+	OpenItemID    string          `json:"openItemId"`
+	InvoiceNumber string          `json:"invoiceNumber"`
+	InvoiceDate   string          `json:"invoiceDate"`
+	OpenAmount    decimal.Decimal `json:"openAmount"`
+	Discount      decimal.Decimal `json:"discount"`
+	Withheld      decimal.Decimal `json:"withheld"`
+	Paid          decimal.Decimal `json:"paid"`
+}
+
+// RunRemittance reads the remittance of one vendor in a run. A missing run is ErrRunNotFound; a run with no
+// payment to the vendor is ErrNotFound.
+func (s *Postgres) RunRemittance(ctx context.Context, runID, vendorID string) (Remittance, error) {
+	out := Remittance{RunID: runID, VendorID: vendorID, Payments: []RemittancePayment{}}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select r.proposal_id::text, r.legal_entity_id::text, p.run_date::text, r.completed_at from ap_payment_run r
+			join ap_payment_proposal p on p.tenant_id = r.tenant_id and p.id = r.proposal_id where r.id = $1::uuid`, runID).
+			Scan(&out.ProposalID, &out.LegalEntityID, &out.PaymentDate, &out.CompletedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrRunNotFound
+		}
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select p.end_to_end_id, p.currency, p.payment_method, p.amount::text,
+				l.open_item_id::text, i.invoice_number, i.invoice_date::text, l.open_amount::text, l.discount_amount::text, l.withheld_amount::text, l.pay_amount::text
+			from ap_payment p
+			join ap_payment_proposal_line l on l.tenant_id = p.tenant_id and l.group_id = p.group_id
+			join ap_open_item i on i.tenant_id = l.tenant_id and i.id = l.open_item_id
+			where p.run_id = $1::uuid and p.vendor_id = $2::uuid
+			order by p.end_to_end_id collate "C", i.invoice_date, i.invoice_number collate "C", l.open_item_id`, runID, vendorID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var pay RemittancePayment
+			var line RemittanceLine
+			var amount, open, discount, withheld, paid string
+			if err := rows.Scan(&pay.EndToEndID, &pay.Currency, &pay.Method, &amount,
+				&line.OpenItemID, &line.InvoiceNumber, &line.InvoiceDate, &open, &discount, &withheld, &paid); err != nil {
+				return err
+			}
+			if err := parseDecimals([]*decimal.Decimal{&pay.Amount, &line.OpenAmount, &line.Discount, &line.Withheld, &line.Paid}, amount, open, discount, withheld, paid); err != nil {
+				return err
+			}
+			line.Paid = line.Paid.Sub(line.Withheld)
+			if n := len(out.Payments); n == 0 || out.Payments[n-1].EndToEndID != pay.EndToEndID {
+				pay.Lines = []RemittanceLine{}
+				out.Payments = append(out.Payments, pay)
+			}
+			last := &out.Payments[len(out.Payments)-1]
+			last.Lines = append(last.Lines, line)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(out.Payments) == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+	return out, err
+}

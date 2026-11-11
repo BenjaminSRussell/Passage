@@ -7,6 +7,7 @@ import { ALL_DIMENSIONS, ProblemAlert } from "./parts";
 import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const directionLabels: Record<TraceDirection, string> = { BOTH: "Every movement", FORWARD: "Forward: where it went", BACKWARD: "Backward: where it came from" };
 
@@ -70,9 +71,7 @@ export function TrackingTracePage() {
           <FormField id="trace-serial" label="Serial number" optional>
             {(control) => <Input {...control} value={draft.serialId} onChange={set("serialId")} />}
           </FormField>
-          <FormField id="trace-product" label="Product" optional error={errors.productId}>
-            {(control) => <Input {...control} value={draft.productId} onChange={set("productId")} placeholder="Product id" invalid={Boolean(errors.productId)} />}
-          </FormField>
+          <LookupFormField id="trace-product" label="Product" entity="product" optional prefill={false} value={draft.productId} error={errors.productId} onChange={(productId) => setDraft({ ...draft, productId })} />
           <FormField id="trace-direction" label="Direction">
             {(control) => (
               <Select {...control} value={draft.direction} onChange={(event) => setDraft({ ...draft, direction: event.target.value as TraceDirection })}>

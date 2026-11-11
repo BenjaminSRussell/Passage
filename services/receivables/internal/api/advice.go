@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -14,6 +17,8 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
 )
+
+var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 
 // maxAdviceBytes bounds one remittance advice upload, below httpx.Decode's body cap like a lockbox file.
 const maxAdviceBytes = maxLockboxBytes
@@ -27,6 +32,12 @@ type adviceRequest struct {
 	Format        string `json:"format"`
 	Content       string `json:"content"`
 	AutoApply     bool   `json:"autoApply"`
+	// CreateMissing records an ADVISED payment for each line that names no payment (the advice came before the bank credit).
+	// It needs currency; valueDate defaults to today and paymentMode to WIRE.
+	CreateMissing bool   `json:"createMissing"`
+	Currency      string `json:"currency"`
+	ValueDate     string `json:"valueDate"`
+	PaymentMode   string `json:"paymentMode"`
 }
 
 type adviceResponse struct {
@@ -57,6 +68,19 @@ func (a *API) importAdvice(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Content) == "" || len(req.Content) > maxAdviceBytes {
 		fields["content"] = fmt.Sprintf("must be a non-empty advice of at most %d bytes", maxAdviceBytes)
 	}
+	if req.CreateMissing {
+		if !currencyPattern.MatchString(req.Currency) {
+			fields["currency"] = "must be an ISO 4217 code such as USD when createMissing is set"
+		}
+		if req.ValueDate != "" {
+			if _, err := time.Parse("2006-01-02", req.ValueDate); err != nil {
+				fields["valueDate"] = "must be a date as YYYY-MM-DD"
+			}
+		}
+		if req.PaymentMode != "" && !slices.Contains([]string{"CHECK", "ACH", "WIRE", "CARD", "CASH"}, req.PaymentMode) {
+			fields["paymentMode"] = "must be CHECK, ACH, WIRE, CARD or CASH"
+		}
+	}
 	if len(fields) > 0 {
 		writeFields(w, r, fields)
 		return
@@ -74,7 +98,8 @@ func (a *API) importAdvice(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	out, err := a.store.ApplyRemittanceAdvice(r.Context(), req.LegalEntityID, lines)
+	out, err := a.store.ApplyRemittanceAdviceWith(r.Context(), req.LegalEntityID, lines,
+		store.AdviceOptions{CreateMissing: req.CreateMissing, Currency: req.Currency, ValueDate: req.ValueDate, PaymentMode: req.PaymentMode})
 	if err != nil {
 		a.fail("apply remittance advice", w, r, err)
 		return

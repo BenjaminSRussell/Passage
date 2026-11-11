@@ -403,8 +403,8 @@ func (c *calculation) assemble(lines []*lineCalc) {
 		result := LineResult{LineRef: c.doc.Lines[i].LineRef, Base: Dec{base}, Taxes: []TaxLine{}}
 		leg := func(x *cell, direction string) {
 			recoverable := x.tax
-			if direction != DirOutput && x.code.RecoverablePct != nil {
-				recoverable = x.tax.Mul(x.code.RecoverablePct.Decimal).Div(hundred).Round(c.exp)
+			if pct := c.recoveryPct(x.code, c.doc.Lines[i].ItemTaxGroup); direction != DirOutput && pct != nil {
+				recoverable = x.tax.Mul(pct.Decimal).Div(hundred).Round(c.exp)
 			}
 			accumulate(x.code.Code, direction, base, x.tax)
 			result.Taxes = append(result.Taxes, TaxLine{Code: x.code.Code, Jurisdiction: x.code.Jurisdiction, RatePct: x.rate.RatePct,
@@ -423,4 +423,13 @@ func (c *calculation) assemble(lines []*lineCalc) {
 		}
 		c.res.Lines = append(c.res.Lines, result)
 	}
+}
+
+// recoveryPct is the recoverable share of an input tax: the recovery policy that applies to the code and the line's item tax group
+// on the tax date, else the code's own recoverable_pct, else nil (everything is recoverable).
+func (c *calculation) recoveryPct(code Code, itemGroup string) *Dec {
+	if p := RecoveryFor(c.cfg.Recovery, code.Code, itemGroup, c.taxDate); p != nil {
+		return p
+	}
+	return code.RecoverablePct
 }

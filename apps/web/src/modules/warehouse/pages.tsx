@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, Pa
 import { describeProblem, simulateDirectives, type Compliance, type Direction, type Problem, type SimulateRequest, type SimulateResponse, type TraceStep } from "./api/client";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DECIMAL = /^\d+(\.\d+)?$/;
@@ -193,7 +194,7 @@ export function validateDraft(d: SimulatorDraft): Errors {
   const errors: Errors = {};
   if (d.itemId.trim() === "") errors.itemId = "Enter the item.";
   if (d.workType.trim() === "") errors.workType = "Enter the work type, such as PURCHASE_PUTAWAY.";
-  if (!UUID.test(d.warehouseId.trim())) errors.warehouseId = "Enter the warehouse id (a UUID).";
+  if (!UUID.test(d.warehouseId.trim())) errors.warehouseId = "Choose a warehouse.";
   if (!DECIMAL.test(d.qty) || Number(d.qty) <= 0) errors.qty = "Enter a quantity above 0.";
   if (d.weight !== "" && !DECIMAL.test(d.weight)) errors.weight = "Enter a weight of 0 or more.";
   if (d.volume !== "" && !DECIMAL.test(d.volume)) errors.volume = "Enter a volume of 0 or more.";
@@ -367,7 +368,7 @@ export function DirectiveSimulatorPage({ initial = exampleDraft }: { initial?: S
               </Select>
             )}
           </FormField>
-          {text("sim-warehouse", "warehouseId", "Warehouse id")}
+          <LookupFormField id="sim-warehouse" label="Warehouse" entity="warehouse" value={draft.warehouseId} error={errors.warehouseId} onChange={(warehouseId) => set({ warehouseId })} />
           {text("sim-qty", "qty", "Quantity", { decimal: true, hint: "In the item's base unit." })}
           {text("sim-weight", "weight", "Weight (kg)", { optional: true, decimal: true })}
           {text("sim-volume", "volume", "Volume (m³)", { optional: true, decimal: true })}

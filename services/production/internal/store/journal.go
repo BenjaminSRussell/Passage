@@ -623,7 +623,7 @@ func logStatus(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, cmd
 		return err
 	}
 	return enqueue(ctx, tx, h.id, prodevents.OrderStatusChanged, tenantID, actor, prodevents.OrderStatusChangedData{
-		OrderID: h.id, From: string(from), To: string(to), Quantity: h.quantity.String(), QtyRAF: h.qtyRAF.String(),
+		OrderID: h.id, OrderNumber: h.orderNumber, LegalEntityID: h.legalEntityID, From: string(from), To: string(to), Quantity: h.quantity.String(), QtyRAF: h.qtyRAF.String(),
 		QtyError: h.qtyError.String(), Actor: actor, OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }

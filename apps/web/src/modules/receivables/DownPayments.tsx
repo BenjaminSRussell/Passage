@@ -395,7 +395,7 @@ export function DownPaymentDetailPage() {
           <Detail term="Remaining" mono>{money(dp.remaining, dp.currency)}</Detail>
           <Detail term="Received" mono>{dp.receivedDate ?? "Not yet"}</Detail>
           <Detail term="Sales order" mono>{dp.salesOrderId ?? "None"}</Detail>
-          <Detail term="Customer" mono>{dp.customerId}</Detail>
+          <Detail term="Customer"><EntityName entity="customer" id={dp.customerId} /></Detail>
           <Detail term="Requested" mono>{dateTime(dp.createdAt)}</Detail>
         </dl>
       </Card>

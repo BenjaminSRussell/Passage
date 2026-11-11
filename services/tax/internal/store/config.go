@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -230,13 +231,15 @@ func (s *Store) DeleteCode(ctx context.Context, code string) error {
 		return err
 	}
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var groups, boxes int
+		var groups, boxes, certs, policies int
 		if err := tx.QueryRow(ctx, `select (select count(*) from tax_group where tenant_id = $1 and $2 = any(tax_codes)),
-			(select count(*) from tax_vat_box_code where tenant_id = $1 and code = $2)`, p.TenantID, code).Scan(&groups, &boxes); err != nil {
+			(select count(*) from tax_vat_box_code where tenant_id = $1 and code = $2),
+			(select count(*) from tax_exemption_certificate where tenant_id = $1 and $2 = any(codes)),
+			(select count(*) from tax_recovery_policy where tenant_id = $1 and code = $2)`, p.TenantID, code).Scan(&groups, &boxes, &certs, &policies); err != nil {
 			return fmt.Errorf("check tax code use: %w", err)
 		}
-		if groups > 0 || boxes > 0 {
-			return inUse("code", "Tax code %s is used by %d tax groups and %d VAT return boxes. Remove it from them first.", code, groups, boxes)
+		if groups > 0 || boxes > 0 || certs > 0 || policies > 0 {
+			return inUse("code", "Tax code %s is used by %d tax groups, %d VAT return boxes, %d exemption certificates and %d recovery policies. Remove it from them first.", code, groups, boxes, certs, policies)
 		}
 		tag, err := tx.Exec(ctx, `delete from tax_code where tenant_id = $1 and code = $2`, p.TenantID, code)
 		if err != nil {
@@ -349,7 +352,104 @@ func (s *Store) LoadConfig(ctx context.Context) (domain.Config, error) {
 			return err
 		}
 		cfg = domain.AssembleConfig(codes, groups, "")
+		certs, err := listCertificates(ctx, tx, p.TenantID)
+		if err != nil {
+			return err
+		}
+		for _, c := range certs {
+			cfg.Exemptions = append(cfg.Exemptions, c.Exemption)
+		}
+		if cfg.Recovery, err = listRecovery(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
 		return nil
 	})
 	return cfg, err
+}
+
+// ---- exemption certificates
+
+func listCertificates(ctx context.Context, tx pgx.Tx, tenantID string) ([]domain.Certificate, error) {
+	rows, err := tx.Query(ctx, `select number, party_ref, note, codes, valid_from, valid_to from tax_exemption_certificate where tenant_id = $1 order by number`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list exemption certificates: %w", err)
+	}
+	defer rows.Close()
+	out := []domain.Certificate{}
+	for rows.Next() {
+		var c domain.Certificate
+		var from time.Time
+		var to *time.Time
+		if err := rows.Scan(&c.Number, &c.PartyRef, &c.Note, &c.Codes, &from, &to); err != nil {
+			return nil, fmt.Errorf("scan exemption certificate: %w", err)
+		}
+		c.ValidFrom = domain.Date{Time: from}
+		if to != nil {
+			c.ValidTo = domain.Date{Time: *to}
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListCertificates(ctx context.Context) ([]domain.Certificate, error) {
+	p, err := tenantOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []domain.Certificate
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		out, err = listCertificates(ctx, tx, p.TenantID)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) PutCertificate(ctx context.Context, c domain.Certificate) error {
+	p, err := tenantOf(ctx)
+	if err != nil {
+		return err
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		codes, err := listCodes(ctx, tx, p.TenantID)
+		if err != nil {
+			return err
+		}
+		known := map[string]bool{}
+		for _, code := range codes {
+			known[code.Code.Code] = true
+		}
+		if err := domain.ValidateCertificate(c, known); err != nil {
+			return err
+		}
+		var to any
+		if !c.ValidTo.IsZero() {
+			to = c.ValidTo.Time
+		}
+		if _, err := tx.Exec(ctx, `insert into tax_exemption_certificate (tenant_id, number, party_ref, note, codes, valid_from, valid_to)
+			values ($1, $2, $3, $4, $5, $6, $7)
+			on conflict (tenant_id, number) do update set party_ref = excluded.party_ref, note = excluded.note, codes = excluded.codes,
+				valid_from = excluded.valid_from, valid_to = excluded.valid_to, updated_at = now()`,
+			p.TenantID, c.Number, c.PartyRef, c.Note, c.Codes, c.ValidFrom.Time, to); err != nil {
+			return fmt.Errorf("save exemption certificate: %w", err)
+		}
+		return nil
+	})
+}
+
+func (s *Store) DeleteCertificate(ctx context.Context, number string) error {
+	p, err := tenantOf(ctx)
+	if err != nil {
+		return err
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `delete from tax_exemption_certificate where tenant_id = $1 and number = $2`, p.TenantID, number)
+		if err != nil {
+			return fmt.Errorf("delete exemption certificate: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }

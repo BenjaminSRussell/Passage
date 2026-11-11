@@ -61,8 +61,13 @@ type WorkOrder struct {
 	SignedAt        *time.Time `json:"signedAt,omitempty"`
 	SignatureRef    *string    `json:"signatureRef,omitempty"`
 	TechnicianNote  string     `json:"technicianNote"`
-	noteAt          *time.Time
-	postKey         string
+	// SignedLatitude and SignedLongitude are where the customer signed, when the device knew.
+	SignedLatitude  *float64 `json:"signedLatitude,omitempty"`
+	SignedLongitude *float64 `json:"signedLongitude,omitempty"`
+	// Checklist is what the technician ticks off on the visit; the ticks are in the action log.
+	Checklist []domain.ChecklistItem `json:"checklist"`
+	noteAt    *time.Time
+	postKey   string
 }
 
 // CreateWorkOrder stores a work order in UNSCHEDULED status.
@@ -91,6 +96,13 @@ func (s *Postgres) CreateWorkOrder(ctx context.Context, in WorkOrder, key, reque
 		if err != nil {
 			return err
 		}
+		if in.Checklist == nil {
+			in.Checklist = []domain.ChecklistItem{}
+		}
+		checklist, err := json.Marshal(in.Checklist)
+		if err != nil {
+			return err
+		}
 		out = in
 		if out.Lines == nil {
 			out.Lines = []domain.WorkLine{}
@@ -105,11 +117,11 @@ func (s *Postgres) CreateWorkOrder(ctx context.Context, in WorkOrder, key, reque
 		out.RequiredSkills = in.RequiredSkills
 		_, err = tx.Exec(ctx, `insert into service_work_order (tenant_id, id, number, case_id, agreement_id, customer_party_id, legal_entity_id,
 			territory_id, incident_type_id, est_duration_minutes, currency, status, lines, version, idempotency_key, request_hash,
-			required_skills, window_start, window_end, address, geo_lat, geo_lon, signature_exempt)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+			required_skills, window_start, window_end, address, geo_lat, geo_lon, signature_exempt, checklist)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
 			tid, out.ID, number, in.CaseID, in.AgreementID, in.CustomerPartyID, in.LegalEntityID, in.TerritoryID, in.IncidentTypeID,
 			in.EstDurationMinutes, in.Currency, out.Status, lines, nullable(key), requestHash,
-			in.RequiredSkills, in.WindowStart, in.WindowEnd, in.Address, in.Latitude, in.Longitude, in.SignatureExempt)
+			in.RequiredSkills, in.WindowStart, in.WindowEnd, in.Address, in.Latitude, in.Longitude, in.SignatureExempt, checklist)
 		return err
 	})
 	if err != nil {
@@ -352,16 +364,16 @@ func versionConflict(current int) error {
 const workOrderColumns = `id::text, number, case_id::text, agreement_id::text, customer_party_id::text, legal_entity_id::text,
 	territory_id::text, incident_type_id::text, est_duration_minutes, currency, status, lines, posting, version, coalesce(post_key, ''),
 	follow_up_of::text, completed_at, first_time_fix, required_skills, window_start, window_end, address, geo_lat::float8, geo_lon::float8,
-	technician_id::text, assigned_start, assigned_end, assignment_pinned, signature_exempt, signed_by, signed_at, signature_ref, technician_note, note_at`
+	technician_id::text, assigned_start, assigned_end, assignment_pinned, signature_exempt, signed_by, signed_at, signature_ref, technician_note, note_at, signed_lat::float8, signed_lon::float8, checklist`
 
 func scanWorkOrder(row pgx.Row) (WorkOrder, error) {
 	var wo WorkOrder
-	var lines, posting []byte
+	var lines, posting, checklist []byte
 	if err := row.Scan(&wo.ID, &wo.Number, &wo.CaseID, &wo.AgreementID, &wo.CustomerPartyID, &wo.LegalEntityID, &wo.TerritoryID,
 		&wo.IncidentTypeID, &wo.EstDurationMinutes, &wo.Currency, &wo.Status, &lines, &posting, &wo.Version, &wo.postKey,
 		&wo.FollowUpOf, &wo.CompletedAt, &wo.FirstTimeFix, &wo.RequiredSkills, &wo.WindowStart, &wo.WindowEnd, &wo.Address, &wo.Latitude,
 		&wo.Longitude, &wo.TechnicianID, &wo.AssignedStart, &wo.AssignedEnd, &wo.AssignmentPinned, &wo.SignatureExempt, &wo.SignedBy, &wo.SignedAt,
-		&wo.SignatureRef, &wo.TechnicianNote, &wo.noteAt); err != nil {
+		&wo.SignatureRef, &wo.TechnicianNote, &wo.noteAt, &wo.SignedLatitude, &wo.SignedLongitude, &checklist); err != nil {
 		return wo, err
 	}
 	if wo.RequiredSkills == nil {
@@ -369,6 +381,12 @@ func scanWorkOrder(row pgx.Row) (WorkOrder, error) {
 	}
 	if err := json.Unmarshal(lines, &wo.Lines); err != nil {
 		return wo, err
+	}
+	if err := json.Unmarshal(checklist, &wo.Checklist); err != nil {
+		return wo, err
+	}
+	if wo.Checklist == nil {
+		wo.Checklist = []domain.ChecklistItem{}
 	}
 	if posting != nil {
 		wo.Posting = &domain.Posting{}

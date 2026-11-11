@@ -1,0 +1,10 @@
+{
+  "name": "Passage Technician",
+  "short_name": "Technician",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0b5cad",
+  "icons": []
+}

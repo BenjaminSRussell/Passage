@@ -57,7 +57,7 @@ describe("data-quality scorecard filters", () => {
     const filter = screen.getByRole("form", { name: "Scorecard filter" });
     fireEvent.change(within(filter).getByLabelText(/Asset/), { target: { value: "core.vendor" } });
     fireEvent.change(within(filter).getByLabelText("Rule type"), { target: { value: "UNIQUENESS" } });
-    fireEvent.change(within(filter).getByLabelText(/Owner user id/), { target: { value: OWNER } });
+    fireEvent.change(within(filter).getByLabelText(/^Owner/), { target: { value: OWNER } });
     fireEvent.click(within(filter).getByRole("button", { name: "Show rules" }));
 
     await waitFor(() => expect(rulesCalls()).toHaveLength(2));
@@ -68,17 +68,17 @@ describe("data-quality scorecard filters", () => {
     expect(await within(table).findByText("vendor_iban_unique")).toBeInTheDocument();
   });
 
-  it("refuses a malformed asset or owner without calling the service", async () => {
+  it("refuses a malformed asset, takes no typed text as an owner, and does not call the service", async () => {
     server.handler = () => json(200, { items: [] });
     render("/analytics/data-quality");
     await findTable({ name: "Data-quality rules" });
     const before = server.calls.length;
     const filter = screen.getByRole("form", { name: "Scorecard filter" });
     fireEvent.change(within(filter).getByLabelText(/Asset/), { target: { value: "Vendor" } });
-    fireEvent.change(within(filter).getByLabelText(/Owner user id/), { target: { value: "alice" } });
+    fireEvent.change(within(filter).getByLabelText(/^Owner/), { target: { value: "alice" } });
+    expect(within(filter).getByLabelText(/^Owner/)).toHaveAttribute("data-value", "");
     fireEvent.click(within(filter).getByRole("button", { name: "Show rules" }));
     expect(await screen.findByText("Use a dotted lower-case asset such as core.vendor.")).toBeInTheDocument();
-    expect(screen.getByText("Use the owner's user id (a UUID).")).toBeInTheDocument();
     expect(server.calls).toHaveLength(before);
   });
 

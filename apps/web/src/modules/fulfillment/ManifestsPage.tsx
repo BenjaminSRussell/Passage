@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { useNames } from "../mfg-shared/names";
 import { useNavigate } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -75,6 +76,7 @@ function explainClose(problem: Problem): Problem {
 
 function CloseCard({ groups, onDone }: { groups: Group[]; onDone(manifest: Manifest): void }) {
   const closable = groups.filter((g) => g.ready > 0);
+  const warehouseNames = useNames("warehouse", closable.map((g) => g.warehouseId));
   const [choice, setChoice] = useState("");
   const [pickupDate, setPickupDate] = useState(today());
   const [reference, setReference] = useState("");
@@ -123,7 +125,7 @@ function CloseCard({ groups, onDone }: { groups: Group[]; onDone(manifest: Manif
               {closable.length === 0 ? <option value="">No shipped parcel waiting</option> : null}
               {closable.map((g) => (
                 <option key={g.key} value={g.key}>
-                  {`${g.carrier}, warehouse ${shortId(g.warehouseId)}, ${g.ready} parcel${g.ready === 1 ? "" : "s"} ready`}
+                  {`${g.carrier}, warehouse ${warehouseNames[g.warehouseId] ?? shortId(g.warehouseId)}, ${g.ready} parcel${g.ready === 1 ? "" : "s"} ready`}
                 </option>
               ))}
             </Select>

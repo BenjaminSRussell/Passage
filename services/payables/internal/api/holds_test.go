@@ -90,6 +90,33 @@ func TestVendorBlockRoutes(t *testing.T) {
 	wantProblem(t, blocker.send(r, http.MethodPost, block, `{"reason":"x"}`), http.StatusInternalServerError, "COM-0500")
 }
 
+func TestVendorBlockList_ScopedFilteredAndReadableByBlockersAndOpenItemReaders(t *testing.T) {
+	s := newFakeStore()
+	s.blocks = []store.VendorBlock{
+		{VendorID: vendorOne, LegalEntityID: entityA, Reason: "sanctions review"},
+		{VendorID: vendorTwo, LegalEntityID: entityA, Reason: "bank details query"},
+		{VendorID: vendorOne, LegalEntityID: entityB, Reason: "other entity"},
+	}
+	r, _ := proposalRouter(s, nil)
+	list := "/v1/payables/vendor-blocks"
+	for _, c := range []caller{blocker, {duties: dutyRead, user: "rita", entity: entityA}} {
+		rec := c.send(r, http.MethodGet, list, "")
+		if items, _ := decode(t, rec)["items"].([]any); rec.Code != http.StatusOK || len(items) != 2 {
+			t.Fatalf("%s list: %d %s", c.duties, rec.Code, rec.Body)
+		}
+	}
+	rec := blocker.send(r, http.MethodGet, list+"?vendor="+vendorTwo, "")
+	items, _ := decode(t, rec)["items"].([]any)
+	if rec.Code != http.StatusOK || len(items) != 1 || items[0].(map[string]any)["reason"] != "bank details query" {
+		t.Fatalf("one vendor: %d %s", rec.Code, rec.Body)
+	}
+	wantProblem(t, holder.send(r, http.MethodGet, list, ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, blocker.send(r, http.MethodGet, list+"?vendor=nope", ""), http.StatusBadRequest, "COM-0001")
+	wantProblem(t, blocker.send(r, http.MethodGet, list+"?legal_entity="+entityB, ""), http.StatusForbidden, "AUTH-0003")
+	s.blockErr = errors.New("db down")
+	wantProblem(t, blocker.send(r, http.MethodGet, list, ""), http.StatusInternalServerError, "COM-0500")
+}
+
 func TestListProposals_FiltersPagesAndValidates(t *testing.T) {
 	s := newFakeStore()
 	s.summaries = []store.ProposalSummary{
@@ -153,12 +180,25 @@ func TestHoldAndBlockRoutes_RealStoreExcludeItemsFromProposals(t *testing.T) {
 		t.Fatalf("block: %d %s", rec.Code, rec.Body)
 	}
 	wantProblem(t, propose("run-1"), http.StatusUnprocessableEntity, "AP-PRP-005")
+	blocks := decode(t, all.send(router, http.MethodGet, "/v1/payables/vendor-blocks", ""))["items"].([]any)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks = %v", blocks)
+	}
+	if b := blocks[0].(map[string]any); b["vendorId"] != vendorTwo || b["legalEntityId"] != entityA || b["reason"] != "fraud" || b["blockedBy"] != "hana" || b["blockedAt"] == nil {
+		t.Fatalf("block = %v", b)
+	}
+	if other := decode(t, all.send(router, http.MethodGet, "/v1/payables/vendor-blocks?vendor="+vendorOne, ""))["items"].([]any); len(other) != 0 {
+		t.Fatalf("vendor one is not blocked: %v", other)
+	}
 
 	if rec := all.send(router, http.MethodPost, "/v1/payables/open-items/"+items[0].ID+":release", ""); rec.Code != http.StatusOK || decode(t, rec)["paymentHold"] != false {
 		t.Fatalf("release: %d %s", rec.Code, rec.Body)
 	}
 	if rec := all.send(router, http.MethodPost, "/v1/payables/vendors/"+vendorTwo+":unblock", ""); rec.Code != http.StatusOK {
 		t.Fatalf("unblock: %d %s", rec.Code, rec.Body)
+	}
+	if left := decode(t, all.send(router, http.MethodGet, "/v1/payables/vendor-blocks", ""))["items"].([]any); len(left) != 0 {
+		t.Fatalf("blocks after unblock = %v", left)
 	}
 	created := propose("run-2")
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), items[0].ID) || !strings.Contains(created.Body.String(), items[1].ID) {

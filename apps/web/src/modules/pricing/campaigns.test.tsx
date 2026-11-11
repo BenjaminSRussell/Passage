@@ -133,7 +133,7 @@ describe("New campaign", () => {
       return undefined;
     };
     renderAt("/pricing/campaigns/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Campaign name", "Spring push");
     fill("Valid from", "2026-03-01");
     fill("Valid to", "2026-03-31");
@@ -158,7 +158,7 @@ describe("New campaign", () => {
   it("shows service field errors next to the fields", async () => {
     server.handler = () => json(422, { code: "COM-0001", detail: "request is invalid", errors: { validity: "validTo must not be before validFrom" } });
     renderAt("/pricing/campaigns/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Campaign name", "Spring push");
     fill("Valid from", "2026-03-01");
     fill("Valid to", "2026-03-31");
@@ -271,8 +271,8 @@ describe("Trade agreement in a campaign", () => {
       return undefined;
     };
     renderAt(`/pricing/agreements/new?campaign=${CMP}`);
-    expect(screen.getByLabelText(/^Campaign id/)).toHaveValue(CMP);
-    fill("Legal entity id", LE);
+    expect(screen.getByLabelText(/^Campaign/)).toHaveAttribute("data-value", CMP);
+    fill("Legal entity", LE);
     fill("Customer", "C1");
     fill("Product", "BOLT");
     fill("Price", "8.5");
@@ -287,7 +287,7 @@ describe("Trade agreement in a campaign", () => {
   it("refuses a malformed campaign id before calling the service", async () => {
     renderAt("/pricing/agreements/new?campaign=not-a-uuid");
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(await screen.findByText("Enter the campaign id (a UUID) or leave it empty.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a campaign, or clear it.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
 });

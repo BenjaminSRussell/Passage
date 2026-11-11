@@ -99,7 +99,7 @@ export function ProductListingsPage() {
     { key: "listingType", header: "Type", render: (r) => <Badge tone={r.listingType === "DENY" ? "danger" : "success"}>{sentence(r.listingType)}</Badge> },
     { key: "productId", header: "Product", render: (row) => <EntityName entity="product" id={row.productId} /> },
     { key: "scopeType", header: "Applies to", render: (r) => sentence(r.scopeType) },
-    { key: "scopeKey", header: "Customer or group", mono: true },
+    { key: "scopeKey", header: "Customer or group", render: (r) => (r.scopeType === "CUSTOMER" ? <EntityName entity="customer" id={r.scopeKey} fallback={r.scopeKey} /> : <span className={styles.mono}>{r.scopeKey}</span>) },
     { key: "validity", header: "Valid", render: validity },
     { key: "legalEntityId", header: "Legal entity", render: (r) => <EntityName entity="legalEntity" id={r.legalEntityId} /> },
     { key: "createdAt", header: "Added", render: (r) => `${formatDateTime(r.createdAt)} by ${r.createdBy}` },

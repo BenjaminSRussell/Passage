@@ -7,6 +7,7 @@ import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { PERIOD_LABELS } from "./rebateFormat";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface RoyaltyTierDraft {
   from: string;
@@ -54,9 +55,9 @@ const ACCOUNT = /^\d{4,8}$/;
 /** Client checks that mirror the service (FR-26.17, BR-26.8); the service has the last word. */
 export function validateRoyalty(v: RoyaltyDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
-  if (!UUID.test(v.licensorVendorId.trim())) errors.licensorVendorId = "Enter the licensor's vendor id (a UUID).";
+  if (!UUID.test(v.licensorVendorId.trim())) errors.licensorVendorId = "Choose the licensor's vendor.";
   if (v.productKey.trim() === "" || v.productKey.trim().length > 64) errors.productKey = "Enter the product or group (up to 64 characters).";
   if (!DECIMAL.test(v.minimumRoyalty.trim())) errors.minimumRoyalty = "Enter the minimum as a number, or 0.";
   if (!/^[A-Z]{3}$/.test(v.currency)) errors.currency = "Use a three-letter ISO 4217 code, such as USD.";
@@ -160,9 +161,9 @@ export function NewRoyaltyPage() {
       <PageHeader title="New royalty agreement" description="The agreement is active from creation: posted invoice lines for the product accrue royalty period by period." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("ry-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="ry-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {text("ry-name", "name", "Agreement name")}
-          {text("ry-licensor", "licensorVendorId", "Licensor vendor id", { mono: true })}
+          <LookupFormField id="ry-licensor" label="Licensor vendor" entity="vendor" scope={{ legalEntityId: values.legalEntityId || undefined }} value={values.licensorVendorId} error={errors.licensorVendorId} onChange={(licensorVendorId) => update({ licensorVendorId })} />
           <FormField id="ry-product-scope" label="Covers">
             {(c) => (
               <Select {...c} value={values.productScope} onChange={(e) => update({ productScope: e.target.value as RoyaltyDraft["productScope"] })}>

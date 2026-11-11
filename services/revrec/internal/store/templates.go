@@ -10,7 +10,8 @@ import (
 )
 
 // Template is how the revenue of a product is recognized when its contract is opened from a posted invoice (29-4):
-// POINT_IN_TIME at the posting date, or RATABLE over TermMonths from the posting date.
+// POINT_IN_TIME at the posting date, RATABLE over TermMonths from the posting date, MILESTONE (recognized when the milestone is
+// satisfied) or USAGE (recognized as usage posts).
 type Template struct {
 	ProductID  string
 	Method     string

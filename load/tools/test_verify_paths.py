@@ -198,6 +198,10 @@ class TestGateway(unittest.TestCase):
         self.assertIn("/api/v1/org", prefixes)
         self.assertTrue(all(p.startswith("/api/v1/") for p in prefixes))
 
+    def test_this_branch_gateway_forwards_every_campaign_call(self) -> None:
+        prefixes = vp.gateway_prefixes(vp.ROOT / "deploy" / "gateway")
+        self.assertEqual(vp.check_gateway(vp.DEFAULT_SCENARIOS.read_text(encoding="utf-8"), prefixes), [])
+
 
 class TestMain(unittest.TestCase):
     def _run(self, script: str, spec: str = SPEC, gateway: str | None = None) -> int:

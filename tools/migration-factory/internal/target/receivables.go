@@ -107,6 +107,8 @@ type Config struct {
 type Receivables struct {
 	cfg    Config
 	client *http.Client
+	// aud is the service the tokens are issued for; the payables client reuses the call machinery with its own.
+	aud string
 }
 
 // NewReceivables builds the client. A zero Config is valid and reports Configured false.
@@ -125,7 +127,7 @@ func NewReceivables(cfg Config) *Receivables {
 		client = &http.Client{Timeout: defaultTimeout}
 	}
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
-	return &Receivables{cfg: cfg, client: client}
+	return &Receivables{cfg: cfg, client: client, aud: audReceivables}
 }
 
 // Configured reports whether a load can be attempted: an address and a signing key.
@@ -318,8 +320,8 @@ func (r *Receivables) do(ctx context.Context, method, path, tenantID, legalEntit
 		if idemKey != "" {
 			req.Header.Set("Idempotency-Key", idemKey)
 		}
-		if _, err := r.cfg.Signer.ApplyDuties(req, principal, audReceivables, legalEntityID, []string{duty}); err != nil {
-			return 0, nil, &Error{Kind: ErrDenied, Detail: clip("cannot sign for receivables with " + duty + ": " + err.Error())}
+		if _, err := r.cfg.Signer.ApplyDuties(req, principal, r.aud, legalEntityID, []string{duty}); err != nil {
+			return 0, nil, &Error{Kind: ErrDenied, Detail: clip("cannot sign for " + r.aud + " with " + duty + ": " + err.Error())}
 		}
 		var wait time.Duration
 		resp, err := r.client.Do(req)
@@ -328,16 +330,16 @@ func (r *Receivables) do(ctx context.Context, method, path, tenantID, legalEntit
 			if ctx.Err() != nil {
 				return 0, nil, ctx.Err()
 			}
-			last = "no answer from the receivables service"
+			last = "no answer from the " + r.aud + " service"
 		default:
 			body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 			_ = resp.Body.Close()
 			if rerr == nil && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
 				return resp.StatusCode, body, nil
 			}
-			last = fmt.Sprintf("the receivables service answered %d", resp.StatusCode)
+			last = fmt.Sprintf("the %s service answered %d", r.aud, resp.StatusCode)
 			if rerr != nil {
-				last = "the receivables answer was cut off"
+				last = "the " + r.aud + " answer was cut off"
 			}
 			if secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && secs > 0 {
 				wait = time.Duration(secs) * time.Second

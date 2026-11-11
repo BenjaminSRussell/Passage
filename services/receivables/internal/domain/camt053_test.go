@@ -155,3 +155,21 @@ func TestParseCAMT053_NeverPanics(t *testing.T) {
 		}
 	})
 }
+
+func TestParseCAMT053_ReadsTheStatementsBankAccount(t *testing.T) {
+	res, err := ParseCAMT053([]byte(camtSample))
+	if err != nil || len(res.Credits) != 1 || res.Credits[0].BankAccount != "DE89370400440532013000" {
+		t.Fatalf("IBAN account: %+v %v", res.Credits, err)
+	}
+	other := strings.Replace(camtSample, "<IBAN>DE89370400440532013000</IBAN></Id></Acct>", "<Othr><Id>0012-3456 78</Id></Othr></Id></Acct>", 1)
+	if res, err = ParseCAMT053([]byte(other)); err != nil || res.Credits[0].BankAccount != "0012345678" {
+		t.Fatalf("other id account: %+v %v", res.Credits, err)
+	}
+	none := strings.Replace(camtSample, "<Acct><Id><IBAN>DE89370400440532013000</IBAN></Id></Acct>", "", 1)
+	if res, err = ParseCAMT053([]byte(none)); err != nil || res.Credits[0].BankAccount != "" {
+		t.Fatalf("no account: %+v %v", res.Credits, err)
+	}
+	if got := NormalizeBankAccount(" de89 3704-0044 "); got != "DE8937040044" {
+		t.Errorf("normalized = %q", got)
+	}
+}

@@ -112,7 +112,7 @@ describe("account lifecycle actions", () => {
 describe("validateImport", () => {
   it("requires an account id and a file within the upload limit", () => {
     expect(validateImport({ bankAccountId: "", file: null })).toEqual({
-      bankAccountId: "Enter the bank account id (a UUID).",
+      bankAccountId: "Choose the bank account.",
       file: "Choose the camt.053, BAI2 or MT940 file from the bank.",
     });
     const big = new File(["x"], "big.xml");

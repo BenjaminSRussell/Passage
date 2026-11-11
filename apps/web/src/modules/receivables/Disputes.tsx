@@ -320,7 +320,7 @@ export function DisputeDetailPage() {
           <Detail term="SLA due" mono>{dateTime(dispute.slaDue)}</Detail>
           <Detail term="Opened" mono>{dateTime(dispute.createdAt)}</Detail>
           <Detail term="Resolved" mono>{dateTime(dispute.resolvedAt)}</Detail>
-          <Detail term="Customer" mono>{dispute.customerId}</Detail>
+          <Detail term="Customer"><EntityName entity="customer" id={dispute.customerId} /></Detail>
           <Detail term="Note">{dispute.resolutionNote ?? "None"}</Detail>
         </dl>
       </Card>

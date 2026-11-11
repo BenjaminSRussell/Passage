@@ -32,6 +32,7 @@ paths:
   /v1/eam/assets:
     get:
       operationId: listAssets
+      summary: "List assets"
       x-passage-duty: eam.inquire
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -42,6 +43,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createAsset
+      summary: "Create an asset"
       x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -54,6 +56,7 @@ paths:
   /v1/eam/assets/{id}:
     get:
       operationId: getAsset
+      summary: "Get an asset"
       x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -62,6 +65,7 @@ paths:
   /v1/eam/assets/{id}/activate:
     post:
       operationId: activateAsset
+      summary: "Activate an asset"
       x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IfMatch" }]
       responses:
@@ -72,6 +76,7 @@ paths:
   /v1/eam/assets/{id}/counters:
     post:
       operationId: createCounter
+      summary: "Add a counter to an asset"
       x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -130,6 +135,7 @@ paths:
   /v1/eam/assets/{id}/warranties:
     get:
       operationId: listWarranties
+      summary: "List the warranties of an asset"
       x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -167,6 +173,7 @@ paths:
   /v1/eam/fault-catalogs/{assetType}:
     get:
       operationId: getFaultCatalog
+      summary: "Get the fault catalog of an asset type"
       x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/AssetType" }]
       responses:
@@ -197,6 +204,7 @@ paths:
   /v1/eam/counters/{id}/rules:
     post:
       operationId: createRule
+      summary: "Add a rule to a counter"
       x-passage-duty: eam.asset.maintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -237,6 +245,7 @@ paths:
   /v1/eam/plans:
     get:
       operationId: listPlans
+      summary: "List maintenance plans"
       x-passage-duty: eam.inquire
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -266,6 +275,7 @@ paths:
   /v1/eam/requests:
     get:
       operationId: listRequests
+      summary: "List maintenance requests"
       x-passage-duty: eam.inquire
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -277,6 +287,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createRequest
+      summary: "Create a maintenance request"
       x-passage-duty: eam.request.create
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -288,6 +299,7 @@ paths:
   /v1/eam/requests/{id}/convert:
     post:
       operationId: convertRequest
+      summary: "Convert a maintenance request to a work order"
       x-passage-duty: eam.work.plan
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -315,6 +327,7 @@ paths:
   /v1/eam/work-orders:
     get:
       operationId: listWorkOrders
+      summary: "List work orders"
       x-passage-duty: eam.inquire
       parameters:
         - { $ref: "#/components/parameters/Limit" }
@@ -341,6 +354,7 @@ paths:
   /v1/eam/work-orders/{id}:
     get:
       operationId: getWorkOrder
+      summary: "Get a work order"
       x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -369,6 +383,7 @@ paths:
   /v1/eam/work-orders/{id}/labor:
     post:
       operationId: recordLabor
+      summary: "Record labor on a work order"
       x-passage-duty: eam.work-order.execute
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -413,6 +428,7 @@ paths:
   /v1/eam/kpis:
     get:
       operationId: getKpis
+      summary: "Get maintenance KPIs"
       x-passage-duty: eam.inquire
       parameters:
         - { name: asset, in: query, required: true, schema: { type: string, format: uuid } }
@@ -424,6 +440,7 @@ paths:
   /v1/eam/permit-types:
     get:
       operationId: listPermitTypes
+      summary: "List permit types"
       x-passage-duty: eam.inquire
       responses:
         "200":
@@ -468,6 +485,7 @@ paths:
   /v1/eam/assets/{id}/isolation-points:
     get:
       operationId: listIsolationPoints
+      summary: "List the isolation points of an asset"
       x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -690,6 +708,7 @@ paths:
   /v1/eam/sequences/{id}:
     get:
       operationId: getSequence
+      summary: "Get a maintenance sequence"
       x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:
@@ -776,6 +795,7 @@ paths:
   /v1/eam/rounds/{id}:
     get:
       operationId: getRound
+      summary: "Get an inspection round"
       x-passage-duty: eam.inquire
       parameters: [{ $ref: "#/components/parameters/Id" }]
       responses:

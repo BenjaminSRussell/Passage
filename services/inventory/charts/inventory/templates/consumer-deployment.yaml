@@ -57,6 +57,8 @@ spec:
                   key: DATABASE_URL
             - name: INV_NEGATIVE_DEFAULT
               value: {{ .Values.inventory.negativeDefault | quote }}
+            - name: INV_ALLOW_NEGATIVE_TRUCK
+              value: {{ .Values.inventory.allowNegativeTruck | quote }}
             - name: INV_JOURNAL_MAX_LINES
               value: {{ .Values.inventory.journalMaxLines | quote }}
             # loadConfig checks the posting-profile accounts in every mode.
