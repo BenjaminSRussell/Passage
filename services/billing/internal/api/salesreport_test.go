@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,11 +15,38 @@ type fakeSalesReports struct {
 	listed  string
 	retried string
 	err     error
+	limit   int
+	after   string
+	more    bool
 }
 
-func (f *fakeSalesReports) ListSalesReports(_ context.Context, status string, _ int) ([]store.SalesReport, error) {
-	f.listed = status
-	return []store.SalesReport{{ID: "r1", Status: store.SalesReportParked}}, nil
+func (f *fakeSalesReports) ListSalesReportsPage(_ context.Context, status string, limit int, after string) ([]store.SalesReport, string, error) {
+	f.listed, f.limit, f.after = status, limit, after
+	if after == "" && f.more {
+		return []store.SalesReport{{ID: "r1", Status: store.SalesReportParked}}, "2027-01-01T00:00:00Z|r1", nil
+	}
+	return []store.SalesReport{{ID: "r1", Status: store.SalesReportParked}}, "", nil
+}
+
+// #553: the list pages with a cursor instead of showing the newest 200 only.
+func TestSalesReports_ListPagesWithACursor(t *testing.T) {
+	fake := &fakeSalesReports{more: true}
+	a, h := setupAPI(t, newFakeStore(), &fakeTax{perLine: "19.00"})
+	a.WithSalesReports(fake)
+	rec := doAs(h, http.MethodGet, "/v1/billing/sales-reports?limit=1", "", "", dutyView, nil)
+	if rec.Code != http.StatusOK || fake.limit != 1 || !strings.Contains(rec.Body.String(), `"nextCursor"`) {
+		t.Fatalf("first page = %d %s (limit %d)", rec.Code, rec.Body, fake.limit)
+	}
+	cursor := base64.RawURLEncoding.EncodeToString([]byte("2027-01-01T00:00:00Z|r1"))
+	rec = doAs(h, http.MethodGet, "/v1/billing/sales-reports?limit=1&cursor="+cursor, "", "", dutyView, nil)
+	if rec.Code != http.StatusOK || fake.after != "2027-01-01T00:00:00Z|r1" || strings.Contains(rec.Body.String(), `"nextCursor"`) {
+		t.Fatalf("second page = %d %s (after %q)", rec.Code, rec.Body, fake.after)
+	}
+	for _, q := range []string{"limit=0", "limit=201", "limit=x", "cursor=***"} {
+		if rec := doAs(h, http.MethodGet, "/v1/billing/sales-reports?"+q, "", "", dutyView, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", q, rec.Code)
+		}
+	}
 }
 
 func (f *fakeSalesReports) RetrySalesReport(_ context.Context, id string) (store.SalesReport, error) {

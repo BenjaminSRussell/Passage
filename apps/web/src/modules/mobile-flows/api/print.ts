@@ -80,6 +80,8 @@ export const CODE = /^[A-Z0-9][A-Z0-9_-]{1,39}$/;
 
 export interface Printer {
   id: string;
+  /** Set once the printer has left its queue (FR-32.13); only listed with includeRetired. */
+  retiredAt?: string;
   code: string;
   name: string;
   deviceType: DeviceType;
@@ -212,6 +214,11 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   return (await res.json()) as T;
 }
 
+async function removeOne(path: string): Promise<void> {
+  const res = await apiFetch(`${base}${path}`, { method: "DELETE", headers: { Accept: "application/json" }, credentials: "same-origin" });
+  if (!res.ok) throw await toError(res);
+}
+
 async function items<T>(path: string, signal?: AbortSignal): Promise<T[]> {
   const body = await send<{ items?: T[] }>(path, {}, signal);
   if (!Array.isArray(body.items)) throw new PrintApiError(0, "COM-0001", "The response has no items", {});
@@ -233,6 +240,28 @@ export function listPrinters(signal?: AbortSignal): Promise<Printer[]> {
 /** Registers a printer. Reuse one key per form so a retried submit cannot register twice. */
 export function createPrinter(input: NewPrinter, key: string): Promise<Printer> {
   return post<Printer>("/printers", input, key);
+}
+
+/** The fields of a printer that can change (the code and device type cannot). */
+export type PrinterEdit = Partial<Pick<NewPrinter, "name" | "dpi" | "mediaSize" | "host" | "port" | "queueCode" | "failoverRank">>;
+
+/** Edits an active printer, including moving it to another queue or failover rank (PRN-0006 when the rank is taken). */
+export function updatePrinter(id: string, edit: PrinterEdit): Promise<Printer> {
+  return send<Printer>(`/printers/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(edit) });
+}
+
+/** Takes a printer out of its queue; later jobs fail over past it. */
+export function retirePrinter(id: string): Promise<Printer> {
+  return send<Printer>(`/printers/${encodeURIComponent(id)}:retire`, { method: "POST" });
+}
+
+/** Replaces a routing rule. */
+export function updateRoutingRule(id: string, input: NewRoutingRule): Promise<RoutingRule> {
+  return send<RoutingRule>(`/routing-rules/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export function deleteRoutingRule(id: string): Promise<void> {
+  return removeOne(`/routing-rules/${encodeURIComponent(id)}`);
 }
 
 /** Printer status report (§6.32.14): state, queue depth and last error per printer. */

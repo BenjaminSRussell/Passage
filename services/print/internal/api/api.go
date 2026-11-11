@@ -91,13 +91,18 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.Route("/print/v1", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/printers", a.createPrinter)
+		r.With(authz.RequireDuty(dutyPrintAdmin)).Patch("/printers/{id}", a.updatePrinter)
+		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/printers/{id}:retire", a.retirePrinter)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/printers", a.listPrinters)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/printers/status", a.printerStatuses)
 		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/routing-rules", a.createRoutingRule)
+		r.With(authz.RequireDuty(dutyPrintAdmin)).Put("/routing-rules/{id}", a.updateRoutingRule)
+		r.With(authz.RequireDuty(dutyPrintAdmin)).Delete("/routing-rules/{id}", a.deleteRoutingRule)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/routing-rules", a.listRoutingRules)
 		r.With(authz.RequireDuty(dutyPrint)).Post("/jobs", a.createJob)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/jobs", a.listJobs)
 		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/jobs:purge", a.purgeJobs)
+		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/jobs:sweep", a.sweepJobs)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/jobs/{id}", a.getJob)
 		r.With(authz.RequireDuty(dutyRenderDocument)).Post("/documents:render", a.renderDocument)
 	})
@@ -217,7 +222,7 @@ func (a *API) listPrinters(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return
 	}
-	items, err := a.store.ListPrinters(r.Context())
+	items, err := a.store.ListPrinters(r.Context(), r.URL.Query().Get("includeRetired") == "true")
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -350,11 +355,22 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 	// The job is stored: finish dispatch and record the outcome even if the client
 	// goes away, so it is not left QUEUED (the printer may already hold the label).
 	ctx := context.WithoutCancel(r.Context())
-	devices, err := a.store.QueueDevices(ctx, queue)
-	if err != nil {
+	if err := a.dispatchJob(ctx, &created, labelData); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
+	httpx.JSON(w, http.StatusCreated, created)
+}
+
+// dispatchJob sends a QUEUED job to its queue's devices in failover order and stores the
+// outcome. labelData is the template data of a new label job, so a 1 in device can get its
+// compact layout (FR-32.7); a reprint or a swept job has none and reuses the stored payload.
+func (a *API) dispatchJob(ctx context.Context, job *domain.Job, labelData map[string]string) error {
+	devices, err := a.store.QueueDevices(ctx, job.QueueCode)
+	if err != nil {
+		return err
+	}
+	format, template, zpl := job.Format, job.TemplateCode, job.ZPL
 	// A ZPL label goes to ZPL_II devices and a PDF document to PDF_IPP devices; the
 	// rest of the queue is skipped, and a queue with none fails with MOB-0112.
 	// FR-32.7: a ZPL label is laid out and sized for each device's media (the
@@ -371,20 +387,18 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 		}
 		return a.sender.Send(ctx, d, payload)
 	})
-	if err := created.Complete(out, dispatchErr); err != nil {
-		httpx.Fail(w, r, err)
-		return
+	if err := job.Complete(out, dispatchErr); err != nil {
+		return err
 	}
-	if err := a.store.CompleteJob(ctx, created); err != nil {
-		httpx.Fail(w, r, err)
-		return
+	if err := a.store.CompleteJob(ctx, *job); err != nil {
+		return err
 	}
-	if created.Status == domain.JobPrinted {
+	if job.Status == domain.JobPrinted {
 		a.printed.Add(1)
 	} else {
 		a.failed.Add(1)
 	}
-	httpx.JSON(w, http.StatusCreated, created)
+	return nil
 }
 
 var jobStatuses = map[string]bool{domain.JobQueued: true, domain.JobPrinted: true, domain.JobFailed: true}

@@ -1757,6 +1757,48 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/rma-credits:backfill-reservation:
+    post:
+      operationId: backfillRMAReservationForRMA
+      summary: Backfill the reservation of the credit of one RMA (the service call sales drives)
+      description: |
+        The same as backfilling by credit id, but the credit is found by `legalEntityId` and `rmaId`, so
+        sales can work through the RMAs it credited before billing reservations existed. A credit that
+        already holds a reservation is 409 AR-RMA-STATE, which the caller treats as done. The caller
+        needs a token for the legal entity and the service duty ar.rmacredit.backfill.
+      x-passage-duty: ar.rmacredit.backfill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [rmaId, legalEntityId, invoiceId, invoiceLines]
+              properties:
+                rmaId: { type: string, format: uuid }
+                legalEntityId: { type: string, format: uuid }
+                invoiceId: { type: string, format: uuid }
+                invoiceLines:
+                  type: array
+                  items:
+                    type: object
+                    required: [lineNo, qty]
+                    properties:
+                      lineNo: { type: integer, minimum: 1 }
+                      qty: { type: string }
+      responses:
+        "200":
+          description: Reservation taken and committed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RMACreditView" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
   /v1/receivables/rma-credits/{id}:backfill-reservation:
     post:
       operationId: backfillRMAReservation

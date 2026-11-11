@@ -175,7 +175,7 @@ var serviceGrants = map[string]map[string][]string{
 		"billing":     {"billing.invoice.read"},
 		"fulfillment": {"fulfillment.packing-slip.read"},
 		"inventory":   {"inventory.read", "inventory.return-receipt.post"},
-		"receivables": {"ar.rmacredit.post"},
+		"receivables": {"ar.rmacredit.post", "ar.rmacredit.backfill"},
 		"party":       {"party.read"},
 	},
 	"receivables": {

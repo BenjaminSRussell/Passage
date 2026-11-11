@@ -20,6 +20,9 @@ type returnStore struct {
 	version  int
 	filter   store.ReturnOrderFilter
 	err      error
+
+	recomputed []string
+	backfilled []any
 }
 
 func (s *returnStore) CreateReturnOrder(_ context.Context, in store.NewReturnOrder) (store.ReturnOrder, bool, error) {
@@ -49,6 +52,49 @@ func (s *returnStore) InspectReturnOrder(_ context.Context, id string, version i
 
 func (s *returnStore) CreditReturnOrder(_ context.Context, id string, version int, _ string, _ time.Time) (store.ReturnOrder, error) {
 	return store.ReturnOrder{ID: id, Version: version + 1}, s.err
+}
+
+func (s *returnStore) RecomputeReturnCredit(_ context.Context, id string, version int, _ string, _ time.Time) (store.ReturnOrder, error) {
+	s.recomputed = append(s.recomputed, id)
+	return store.ReturnOrder{ID: id, Version: version + 1}, s.err
+}
+
+func (s *returnStore) BackfillReservations(_ context.Context, le string, limit int) (store.ReservationBackfillResult, error) {
+	s.backfilled = []any{le, limit}
+	return store.ReservationBackfillResult{Backfilled: 2}, s.err
+}
+
+func TestCreditReturnOrder_RecomputeFlag(t *testing.T) {
+	id := ids.New()
+	s := &returnStore{}
+	hdr := map[string]string{"If-Match": `"1"`}
+	if rec := serve(t, s, http.MethodPost, returnOrders+"/"+id+":credit", principal(dutyWrite), hdr); rec.Code != http.StatusOK || len(s.recomputed) != 0 {
+		t.Fatalf("plain credit: %d recomputed %v", rec.Code, s.recomputed)
+	}
+	if rec := serve(t, s, http.MethodPost, returnOrders+"/"+id+":credit?recompute=true", principal(dutyWrite), hdr); rec.Code != http.StatusOK || len(s.recomputed) != 1 || s.recomputed[0] != id {
+		t.Fatalf("recompute credit: %d recomputed %v", rec.Code, s.recomputed)
+	}
+}
+
+func TestBackfillReservations_Route(t *testing.T) {
+	s := &returnStore{}
+	path := returnOrders + ":backfill-reservations"
+	if rec := serve(t, s, http.MethodPost, path+"?legalEntityId="+testLE, principal(dutyRead), nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("without the write duty: %d", rec.Code)
+	}
+	if rec := serve(t, s, http.MethodPost, path+"?legalEntityId=x", principal(dutyWrite), nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad legal entity: %d", rec.Code)
+	}
+	if rec := serve(t, s, http.MethodPost, path+"?legalEntityId="+ids.New(), principal(dutyWrite), nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("other legal entity: %d", rec.Code)
+	}
+	if rec := serve(t, s, http.MethodPost, path+"?legalEntityId="+testLE+"&limit=0", principal(dutyWrite), nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad limit: %d", rec.Code)
+	}
+	rec := serve(t, s, http.MethodPost, path+"?legalEntityId="+testLE+"&limit=5", principal(dutyWrite), nil)
+	if rec.Code != http.StatusOK || len(s.backfilled) != 2 || s.backfilled[0] != testLE || s.backfilled[1] != 5 || !strings.Contains(rec.Body.String(), `"backfilled":2`) {
+		t.Fatalf("backfill: %d %s %v", rec.Code, rec.Body, s.backfilled)
+	}
 }
 
 func (s *returnStore) RejectReturnOrder(_ context.Context, id string, version int, _ string, _ time.Time) (store.ReturnOrder, error) {

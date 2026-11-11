@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/BenjaminSRussell/passage/platform/features"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 )
@@ -70,6 +72,36 @@ func TestFeatureGateDoesNotBlockReadiness(t *testing.T) {
 func TestWithoutAFeatureGateRoutesBehaveAsBefore(t *testing.T) {
 	if rec := listFormulas(newRouter(&fakeStore{formula: ac241Formula()})); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+// A route registered without With, or inside Group or Route, still passes the gate (#556).
+func TestDutyFirstRouterGatesEveryRegistrationMethod(t *testing.T) {
+	var gated int
+	gate := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { gated++; next.ServeHTTP(w, r) })
+	}
+	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
+	root := chi.NewRouter()
+	r := dutyFirstRouter{Router: root, gate: gate}
+	r.Get("/plain", ok)
+	r.Post("/plain", ok)
+	r.HandleFunc("/handle", ok)
+	r.Method("PATCH", "/method", http.HandlerFunc(ok))
+	r.Group(func(g chi.Router) { g.Get("/grouped", ok) })
+	r.Route("/sub", func(s chi.Router) { s.Put("/leaf", ok) })
+	r.Mount("/mounted", http.HandlerFunc(ok))
+	r.With(func(next http.Handler) http.Handler { return next }).Delete("/with", ok)
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/plain"}, {"POST", "/plain"}, {"GET", "/handle"}, {"PATCH", "/method"}, {"GET", "/grouped"},
+		{"PUT", "/sub/leaf"}, {"GET", "/mounted"}, {"DELETE", "/with"},
+	} {
+		before := gated
+		rec := httptest.NewRecorder()
+		root.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, nil))
+		if rec.Code != http.StatusNoContent || gated != before+1 {
+			t.Errorf("%s %s: status %d, gate ran %d times, want once", c.method, c.path, rec.Code, gated-before)
+		}
 	}
 }
 

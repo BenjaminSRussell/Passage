@@ -65,27 +65,27 @@ type Definition struct {
 
 // Instance is a submitted document under approval.
 type Instance struct {
-	ID                 string
-	DefinitionID       string
-	DefinitionVersion  int
-	Entity             string
-	RecordID           string
-	SubmittedBy        string
-	Status             string
-	CurrentStep        int
-	OutcomeReason      string
+	ID                string
+	DefinitionID      string
+	DefinitionVersion int
+	Entity            string
+	RecordID          string
+	SubmittedBy       string
+	Status            string
+	CurrentStep       int
+	OutcomeReason     string
 }
 
 // WorkItem is one assignee's task on a step.
 type WorkItem struct {
-	ID                  string
-	InstanceID          string
-	Step                int
-	AssigneeID          string
-	OriginalAssigneeID  string
-	Status              string
-	Comment             string
-	DelegationDepth     int
+	ID                 string
+	InstanceID         string
+	Step               int
+	AssigneeID         string
+	OriginalAssigneeID string
+	Status             string
+	Comment            string
+	DelegationDepth    int
 }
 
 // Action is an inbox or instance command.

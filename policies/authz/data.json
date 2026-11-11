@@ -481,6 +481,7 @@
     ]},
     "fulfillment.shipment.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/shipments/*", "methods": ["GET"]}]},
     "ar.rmacredit.post": {"service_only": true, "permissions": [{"resource": "/v1/receivables/rma-credits", "methods": ["POST"]}]},
+    "ar.rmacredit.backfill": {"service_only": true, "permissions": [{"resource": "/v1/receivables/rma-credits:backfill-reservation", "methods": ["POST"]}]},
     "inventory.return-receipt.post": {"service_only": true, "permissions": [{"resource": "/internal/v1/inventory/return-receipts", "methods": ["POST"]}]},
     "fulfillment.packing-slip.read": {"service_only": true, "permissions": [{"resource": "/v1/fulfillment/packing-slips/*", "methods": ["GET"]}]},
     "billing.credit-reservation.write": {"service_only": true, "permissions": [
@@ -1237,9 +1238,14 @@
       {"resource": "/api/v1/cutover/plans/*/rollback", "methods": ["POST"]},
       {"resource": "/api/v1/cutover/plans/*/rollback/compensations", "methods": ["GET", "POST"]},
       {"resource": "/api/v1/migration/coexistence/*/*/*", "methods": ["PUT"]},
+      {"resource": "/api/v1/cutover/plans/*/opening-targets", "methods": ["GET"]},
+      {"resource": "/api/v1/cutover/plans/*/opening-targets/*/*", "methods": ["PUT"]},
       {"resource": "/api/v1/cutover/plans/generate", "methods": ["POST"]},
       {"resource": "/api/v1/cutover/plans/*/go-no-go", "methods": ["GET", "POST"]},
       {"resource": "/api/v1/cutover/plans/*/export/*", "methods": ["GET"]}
+    ]},
+    "migration.opening-target.release": {"permissions": [
+      {"resource": "/api/v1/migration/opening-targets/*/*/release", "methods": ["POST"]}
     ]},
     "migration.cutover-step.execute": {"permissions": [
       {"resource": "/api/v1/cutover/plans/*/steps/*/complete", "methods": ["POST"]},
@@ -2018,7 +2024,11 @@
     "print.admin": {"permissions": [
       {"resource": "/print/v1/jobs:purge", "methods": ["POST"]},
       {"resource": "/print/v1/printers", "methods": ["POST"]},
-      {"resource": "/print/v1/routing-rules", "methods": ["POST"]}
+      {"resource": "/print/v1/routing-rules", "methods": ["POST"]},
+      {"resource": "/print/v1/printers/*", "methods": ["PATCH"]},
+      {"resource": "/print/v1/printers/*:retire", "methods": ["POST"]},
+      {"resource": "/print/v1/routing-rules/*", "methods": ["PUT", "DELETE"]},
+      {"resource": "/print/v1/jobs:sweep", "methods": ["POST"]}
     ]},
     "warehouse.offline-conflict.resolve": {"permissions": [
       {"resource": "/api/v1/mobile/offline/conflicts", "methods": ["GET"]},
@@ -3314,6 +3324,7 @@
       {"resource": "/v1/sales/return-orders/*:inspect", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders/*:disposition", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders/*:credit", "methods": ["POST"]},
+      {"resource": "/v1/sales/return-orders:backfill-reservations", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders/*:reject", "methods": ["POST"]}
     ]},
     "sales.parameter.maintain": {"permissions": [
@@ -3782,7 +3793,7 @@
       "billing": ["billing.invoice.read"],
       "fulfillment": ["fulfillment.packing-slip.read"],
       "inventory": ["inventory.read", "inventory.return-receipt.post"],
-      "receivables": ["ar.rmacredit.post"],
+      "receivables": ["ar.rmacredit.post", "ar.rmacredit.backfill"],
       "party": ["party.read"]
     },
     "receivables": {

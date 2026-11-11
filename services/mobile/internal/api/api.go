@@ -51,16 +51,18 @@ const (
 	codeStale        = "MOB-VERSION-CONFLICT"
 	codeStep         = "MOB-STEP"
 	codeInProgress   = "MOB-IN-PROGRESS"
-	codeSessionStale = "MOB-SESSION-STALE"
-	codeReuse        = "idempotency_key_reuse"
-	codeConflict     = "MOB-0107"
-	codeGraph        = "MOB-0113"
-	headerKey        = "Idempotency-Key"
-	headerReplayed   = "Idempotent-Replayed"
-	maxKeyLength     = 200
-	maxBody          = 4 << 20
-	defaultPage      = 100
-	maxPage          = 200
+	// codeApplyInProgress answers a supervisor's reject of a transaction a replay is applying (#522).
+	codeApplyInProgress = "MOB-APPLY-IN-PROGRESS"
+	codeSessionStale    = "MOB-SESSION-STALE"
+	codeReuse           = "idempotency_key_reuse"
+	codeConflict        = "MOB-0107"
+	codeGraph           = "MOB-0113"
+	headerKey           = "Idempotency-Key"
+	headerReplayed      = "Idempotent-Replayed"
+	maxKeyLength        = 200
+	maxBody             = 4 << 20
+	defaultPage         = 100
+	maxPage             = 200
 )
 
 // API holds the handlers, the per-tenant publish hub and the counters.
@@ -218,6 +220,9 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeSessionEnded, "the session has ended; sign in again"))
 	case errors.Is(err, store.ErrNotOwner):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeNotOwner, "the session belongs to another user"))
+	case errors.Is(err, store.ErrApplyInProgress):
+		w.Header().Set("Retry-After", "30")
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeApplyInProgress, "the transaction is being applied at the warehouse right now; wait for it to finish, then reject it if it is still open"))
 	case errors.Is(err, store.ErrInProgress):
 		w.Header().Set("Retry-After", "5")
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeInProgress, "a request with this Idempotency-Key is still running; retry shortly"))

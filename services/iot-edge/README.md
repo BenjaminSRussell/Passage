@@ -47,6 +47,26 @@ Pure decision logic the connector and the fleet will run. No I/O yet.
 to the shopfloor ingest with `Peek` and `Ack`, plus heartbeat, configuration pull and the `/metrics` endpoint. See
 NOT-IMPLEMENTED.md for what is open (OPC-UA and MQTT adapters, persistent ring, Kafka).
 
+## MFS automation adapter (wave 32, FR-32.12)
+
+`internal/mfs` is the adapter for AS/RS, conveyor and sorter controllers (PLCs), run on the plant
+edge node:
+
+- `telegram.go`: Passage's telegram profile v1 (fixed-width ASCII frames `STX LLLL body ETX`; types
+  MOVE, ARRV, DIVT, ERRR, ALIV, ACKN, NACK), the codec with validation (load units are SSCCs with a
+  checked GS1 mod-10 digit), and a `Framer` that cuts a TCP stream into frames and resynchronises after
+  noise or a corrupted frame.
+- `link.go`: a reliable session over any `net.Conn`. `Send` numbers a telegram, waits for ACKN, resends
+  with the same sequence, and reports a NACK or no answer. Received ARRV/DIVT/ERRR telegrams are
+  handed to the handler once (a repeat is acknowledged again but not redelivered), a handler error
+  is NACKed busy so the PLC resends, malformed telegrams are NACKed, sequence gaps are reported, and a
+  peer silent for three keep-alive intervals ends `Run` with `ErrLinkDown`.
+- `events.go`: PLC telegrams to `dev.passage.warehouse.automation.event.v1` events (arrived, diverted,
+  fault) and a warehouse transport order to a MOVE telegram.
+
+Tests run the link against a fake PLC over `net.Pipe`. Dialling a PLC, mapping a vendor's telegram
+profile onto this one and forwarding events to the warehouse are open (NOT-IMPLEMENTED.md).
+
 ## Configuration
 
 | Variable | Default | Rule |

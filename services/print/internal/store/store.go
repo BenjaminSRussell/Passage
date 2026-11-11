@@ -49,10 +49,16 @@ type NewJob struct {
 type Store interface {
 	Ping(ctx context.Context) error
 	CreatePrinter(ctx context.Context, p domain.Printer, idempotencyKey string) (domain.Printer, bool, error)
-	ListPrinters(ctx context.Context) ([]domain.Printer, error)
+	ListPrinters(ctx context.Context, includeRetired bool) ([]domain.Printer, error)
+	GetPrinter(ctx context.Context, id string) (domain.Printer, error)
+	UpdatePrinter(ctx context.Context, p domain.Printer) (domain.Printer, error)
+	RetirePrinter(ctx context.Context, id string) (domain.Printer, error)
 	QueueDevices(ctx context.Context, queueCode string) ([]domain.Printer, error)
 	CreateRoutingRule(ctx context.Context, r domain.RoutingRule, idempotencyKey string) (domain.RoutingRule, bool, error)
 	ListRoutingRules(ctx context.Context) ([]domain.RoutingRule, error)
+	UpdateRoutingRule(ctx context.Context, r domain.RoutingRule) (domain.RoutingRule, error)
+	DeleteRoutingRule(ctx context.Context, id string) error
+	ClaimStaleJobs(ctx context.Context, olderThan time.Time, limit int) ([]domain.Job, error)
 	CreateJob(ctx context.Context, in NewJob) (domain.Job, bool, error)
 	ListJobs(ctx context.Context, f JobFilter) ([]domain.Job, error)
 	CompleteJob(ctx context.Context, j domain.Job) error
@@ -70,11 +76,11 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 // Ping checks the database connection for readiness.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-const printerColumns = "id::text, code, name, device_type, dpi, media_size, host, port, queue_code, failover_rank, created_at"
+const printerColumns = "id::text, code, name, device_type, dpi, media_size, host, port, queue_code, failover_rank, created_at, retired_at"
 
 func scanPrinter(row pgx.Row) (domain.Printer, error) {
 	var p domain.Printer
-	err := row.Scan(&p.ID, &p.Code, &p.Name, &p.DeviceType, &p.Dpi, &p.MediaSize, &p.Host, &p.Port, &p.QueueCode, &p.FailoverRank, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.Code, &p.Name, &p.DeviceType, &p.Dpi, &p.MediaSize, &p.Host, &p.Port, &p.QueueCode, &p.FailoverRank, &p.CreatedAt, &p.RetiredAt)
 	return p, err
 }
 
@@ -119,20 +125,20 @@ func (s *Postgres) CreatePrinter(ctx context.Context, in domain.Printer, idempot
 	return out, inserted, nil
 }
 
-// rankConstraint is the generated name of UNIQUE (tenant_id, queue_code, failover_rank).
-const rankConstraint = "print_device_tenant_id_queue_code_failover_rank_key"
+// rankConstraint is the unique index on (tenant_id, queue_code, failover_rank) of active printers (0006).
+const rankConstraint = "print_device_active_rank"
 
 func samePrinter(a, b domain.Printer) bool {
 	return a.Code == b.Code && a.Name == b.Name && a.DeviceType == b.DeviceType && a.Dpi == b.Dpi && a.MediaSize == b.MediaSize &&
 		a.Host == b.Host && a.Port == b.Port && a.QueueCode == b.QueueCode && a.FailoverRank == b.FailoverRank
 }
 
-// ListPrinters returns every printer of the tenant, ordered by code.
-func (s *Postgres) ListPrinters(ctx context.Context) ([]domain.Printer, error) {
+// ListPrinters returns the tenant's printers ordered by code; retired ones only on request.
+func (s *Postgres) ListPrinters(ctx context.Context, includeRetired bool) ([]domain.Printer, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := []domain.Printer{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+printerColumns+` from print_device where tenant_id = $1 order by code`, p.TenantID)
+		rows, err := tx.Query(ctx, `select `+printerColumns+` from print_device where tenant_id = $1 and ($2 or retired_at is null) order by code`, p.TenantID, includeRetired)
 		if err != nil {
 			return err
 		}
@@ -154,7 +160,7 @@ func (s *Postgres) QueueDevices(ctx context.Context, queueCode string) ([]domain
 	p, _ := tenant.FromContext(ctx)
 	out := []domain.Printer{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select `+printerColumns+` from print_device where tenant_id = $1 and queue_code = $2 order by failover_rank`, p.TenantID, queueCode)
+		rows, err := tx.Query(ctx, `select `+printerColumns+` from print_device where tenant_id = $1 and queue_code = $2 and retired_at is null order by failover_rank`, p.TenantID, queueCode)
 		if err != nil {
 			return err
 		}

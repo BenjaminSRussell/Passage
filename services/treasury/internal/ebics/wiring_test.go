@@ -276,6 +276,26 @@ func TestPoller_RepeatedLocalFailureParksTheSubscriberAndASuccessResetsTheCount(
 	}
 }
 
+// #521: a bank that keeps delivering a malformed segment sequence is not polled forever; the subscriber is parked with its own
+// code after the same number of consecutive failures, and the error is a protocol one, not a local one.
+func TestPoller_RepeatedMalformedDeliveryParksTheSubscriber(t *testing.T) {
+	e := newEnv(t, false)
+	e.onboard()
+	e.bank.served["C53"] = twoStatements(t)
+	e.bank.segChars = 40
+	e.bank.wrongSegment = true
+	p := newPoller(e, &sinkLog{})
+	for range maxLocalFailures {
+		_, err := p.Once(context.Background())
+		if err == nil || !errors.Is(err, ErrProtocol) || errors.Is(err, ErrLocal) {
+			t.Fatalf("a malformed delivery must be reported as a protocol error: %v", err)
+		}
+	}
+	if got := e.sub().ParkedCode; got != CodeBankDelivery {
+		t.Fatalf("parked code %q, want %q", got, CodeBankDelivery)
+	}
+}
+
 func TestUnpark_RecordsWhoAndRefusesAStaleVersion(t *testing.T) {
 	e := newEnv(t, false)
 	e.onboard()

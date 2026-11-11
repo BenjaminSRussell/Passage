@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +75,7 @@ func (a *API) registerReturnOrders(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post(returnOrders+"/{id}:disposition", a.dispositionReturnOrder)
 	r.With(authz.RequireDuty(dutyWrite)).Post(returnOrders+"/{id}:credit", a.creditReturnOrder)
 	r.With(authz.RequireDuty(dutyWrite)).Post(returnOrders+"/{id}:reject", a.rejectReturnOrder)
+	r.With(authz.RequireDuty(dutyWrite)).Post(returnOrders+":backfill-reservations", a.backfillReservations)
 }
 
 func (a *API) rejectReturnOrder(w http.ResponseWriter, r *http.Request) {
@@ -295,8 +297,52 @@ func (a *API) dispositionReturnOrder(w http.ResponseWriter, r *http.Request) {
 	a.rmaCommand(w, r, "disposition return order", a.store.DispositionReturnOrder)
 }
 
+// creditReturnOrder posts the credit. With ?recompute=true on a CREDITED return whose credit was not confirmed it first
+// works the credit out again from the invoice as billing holds it now, so a credit that receivables released with :cancel
+// can be corrected and sent again under the same RMA key.
 func (a *API) creditReturnOrder(w http.ResponseWriter, r *http.Request) {
-	a.rmaCommand(w, r, "credit return order", a.store.CreditReturnOrder)
+	if r.URL.Query().Get("recompute") != "true" {
+		a.rmaCommand(w, r, "credit return order", a.store.CreditReturnOrder)
+		return
+	}
+	a.rmaCommand(w, r, "credit return order", func(ctx context.Context, id string, version int, actor string, now time.Time) (store.ReturnOrder, error) {
+		o, err := a.store.RecomputeReturnCredit(ctx, id, version, actor, now)
+		if err != nil {
+			return store.ReturnOrder{}, err
+		}
+		return a.store.CreditReturnOrder(ctx, id, o.Version, actor, now)
+	})
+}
+
+// backfillReservations drives receivables' :backfill-reservation for the credits sales posted before billing
+// reservations existed; call it again while `more` is true.
+func (a *API) backfillReservations(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	le := r.URL.Query().Get("legalEntityId")
+	if !ids.Valid(le) {
+		validationFailed(w, r, map[string]string{"legalEntityId": "must be a UUID"})
+		return
+	}
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			validationFailed(w, r, map[string]string{"limit": "must be a whole number of 1 or more"})
+			return
+		}
+		limit = n
+	}
+	if !inScope(w, r, le) {
+		return
+	}
+	out, err := a.store.BackfillReservations(r.Context(), le, limit)
+	if err != nil {
+		a.fail(w, r, "backfill rma reservations", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func (a *API) receiveReturnOrder(w http.ResponseWriter, r *http.Request) {
