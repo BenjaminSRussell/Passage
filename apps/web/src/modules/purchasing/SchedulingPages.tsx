@@ -54,6 +54,7 @@ import {
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -188,7 +189,7 @@ export function validateSchedulingAgreement(h: SAHeaderDraft, p: ProfileDraft, r
     ["productId", "product"],
     ["siteId", "site"],
   ] as const) {
-    if (!uuidPattern.test(h[field].trim())) errors[field] = `Enter the ${label} id (a UUID).`;
+    if (!uuidPattern.test(h[field].trim())) errors[field] = `Choose a ${label}.`;
   }
   if (!currencyPattern.test(h.currency)) errors.currency = "Use a three-letter ISO code such as USD.";
   if (h.unit.trim() === "") errors.unit = "Enter a unit.";
@@ -301,10 +302,33 @@ export function SchedulingAgreementCreatePage() {
       <form className={styles.form} onSubmit={onSubmit} noValidate>
         <Card title="Agreement">
           <div className={styles.grid}>
-            {text("sa-legal-entity", "Legal entity id", "legalEntityId")}
-            {text("sa-vendor", "Vendor id", "vendorId")}
-            {text("sa-product", "Product id", "productId")}
-            {text("sa-site", "Site id", "siteId")}
+            <LookupFormField id="sa-legal-entity" label="Legal entity" entity="legalEntity" value={header.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setH({ legalEntityId })} />
+            <LookupFormField
+              id="sa-vendor"
+              label="Vendor"
+              entity="vendor"
+              scope={{ legalEntityId: header.legalEntityId || undefined }}
+              value={header.vendorId}
+              error={errors.vendorId}
+              onChange={(vendorId) => setH({ vendorId })}
+            />
+            <LookupFormField
+              id="sa-product"
+              label="Product"
+              entity="product"
+              value={header.productId}
+              error={errors.productId}
+              onChange={(productId, option) => setHeader((h) => ({ ...h, productId, ...(option?.unit && (h.unit.trim() === "" || h.unit === "EA") ? { unit: option.unit } : {}) }))}
+            />
+            <LookupFormField
+              id="sa-site"
+              label="Site"
+              entity="site"
+              scope={{ legalEntityId: header.legalEntityId || undefined }}
+              value={header.siteId}
+              error={errors.siteId}
+              onChange={(siteId) => setH({ siteId })}
+            />
             <FormField id="sa-currency" label="Currency" error={errors.currency}>
               {(c) => <Input {...c} value={header.currency} maxLength={3} onChange={(e) => setH({ currency: e.target.value.toUpperCase() })} />}
             </FormField>

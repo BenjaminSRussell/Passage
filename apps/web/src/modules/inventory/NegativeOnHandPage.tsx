@@ -7,6 +7,7 @@ import { ALL_DIMENSIONS, money, ProblemAlert } from "./parts";
 import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const columns: DataTableColumn<NegativeOnHandLine>[] = [
   { key: "productId", header: "Product", render: (row) => <Named entity="product" id={row.productId} /> },
@@ -69,12 +70,8 @@ export function NegativeOnHandPage() {
           <FormField id="negative-warehouse" label="Warehouse" optional>
             {(control) => <Input {...control} value={draft.warehouseId} onChange={set("warehouseId")} />}
           </FormField>
-          <FormField id="negative-product" label="Product" optional error={errors.productId}>
-            {(control) => <Input {...control} value={draft.productId} onChange={set("productId")} placeholder="Product id" invalid={Boolean(errors.productId)} />}
-          </FormField>
-          <FormField id="negative-entity" label="Legal entity" optional error={errors.legalEntityId}>
-            {(control) => <Input {...control} value={draft.legalEntityId} onChange={set("legalEntityId")} placeholder="Legal entity id" invalid={Boolean(errors.legalEntityId)} />}
-          </FormField>
+          <LookupFormField id="negative-product" label="Product" entity="product" optional prefill={false} value={draft.productId} error={errors.productId} onChange={(productId) => setDraft({ ...draft, productId })} />
+          <LookupFormField id="negative-entity" label="Legal entity" entity="legalEntity" optional prefill={false} value={draft.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setDraft({ ...draft, legalEntityId })} />
           <div className={styles.formActions}>
             <Button type="submit" variant="primary">
               Apply filters

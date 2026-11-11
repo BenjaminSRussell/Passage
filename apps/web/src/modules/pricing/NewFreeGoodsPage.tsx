@@ -18,6 +18,7 @@ import { CALC_LABELS, CUSTOMER_KIND_LABELS, KIND_LABELS, PRODUCT_KIND_LABELS } f
 import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -39,7 +40,7 @@ export const emptyFreeGoods: FreeGoodsRuleInput = {
 /** Client checks that mirror the service (FR-26.22); the service has the last word. */
 export function validateFreeGoods(v: FreeGoodsRuleInput): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.customerKind === "all") {
     if (v.customerKey.trim() !== "") errors.customerKey = "Leave empty when the rule is for all customers.";
   } else if (v.customerKey.trim() === "" || v.customerKey.trim().length > 64) {
@@ -142,7 +143,7 @@ export function NewFreeGoodsPage() {
       <PageHeader title="New free goods rule" description="Give free units for every quantity ordered of a product or product group and unit." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("fg-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="fg-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           <FormField id="fg-customer-kind" label="Customers">
             {(c) => (
               <Select {...c} value={values.customerKind} onChange={(e) => update({ customerKind: e.target.value as FreeGoodsCustomerKind })}>

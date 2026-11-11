@@ -4,7 +4,7 @@ import { buttonClassName, Card, PageHeader, type DataTableColumn } from "../../s
 import { createRequisition, listRequisitions, type Requisition, type RequisitionStatus } from "./api/recruitment";
 import { DATE, UUID, dayOf } from "./format";
 import styles from "./pages.module.css";
-import { CheckField, FormActions, ListPage, SelectField, Status, TextField, labelled, useSubmit } from "./parts";
+import { CheckField, FormActions, ListPage, LookupField, SelectField, Status, TextField, labelled, useSubmit } from "./parts";
 
 const STATUSES: RequisitionStatus[] = ["DRAFT", "APPROVED", "OPEN", "FILLED", "CANCELED"];
 
@@ -64,8 +64,8 @@ export function validateRequisition(v: RequisitionValues) {
   const errors: Record<string, string> = {};
   const number = v.requisitionNumber.trim().toUpperCase();
   if (!/^[A-Z0-9][A-Z0-9-]{0,19}$/.test(number)) errors.requisitionNumber = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
-  if (!UUID.test(v.positionId.trim())) errors.positionId = "Enter the position's id.";
-  if (!UUID.test(v.hiringManagerWorkerId.trim())) errors.hiringManagerWorkerId = "Enter the hiring manager's worker id.";
+  if (!UUID.test(v.positionId.trim())) errors.positionId = "Choose the position.";
+  if (!UUID.test(v.hiringManagerWorkerId.trim())) errors.hiringManagerWorkerId = "Choose the hiring manager.";
   const headcount = Number(v.headcount);
   if (!/^\d{1,3}$/.test(v.headcount.trim()) || headcount < 1 || headcount > 500) errors.headcount = "Enter a whole number from 1 to 500.";
   if (!DATE.test(v.plannedStartDate)) errors.plannedStartDate = "Choose the planned start date.";
@@ -95,7 +95,7 @@ export function NewRequisitionPage() {
   });
   const form = useSubmit({ "HCM-REQ-DUPLICATE": "requisitionNumber" });
   const set = (patch: Partial<RequisitionValues>) => {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     form.touch();
   };
 
@@ -118,8 +118,8 @@ export function NewRequisitionPage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {text("requisitionNumber", "Requisition number", { hint: "Unique in your tenant, for example REQ-2026-014." })}
-          {text("positionId", "Position id")}
-          {text("hiringManagerWorkerId", "Hiring manager worker id")}
+          <LookupField entity="position" id="requisition-positionId" label="Position" value={values.positionId} error={form.errors.positionId} onChange={(positionId) => set({ positionId })} />
+          <LookupField entity="worker" id="requisition-hiringManagerWorkerId" label="Hiring manager" value={values.hiringManagerWorkerId} error={form.errors.hiringManagerWorkerId} onChange={(hiringManagerWorkerId) => set({ hiringManagerWorkerId })} />
           {text("headcount", "Headcount", { inputMode: "numeric" })}
           {text("plannedStartDate", "Planned start date", { type: "date" })}
           <CheckField id="requisition-allowOverfill" label="Allow more people than the position has room for" checked={values.allowOverfill} onChange={(allowOverfill) => set({ allowOverfill })} />

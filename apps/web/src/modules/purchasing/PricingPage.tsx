@@ -5,10 +5,9 @@ import { describeProblem, lookupPrice, type Candidate, type LookupParams, type P
 import { ShortId, currencyPattern, datePattern, decimalPattern, money, todayIso, uuidPattern, type Failure } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const FIELDS: { name: Exclude<keyof LookupParams, "tie">; label: string; optional?: boolean; hint?: string; type?: string }[] = [
-  { name: "vendor", label: "Vendor id" },
-  { name: "product", label: "Product id" },
   { name: "qty", label: "Quantity" },
   { name: "unit", label: "Unit" },
   { name: "currency", label: "Currency" },
@@ -19,8 +18,8 @@ const FIELDS: { name: Exclude<keyof LookupParams, "tie">; label: string; optiona
 
 export function validateLookup(p: LookupParams): Partial<Record<keyof LookupParams, string>> {
   const errors: Partial<Record<keyof LookupParams, string>> = {};
-  if (!uuidPattern.test(p.vendor.trim())) errors.vendor = "Enter the vendor id (a UUID).";
-  if (!uuidPattern.test(p.product.trim())) errors.product = "Enter the product id (a UUID).";
+  if (!uuidPattern.test(p.vendor.trim())) errors.vendor = "Choose a vendor.";
+  if (!uuidPattern.test(p.product.trim())) errors.product = "Choose a product.";
   if (!decimalPattern.test(p.qty.trim()) || Number(p.qty) <= 0) errors.qty = "Enter a positive quantity.";
   if (p.unit.trim() === "") errors.unit = "Enter a unit.";
   if (!currencyPattern.test(p.currency)) errors.currency = "Use a three-letter ISO code such as USD.";
@@ -93,6 +92,15 @@ export function PriceLookupPage() {
       <Card>
         <form className={styles.form} onSubmit={onSubmit} noValidate>
           <div className={styles.grid}>
+            <LookupFormField id="lookup-vendor" label="Vendor" entity="vendor" value={form.vendor} error={errors.vendor} onChange={(vendor) => setForm((prev) => ({ ...prev, vendor }))} />
+            <LookupFormField
+              id="lookup-product"
+              label="Product"
+              entity="product"
+              value={form.product}
+              error={errors.product}
+              onChange={(product, option) => setForm((prev) => ({ ...prev, product, ...(option?.unit && (prev.unit === "" || prev.unit === "EA") ? { unit: option.unit } : {}) }))}
+            />
             {FIELDS.map((f) => (
               <FormField key={f.name} id={`lookup-${f.name}`} label={f.label} optional={f.optional} hint={f.hint} error={errors[f.name]}>
                 {(control) => (

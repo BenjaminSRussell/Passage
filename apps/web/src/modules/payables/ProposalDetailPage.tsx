@@ -80,7 +80,10 @@ export function ProposalDetailPage() {
   const draft = p.status === "DRAFT";
   const canApprove = draft && holdsDuty(duties, "payment-proposal.approve");
   const canCancel = draft && holdsDuty(duties, "payment-proposal.write");
-  const canRun = (p.status === "APPROVED" || p.status === "EXECUTING") && holdsDuty(duties, "payment-run.execute");
+  // A proposal names its run once one starts, so a running, paid or failed proposal links to it. Without the id
+  // (a run that is not started yet) an executor starts it; starting again answers the run that already exists.
+  const runLink = p.paymentRunId && holdsDuty(duties, "payment-run.read") ? `/payables/runs/${p.paymentRunId}` : null;
+  const canRun = !runLink && (p.status === "APPROVED" || p.status === "EXECUTING") && holdsDuty(duties, "payment-run.execute");
   const { payments, invoices } = counts(p);
   const withheld = Object.entries(p.totalWithheld ?? {});
   const open = p.groups.find((g) => g.id === shown);
@@ -139,6 +142,11 @@ export function ProposalDetailPage() {
               All proposals
             </Link>
             {canCancel ? <Button disabled={busy} onClick={() => { decide.reset(); setConfirm("cancel"); }}>Cancel proposal</Button> : null}
+            {runLink ? (
+              <Link className={buttonClassName(p.status === "EXECUTING" ? "primary" : "secondary")} to={runLink}>
+                Open payment run
+              </Link>
+            ) : null}
             {canRun ? (
               <Button variant="primary" disabled={busy} loading={start.isPending} onClick={() => start.mutate()}>
                 {p.status === "EXECUTING" ? "Open payment run" : "Start payment run"}

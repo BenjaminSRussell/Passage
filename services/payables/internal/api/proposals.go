@@ -71,6 +71,7 @@ type PayablesStore interface {
 	SetPaymentHold(ctx context.Context, id string, held bool, reason string) (bool, error)
 	BlockVendor(ctx context.Context, legalEntityID, vendorID, reason string) error
 	UnblockVendor(ctx context.Context, legalEntityID, vendorID string) error
+	VendorBlocks(ctx context.Context, legalEntityID, vendorID string) ([]store.VendorBlock, error)
 }
 
 type RateSource interface {

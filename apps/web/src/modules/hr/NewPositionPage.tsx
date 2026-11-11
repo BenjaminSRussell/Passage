@@ -6,6 +6,7 @@ import { DATE, todayIso, UUID, validFte } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 interface Values {
   positionNumber: string;
@@ -32,8 +33,8 @@ export function validatePosition(values: Values): { errors: Errors; input?: NewP
   const jobCode = values.jobCode.trim().toUpperCase();
   if (!NUMBER.test(positionNumber)) errors.positionNumber = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
   if (!JOB.test(jobCode)) errors.jobCode = "Use 1 to 20 characters: A to Z, 0 to 9, _ or a hyphen.";
-  if (!UUID.test(values.departmentId.trim())) errors.departmentId = "Enter the department's org unit id (a UUID).";
-  if (!UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(values.departmentId.trim())) errors.departmentId = "Choose the department.";
+  if (!UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!validFte(values.fte, 5)) errors.fte = "Enter an FTE from 0.05 to 2.00, for example 1.00 or 0.50.";
   if (!DATE.test(values.validFrom)) errors.validFrom = "Enter the date the position starts.";
   if (values.validTo && (!DATE.test(values.validTo) || values.validTo <= values.validFrom)) errors.validTo = "The end must be after the start.";
@@ -73,7 +74,7 @@ export function NewPositionPage() {
   const key = useRef(newKey());
 
   function update(patch: Partial<Values>) {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     key.current = newKey();
   }
 
@@ -116,8 +117,8 @@ export function NewPositionPage() {
         <form className={styles.form} onSubmit={submit} noValidate>
           {field("positionNumber", "Position number", "Unique in your tenant, for example POS-100.", false, { maxLength: 20 })}
           {field("jobCode", "Job code", "For example ENG-2 or MGR.", false, { maxLength: 20 })}
-          {field("departmentId", "Department id", "The organization unit of the department.")}
-          {field("legalEntityId", "Legal entity id")}
+          <LookupFormField id="position-departmentId" label="Department" entity="operatingUnit" hint="The organization unit of the department." value={values.departmentId} error={errors.departmentId} onChange={(departmentId) => update({ departmentId })} />
+          <LookupFormField id="position-legalEntityId" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {field("fte", "FTE", "0.05 to 2.00. Two people sharing a job is 2.00.", false, { inputMode: "decimal" })}
           {field("validFrom", "Starts", undefined, false, { type: "date" })}
           {field("validTo", "Ends before", "The first day the position no longer exists.", true, { type: "date" })}

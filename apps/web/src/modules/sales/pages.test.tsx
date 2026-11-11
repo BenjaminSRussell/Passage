@@ -145,7 +145,28 @@ describe("Sales orders list", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "CONFIRMED" } });
+    fireEvent.change(screen.getByLabelText("Active hold"), { target: { value: "CREDIT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("status")).toBe("CONFIRMED"));
+    expect(calls.at(-1)?.url.searchParams.get("hold")).toBe("CREDIT");
+  });
+
+  it("says nothing matches the filters and clears them", async () => {
+    handler = (url) => ({ status: 200, body: { items: url.searchParams.get("status") === "CANCELLED" ? [] : [summary] } });
+    renderAt("/sales/orders");
+    expect(await screen.findByText("SO-0000042")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "CANCELLED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No sales orders match these filters")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("SO-0000042")).toBeInTheDocument();
+  });
+
+  it("tells a user without access they cannot view sales orders", async () => {
+    handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "missing duty" } });
+    renderAt("/sales/orders");
+    expect(await screen.findByText("You can't view sales orders")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
   it("shows a loading table while the request is pending", async () => {
@@ -158,6 +179,7 @@ describe("Sales orders list", () => {
     handler = () => ({ status: 200, body: { items: [] } });
     renderAt("/sales/orders");
     expect(await screen.findByRole("heading", { name: "No sales orders yet" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Enter the first order" })).toHaveAttribute("href", "/sales/orders/new");
   });
 
   it("shows the problem code and retries on error", async () => {
@@ -176,9 +198,27 @@ describe("Sales orders list", () => {
         ? { status: 200, body: { items: [{ ...summary, id: "o2", orderNumber: "SO-0000041" }] } }
         : { status: 200, body: { items: [summary], nextCursor: "c1" } };
     renderAt("/sales/orders");
-    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more sales orders" }));
     expect(await screen.findByText("SO-0000041")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more sales orders" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the loaded orders and retries a failed next page", async () => {
+    let failNext = true;
+    handler = (url) => {
+      if (url.searchParams.get("cursor") !== "c1") return { status: 200, body: { items: [summary], nextCursor: "c1" } };
+      if (failNext) {
+        failNext = false;
+        return { status: 503, body: { code: "COM-0503", detail: "busy" } };
+      }
+      return { status: 200, body: { items: [{ ...summary, id: "o2", orderNumber: "SO-0000041" }] } };
+    };
+    renderAt("/sales/orders");
+    fireEvent.click(await screen.findByRole("button", { name: "Load more sales orders" }));
+    expect(await screen.findByText("Could not load sales orders")).toBeInTheDocument();
+    expect(screen.getByText("SO-0000042")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("SO-0000041")).toBeInTheDocument();
   });
 });
 

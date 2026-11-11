@@ -5,6 +5,7 @@ import { describeProblem, newKey, startPackRun, type PackRunRequest, type Proble
 import { localToUtc, parseCustomerMap, parseRecords, SOURCE_LABELS, SOURCE_SYSTEMS, splitList, TARGET_COLUMNS, type SourceSystem } from "./domain";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface PackRunValues {
   sourceSystem: SourceSystem;
@@ -50,7 +51,7 @@ export function validatePackRun(values: PackRunValues): { errors: Errors; input?
   const importSource = values.importSource.trim();
   const customers = parseCustomerMap(values.customers);
   if (values.loadIntoReceivables) {
-    if (!UUID.test(legalEntityId)) errors.legalEntityId = "Enter the legal entity id (a UUID) the open items belong to.";
+    if (!UUID.test(legalEntityId)) errors.legalEntityId = "Choose the legal entity the open items belong to.";
     if (importSource !== "" && !IMPORT_SOURCE.test(importSource)) errors.importSource = "Use up to 40 letters, digits, dots, dashes or underscores.";
     if (customers.errors.length > 0) errors.customers = customers.errors.slice(0, 2).join(" ");
   }
@@ -101,7 +102,7 @@ export function NewPackRunPage() {
   const key = useRef(newKey());
 
   function update(patch: Partial<PackRunValues>) {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     key.current = newKey();
   }
 
@@ -183,7 +184,15 @@ export function NewPackRunPage() {
           </div>
           {target ? (
             <>
-              {text("legalEntityId", "Legal entity id", "The Passage legal entity the open items belong to. You must be scoped to it.", { maxLength: 36 })}
+              <LookupFormField
+                id="run-legalEntityId"
+                label="Legal entity"
+                entity="legalEntity"
+                hint="The Passage legal entity the open items belong to. You must be scoped to it."
+                value={values.legalEntityId}
+                error={errors.legalEntityId}
+                onChange={(legalEntityId) => update({ legalEntityId })}
+              />
               {text("importSource", "Import source", "How receivables keys the items with the legacy id. Default: the system and company, such as ax2012.usmf.", { maxLength: 40 }, true)}
               <div className={styles.wide}>
                 <FormField id="run-customers" label="Customers" hint="One per line: legacyParty=Passage customer id. A party that is already a UUID needs no line." error={errors.customers} optional>

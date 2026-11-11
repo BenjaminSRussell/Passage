@@ -15,6 +15,7 @@ The repository README explains the dev proxy and how to point it at running serv
 ## Docs
 
 - [docs/design-system.md](docs/design-system.md): tokens, layout, primitives and accessibility rules.
+- [docs/accessibility-conformance-report.md](docs/accessibility-conformance-report.md): the WCAG 2.2 AA conformance report (draft), with the evidence for each criterion and the known gaps.
 - [docs/ux-writing.md](docs/ux-writing.md): voice, sentence case, task verbs, the error message pattern and the glossary.
 - [src/shell/README.md](src/shell/README.md): the shell host and what it still needs.
 

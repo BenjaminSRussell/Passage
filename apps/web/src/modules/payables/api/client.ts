@@ -63,6 +63,8 @@ export interface Proposal extends ProposalSummary {
   runId: string;
   createdAt: string;
   approvedAt?: string;
+  /** The payment run started from the proposal; present once a run starts and kept when it is paid or failed. */
+  paymentRunId?: string;
   totalWithheld?: Record<string, string>;
   excludedItems?: ExcludedItem[];
   groups: ProposalGroup[];
@@ -125,6 +127,27 @@ export function holdOpenItem(id: string, reason: string): Promise<OpenItem> {
 
 export function releaseOpenItem(id: string): Promise<OpenItem> {
   return send("POST", `/open-items/${encodeURIComponent(id)}:release`, {});
+}
+
+/** A vendor whose payments are on hold in one legal entity (the service calls it a vendor block). */
+export interface VendorBlock {
+  vendorId: string;
+  legalEntityId: string;
+  reason: string;
+  blockedBy?: string;
+  blockedAt: string;
+}
+
+export function listVendorBlocks(legalEntityId: string | undefined): Promise<{ items: VendorBlock[] }> {
+  return send("GET", `/vendor-blocks${query({ legal_entity: legalEntityId })}`);
+}
+
+export function blockVendor(vendorId: string, legalEntityId: string | undefined, reason: string): Promise<unknown> {
+  return send("POST", `/vendors/${encodeURIComponent(vendorId)}:block`, { ...(legalEntityId ? { legalEntityId } : {}), reason });
+}
+
+export function unblockVendor(vendorId: string, legalEntityId: string | undefined): Promise<unknown> {
+  return send("POST", `/vendors/${encodeURIComponent(vendorId)}:unblock`, legalEntityId ? { legalEntityId } : {});
 }
 
 export function listProposals(q: ProposalQuery): Promise<Page<ProposalSummary>> {
@@ -201,6 +224,47 @@ export function failRun(id: string, reason: string): Promise<PaymentRun> {
 
 export async function downloadRunFile(id: string): Promise<Blob> {
   const res = await apiFetch(`${BASE}/payment-runs/${encodeURIComponent(id)}/file`, { headers: { Accept: "application/xml" } });
+  if (!res.ok) throw await readProblem(res);
+  return res.blob();
+}
+
+export interface RemittanceLine {
+  openItemId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  openAmount: string;
+  discount: string;
+  withheld: string;
+  paid: string;
+}
+
+export interface RemittancePayment {
+  endToEndId: string;
+  currency: string;
+  paymentMethod: PaymentMethod;
+  amount: string;
+  lines: RemittanceLine[];
+}
+
+/** What one vendor was paid in a completed payment run: each payment and the invoices it settled. */
+export interface RemittanceAdvice {
+  runId: string;
+  proposalId: string;
+  legalEntityId: string;
+  vendorId: string;
+  paymentDate: string;
+  completedAt?: string;
+  payments: RemittancePayment[];
+}
+
+const remittancePath = (runId: string, vendorId: string) => `/payment-runs/${encodeURIComponent(runId)}/remittances/${encodeURIComponent(vendorId)}`;
+
+export function getRemittance(runId: string, vendorId: string): Promise<RemittanceAdvice> {
+  return send("GET", remittancePath(runId, vendorId));
+}
+
+export async function downloadRemittanceCsv(runId: string, vendorId: string): Promise<Blob> {
+  const res = await apiFetch(`${BASE}${remittancePath(runId, vendorId)}?format=csv`, { headers: { Accept: "text/csv" } });
   if (!res.ok) throw await readProblem(res);
   return res.blob();
 }

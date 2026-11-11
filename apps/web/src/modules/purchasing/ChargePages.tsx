@@ -517,7 +517,7 @@ export function ChargeCodeDetailPage() {
 }
 
 const keyLabel = (a: AutoCharge) =>
-  a.accountCode === "ALL" ? "Every vendor" : a.accountCode === "GROUP" ? `Vendor group ${(a.accountId ?? "").slice(0, 8)}` : <Named entity="vendor" id={a.accountId} />;
+  a.accountCode === "ALL" ? "Every vendor" : a.accountCode === "GROUP" ? <Named entity="vendorGroup" id={a.accountId} fallback="Vendor group" /> : <Named entity="vendor" id={a.accountId} />;
 
 const itemLabel = (a: AutoCharge) =>
   a.itemCode === "PRODUCT" ? <Named entity="product" id={a.itemId} /> : a.itemCode === "GROUP" ? `Product group ${(a.itemId ?? "").slice(0, 8)}` : "Whole order";

@@ -140,7 +140,7 @@ const requisitions = table<Requisition>([
     4,
     "APPROVED",
     9,
-    [rline(1, "FST-KIT-A", 300, 10), rline(2, "RM-SS316-BAR", 600, 14)],
+    [rline(1, "FST-KIT-A", 300, 10, { status: "CONSOLIDATED", po: { id: uid(K_PO, 6), lineNo: 1 } }), rline(2, "RM-SS316-BAR", 600, 14)],
     2,
     [
       hist(4, 0, "SUBMITTED", "DRAFT", "IN_REVIEW", 8.9),
@@ -662,5 +662,7 @@ route("GET", `${BASE}/trade-agreements/{id}`, ({ params }) => {
 
 // Exported for the receiving handler: purchase orders are the source of what arrives.
 export const purchaseOrders = pos;
+// The release runs (procurement.ts) turn approved requisition lines into draft orders.
+export { requisitions };
 export { po as newPurchaseOrder, pline as newPurchaseLine };
 export { etagOf };

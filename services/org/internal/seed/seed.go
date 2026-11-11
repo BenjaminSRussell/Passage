@@ -120,9 +120,35 @@ func Run(ctx context.Context, st store.Store, tenantID, name string) (Result, er
 	if name != DemoManufacturer {
 		return Result{}, fmt.Errorf("unknown seed package %q; known packages: %s", name, DemoManufacturer)
 	}
-	r := &runner{ctx: tenant.With(ctx, tenant.Principal{TenantID: tenantID, Duties: map[string]struct{}{tenant.DutyAllScope: {}}}), st: st}
+	r := &runner{ctx: seedContext(ctx, tenantID, ""), st: st}
 	err := r.run()
 	return r.res, err
+}
+
+// ResetResult is what a reset removed and what the load after it created.
+type ResetResult struct {
+	Removed int
+	Result
+}
+
+// Reset removes what the package created in the tenant, found by the idempotency key namespace only this loader
+// writes, and loads the package again. The removal is one transaction that refuses, deleting nothing, when records
+// the package did not create hang off it. The load after it is the same idempotent load as Run, so if it stops
+// part way a repeat of Reset or Run completes it.
+func Reset(ctx context.Context, st store.Store, tenantID, actor, name string) (ResetResult, error) {
+	if name != DemoManufacturer {
+		return ResetResult{}, fmt.Errorf("unknown seed package %q; known packages: %s", name, DemoManufacturer)
+	}
+	removed, err := st.RemoveDemoCompany(seedContext(ctx, tenantID, actor), keyPrefix, actor)
+	if err != nil {
+		return ResetResult{}, err
+	}
+	loaded, err := Run(ctx, st, tenantID, name)
+	return ResetResult{Removed: removed.Removed(), Result: loaded}, err
+}
+
+func seedContext(ctx context.Context, tenantID, actor string) context.Context {
+	return tenant.With(ctx, tenant.Principal{TenantID: tenantID, UserID: actor, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 func (r *runner) run() error {

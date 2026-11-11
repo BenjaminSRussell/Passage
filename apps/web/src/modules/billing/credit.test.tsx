@@ -319,9 +319,9 @@ describe("Installment plan on a free-text invoice", () => {
     fireEvent.change(first, { target: { value: "30" } });
     fireEvent.change(second, { target: { value: "60" } });
     fireEvent.change(screen.getAllByLabelText(/Due after \(days\)/)[1], { target: { value: "30" } });
-    fill("Legal entity id", LE);
-    fill("Customer id", CUST);
-    fill("Invoice account id", ACCT);
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
+    fill("Invoice account", ACCT);
     fill("Description", "Machine");
     fill("Unit price", "1000.01");
     fill("Revenue account", "4000");

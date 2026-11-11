@@ -32,6 +32,8 @@ import { CURRENCY, dateTime, money, UUID, validAmount } from "./format";
 import { CommandFailure, Detail, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -57,7 +59,7 @@ export function ChecksPage() {
     event.preventDefault();
     const value = draft.trim();
     if (!UUID.test(value)) {
-      setError("Enter the bank account id (a UUID).");
+      setError("Choose a bank account.");
       return;
     }
     setError(undefined);
@@ -78,8 +80,8 @@ export function ChecksPage() {
       />
       <Card>
         <form className={styles.toolbar} onSubmit={choose} noValidate>
-          <FormField id="ck-account" label="Bank account id" error={error}>
-            {(c) => <Input {...c} className={styles.mono} value={draft} onChange={(e) => setDraft(e.target.value)} invalid={Boolean(error)} />}
+          <FormField id="ck-account" label="Bank account" error={error}>
+            {(c) => <EntityLookup {...c} entity="bankAccount" value={draft} onChange={(e) => setDraft(e.target.value)} invalid={Boolean(error)} />}
           </FormField>
           <Button type="submit">Show checks</Button>
         </form>
@@ -115,7 +117,7 @@ export interface CheckDraft {
 /** The checks the service applies (COM-0001), so most mistakes are caught before the round trip. */
 export function validateCheck(v: CheckDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.bankAccountId.trim())) errors.bankAccountId = "Enter the bank account id (a UUID).";
+  if (!UUID.test(v.bankAccountId.trim())) errors.bankAccountId = "Choose the bank account.";
   const payee = v.payee.trim();
   if (payee.length < 1 || payee.length > 140) errors.payee = "Enter the payee, up to 140 characters.";
   const currency = v.currency.trim();
@@ -188,7 +190,16 @@ export function NewCheckPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {field("bankAccountId", "Bank account id")}
+          <LookupFormField
+            id="ck-bankAccountId"
+            label="Bank account"
+            entity="bankAccount"
+            value={values.bankAccountId}
+            error={errors.bankAccountId}
+            onChange={(bankAccountId, picked) =>
+              setValues((prev) => ({ ...prev, bankAccountId, currency: picked?.currency && prev.currency.trim() === "" ? picked.currency : prev.currency }))
+            }
+          />
           {field("payee", "Payee", undefined, false)}
           {field("amount", "Amount", "For example 1250.00.")}
           {field("currency", "Currency", "The bank account's currency.")}

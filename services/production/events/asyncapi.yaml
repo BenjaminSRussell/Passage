@@ -277,13 +277,15 @@ components:
     orderCreated:
       name: created
       title: Production order created
-      description: 'Emitted when an order is committed, and for the new order of a split (originType Split and originId the original, or a rework order of the same reference; FR-21.15) (consumers: planning, analytics).'
+      description: 'Emitted when an order is committed, and for the new order of a split (originType Split and originId the original, or a rework order of the same reference; FR-21.15) (consumers: planning, analytics, search).'
       payload:
         type: object
-        required: [orderId, orderNumber, productId, quantity, siteId, deliveryDate, originType, originId, configurationId, reworkReference]
+        required: [orderId, orderNumber, legalEntityId, status, productId, quantity, siteId, deliveryDate, originType, originId, configurationId, reworkReference]
         properties:
           orderId: { type: string, format: uuid }
           orderNumber: { type: string }
+          legalEntityId: { type: string, format: uuid, description: 'The order''s legal entity; the search index scopes the order by it (#506).' }
+          status: { type: string, description: 'The status the order was committed in (Created).' }
           productId: { type: string, format: uuid }
           quantity: { type: string }
           siteId: { type: string, format: uuid }
@@ -315,13 +317,15 @@ components:
         Emitted by every command that changes the status, and by every report as finished
         (which changes the reported quantities), and for each order a merge cancels into
         another (FR-21.15). A re-estimate that keeps the status emits nothing (consumers:
-        planning, scheduling, shop floor, lean). A bulk status update (FR-21.12) emits the
+        planning, scheduling, shop floor, lean, search). A bulk status update (FR-21.12) emits the
         same event per order it moves.
       payload:
         type: object
-        required: [orderId, from, to, quantity, qtyRaf, qtyError, startDate, endDate, actor, occurredAt]
+        required: [orderId, orderNumber, legalEntityId, from, to, quantity, qtyRaf, qtyError, startDate, endDate, actor, occurredAt]
         properties:
           orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          legalEntityId: { type: string, format: uuid, description: 'The order''s legal entity; the search index scopes the order by it (#506).' }
           from: { type: string }
           to: { type: string }
           quantity: { type: string }

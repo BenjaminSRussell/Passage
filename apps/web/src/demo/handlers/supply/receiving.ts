@@ -69,9 +69,12 @@ const receipts = table<Receipt>([
 
 route("GET", `${BASE}/receipts`, ({ query }) => {
   const state = query.get("state");
+  const vendorId = query.get("vendorId");
+  const from = query.get("from");
+  const to = query.get("to");
   const items = receipts
     .all()
-    .filter((r) => !state || r.state === state)
+    .filter((r) => (!state || r.state === state) && (!vendorId || r.vendorId === vendorId) && (!from || r.receiptDate >= from) && (!to || r.receiptDate <= to))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.receiptNumber.localeCompare(a.receiptNumber))
     .map((r) => ({ ...r, lines: [] }));
   return { items };

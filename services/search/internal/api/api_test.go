@@ -27,14 +27,18 @@ const (
 	dutyParty   = "party.read"
 	dutyProduct = "product.read"
 	dutyPO      = "procurement.purchase-order.inquire"
+	dutyMO      = "production.order.read"
+	dutyWorker  = "hr.worker.inquire"
 )
 
 type harness struct {
-	t      *testing.T
-	h      http.Handler
-	api    *API
-	poID   map[string]string
-	partID string
+	t        *testing.T
+	h        http.Handler
+	api      *API
+	poID     map[string]string
+	moID     map[string]string
+	partID   string
+	workerID string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -44,7 +48,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("migrate: %v", err)
 	}
 	st := store.New(app)
-	hr := &harness{t: t, poID: map[string]string{}, partID: ids.New()}
+	hr := &harness{t: t, poID: map[string]string{}, moID: map[string]string{}, partID: ids.New(), workerID: ids.New()}
 	seed := func(le string, r store.Record) {
 		r.At = time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
 		ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "seed", Duties: map[string]struct{}{}})
@@ -57,6 +61,12 @@ func newHarness(t *testing.T) *harness {
 		hr.poID[w.le] = id
 		seed(w.le, store.Record{Type: store.TypePurchaseOrder, ID: id, LegalEntityID: w.le, Number: w.number, Title: w.number, Status: "CONFIRMED"})
 	}
+	for _, w := range []struct{ le, number string }{{entityA, "MO-ALPHA"}, {entityB, "MO-BRAVO"}} {
+		id := ids.New()
+		hr.moID[w.le] = id
+		seed(w.le, store.Record{Type: store.TypeProductionOrder, ID: id, LegalEntityID: w.le, Number: w.number, Title: w.number, Status: "RELEASED"})
+	}
+	seed("", store.Record{Type: store.TypeWorker, ID: hr.workerID, Number: "WRK-ALPHA", Title: "WRK-ALPHA", Subtitle: "employee"})
 	seed("", store.Record{Type: store.TypeParty, ID: hr.partID, Number: "P-ALPHA", Title: "Alpha Supplies", Subtitle: "organization", Status: "active"})
 	seed("", store.Record{Type: store.TypeProduct, ID: ids.New(), Number: "SKU-ALPHA", Title: "Alpha Widget", Status: "active"})
 	hr.api = New(st)
@@ -118,6 +128,48 @@ func TestEntityANeverSeesEntityBRecords(t *testing.T) {
 		if !slices.Equal(got, tc.want) && (len(got) != 0 || len(tc.want) != 0) {
 			t.Errorf("%s sees %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+// Production orders (#506-2) follow the same legal-entity rule as purchase
+// orders: entity A never sees entity B's order, and the link opens the order.
+func TestEntityANeverSeesEntityBProductionOrders(t *testing.T) {
+	h := newHarness(t)
+	for name, tc := range map[string]struct {
+		scopes string
+		want   []string
+	}{
+		"entity A":  {entityA, []string{"MO-ALPHA"}},
+		"entity B":  {entityB, []string{"MO-BRAVO"}},
+		"both":      {entityA + "," + entityB, []string{"MO-ALPHA", "MO-BRAVO"}},
+		"no entity": {"", nil},
+	} {
+		rs := h.results("q=mo-", tc.scopes, dutyMO)
+		if got := field(rs, "number"); !slices.Equal(got, tc.want) && (len(got) != 0 || len(tc.want) != 0) {
+			t.Errorf("%s sees %v, want %v", name, got, tc.want)
+		}
+	}
+	rs := h.results("q=mo-alpha", entityA, dutyMO)
+	if len(rs) != 1 || rs[0]["type"] != "production_order" || rs[0]["link"] != "/production/"+h.moID[entityA] || rs[0]["legalEntityId"] != entityA {
+		t.Fatalf("production order result %v", rs)
+	}
+	if got := field(h.results("q=mo-alpha", entityA, dutyPO+","+dutyWorker), "type"); slices.Contains(got, "production_order") {
+		t.Errorf("a caller without production.order.read sees types %v", got)
+	}
+}
+
+// Workers are tenant-wide and need hr.worker.inquire; HR events carry no name,
+// so a worker is found by personnel number.
+func TestWorkersNeedTheWorkerInquireDuty(t *testing.T) {
+	h := newHarness(t)
+	for _, scopes := range []string{entityA, entityB} {
+		rs := h.results("q=wrk-", scopes, dutyWorker)
+		if len(rs) != 1 || rs[0]["type"] != "worker" || rs[0]["link"] != "/hr/workers/"+h.workerID || rs[0]["number"] != "WRK-ALPHA" {
+			t.Errorf("scope %s: worker results %v", scopes, rs)
+		}
+	}
+	if got := field(h.results("q=wrk-alpha", entityA, dutyParty+","+dutyMO), "type"); slices.Contains(got, "worker") {
+		t.Errorf("a caller without hr.worker.inquire sees types %v", got)
 	}
 }
 

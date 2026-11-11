@@ -1,7 +1,23 @@
 // Scheduling service (/api/v1/scheduling) for the demo: the resource Gantt and capacity load. Resources and
 // their load come from company.ts (BAL-01 over capacity, MCH-01 near full); the bars are the running and
 // released production orders of the production demo.
-import type { Firm, GanttBar, LoadItem, LoadJob, MoveRequest, MoveResponse, Resource, Run, RunKpis, SchedulingParameters } from "../../../modules/scheduling/api/client";
+import type {
+  BottleneckDetail,
+  BottleneckEpisode,
+  BottleneckWeek,
+  DispatchLine,
+  Firm,
+  GanttBar,
+  LateOrder,
+  LoadItem,
+  LoadJob,
+  MoveRequest,
+  MoveResponse,
+  Resource,
+  Run,
+  RunKpis,
+  SchedulingParameters,
+} from "../../../modules/scheduling/api/client";
 import { reply, route } from "../../backend";
 import { RESOURCES, resourceByCode } from "../../company";
 import { orders as productionOrders } from "./production";
@@ -316,4 +332,149 @@ route("GET", `${BASE}/capacity-load`, (req) => {
     }
   }
   return { items };
+});
+
+// Bottlenecks: weekly load above 100 % for two weeks or more opens an episode. The impeller balancer has been over
+// capacity since last week; the test stand and the CNC cell had episodes that closed.
+const THRESHOLD = 100;
+const CONSECUTIVE = 2;
+const WEEK = 7 * 86_400_000;
+const thisMonday = mondayOf(day(0));
+const weekOf = (w: number) => iso(thisMonday + w * WEEK).slice(0, 10);
+
+/** Weekly load % of a resource, w weeks from this week (negative: past weeks, from the history of closed episodes). */
+function weekLoad(code: string, w: number): number {
+  const r = resourceByCode(code);
+  if (w >= 0) return Math.max(0.2, r.load + WEEK_CURVE[Math.min(w, 7)]) * 100;
+  // Oldest first; the last entry is last week.
+  const past: Record<string, number[]> = { "MCH-01": [0.91, 0.97, 1.04, 1.07, 1.06, 0.95, 0.9, 0.88, 0.93], "TST-01": [0.82, 0.86, 0.9, 0.84, 0.97, 1.03, 1.08, 1.02, 0.94] };
+  const curve = past[code];
+  return (curve ? curve[Math.max(0, curve.length + w)] : r.load + 0.03) * 100;
+}
+
+interface EpisodeSpec {
+  id: string;
+  code: string;
+  from: number;
+  to: number;
+  closed?: number;
+}
+const EPISODES: EpisodeSpec[] = [
+  { id: "BN-0031", code: "BAL-01", from: -1, to: 3 },
+  { id: "BN-0028", code: "TST-01", from: -4, to: -2, closed: -1 },
+  { id: "BN-0024", code: "MCH-01", from: -7, to: -5, closed: -4 },
+];
+
+function episode(s: EpisodeSpec): BottleneckDetail {
+  const r = resourceByCode(s.code);
+  const weeks: BottleneckWeek[] = [];
+  for (let w = s.from - 1; w <= s.to + 1; w++) {
+    const pct = Math.round(weekLoad(s.code, w) * 10) / 10;
+    const open = r.hoursPerDay * 60 * 5;
+    weeks.push({ weekStart: weekOf(w), openMinutes: open, bookedMinutes: Math.round((open * pct) / 100), loadPct: pct, bottleneck: pct > THRESHOLD && w >= s.from && w <= s.to });
+  }
+  const flagged = weeks.filter((w) => w.bottleneck);
+  const current = flagged.filter((w) => w.weekStart >= weekOf(0));
+  const open = s.closed === undefined;
+  return {
+    id: s.id,
+    resourceId: r.id,
+    resourceCode: r.code,
+    firstWeek: weekOf(s.from),
+    flaggedWeeks: flagged.length,
+    peakLoadPct: Math.max(0, ...flagged.map((w) => w.loadPct)),
+    thresholdPct: THRESHOLD,
+    consecutiveWeeks: CONSECUTIVE,
+    detectedAt: iso(thisMonday + (s.from + 1) * WEEK + 2 * 3_600_000),
+    closedAt: open ? null : iso(thisMonday + (s.closed ?? 0) * WEEK + 2 * 3_600_000),
+    currentFlaggedWeeks: open ? current.length : 0,
+    currentPeakLoadPct: open ? Math.max(0, ...current.map((w) => w.loadPct)) : 0,
+    weeks,
+  };
+}
+
+route("GET", `${BASE}/bottlenecks`, (req) => {
+  const status = req.query.get("status") ?? "open";
+  const items: BottleneckEpisode[] = EPISODES.map(episode)
+    .filter((e) => status === "all" || (status === "open" ? e.closedAt === null : e.closedAt !== null))
+    .map(({ weeks: _weeks, ...e }) => (void _weeks, e));
+  return { items };
+});
+route("GET", `${BASE}/bottlenecks/{id}`, (req) => {
+  const s = EPISODES.find((e) => e.id === req.params.id);
+  return s ? episode(s) : reply.problem(404, "SCHED-0404", "Bottleneck not found.");
+});
+route("POST", `${BASE}/capacity-load:refresh`, () => ({ resources: RESOURCES.length, loadRows: RESOURCES.length * 13, openEpisodes: EPISODES.filter((e) => e.closed === undefined).length }));
+
+// Late orders: orders whose last job ends after the due date, from the Gantt's bars, and the estimated pump order
+// whose test step found no slot on the test stand inside the horizon.
+const DEPENDENTS: Record<string, number> = { "MO-24618": 2 };
+route("GET", `${BASE}/late-orders`, (req) => {
+  const min = Number(req.query.get("minLateMinutes") ?? 1);
+  const byOrder = new Map<string, GanttBar[]>();
+  for (const b of bars) byOrder.set(b.orderId, [...(byOrder.get(b.orderId) ?? []), b]);
+  const items: LateOrder[] = [];
+  for (const [orderId, list] of byOrder) {
+    const late = Math.max(...list.map((b) => b.lateMinutes));
+    if (late < min) continue;
+    const order = productionOrders.get(orderId);
+    items.push({
+      orderId,
+      dueAt: order?.deliveryDate ? `${order.deliveryDate}T23:59:59Z` : null,
+      plannedStart: list.map((b) => b.start).sort()[0] ?? null,
+      plannedEnd: list.map((b) => b.end).sort().at(-1) ?? null,
+      lateMinutes: late,
+      lateOperations: new Set(list.filter((b) => b.lateMinutes > 0).map((b) => b.operNumber)).size,
+      unplacedOperations: 0,
+      operations: order?.operations.length ?? new Set(list.map((b) => b.operNumber)).size,
+      firmed: list.some((b) => firmedJobs.get(b.jobId)?.firmed ?? b.firmed),
+      dependentOrders: DEPENDENTS[orderId] ?? 0,
+    });
+  }
+  items.sort((a, b) => b.lateMinutes - a.lateMinutes);
+  const unplaced = productionOrders.get("MO-24630");
+  if (unplaced) {
+    items.push({ orderId: unplaced.id, dueAt: `${unplaced.deliveryDate}T23:59:59Z`, plannedStart: hour(8 * 24 + 6), plannedEnd: null, lateMinutes: 0, lateOperations: 0, unplacedOperations: 1, operations: unplaced.operations.length, firmed: false, dependentOrders: 0 });
+  }
+  return { items, truncated: false };
+});
+
+// The dispatch list: the jobs booked on one resource in a window of its local day, numbered in start order.
+route("GET", `${BASE}/dispatch-list`, (req) => {
+  const r = resources.find((x) => x.id === req.query.get("resourceId"));
+  if (!r) return reply.problem(404, "SCHED-0404", "Resource not found.");
+  const date = req.query.get("date") ?? day(0);
+  const startMinute = Number(req.query.get("startMinute") ?? 0);
+  const endMinute = Number(req.query.get("endMinute") ?? 1440);
+  const midnight = Date.parse(`${date}T00:00:00Z`);
+  const from = midnight + startMinute * MIN;
+  const to = midnight + endMinute * MIN;
+  const lines: DispatchLine[] = bars
+    .filter((b) => b.resourceId === r.id && Date.parse(b.end) > from && Date.parse(b.start) < to)
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .map((b, i) => ({
+      sequence: i + 1,
+      jobId: b.jobId,
+      orderId: b.orderId,
+      operNumber: b.operNumber,
+      segment: b.segment,
+      role: "primary",
+      start: b.start,
+      end: b.end,
+      minutesInWindow: Math.round((Math.min(Date.parse(b.end), to) - Math.max(Date.parse(b.start), from)) / MIN),
+      changeoverMinutes: 0,
+      finite: true,
+      firmed: firmedJobs.get(b.jobId)?.firmed ?? b.firmed,
+      lateMinutes: b.lateMinutes,
+    }));
+  return {
+    resource: { id: r.id, code: r.code, name: r.name, timeZone: r.timeZone },
+    date,
+    days: Math.max(1, Math.ceil((endMinute - startMinute) / 1440)),
+    windowStart: iso(from),
+    windowEnd: iso(to),
+    totalMinutes: lines.reduce((n, l) => n + l.minutesInWindow, 0),
+    lines,
+    truncated: false,
+  };
 });

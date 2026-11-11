@@ -233,3 +233,117 @@ for (const decision of ["apply", "dismiss"] as const) {
 
 route("GET", `${BASE}/plans/{code}/versions/{n}`, (req) => versions.find((v) => String(v.number) === req.params.n) ?? reply.problem(404, "PLAN-0404", "Version not found."));
 route("GET", `${BASE}/plans/{code}/versions`, (req) => ({ items: versions.slice(0, Number(req.query.get("limit") ?? 50)) }));
+
+// The BASE demand forecast: six months of the pumps at the Cedar Rapids plant. The next quarter is the consensus
+// the planner submitted, waiting to be published; later months are the statistical baseline. Open sales reduce it.
+type ForecastLineRow = { itemId: string; siteId: string; periodStart: string; periodEnd: string; source: "statistical" | "manual" | "consensus"; qty: string; salesQty: string; reducedQty: string };
+const forecastModel = {
+  code: "BASE",
+  version: 7,
+  reductionPrinciple: "transactions" as const,
+  reductionPercent: "0",
+  status: "submitted" as "draft" | "submitted" | "published",
+  submittedBy: "Aisha Grant" as string | null,
+  decidedBy: USER.name as string | null,
+  publishedAt: at(-31) as string | null,
+};
+const MONTHLY: Record<string, number[]> = {
+  "CP-200": [118, 124, 96, 132, 140, 151],
+  "CP-400": [34, 38, 30, 41, 44, 46],
+  "SP-150": [210, 185, 160, 240, 265, 280],
+  "DP-100": [42, 45, 40, 48, 52, 50],
+  "BP-300": [3, 2, 4, 3, 5, 4],
+};
+const OPEN_SALES: Record<string, number[]> = { "CP-200": [64, 22, 0], "CP-400": [18, 6, 0], "SP-150": [95, 30, 8], "DP-100": [25, 4, 0], "BP-300": [2, 1, 0] };
+const monthStart = (offset: number) => {
+  const d = new Date(`${day(0).slice(0, 7)}-01T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + offset);
+  return d.toISOString().slice(0, 10);
+};
+const monthEnd = (offset: number) => new Date(Date.parse(`${monthStart(offset + 1)}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+const forecastLines: ForecastLineRow[] = Object.entries(MONTHLY).flatMap(([number, qty]) =>
+  qty.map((q, m) => {
+    const sales = OPEN_SALES[number][m] ?? 0;
+    return { itemId: itemId(number), siteId: PLANT.id, periodStart: monthStart(m), periodEnd: monthEnd(m), source: m < 3 ? ("consensus" as const) : ("statistical" as const), qty: dec(q, 0), salesQty: dec(sales, 0), reducedQty: dec(Math.max(0, q - sales), 0) };
+  }),
+);
+
+route("GET", `${BASE}/forecasts/{code}/lines`, (req) => {
+  if (req.params.code !== "BASE") return reply.problem(404, "PLAN-FORECAST-NOT-FOUND", `Forecast model ${req.params.code} has no lines yet.`);
+  let rows = forecastLines;
+  if (req.query.get("itemId")) rows = rows.filter((l) => l.itemId === req.query.get("itemId"));
+  if (req.query.get("siteId")) rows = rows.filter((l) => l.siteId === req.query.get("siteId"));
+  return { model: forecastModel, items: rows.slice(0, Number(req.query.get("limit") ?? 500)) };
+});
+route("PUT", `${BASE}/forecasts/{code}/lines`, (req) => {
+  if (forecastModel.status !== "draft") return reply.problem(409, "PLAN-CONSENSUS-STATE", "Only a draft forecast accepts changes; reject the submitted consensus first.");
+  const body = req.body as { lines: { itemId: string; siteId: string; periodStart: string; periodEnd: string; qty: string; salesQty?: string }[] };
+  for (const cell of body.lines ?? []) {
+    const row = forecastLines.find((l) => l.itemId === cell.itemId && l.siteId === cell.siteId && l.periodStart === cell.periodStart);
+    const sales = Number(cell.salesQty ?? row?.salesQty ?? 0);
+    const next = { itemId: cell.itemId, siteId: cell.siteId, periodStart: cell.periodStart, periodEnd: cell.periodEnd, source: "manual" as const, qty: dec(Number(cell.qty), 0), salesQty: dec(sales, 0), reducedQty: dec(Math.max(0, Number(cell.qty) - sales), 0) };
+    if (row) Object.assign(row, next);
+    else forecastLines.push(next);
+  }
+  forecastModel.version += 1;
+  return { model: forecastModel, updated: body.lines?.length ?? 0 };
+});
+for (const step of ["submit", "publish", "reject"] as const) {
+  route("POST", `${BASE}/forecasts/{code}:${step}`, () => {
+    const need = step === "submit" ? "draft" : "submitted";
+    if (forecastModel.status !== need) return reply.problem(409, "PLAN-CONSENSUS-STATE", `The forecast is ${forecastModel.status}; it must be ${need} to ${step}.`);
+    forecastModel.version += 1;
+    if (step === "submit") Object.assign(forecastModel, { status: "submitted", submittedBy: USER.name });
+    if (step === "publish") Object.assign(forecastModel, { status: "published", decidedBy: USER.name, publishedAt: at(0) });
+    if (step === "reject") Object.assign(forecastModel, { status: "draft", decidedBy: USER.name });
+    return { model: forecastModel, publication: null };
+  });
+}
+
+// What-if scenarios of the MAIN plan: a demand surge from the utilities, a motor supplier slipping, a quiet winter.
+interface ScenarioRow {
+  id: string;
+  code: string;
+  version: number;
+  planCode: string;
+  name: string;
+  demandFactor: string;
+  itemFactors: { itemId: string; factor: string }[];
+  addedDemand: { itemId: string; date: string; qty: string }[];
+  leadTimeOverrides: { itemId: string; leadTimeDays: number }[];
+  active: boolean;
+}
+const scenarios = table<ScenarioRow>([
+  { id: "SC-UTILITY-SURGE", code: "UTILITY-SURGE", version: 3, planCode: "MAIN", name: "Municipal stimulus orders: CP-400 demand up 25 %", demandFactor: "1", itemFactors: [{ itemId: itemId("CP-400"), factor: "1.25" }, { itemId: itemId("CP-200"), factor: "1.10" }], addedDemand: [{ itemId: itemId("BP-300"), date: day(45), qty: "4" }], leadTimeOverrides: [], active: true },
+  { id: "SC-MOTOR-DELAY", code: "MOTOR-DELAY", version: 2, planCode: "MAIN", name: "Volta Motor Works lead time slips to six weeks", demandFactor: "1", itemFactors: [], addedDemand: [], leadTimeOverrides: [{ itemId: itemId("MTR-15HP-TEFC"), leadTimeDays: 42 }, { itemId: itemId("MTR-5HP-TEFC"), leadTimeDays: 35 }], active: true },
+  { id: "SC-SECOND-SHIFT", code: "BAL-2ND-SHIFT", version: 1, planCode: "MAIN", name: "Second balancing shift: impeller lead time down to 2 days", demandFactor: "1", itemFactors: [], addedDemand: [], leadTimeOverrides: [{ itemId: itemId("SA-IMP-06"), leadTimeDays: 2 }], active: true },
+  { id: "SC-SLOW-WINTER", code: "SLOW-WINTER", version: 4, planCode: "MAIN", name: "Quiet winter: all demand down 15 %", demandFactor: "0.85", itemFactors: [], addedDemand: [], leadTimeOverrides: [], active: false },
+]);
+let simulationSeq = 100;
+route("GET", `${BASE}/scenarios`, (req) => {
+  const plan = req.query.get("planCode");
+  return { items: scenarios.all().filter((s) => !plan || s.planCode === plan) };
+});
+route("POST", `${BASE}/scenarios`, (req) => {
+  const body = req.body as Omit<ScenarioRow, "id" | "version">;
+  if (scenarios.all().some((s) => s.code === body.code)) return reply.problem(409, "PLAN-SCENARIO-EXISTS", `Scenario ${body.code} already exists.`);
+  return reply.created(scenarios.insert({ ...body, id: `SC-${body.code}`, version: 1 }));
+});
+route("POST", `${BASE}/scenarios/{code}:run`, (req) => {
+  const s = scenarios.all().find((x) => x.code === req.params.code);
+  if (!s) return reply.problem(404, "PLAN-0404", "Scenario not found.");
+  simulationSeq += 1;
+  const extra = s.itemFactors.length * 2 + s.addedDemand.length + s.leadTimeOverrides.length * 3;
+  const run: PlanVersion = { ...version, id: `SIM-${simulationSeq}`, number: simulationSeq, status: "complete", kind: "simulation", scenarioCode: s.code, asOf: at(0), plannedOrders: version.plannedOrders + extra, messages: version.messages + Math.ceil(extra / 2), durationMs: 1650 + extra * 40, approvedFirmed: 0 };
+  return reply.created(run);
+});
+route("GET", `${BASE}/scenarios/{code}`, (req) => {
+  const s = scenarios.all().find((x) => x.code === req.params.code);
+  return s ? reply.versioned(s, s.version) : reply.problem(404, "PLAN-0404", "Scenario not found.");
+});
+route("PUT", `${BASE}/scenarios/{code}`, (req) => {
+  const s = scenarios.all().find((x) => x.code === req.params.code);
+  if (!s) return reply.problem(404, "PLAN-0404", "Scenario not found.");
+  const next = scenarios.update(s.id, { ...(req.body as Partial<ScenarioRow>), id: s.id, code: s.code, version: s.version + 1 })!;
+  return reply.versioned(next, next.version);
+});

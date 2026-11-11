@@ -184,12 +184,13 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "AP-EMP-002": { message: "This worker is already mapped to another vendor.", action: "Change the existing mapping instead." },
   "AP-FIL-001": { message: "The payment file isn't valid.", action: "Check the payments in the run, then generate the file again." },
   "AP-FIL-002": { message: "The payment file failed the bank format check.", action: "Check the bank details of the payments listed, then generate the file again." },
+  "PRN-0008": { message: "The document has a value the PDF can't show: a required value is empty, or a text is too long.", action: "Open Details to see which value it is, correct it on the document and download the PDF again." },
+  "PRN-0009": { message: "This document has more lines than one PDF can hold.", action: "A PDF holds up to 500 lines. Contact support with the details below if you need this document as one file." },
   "PRN-0003": { message: "A printer with this code is already registered.", action: "Choose another code, or edit the existing printer." },
   "PRN-0006": { message: "That queue already has a printer at this failover position.", action: "Pick a free position in the queue, or move the other printer first." },
   "PRN-0010": { message: "That printer wasn't found, or it was already retired.", action: "Reload the printers page to see the current list." },
   "PRN-0011": { message: "That routing rule wasn't found.", action: "Reload the routing rules to see the current list." },
   "MOB-0112": { message: "No printer queue is set up for this document.", action: "Add a routing rule for the document type, or choose a queue." },
-  "PRN-0008": { message: "The document has content the PDF layout cannot show.", action: "Check the document for unusual characters or empty required fields, then try again." },
   "AP-OPN-001": { message: "A settled or reversed open item can't be held or released.", action: "Reload the page to see the item's current state." },
   "AP-OPB-001": { message: "Some opening balance rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
   "AP-OPB-002": { message: "This opening balance batch was already loaded with different content.", action: "Use a new batch name, or send exactly what was loaded before." },
@@ -209,6 +210,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "AP-RUN-015": { message: "An open item changed after the proposal was approved.", action: "Create and approve a new proposal." },
   "AP-RUN-016": { message: "A payment run needs a signed-in user.", action: "Sign in again, then try again." },
   "AP-RUN-017": { message: "A payee isn't in the vendor master.", action: "Create the vendor, or remove the payment from the run." },
+  "AP-RUN-018": { message: "A remittance advice is available only once the payment run is complete.", action: "Complete the run, then open the remittance advice again." },
   "AP-STS-001": { message: "The bank rejected the payment.", action: "Check the bank's reason, correct the payment and send it again." },
   "AP-STS-002": { message: "The bank reported a payment we don't recognize.", action: "Contact support with the details below." },
   "PAY-0001": { message: "Some of the payment details aren't valid.", action: "Check the fields marked in the form and try again." },
@@ -950,6 +952,17 @@ const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0143": { message: "Someone else changed the worker after you opened it.", action: RELOAD_AND_REDO },
 };
 
+const companySetup: Record<string, ProblemCatalogEntry> = {
+  "ORG-0403": {
+    message: "Only a tenant administrator whose access covers every legal entity can load or reset the demo company.",
+    action: "Ask a tenant administrator to do this.",
+  },
+  "ORG-DEMO-IN-USE": {
+    message: "The demo company wasn't reset, because records that are not part of the demo have been added under it. Nothing was removed.",
+    action: "Open Details to see what was added. Remove those records first, or keep the demo company as it is.",
+  },
+};
+
 /** Group consolidation and intercompany (wave 40): the codes a person can reach from the group and intercompany screens. */
 const groupFinance: Record<string, ProblemCatalogEntry> = {
   "CNS-0904": { message: "The ownership shares of this unit would add up to more than 100 percent on that date.", action: "Lower the share, or end another holder's holding first." },
@@ -996,6 +1009,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...p2pGaps,
   ...p2pMore,
   ...treasury,
+  ...companySetup,
   ...groupFinance,
   ...shared,
 });

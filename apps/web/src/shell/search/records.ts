@@ -2,7 +2,7 @@ import { z } from "zod";
 import { apiFetch } from "../api/http";
 
 /** The record types the search service indexes (services/search). */
-export const RECORD_TYPES = ["party", "product", "purchase_order", "receipt", "vendor_invoice", "sales_order", "packing_slip", "customer_invoice"] as const;
+export const RECORD_TYPES = ["party", "product", "purchase_order", "receipt", "vendor_invoice", "sales_order", "packing_slip", "customer_invoice", "production_order", "worker"] as const;
 export type RecordType = (typeof RECORD_TYPES)[number];
 
 /** Group headings in the palette; plural, sentence case. */
@@ -15,6 +15,8 @@ export const RECORD_TYPE_LABEL: Record<RecordType, string> = {
   sales_order: "Sales orders",
   packing_slip: "Packing slips",
   customer_invoice: "Customer invoices",
+  production_order: "Production orders",
+  worker: "Workers",
 };
 
 /** Singular name, for screen readers. */
@@ -27,6 +29,8 @@ export const RECORD_TYPE_NOUN: Record<RecordType, string> = {
   sales_order: "Sales order",
   packing_slip: "Packing slip",
   customer_invoice: "Customer invoice",
+  production_order: "Production order",
+  worker: "Worker",
 };
 
 export interface RecordHit {

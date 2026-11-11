@@ -5,6 +5,7 @@ import { createWorker, describeProblem, newKey, type NewWorker, type Problem, ty
 import { UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 interface Values {
   personnelNumber: string;
@@ -28,7 +29,7 @@ export function validateWorker(values: Values): { errors: Errors; input?: NewWor
   const errors: Errors = {};
   const personnelNumber = values.personnelNumber.trim().toUpperCase();
   if (!PERSONNEL_NUMBER.test(personnelNumber)) errors.personnelNumber = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
-  if (!UUID.test(values.partyPersonId.trim())) errors.partyPersonId = "Enter the person's party id (a UUID).";
+  if (!UUID.test(values.partyPersonId.trim())) errors.partyPersonId = "Choose the person's party record.";
   const legalName = values.legalName.trim();
   if (legalName.length < 1 || legalName.length > 200) errors.legalName = "Enter a legal name of up to 200 characters.";
   if (values.userId.trim() && !UUID.test(values.userId.trim())) errors.userId = "Enter the sign-in user id (a UUID), or leave it empty.";
@@ -62,7 +63,7 @@ export function NewWorkerPage() {
   const key = useRef(newKey());
 
   function update(patch: Partial<Values>) {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     key.current = newKey();
   }
 
@@ -120,7 +121,7 @@ export function NewWorkerPage() {
               </Select>
             )}
           </FormField>
-          {field("partyPersonId", "Party id", "The person record this worker belongs to.")}
+          <LookupFormField id="worker-partyPersonId" label="Party" entity="party" allowCreate hint="The person record this worker belongs to." value={values.partyPersonId} error={errors.partyPersonId} onChange={(partyPersonId) => update({ partyPersonId })} />
           {field("legalName", "Legal name", undefined, false, { maxLength: 200 })}
           {field("preferredName", "Preferred name", undefined, true, { maxLength: 200 })}
           {field("userId", "Sign-in user", "The user's id, so they can use self-service.", true)}

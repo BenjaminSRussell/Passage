@@ -54,6 +54,8 @@ var sources = []source{
 	{store.TypeSalesOrder, []string{"sales.order.read"}, "/sales/orders/%s", false},
 	{store.TypePackingSlip, []string{"fulfillment.warehouse.view"}, "/fulfillment/packing-slips/%s", false},
 	{store.TypeCustomerInvoice, []string{"billing.invoice.view"}, "/billing/invoices/%s", false},
+	{store.TypeProductionOrder, []string{"production.order.read"}, "/production/%s", false},
+	{store.TypeWorker, []string{"hr.worker.inquire"}, "/hr/workers/%s", false},
 }
 
 type Searcher interface {
