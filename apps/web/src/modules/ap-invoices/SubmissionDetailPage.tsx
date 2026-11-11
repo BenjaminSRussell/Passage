@@ -8,7 +8,7 @@ import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, DataTable, FormField, PageHeader, Select, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
 import { fetchReceipt, type Receipt } from "../receiving/api/client";
-import { ApiError, fetchInvoices, fetchSubmission, newKey, rejectSubmission, resolveSubmission, type Submission } from "./api/client";
+import { ApiError, fetchInvoices, fetchSubmission, fetchSubmissions, newKey, rejectSubmission, resolveSubmission, type Invoice, type Submission } from "./api/client";
 import { submissionStatusLabel, submissionStatusTone, type InvoiceNavState } from "./parts";
 
 const POST_DUTY = "receiving.vendor-invoice.post";
@@ -156,9 +156,43 @@ function SubmissionDetail({ id }: { id: string }) {
   );
 }
 
+/** The most pages of the vendor's invoices and submissions the picker reads; a vendor with more is told so. */
+const RESOLVE_PAGES = 10;
+const RESOLVE_PAGE_SIZE = 200;
+
+async function allPages<T>(load: (cursor?: string) => Promise<{ items: T[]; nextCursor?: string }>): Promise<{ items: T[]; capped: boolean }> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < RESOLVE_PAGES; page++) {
+    const body = await load(cursor);
+    items.push(...body.items);
+    cursor = body.nextCursor;
+    if (!cursor) return { items, capped: false };
+  }
+  return { items, capped: true };
+}
+
+/**
+ * The invoices that can close a submission, as the service checks them: the vendor's, of the submission's legal entity,
+ * posted or held for audit, and not already closing another submission. The one with the submission's number comes first.
+ */
+export async function closingInvoices(submission: Submission): Promise<{ items: Invoice[]; capped: boolean }> {
+  const vendorId = submission.vendorId;
+  const [posted, held, closed] = await Promise.all([
+    allPages((cursor) => fetchInvoices({ vendorId, status: "POSTED", cursor, limit: RESOLVE_PAGE_SIZE })),
+    allPages((cursor) => fetchInvoices({ vendorId, status: "AUDIT_BLOCKED", cursor, limit: RESOLVE_PAGE_SIZE })),
+    allPages((cursor) => fetchSubmissions({ vendorId, status: "POSTED", cursor, limit: RESOLVE_PAGE_SIZE })),
+  ]);
+  const taken = new Set(closed.items.filter((s) => s.id !== submission.id && s.invoiceId).map((s) => s.invoiceId));
+  const items = [...posted.items, ...held.items]
+    .filter((i) => i.legalEntityId === submission.legalEntityId && !taken.has(i.id))
+    .sort((a, b) => Number(b.invoiceNumber === submission.invoiceNumber) - Number(a.invoiceNumber === submission.invoiceNumber) || b.invoiceDate.localeCompare(a.invoiceDate));
+  return { items, capped: posted.capped || held.capped || closed.capped };
+}
+
 function ResolveCard({ submission, onDone, onFailed }: { submission: Submission; onDone(s: Submission): void; onFailed(problem: unknown): void }) {
-  const invoices = useQuery({ queryKey: ["ap-invoices", "invoices", "of-vendor", submission.vendorId], queryFn: () => fetchInvoices({ vendorId: submission.vendorId, status: "POSTED" }), enabled: Boolean(submission.vendorId) });
-  const options = [...(invoices.data?.items ?? [])].sort((a, b) => Number(b.invoiceNumber === submission.invoiceNumber) - Number(a.invoiceNumber === submission.invoiceNumber));
+  const invoices = useQuery({ queryKey: ["ap-invoices", "closing-invoices", submission.id], queryFn: () => closingInvoices(submission), enabled: Boolean(submission.vendorId) });
+  const options = invoices.data?.items ?? [];
   const [invoiceId, setInvoiceId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -184,13 +218,18 @@ function ResolveCard({ submission, onDone, onFailed }: { submission: Submission;
   return (
     <Card title="Record the posted invoice">
       <form onSubmit={(event) => void submit(event)} noValidate aria-label="Record the posted invoice">
-        <FormField id="submission-invoice" label="Posted vendor invoice" hint="Invoices of this vendor that are posted; the one with the same number is first." error={error || undefined}>
+        <FormField
+          id="submission-invoice"
+          label="Posted vendor invoice"
+          hint={`This vendor's invoices in the submission's legal entity that are posted or held for audit and close no other submission; the one with the same number is first.${invoices.data?.capped ? " Only the newest are listed." : ""}`}
+          error={error || (invoices.isError ? "The vendor's invoices could not be loaded." : undefined)}
+        >
           {(control) => (
             <Select {...control} value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} invalid={Boolean(error)}>
               <option value="">{invoices.isPending ? "Loading invoices…" : "Choose an invoice"}</option>
               {options.map((i) => (
                 <option key={i.id} value={i.id}>
-                  {`${i.invoiceNumber}, ${i.total} ${i.currency}, ${i.invoiceDate}`}
+                  {`${i.invoiceNumber}, ${i.total} ${i.currency}, ${i.invoiceDate}${i.status === "AUDIT_BLOCKED" ? ", held for audit" : ""}`}
                 </option>
               ))}
             </Select>

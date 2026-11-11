@@ -11,6 +11,9 @@ const VENDOR = "11111111-1111-4111-8111-111111111111";
 const ENTITY = "22222222-2222-4222-8222-222222222222";
 const ID = "44444444-4444-4444-8444-444444444444";
 const INVOICE = "33333333-3333-4333-8333-333333333333";
+const HELD = "33333333-3333-4333-8333-333333333334";
+const LINKED = "33333333-3333-4333-8333-333333333335";
+const OTHER_ENTITY_INVOICE = "33333333-3333-4333-8333-333333333336";
 const RECEIPT = "0190a000-0000-7000-8000-000000000010";
 const DUTIES = ["receiving.receipt.maintain", "receiving.ap.inquire", "receiving.vendor-invoice.post"];
 
@@ -60,7 +63,13 @@ describe("invoice submissions", () => {
     server.handler = (url, init) => {
       if (url.pathname === `/api/v1/receiving/invoice-submissions/${ID}:resolve` && init.method === "POST") return json(200, submission({ status: "POSTED", invoiceId: INVOICE }));
       if (url.pathname === `/api/v1/receiving/invoice-submissions/${ID}`) return json(200, submission());
-      if (url.pathname === "/api/v1/receiving/invoices") return json(200, { items: [{ ...posted, lines: [], status: "POSTED", vendorId: VENDOR, legalEntityId: ENTITY, postingDate: "2026-11-09", ledgerId: "l", fiscalPeriodId: "p", ledgerEntryId: "e", createdAt: "2026-11-09T00:00:00Z" }] });
+      if (url.pathname === "/api/v1/receiving/invoices") {
+        const inv = (id: string, number: string, status: Invoice["status"], legalEntityId = ENTITY) => ({ ...posted, id, invoiceNumber: number, lines: [], status, vendorId: VENDOR, legalEntityId, postingDate: "2026-11-09", ledgerId: "l", fiscalPeriodId: "p", ledgerEntryId: "e", createdAt: "2026-11-09T00:00:00Z" });
+        return url.searchParams.get("status") === "AUDIT_BLOCKED"
+          ? json(200, { items: [inv(HELD, "AC-8999", "AUDIT_BLOCKED")] })
+          : json(200, { items: [inv(INVOICE, "AC-9001", "POSTED"), inv(OTHER_ENTITY_INVOICE, "AC-9002", "POSTED", "99999999-9999-4999-8999-999999999999"), inv(LINKED, "AC-9003", "POSTED")] });
+      }
+      if (url.pathname === "/api/v1/receiving/invoice-submissions") return json(200, { items: [submission({ id: "55555555-5555-4555-8555-555555555555", status: "POSTED", invoiceId: LINKED })] });
       if (url.pathname === `/api/v1/receiving/receipts/${RECEIPT}`) return json(200, { id: RECEIPT, receiptNumber: "RCV-000007", state: "POSTED", version: 1, vendorId: VENDOR, purchaseOrderId: "p", legalEntityId: ENTITY, packingSlip: "PS", carrier: "", receiptDate: "2026-11-01", currency: "USD", exchangeRate: "1", createdAt: "2026-11-01T00:00:00Z", lines: [] });
       return undefined;
     };
@@ -70,7 +79,11 @@ describe("invoice submissions", () => {
     expect(screen.getByRole("link", { name: "Post as vendor invoice" })).toHaveAttribute("href", "/ap-invoices/post");
     fireEvent.click(screen.getByRole("button", { name: "Mark as posted" }));
     expect(await screen.findByText(/Choose the vendor invoice/)).toBeInTheDocument();
-    fireEvent.change(await screen.findByLabelText("Posted vendor invoice"), { target: { value: INVOICE } });
+    expect(await screen.findByRole("option", { name: /AC-8999.*held for audit/ })).toBeInTheDocument();
+    const choices = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+    expect(choices[1]).toMatch(/^AC-9001/);
+    expect(choices.some((c) => c.startsWith("AC-9002") || c.startsWith("AC-9003"))).toBe(false);
+    fireEvent.change(screen.getByLabelText("Posted vendor invoice"), { target: { value: INVOICE } });
     fireEvent.click(screen.getByRole("button", { name: "Mark as posted" }));
     expect(await screen.findByText(/Recorded. The vendor sees the submission as posted/)).toBeInTheDocument();
     const call = server.calls.find((c) => c.init.method === "POST");

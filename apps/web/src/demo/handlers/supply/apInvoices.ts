@@ -145,6 +145,9 @@ route("POST", `${BASE}/invoice-submissions/{id}:reject`, ({ params, body }) => {
 
 route("POST", `${BASE}/invoice-submissions/{id}:resolve`, ({ params, body }) => {
   const invoiceId = String((body as { invoiceId?: unknown } | undefined)?.invoiceId ?? "");
-  if (!invoices.some((i) => i.id === invoiceId)) return reply.problem(400, "COM-0001", "request failed validation", { invoiceId: "must be the id of the posted invoice" });
+  const chosen = invoices.find((i) => i.id === invoiceId);
+  if (!chosen) return reply.problem(400, "COM-0001", "request failed validation", { invoiceId: "must be the id of the posted invoice" });
+  if (chosen.status === "AUDIT_REJECTED") return reply.problem(422, "SUP-INV-007", "the invoice was rejected after audit");
+  if (submissions.some((s) => s.id !== params.id && s.invoiceId === invoiceId)) return reply.problem(422, "SUP-INV-006", "the invoice already closes another submission");
   return decide(params.id, { status: "POSTED", invoiceId });
 });
