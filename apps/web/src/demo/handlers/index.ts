@@ -17,3 +17,4 @@ import "./fx";
 import "./print";
 import "./technician";
 import "./analytics";
+import "./b2b";
