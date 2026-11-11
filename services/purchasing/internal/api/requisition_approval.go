@@ -122,7 +122,14 @@ func (a *API) decideRequisition(w http.ResponseWriter, r *http.Request, id, acti
 	}
 	if action == domain.ReqActionApprove && cur.Status == store.RequisitionInReview && cur.Version == version && cur.ApprovedSteps+1 == len(cur.ApproverChain) {
 		// The last level's approval reserves the funds: the budget check runs first, so an over-budget requisition is refused
-		// instead of approved and then found to have no funds (FR-38.4, FR-38.5).
+		// instead of approved and then found to have no funds (FR-38.4, FR-38.5). The check reserves, so an approval the store
+		// would refuse anyway is refused before it: a reservation for a requisition that stays IN_REVIEW and is then rejected
+		// would never be given back.
+		if repeatApprover(cur, userID) {
+			fail(w, r, httpx.NewProblem(http.StatusForbidden, store.CodeRequisitionRepeatApprover,
+				"you already approved an earlier level of this requisition; the next level needs another approver"))
+			return
+		}
 		if err := a.checkRequisitionBudget(r, cur); err != nil {
 			fail(w, r, err)
 			return

@@ -129,3 +129,37 @@ func TestCancelApprovedRequisition_ReleasesAndAFailedReleaseStaysQueued(t *testi
 		t.Fatalf("bad status: %d, want 422", rec.Code)
 	}
 }
+
+func TestApproveRequisition_ARepeatApproverIsRefusedBeforeTheBudgetCheckReserves(t *testing.T) {
+	b := &fakeBudget{check: budget.Check{Result: "PASS"}}
+	h, id := budgetHarness(t, b)
+	r := h.fake.requisitions[id]
+	r.ApproverChain, r.ApprovedSteps = []string{domain.RoleManager, domain.RoleManager}, 1
+	// An approval from an earlier round does not count; the one after the latest submission does.
+	r.History = []store.RequisitionHistory{
+		{Action: store.HistorySubmitted, RequisitionVersion: 1},
+		{Action: store.HistoryApproved, ActorID: userApprover, RequisitionVersion: 2},
+		{Action: store.HistorySubmitted, RequisitionVersion: 3},
+	}
+	h.fake.requisitions[id] = r
+	if code := decide(h, id, "approve", userApprover, []string{dutyRequisitionApprove}, ""); code != http.StatusOK || len(b.checked) != 1 {
+		t.Fatalf("approval from an earlier round: %d with %d checks; want 200 and one check", code, len(b.checked))
+	}
+	b2 := &fakeBudget{check: budget.Check{Result: "PASS"}}
+	h2, id2 := budgetHarness(t, b2)
+	r2 := h2.fake.requisitions[id2]
+	r2.ApproverChain, r2.ApprovedSteps = []string{domain.RoleManager, domain.RoleManager}, 1
+	r2.History = []store.RequisitionHistory{
+		{Action: store.HistorySubmitted, RequisitionVersion: 3},
+		{Action: store.HistoryApproved, ActorID: userApprover, RequisitionVersion: 4},
+	}
+	h2.fake.requisitions[id2] = r2
+	rec := h2.do(call{method: "POST", path: "/v1/procurement/requisitions/" + id2 + ":approve", user: userApprover, duties: []string{dutyRequisitionApprove},
+		headers: map[string]string{"Idempotency-Key": "k-r", "If-Match": `"4"`}})
+	if rec.Code != http.StatusForbidden || problemCode(t, rec) != store.CodeRequisitionRepeatApprover {
+		t.Fatalf("repeat approver: %d %s; want 403 %s", rec.Code, rec.Body, store.CodeRequisitionRepeatApprover)
+	}
+	if len(b2.checked) != 0 || h2.fake.approval.calls != 0 {
+		t.Fatalf("a refused approval ran %d budget checks (reserving funds) and %d store calls; want none", len(b2.checked), h2.fake.approval.calls)
+	}
+}

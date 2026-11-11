@@ -65,6 +65,23 @@ func (a *API) checkRequisitionBudget(r *http.Request, cur store.Requisition) err
 	return p
 }
 
+// repeatApprover reports whether the user approved a level of the requisition since it was last submitted, read from its
+// history the way the store's own check (PRC-REQ-010) reads it under the row lock.
+func repeatApprover(cur store.Requisition, userID string) bool {
+	submitted := 0
+	for _, h := range cur.History {
+		if h.Action == store.HistorySubmitted && h.RequisitionVersion > submitted {
+			submitted = h.RequisitionVersion
+		}
+	}
+	for _, h := range cur.History {
+		if h.Action == store.HistoryApproved && h.ActorID == userID && h.RequisitionVersion > submitted {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *API) registerBudgetCalls(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/budget-calls", a.listBudgetCalls)
 	r.With(authz.RequireDuty(dutyPurchaseOrderMaintain)).Post("/budget-calls:retry", a.retryBudgetCalls)
