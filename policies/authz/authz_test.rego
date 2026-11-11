@@ -2662,6 +2662,14 @@ test_print_queue_management_is_admin_only if {
 	not allowed("print.job.submit", "POST", "/print/v1/jobs:sweep")
 }
 
+test_analytics_view_executes_queries_and_reads_tile_values if {
+	allowed("analytics.view", "POST", "/v1/analytics/query:execute")
+	allowed("analytics.view", "GET", "/v1/analytics/dashboards/controller_kpis/values")
+	not allowed("analytics.author", "POST", "/v1/analytics/query:execute")
+	not allowed("analytics.export", "GET", "/v1/analytics/dashboards/controller_kpis/values")
+	not allowed("analytics.view", "PUT", "/v1/analytics/dashboards/controller_kpis/values")
+}
+
 test_print_docgen_reads_and_admin_writes if {
 	allowed("print.job.submit", "GET", "/print/v1/document-templates")
 	allowed("print.job.submit", "GET", "/print/v1/document-templates/INV-STD")

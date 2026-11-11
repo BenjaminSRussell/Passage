@@ -202,6 +202,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "PRN-0006": { message: "That queue already has a printer at this failover position.", action: "Pick a free position in the queue, or move the other printer first." },
   "PRN-0010": { message: "That printer wasn't found, or it was already retired.", action: "Reload the printers page to see the current list." },
   "PRN-0011": { message: "That routing rule wasn't found.", action: "Reload the routing rules to see the current list." },
+  "ANA-0120": { message: "The analytics engine isn't answering, so these figures can't be shown right now.", action: "Try again in a minute. If it keeps failing, contact support with the details below." },
   "PRN-0012": { message: "That document template wasn't found.", action: "Check the template code, or save the template first." },
   "PRN-0013": { message: "A text block this document uses doesn't exist, or has no English version to fall back on.", action: "Add the text block (and its English version) under text blocks, then try again." },
   "PRN-0014": { message: "A text block has a placeholder that the document gave no value for.", action: "Open Details to see which values are missing and send them with the document." },

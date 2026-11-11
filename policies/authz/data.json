@@ -1068,8 +1068,10 @@
     "analytics.view": {"permissions": [
       {"resource": "/v1/analytics/dashboards", "methods": ["GET"]},
       {"resource": "/v1/analytics/dashboards/*", "methods": ["GET"]},
+      {"resource": "/v1/analytics/dashboards/*/values", "methods": ["GET"]},
       {"resource": "/v1/analytics/metrics", "methods": ["GET"]},
-      {"resource": "/v1/analytics/query", "methods": ["POST"]}
+      {"resource": "/v1/analytics/query", "methods": ["POST"]},
+      {"resource": "/v1/analytics/query:execute", "methods": ["POST"]}
     ]},
     "analytics.ux.record": {"permissions": [{"resource": "/v1/analytics/ux-events", "methods": ["POST"]}]},
     "analytics.ux.view": {"permissions": [
