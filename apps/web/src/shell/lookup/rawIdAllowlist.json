@@ -169,7 +169,7 @@
       "labels": [
         "Shipment id"
       ],
-      "reason": "Shipments have no lookup entity yet (follow-up to #500)."
+      "reason": "A load is built from sales, transfer and inbound shipments, which three services own; no single list spans them, so the field stays a typed id."
     },
     "modules/transport/CheckInPage.tsx": {
       "labels": [
@@ -193,7 +193,7 @@
       "labels": [
         "Shipment id"
       ],
-      "reason": "Shipments have no lookup entity yet (follow-up to #500)."
+      "reason": "The shipment to rate is a sales, transfer or inbound shipment of another service; no single list spans them, so the field stays a typed id."
     }
   }
 }
