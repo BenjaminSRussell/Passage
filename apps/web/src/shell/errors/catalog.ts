@@ -969,6 +969,8 @@ const treasury: Record<string, ProblemCatalogEntry> = {
   "BUD-0063": { message: "This source is not connected to budgeting.", action: "Ask an administrator to connect the fixed assets, HR, projects or planning service, or enter the amounts by hand." },
   "BUD-0064": { message: "The service holding that source did not give amounts the plan can use.", action: "Read the reason, correct the request or try again in a moment." },
   "BUD-0065": { message: "A department has positions this year and no cost center in the request.", action: "Map every department named in the message to a cost center and generate again." },
+  "BUD-0066": { message: "That workbook was exported from another plan, scenario or year.", action: "Export this scenario again, edit that file and import it back." },
+  "BUD-0067": { message: "The grid holds more cells than one workbook carries.", action: "Export one account or cost center at a time." },
   "BUD-0070": { message: "This budget line is a requisition's pre-encumbrance, so it cannot be checked or relieved as a purchase order.", action: "Convert it to the purchase order line first." },
   "BUD-0071": { message: "This budget line is not a pre-encumbrance, or it was already converted.", action: "Nothing to convert; check the purchase order line instead." },
   "BUD-0072": { message: "The purchase order line already carries a budget reservation.", action: "Use that reservation; do not convert a second one onto the line." },

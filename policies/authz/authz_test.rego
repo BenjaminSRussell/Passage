@@ -2772,3 +2772,12 @@ test_consolidation_and_intercompany_service_grants if {
 	"ledger.balance.read" in data.service_grants.intercompany.ledger
 	count([d | some d in data.service_grants.intercompany.ledger; d == "ledger.period.postclosed"]) == 0
 }
+
+# #38: the workbook round trip of a plan scenario: export is a read, import writes the grid and needs the maintain duty.
+test_budget_plan_workbook_export_and_import if {
+	allowed("budget.view", "GET", "/v1/budget/plans/p1/scenarios/s1:export")
+	not allowed("budget.plan.maintain", "GET", "/v1/budget/plans/p1/scenarios/s1:export")
+	allowed("budget.plan.maintain", "POST", "/v1/budget/plans/p1/scenarios/s1:import")
+	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios/s1:import")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/scenarios/s1:import")
+}
