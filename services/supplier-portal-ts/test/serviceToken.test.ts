@@ -37,11 +37,18 @@ describe("special duties", () => {
   const signer = createServiceTokenSigner({ seedBase64: randomBytes(32).toString("base64"), now: () => 1_000_000, newJti: () => "j" });
   const caller = { tenantId: TENANT, legalEntityId: LE_1, userId: "user-1", vendorId: VENDOR_A };
 
-  it("keeps the registration and invite-accept duties out of a signed-in user's token", () => {
+  it("keeps the registration, invite-accept and vendor-admin duties out of a signed-in user's token", () => {
     expect(tokenClaims(signer.mint("party", caller))["duties"]).toEqual(["party.vendor-portal.read", "party.vendor-portal.write"]);
     expect(tokenClaims(signer.mint("payables", caller))["duties"]).toEqual(["payables.vendor-portal.read"]);
     expect(tokenClaims(signer.mint("party", caller, ["party.vendor-portal.invite-accept"]))["duties"]).toEqual(["party.vendor-portal.invite-accept"]);
     expect(() => signer.mint("party", caller, ["procurement.vendor-portal.read"])).toThrow(TypeError);
+  });
+
+  it("signs the vendor-admin duty only by name and only for a vendor administrator", () => {
+    expect(tokenClaims(signer.mint("party", { ...caller, isAdmin: true }))["duties"]).toEqual(["party.vendor-portal.read", "party.vendor-portal.write"]);
+    expect(tokenClaims(signer.mint("party", { ...caller, isAdmin: true }, ["party.vendor-portal.admin"]))["duties"]).toEqual(["party.vendor-portal.admin"]);
+    expect(() => signer.mint("party", caller, ["party.vendor-portal.admin"])).toThrow(TypeError);
+    expect(() => signer.mint("party", { ...caller, isAdmin: false }, ["party.vendor-portal.read", "party.vendor-portal.admin"])).toThrow(TypeError);
   });
 
   it("signs the registration token with no vendor and one duty", () => {

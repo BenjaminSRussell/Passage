@@ -160,10 +160,15 @@ describe("vendor-admin invitations", () => {
     expect(body.acceptUrl).toBe(`${APP}/accept-invite#token=${encodeURIComponent(TOKEN)}`);
     expect(rig.calls[0]!.url).toBe("http://party.test/v1/party/vendor-portal/invites");
     expect(claimsOf(0)).toMatchObject({ aud: "party", vnd: VENDOR_A });
-    expect(claimsOf(0)["duties"]).not.toContain("party.vendor-portal.invite-accept");
+    // Party requires the vendor-admin duty on these routes; the token carries it and nothing else.
+    expect(claimsOf(0)["duties"]).toEqual(["party.vendor-portal.admin"]);
     expect((await api(rig, admin, "GET", "/api/v1/invites")).status).toBe(200);
     expect((await api(rig, admin, "POST", `/api/v1/invites/${INVITE_ID}/revoke`)).status).toBe(200);
     expect(rig.calls[2]!.url).toBe(`http://party.test/v1/party/vendor-portal/invites/${INVITE_ID}:revoke`);
+    expect([claimsOf(1)["duties"], claimsOf(2)["duties"]]).toEqual([["party.vendor-portal.admin"], ["party.vendor-portal.admin"]]);
+    // The administrator's other calls carry the ordinary supplier duties, never the admin one.
+    await api(rig, admin, "GET", "/api/v1/requests");
+    expect(claimsOf(3)["duties"]).toEqual(["party.vendor-portal.read", "party.vendor-portal.write"]);
   });
 });
 
@@ -222,13 +227,50 @@ describe("accepting an invitation", () => {
   });
 
   it("refuses a request from another origin, and limits attempts per address", async () => {
-    rig = await startRig({ publicLimit: 2 });
+    rig = await startRig({ publicLimit: 2, trustedProxies: "127.0.0.1" });
     expect((await post("/bff/invites/verify", { token: TOKEN }, { origin: "https://evil.example.invalid" })).status).toBe(403);
     const statuses = [];
     for (let i = 0; i < 4; i++) statuses.push((await post("/bff/invites/verify", { token: "nope" }, { "x-forwarded-for": "198.51.100.7" })).status);
     expect(statuses).toEqual([404, 404, 429, 429]);
     // Another address has its own allowance, and the proxy's last entry is the one believed.
     expect((await post("/bff/invites/verify", { token: "nope" }, { "x-forwarded-for": "6.6.6.6, 198.51.100.8" })).status).toBe(404);
+  });
+});
+
+describe("the public rate limit", () => {
+  const verify = (headers: Record<string, string> = {}) => post("/bff/invites/verify", { token: "nope" }, headers).then((r) => r.status);
+
+  it("ignores X-Forwarded-For when no proxy is trusted: the client is the TCP peer", async () => {
+    rig = await startRig({ publicLimit: 2 });
+    const statuses = [];
+    for (const xff of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) statuses.push(await verify({ "x-forwarded-for": xff }));
+    expect(statuses).toEqual([404, 404, 429]);
+  });
+
+  it("ignores X-Forwarded-For from a peer that is not a trusted proxy", async () => {
+    rig = await startRig({ publicLimit: 2, trustedProxies: "10.0.0.0/8" });
+    const statuses = [];
+    for (const xff of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) statuses.push(await verify({ "x-forwarded-for": xff }));
+    expect(statuses).toEqual([404, 404, 429]);
+  });
+
+  it("walks past the trusted proxies and cannot be steered by entries the client prepends", async () => {
+    rig = await startRig({ publicLimit: 2, trustedProxies: "127.0.0.1, 10.0.0.0/8" });
+    const statuses = [];
+    // The same client behind two trusted hops, each time pretending to be someone else in front.
+    for (const fake of ["6.6.6.1", "6.6.6.2", "6.6.6.3"]) statuses.push(await verify({ "x-forwarded-for": `${fake}, 198.51.100.7, 10.1.2.3` }));
+    expect(statuses).toEqual([404, 404, 429]);
+    expect(await verify({ "x-forwarded-for": "198.51.100.8, 10.1.2.3" })).toBe(404);
+  });
+
+  it("refuses a client over its own allowance before it spends the shared budget, so one client cannot exhaust it", async () => {
+    rig = await startRig({ limit: 3, publicLimit: 2, trustedProxies: "127.0.0.1" });
+    const flood = [];
+    for (let i = 0; i < 10; i++) flood.push(await verify({ "x-forwarded-for": "198.51.100.66" }));
+    expect(flood).toEqual([404, 404, 429, 429, 429, 429, 429, 429, 429, 429]);
+    // One slot of the shared budget of 3 is left for everyone else.
+    expect(await verify({ "x-forwarded-for": "203.0.113.1" })).toBe(404);
+    expect(await verify({ "x-forwarded-for": "203.0.113.2" })).toBe(429);
   });
 });
 
@@ -279,7 +321,7 @@ describe("public prospect registration", () => {
   });
 
   it("limits registrations per client address", async () => {
-    rig = await startRig({ registration, publicLimit: 2 });
+    rig = await startRig({ registration, publicLimit: 2, trustedProxies: "127.0.0.1" });
     rig.answers(Response.json({}, { status: 202 }), Response.json({}, { status: 202 }));
     const statuses = [];
     for (let i = 0; i < 3; i++) statuses.push((await post("/bff/prospects", form, { "x-forwarded-for": "203.0.113.9" })).status);
