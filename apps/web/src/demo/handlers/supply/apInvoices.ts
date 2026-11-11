@@ -109,7 +109,7 @@ function submission(n: number, receipt: number, s: { number: string; qty: number
     total: dec(amount),
     status: s.status,
     lines: [{ receiptId: uid(K_RECEIPT, receipt), receiptLineNo: 1, qty: dec(s.qty, 0), unitPrice: dec(s.unitPrice), amount: dec(amount) }],
-    createdAt: at(-s.ago + 0.2),
+    createdAt: at(Math.min(-0.1, -s.ago + 0.2)),
     ...s.extra,
   };
 }
