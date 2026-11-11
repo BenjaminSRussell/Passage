@@ -1,0 +1,22 @@
+# Generated from deploy/cloud-profiles/profiles.json by deploy/cloud-profiles/cloudprofile.py; do not edit.
+global:
+  cloudProfile: "china"
+  cloudOverlays: []
+  cloudName: "AzureChinaCloud"
+  fips: false
+  imageRegistry: ""
+  imageRegistryRequired: true
+  allowedRegions: ["chinanorth", "chinaeast", "chinanorth2", "chinaeast2", "chinanorth3", "chinaeast3"]
+  pagerDutyAllowed: false
+  endpoints:
+    entraAuthority: "https://login.partner.microsoftonline.cn"
+    appRegistrationPortal: "portal.azure.cn"
+    graphRoot: "https://microsoftgraph.chinacloudapi.cn"
+    armEndpoint: "https://management.chinacloudapi.cn"
+    keyVaultSuffix: "vault.azure.cn"
+    blobSuffix: "blob.core.chinacloudapi.cn"
+    containerRegistrySuffix: "azurecr.cn"
+    postgresSuffix: "postgres.database.chinacloudapi.cn"
+    azureOpenAISuffix: "openai.azure.cn"
+    keyVaultPrivateLinkZone: "privatelink.vaultcore.azure.cn"
+  egressAllowlist: ["login.partner.microsoftonline.cn", "login.chinacloudapi.cn", "microsoftgraph.chinacloudapi.cn", "management.chinacloudapi.cn", "*.vault.azure.cn", "*.blob.core.chinacloudapi.cn", "*.azurecr.cn", "*.postgres.database.chinacloudapi.cn", "*.openai.azure.cn"]

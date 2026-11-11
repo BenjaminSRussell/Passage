@@ -1,0 +1,22 @@
+# Generated from deploy/cloud-profiles/profiles.json by deploy/cloud-profiles/cloudprofile.py; do not edit.
+global:
+  cloudProfile: "commercial"
+  cloudOverlays: []
+  cloudName: "AzurePublic"
+  fips: false
+  imageRegistry: ""
+  imageRegistryRequired: false
+  allowedRegions: []
+  pagerDutyAllowed: true
+  endpoints:
+    entraAuthority: "https://login.microsoftonline.com"
+    appRegistrationPortal: "portal.azure.com"
+    graphRoot: "https://graph.microsoft.com"
+    armEndpoint: "https://management.azure.com"
+    keyVaultSuffix: "vault.azure.net"
+    blobSuffix: "blob.core.windows.net"
+    containerRegistrySuffix: "azurecr.io"
+    postgresSuffix: "postgres.database.azure.com"
+    azureOpenAISuffix: "openai.azure.com"
+    keyVaultPrivateLinkZone: "privatelink.vaultcore.azure.net"
+  egressAllowlist: ["login.microsoftonline.com", "graph.microsoft.com", "management.azure.com", "*.vault.azure.net", "*.blob.core.windows.net", "*.azurecr.io", "*.postgres.database.azure.com", "api.anthropic.com", "bedrock-runtime.*.amazonaws.com", "api.openai.com", "*.openai.azure.com", "events.pagerduty.com", "ghcr.io"]

@@ -1,3 +1,4 @@
+import { assertProviderEndpoint, type EgressOptions } from "../cloudprofile/index.js";
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
@@ -15,6 +16,8 @@ export interface OpenAICompatibleConfig {
   maxTokens?: number;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
+  /** Cloud profile egress check (#599); defaults to PASSAGE_CLOUD_PROFILE. `region` is where the endpoint is hosted. */
+  egress?: EgressOptions;
 }
 
 /**
@@ -25,6 +28,7 @@ export interface OpenAICompatibleConfig {
  */
 export function createOpenAICompatibleProvider(cfg: OpenAICompatibleConfig): ModelProvider {
   const url = new URL(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`);
+  assertProviderEndpoint(url.toString(), cfg.egress);
   for (const [k, v] of Object.entries(cfg.query ?? {})) url.searchParams.set(k, v);
   const headers: Record<string, string> =
     (cfg.auth ?? "bearer") === "api-key" ? { "api-key": cfg.apiKey } : { authorization: `Bearer ${cfg.apiKey}` };
