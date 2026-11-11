@@ -2638,6 +2638,13 @@ test_receivables_fx_settings_and_payment_reversal_have_their_own_duties if {
 	data.service_grants.receivables.fx == ["fx.rate.lookup"]
 }
 
+test_payables_records_withholding_with_tax_under_its_own_service_duty if {
+	data.service_grants.payables.tax == ["tax.withholding.calculate", "tax.withholding.record"]
+	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.calculate", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/calculate")
+}
+
 test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")

@@ -58,6 +58,9 @@ type ProposalLine struct {
 	Pay             decimal.Decimal `json:"pay"`
 	Withheld        decimal.Decimal `json:"withheld"`
 	WithholdingCode string          `json:"withholdingCode,omitempty"`
+	// WithheldBase is the amount the tax was withheld on (the pay amount less what is under the code's threshold); the tax service
+	// records it with the withheld tax. Zero on lines stored before it was kept: the pay amount stands in for it.
+	WithheldBase decimal.Decimal `json:"-"`
 	Rate            decimal.Decimal `json:"rate"`
 	Valued          decimal.Decimal `json:"valued"`
 }

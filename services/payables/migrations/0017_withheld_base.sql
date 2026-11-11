@@ -1,0 +1,4 @@
+-- #13: the amount a payment line's tax was withheld on, kept with the withheld tax so the payment run can record the withholding with the
+-- tax service (POST /v1/tax/withholding/entries needs the taxable base for the remittance and the certificate). Null on lines proposed before
+-- this column existed, and on lines nothing was withheld from; the pay amount stands in for it.
+ALTER TABLE ap_payment_proposal_line ADD COLUMN IF NOT EXISTS withheld_base numeric(20,6) CHECK (withheld_base IS NULL OR withheld_base >= 0);

@@ -39,15 +39,16 @@ type API struct {
 	clientErrors atomic.Int64
 	serverFaults atomic.Int64
 
-	fileClientErrors atomic.Int64
-	fileServerFaults atomic.Int64
-	http             requestMetrics
-	aging            *agingDeps
-	proposals        *proposalDeps
-	runs             *runDeps
-	withholding      *withholdingDeps
-	employeeVendors  *employeeVendorDeps
-	opening          *openingDeps
+	fileClientErrors    atomic.Int64
+	fileServerFaults    atomic.Int64
+	http                requestMetrics
+	aging               *agingDeps
+	proposals           *proposalDeps
+	runs                *runDeps
+	withholding         *withholdingDeps
+	withholdingRecorder WithholdingRecorder
+	employeeVendors     *employeeVendorDeps
+	opening             *openingDeps
 	// vendorGroupDim is the ledger dimension attribute that carries the vendor group code on the AP control account; empty posts and compares none.
 	vendorGroupDim string
 }
