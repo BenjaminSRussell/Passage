@@ -42,7 +42,9 @@ func specOperations(t *testing.T) map[string]bool {
 // Every registered route is documented in OpenAPI and nothing documented is missing from the router.
 func TestOpenAPI_MatchesRoutes(t *testing.T) {
 	r := chi.NewRouter()
-	New(nil).Register(r)
+	a := New(nil)
+	a.Register(r)
+	a.RegisterStreams(r)
 	routes := map[string]bool{}
 	if err := chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		routes[method+" "+route] = true
