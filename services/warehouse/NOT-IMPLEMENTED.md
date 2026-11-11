@@ -97,7 +97,7 @@ pages. Everything below is missing and is listed with its reason. Status is
 | Hazmat profile, segregation matrix and section maintenance pages; hazmat inventory by section | later slice of PSG-31 | Slice 2 adds hazmat data to the simulator only (a JSON field and the AC-31.14 example); the maintenance pages arrive with `/hazmat-profiles`. |
 | Cross-dock template, packaging specification and labor standard/performance pages | later slice of PSG-31 | Their domain functions have no endpoint yet; each page arrives with its API. |
 | Wave workbench, load planning | later slice of PSG-31 | Each needs its API. Slice 4 adds Receiving (list, Register ASN, receive pallets) and Dock schedule (a day's appointments, doors, Book a dock appointment). |
-| Receiving: create LPs, print receipt labels; dock: week view, drag to reschedule | later slice of PSG-31 | LPs are not persisted (deliverable 1), printing needs wave 32, and appointments cannot be moved yet. The schedule shows times in the browser's time zone, not the warehouse's, until the org warehouse projection gives its zone (handoff org). |
+| Receiving: create LPs, print receipt labels; dock: week view, drag to reschedule | partly built | The warehouse now generates the pallet's SSCC and license plate id when it is received (migration `0006`, `PUT /v1/warehouse/gs1-settings`), keeps lot and expiry, and a device prints the label from `GET /v1/warehouse/pallets/{sscc}/label` (wave 32). LPs are still not persisted as nested units, and appointments cannot be moved yet. The schedule shows times in the browser's time zone, not the warehouse's, until the org warehouse projection gives its zone (handoff org). |
 | Personalization (saved filters) and bulk priority change | handoff (web shell, wave 5) | Shell-owned personalization. |
 | Playwright E2E for wave release | later slice of PSG-31 | No wave release yet. |
 
@@ -118,4 +118,24 @@ pages. Everything below is missing and is listed with its reason. Status is
 | Migration from AX / SAP (§6.31.11) | later slice of PSG-31 | Needs the persisted model and the migration framework (handoff: migration-framework). |
 | Country compliance packs (TRGS 510, NFPA 30) | handoff (wave 48) | Packs supply the segregation matrix through `WarehouseCompliancePack`. |
 | Labor privacy OPA bundle `LaborPrivacyPolicy` | handoff (edge-identity, OPA policies) | Policies live under `policies/`, which this wave does not own. |
-| GS1 company prefix for SSCC generation | handoff (wave 8 configuration) | Slice 1 generates SSCC-18 from a caller-supplied prefix; the tenant prefix comes from wave 8. |
+| GS1 company prefix for SSCC generation | built (wave 32) | The tenant's prefix and extension digit are set with `PUT /v1/warehouse/gs1-settings` (7 to 11 digits; locked once SSCCs were issued); the serial counter is drawn under a row lock. Moving the prefix into the wave 8 configuration is a later choice. |
+
+## RFID and automation (#32, wave 32)
+
+Built: `domain.DecodeEPC` for the 96-bit EPC schemes a warehouse reads (SGTIN, SSCC, SGLN, GRAI, GIAI, GSRN, GDTI; the SGTIN-96
+vector of GS1 TDS is a test), `POST /v1/warehouse/rfid-reads:ingest` (up to 500 reads, a read that cannot be decoded is listed
+with its position, a tag read again at the same reader within five seconds is a duplicate, an SSCC the warehouse labelled names
+its receipt and pallet) and `GET /v1/warehouse/rfid-reads`; automation orders from transport work (`POST
+/v1/warehouse/automation/transport-orders`, the line's pallet SSCC and two locations of at most 12 characters, the work assigned
+to `automation:<station>`), the connector's pull and report, and `POST /v1/warehouse/automation/events`, where each PLC event is
+stored once by station and sequence and an arrival of a load unit with an order sent to the station confirms the work line as the
+station's identity (migration `0007`). Duties `warehouse.rfid.ingest` and `warehouse.automation.execute`.
+
+| Item | Status | Reason |
+|---|---|---|
+| RFID reader hardware and the gateway that posts reads | human/infra (#213) | A Zebra or Impinj reader and its gateway are needed; the endpoint takes any reader that posts JSON. |
+| SGTIN-198 and the other non-96-bit schemes (GIAI-202, SGLN-195, GRAI-170) | later slice | Their 7-bit character encodings are not decoded: the read is rejected as WMS-EPC-INVALID. |
+| What an RFID read does to stock (move an LP on a portal read, raise an exception on an unexpected read) | later slice | Reads are stored and resolved to a receipt pallet; nothing acts on them yet. |
+| `fault` and `diverted` PLC events changing work | later slice | They mark the order FAULT or DIVERTED with the PLC's code and leave the work as it is for a person. |
+| Cancelling an automation order, and a MOVE for an order the PLC never acknowledged | later slice | An order whose MOVE got no acknowledgement stays pending and is offered again after the connector reconnects; the PLC must treat a repeated MOVE for a load unit it holds as a duplicate. |
+| A real vendor's telegram layout | human/infra (#213) | Needs a PLC. |

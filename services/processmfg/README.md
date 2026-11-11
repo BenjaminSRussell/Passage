@@ -167,6 +167,10 @@ batch store.
 Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a handoff to
 `policies/`.
 
+## Control recipes of released orders (#25)
+
+`PUT /v1/production/recipe-targets/{itemId}` says where the control recipes of an item's batch orders go: the shop floor resource and the destination (`kiosk`, `pcs-opcua` with an edge node, or `pcs-mqtt` with an edge node and the recipe topic). Releasing a batch order of such an item generates its control recipe in the shopfloor service as the releasing user (service grant `processmfg` to `shopfloor`, duty `shopfloor.controlrecipe.create`, `SHOPFLOOR_URL` and the service signing key): the order's make instruction and its material list scaled to the batch. The order keeps the recipe's id or the reason it could not be made (`GET /v1/production/batch-orders/{id}/control-recipe`); a failure never undoes the release, and `POST /v1/production/batch-orders/{id}:send-recipe` repeats it (the shopfloor service deduplicates by the order). Migration `0011`; codes `PMF-0503` (no `SHOPFLOOR_URL`), `PMF-0504` (the order is not released or started) and `PMF-0505` (no recipe target).
+
 ## Events
 
 | Type | When |
