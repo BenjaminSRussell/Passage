@@ -932,6 +932,148 @@ paths:
         '409': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-STATE: already decided.' }
         '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the note is missing or too long.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/payment-terms:
+    get:
+      operationId: listPaymentTerms
+      summary: "List payment terms"
+      x-passage-duty: party.read
+      description: The tenant's payment terms by code, for a form to pick the term of a customer or vendor role by name.
+      responses:
+        '200':
+          description: The payment terms.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PaymentTerm' } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/payment-terms/{id}:
+    get:
+      operationId: getPaymentTerm
+      summary: "Get one payment term"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The payment term.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentTerm' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PAYMENT-TERM-NOT-FOUND.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/posting-profiles:
+    get:
+      operationId: listPostingProfiles
+      summary: "List customer posting profiles of the caller's legal entities"
+      x-passage-duty: party.read
+      description: Posting profiles by code in the caller's legal entities (row security), optionally of one of them.
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The posting profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PostingProfile' } }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001: legalEntityId is not a UUID.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/posting-profiles/{id}:
+    get:
+      operationId: getPostingProfile
+      summary: "Get one posting profile"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The posting profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostingProfile' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-POSTING-PROFILE-NOT-FOUND: unknown or outside the caller''s legal entities.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/customer-groups:
+    get:
+      operationId: listCustomerGroups
+      summary: "List customer groups"
+      x-passage-duty: party.read
+      responses:
+        '200':
+          description: The customer groups by code.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/CustomerGroup' } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+    post:
+      operationId: createCustomerGroup
+      summary: "Register a customer group"
+      x-passage-duty: party.write
+      description: >-
+        A short code (1 to 10 of A-Z, 0-9, dash, underscore; upper-cased) and a name. An optional id registers a group id customer roles
+        already carry. Also allowed with party.import.write. An Idempotency-Key replays the stored group.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                id: { type: string, format: uuid }
+                code: { type: string, pattern: '^[A-Za-z0-9_-]{1,10}$' }
+                name: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerGroup' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-CUSTOMER-GROUP-EXISTS: the code or id is taken; idempotency_key_reuse: the key was used with another body.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-CUSTOMER-GROUP-INVALID with per-field errors.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/customer-groups/{id}:
+    get:
+      operationId: getCustomerGroup
+      summary: "Get one customer group"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The customer group.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerGroup' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-CUSTOMER-GROUP-NOT-FOUND.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
   /healthz:
     get:
       operationId: liveness
@@ -1274,6 +1416,34 @@ components:
       required: [token]
       properties:
         token: { type: string, maxLength: 2048 }
+    PaymentTerm:
+      type: object
+      required: [id, code, name, offsetMonths, version]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        netDays: { type: integer, description: Days after the invoice date; absent when dayOfMonth is set. }
+        dayOfMonth: { type: integer, minimum: 1, maximum: 31 }
+        offsetMonths: { type: integer }
+        version: { type: integer }
+    PostingProfile:
+      type: object
+      required: [id, legalEntityId, code, name, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        version: { type: integer }
+    CustomerGroup:
+      type: object
+      required: [id, code, name, version]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        version: { type: integer }
   responses:
     Problem:
       description: RFC 9457 problem details.

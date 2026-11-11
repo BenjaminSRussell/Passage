@@ -886,6 +886,7 @@
       {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
+      {"resource": "/v1/party/customer-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-questionnaires", "methods": ["POST"]},
@@ -900,6 +901,7 @@
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
+      {"resource": "/v1/party/customer-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]}
     ]},
     "party.vendor.lookup": {"service_only": true, "permissions": [
@@ -920,6 +922,12 @@
       {"resource": "/v1/party/vendors/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-groups/*", "methods": ["GET"]},
+      {"resource": "/v1/party/customer-groups", "methods": ["GET"]},
+      {"resource": "/v1/party/customer-groups/*", "methods": ["GET"]},
+      {"resource": "/v1/party/payment-terms", "methods": ["GET"]},
+      {"resource": "/v1/party/payment-terms/*", "methods": ["GET"]},
+      {"resource": "/v1/party/posting-profiles", "methods": ["GET"]},
+      {"resource": "/v1/party/posting-profiles/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-questionnaires", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-requests", "methods": ["GET"]},

@@ -2788,3 +2788,16 @@ test_agent_run_duties_open_only_their_routes if {
 	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
 	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
 }
+
+test_party_setup_lists_are_read_with_party_read if {
+	allowed("party.read", "GET", "/v1/party/payment-terms")
+	allowed("party.read", "GET", "/v1/party/payment-terms/t1")
+	allowed("party.read", "GET", "/v1/party/posting-profiles")
+	allowed("party.read", "GET", "/v1/party/posting-profiles/p1")
+	allowed("party.read", "GET", "/v1/party/customer-groups")
+	allowed("party.read", "GET", "/v1/party/customer-groups/g1")
+	allowed("party.write", "POST", "/v1/party/customer-groups")
+	allowed("party.import.write", "POST", "/v1/party/customer-groups")
+	not allowed("party.read", "POST", "/v1/party/customer-groups")
+	not allowed("party.write", "POST", "/v1/party/payment-terms")
+}
