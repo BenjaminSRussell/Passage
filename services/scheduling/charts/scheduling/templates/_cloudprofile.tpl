@@ -23,6 +23,11 @@ from a mirror (global.imageRegistryRequired) fails the render when none is set.
 - name: PASSAGE_CLOUD_PROFILE
   value: {{ concat (list .) ($g.cloudOverlays | default list) | join "+" | quote }}
 {{- end }}
+{{- /* global.fieldcryptKeyId: the Key Vault key that wraps FIELDCRYPT_KEYS entries written id=wrapped:... (#600). */}}
+{{- with $g.fieldcryptKeyId }}
+- name: FIELDCRYPT_AZURE_KEY_ID
+  value: {{ . | quote }}
+{{- end }}
 {{- end -}}
 
 {{/*

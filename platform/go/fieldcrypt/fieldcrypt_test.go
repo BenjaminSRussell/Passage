@@ -2,11 +2,13 @@ package fieldcrypt_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
@@ -157,5 +159,93 @@ func TestMACKnownAnswer(t *testing.T) {
 	}
 	if hex := fmt.Sprintf("%x", got); hex != "9d68c037adb7f1ab6a7e652dc822e16f9ef453aa924977cca7363d4b0ecaacd9" {
 		t.Fatalf("mac drifted: %s", hex)
+	}
+}
+
+type fakeKMS struct{ calls int }
+
+func (f *fakeKMS) Wrap(_ context.Context, key []byte) ([]byte, error) {
+	out := make([]byte, len(key))
+	for i, b := range key {
+		out[i] = b ^ 0x5a
+	}
+	return out, nil
+}
+
+func (f *fakeKMS) Unwrap(ctx context.Context, wrapped []byte) ([]byte, error) {
+	f.calls++
+	return f.Wrap(ctx, wrapped)
+}
+
+// A wrapped master key opens exactly what the same key unwrapped opens: the envelope and its key id are unchanged.
+func TestWrappedMasterKeyKeepsTheEnvelopeAndKeyID(t *testing.T) {
+	kms := &fakeKMS{}
+	plainKey := bytes.Repeat([]byte{7}, 32)
+	entry, err := fieldcrypt.WrapEntry(context.Background(), "2027-01", plainKey, kms)
+	if err != nil || !strings.HasPrefix(entry, "2027-01=wrapped:") || strings.Contains(entry, base64.StdEncoding.EncodeToString(plainKey)) {
+		t.Fatalf("entry = %q, %v", entry, err)
+	}
+	env := map[string]string{fieldcrypt.EnvKeys: entry, fieldcrypt.EnvCurrentID: "2027-01"}
+	wrapped, err := fieldcrypt.FromEnvWith(context.Background(), func(k string) string { return env[k] }, kms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := fieldcrypt.NewKeys("2027-01", map[string][]byte{"2027-01": plainKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := wrapped.Seal("tenant-1", "ssn", []byte("123-45-6789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := fieldcrypt.KeyID(sealed); id != "2027-01" {
+		t.Errorf("envelope key id = %q", id)
+	}
+	if got, err := plain.Open("tenant-1", "ssn", sealed); err != nil || string(got) != "123-45-6789" {
+		t.Errorf("a plain copy of the same key must open the wrapped key's value: %q %v", got, err)
+	}
+	if kms.calls != 1 {
+		t.Errorf("unwrap calls = %d, want 1 per wrapped entry", kms.calls)
+	}
+}
+
+// Rotation: an old plain entry and a new wrapped one live side by side; old values still open and new ones use the new key.
+func TestRotationMixesPlainAndWrappedEntries(t *testing.T) {
+	kms := &fakeKMS{}
+	oldKey, newKey := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
+	entry, _ := fieldcrypt.WrapEntry(context.Background(), "new", newKey, kms)
+	env := map[string]string{fieldcrypt.EnvKeys: "old=" + base64.StdEncoding.EncodeToString(oldKey) + "," + entry, fieldcrypt.EnvCurrentID: "new"}
+	keys, err := fieldcrypt.FromEnvWith(context.Background(), func(k string) string { return env[k] }, kms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldOnly, _ := fieldcrypt.NewKeys("old", map[string][]byte{"old": oldKey})
+	sealedOld, _ := oldOnly.Seal("t", "f", []byte("v1"))
+	if got, err := keys.Open("t", "f", sealedOld); err != nil || string(got) != "v1" {
+		t.Errorf("old value after rotation: %q %v", got, err)
+	}
+	sealedNew, _ := keys.Seal("t", "f", []byte("v2"))
+	if id, _ := fieldcrypt.KeyID(sealedNew); id != "new" {
+		t.Errorf("new values use key %q", id)
+	}
+}
+
+func TestWrappedEntryErrorsFailClosedAndNameNoKeyMaterial(t *testing.T) {
+	good := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))
+	get := func(entry string) func(string) string {
+		return func(k string) string {
+			return map[string]string{fieldcrypt.EnvKeys: entry, fieldcrypt.EnvCurrentID: "k"}[k]
+		}
+	}
+	// No Key Vault configured: fieldcrypt.FromEnv cannot unwrap and says so.
+	if _, err := fieldcrypt.FromEnv(get("k=wrapped:" + good)); err == nil || !strings.Contains(err.Error(), "wrapped") {
+		t.Errorf("fieldcrypt.FromEnv without a vault: %v", err)
+	}
+	if _, err := fieldcrypt.FromEnvWith(context.Background(), get("k=wrapped:%%%"), &fakeKMS{}); err == nil {
+		t.Error("bad base64 must fail")
+	}
+	// An unwrapped blob of the wrong length is refused.
+	if _, err := fieldcrypt.FromEnvWith(context.Background(), get("k=wrapped:"+base64.StdEncoding.EncodeToString([]byte("short"))), &fakeKMS{}); err == nil {
+		t.Error("a short key must fail")
 	}
 }
