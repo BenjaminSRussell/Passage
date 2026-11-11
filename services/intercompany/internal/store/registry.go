@@ -247,16 +247,19 @@ func (s *Postgres) GetSettings(ctx context.Context) (domain.Settings, error) {
 	}
 	out := domain.DefaultSettings
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var tol string
-		err := tx.QueryRow(ctx, `select charge_settlement_mode, cross_border_tax, recon_currency, fx_tolerance_pct::text from ic_setting where tenant_id = $1`, pr.TenantID).
-			Scan(&out.ChargeSettlementMode, &out.CrossBorderTax, &out.ReconCurrency, &tol)
+		var tol, maxPct string
+		err := tx.QueryRow(ctx, `select charge_settlement_mode, cross_border_tax, recon_currency, fx_tolerance_pct::text, fx_adjust_max_pct::text from ic_setting where tenant_id = $1`, pr.TenantID).
+			Scan(&out.ChargeSettlementMode, &out.CrossBorderTax, &out.ReconCurrency, &tol, &maxPct)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		out.FXTolerancePct, err = decimal.NewFromString(tol)
+		if out.FXTolerancePct, err = decimal.NewFromString(tol); err != nil {
+			return err
+		}
+		out.FXAdjustMaxPct, err = decimal.NewFromString(maxPct)
 		return err
 	})
 	if err != nil {
@@ -275,10 +278,10 @@ func (s *Postgres) PutSettings(ctx context.Context, st domain.Settings) error {
 		return err
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `insert into ic_setting (tenant_id, charge_settlement_mode, cross_border_tax, recon_currency, fx_tolerance_pct, updated_by) values ($1, $2, $3, $4, $5::numeric, $6)
+		_, err := tx.Exec(ctx, `insert into ic_setting (tenant_id, charge_settlement_mode, cross_border_tax, recon_currency, fx_tolerance_pct, fx_adjust_max_pct, updated_by) values ($1, $2, $3, $4, $5::numeric, $6::numeric, $7)
 			on conflict (tenant_id) do update set charge_settlement_mode = excluded.charge_settlement_mode, cross_border_tax = excluded.cross_border_tax,
-				recon_currency = excluded.recon_currency, fx_tolerance_pct = excluded.fx_tolerance_pct, updated_by = excluded.updated_by, updated_at = now()`,
-			pr.TenantID, st.ChargeSettlementMode, st.CrossBorderTax, st.ReconCurrency, st.FXTolerancePct.String(), by)
+				recon_currency = excluded.recon_currency, fx_tolerance_pct = excluded.fx_tolerance_pct, fx_adjust_max_pct = excluded.fx_adjust_max_pct, updated_by = excluded.updated_by, updated_at = now()`,
+			pr.TenantID, st.ChargeSettlementMode, st.CrossBorderTax, st.ReconCurrency, st.FXTolerancePct.String(), st.FXAdjustMaxPct.String(), by)
 		return err
 	})
 	return wrap("put intercompany settings", err)

@@ -1,8 +1,8 @@
 package api
 
 import (
-	"bytes"
 	"context"
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -92,7 +92,7 @@ func TestPlanXlsx_ExportEditImportRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != xlsxContentType || rec.Header().Get("ETag") != `"2"` || !strings.Contains(rec.Header().Get("Content-Disposition"), ".xlsx") {
 		t.Fatalf("export = %d %v", rec.Code, rec.Header())
 	}
-	sheets, err := xlsx.Read(rec.Body.Bytes())
+	sheets, err := xlsx.Read(context.Background(), rec.Body.Bytes())
 	if err != nil || len(sheets) != 2 {
 		t.Fatalf("read export: %v %d", err, len(sheets))
 	}
@@ -155,7 +155,7 @@ func TestPlanXlsx_ImportReportsEveryProblemWithItsCell(t *testing.T) {
 	e := newXlsxEnv(t)
 	e.seed(t)
 	rec := e.do(http.MethodGet, e.path(":export"), nil, nil, dutyView)
-	sheets, _ := xlsx.Read(rec.Body.Bytes())
+	sheets, _ := xlsx.Read(context.Background(), rec.Body.Bytes())
 	g := &sheets[0]
 	g.Rows[1][2] = xlsx.Str("lots")                                 // C2 not a number
 	g.Rows[1][3] = xlsx.Num("-5")                                   // D2 negative
@@ -187,7 +187,7 @@ func TestPlanXlsx_ImportRefusesOtherWorkbooksAndNonWorkbooks(t *testing.T) {
 	e := newXlsxEnv(t)
 	e.seed(t)
 	rec := e.do(http.MethodGet, e.path(":export"), nil, nil, dutyView)
-	sheets, _ := xlsx.Read(rec.Body.Bytes())
+	sheets, _ := xlsx.Read(context.Background(), rec.Body.Bytes())
 	hdr := func(k string) map[string]string { return map[string]string{"If-Match": `"2"`, "Idempotency-Key": k} }
 
 	other := append([]xlsx.Sheet(nil), sheets...)
@@ -213,5 +213,28 @@ func TestPlanXlsx_ImportRefusesOtherWorkbooksAndNonWorkbooks(t *testing.T) {
 	}
 	if rec := e.do(http.MethodGet, e.path(":export"), nil, nil, dutyPlanMaintain); rec.Code != http.StatusForbidden {
 		t.Fatalf("maintain duty only can export: %d", rec.Code)
+	}
+}
+
+func TestPlanXlsx_ImportRefusesAnOldVersionAndAnAmountTheColumnCannotHold(t *testing.T) {
+	e := newXlsxEnv(t)
+	e.seed(t)
+	rec := e.do(http.MethodGet, e.path(":export"), nil, nil, dutyView)
+	sheets, _ := xlsx.Read(context.Background(), rec.Body.Bytes())
+	raw, _ := xlsx.Write(sheets)
+	// The workbook says version 2; importing with another If-Match is a stale grid.
+	stale := e.do(http.MethodPost, e.path(":import"), raw, map[string]string{"If-Match": `"5"`, "Idempotency-Key": "v1"}, dutyPlanMaintain)
+	if stale.Code != http.StatusPreconditionFailed || !strings.Contains(stale.Body.String(), "BUD-0050") {
+		t.Fatalf("version mismatch = %d %s", stale.Code, stale.Body)
+	}
+	sheets[0].Rows[1][2] = xlsx.Num("1E15")
+	big, _ := xlsx.Write(sheets)
+	rec = e.do(http.MethodPost, e.path(":import"), big, map[string]string{"If-Match": `"2"`, "Idempotency-Key": "v2"}, dutyPlanMaintain)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Plan!C2") {
+		t.Fatalf("huge amount = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do(http.MethodPut, e.path("/grid"), []byte(`{"cells":[{"account":"1","costCenter":"c","period":"2027-01","amount":"1000000000000000"}]}`),
+		map[string]string{"If-Match": `"2"`, "Idempotency-Key": "v3", "Content-Type": "application/json"}, dutyPlanMaintain); rec.Code != http.StatusBadRequest {
+		t.Fatalf("JSON grid huge amount = %d %s", rec.Code, rec.Body)
 	}
 }

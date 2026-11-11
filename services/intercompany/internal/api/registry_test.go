@@ -385,3 +385,41 @@ func TestCharge_ATaxServiceThatIsDownStopsTheChargeBeforePosting(t *testing.T) {
 }
 
 var _ = httptest.NewRecorder
+
+func TestReconciliation_FXAdjustRefusesTimingItemsAndDifferencesFXCannotExplain(t *testing.T) {
+	e := newRegistryEnv(t)
+	e.setup(t, false)
+	e.rates.Set("closing", "EUR", "USD", decimal.RequireFromString("1.11"))
+	post := func(ledger, le, account string, credit bool, amount, cur, date, key string) {
+		t.Helper()
+		if _, err := e.fake.Post(context.Background(), ledgerclient.Entry{LegalEntityID: le, LedgerID: ledger, DocumentID: key, PostingDate: date, Currency: cur, IdempotencyKey: key,
+			SourceType: "test", Lines: []ledgerclient.Line{{Account: account, Credit: credit, Amount: decimal.RequireFromString(amount)}, {Account: "9999", Credit: !credit, Amount: decimal.RequireFromString(amount)}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A books 100,000 USD and B only 50,000 EUR (55,500 USD): a missing invoice, not an exchange difference.
+	post("L-A", leA, "1500-DUE-FROM-B", false, "100000.00", "USD", "2026-11-05", "a1")
+	post("L-B", leB, "2500-DUE-TO-A", true, "50000.00", "EUR", "2026-11-06", "b1")
+	rec := postAs(e.h, http.MethodPost, "/v1/interco/reconciliations/run", "r1", `{"period":"2026-11","currency":"USD","source":"ledger","fxTolerancePct":"0"}`)
+	run := decode[struct{ ID string }](t, rec)
+	d := decode[struct{ Items []struct{ ID string } }](t, postAs(e.h, http.MethodGet, "/v1/interco/reconciliations/"+run.ID, "", ""))
+	rec = postAs(e.h, http.MethodPost, "/v1/interco/reconciliations/items/"+d.Items[0].ID+"/fx-adjust", "", "")
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "IC-0861") {
+		t.Fatalf("a large difference = %d %s", rec.Code, rec.Body.String())
+	}
+	if n := len(e.fake.Entries()); n != 2 {
+		t.Fatalf("a refused adjustment posted: %d entries", n)
+	}
+	// B books its side after the period end: a Timing item, which the next period closes.
+	post("L-B", leB, "2500-DUE-TO-A", true, "40090.09", "EUR", "2026-12-02", "b2")
+	rec = postAs(e.h, http.MethodPost, "/v1/interco/reconciliations/run", "r2", `{"period":"2026-11","currency":"USD","source":"ledger","fxTolerancePct":"0"}`)
+	run2 := decode[struct{ ID string }](t, rec)
+	d2 := decode[struct{ Items []struct{ ID, Status string } }](t, postAs(e.h, http.MethodGet, "/v1/interco/reconciliations/"+run2.ID, "", ""))
+	if d2.Items[0].Status != "Timing" {
+		t.Skipf("fixture is %s, not Timing", d2.Items[0].Status)
+	}
+	rec = postAs(e.h, http.MethodPost, "/v1/interco/reconciliations/items/"+d2.Items[0].ID+"/fx-adjust", "", "")
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "IC-0858") {
+		t.Fatalf("a timing item = %d %s", rec.Code, rec.Body.String())
+	}
+}

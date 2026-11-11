@@ -96,8 +96,8 @@ func periodEnd(period string) (time.Time, error) {
 // acquisition figures from its stored terms, and its IC amounts from its balances with the overrides applied.
 //
 //	net income      = - sum of the unit's income accounts (debit less credit, unit currency)
-//	closing assets  = - sum of the unit's equity accounts + net income
-//	opening assets  = closing assets at the previous fiscal year end, or closing less net income when there is none
+//	closing assets  = - sum of the unit's equity accounts - dividends declared + net income
+//	opening assets  = closing assets at the previous fiscal year end, or closing less net income plus dividends declared when there is none
 func RunUnits(in DeriveInput) ([]RunUnit, error) {
 	d, err := DeriveRun(in)
 	return d.Units, err
@@ -181,7 +181,7 @@ func DeriveRun(in DeriveInput) (Derived, error) {
 			continue
 		}
 
-		opening := closing.Sub(profit)
+		opening := closing.Sub(profit).Add(dividends)
 		if b, ok := in.Opening[u.ID]; ok {
 			opening = b.NetAssets
 		}

@@ -113,7 +113,12 @@ func validateSourceParams(req generateRequest) map[string]string {
 		if len(req.Projects) == 0 || len(req.Projects) > maxSourceRows {
 			f["projects"] = fmt.Sprintf("name 1 to %d projects with their forecast model", maxSourceRows)
 		}
+		pairs := map[[2]string]bool{}
 		for i, p := range req.Projects {
+			if pairs[[2]string{p.ProjectID, p.ModelID}] {
+				f[fmt.Sprintf("projects[%d].modelId", i)] = "the project and forecast model appear twice"
+			}
+			pairs[[2]string{p.ProjectID, p.ModelID}] = true
 			if !ids.Valid(p.ProjectID) {
 				f[fmt.Sprintf("projects[%d].projectId", i)] = "must be a project id"
 			}

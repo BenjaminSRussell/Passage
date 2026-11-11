@@ -19,6 +19,7 @@ const (
 	CodeNothingToAdjust    = "IC-0858" // the item has no FX difference to book
 	CodeRateUnavailable    = "IC-0859" // the rate tables have no rate for the pair and date
 	CodeNotConfigured      = "IC-0860" // the stored registry or the ledger is not configured
+	CodeBeyondFX           = "IC-0861" // the difference is larger than an exchange difference can explain
 )
 
 // Settlement modes of an IC charge (ic.chargeSettlementMode, FR-40.13).
@@ -131,10 +132,16 @@ type Settings struct {
 	// for the tenant.
 	ReconCurrency  string
 	FXTolerancePct decimal.Decimal
+	// FXAdjustMaxPct is the largest difference, in percent of the larger side of a pair, that may be booked to the FX-difference
+	// account (0 to 10). A larger one is a missing or wrong entry and needs a correcting entry.
+	FXAdjustMaxPct decimal.Decimal
 }
 
 // DefaultSettings is what a tenant that stored nothing gets: Journal mode, no cross-border tax, the default FX tolerance.
-var DefaultSettings = Settings{ChargeSettlementMode: SettlementJournal, FXTolerancePct: DefaultFXTolerancePct}
+var DefaultSettings = Settings{ChargeSettlementMode: SettlementJournal, FXTolerancePct: DefaultFXTolerancePct, FXAdjustMaxPct: DefaultFXAdjustMaxPct}
+
+// DefaultFXAdjustMaxPct is the default Settings.FXAdjustMaxPct.
+var DefaultFXAdjustMaxPct = decimal.NewFromInt(2)
 
 // Validate checks the settings before they are stored.
 func (s Settings) Validate() error {
@@ -143,6 +150,9 @@ func (s Settings) Validate() error {
 	}
 	if s.ReconCurrency != "" && !ccyCode.MatchString(s.ReconCurrency) {
 		return invalid("reconCurrency must be an ISO 4217 code")
+	}
+	if s.FXAdjustMaxPct.IsNegative() || s.FXAdjustMaxPct.GreaterThan(decimal.NewFromInt(10)) {
+		return invalid("fxAdjustMaxPct must be between 0 and 10 percent")
 	}
 	return ValidateFXTolerance(s.FXTolerancePct)
 }

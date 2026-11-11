@@ -1021,6 +1021,7 @@ const groupFinance: Record<string, ProblemCatalogEntry> = {
   "IC-0858": { message: "This pair has no FX difference to book.", action: "Only a pair in two currencies with a difference can be booked to the FX-difference account." },
   "IC-0859": { message: "The rate tables have no rate to convert this pair.", action: "Publish the closing rate for the two currencies and the period end, then run the reconciliation again." },
   "IC-0860": { message: "Intercompany is not fully set up for this step.", action: "Store the accounting matrix and the entities first, or ask an administrator to connect the ledger." },
+  "IC-0861": { message: "That difference is too large to be an exchange difference.", action: "Find the missing or wrong entry and post a correcting entry instead of booking it to the FX-difference account." },
 };
 
 /** Field service: the technician's day, captures, checklist and truck stock (#45). */

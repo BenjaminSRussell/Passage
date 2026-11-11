@@ -298,10 +298,12 @@ type settingsBody struct {
 	CrossBorderTax       bool   `json:"crossBorderTax"`
 	ReconCurrency        string `json:"reconCurrency"`
 	FXTolerancePct       string `json:"fxTolerancePct"`
+	// FXAdjustMaxPct is the most, in percent of the larger side of a pair, that an FX adjustment may book (0 to 10, default 2).
+	FXAdjustMaxPct string `json:"fxAdjustMaxPct"`
 }
 
 func toSettingsBody(s domain.Settings) settingsBody {
-	return settingsBody{ChargeSettlementMode: s.ChargeSettlementMode, CrossBorderTax: s.CrossBorderTax, ReconCurrency: s.ReconCurrency, FXTolerancePct: s.FXTolerancePct.String()}
+	return settingsBody{ChargeSettlementMode: s.ChargeSettlementMode, CrossBorderTax: s.CrossBorderTax, ReconCurrency: s.ReconCurrency, FXTolerancePct: s.FXTolerancePct.String(), FXAdjustMaxPct: s.FXAdjustMaxPct.String()}
 }
 
 func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -326,9 +328,12 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := fieldParser{}
-	s := domain.Settings{ChargeSettlementMode: body.ChargeSettlementMode, CrossBorderTax: body.CrossBorderTax, ReconCurrency: body.ReconCurrency, FXTolerancePct: domain.DefaultFXTolerancePct}
+	s := domain.Settings{ChargeSettlementMode: body.ChargeSettlementMode, CrossBorderTax: body.CrossBorderTax, ReconCurrency: body.ReconCurrency, FXTolerancePct: domain.DefaultFXTolerancePct, FXAdjustMaxPct: domain.DefaultFXAdjustMaxPct}
 	if body.FXTolerancePct != "" {
 		s.FXTolerancePct = f.amount("fxTolerancePct", body.FXTolerancePct, true)
+	}
+	if body.FXAdjustMaxPct != "" {
+		s.FXAdjustMaxPct = f.amount("fxAdjustMaxPct", body.FXAdjustMaxPct, true)
 	}
 	if len(f) == 0 {
 		if err := s.Validate(); err != nil {

@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS ic_setting (
   -- What the scheduled reconciliation compares in: the currency both sides are converted to, and the FX tolerance (BR-40.5).
   recon_currency text NOT NULL DEFAULT '' CHECK (recon_currency = '' OR recon_currency ~ '^[A-Z]{3}$'),
   fx_tolerance_pct numeric(6,3) NOT NULL DEFAULT 0.5 CHECK (fx_tolerance_pct >= 0 AND fx_tolerance_pct <= 5),
+  -- The largest difference, as a percentage of the larger side, that may be booked to the FX-difference account; more than that needs a
+  -- real correcting entry.
+  fx_adjust_max_pct numeric(6,3) NOT NULL DEFAULT 2 CHECK (fx_adjust_max_pct >= 0 AND fx_adjust_max_pct <= 10),
   updated_by text NOT NULL CHECK (length(updated_by) >= 1),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

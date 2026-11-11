@@ -90,30 +90,32 @@ func retryTenants(ctx context.Context, q retryQueue, port budget.Port, tenants [
 func retryTenant(ctx context.Context, q retryQueue, port budget.Port, tenantID string) (budget.RetryResult, error) {
 	all := tenant.With(ctx, tenant.Principal{TenantID: tenantID, UserID: budgetRetryActor, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 	var total budget.RetryResult
+	// A call that failed in this run stays pending and sits at the head of an oldest-first list, so each pass asks for that many more
+	// and skips them: calls that keep failing cannot starve the newer ones behind them.
+	failed := map[string]bool{}
 	for pass := 0; pass < maxRetryPasses; pass++ {
-		pending, err := q.ListBudgetCalls(all, store.BudgetCallPending, 100)
+		pending, err := q.ListBudgetCalls(all, store.BudgetCallPending, min(100+len(failed), 1000))
 		if err != nil {
 			return total, err
 		}
-		if len(pending) == 0 {
-			return total, nil
-		}
-		done := 0
-		failed := 0
+		tried := 0
 		for _, c := range pending {
+			if failed[c.ID] || tried == 100 {
+				continue
+			}
+			tried++
 			as := tenant.With(ctx, tenant.Principal{TenantID: tenantID, UserID: budgetRetryActor, LegalEntityID: c.LegalEntityID})
 			total.Tried++
 			if err := budget.Run(as, port, q, c); err != nil {
-				failed++
+				failed[c.ID] = true
 				continue
 			}
-			done++
+			total.Done++
 		}
-		total.Done += done
-		total.Failed = failed
-		if done == 0 {
-			return total, nil
+		if tried == 0 {
+			break
 		}
 	}
+	total.Failed = len(failed)
 	return total, nil
 }

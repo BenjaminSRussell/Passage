@@ -162,6 +162,7 @@ func TestPlanGenerate_SourceProblems(t *testing.T) {
 		"accounts listed":  `{"source":"fixed-assets","account":"6500","accounts":["1"],"costCenters":[{"costCenter":"CC1","weight":"1"}]}`,
 		"no rates":         `{"source":"positions","account":"6000","departments":[{"departmentId":"0196a6a4-0000-7000-8000-0000000000d1","costCenter":"C"}]}`,
 		"bad project":      `{"source":"projects","account":"1","projects":[{"projectId":"x","modelId":"y","costCenter":"C"}]}`,
+		"repeated project": `{"source":"projects","account":"1","projects":[{"projectId":"0196a6a4-0000-7000-8000-0000000000e1","modelId":"0196a6a4-0000-7000-8000-0000000000e2","costCenter":"C"},{"projectId":"0196a6a4-0000-7000-8000-0000000000e1","modelId":"0196a6a4-0000-7000-8000-0000000000e2","costCenter":"D"}]}`,
 		"no model code":    `{"source":"demand","account":"1","unitPrices":[{"itemId":"0196a6a4-0000-7000-8000-0000000000f1","price":"1"}],"costCenters":[{"costCenter":"C","weight":"1"}]}`,
 		"cost centers+pos": `{"source":"positions","account":"1","costCenters":[{"costCenter":"C","weight":"1"}]}`,
 	} {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -112,7 +113,7 @@ func TestRetryTenants_AFailingCallFailsTheRunButNotTheOthers(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 tenants still have") {
 		t.Fatalf("err = %v", err)
 	}
-	if q.calls[retryTenantA][1].Status != store.BudgetCallDone || q.calls[retryTenantA][0].Status != store.BudgetCallPending || q.calls[retryTenantA][0].Attempts != 2 {
+	if q.calls[retryTenantA][1].Status != store.BudgetCallDone || q.calls[retryTenantA][0].Status != store.BudgetCallPending || q.calls[retryTenantA][0].Attempts != 1 {
 		t.Fatalf("calls = %+v %+v", q.calls[retryTenantA][0], q.calls[retryTenantA][1])
 	}
 }
@@ -126,5 +127,23 @@ func TestBudgetCallsRetry_RejectsBadInput(t *testing.T) {
 	env := map[string]string{"DATABASE_URL": "postgres://x"}
 	if err := budgetCallsRetry(context.Background(), func(k string) string { return env[k] }, []string{retryTenantA}); err == nil || !strings.Contains(err.Error(), "BUDGETING_URL") {
 		t.Fatalf("no budgeting url: %v", err)
+	}
+}
+
+func TestRetryTenants_CallsThatKeepFailingDoNotStarveNewerOnes(t *testing.T) {
+	var calls []*store.BudgetCall
+	port := &recordingPort{fail: map[string]bool{}}
+	for i := 0; i < 150; i++ {
+		line := fmt.Sprintf("bad%d", i)
+		port.fail[line] = true
+		calls = append(calls, &store.BudgetCall{ID: line, LegalEntityID: retryLE1, Kind: store.BudgetCallConvert, RequisitionLineID: line, Status: store.BudgetCallPending})
+	}
+	calls = append(calls, &store.BudgetCall{ID: "new", LegalEntityID: retryLE1, Kind: store.BudgetCallConvert, RequisitionLineID: "new", Status: store.BudgetCallPending})
+	q := &memQueue{calls: map[string][]*store.BudgetCall{retryTenantA: calls}}
+	if err := retryTenants(context.Background(), q, port, []string{retryTenantA}); err == nil {
+		t.Fatal("150 calls budgeting refused must fail the run")
+	}
+	if last := calls[len(calls)-1]; last.Status != store.BudgetCallDone {
+		t.Fatalf("the newest call is %s: failing calls starved it", last.Status)
 	}
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -19,6 +20,9 @@ import (
 )
 
 // Problem codes of the workbook round trip (FR-38.14).
+// maxPlanAmount is the first amount a plan cell cannot hold (numeric(19,4)).
+var maxPlanAmount = decimal.New(1, 15)
+
 const (
 	codeWorkbookOtherPlan = "BUD-0066" // the workbook was exported from another plan, scenario or fiscal year
 	codeExportTooLarge    = "BUD-0067" // the grid holds more cells than one workbook carries
@@ -189,9 +193,13 @@ func (a *API) importGrid(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	cells, rows, fields, other := parseWorkbook(body, plan, sid)
+	cells, rows, fields, other, stale := parseWorkbook(r.Context(), body, plan, sid, version)
 	if other != "" {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeWorkbookOtherPlan, other))
+		return
+	}
+	if stale != "" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeGridStale, stale))
 		return
 	}
 	if len(fields) > 0 {
@@ -212,12 +220,12 @@ func (a *API) importGrid(w http.ResponseWriter, r *http.Request) {
 
 // parseWorkbook turns a workbook into plan cells. It returns the cells and the number of data rows, the problems keyed by cell
 // reference (Plan!C5), or other when the workbook belongs to another plan, scenario or fiscal year.
-func parseWorkbook(data []byte, plan store.PlanView, scenarioID string) (cells []domain.PlanCell, rows int, fields map[string]string, other string) {
+func parseWorkbook(ctx context.Context, data []byte, plan store.PlanView, scenarioID string, version int64) (cells []domain.PlanCell, rows int, fields map[string]string, other, stale string) {
 	fields = map[string]string{}
-	sheets, err := xlsx.Read(data)
+	sheets, err := xlsx.Read(ctx, data, planSheet, infoSheet)
 	if err != nil {
-		fields["file"] = "is not a readable .xlsx workbook; export the plan and edit that file"
-		return nil, 0, fields, ""
+		fields["file"] = "is not a readable .xlsx workbook (" + err.Error() + "); export the plan and edit that file"
+		return nil, 0, fields, "", ""
 	}
 	var info, grid *xlsx.Sheet
 	for i := range sheets {
@@ -230,7 +238,7 @@ func parseWorkbook(data []byte, plan store.PlanView, scenarioID string) (cells [
 	}
 	if grid == nil || info == nil {
 		fields["file"] = "must have the sheets Plan and Info of an exported workbook"
-		return nil, 0, fields, ""
+		return nil, 0, fields, "", ""
 	}
 	meta := map[string]string{}
 	for r := range info.Rows {
@@ -240,11 +248,14 @@ func parseWorkbook(data []byte, plan store.PlanView, scenarioID string) (cells [
 	}
 	switch {
 	case meta["Plan"] != plan.ID:
-		return nil, 0, nil, "the workbook was exported from another plan: export this plan's scenario and edit that file"
+		return nil, 0, nil, "the workbook was exported from another plan: export this plan's scenario and edit that file", ""
 	case meta["Scenario"] != scenarioID:
-		return nil, 0, nil, "the workbook was exported from another scenario of this plan: import it into its own scenario"
+		return nil, 0, nil, "the workbook was exported from another scenario of this plan: import it into its own scenario", ""
 	case meta["Fiscal year"] != fmt.Sprint(plan.FiscalYear):
-		return nil, 0, nil, fmt.Sprintf("the workbook is for fiscal year %s and the plan for %d", meta["Fiscal year"], plan.FiscalYear)
+		return nil, 0, nil, fmt.Sprintf("the workbook is for fiscal year %s and the plan for %d", meta["Fiscal year"], plan.FiscalYear), ""
+	}
+	if meta["Version"] != fmt.Sprint(version) {
+		return nil, 0, nil, "", fmt.Sprintf("the workbook was exported at grid version %s and the grid is read for version %d: export it again, or import it with the version it was exported at", meta["Version"], version)
 	}
 	periods := domain.Periods(plan.FiscalYear)
 	if strings.TrimSpace(grid.At(0, 0).Text) != "Account" || strings.TrimSpace(grid.At(0, 1).Text) != "Cost center" {
@@ -256,7 +267,7 @@ func parseWorkbook(data []byte, plan store.PlanView, scenarioID string) (cells [
 		}
 	}
 	if len(fields) > 0 {
-		return nil, 0, fields, ""
+		return nil, 0, fields, "", ""
 	}
 	seen := map[string]int{}
 	add := func(ref, msg string) {
@@ -305,6 +316,10 @@ func parseWorkbook(data []byte, plan store.PlanView, scenarioID string) (cells [
 					add(xlsx.Ref(r, 2+i), "must have at most 4 decimal places")
 					continue
 				}
+				if rounded.GreaterThanOrEqual(maxPlanAmount) {
+					add(xlsx.Ref(r, 2+i), "must be below 1,000,000,000,000,000")
+					continue
+				}
 				amount = rounded
 			}
 			if amount.Sign() < 0 {
@@ -316,13 +331,13 @@ func parseWorkbook(data []byte, plan store.PlanView, scenarioID string) (cells [
 	}
 	switch {
 	case len(fields) > 0:
-		return nil, rows, fields, ""
+		return nil, rows, fields, "", ""
 	case rows == 0:
 		fields[planSheet] = "holds no rows"
-		return nil, 0, fields, ""
+		return nil, 0, fields, "", ""
 	case len(cells) > maxGridCells:
 		fields[planSheet] = fmt.Sprintf("holds %d cells; one import takes at most %d", len(cells), maxGridCells)
-		return nil, rows, fields, ""
+		return nil, rows, fields, "", ""
 	}
-	return cells, rows, nil, ""
+	return cells, rows, nil, "", ""
 }

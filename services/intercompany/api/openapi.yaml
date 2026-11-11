@@ -851,7 +851,7 @@ paths:
         other side's converted amount against its FX-difference account, in its own currency, on the last day of the period. A
         ledger that refuses the date because its period is closed is asked for the first day of the next period (only close may post
         into a closed period); the entry's text says so. The item is resolved with a note naming the ledger entry. A second call
-        returns the stored adjustment. IC-0857 when the entity has no FX-difference account, IC-0858 when the item has no FX
+        returns the stored adjustment. A Timing item, or a difference larger than settings fxAdjustMaxPct of the larger side, is refused (IC-0858, IC-0861): a missing or wrong entry needs a correcting entry. IC-0857 when the entity has no FX-difference account, IC-0858 when the item has no FX
         difference, IC-0852 when the item is not open, IC-0845 when the ledger refuses the entry, IC-0846 when it does not answer.
       x-passage-duty: intercompany.reconcile
       parameters:
@@ -1138,6 +1138,7 @@ components:
         crossBorderTax: { type: boolean }
         reconCurrency: { type: string, description: Empty switches the scheduled reconciliation off }
         fxTolerancePct: { type: string, description: 0 to 5 }
+        fxAdjustMaxPct: { type: string, description: 'The most, in percent of the larger side of a pair, that an FX adjustment may book (0 to 10, default 2); a larger difference is IC-0861 and needs a correcting entry' }
     FxAdjustment:
       type: object
       required: [id, itemId, entity, currency, amount, direction, account, fxAccount, ledgerEntryId, postedOn, periodEnd]

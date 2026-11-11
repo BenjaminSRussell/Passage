@@ -44,6 +44,12 @@ func TestDeriveRun_DividendsGiveE6AndComeOffTheNetAssets(t *testing.T) {
 	if got["DIVIDEND_INCOMED"] != "88.00" || got["NCI_EQUITYD"] != "22.00" || got["DIVIDENDS_DECLAREDC"] != "110.00" {
 		t.Fatalf("E6 = %v", got)
 	}
+	// Opening 1000 at 1.0, income 200 and the dividend 100 at the average 1.1, closing 1100 at 1.2: CTA = 1320 - (1000 + 220 - 110) = 210.
+	for _, b := range res.Balances {
+		if b.Account == AcctTranslationCTA && !b.Amount.Equal(dec("210")) {
+			t.Errorf("CTA = %s, want 210 (the dividend must not be left in it)", b.Amount)
+		}
+	}
 	if err := CheckBalanced(entriesOf(res)); err != nil {
 		t.Fatalf("the run does not balance: %v", err)
 	}
@@ -157,5 +163,36 @@ func TestDeriveRun_AnAssociateGoesThroughTheEquityMethodAndTheRegister(t *testin
 	in.Units = []Unit{subsidiary("A1", "EUR", "60")}
 	if _, err := DeriveRun(in); err == nil || !strings.Contains(err.Error(), "50 percent") {
 		t.Fatalf("a controlled equity unit: %v", err)
+	}
+}
+
+func TestDeriveRun_WithoutAnOpeningTheDividendIsNotATranslationDifference(t *testing.T) {
+	parent := Unit{ID: "P", LegalEntityID: "le-p", LedgerID: "l-p", Currency: "USD"}
+	for name, c := range map[string]struct{ currency string }{"same currency": {"USD"}, "foreign": {"EUR"}} {
+		sub := subsidiary("S1", c.currency, "80")
+		lines := []CollectLine{
+			collected("S1", "3000", AccountBalanceSheet, RoleEquity, "-1000"),
+			collected("S1", "3900", AccountBalanceSheet, RoleDividendPaid, "100"),
+			collected("S1", "4000", AccountIncome, "", "-200"),
+		}
+		d, err := DeriveRun(DeriveInput{GroupCurrency: "USD", Period: "2027-03", Units: []Unit{parent, sub}, Lines: lines,
+			Rates:        map[string]CollectRate{"EUR": {Average: dec("1"), Closing: dec("1")}},
+			OpeningRates: map[string]decimalT{"EUR": dec("1")},
+			Terms:        map[string]UnitTerms{"S1": {HistoricalRate: dec("1")}}})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !d.Units[0].OpeningNetAssets.Equal(dec("1000")) || !d.Units[0].ClosingNetAssets.Equal(dec("1100")) {
+			t.Fatalf("%s: opening %s closing %s, want 1000 and 1100", name, d.Units[0].OpeningNetAssets, d.Units[0].ClosingNetAssets)
+		}
+		res, err := ComputeRun(RunInput{GroupID: "g1", Period: "2027-03", Currency: "USD", Units: d.Units})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range res.Balances {
+			if b.Account == AcctTranslationCTA && !b.Amount.IsZero() {
+				t.Errorf("%s: CTA = %s, want 0", name, b.Amount)
+			}
+		}
 	}
 }

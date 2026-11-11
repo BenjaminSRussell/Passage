@@ -205,8 +205,20 @@ func (r *Reconciler) AdjustFX(ctx context.Context, itemID string) (domain.FXAdju
 		return domain.FXAdjustment{}, &domain.Error{Code: domain.CodeReconNotOpen, Detail: "the item is resolved and has nothing left to adjust"}
 	case it.Resolution != domain.ResolutionOpen:
 		return domain.FXAdjustment{}, &domain.Error{Code: domain.CodeReconNotOpen, Detail: "the item matched and has nothing to adjust"}
+	case it.Status == domain.ReconTiming:
+		return domain.FXAdjustment{}, &domain.Error{Code: domain.CodeNothingToAdjust, Detail: "the pair is a timing item: the other side's booking in the next period closes it, so there is nothing to adjust"}
 	case !it.FXApplies || it.Difference.IsZero():
 		return domain.FXAdjustment{}, &domain.Error{Code: domain.CodeNothingToAdjust, Detail: "only a pair in two currencies with a difference has an FX difference to book"}
+	}
+	settings, err := r.reg.GetSettings(ctx)
+	if err != nil {
+		return domain.FXAdjustment{}, err
+	}
+	larger := decimal.Max(it.AmountA.Abs(), it.AmountB.Abs())
+	limit := larger.Mul(settings.FXAdjustMaxPct).Div(decimal.NewFromInt(100))
+	if it.Difference.Abs().GreaterThan(limit) {
+		return domain.FXAdjustment{}, &domain.Error{Code: domain.CodeBeyondFX, Detail: fmt.Sprintf("the difference of %s %s is more than %s percent of the larger side, which is the most an exchange difference can explain here; find the missing or wrong entry and post a correcting entry instead",
+			it.Difference.Abs().StringFixed(int32(money.MinorUnits(run.Currency))), run.Currency, settings.FXAdjustMaxPct.String())}
 	}
 	entities, err := r.reg.ListEntities(ctx)
 	if err != nil {
