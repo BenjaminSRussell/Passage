@@ -215,6 +215,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listTenants
@@ -680,6 +681,8 @@ components:
         displayName: { type: string, minLength: 1, maxLength: 200 }
         adminUserId: { type: string, format: uuid, description: Initial tenant.administer holder; given together with adminIdpSubject. }
         adminIdpSubject: { type: string, minLength: 1, maxLength: 255 }
+        residency: { type: string, enum: [EU, US, UK, GLOBAL], default: GLOBAL, description: Where the tenant's data may live. The code-to-regions table is platform/go/residency. }
+        region: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,62}$', description: Where the tenant is placed (westeurope, eu-west). Must be a region the residency allows; otherwise 422 OPS-1705 and nothing is created. }
     GrantTenantAdministrator:
       type: object
       required: [userId, reason]
@@ -688,13 +691,15 @@ components:
         reason: { type: string, minLength: 1, maxLength: 500 }
     Tenant:
       type: object
-      required: [tenantId, realmName, displayName, status, createdAt]
+      required: [tenantId, realmName, displayName, status, createdAt, residency]
       properties:
         tenantId: { type: string, format: uuid }
         realmName: { type: string }
         displayName: { type: string }
         status: { type: string, enum: [active, suspended, deprovisioned] }
         createdAt: { type: string, format: date-time }
+        residency: { type: string, enum: [EU, US, UK, GLOBAL] }
+        region: { type: string, description: Empty for a tenant created before regions were recorded. }
     TenantPage:
       type: object
       required: [items]
