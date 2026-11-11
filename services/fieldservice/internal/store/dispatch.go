@@ -406,6 +406,9 @@ func assignTx(ctx context.Context, tx pgx.Tx, id string, version int, in AssignI
 	if wo.TechnicianID != nil && *wo.TechnicianID != tech.ID {
 		previous = wo.TechnicianID
 	}
+	if err := notifyRoute(ctx, tx, tid, &tech.ID, previous); err != nil {
+		return WorkOrder{}, err
+	}
 	return out, enqueue(ctx, tx, "workorder", id, svcevents.AssignmentChanged, tid, svcevents.AssignmentChangedData{
 		WorkOrderID: id, Number: wo.Number, LegalEntityID: wo.LegalEntityID, TerritoryID: wo.TerritoryID, Action: "ASSIGNED",
 		TechnicianID: &tech.ID, PreviousTechnicianID: previous, Start: &start, End: &endText, Pinned: in.Pinned,
@@ -442,6 +445,9 @@ func (s *Postgres) UnassignWorkOrder(ctx context.Context, id string, version int
 		if wo.AssignedStart != nil && wo.AssignedEnd != nil {
 			a, b := wo.AssignedStart.UTC().Format(time.RFC3339), wo.AssignedEnd.UTC().Format(time.RFC3339)
 			start, end = &a, &b
+		}
+		if err := notifyRoute(ctx, tx, tid, wo.TechnicianID); err != nil {
+			return err
 		}
 		return enqueue(ctx, tx, "workorder", id, svcevents.AssignmentChanged, tid, svcevents.AssignmentChangedData{
 			WorkOrderID: id, Number: wo.Number, LegalEntityID: wo.LegalEntityID, TerritoryID: wo.TerritoryID, Action: "UNASSIGNED",
@@ -647,6 +653,10 @@ func (s *Postgres) PublishDispatch(ctx context.Context, in PublishInput, now tim
 				}
 			}
 			assignments = append(assignments, h.order)
+			technician := h.order.TechnicianID
+			if err := notifyRoute(ctx, tx, tid, &technician); err != nil {
+				return err
+			}
 		}
 		raw, err := json.Marshal(assignments)
 		if err != nil {

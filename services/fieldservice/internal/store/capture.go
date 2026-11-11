@@ -206,7 +206,10 @@ func (s *Postgres) SetChecklist(ctx context.Context, id string, version int, ite
 			return err
 		}
 		wo, err = getWorkOrder(ctx, tx, tid, id)
-		return err
+		if err != nil {
+			return err
+		}
+		return notifyRoute(ctx, tx, tid, current.TechnicianID)
 	})
 	return wo, err
 }

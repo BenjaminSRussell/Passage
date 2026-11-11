@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/api"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/objectstore"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/optimizer"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/routefeed"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/store"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/migrations"
 )
@@ -76,7 +77,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if objects != nil {
 		s.WithObjects(objects)
 	}
-	a := api.New(s).WithOptimizer(optimizer.New(getenv("DISPATCH_URL"), signer))
+	feed := routefeed.New()
+	a := api.New(s).WithOptimizer(optimizer.New(getenv("DISPATCH_URL"), signer)).WithRouteFeed(feed)
 	router := httpx.NewRouter()
 	a.Register(router)
 
@@ -97,6 +99,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	go feed.Run(ctx, pool)
 	captures, err := newCaptureJob(getenv, s)
 	if err != nil {
 		return err

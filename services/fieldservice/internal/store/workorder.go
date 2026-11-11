@@ -238,6 +238,9 @@ func (s *Postgres) move(ctx context.Context, id string, version int, to domain.W
 		if err != nil {
 			return err
 		}
+		if err := notifyRoute(ctx, tx, tid, current.TechnicianID); err != nil {
+			return err
+		}
 		if to == domain.WOCompleted {
 			return enqueueCompleted(ctx, tx, tid, wo, now)
 		}

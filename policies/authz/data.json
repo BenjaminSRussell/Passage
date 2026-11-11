@@ -1966,7 +1966,8 @@
     "fieldservice.work-order.execute": {"permissions": [
       {"resource": "/v1/service/work-orders/*/actions", "methods": ["POST"]},
       {"resource": "/v1/service/work-orders/*/captures/*", "methods": ["PUT"]},
-      {"resource": "/v1/service/technicians/*/day", "methods": ["GET"]}
+      {"resource": "/v1/service/technicians/*/day", "methods": ["GET"]},
+      {"resource": "/v1/service/technicians/*/day/events", "methods": ["GET"]}
     ]},
     "fieldservice.technician.dispatch": {"permissions": [
       {"resource": "/v1/service/technicians", "methods": ["POST"]},
