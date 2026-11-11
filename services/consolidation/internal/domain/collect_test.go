@@ -10,9 +10,9 @@ import (
 func asError(err error, target **Error) bool { return errors.As(err, target) }
 
 var testMapping = []AccountMapping{
-	{"1000", "CASH", AccountBalanceSheet},
-	{"2000", "PAYABLES", AccountBalanceSheet},
-	{"4000", "REVENUE", AccountIncome},
+	{"1000", "CASH", AccountBalanceSheet, ""},
+	{"2000", "PAYABLES", AccountBalanceSheet, ""},
+	{"4000", "REVENUE", AccountIncome, ""},
 }
 
 func TestCollect_TranslatesBalanceSheetAtClosingAndIncomeAtAverage(t *testing.T) {

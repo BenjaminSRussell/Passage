@@ -1243,6 +1243,16 @@ test_treasury_cash_desk_writes_and_reads_are_separate if {
 	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days")
 	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:close")
 	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/entries")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:post")
+	allowed("treasury.cashdesk.write", "PATCH", "/v1/treasury/cash-desks/d1")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1:deactivate")
+	allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1:activate")
+	not allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:approve")
+	not allowed("treasury.cashdesk.write", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:reject")
+	allowed("treasury.cashdesk.approve", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:approve")
+	allowed("treasury.cashdesk.approve", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:reject")
+	not allowed("treasury.cashdesk.approve", "POST", "/v1/treasury/cash-desks/d1/entries")
+	not allowed("treasury.cashdesk.approve", "POST", "/v1/treasury/cash-desks/d1/days/2026-11-10:close")
 	not allowed("treasury.cashdesk.write", "GET", "/v1/treasury/cash-desks")
 	allowed("treasury.view", "GET", "/v1/treasury/cash-desks/d1/days/2026-11-10/entries")
 	allowed("treasury.view", "GET", "/v1/treasury/cash-desks/d1/days")
@@ -1270,13 +1280,26 @@ test_budget_plan_generation_needs_the_maintain_duty if {
 
 test_budget_conversion_is_service_only_and_reaches_only_the_convert_routes if {
 	data.duties["budget.encumbrance.convert"].service_only
-	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert"]
+	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert", "budget.requisition.check"]
 	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:convert")
 	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances:convert")
 	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/checks")
 	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:release")
 	not allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
 	not allowed("budget.view", "POST", "/v1/budget/encumbrances/e1:convert")
+}
+
+test_requisition_budget_check_is_service_only_and_reaches_only_its_two_routes if {
+	data.duties["budget.requisition.check"].service_only
+	allowed("budget.requisition.check", "POST", "/v1/budget/requisition-checks")
+	allowed("budget.requisition.check", "POST", "/v1/budget/requisition-checks:release-line")
+	not allowed("budget.requisition.check", "POST", "/v1/budget/checks")
+	not allowed("budget.requisition.check", "POST", "/v1/budget/encumbrances/e1:convert")
+	not allowed("budget.check", "POST", "/v1/budget/requisition-checks")
+	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/requisition-checks")
+	allowed("procurement.purchase-order.maintain", "POST", "/v1/procurement/budget-calls:retry")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/budget-calls")
+	not allowed("procurement.purchase-order.inquire", "POST", "/v1/procurement/budget-calls:retry")
 }
 
 test_budget_view_reads_the_scenario_comparison_and_cannot_write_it if {
@@ -2685,6 +2708,18 @@ test_receiving_document_flow_is_read_only_and_separate if {
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
+}
+
+test_consolidation_unit_edit_terms_and_mapping_versions_follow_configure_and_view if {
+	allowed("consolidation.configure", "PATCH", "/v1/consol/groups/g1/units/u1")
+	allowed("consolidation.configure", "DELETE", "/v1/consol/groups/g1/units/u1")
+	allowed("consolidation.configure", "PUT", "/v1/consol/groups/g1/units/u1/terms")
+	not allowed("consolidation.run", "PATCH", "/v1/consol/groups/g1/units/u1")
+	not allowed("consolidation.view", "PUT", "/v1/consol/groups/g1/units/u1/terms")
+	allowed("consolidation.view", "GET", "/v1/consol/groups/g1/unit-terms")
+	allowed("consolidation.view", "GET", "/v1/consol/groups/g1/account-map/versions")
+	allowed("consolidation.view", "GET", "/v1/consol/collections/c1/validations")
+	not allowed("consolidation.configure", "GET", "/v1/consol/groups/g1/unit-terms")
 }
 
 # #45: the technician's day and capture routes belong to the technician duty; reading a capture

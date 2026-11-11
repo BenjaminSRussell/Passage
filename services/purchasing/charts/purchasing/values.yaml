@@ -17,13 +17,14 @@ database:
 # requisitions from punchout returns (procurement.requisition.create) and, for inbound cXML, confirms purchase orders (#35).
 serviceIdentity:
   publicKeys: ""
-  # purchasing signs its call to budgeting (budget.encumbrance.convert) with this Secret's key "signing-key", mounted at
+  # purchasing signs its calls to budgeting (budget.encumbrance.convert, budget.requisition.check) with this Secret's key "signing-key", mounted at
   # /var/run/passage/service-identity. Add purchasing's public key to budgeting's serviceIdentity.publicKeys first.
   signingKeySecret: ""
   keyId: ""
 
-# Base URLs of the services purchasing calls. budgeting converts a requisition line's pre-encumbrance when a PO line is
-# created from it (FR-38.5); unset, nothing is converted and purchasing logs a warning at start.
+# Base URLs of the services purchasing calls. budgeting checks an approved requisition and reserves its lines as pre-encumbrances,
+# gives them back when it is cancelled, and converts a line's pre-encumbrance when a PO line is created from it (FR-38.5). Unset,
+# requisitions are approved unchecked, nothing is converted and purchasing logs a warning at start.
 serviceUrls:
   budgeting: ""
 

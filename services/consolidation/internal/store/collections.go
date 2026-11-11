@@ -24,12 +24,16 @@ type Collection struct {
 	Currency  string
 	CreatedBy string
 	CreatedAt time.Time
+	// MappingVersion is the version of the chart mapping the lines were mapped with (0 for a collection made before mappings
+	// were versioned).
+	MappingVersion int
 }
 
-// CollectionDetail is a collection with every collected line.
+// CollectionDetail is a collection with every collected line and the rates it translated at.
 type CollectionDetail struct {
 	Collection
 	Lines []domain.CollectLine
+	Rates map[string]domain.CollectRate
 }
 
 func errCollectionNotFound(id string) error {
@@ -39,7 +43,7 @@ func errCollectionNotFound(id string) error {
 // CreateCollection stores collected lines as the next version of the group's
 // collection for the period. The lines and header are immutable. With an
 // Idempotency-Key a retry returns the stored collection.
-func (s *Postgres) CreateCollection(ctx context.Context, groupID, period string, lines []domain.CollectLine, inputs any, key string) (Collection, bool, error) {
+func (s *Postgres) CreateCollection(ctx context.Context, groupID, period string, mappingVersion int, lines []domain.CollectLine, inputs any, key string) (Collection, bool, error) {
 	tenantID, by, err := creator(ctx)
 	if err != nil {
 		return Collection{}, false, err
@@ -65,13 +69,16 @@ func (s *Postgres) CreateCollection(ctx context.Context, groupID, period string,
 			if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+"|collection|"+groupID+"|"+period); err != nil {
 				return Collection{}, err
 			}
-			c := Collection{ID: ids.New(), GroupID: groupID, Period: period, Currency: currency, CreatedBy: by}
+			if err := lockCollectedUnits(ctx, tx, tenantID, groupID, lines); err != nil {
+				return Collection{}, err
+			}
+			c := Collection{ID: ids.New(), GroupID: groupID, Period: period, Currency: currency, CreatedBy: by, MappingVersion: mappingVersion}
 			if err := tx.QueryRow(ctx, `select coalesce(max(version), 0) + 1 from consolidation_collection where tenant_id = $1 and group_id = $2::uuid and period = $3`,
 				tenantID, groupID, period).Scan(&c.Version); err != nil {
 				return Collection{}, err
 			}
-			if err := tx.QueryRow(ctx, `insert into consolidation_collection (tenant_id, id, group_id, period, version, currency, inputs, created_by)
-				values ($1, $2, $3::uuid, $4, $5, $6, $7, $8) returning created_at`, tenantID, c.ID, groupID, period, c.Version, currency, raw, by).Scan(&c.CreatedAt); err != nil {
+			if err := tx.QueryRow(ctx, `insert into consolidation_collection (tenant_id, id, group_id, period, version, currency, inputs, created_by, mapping_version)
+				values ($1, $2, $3::uuid, $4, $5, $6, $7, $8, nullif($9, 0)) returning created_at`, tenantID, c.ID, groupID, period, c.Version, currency, raw, by, mappingVersion).Scan(&c.CreatedAt); err != nil {
 				return Collection{}, err
 			}
 			var batch pgx.Batch
@@ -80,9 +87,9 @@ func (s *Postgres) CreateCollection(ctx context.Context, groupID, period string,
 				if l.Mapped() {
 					acct, typ = l.ConsolidationAccount, l.Type
 				}
-				batch.Queue(`insert into consolidation_collection_line (tenant_id, collection_id, seq, unit_id, main_account, consolidation_account, account_type, unit_currency, unit_amount, rate, group_amount)
-					values ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9::numeric, $10::numeric, $11::numeric)`,
-					tenantID, c.ID, i, l.UnitID, l.MainAccount, acct, typ, l.UnitCurrency, l.UnitAmount.String(), l.Rate.String(), l.GroupAmount.String())
+				batch.Queue(`insert into consolidation_collection_line (tenant_id, collection_id, seq, unit_id, main_account, consolidation_account, account_type, unit_currency, unit_amount, rate, group_amount, role)
+					values ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9::numeric, $10::numeric, $11::numeric, nullif($12, ''))`,
+					tenantID, c.ID, i, l.UnitID, l.MainAccount, acct, typ, l.UnitCurrency, l.UnitAmount.String(), l.Rate.String(), l.GroupAmount.String(), l.Role)
 			}
 			res := tx.SendBatch(ctx, &batch)
 			for range batch.Len() {
@@ -146,41 +153,126 @@ func (s *Postgres) GetCollection(ctx context.Context, id string) (CollectionDeta
 	}
 	var d CollectionDetail
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `select id::text, group_id::text, period, version, currency, created_by, created_at from consolidation_collection
-			where tenant_id = $1 and id = $2::uuid`, pr.TenantID, id).Scan(&d.ID, &d.GroupID, &d.Period, &d.Version, &d.Currency, &d.CreatedBy, &d.CreatedAt)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return errCollectionNotFound(id)
-		}
-		if err != nil {
-			return err
-		}
-		rows, err := tx.Query(ctx, `select unit_id::text, main_account, coalesce(consolidation_account, ''), coalesce(account_type, ''), unit_currency,
-				unit_amount::text, rate::text, group_amount::text
-			from consolidation_collection_line where tenant_id = $1 and collection_id = $2::uuid order by seq`, pr.TenantID, id)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var l domain.CollectLine
-			var amount, rate, group string
-			if err := rows.Scan(&l.UnitID, &l.MainAccount, &l.ConsolidationAccount, &l.Type, &l.UnitCurrency, &amount, &rate, &group); err != nil {
-				return err
-			}
-			for _, f := range []struct {
-				dst *decimal.Decimal
-				raw string
-			}{{&l.UnitAmount, amount}, {&l.Rate, rate}, {&l.GroupAmount, group}} {
-				if *f.dst, err = decimal.NewFromString(f.raw); err != nil {
-					return fmt.Errorf("store: collection amount %q: %w", f.raw, err)
-				}
-			}
-			d.Lines = append(d.Lines, l)
-		}
-		return rows.Err()
+		return loadCollection(ctx, tx, pr.TenantID, `id = $2::uuid`, id, &d)
 	})
 	if err != nil {
 		return CollectionDetail{}, wrap("get consolidation collection", err)
 	}
 	return d, nil
+}
+
+// LatestCollection returns the newest version of the group's collection for a period; ok is false when there is none.
+func (s *Postgres) LatestCollection(ctx context.Context, groupID, period string) (CollectionDetail, bool, error) {
+	pr, err := principal(ctx)
+	if err != nil {
+		return CollectionDetail{}, false, err
+	}
+	var d CollectionDetail
+	found := true
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var id string
+		err := tx.QueryRow(ctx, `select id::text from consolidation_collection where tenant_id = $1 and group_id = $2::uuid and period = $3 order by version desc limit 1`,
+			pr.TenantID, groupID, period).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			found = false
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return loadCollection(ctx, tx, pr.TenantID, `id = $2::uuid`, id, &d)
+	})
+	if err != nil {
+		return CollectionDetail{}, false, wrap("get latest consolidation collection", err)
+	}
+	return d, found, nil
+}
+
+func loadCollection(ctx context.Context, tx pgx.Tx, tenantID, where, id string, d *CollectionDetail) error {
+	var inputs []byte
+	err := tx.QueryRow(ctx, `select id::text, group_id::text, period, version, currency, created_by, created_at, coalesce(mapping_version, 0), inputs from consolidation_collection
+		where tenant_id = $1 and `+where, tenantID, id).Scan(&d.ID, &d.GroupID, &d.Period, &d.Version, &d.Currency, &d.CreatedBy, &d.CreatedAt, &d.MappingVersion, &inputs)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errCollectionNotFound(id)
+	}
+	if err != nil {
+		return err
+	}
+	var in struct {
+		Rates map[string]domain.CollectRate `json:"rates"`
+	}
+	if err := json.Unmarshal(inputs, &in); err != nil {
+		return fmt.Errorf("store: collection inputs: %w", err)
+	}
+	d.Rates = in.Rates
+	rows, err := tx.Query(ctx, `select unit_id::text, main_account, coalesce(consolidation_account, ''), coalesce(account_type, ''), coalesce(role, ''), unit_currency,
+			unit_amount::text, rate::text, group_amount::text
+		from consolidation_collection_line where tenant_id = $1 and collection_id = $2::uuid order by seq`, tenantID, d.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var l domain.CollectLine
+		var amount, rate, group string
+		if err := rows.Scan(&l.UnitID, &l.MainAccount, &l.ConsolidationAccount, &l.Type, &l.Role, &l.UnitCurrency, &amount, &rate, &group); err != nil {
+			return err
+		}
+		for _, f := range []struct {
+			dst *decimal.Decimal
+			raw string
+		}{{&l.UnitAmount, amount}, {&l.Rate, rate}, {&l.GroupAmount, group}} {
+			if *f.dst, err = decimal.NewFromString(f.raw); err != nil {
+				return fmt.Errorf("store: collection amount %q: %w", f.raw, err)
+			}
+		}
+		d.Lines = append(d.Lines, l)
+	}
+	return rows.Err()
+}
+
+// lockCollectedUnits holds the units the lines were collected from (FOR SHARE) until the collection commits, and refuses lines
+// of a unit that left the group or changed currency since it was read: the lines are read from the ledgers before this
+// transaction, so without it a unit removed meanwhile (RemoveUnit checks for collection lines under its row lock) would leave
+// stored lines of a unit the group no longer has, and a currency change would leave lines in a currency the unit no longer is.
+func lockCollectedUnits(ctx context.Context, tx pgx.Tx, tenantID, groupID string, lines []domain.CollectLine) error {
+	want := map[string]string{}
+	for _, l := range lines {
+		want[l.UnitID] = l.UnitCurrency
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	unitIDs := make([]string, 0, len(want))
+	for id := range want {
+		unitIDs = append(unitIDs, id)
+	}
+	rows, err := tx.Query(ctx, `select id::text, currency from consolidation_unit where tenant_id = $1 and group_id = $2::uuid and id = any($3::uuid[])
+		order by id for share`, tenantID, groupID, unitIDs)
+	if err != nil {
+		return err
+	}
+	have := map[string]string{}
+	for rows.Next() {
+		var id, currency string
+		if err := rows.Scan(&id, &currency); err != nil {
+			rows.Close()
+			return err
+		}
+		have[id] = currency
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range unitIDs {
+		currency, ok := have[id]
+		switch {
+		case !ok:
+			return &domain.Error{Code: domain.CodeCollectionError, Detail: "unit " + id + " left the group while it was collected; collect again"}
+		case currency != want[id]:
+			return &domain.Error{Code: domain.CodeCollectionError, Detail: "unit " + id + " changed its currency to " + currency + " while it was collected; collect again"}
+		}
+	}
+	return nil
 }
