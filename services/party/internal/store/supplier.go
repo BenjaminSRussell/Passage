@@ -26,7 +26,12 @@ const (
 	CodeSupplierState    = "PTY-SUP-STATE"
 	CodeSupplierInvalid  = "PTY-SUP-INVALID"
 	CodeSupplierSoD      = "PTY-SUP-SOD"
+	// CodeSupplierPartyWrite: approving a profile change rewrites the tenant-wide party, which needs party.write as well.
+	CodeSupplierPartyWrite = "PTY-SUP-PARTY-WRITE"
 )
+
+// DutyPartyWrite is the duty that edits a party; approving a vendor's profile change needs it besides the decide duty.
+const DutyPartyWrite = "party.write"
 
 type Questionnaire struct {
 	ID        string            `json:"id"`
@@ -427,6 +432,13 @@ func (s *Postgres) DecideRequest(ctx context.Context, id string, approve bool, n
 		}
 		if !domain.CanDecide(r.Status) {
 			return supplierState("the request is " + r.Status + " and cannot be decided")
+		}
+		// The party a profile change rewrites is tenant-wide: the same party can be a customer in another legal entity. The
+		// decide duty alone, which can be scoped to one legal entity, does not reach it; the approver needs party.write too.
+		if approve && r.Kind == domain.RequestProfileChange && len(r.Changes) > 0 {
+			if caller, _ := tenant.FromContext(ctx); !caller.HasDuty(DutyPartyWrite) {
+				return httpx.NewProblem(http.StatusForbidden, CodeSupplierPartyWrite, "approving a profile change updates the vendor's party, which needs party.write as well")
+			}
 		}
 		var createdBy string
 		if err := tx.QueryRow(ctx, `select created_by from vendor_request where tenant_id = $1 and id = $2`, tenantOf(ctx), rid).Scan(&createdBy); err != nil {

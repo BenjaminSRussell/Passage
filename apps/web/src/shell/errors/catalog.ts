@@ -669,6 +669,7 @@ const party: Record<string, ProblemCatalogEntry> = {
   "PTY-0001": { message: "The tax registration number isn't valid for its country.", action: "Check the number and the country, then try again." },
   "PTY-SUP-INVALID": { message: "Some of the details aren't valid.", action: "Check the highlighted fields, then try again." },
   "PTY-SUP-NOT-FOUND": { message: "That request, document or supplier can't be found.", action: "Reload the list and try again." },
+  "PTY-SUP-PARTY-WRITE": { message: "Approving this profile change updates the supplier's party record, which you aren't allowed to edit.", action: "Ask someone who can edit parties to approve it, or reject it with a note." },
   "PTY-SUP-SCOPE": { message: "This account isn't a supplier account.", action: "Sign in with a supplier account." },
   "PTY-SUP-SOD": { message: "You invited this supplier, so someone else has to approve it.", action: "Ask a colleague to approve the onboarding." },
   "PTY-SUP-STATE": { message: "The request has already moved on.", action: "Reload and check its current status." },

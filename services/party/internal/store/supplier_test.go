@@ -2,13 +2,16 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
@@ -18,15 +21,28 @@ type supplierRig struct {
 	s              *store.Postgres
 	app            *pgxpool.Pool
 	buyer, approve context.Context
+	// approveEdit holds party.write besides the decide duty: it can approve a profile change.
+	approveEdit context.Context
 	vendorA        string
 	vendorB        string
+}
+
+// withDuty adds a duty to the principal in ctx.
+func withDuty(ctx context.Context, duty string) context.Context {
+	p, _ := tenant.FromContext(ctx)
+	duties := map[string]struct{}{duty: {}}
+	for d := range p.Duties {
+		duties[d] = struct{}{}
+	}
+	p.Duties = duties
+	return tenant.With(ctx, p)
 }
 
 func newSupplierRig(t *testing.T) *supplierRig {
 	t.Helper()
 	app := migratedApp(t)
 	s := store.New(app).WithKeys(testKeys(t))
-	r := &supplierRig{s: s, app: app, buyer: asUser(1, legalEntityA, "buyer"), approve: asUser(1, legalEntityA, "approver")}
+	r := &supplierRig{s: s, app: app, buyer: asUser(1, legalEntityA, "buyer"), approve: asUser(1, legalEntityA, "approver"), approveEdit: withDuty(asUser(1, legalEntityA, "approver"), store.DutyPartyWrite)}
 	group := ids.New()
 	for i, dst := range []*string{&r.vendorA, &r.vendorB} {
 		party, err := insertParty(principalContext(1, ""), app, testkit.TenantID(1), []string{"P-A", "P-B"}[i])
@@ -269,7 +285,7 @@ func TestSupplier_ApprovingAProfileChangeAppliesItToTheVendorsParty(t *testing.T
 	if p, _, _ := r.s.GetParty(r.buyer, v.PartyID); p.Version != before.Version || *p.LegalName != "Acme" {
 		t.Fatalf("party changed before approval: %+v", p)
 	}
-	done, err := r.s.DecideRequest(r.approve, req.ID, true, "ok")
+	done, err := r.s.DecideRequest(r.approveEdit, req.ID, true, "ok")
 	if err != nil || done.Status != domain.RequestApproved || done.AppliedAt == nil {
 		t.Fatalf("approve %+v %v", done, err)
 	}
@@ -297,6 +313,41 @@ func TestSupplier_ApprovingAProfileChangeAppliesItToTheVendorsParty(t *testing.T
 	}
 }
 
+func TestSupplier_ApprovingAProfileChangeNeedsPartyWrite(t *testing.T) {
+	r := newSupplierRig(t)
+	v, _ := r.s.GetVendor(r.buyer, r.vendorA)
+	req, err := r.s.CreateRequest(r.buyer, r.vendorA, domain.RequestProfileChange, "Rename", "x", map[string]string{"legalName": "Other Name"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The decide duty alone does not reach the tenant-wide party.
+	_, err = r.s.DecideRequest(r.approve, req.ID, true, "ok")
+	if problemCode(t, err) != store.CodeSupplierPartyWrite {
+		t.Fatalf("approve without party.write: %v", err)
+	}
+	if p := (*httpx.Problem)(nil); !errors.As(err, &p) || p.Status != http.StatusForbidden {
+		t.Errorf("approve without party.write: %+v, want 403", p)
+	}
+	if got, _ := r.s.GetRequest(r.buyer, "", req.ID); got.Status != domain.RequestSubmitted || got.AppliedAt != nil {
+		t.Errorf("request after a refused approval: %+v", got)
+	}
+	if p, _, _ := r.s.GetParty(r.buyer, v.PartyID); *p.LegalName != "Acme" || p.Version != 1 {
+		t.Errorf("party after a refused approval: %+v", p)
+	}
+	// Rejecting it changes no party, so the decide duty is enough.
+	if d, err := r.s.DecideRequest(r.approve, req.ID, false, "no"); err != nil || d.Status != domain.RequestRejected {
+		t.Fatalf("reject without party.write: %+v %v", d, err)
+	}
+	// A profile change that carries no field changes writes nothing to the party either.
+	empty, err := r.s.CreateRequest(r.buyer, r.vendorA, domain.RequestProfileChange, "Note", "Nothing to change.", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, err := r.s.DecideRequest(r.approve, empty.ID, true, ""); err != nil || d.Status != domain.RequestApproved {
+		t.Fatalf("approve an empty profile change: %+v %v", d, err)
+	}
+}
+
 func TestSupplier_RejectingOrWithdrawingAProfileChangeLeavesThePartyAlone(t *testing.T) {
 	r := newSupplierRig(t)
 	v, _ := r.s.GetVendor(r.buyer, r.vendorA)
@@ -317,7 +368,7 @@ func TestSupplier_AProfileChangeThePartyCannotTakeFailsTheApprovalAndKeepsItOpen
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.s.DecideRequest(r.approve, req.ID, true, ""); problemCode(t, err) != store.CodeSupplierInvalid {
+	if _, err := r.s.DecideRequest(r.approveEdit, req.ID, true, ""); problemCode(t, err) != store.CodeSupplierInvalid {
 		t.Fatalf("approve an invalid change: %v", err)
 	}
 	if got, _ := r.s.GetRequest(r.buyer, "", req.ID); got.Status != domain.RequestSubmitted || got.AppliedAt != nil {
