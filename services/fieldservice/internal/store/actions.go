@@ -488,7 +488,7 @@ func enqueueCompleted(ctx context.Context, tx pgx.Tx, tenantID string, wo WorkOr
 	return enqueue(ctx, tx, "workorder", wo.ID, svcevents.WorkOrderCompleted, tenantID, svcevents.WorkOrderCompletedData{
 		WorkOrderID: wo.ID, Number: wo.Number, CustomerPartyID: wo.CustomerPartyID, LegalEntityID: wo.LegalEntityID, CaseID: wo.CaseID,
 		TechnicianID: wo.TechnicianID, FirstTimeFix: wo.FirstTimeFix == nil || *wo.FirstTimeFix, DurationMinutes: domain.WorkMinutes(marks),
-		CompletedAt: at.UTC().Format(time.RFC3339), Truck: truck, Lines: lines,
+		CompletedAt: at.UTC().Format(time.RFC3339), Currency: wo.Currency, Truck: truck, Lines: lines,
 	})
 }
 

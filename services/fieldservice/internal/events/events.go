@@ -255,6 +255,9 @@ type WorkOrderCompletedData struct {
 	FirstTimeFix    bool    `json:"firstTimeFix"`
 	DurationMinutes int     `json:"durationMinutes"`
 	CompletedAt     string  `json:"completedAt"`
+	// Currency is the work order's currency, the one a truck issue is valued in when the
+	// truck holds no stock to take a value from.
+	Currency string `json:"currency"`
 	// Truck is where the technician's truck stock sits in inventory; absent when the work
 	// order has no technician or the technician has no truck (BR-45.7).
 	Truck *CompletedTruck `json:"truck"`

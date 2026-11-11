@@ -972,6 +972,19 @@ const groupFinance: Record<string, ProblemCatalogEntry> = {
   "IC-0852": { message: "This pair has nothing left to resolve.", action: "Reload the run to see its current state." },
 };
 
+/** Field service: the technician's day, captures, checklist and truck stock (#45). */
+const fieldService: Record<string, ProblemCatalogEntry> = {
+  "SVC-WO-003": { message: "A required checklist item is still open, so the job can't be completed.", action: "Tick the open items, then complete the job again." },
+  "SVC-CAP-001": { message: "That photo or signature can't be used: it isn't a PNG or JPEG, or it is too large.", action: "Take the photo again, or clear the signature and sign again." },
+  "SVC-CAP-002": { message: "A photo or signature this entry refers to hasn't been uploaded yet.", action: "Wait for the upload to finish, then sync again." },
+  "SVC-CAP-003": { message: "This job is no longer open for photos or signatures.", action: "Ask the dispatcher to check the job's status." },
+  "SVC-SYNC-007": { message: "That checklist item isn't on this job any more.", action: "Reload the job to see its current checklist." },
+  "SVC-TECH-006": { message: "Your sign-in isn't linked to a technician.", action: "Ask your dispatcher to link your worker record to a technician." },
+  "INV-TRK-001": { message: "That truck stock level can't be saved: the maximum must be above zero and not below the minimum.", action: "Correct the minimum and maximum and save again." },
+  "INV-TRK-003": { message: "This technician has no truck to take the parts from.", action: "Set the technician's truck site and warehouse, then replay the completion." },
+  "INV-TRK-004": { message: "Truck stock isn't switched on for this service.", action: "Ask your administrator to enable it." },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -997,6 +1010,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...treasury,
   ...groupFinance,
   ...shared,
+  ...fieldService,
 });
 
 /** The catalog entry for a problem code, if there is one. */

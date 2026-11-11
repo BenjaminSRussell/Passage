@@ -402,6 +402,7 @@
     "hub.client.consume": {"service_only": true, "permissions": [{"resource": "/v1/hub/clients:consume", "methods": ["POST"]}]},
     "inventory.read": {"permissions": [
       {"resource": "/v1/inventory/onhand", "methods": ["GET"]},
+      {"resource": "/v1/inventory/truck-stock-levels", "methods": ["GET"]},
       {"resource": "/v1/inventory/journals", "methods": ["GET"]},
       {"resource": "/v1/inventory/journals/*", "methods": ["GET"]},
       {"resource": "/v1/inventory/transactions", "methods": ["GET"]},
@@ -510,8 +511,10 @@
       {"resource": "/v1/inventory/consignment-orders/*:close", "methods": ["POST"]},
       {"resource": "/v1/inventory/consignment-orders/*:cancel", "methods": ["POST"]}
     ]},
+    "inventory.truck-stock.write": {"permissions": [{"resource": "/v1/inventory/truck-stock-levels", "methods": ["PUT"]}]},
     "inventory.transfer.write": {"permissions": [
       {"resource": "/v1/inventory/transfer-orders", "methods": ["POST"]},
+      {"resource": "/v1/inventory/truck-stock:replenish", "methods": ["POST"]},
       {"resource": "/v1/inventory/transfer-orders/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/inventory/transfer-orders/*", "methods": ["PATCH"]},
       {"resource": "/v1/inventory/transfer-orders/*:confirm", "methods": ["POST"]},

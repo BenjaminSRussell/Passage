@@ -167,7 +167,7 @@ components:
         (0 for a manual completion without an action log).
       payload:
         type: object
-        required: [workOrderId, number, customerId, legalEntityId, caseId, technicianId, firstTimeFix, durationMinutes, completedAt, truck, lines]
+        required: [workOrderId, number, customerId, legalEntityId, caseId, technicianId, firstTimeFix, durationMinutes, completedAt, currency, truck, lines]
         additionalProperties: false
         properties:
           workOrderId: { type: string, format: uuid }
@@ -179,6 +179,7 @@ components:
           firstTimeFix: { type: boolean }
           durationMinutes: { type: integer, minimum: 0 }
           completedAt: { type: string, format: date-time }
+          currency: { type: string, pattern: "^[A-Z]{3}$", description: The work order currency; a truck issue with no stock to take a value from is valued in it. }
           truck:
             description: The technician's truck as an inventory address; null without a technician or a truck. Inventory issues the consumed PART lines from it (BR-45.7).
             oneOf:

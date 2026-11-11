@@ -34,6 +34,7 @@ func TestLoadConfig_rejects(t *testing.T) {
 		"bad max lines":       {"INV_JOURNAL_MAX_LINES": "10"},
 		"bad negative policy": {"INV_NEGATIVE_DEFAULT": "maybe"},
 		"missing account":     {"INV_INVENTORY_ACCOUNT": ""},
+		"bad truck policy":    {"INV_ALLOW_NEGATIVE_TRUCK": "maybe"},
 	}
 	for name, o := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -69,5 +70,17 @@ func TestRun_StopsOnMalformedServicePublicKeys(t *testing.T) {
 	err := run(context.Background(), env(map[string]string{"PASSAGE_SERVICE_NAME": "inventory", "PASSAGE_SERVICE_PUBLIC_KEYS": "receiving=zzz"}))
 	if err == nil || !strings.Contains(err.Error(), "PASSAGE_SERVICE_PUBLIC_KEYS") {
 		t.Fatalf("run with a malformed key = %v", err)
+	}
+}
+
+// service.allow-negative-truck (BR-45.7) is off unless INV_ALLOW_NEGATIVE_TRUCK is true, and is independent of INV_NEGATIVE_DEFAULT.
+func TestLoadConfig_allowNegativeTruck(t *testing.T) {
+	c, err := loadConfig(env(map[string]string{"INV_NEGATIVE_DEFAULT": "allow"}))
+	if err != nil || c.allowNegativeTruck {
+		t.Fatalf("default: %v %v", c.allowNegativeTruck, err)
+	}
+	c, err = loadConfig(env(map[string]string{"INV_ALLOW_NEGATIVE_TRUCK": "true"}))
+	if err != nil || !c.allowNegativeTruck || c.negative.PhysicalAllowed {
+		t.Fatalf("on: %+v %v", c, err)
 	}
 }

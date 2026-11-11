@@ -2411,3 +2411,14 @@ test_fieldservice_technician_day_and_captures if {
 	allowed("fieldservice.work-order.maintain", "PUT", "/v1/service/work-orders/w1/checklist")
 	not allowed("fieldservice.work-order.maintain", "PUT", "/v1/service/work-orders/w1/captures/c1")
 }
+
+# #45: truck stock levels are set with their own duty, read with inventory.read, and replenishment
+# creates transfer orders, so it needs the transfer duty.
+test_inventory_truck_stock if {
+	allowed("inventory.truck-stock.write", "PUT", "/v1/inventory/truck-stock-levels")
+	not allowed("inventory.read", "PUT", "/v1/inventory/truck-stock-levels")
+	allowed("inventory.read", "GET", "/v1/inventory/truck-stock-levels")
+	allowed("inventory.transfer.write", "POST", "/v1/inventory/truck-stock:replenish")
+	not allowed("inventory.truck-stock.write", "POST", "/v1/inventory/truck-stock:replenish")
+	not allowed("inventory.transfer.post", "POST", "/v1/inventory/truck-stock:replenish")
+}
