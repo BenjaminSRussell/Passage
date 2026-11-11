@@ -21,7 +21,11 @@ export type LookupEntityKey =
   | "fund"
   | "user"
   | "load"
-  | "ledger";
+  | "ledger"
+  | "openItem"
+  | "arPayment"
+  | "salesOrder"
+  | "packingSlip";
 
 export interface LookupOption {
   id: string;
@@ -495,6 +499,54 @@ function ledgerOption(row: Raw): LookupOption | null {
 }
 
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  openItem: listedEntity(
+    "open item",
+    "/api/v1/receivables/open-items",
+    (row) => {
+      const hit = option(row, ["documentNumber"], []);
+      const open = text(row, "openAmount");
+      const currency = text(row, "currency");
+      const due = text(row, "dueDate");
+      const number = [open && currency ? `${open} ${currency} open` : undefined, due ? `due ${due}` : undefined].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency } : null;
+    },
+    () => ({ status: "open", limit: "100" }),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
+  arPayment: listedEntity(
+    "payment",
+    "/api/v1/receivables/payments",
+    (row) => {
+      const id = text(row, "id");
+      const amount = text(row, "amount");
+      const currency = text(row, "currency");
+      const received = text(row, "receivedDate");
+      if (!id || !amount) return null;
+      return { id, name: `${amount} ${currency ?? ""}${received ? ` received ${received}` : ""}`.trim(), number: text(row, "payerName", "sourceRef"), currency };
+    },
+    () => ({ limit: "100" }),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
+  salesOrder: listedEntity(
+    "sales order",
+    "/api/v1/sales/orders",
+    (row) => {
+      const hit = option(row, ["orderNumber"], []);
+      const number = [text(row, "orderType"), text(row, "status")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+    () => ({ limit: "100" }),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
+  packingSlip: listedEntity(
+    "packing slip",
+    "/api/v1/fulfillment/packing-slips",
+    (row) => {
+      const hit = option(row, ["packingSlipNumber"], []);
+      const number = [text(row, "status")?.replace(/_/g, " ").toLowerCase(), text(row, "postingDate")].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+  ),
   ledger: listedEntity("ledger", "/api/v1/ledger/ledgers", ledgerOption, (scope) => ({ legalEntityId: scope.legalEntityId })),
   bankAccount: bankAccountDef,
   position: positionDef,

@@ -322,7 +322,7 @@ describe("New revenue contract", () => {
     };
     const { container } = renderAt("/billing/revenue-contracts/new");
     fill("Legal entity", LE);
-    fill("Sales order id", ORDER);
+    fill("Sales order", ORDER);
     fill("Customer", CUST);
     fill("Contract price", "10800.00");
     fill("Product", PRODUCT);
@@ -346,7 +346,7 @@ describe("New revenue contract", () => {
     };
     const { container } = renderAt("/billing/revenue-contracts/new");
     fill("Legal entity", LE);
-    fill("Sales order id", ORDER);
+    fill("Sales order", ORDER);
     fill("Customer", CUST);
     fill("Contract price", "10800.00");
     fill("Contract date", "2027-03-10");
@@ -379,7 +379,7 @@ describe("New revenue contract", () => {
     };
     renderAt("/billing/revenue-contracts/new");
     fill("Legal entity", LE);
-    fill("Sales order id", ORDER);
+    fill("Sales order", ORDER);
     fill("Customer", CUST);
     fill("Contract price", "2250");
     fill("Product", PRODUCT);
@@ -403,7 +403,7 @@ describe("New revenue contract", () => {
     };
     renderAt("/billing/revenue-contracts/new");
     fill("Legal entity", LE);
-    fill("Sales order id", ORDER);
+    fill("Sales order", ORDER);
     fill("Customer", CUST);
     fill("Contract price", "100");
     fill("Product", PRODUCT);

@@ -260,8 +260,8 @@ export function NewDeductionPage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           {text("nde-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
-          {text("nde-item", "openItemId", "Open item id", { hint: "The short-paid invoice; the deduction takes its customer and currency." })}
-          {text("nde-payment", "paymentId", "Payment id", { optional: true, hint: "The short payment, if it is recorded." })}
+          {text("nde-item", "openItemId", "Open item", { entity: "openItem", hint: "The short-paid invoice; the deduction takes its customer and currency." })}
+          {text("nde-payment", "paymentId", "Payment", { entity: "arPayment", optional: true, hint: "The short payment, if it is recorded." })}
           <FormField id="nde-type" label="Type">
             {(c) => (
               <Select {...c} value={values.type} onChange={(e) => update({ type: e.target.value as DeductionType })}>

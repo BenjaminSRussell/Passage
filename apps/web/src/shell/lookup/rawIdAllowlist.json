@@ -12,17 +12,9 @@
       ],
       "reason": "Vendor and legal entity are lookups. The ledger service has no list route to search yet, and receipt lines arrive from the GR/IR selection; neither has a lookup adapter."
     },
-    "modules/billing/NewRevenueContractPage.tsx": {
-      "labels": [
-        "Sales order id"
-      ],
-      "reason": "Legal entity, customer and product are lookups. Sales orders have no search route (the order list cannot filter by number), so there is no sales order lookup yet."
-    },
     "modules/billing/NewShipmentProposalPage.tsx": {
       "labels": [
         "Order line id",
-        "Packing slip id",
-        "Sales order id",
         "Slip line id"
       ],
       "reason": "Legal entity, customers and products are lookups. Packing slips, their lines, sales orders and order lines have no search route or lookup adapter yet."
@@ -289,38 +281,6 @@
     "modules/quality/SpcPage.tsx": {
       "labels": [
         "Test id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/receivables/Cases.tsx": {
-      "labels": [
-        "Open item id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/receivables/Deductions.tsx": {
-      "labels": [
-        "Open item id",
-        "Payment id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/receivables/Disputes.tsx": {
-      "labels": [
-        "Open item id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/receivables/DownPayments.tsx": {
-      "labels": [
-        "Open item id",
-        "Sales order id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500. No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/receivables/Promises.tsx": {
-      "labels": [
-        "Open item id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
