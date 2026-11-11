@@ -57,7 +57,7 @@ func NewRouterWithoutTenant() *chi.Mux {
 
 func newRouter(extra ...func(http.Handler) http.Handler) *chi.Mux {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, recordMetrics, TrustedRealIP(trustedProxiesFromEnv()), middleware.Recoverer, middleware.Timeout(RequestTimeout))
+	r.Use(middleware.RequestID, processFenceMiddleware, recordMetrics, TrustedRealIP(trustedProxiesFromEnv()), middleware.Recoverer, middleware.Timeout(RequestTimeout))
 	r.Use(logRequests)
 	r.Use(extra...)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
