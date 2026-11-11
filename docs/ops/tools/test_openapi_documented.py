@@ -5,8 +5,10 @@ gate of api_reference.py: operationId, summary or description, x-passage-duty, a
 A spec that is not valid YAML (an unquoted ": " in a description, for example) fails here, because the reference build
 parses the same file.
 
-supplier-portal-ts is the one open exception: it documents the vendor portal BFF and carries neither operationId nor
-x-passage-duty on its operations; which duty guards each BFF route is the portal owner's call (see docs/ops/NOT-IMPLEMENTED.md).
+The portal BFFs are the open exceptions: supplier-portal-ts (the vendor portal) and customer-portal-ts (the customer
+portal, #30) document session and proxy routes that carry neither operationId nor x-passage-duty; the duty is the owning
+service's, checked on the service token the BFF signs, and which duty to document on each BFF route is the portal owner's
+call (see docs/ops/NOT-IMPLEMENTED.md).
 
 Run: python3 -m unittest discover -s docs/ops/tools
 """
@@ -22,7 +24,7 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 ROOT = Path(__file__).resolve().parents[3]
-EXCEPTIONS = {"supplier-portal-ts"}
+EXCEPTIONS = {"supplier-portal-ts", "customer-portal-ts"}
 
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
