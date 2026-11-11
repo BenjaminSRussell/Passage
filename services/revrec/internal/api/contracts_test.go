@@ -79,6 +79,21 @@ func (f *fakeStore) CreateContract(_ context.Context, c store.Contract) (store.C
 	return c, nil
 }
 
+func (f *fakeStore) AddObligations(_ context.Context, id string, increase decimal.Decimal, add []store.Obligation, _ int) (store.Contract, error) {
+	c, ok := f.contracts[id]
+	if !ok {
+		return store.Contract{}, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "contract not found")
+	}
+	for _, o := range add {
+		o.LineNo = len(c.Obligations) + 1
+		c.Obligations = append(c.Obligations, o)
+	}
+	c.TransactionPrice = c.TransactionPrice.Add(increase)
+	c.Version++
+	f.contracts[id] = c
+	return c, nil
+}
+
 func (f *fakeStore) GetContract(_ context.Context, id string) (store.Contract, error) {
 	c, ok := f.contracts[id]
 	if !ok {

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -99,15 +100,128 @@ func TestInvoiceConsumer_OpensOneContractPerOrderFromTheInvoicedLines(t *testing
 		sup.TermEnd.Format("2006-01-02") != "2028-02-29" || len(sup.Schedule) == 0 {
 		t.Fatalf("support obligation: %+v", sup)
 	}
-	// A redelivery and a later invoice of the same order open nothing more.
+	// A redelivery, and a later invoice that bills a product the contract has, open nothing more.
 	if err := g.consumeInvoice(t, evt); err != nil {
 		t.Fatalf("redelivery: %v", err)
 	}
-	if err := g.consumeInvoice(t, invoicePosted(t, "2027-04-01", invoiceLine{bundleOrder, bundleInstall, "500.00"})); err != nil {
+	if err := g.consumeInvoice(t, invoicePosted(t, "2027-04-01", invoiceLine{bundleOrder, bundleHardware, "500.00"})); err != nil {
 		t.Fatalf("second invoice: %v", err)
 	}
-	if cs := g.contractsOf(t, bundleOrder); len(cs) != 1 || len(cs[0].Obligations) != 2 {
+	if cs := g.contractsOf(t, bundleOrder); len(cs) != 1 || len(cs[0].Obligations) != 2 || !cs[0].TransactionPrice.Equal(decimal.RequireFromString("10400.00")) {
 		t.Fatalf("contracts after replay: %+v", cs)
+	}
+}
+
+// #29: a product first invoiced on a later invoice becomes a new obligation at its invoiced net (a separate contract, ASC 606-10-25-12):
+// the price grows by it, the obligations and schedules already there are untouched, its template sets how it is recognized, and
+// redelivering the invoice adds nothing twice.
+func TestInvoiceConsumer_AProductFirstInvoicedLaterIsAddedToTheContract(t *testing.T) {
+	g := newLedgerRig(t)
+	if rec := call(t, g.handler, http.MethodPut, "/v1/revrec/recognition-templates/"+bundleInstall, `{"method":"MILESTONE"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("put template: %d %s", rec.Code, rec.Body)
+	}
+	if err := g.consumeInvoice(t, invoicePosted(t, "2027-03-01", invoiceLine{bundleOrder, bundleHardware, "8000.00"})); err != nil {
+		t.Fatal(err)
+	}
+	before := g.contractsOf(t, bundleOrder)[0]
+	if before.Status != "COMPLETE" {
+		t.Fatalf("a contract with only recognized revenue is %s, want COMPLETE", before.Status)
+	}
+	later := invoicePosted(t, "2027-04-01", invoiceLine{bundleOrder, bundleHardware, "100.00"}, invoiceLine{bundleOrder, bundleInstall, "1350.00"})
+	for range 2 {
+		if err := g.consumeInvoice(t, later); err != nil {
+			t.Fatalf("later invoice: %v", err)
+		}
+	}
+	cs := g.contractsOf(t, bundleOrder)
+	if len(cs) != 1 {
+		t.Fatalf("contracts: %+v", cs)
+	}
+	c := cs[0]
+	if len(c.Obligations) != 2 || !c.TransactionPrice.Equal(decimal.RequireFromString("9350.00")) || c.Status != "OPEN" || c.Version != before.Version+1 {
+		t.Fatalf("modified contract: price %s status %s version %d obligations %d", c.TransactionPrice, c.Status, c.Version, len(c.Obligations))
+	}
+	var installed, hardware store.Obligation
+	for _, o := range c.Obligations {
+		if o.ProductID == bundleInstall {
+			installed = o
+		} else {
+			hardware = o
+		}
+	}
+	if installed.LineNo != 2 || installed.Method != "MILESTONE" || !installed.Allocated.Equal(decimal.RequireFromString("1350.00")) ||
+		len(installed.Schedule) != 1 || installed.Schedule[0].Status != "SCHEDULED" {
+		t.Fatalf("added obligation: %+v", installed)
+	}
+	if !hardware.Allocated.Equal(decimal.RequireFromString("8000.00")) || len(hardware.Schedule) != 1 || hardware.Schedule[0].Status != "RECOGNIZED" {
+		t.Fatalf("the obligation that was there changed: %+v", hardware)
+	}
+}
+
+// #29: a USAGE template gives an obligation with no schedule that keeps the contract open.
+func TestInvoiceConsumer_UsageTemplateOpensAnObligationWithoutSchedule(t *testing.T) {
+	g := newLedgerRig(t)
+	if rec := call(t, g.handler, http.MethodPut, "/v1/revrec/recognition-templates/"+bundleSupport, `{"method":"USAGE"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("put template: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, g.handler, http.MethodPut, "/v1/revrec/recognition-templates/"+bundleInstall, `{"method":"USAGE","termMonths":3}`, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("a USAGE template with a term: %d", rec.Code)
+	}
+	if err := g.consumeInvoice(t, invoicePosted(t, "2027-03-01", invoiceLine{bundleOrder, bundleSupport, "900.00"})); err != nil {
+		t.Fatal(err)
+	}
+	c := g.contractsOf(t, bundleOrder)[0]
+	if c.Status != "OPEN" || len(c.Obligations) != 1 || c.Obligations[0].Method != "USAGE" || len(c.Obligations[0].Schedule) != 0 {
+		t.Fatalf("usage contract: %+v", c)
+	}
+}
+
+func TestAllocateRouteAddsObligationsAndRefusesDuplicatesAndCancelled(t *testing.T) {
+	g := newLedgerRig(t)
+	if err := g.consumeInvoice(t, invoicePosted(t, "2027-03-01", invoiceLine{bundleOrder, bundleHardware, "8000.00"})); err != nil {
+		t.Fatal(err)
+	}
+	c := g.contractsOf(t, bundleOrder)[0]
+	path := "/v1/revrec/contracts/" + c.ID + ":allocate"
+	body := func(product, price, ssp string) string {
+		return `{"transactionPriceIncrease":"` + price + `","obligations":[{"productId":"` + product + `","ssp":"` + ssp + `","sspSource":"EXPLICIT","method":"RATABLE","termStart":"2027-04-01","termEnd":"2028-03-31"}]}`
+	}
+	if rec := call(t, g.handler, http.MethodPost, path, body(bundleSupport, "1200.00", "1200.00"), map[string]string{"If-Match": `"99"`}); rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("a stale version: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, g.handler, http.MethodPost, path, body(bundleHardware, "10.00", "10.00"), nil); rec.Code != http.StatusConflict {
+		t.Errorf("a product the contract has: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, g.handler, http.MethodPost, path, `{"transactionPriceIncrease":"x","obligations":[]}`, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("a bad price: %d", rec.Code)
+	}
+	rec := call(t, g.handler, http.MethodPost, path, body(bundleSupport, "1200.00", "1200.00"), map[string]string{"If-Match": `"` + strconv.Itoa(c.Version) + `"`})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("allocate: %d %s", rec.Code, rec.Body)
+	}
+	got := g.contractsOf(t, bundleOrder)[0]
+	if len(got.Obligations) != 2 || !got.TransactionPrice.Equal(decimal.RequireFromString("9200.00")) || got.Status != "OPEN" {
+		t.Fatalf("contract after :allocate: %+v", got)
+	}
+	var support store.Obligation
+	for _, o := range got.Obligations {
+		if o.ProductID == bundleSupport {
+			support = o
+		}
+	}
+	sum := decimal.Zero
+	for _, s := range support.Schedule {
+		sum = sum.Add(s.Amount)
+	}
+	if !support.Allocated.Equal(decimal.RequireFromString("1200.00")) || !sum.Equal(support.Allocated) || len(support.Schedule) != 12 {
+		t.Fatalf("support obligation: allocated %s over %d lines summing %s", support.Allocated, len(support.Schedule), sum)
+	}
+	var queued int
+	if err := g.admin.QueryRow(context.Background(), `select count(*) from outbox where aggregate_id = $1`, c.ID).Scan(&queued); err != nil || queued < 2 {
+		t.Errorf("contract.allocated events for the contract = %d (%v), want one at creation and one for the modification", queued, err)
+	}
+	if rec := call(t, g.handler, http.MethodPost, "/v1/revrec/contracts/"+ids.New()+":allocate", body(bundleSupport, "1.00", "1.00"), nil); rec.Code != http.StatusNotFound {
+		t.Errorf("an unknown contract: %d", rec.Code)
 	}
 }
 
