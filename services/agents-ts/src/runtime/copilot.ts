@@ -17,12 +17,15 @@ import { StreamRestorer } from "../providers/stream.js";
 import { ProviderError, proposeTool } from "../providers/wire.js";
 import type { AuditPort, BudgetPort, KillSwitchPort, ModelProvider, ModelUsage, RunRequest, RunResult } from "./engine.js";
 import type { McpConnector } from "./mcp.js";
+import type { KnowledgeService } from "./knowledge.js";
 
 /** The duty to use the copilot (seeded in policies/authz/data.json). */
 export const COPILOT_DUTY = "mcp.copilot.use";
 export const COPILOT_AGENT_ID = "copilot";
 export const MAX_MESSAGE_CHARS = 4000;
 export const KNOWLEDGE_SEARCH_TOOL = "passage.knowledge.search";
+/** Searching the knowledge index is part of using the copilot: the route is seeded under the same duty (policies/authz/data.json). */
+export const KNOWLEDGE_READ_DUTY = COPILOT_DUTY;
 
 /** Request and response of POST /api/v1/copilot/chat; the shape apps/web/src/modules/copilot/api/client.ts validates. */
 export interface ChatRequest {
@@ -80,6 +83,8 @@ export interface CopilotDeps {
   cache: CopilotAnswerCache;
   config: CopilotConfig;
   modelId: string;
+  /** The knowledge index. When set, `passage.knowledge.search` is a read tool of the copilot to everyone who may use the copilot. */
+  knowledge?: KnowledgeService;
   now?: () => Date;
 }
 
@@ -135,6 +140,9 @@ export function createCopilotService(deps: CopilotDeps) {
       const runId = randomUUID();
       const session = await deps.mcp.connect(caller, token, runId);
       const candidates = session.tools.filter((t) => t.approvalMode === "none" && READ_TOOL.test(t.name));
+      if (deps.knowledge !== undefined && !candidates.some((t) => t.name === KNOWLEDGE_SEARCH_TOOL)) {
+        candidates.push({ name: KNOWLEDGE_SEARCH_TOOL, requiredDuty: KNOWLEDGE_READ_DUTY, approvalMode: "none" } as (typeof candidates)[number]);
+      }
       const gate = gateCopilotTools(caller.duties, candidates.map((t) => ({ name: t.name, requiredDuty: t.requiredDuty })));
       if (gate.allowed.length === 0) {
         const first = gate.denied[0];
@@ -234,7 +242,10 @@ export function createCopilotService(deps: CopilotDeps) {
             break;
           }
           const args = JSON.parse(pseudo.restore(JSON.stringify(p.args))) as Record<string, unknown>;
-          const out = await session.call(p.tool, args);
+          const out =
+            p.tool === KNOWLEDGE_SEARCH_TOOL && deps.knowledge !== undefined
+              ? await searchKnowledge(deps.knowledge, caller.tenantId, args)
+              : await session.call(p.tool, args);
           if (!out.ok) {
             const denied = out.code === "AGT-0203";
             toolCalls.push({ tool: p.tool, status: denied ? "DENIED" : "ERROR", code: out.code });
@@ -282,6 +293,17 @@ export function createCopilotService(deps: CopilotDeps) {
       }
     },
   };
+}
+
+/** The copilot's own knowledge search: the caller's tenant, a query of at most 1000 characters, ten chunks at most. */
+async function searchKnowledge(knowledge: KnowledgeService, tenantId: string, args: Record<string, unknown>): Promise<{ ok: true; output: unknown; ref: string } | { ok: false; code: string; message: string }> {
+  const query = typeof args["query"] === "string" ? args["query"] : typeof args["q"] === "string" ? args["q"] : "";
+  if (query.trim() === "" || query.length > 1000) return { ok: false, code: "AGT-0214", message: "the knowledge search needs a query of 1 to 1000 characters" };
+  try {
+    return { ok: true, output: await knowledge.search(tenantId, query, 10), ref: KNOWLEDGE_SEARCH_TOOL };
+  } catch {
+    return { ok: false, code: "AGT-0214", message: "the knowledge search failed" };
+  }
 }
 
 function refusal(code: string, message: string): ChatResponse {

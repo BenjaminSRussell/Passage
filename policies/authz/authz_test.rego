@@ -2706,6 +2706,11 @@ test_agent_run_duties_open_only_their_routes if {
 	allowed("mcp.copilot.use", "POST", "/api/v1/copilot/chat")
 	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
 	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
+	allowed("mcp.copilot.use", "POST", "/api/v1/knowledge/search")
+	not allowed("mcp.copilot.use", "POST", "/api/v1/knowledge/chunks")
+	allowed("knowledge.write", "POST", "/api/v1/knowledge/chunks")
+	not allowed("knowledge.write", "POST", "/api/v1/knowledge/search")
+	not allowed("knowledge.write", "POST", "/api/v1/copilot/chat")
 }
 
 test_opening_stock_and_bank_import_duties_are_service_only_and_cover_only_their_route if {

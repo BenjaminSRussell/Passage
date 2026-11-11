@@ -1237,6 +1237,9 @@
       {"resource": "/v1/consol/runs/*", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*/statements", "methods": ["GET"]}
     ]},
+    "knowledge.write": {"permissions": [
+      {"resource": "/api/v1/knowledge/chunks", "methods": ["POST"]}
+    ]},
     "mcp.copilot.use": {"permissions": [
       {"resource": "/api/v1/copilot/chat", "methods": ["POST"]},
       {"resource": "/api/v1/knowledge/search", "methods": ["POST"]},
