@@ -1016,6 +1016,8 @@ const fieldService: Record<string, ProblemCatalogEntry> = {
   "SVC-WO-003": { message: "A required checklist item is still open, so the job can't be completed.", action: "Tick the open items, then complete the job again." },
   "SVC-CAP-001": { message: "That photo or signature can't be used: it isn't a PNG or JPEG, or it is too large.", action: "Take the photo again, or clear the signature and sign again." },
   "SVC-CAP-002": { message: "A photo or signature this entry refers to hasn't been uploaded yet.", action: "Wait for the upload to finish, then sync again." },
+  "SVC-CAP-004": { message: "This photo or signature was deleted after the retention period.", action: "The record of the job is kept; ask your administrator if you need the image restored from a backup." },
+  "SVC-CAP-005": { message: "The image store did not answer, so the photo or signature was not saved.", action: "Try again in a moment; the app keeps it on the device until it uploads." },
   "SVC-CAP-003": { message: "This job is no longer open for photos or signatures.", action: "Ask the dispatcher to check the job's status." },
   "SVC-SYNC-007": { message: "That checklist item isn't on this job any more.", action: "Reload the job to see its current checklist." },
   "SVC-TECH-006": { message: "Your sign-in isn't linked to a technician.", action: "Ask your dispatcher to link your worker record to a technician." },

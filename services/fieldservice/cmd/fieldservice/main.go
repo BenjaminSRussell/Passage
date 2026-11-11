@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/api"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/objectstore"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/optimizer"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/store"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/migrations"
@@ -67,7 +68,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if signer == nil || getenv("DISPATCH_URL") == "" {
 		slog.Warn("DISPATCH_URL or the service signing key is unset: dispatch optimizations are refused (SVC-DSP-017)")
 	}
+	objects, err := objectstore.FromEnv(getenv)
+	if err != nil {
+		return err
+	}
 	s := store.New(pool)
+	if objects != nil {
+		s.WithObjects(objects)
+	}
 	a := api.New(s).WithOptimizer(optimizer.New(getenv("DISPATCH_URL"), signer))
 	router := httpx.NewRouter()
 	a.Register(router)
@@ -89,6 +97,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	captures, err := newCaptureJob(getenv, s)
+	if err != nil {
+		return err
+	}
+	if captures != nil {
+		go captures.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), public) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
