@@ -46,6 +46,8 @@ func (f *fakeCustomers) PortalAccounts(context.Context, string) ([]store.PortalA
 	return nil, nil
 }
 
+func (f *fakeCustomers) SetPortalBillToAccess(context.Context, string, bool) error { return nil }
+
 func (f *fakeCustomers) CreateCustomer(ctx context.Context, partyID string, in store.NewCustomerRole) (domain.Customer, bool, error) {
 	caller, _ := tenant.FromContext(ctx)
 	f.scopes = tenant.LegalEntityScopeList(caller)

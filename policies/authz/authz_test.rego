@@ -1054,6 +1054,12 @@ test_sales_customer_portal_write_duties_open_only_their_own_post if {
 	not allowed("sales.order.write", "POST", "/v1/sales/customer-portal/returns")
 }
 
+test_party_write_sets_portal_access_and_the_portal_cannot if {
+	allowed("party.write", "PUT", "/v1/party/customers/c1/portal-access")
+	not allowed("party.customer-portal.read", "PUT", "/v1/party/customers/c1/portal-access")
+	not allowed("party.read", "PUT", "/v1/party/customers/c1/portal-access")
+}
+
 test_customer_portal_party_and_identity_reads_are_their_own_route_only if {
 	allowed("party.customer-portal.read", "GET", "/v1/party/customer-portal/accounts")
 	not allowed("party.customer-portal.read", "GET", "/v1/party/customers/c1")

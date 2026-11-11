@@ -44,6 +44,8 @@ type CustomerStore interface {
 	GetCustomer(ctx context.Context, customerID string) (domain.Customer, error)
 	// PortalAccounts lists the accounts a customer contact of customerID may act for in the customer portal.
 	PortalAccounts(ctx context.Context, customerID string) ([]PortalAccount, error)
+	// SetPortalBillToAccess lets (or stops) contacts of customerID act for its bill-to account in the portal.
+	SetPortalBillToAccess(ctx context.Context, customerID string, allowed bool) error
 }
 
 func (s *Postgres) GetCustomer(ctx context.Context, customerID string) (domain.Customer, error) {
@@ -212,7 +214,9 @@ type PortalAccount struct {
 }
 
 // PortalAccounts lists the customer itself and the accounts related to it through the invoice-account relation, in the same legal
-// entity and the same customer group, and not blocked for all transactions. A customer group alone is a classification, not a
+// entity and the same customer group, and not blocked for all transactions. Access runs downward by default: a bill-to customer
+// reaches the accounts that bill to it ("ship-to"), but a ship-to customer reaches its bill-to account only when its
+// portal_bill_to_access flag is set (SetPortalBillToAccess). A customer group alone is a classification, not a
 // relationship, so two customers that merely share a group are never listed for each other.
 func (s *Postgres) PortalAccounts(ctx context.Context, customerID string) ([]PortalAccount, error) {
 	caller, _ := tenant.FromContext(ctx)
@@ -229,7 +233,7 @@ func (s *Postgres) PortalAccounts(ctx context.Context, customerID string) ([]Por
 			join party p on p.tenant_id = c.tenant_id and p.id = c.party_id
 			where me.tenant_id = $1 and me.id = $2
 				and (c.id = me.id or (c.customer_group_id = me.customer_group_id and c.blocked <> 'all'
-					and (c.party_id = me.invoice_account_party_id or c.invoice_account_party_id = me.party_id)))
+					and ((me.portal_bill_to_access and c.party_id = me.invoice_account_party_id) or c.invoice_account_party_id = me.party_id)))
 			order by (c.id = me.id) desc, c.account_number, c.id`, caller.TenantID, id)
 		if err != nil {
 			return err
@@ -251,4 +255,22 @@ func (s *Postgres) PortalAccounts(ctx context.Context, customerID string) ([]Por
 		return nil, notFound(CodeCustomerNotFound, "customer not found")
 	}
 	return out, nil
+}
+
+func (s *Postgres) SetPortalBillToAccess(ctx context.Context, customerID string, allowed bool) error {
+	caller, _ := tenant.FromContext(ctx)
+	id, err := canonicalID(customerID)
+	if err != nil {
+		return notFound(CodeCustomerNotFound, "customer not found")
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `update customer_role set portal_bill_to_access = $3 where tenant_id = $1 and id = $2`, caller.TenantID, id, allowed)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return notFound(CodeCustomerNotFound, "customer not found")
+		}
+		return nil
+	})
 }

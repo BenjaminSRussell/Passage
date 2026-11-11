@@ -234,12 +234,28 @@ func (a *CustomerContactsAPI) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	customerID, _ := canonicalUUID(req.CustomerID)
+	// The registry decides first: an address that already has a contact, enabled or disabled, never reaches Keycloak.
+	var taken bool
+	if err := dbx.WithTenantTx(r.Context(), a.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(r.Context(), `select exists (select 1 from identity_customer_contacts where tenant_id = $1 and lower(email) = $2)`, p.TenantID, email).Scan(&taken)
+	}); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if taken {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeContactExists, "a customer contact with this email address already exists"))
+		return
+	}
 	realm, err := a.realm(r.Context(), p.TenantID)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	userID, err := a.keycloak.CreateContact(r.Context(), realm, ContactSpec{TenantID: p.TenantID, Email: email, GivenName: req.GivenName, FamilyName: req.FamilyName, CustomerID: customerID, LegalEntityIDs: legalEntities})
+	userID, adopted, err := a.keycloak.CreateContact(r.Context(), realm, ContactSpec{TenantID: p.TenantID, Email: email, GivenName: req.GivenName, FamilyName: req.FamilyName, CustomerID: customerID, LegalEntityIDs: legalEntities})
+	if errors.Is(err, ErrContactNotAdoptable) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeContactExists, "that address already belongs to another account and cannot be invited as a portal contact"))
+		return
+	}
 	if err != nil {
 		a.keycloakFailed(w, r, "create the account", err)
 		return
@@ -254,6 +270,11 @@ values ($1, $2, $3, $4, $5, $6, $7, $8, $8) returning `+contactColumns, p.Tenant
 		}
 		if created, err = pgx.CollectExactlyOneRow(rows, scanContact); err != nil {
 			return err
+		}
+		if adopted {
+			if err := insertAudit(r.Context(), tx, p.TenantID, p.UserID, "customercontact", created.ContactID, "adopted", []byte(`{"keycloakUserId":"`+userID+`"}`)); err != nil {
+				return err
+			}
 		}
 		return record(r.Context(), tx, p.TenantID, p.UserID, "customercontact", created.ContactID, "invited", contactEvent(created))
 	})
@@ -389,7 +410,9 @@ where tenant_id = $1 and contact_id = $2 returning `+contactColumns, p.TenantID,
 		if updated, err = pgx.CollectExactlyOneRow(rows, scanContact); err != nil {
 			return err
 		}
-		return record(r.Context(), tx, p.TenantID, p.UserID, "customercontact", updated.ContactID, "remapped", contactEvent(updated))
+		ev := contactEvent(updated)
+		ev["previousCustomerId"], ev["previousLegalEntityIds"] = current.CustomerID, current.LegalEntityIDs
+		return record(r.Context(), tx, p.TenantID, p.UserID, "customercontact", updated.ContactID, "remapped", ev)
 	})
 	if err != nil {
 		failWrite(w, r, err)

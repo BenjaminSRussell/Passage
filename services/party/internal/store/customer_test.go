@@ -336,11 +336,27 @@ func TestCustomer_PortalAccountsFollowTheInvoiceAccountRelationInOneGroup(t *tes
 		t.Fatalf("head office accounts: %s err %v", names(got), err)
 	}
 	got, err = s.PortalAccounts(user, s1)
-	if err != nil || names(got) != "C-S1:self C-HQ:bill-to " {
-		t.Fatalf("store one accounts (a sibling is not related): %s err %v", names(got), err)
+	if err != nil || names(got) != "C-S1:self " {
+		t.Fatalf("store one accounts (a sibling is not related, bill-to is opt-in): %s err %v", names(got), err)
 	}
-	if got, _ = s.PortalAccounts(user, s2); names(got) != "C-S2:self C-HQ:bill-to " {
+	// Access is downward only: a ship-to contact reaches its bill-to account only when the flag is set.
+	if got, _ = s.PortalAccounts(user, s1); names(got) != "C-S1:self " {
+		t.Fatalf("a ship-to customer sees %s by default, want only itself", names(got))
+	}
+	if err := s.SetPortalBillToAccess(user, s1, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.PortalAccounts(user, s1); names(got) != "C-S1:self C-HQ:bill-to " {
+		t.Fatalf("with the flag a ship-to customer sees %s", names(got))
+	}
+	if got, _ = s.PortalAccounts(user, hq); names(got) != "C-HQ:self C-S1:ship-to C-S2:ship-to " {
+		t.Fatalf("a bill-to customer's access does not depend on the flag: %s", names(got))
+	}
+	if got, _ = s.PortalAccounts(user, s2); names(got) != "C-S2:self " {
 		t.Fatalf("store two accounts: %s", names(got))
+	}
+	if err := s.SetPortalBillToAccess(asUser(1, legalEntityB, "x"), s1, true); problemCode(t, err) != store.CodeCustomerNotFound {
+		t.Errorf("another legal entity: %v", err)
 	}
 	if got, _ = s.PortalAccounts(user, loner); names(got) != "C-X:self " {
 		t.Fatalf("an unrelated customer of the same group sees %s", names(got))

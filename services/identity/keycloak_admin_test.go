@@ -47,8 +47,9 @@ type fakeKeycloak struct {
 	created     int
 	roleMaps    []string // realm/user/role
 	emails      []sentEmail
-	noRole      bool // the realm has no customer-user role
-	emailStatus int  // when set, execute-actions-email answers it
+	noRole      bool                // the realm has no customer-user role
+	emailStatus int                 // when set, execute-actions-email answers it
+	extraRoles  map[string][]string // user id -> realm roles it already holds
 }
 
 type sentEmail struct {
@@ -201,6 +202,17 @@ func (f *fakeKeycloak) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "role-1", "name": parts[1]})
+	case len(parts) == 4 && parts[0] == "users" && parts[2] == "role-mappings" && r.Method == http.MethodGet:
+		roles := []map[string]any{}
+		for _, m := range f.roleMaps {
+			if strings.HasPrefix(m, realm+"/"+parts[1]+"/") {
+				roles = append(roles, map[string]any{"name": strings.TrimPrefix(m, realm+"/"+parts[1]+"/")})
+			}
+		}
+		for _, name := range f.extraRoles[parts[1]] {
+			roles = append(roles, map[string]any{"name": name})
+		}
+		_ = json.NewEncoder(w).Encode(roles)
 	case len(parts) == 4 && parts[0] == "users" && parts[2] == "role-mappings" && r.Method == http.MethodPost:
 		var roles []map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&roles)

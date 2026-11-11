@@ -876,6 +876,7 @@
       {"resource": "/v1/party/parties", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
+      {"resource": "/v1/party/customers/*/portal-access", "methods": ["PUT"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]},

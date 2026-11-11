@@ -22,6 +22,7 @@ func (a *API) WithCustomers(customers store.CustomerStore) *API {
 func (a *API) registerCustomers(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/parties/{id}/customer", a.createCustomer)
 	r.With(authz.RequireAnyDuty(dutyRead, dutyImportRead)).Get("/v1/party/customers/{id}", a.getCustomer)
+	r.With(authz.RequireDuty(dutyWrite)).Put("/v1/party/customers/{id}/portal-access", a.setPortalAccess)
 	r.With(authz.RequireDuty(dutyPortalAccountsRead)).Get("/v1/party/customer-portal/accounts", a.portalAccounts)
 }
 
@@ -89,4 +90,23 @@ func (a *API) createCustomer(w http.ResponseWriter, r *http.Request) {
 		a.customersCreated.Add(1)
 	}
 	httpx.JSON(w, http.StatusCreated, customer)
+}
+
+// setPortalAccess says whether contacts of a ship-to customer may also act for its bill-to account in the customer portal. Off by default.
+func (a *API) setPortalAccess(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req struct {
+		BillToAccess bool `json:"billToAccess"`
+	}
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := a.customers.SetPortalBillToAccess(r.Context(), chi.URLParam(r, "id"), req.BillToAccess); err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"billToAccess": req.BillToAccess})
 }

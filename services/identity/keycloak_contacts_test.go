@@ -2,6 +2,7 @@ package identity_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"testing"
@@ -30,7 +31,7 @@ func attributeOf(user map[string]any, name string) string {
 func TestKeycloakAdminCreatesAContactWithTheClaimsRoleAndMFAEnrolment(t *testing.T) {
 	kc := newFakeKeycloak(t)
 	k := kc.admin(t, "acme")
-	id, err := k.CreateContact(context.Background(), "acme", contactSpec())
+	id, _, err := k.CreateContact(context.Background(), "acme", contactSpec())
 	if err != nil || id == "" {
 		t.Fatalf("create = %q, %v", id, err)
 	}
@@ -54,8 +55,8 @@ func TestKeycloakAdminCreatesAContactWithTheClaimsRoleAndMFAEnrolment(t *testing
 	}
 
 	// A retry after a partial failure adopts the same user instead of creating another.
-	again, err := k.CreateContact(context.Background(), "acme", contactSpec())
-	if err != nil || again != id || kc.created != 1 {
+	again, adopted, err := k.CreateContact(context.Background(), "acme", contactSpec())
+	if err != nil || again != id || kc.created != 1 || !adopted {
 		t.Fatalf("retry = %q (%d created), %v; want the same user", again, kc.created, err)
 	}
 }
@@ -63,8 +64,8 @@ func TestKeycloakAdminCreatesAContactWithTheClaimsRoleAndMFAEnrolment(t *testing
 func TestKeycloakAdminNeverAdoptsAnotherTenantsUser(t *testing.T) {
 	kc := newFakeKeycloak(t)
 	kc.addUser("acme", kcUserID, "pat@example.com", "00000000-0000-0000-0000-000000000777", true)
-	_, err := kc.admin(t, "acme").CreateContact(context.Background(), "acme", contactSpec())
-	if !permanent(err) || len(kc.puts) != 0 || len(kc.roleMaps) != 0 || kc.created != 0 {
+	_, _, err := kc.admin(t, "acme").CreateContact(context.Background(), "acme", contactSpec())
+	if !errors.Is(err, identity.ErrContactNotAdoptable) || len(kc.puts) != 0 || len(kc.roleMaps) != 0 || kc.created != 0 {
 		t.Fatalf("err = %v puts %d roles %v created %d; want a permanent refusal and no change", err, len(kc.puts), kc.roleMaps, kc.created)
 	}
 }
@@ -72,7 +73,7 @@ func TestKeycloakAdminNeverAdoptsAnotherTenantsUser(t *testing.T) {
 func TestKeycloakAdminNeedsTheCustomerRoleInTheRealm(t *testing.T) {
 	kc := newFakeKeycloak(t)
 	kc.noRole = true
-	if _, err := kc.admin(t, "acme").CreateContact(context.Background(), "acme", contactSpec()); !permanent(err) {
+	if _, _, err := kc.admin(t, "acme").CreateContact(context.Background(), "acme", contactSpec()); !permanent(err) {
 		t.Fatalf("a realm without customer-user: %v, want a permanent error", err)
 	}
 }
@@ -105,7 +106,7 @@ func TestKeycloakAdminSendsTheInvitationWithTheRequiredActions(t *testing.T) {
 func TestKeycloakAdminRemapsAContactAndEndsItsSessions(t *testing.T) {
 	kc := newFakeKeycloak(t)
 	k := kc.admin(t, "acme")
-	id, err := k.CreateContact(context.Background(), "acme", contactSpec())
+	id, _, err := k.CreateContact(context.Background(), "acme", contactSpec())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,5 +141,57 @@ func TestKeycloakAdminDisablesAContact(t *testing.T) {
 	}
 	if err := k.DisableContact(context.Background(), "acme", testTenant, "40000000-0000-0000-0000-0000000009ff"); err == nil {
 		t.Fatal("a missing user was reported disabled")
+	}
+}
+
+// Existing Keycloak users that are not leftovers of this flow are never touched: a staff user, a disabled user, a user with another
+// role, a user with staff attributes. Nothing is written and no role is added.
+func TestKeycloakAdminNeverAdoptsAStaffOrDisabledUser(t *testing.T) {
+	staffAttrs := func(extra map[string]any) map[string]any {
+		a := map[string]any{"tenant_id": []any{testTenant}, "duties": []any{"ap.pay"}, "tier": []any{"gold"}}
+		for k, v := range extra {
+			a[k] = v
+		}
+		return a
+	}
+	cases := map[string]struct {
+		attrs   map[string]any
+		enabled bool
+		roles   []string
+	}{
+		"staff attributes":      {staffAttrs(nil), true, nil},
+		"marker plus staff":     {staffAttrs(map[string]any{"portal_contact": []any{"customer"}}), true, nil},
+		"no attributes":         {map[string]any{}, true, nil},
+		"disabled leftover":     {map[string]any{"tenant_id": []any{testTenant}, "portal_contact": []any{"customer"}}, false, nil},
+		"marker but staff role": {map[string]any{"tenant_id": []any{testTenant}, "portal_contact": []any{"customer"}}, true, []string{"tenant-admin"}},
+	}
+	for name, c := range cases {
+		kc := newFakeKeycloak(t)
+		kc.addUser("acme", kcUserID, "pat@example.com", testTenant, c.enabled)
+		kc.users["acme"][kcUserID]["attributes"] = c.attrs
+		kc.extraRoles = map[string][]string{kcUserID: c.roles}
+		_, _, err := kc.admin(t, "acme").CreateContact(context.Background(), "acme", contactSpec())
+		if !errors.Is(err, identity.ErrContactNotAdoptable) || len(kc.puts) != 0 || len(kc.roleMaps) != 0 || kc.created != 0 {
+			t.Errorf("%s: err %v puts %d roles %v created %d; want a refusal and no change", name, err, len(kc.puts), kc.roleMaps, kc.created)
+		}
+		if user := kc.user("acme", kcUserID); user["enabled"] != c.enabled {
+			t.Errorf("%s: enabled flipped to %v", name, user["enabled"])
+		}
+	}
+}
+
+// A leftover is adopted by merging: the attributes it has stay, the portal's are set, and it is not enabled by the adoption.
+func TestKeycloakAdminAdoptsALeftoverByMerging(t *testing.T) {
+	kc := newFakeKeycloak(t)
+	kc.addUser("acme", kcUserID, "pat@example.com", testTenant, true)
+	kc.users["acme"][kcUserID]["attributes"] = map[string]any{"tenant_id": []any{testTenant}, "portal_contact": []any{"customer"}, "customer_id": []any{custTwo}}
+	kc.extraRoles = map[string][]string{kcUserID: {"customer-user", "default-roles-acme"}}
+	id, adopted, err := kc.admin(t, "acme").CreateContact(context.Background(), "acme", contactSpec())
+	if err != nil || !adopted || id != kcUserID {
+		t.Fatalf("adopt = %q %v %v", id, adopted, err)
+	}
+	user := kc.user("acme", kcUserID)
+	if attributeOf(user, "customer_id") != custOne || attributeOf(user, "portal_contact") != "customer" {
+		t.Fatalf("attributes = %v", user["attributes"])
 	}
 }

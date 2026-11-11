@@ -39,9 +39,9 @@ type Invitation struct {
 // ContactProvisioner creates and maintains the Keycloak accounts of customer contacts. KeycloakAdmin implements it; the tests use a
 // fake of the Admin API.
 type ContactProvisioner interface {
-	// CreateContact makes (or, when the same tenant already has it, adopts) the user for spec and returns its Keycloak id. The
+	// CreateContact makes (or, only for a provable leftover of this flow, adopts) the user for spec and returns its Keycloak id; ErrContactNotAdoptable for any other existing user. The
 	// user is enabled, holds the customer-user role and the three required actions, and carries the portal's claims as attributes.
-	CreateContact(ctx context.Context, realm string, spec ContactSpec) (string, error)
+	CreateContact(ctx context.Context, realm string, spec ContactSpec) (userID string, adopted bool, err error)
 	// SendInvitation emails the contact the link that completes the required actions.
 	SendInvitation(ctx context.Context, realm, userID string, invitation Invitation) error
 	// MapContact rewrites the contact's customer and legal entities and ends its sessions, so the next sign-in carries the new claims.
@@ -57,33 +57,97 @@ func contactAttributes(spec ContactSpec) map[string][]string {
 		"tenant_id":       {strings.ToLower(spec.TenantID)},
 		"legal_entity_id": {strings.ToLower(strings.Join(spec.LegalEntityIDs, ","))},
 		"customer_id":     {strings.ToLower(spec.CustomerID)},
+		contactMarker:     {"customer"},
 	}
 }
 
-// CreateContact implements ContactProvisioner.
-func (k *KeycloakAdmin) CreateContact(ctx context.Context, realm string, spec ContactSpec) (string, error) {
+// ErrContactNotAdoptable is returned when a Keycloak user with the address exists and is not provably a leftover of this flow.
+var ErrContactNotAdoptable = errors.New("a Keycloak user with this address already exists and is not a portal contact created by this flow")
+
+// contactMarker is set on every user this flow creates; only a user that carries it (and nothing staff-like) can be adopted.
+const contactMarker = "portal_contact"
+
+var contactAttributeNames = map[string]bool{"tenant_id": true, "legal_entity_id": true, "customer_id": true, contactMarker: true}
+
+// adoptable reports whether an existing user is a leftover of this flow: it is enabled, carries the marker, only the portal's
+// attributes, the same tenant, and (checked by the caller) no realm role beyond customer-user and Keycloak's defaults.
+func adoptable(user map[string]any, tenantID string) bool {
+	if enabled, _ := user["enabled"].(bool); !enabled {
+		return false
+	}
+	attrs, _ := user["attributes"].(map[string]any)
+	if len(attrs) == 0 {
+		return false
+	}
+	for name := range attrs {
+		if !contactAttributeNames[name] {
+			return false
+		}
+	}
+	if _, ok := attrs[contactMarker]; !ok {
+		return false
+	}
+	return strings.EqualFold(userTenant(user), tenantID)
+}
+
+func (k *KeycloakAdmin) onlyPortalRoles(ctx context.Context, realm, userID string) (bool, error) {
+	status, raw, err := k.call(ctx, realm, "get user roles", http.MethodGet, "/users/"+url.PathEscape(userID)+"/role-mappings/realm", nil)
+	if err != nil {
+		return false, err
+	}
+	if status != http.StatusOK {
+		return false, statusError("get user roles", status, raw)
+	}
+	var roles []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &roles); err != nil {
+		return false, &KeycloakError{Op: "get user roles", Detail: "unreadable role list"}
+	}
+	for _, r := range roles {
+		if r.Name != CustomerUserRole && r.Name != "offline_access" && r.Name != "uma_authorization" && !strings.HasPrefix(r.Name, "default-roles-") {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// CreateContact implements ContactProvisioner. The registry is checked by the caller first; here an existing user is adopted only
+// when it is provably a leftover of an earlier attempt of this flow (marker attribute, only portal attributes, same tenant, enabled,
+// no other realm role). It is never enabled, never stripped of attributes it has, and anything else is ErrContactNotAdoptable with
+// Keycloak untouched.
+func (k *KeycloakAdmin) CreateContact(ctx context.Context, realm string, spec ContactSpec) (string, bool, error) {
 	username := strings.ToLower(spec.Email)
 	existing, err := k.findUser(ctx, realm, KeycloakTarget{TenantID: spec.TenantID, UserName: username})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	var id string
+	adopted := false
 	if existing != nil {
-		// A retry after a partial failure finds its own earlier user and adopts it; another tenant's user is never touched.
-		if tenantID := userTenant(existing); tenantID != "" && !strings.EqualFold(tenantID, spec.TenantID) {
-			return "", &KeycloakError{Op: "create user", Detail: "a Keycloak user with this address belongs to another tenant", Permanent: true}
-		}
 		id, _ = existing["id"].(string)
 		if _, ok := canonicalUUID(id); !ok {
-			return "", &KeycloakError{Op: "get user", Detail: "the user representation has no id"}
+			return "", false, &KeycloakError{Op: "get user", Detail: "the user representation has no id"}
 		}
-		existing["attributes"] = contactAttributes(spec)
-		existing["enabled"] = true
+		if !adoptable(existing, spec.TenantID) {
+			return "", false, ErrContactNotAdoptable
+		}
+		if ok, err := k.onlyPortalRoles(ctx, realm, id); err != nil {
+			return "", false, err
+		} else if !ok {
+			return "", false, ErrContactNotAdoptable
+		}
+		attrs, _ := existing["attributes"].(map[string]any)
+		for name, values := range contactAttributes(spec) {
+			attrs[name] = values
+		}
+		existing["attributes"] = attrs
 		if status, raw, err := k.call(ctx, realm, "update user", http.MethodPut, "/users/"+url.PathEscape(id), existing); err != nil {
-			return "", err
+			return "", false, err
 		} else if status != http.StatusNoContent && status != http.StatusOK {
-			return "", statusError("update user", status, raw)
+			return "", false, statusError("update user", status, raw)
 		}
+		adopted = true
 	} else {
 		rep := map[string]any{
 			"username": username, "email": username, "firstName": spec.GivenName, "lastName": spec.FamilyName,
@@ -91,24 +155,24 @@ func (k *KeycloakAdmin) CreateContact(ctx context.Context, realm string, spec Co
 		}
 		status, raw, err := k.call(ctx, realm, "create user", http.MethodPost, "/users", rep)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if status != http.StatusCreated && status != http.StatusOK {
-			return "", statusError("create user", status, raw)
+			return "", false, statusError("create user", status, raw)
 		}
 		created, err := k.findUser(ctx, realm, KeycloakTarget{TenantID: spec.TenantID, UserName: username})
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if created == nil {
-			return "", &KeycloakError{Op: "create user", Detail: "the created user cannot be found"}
+			return "", false, &KeycloakError{Op: "create user", Detail: "the created user cannot be found"}
 		}
 		id, _ = created["id"].(string)
 		if _, ok := canonicalUUID(id); !ok {
-			return "", &KeycloakError{Op: "create user", Detail: "the created user has no id"}
+			return "", false, &KeycloakError{Op: "create user", Detail: "the created user has no id"}
 		}
 	}
-	return id, k.grantCustomerRole(ctx, realm, id)
+	return id, adopted, k.grantCustomerRole(ctx, realm, id)
 }
 
 func (k *KeycloakAdmin) grantCustomerRole(ctx context.Context, realm, userID string) error {

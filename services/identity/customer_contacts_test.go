@@ -34,19 +34,23 @@ type fakeContacts struct {
 	mapErr     error
 	disableErr error
 	next       int
+	adopted    bool
+	calls      int // every CreateContact, SendInvitation, MapContact and DisableContact
 }
 
-func (f *fakeContacts) CreateContact(_ context.Context, realm string, spec identity.ContactSpec) (string, error) {
+func (f *fakeContacts) CreateContact(_ context.Context, realm string, spec identity.ContactSpec) (string, bool, error) {
+	f.calls++
 	if f.createErr != nil {
-		return "", f.createErr
+		return "", false, f.createErr
 	}
 	f.next++
 	f.created = append(f.created, spec)
 	f.realms = append(f.realms, realm)
-	return "60000000-0000-4000-8000-00000000000" + string(rune('0'+f.next)), nil
+	return "60000000-0000-4000-8000-00000000000" + string(rune('0'+f.next)), f.adopted, nil
 }
 
 func (f *fakeContacts) SendInvitation(_ context.Context, _, userID string, _ identity.Invitation) error {
+	f.calls++
 	if f.inviteErr != nil {
 		return f.inviteErr
 	}
@@ -55,6 +59,7 @@ func (f *fakeContacts) SendInvitation(_ context.Context, _, userID string, _ ide
 }
 
 func (f *fakeContacts) MapContact(_ context.Context, _, _, userID, customerID string, les []string) error {
+	f.calls++
 	if f.mapErr != nil {
 		return f.mapErr
 	}
@@ -63,6 +68,7 @@ func (f *fakeContacts) MapContact(_ context.Context, _, _, userID, customerID st
 }
 
 func (f *fakeContacts) DisableContact(_ context.Context, _, _, userID string) error {
+	f.calls++
 	if f.disableErr != nil {
 		return f.disableErr
 	}
@@ -125,6 +131,9 @@ func TestCustomerContactInviteCreatesTheKeycloakAccountAndTheRegistryRow(t *test
 	// The same address, in any case, is one contact.
 	dup := f.do(admin, http.MethodPost, "/v1/identity/customer-contacts", map[string]any{"email": "PAT.LEE@example.com", "customerId": custTwo, "legalEntityIds": []string{legalA}})
 	wantProblem(t, dup, http.StatusConflict, "IDN-CONTACT-EXISTS")
+	if len(prov.created) != 1 || prov.calls != 2 {
+		t.Fatalf("a duplicate invite reached Keycloak: %d creates, %d calls (want 1 and 2: the first create and its invitation)", len(prov.created), prov.calls)
+	}
 
 	list := decode[pageOf[contactRow]](t, f.do(admin, http.MethodGet, "/v1/identity/customer-contacts?customerId="+custOne, nil), http.StatusOK)
 	if len(list.Items) != 1 || list.Items[0].ContactID != created.ContactID {
@@ -289,4 +298,42 @@ func TestCustomerPortalLegalEntityNameIsTheTokensOwn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	f.router.ServeHTTP(rec, other)
 	wantProblem(t, rec, http.StatusNotFound, "IDN-LEGAL-ENTITY-NOT-FOUND")
+}
+
+// A disabled contact's address is still taken: inviting it again must not reach Keycloak (it would re-enable the account).
+func TestCustomerContactInviteOfADisabledContactsAddressTouchesNothing(t *testing.T) {
+	prov := &fakeContacts{}
+	f := contactFixture(t, prov)
+	admin := contactAdmin(f, f.tenantA, "")
+	body := map[string]any{"email": "gone@example.com", "customerId": custOne, "legalEntityIds": []string{legalA}}
+	created := decode[contactRow](t, f.do(admin, http.MethodPost, "/v1/identity/customer-contacts", body), http.StatusCreated)
+	decode[contactRow](t, f.do(admin, http.MethodPost, "/v1/identity/customer-contacts/"+created.ContactID+":disable", nil), http.StatusOK)
+	before := prov.calls
+	wantProblem(t, f.do(admin, http.MethodPost, "/v1/identity/customer-contacts", body), http.StatusConflict, "IDN-CONTACT-EXISTS")
+	if prov.calls != before {
+		t.Fatalf("Keycloak was called %d times for a disabled contact's address", prov.calls-before)
+	}
+}
+
+// A Keycloak user that is not a leftover of this flow (a staff user) is a conflict, and the API says so without a registry row.
+func TestCustomerContactInviteOfAnUnadoptableKeycloakUserIsAConflict(t *testing.T) {
+	prov := &fakeContacts{createErr: identity.ErrContactNotAdoptable}
+	f := contactFixture(t, prov)
+	admin := contactAdmin(f, f.tenantA, "")
+	wantProblem(t, f.do(admin, http.MethodPost, "/v1/identity/customer-contacts", map[string]any{"email": "staff@example.com", "customerId": custOne, "legalEntityIds": []string{legalA}}), http.StatusConflict, "IDN-CONTACT-EXISTS")
+	if l := decode[pageOf[contactRow]](t, f.do(admin, http.MethodGet, "/v1/identity/customer-contacts", nil), http.StatusOK); len(l.Items) != 0 {
+		t.Fatalf("a refused invite left %+v", l.Items)
+	}
+}
+
+// An adopted leftover is audited.
+func TestCustomerContactAdoptionIsAudited(t *testing.T) {
+	prov := &fakeContacts{adopted: true}
+	f := contactFixture(t, prov)
+	admin := contactAdmin(f, f.tenantA, "")
+	decode[contactRow](t, f.do(admin, http.MethodPost, "/v1/identity/customer-contacts", map[string]any{"email": "left@example.com", "customerId": custOne, "legalEntityIds": []string{legalA}}), http.StatusCreated)
+	audit, _ := f.auditAndEvents(t, f.tenantA)
+	if !slices.Contains(audit, "customercontact.adopted|admin-1") {
+		t.Fatalf("audit %v", audit)
+	}
 }
