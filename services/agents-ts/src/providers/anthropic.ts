@@ -1,4 +1,4 @@
-import { assertProviderEndpoint, type EgressOptions } from "../cloudprofile/index.js";
+import { assertProviderEndpoint, describeEndpoint, type EgressOptions } from "../cloudprofile/index.js";
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
@@ -21,6 +21,7 @@ export function createAnthropicProvider(cfg: AnthropicConfig): ModelProvider {
   const base = (cfg.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "");
   assertProviderEndpoint(base, cfg.egress);
   return {
+    endpoint: describeEndpoint("anthropic", base, cfg.egress?.region),
     async complete(req): Promise<ModelResponse> {
       // Defence in depth: the engine redacts first; the adapter refuses raw PII too.
       assertNoPii(req.user);

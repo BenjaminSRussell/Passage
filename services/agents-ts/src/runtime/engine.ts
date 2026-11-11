@@ -18,8 +18,9 @@ import {
   validatePolicy,
   type ModePolicy,
 } from "../domain/policy.js";
+import type { ModelEndpoint } from "../cloudprofile/index.js";
 import type { AgentVersion } from "../domain/registry.js";
-import { assertNoPii, Pseudonymizer } from "../domain/redaction.js";
+import { assertNoPii, Pseudonymizer, scanPii } from "../domain/redaction.js";
 import { isTerminal, transition, type RunStatus } from "../domain/run.js";
 import { AgentError } from "../errors.js";
 
@@ -45,6 +46,8 @@ export interface ModelResponse {
 
 /** Provider layer (FR-47.13). Only pseudonymized text reaches this port. */
 export interface ModelProvider {
+  /** Where the adapter's endpoint is hosted; recorded on the run (#605). Absent for test doubles. */
+  readonly endpoint?: ModelEndpoint;
   complete(req: {
     system: string;
     user: string;
@@ -195,6 +198,8 @@ export interface RunResult {
   displayText: string;
   /** Set when the run committed but the audit write then failed. */
   postCommitError?: string;
+  /** Where the model call was served (provider, host, region); set when a call was made (#605). */
+  modelEndpoint?: ModelEndpoint;
 }
 
 /**
@@ -211,6 +216,8 @@ const MAX_SETTLE_ATTEMPTS = 3;
 interface RunLedger {
   /** Set before the provider call; cleared when the provider error proves nothing was billed. */
   mayHaveSpent: boolean;
+  /** Set when a provider call was attempted; never cleared, so the audit row names the endpoint even for a refused call. */
+  called: boolean;
   charged: BudgetState | undefined;
   /** The last settle failure, once charging the usage has been tried and failed. */
   settleError: string | undefined;
@@ -238,6 +245,7 @@ export async function runAgent(
   });
   const ledger: RunLedger = {
     mayHaveSpent: false,
+    called: false,
     charged: undefined,
     settleError: undefined,
     tokensIn: 0,
@@ -296,6 +304,7 @@ export async function runAgent(
       estimated: ledger.estimated,
       budgetState: "OK",
       displayText: "",
+      ...(ledger.called && deps.provider.endpoint !== undefined ? { modelEndpoint: deps.provider.endpoint } : {}),
     };
     await deps.audit.finishRun(req, failed).catch(() => undefined);
     await settleRemainder();
@@ -325,8 +334,11 @@ export async function runAgent(
 }
 
 function logRunError(req: RunRequest, message: string, error: string): void {
+  // Error text can quote a provider or database message; no raw email or IBAN leaves the process in a log line.
+  let safe = error;
+  for (const f of scanPii(error)) safe = safe.split(f.value).join(`[${f.category}]`);
   process.stderr.write(
-    `${JSON.stringify({ level: "error", message, service: "agents-ts", tenantId: req.tenantId, runId: req.runId, error })}\n`,
+    `${JSON.stringify({ level: "error", message, service: "agents-ts", tenantId: req.tenantId, runId: req.runId, error: safe })}\n`,
   );
 }
 
@@ -385,6 +397,7 @@ async function executeRun(
     estimated: ledger.estimated,
     budgetState: "OK",
     displayText,
+    ...(ledger.called && deps.provider.endpoint !== undefined ? { modelEndpoint: deps.provider.endpoint } : {}),
   });
   const finish = (to: RunStatus, c?: string, why?: string): RunResult => {
     moveTo(to);
@@ -476,6 +489,7 @@ async function executeRun(
       promptTokens,
     );
     ledger.mayHaveSpent = true;
+    ledger.called = true;
     let response: ModelResponse;
     try {
       response = await deps.provider.complete({
@@ -486,7 +500,7 @@ async function executeRun(
       });
     } catch (err) {
       // An HTTP error status or a connection never made: the hold is released with zero.
-      if (err instanceof ProviderError && err.unbilled) ledger.mayHaveSpent = false;
+      if ((err instanceof ProviderError && err.unbilled) || (err instanceof AgentError && err.code === "AGT-0215")) ledger.mayHaveSpent = false;
       throw err;
     }
 

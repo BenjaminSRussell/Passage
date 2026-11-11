@@ -30,6 +30,10 @@ interface OverlayRow {
   egressRemove: string[];
   requireFips: boolean;
   eventRetentionDays?: number;
+  enforceProviders?: boolean;
+  requireMirror?: boolean;
+  idleTimeoutMinutes?: number;
+  baaCoveredServices?: { source: string; services: string[] };
 }
 export interface ProfileTable {
   endpointKeys: string[];
@@ -48,6 +52,12 @@ export interface ResolvedProfile {
   llmProviders: string[];
   enforceProviders: boolean;
   egressAllowlist: string[];
+  /** The hipaa overlay is active: model endpoints must be covered by a business associate agreement (Azure OpenAI). */
+  hipaa: boolean;
+  /** Azure services allowed to hold PHI under the hipaa overlay; empty without it. */
+  baaCoveredServices: string[];
+  /** Web app idle sign-out in minutes; 0 means the app default. */
+  idleTimeoutMinutes: number;
 }
 
 const LLM_HOSTS: Record<string, string> = {
@@ -87,6 +97,11 @@ export function resolveProfile(base: string, overlays: string[] = [], table: Pro
   let fips = p.fips;
   const llm = [...p.egress.llmProviders];
   let pager = p.egress.pagerDuty;
+  let enforce = p.egress.enforceProviders;
+  let requireMirror = p.registry.requireMirror;
+  let extra = [...p.egress.extraAllow];
+  let idle = 0;
+  let baa: string[] = [];
   for (const name of overlays) {
     const o = table.overlays[name];
     if (o === undefined) throw new Error(`unknown overlay "${name}"`);
@@ -95,7 +110,12 @@ export function resolveProfile(base: string, overlays: string[] = [], table: Pro
       if (regions.length === 0) throw new Error(`overlay ${name} cannot be combined with ${base}: no region is allowed by both`);
     }
     fips = fips || o.requireFips;
+    enforce = enforce || o.enforceProviders === true;
+    requireMirror = requireMirror || o.requireMirror === true;
+    idle = Math.max(idle, o.idleTimeoutMinutes ?? 0);
+    if (o.baaCoveredServices !== undefined) baa = [...o.baaCoveredServices.services];
     for (const item of o.egressRemove) {
+      extra = extra.filter((h) => h !== item);
       if (item === "pagerDuty") pager = false;
       const i = llm.indexOf(item);
       if (i >= 0) llm.splice(i, 1);
@@ -108,8 +128,8 @@ export function resolveProfile(base: string, overlays: string[] = [], table: Pro
   hosts.push(`*.${ep("keyVaultSuffix")}`, `*.${ep("blobSuffix")}`, `*.${ep("containerRegistrySuffix")}`, `*.${ep("postgresSuffix")}`);
   for (const name of llm) hosts.push(name === "azure-openai" ? `*.${ep("azureOpenAISuffix")}` : (LLM_HOSTS[name] ?? ""));
   if (pager) hosts.push("events.pagerduty.com");
-  if (!p.registry.requireMirror) hosts.push("ghcr.io");
-  hosts.push(...p.egress.extraAllow);
+  if (!requireMirror) hosts.push("ghcr.io");
+  hosts.push(...extra);
   return {
     name: base,
     overlays,
@@ -117,8 +137,11 @@ export function resolveProfile(base: string, overlays: string[] = [], table: Pro
     allowedRegions: regions,
     endpoints,
     llmProviders: llm,
-    enforceProviders: p.egress.enforceProviders,
+    enforceProviders: enforce,
     egressAllowlist: [...new Set(hosts.filter((h) => h !== ""))],
+    hipaa: overlays.includes("hipaa"),
+    baaCoveredServices: baa,
+    idleTimeoutMinutes: idle,
   };
 }
 
@@ -143,6 +166,18 @@ export interface EgressOptions {
   region?: string;
 }
 
+/** Where a model call is served: recorded on every run in the audit log (#605), so a residency review can see it. */
+export interface ModelEndpoint {
+  provider: string;
+  host: string;
+  /** Hosting region as configured (AGENTS_PROVIDER_REGION); "unspecified" when the deployment did not say. */
+  region: string;
+}
+
+export function describeEndpoint(provider: string, url: string, region: string | undefined): ModelEndpoint {
+  return { provider, host: new URL(url).hostname, region: region !== undefined && region !== "" ? region : "unspecified" };
+}
+
 /**
  * Refuses a provider endpoint that is not in the profile's egress allowlist (or whose region is outside
  * allowedRegions). Profiles that do not enforce provider egress (commercial) accept any endpoint, so existing
@@ -152,7 +187,12 @@ export interface EgressOptions {
 export function assertProviderEndpoint(url: string, opts: EgressOptions = {}): void {
   const profile = opts.profile ?? profileFromEnv(opts.env ?? process.env);
   if (!profile.enforceProviders) return;
-  const host = new URL(url).hostname;
+  const parsed = new URL(url);
+  // Plain http would send prompts and credentials in the clear, and an allowlisted host proves nothing about the transport.
+  if (parsed.protocol !== "https:") {
+    throw new EgressDenied(`provider endpoint ${parsed.hostname} must use https under the ${[profile.name, ...profile.overlays].join("+")} profile, got ${parsed.protocol.replace(":", "")}`);
+  }
+  const host = parsed.hostname;
   if (!profile.egressAllowlist.some((pattern) => hostMatches(host, pattern))) {
     throw new EgressDenied(`provider endpoint host ${host} is not in the ${[profile.name, ...profile.overlays].join("+")} egress allowlist`);
   }

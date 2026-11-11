@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { createAnthropicProvider } from "./providers/anthropic.js";
 import { createBedrockProvider } from "./providers/bedrock.js";
 import { createOpenAICompatibleProvider } from "./providers/openai.js";
+import { createPhiGuard, parsePhiFields, type PhiGuard } from "./domain/phi.js";
 import type { ModelProvider } from "./runtime/engine.js";
 
 /** The Claude models Passage defaults to; every one is overridable by configuration. */
@@ -34,6 +36,13 @@ export interface Config {
   anthropic: { apiKey: string; baseUrl: string | undefined };
   openai: { apiKey: string; baseUrl: string; auth: "bearer" | "api-key"; apiVersion: string | undefined };
   bedrock: { region: string; accessKeyId: string; secretAccessKey: string; sessionToken: string | undefined };
+  /**
+   * Azure region the model endpoint is hosted in (AGENTS_PROVIDER_REGION). A cloud profile that pins regions
+   * (gcc, gcc-high, dod, eu-data-boundary) refuses an endpoint without one, and every run records it (#605).
+   */
+  providerRegion: string | undefined;
+  /** Entity metadata fields tagged `phi`: text carrying a value under one of them is never sent to a model (#606). */
+  phiFields: readonly string[];
   /** Caller authentication: the realm that signs the bearer tokens callers send (auth.ts). */
   jwt: { issuer: string; audience: string; jwksUrl: string | undefined; jwksFile: string | undefined };
 }
@@ -53,6 +62,10 @@ function positiveInt(env: NodeJS.ProcessEnv, key: string, fallback: number): num
   const n = Number(raw);
   if (!Number.isSafeInteger(n) || n < 1) throw new Error(`${key} must be a positive integer`);
   return n;
+}
+
+function phiFile(path: string | undefined): string | undefined {
+  return path === undefined || path === "" ? undefined : readFileSync(path, "utf8");
 }
 
 /** 12-factor config. Invalid or missing required settings are an error at startup, never a silent default. */
@@ -119,6 +132,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       secretAccessKey: env["AWS_SECRET_ACCESS_KEY"] ?? "",
       sessionToken: env["AWS_SESSION_TOKEN"],
     },
+    providerRegion: env["AGENTS_PROVIDER_REGION"] || undefined,
+    phiFields: parsePhiFields(env["AGENTS_PHI_FIELDS"], phiFile(env["AGENTS_PHI_FIELDS_FILE"])),
     jwt: { issuer, audience: env["AGENTS_JWT_AUDIENCE"] || "passage-api", jwksUrl, jwksFile },
   };
 }
@@ -131,6 +146,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
 export function createProviderFactory(cfg: Config, fetchFn?: typeof fetch): (modelId: string) => ModelProvider {
   const cache = new Map<string, ModelProvider>();
   const fetching = fetchFn !== undefined ? { fetchFn } : {};
+  const egress = cfg.providerRegion !== undefined ? { egress: { region: cfg.providerRegion } } : {};
+  const phi = createPhiGuard(cfg.phiFields);
   return (modelId) => {
     const hit = cache.get(modelId);
     if (hit !== undefined) return hit;
@@ -138,7 +155,7 @@ export function createProviderFactory(cfg: Config, fetchFn?: typeof fetch): (mod
     switch (cfg.provider) {
       case "anthropic":
         if (cfg.anthropic.apiKey === "") throw new Error("ANTHROPIC_API_KEY is not set");
-        made = createAnthropicProvider({ apiKey: cfg.anthropic.apiKey, model: modelId, ...(cfg.anthropic.baseUrl !== undefined ? { baseUrl: cfg.anthropic.baseUrl } : {}), ...fetching });
+        made = createAnthropicProvider({ apiKey: cfg.anthropic.apiKey, model: modelId, ...(cfg.anthropic.baseUrl !== undefined ? { baseUrl: cfg.anthropic.baseUrl } : {}), ...fetching, ...egress });
         break;
       case "openai":
         if (cfg.openai.apiKey === "" || cfg.openai.baseUrl === "") throw new Error("OPENAI_API_KEY and AGENTS_OPENAI_BASE_URL must be set");
@@ -149,6 +166,7 @@ export function createProviderFactory(cfg: Config, fetchFn?: typeof fetch): (mod
           auth: cfg.openai.auth,
           ...(cfg.openai.apiVersion !== undefined ? { query: { "api-version": cfg.openai.apiVersion } } : {}),
           ...fetching,
+          ...egress,
         });
         break;
       case "bedrock":
@@ -164,10 +182,28 @@ export function createProviderFactory(cfg: Config, fetchFn?: typeof fetch): (mod
             ...(cfg.bedrock.sessionToken !== undefined ? { sessionToken: cfg.bedrock.sessionToken } : {}),
           },
           ...fetching,
+          ...egress,
         });
         break;
     }
+    made = withPhiGuard(made, phi);
     cache.set(modelId, made);
     return made;
+  };
+}
+
+/**
+ * Refuses text that carries a PHI-tagged field before the adapter sees it (#606). The check runs in the factory so
+ * it covers every provider and every caller (agent runs and the copilot); the engine releases the budget hold for
+ * this refusal because no model ran.
+ */
+export function withPhiGuard(provider: ModelProvider, guard: PhiGuard): ModelProvider {
+  if (guard.fields.length === 0) return provider;
+  return {
+    ...(provider.endpoint !== undefined ? { endpoint: provider.endpoint } : {}),
+    complete: async (req) => {
+      guard.assert(req.system, req.user);
+      return provider.complete(req);
+    },
   };
 }
