@@ -408,13 +408,19 @@ func (a *API) endBenefitEnrollment(w http.ResponseWriter, r *http.Request, enrol
 
 // workerBenefits is GET /v1/hr/workers/{id}/benefits (hr.benefits.self): the
 // worker's enrollments and life events. An employee reads their own;
-// hr.worker.inquire or hr.worker.maintain reads anyone's.
+// hr.worker.inquire or hr.worker.maintain reads anyone's. Health-plan elections and
+// life events are protected health information: with read auditing on (the hipaa
+// overlay, #606) a read that returns them is recorded in the audit service first
+// and needs a ?purpose= (an employee reading their own defaults to self-service).
 func (a *API) workerBenefits(w http.ResponseWriter, r *http.Request, workerID string) {
 	ownOnly := benOwnOnly(r) && !caller(r).HasDuty(dutyWorkerInquire)
-	out, err := a.store.ListWorkerBenefits(r.Context(), workerID, ownOnly)
+	out, err := a.listWorkerBenefits(r.Context(), workerID, ownOnly)
 	if err != nil {
 		logFailure(r, "list worker benefits", err)
 		httpx.Fail(w, r, err)
+		return
+	}
+	if !a.auditPHIRead(w, r, entityWorkerBenefits, workerID, benefitPHIFields(out), ownOnly) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)

@@ -30,6 +30,10 @@ type API struct {
 	store   store.Store
 	applied atomic.Int64
 	failed  atomic.Int64
+	// Read-log counters (#606).
+	reads       atomic.Int64
+	readsFailed atomic.Int64
+	exports     atomic.Int64
 }
 
 type ingestRequest struct {
@@ -65,6 +69,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/audit/alert-rules", a.createRule)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/audit/alerts", a.listAlerts)
 	r.Post("/v1/audit/texts/expand", a.expand)
+	// PHI read-access log (#606). Only services record reads; the reader is the verified caller.
+	r.With(authz.RequireDuty(dutyReadLogWrite)).Post("/v1/audit/reads", a.recordRead)
+	r.With(authz.RequireDuty(dutyReadLogView)).Get("/v1/audit/reads", a.listReads)
+	r.With(authz.RequireDuty(dutyReadLogExport)).Get("/v1/audit/reads:export", a.exportReads)
+	r.With(authz.RequireDuty(dutyReadLogExport)).Get("/v1/audit/reads:verify", a.verifyReads)
 }
 
 // Metrics renders Prometheus text.
@@ -73,6 +82,9 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = fmt.Fprintf(w, "# HELP audit_changes_applied_total Field changes appended.\n# TYPE audit_changes_applied_total counter\naudit_changes_applied_total %d\n", a.applied.Load())
 		_, _ = fmt.Fprintf(w, "# HELP audit_changes_failed_total Failed ingest calls.\n# TYPE audit_changes_failed_total counter\naudit_changes_failed_total %d\n", a.failed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP audit_phi_reads_recorded_total PHI reads appended to the read log.\n# TYPE audit_phi_reads_recorded_total counter\naudit_phi_reads_recorded_total %d\n", a.reads.Load())
+		_, _ = fmt.Fprintf(w, "# HELP audit_phi_reads_failed_total PHI read records that were not stored.\n# TYPE audit_phi_reads_failed_total counter\naudit_phi_reads_failed_total %d\n", a.readsFailed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP audit_phi_read_exports_total Read-log exports delivered.\n# TYPE audit_phi_read_exports_total counter\naudit_phi_read_exports_total %d\n", a.exports.Load())
 	})
 }
 

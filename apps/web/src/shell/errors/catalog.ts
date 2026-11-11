@@ -43,6 +43,7 @@ const common: Record<string, ProblemCatalogEntry> = {
   "OPS-1713": { message: "That failover request doesn't exist.", action: "Check the request link, or start the failover again." },
   "OPS-1714": { message: "The failover request expired before a second operator approved it.", action: "Start the failover again and have it approved within 5 minutes." },
   "OPS-1715": { message: "Region operations are open to the platform operator only.", action: "Sign in with a platform operator account." },
+  "OPS-1705": { message: "That region is outside the data residency chosen for this company, so it can't be set up there.", action: "Pick a region inside the residency (for example a European region for an EU company), or change the residency first." },
   "COM-0413": { message: "The request is too large for the service to accept.", action: "Send fewer lines or a smaller file, then try again." },
   "COM-0428": { message: "This page is out of date, so your change can't be saved safely.", action: RELOAD_AND_REDO },
   "COM-0500": { message: "Something went wrong on our side.", action: TRY_LATER },
@@ -1013,6 +1014,14 @@ const fieldService: Record<string, ProblemCatalogEntry> = {
   "INV-TRK-004": { message: "Truck stock isn't switched on for this service.", action: "Ask your administrator to enable it." },
 };
 
+/** Read-access log for protected health information (#606). */
+const phiReadLog: Record<string, ProblemCatalogEntry> = {
+  "AUD-0001": { message: "That audit entry isn't complete, so it wasn't recorded.", action: "Check the entry's details and try again." },
+  "AUD-0002": { message: "A read-log entry can't name who read the record, because the system records the signed-in person itself.", action: "Remove the user from the request and send it again." },
+  "AUD-0003": { message: "The read-log filter, page or export format isn't valid.", action: "Check the dates, the page size and the format (CSV or NDJSON), then try again." },
+  "HCM-PHI-AUDIT-UNAVAILABLE": { message: "This record has health information, and the system couldn't log that you opened it, so it wasn't shown.", action: TRY_LATER },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -1040,6 +1049,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...groupFinance,
   ...shared,
   ...fieldService,
+  ...phiReadLog,
 });
 
 /** The catalog entry for a problem code, if there is one. */

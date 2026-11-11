@@ -2177,6 +2177,16 @@
       {"resource": "/v1/audit/alerts", "methods": ["GET"]},
       {"resource": "/v1/audit/records/*/*", "methods": ["GET"]}
     ]},
+    "audit.read-log.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/audit/reads", "methods": ["POST"]}
+    ]},
+    "audit.read-log.view": {"permissions": [
+      {"resource": "/v1/audit/reads", "methods": ["GET"]}
+    ]},
+    "audit.read-log.export": {"permissions": [
+      {"resource": "/v1/audit/reads:export", "methods": ["GET"]},
+      {"resource": "/v1/audit/reads:verify", "methods": ["GET"]}
+    ]},
     "audit.write": {"permissions": [
       {"resource": "/v1/audit/alert-rules", "methods": ["POST"]},
       {"resource": "/v1/audit/changes", "methods": ["POST"]}
@@ -3905,7 +3915,8 @@
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],
-      "compliance": ["compliance.legal-hold.check"]
+      "compliance": ["compliance.legal-hold.check"],
+      "audit": ["audit.read-log.write"]
     },
     "product": {
       "org": ["org.read"]

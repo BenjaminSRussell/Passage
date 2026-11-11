@@ -67,6 +67,10 @@ spec:
               value: {{ .Values.complianceUrl | default (printf "http://compliance-compliance.%s.svc:8080" .Release.Namespace) | quote }}
             - name: HR_RETENTION_PURGE_ENABLED
               value: {{ .Values.config.retentionPurgeEnabled | quote }}
+            - name: PASSAGE_PHI_READ_AUDIT
+              value: {{ .Values.config.phiReadAudit | quote }}
+            - name: AUDIT_URL
+              value: {{ .Values.auditUrl | default (printf "http://audit-audit.%s.svc:8080" .Release.Namespace) | quote }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_NAME
               value: hr

@@ -5,11 +5,14 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ed25519"
 	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 var (
@@ -99,5 +102,41 @@ func TestReseal_ValidatesArgumentsBeforeConnecting(t *testing.T) {
 				t.Fatalf("got %v, want error containing %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestPHIReadAuditFromEnv(t *testing.T) {
+	signer, err := tenant.NewServiceSigner("hr", ed25519.NewKeyFromSeed(bytes.Repeat([]byte{3}, ed25519.SeedSize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const url = "http://audit.example.svc:8080"
+	tests := []struct {
+		name    string
+		env     map[string]string
+		signer  *tenant.ServiceSigner
+		wantOn  bool
+		wantErr string
+	}{
+		{"commercial is off", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial"}, nil, false, ""},
+		{"unset is off", map[string]string{}, nil, false, ""},
+		{"hipaa overlay is on", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+hipaa", "AUDIT_URL": url}, signer, true, ""},
+		{"hipaa overlay needs the audit url", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+hipaa"}, signer, false, "AUDIT_URL is required"},
+		{"hipaa overlay needs a signing key", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+hipaa", "AUDIT_URL": url}, nil, false, "SIGNING_KEY"},
+		{"switch forces it on", map[string]string{"PASSAGE_PHI_READ_AUDIT": "true", "AUDIT_URL": url}, signer, true, ""},
+		{"switch forces it off", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+hipaa", "PASSAGE_PHI_READ_AUDIT": "false"}, nil, false, ""},
+		{"unknown profile fails closed", map[string]string{"PASSAGE_CLOUD_PROFILE": "nowhere+hipaa"}, signer, false, "unknown cloud profile"},
+	}
+	for _, c := range tests {
+		rec, err := phiReadAuditFromEnv(envOf(c.env), c.signer)
+		if c.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("%s: err = %v, want %q", c.name, err, c.wantErr)
+			}
+			continue
+		}
+		if err != nil || (rec != nil) != c.wantOn {
+			t.Errorf("%s: recorder on = %v, err = %v, want on = %v", c.name, rec != nil, err, c.wantOn)
+		}
 	}
 }

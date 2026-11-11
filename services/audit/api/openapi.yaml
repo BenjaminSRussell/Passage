@@ -52,6 +52,84 @@ paths:
       responses:
         '200': { description: Alert inbox. }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/audit/reads:
+    post:
+      operationId: recordPhiRead
+      summary: "Record a read of protected health information"
+      description: >-
+        Appends one row to the tenant's PHI read-access log (HIPAA audit controls, #606): who read which record and fields,
+        when, and why. The reader is the verified caller of the request (the end user in a service token), never a body value;
+        a body that names userId is refused with AUD-0002. Called by the service that returned the data, not by a person.
+      x-passage-duty: audit.read-log.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PhiReadInput' } } }
+      responses:
+        '201':
+          description: Read appended to the hash chain.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PhiRead' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listPhiReads
+      summary: "List PHI reads in chain order"
+      x-passage-duty: audit.read-log.view
+      parameters:
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: recordId, in: query, schema: { type: string } }
+        - { name: userId, in: query, schema: { type: string } }
+        - { name: from, in: query, description: Inclusive start, schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: Exclusive end, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+      responses:
+        '200':
+          description: One page of reads, oldest first. nextCursor is present when more rows follow.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/PhiRead' } }, nextCursor: { type: string } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/audit/reads:export:
+    get:
+      operationId: exportPhiReads
+      summary: "Export the tenant's PHI read log for an auditor"
+      description: >-
+        Streams the filtered rows as CSV or NDJSON in chain order. The whole chain is verified first and the verdict is in the
+        X-Passage-Read-Chain-* response headers. Keep the head hash: a later export whose chain does not contain it was cut
+        short. CSV neutralises cells that start with a formula character; NDJSON is lossless, so recompute hashes from it.
+      x-passage-duty: audit.read-log.export
+      parameters:
+        - { name: format, in: query, schema: { type: string, enum: [csv, ndjson], default: csv } }
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: recordId, in: query, schema: { type: string } }
+        - { name: userId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: The read log. Cache-Control is no-store.
+          headers:
+            X-Passage-Read-Chain-Verified: { description: "true when every row links to the one before it from the genesis hash.", schema: { type: string, enum: ['true', 'false'] } }
+            X-Passage-Read-Chain-Entries: { description: Rows in the whole chain., schema: { type: integer } }
+            X-Passage-Read-Chain-Head: { description: Hash of the last verified row., schema: { type: string } }
+            X-Passage-Read-Chain-Broken-At: { description: 0-based position of the first row that does not link; only when verified is false., schema: { type: integer } }
+          content:
+            text/csv: { schema: { type: string } }
+            application/x-ndjson: { schema: { type: string } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/audit/reads:verify:
+    get:
+      operationId: verifyPhiReads
+      summary: "Verify the tenant's PHI read-log hash chain"
+      x-passage-duty: audit.read-log.export
+      responses:
+        '200':
+          description: The verification result.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PhiReadChain' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/audit/texts/expand:
     post:
       operationId: expandText
@@ -105,6 +183,42 @@ components:
         traceId: { type: string }
         occurredAt: { type: string, format: date-time }
         hash: { type: string }
+    PhiReadInput:
+      type: object
+      additionalProperties: false
+      required: [entity, recordId, fields, purpose]
+      properties:
+        entity: { type: string, maxLength: 128 }
+        recordId: { type: string, maxLength: 128 }
+        fields: { type: array, minItems: 1, maxItems: 64, items: { type: string, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9_.\[\]-]*$' } }
+        purpose: { type: string, minLength: 1, maxLength: 500, description: A reason code or a short reason for reading the data. }
+        traceId: { type: string, maxLength: 128, description: Defaults to the request id. }
+        occurredAt: { type: string, format: date-time, description: Defaults to now; not more than five minutes ahead. }
+        userId: { type: string, description: Never accepted. The reader is the verified caller; sending it is refused with AUD-0002. }
+    PhiRead:
+      type: object
+      required: [id, seq, entity, recordId, fields, purpose, userId, traceId, occurredAt, prevHash, hash]
+      properties:
+        id: { type: string, format: uuid }
+        seq: { type: integer, format: int64 }
+        entity: { type: string }
+        recordId: { type: string }
+        fields: { type: array, items: { type: string } }
+        purpose: { type: string }
+        userId: { type: string, description: The verified caller who read the data. }
+        sourceService: { type: string, description: The service that recorded the read. }
+        traceId: { type: string }
+        occurredAt: { type: string, format: date-time }
+        prevHash: { type: string }
+        hash: { type: string }
+    PhiReadChain:
+      type: object
+      required: [verified, entries, head]
+      properties:
+        verified: { type: boolean }
+        entries: { type: integer, format: int64 }
+        head: { type: string }
+        brokenAt: { type: integer, format: int64, description: 0-based position of the first row that does not link. }
     AlertRule:
       type: object
       additionalProperties: false

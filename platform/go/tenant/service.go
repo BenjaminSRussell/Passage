@@ -213,6 +213,8 @@ var serviceGrants = map[string]map[string][]string{
 		"warehouse": {"warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register"},
 	},
 	"hr": {
+		// Records a read of protected health information on the caller's behalf (#606, HIPAA read-access log).
+		"audit":      {"audit.read-log.write"},
 		"compliance": {"compliance.legal-hold.check"},
 		"numbering":  {"numbering.sequence.allocate"},
 	},

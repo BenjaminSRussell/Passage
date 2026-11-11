@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/phiaudit"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/api"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/compliance"
@@ -131,6 +132,29 @@ func sealerFromEnv(getenv func(string) string) (*domain.Sealer, error) {
 	return domain.NewSealer(keys, legacy)
 }
 
+// phiReadAuditFromEnv builds the recorder of reads of protected health information (#606, HIPAA audit controls). Read
+// auditing is on when PASSAGE_CLOUD_PROFILE includes the hipaa overlay, or when PASSAGE_PHI_READ_AUDIT=true (and off
+// when it is false). When on, the service refuses to start without AUDIT_URL and a service signing key: it must never
+// return protected health information it cannot record. It returns nil when auditing is off.
+func phiReadAuditFromEnv(getenv func(string) string, signer *tenant.ServiceSigner) (phiaudit.Recorder, error) {
+	on, err := phiaudit.Enabled(getenv)
+	if err != nil {
+		return nil, err
+	}
+	if !on {
+		return nil, nil
+	}
+	url := getenv("AUDIT_URL")
+	if url == "" {
+		return nil, errors.New("AUDIT_URL is required when PHI read auditing is on (the hipaa overlay or PASSAGE_PHI_READ_AUDIT=true)")
+	}
+	if signer == nil {
+		return nil, errors.New("PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE is required when PHI read auditing is on")
+	}
+	slog.Info("PHI read auditing is on", "auditUrl", url)
+	return phiaudit.NewHTTP(url, signer), nil
+}
+
 func maxDepthFromEnv(getenv func(string) string) (int, error) {
 	raw := getenv("HR_MANAGER_MAX_DEPTH")
 	if raw == "" {
@@ -180,6 +204,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		a.WithLegalHolds(compliance.New(url).WithSigner(signer))
 	} else {
 		slog.Warn("COMPLIANCE_URL is empty, the candidate retention purge returns 503 until it is set")
+	}
+	rec, err := phiReadAuditFromEnv(getenv, signer)
+	if err != nil {
+		return err
+	}
+	if rec != nil {
+		a.WithPHIReadAudit(rec)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

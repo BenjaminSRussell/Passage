@@ -273,6 +273,10 @@ unique per worker and period across legal entities: opening it again from a
 scope that cannot see the existing one is 409 `HCM-REV-STATE`, and naming a
 different `legalEntityId` than the existing review's is 422 `HCM-ENTITY-MISMATCH`.
 
+## PHI read auditing (#606)
+
+Health-plan elections (MEDICAL, DENTAL, VISION, HSA, FSA enrollments) and benefit life events on `GET /v1/hr/workers/{id}/benefits` are protected health information (`docs/ops/phi-field-inventory.md`). With read auditing on, a response that carries them is recorded first with `platform/go/phiaudit`: who (the verified caller, taken by the audit service from the service token), which record (`hr.worker.benefits`, the worker id) and fields, when, and `purpose` (`?purpose=`, at most 500 characters; required, except that a worker reading their own record defaults to `self-service`). A response with no phi fields (no health-plan enrollment and no life event) records nothing. If the record cannot be written, the data is not returned (503 `HCM-PHI-AUDIT-UNAVAILABLE`). Metric: `hr_phi_reads_recorded_total`.
+
 ## Self-service profile changes (#267)
 
 An employee (`hr.profile.self`) changes their own record through
@@ -307,6 +311,8 @@ Configuration is read from the environment and validated at startup:
 | `HR_PII_KEY` | no | legacy base64 32-byte key; only opens P3 values written before fieldcrypt. Keep it until `hr reseal-pii` reports `rewritten=0` for every tenant |
 | `HR_RETENTION_PURGE_ENABLED` | no | kill switch for `POST /v1/hr/candidates/purge` and `hr retention-purge`: `false` turns both off (503 `HCM-RET-DISABLED`); anything else leaves them on |
 | `COMPLIANCE_URL` | for the purge | compliance base URL; the purge asks `GET /v1/privacy/holds:check` per candidate (signed, `hr` to `compliance` grant) and skips held ones. Unset: the route answers 503 `HCM-RET-HOLDS` and erases nothing |
+| `PASSAGE_PHI_READ_AUDIT` | no | records every read that returns protected health information (health-plan elections and life events on `GET /v1/hr/workers/{id}/benefits`) in the audit service before the data is returned (#606). Empty or `auto` follows `PASSAGE_CLOUD_PROFILE` (on when it includes the `hipaa` overlay); `true` forces it on, `false` off. Chart: `config.phiReadAudit` |
+| `AUDIT_URL` | when auditing is on | audit base URL; the read is posted to `POST /v1/audit/reads` (signed, `hr` to `audit` grant for `audit.read-log.write`). With auditing on, the service refuses to start without `AUDIT_URL` and a service signing key. Chart: `auditUrl` |
 | `HR_MANAGER_MAX_DEPTH` | no | vacant-manager walk depth, 1–20, default 10 |
 | `MIGRATE_ON_START` | no | `true` applies migrations at start (dev only) |
 | `HTTP_ADDR`, `ADMIN_ADDR` | no | default `:8080` and `:9090` (`/metrics`) |
@@ -553,6 +559,7 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-CMP-SOD` | 403 | The cycle approver created the cycle, submitted one of its worksheets, or is the worker or proposing manager on a submitted row |
 | `HCM-OFR-004` | 422 | A hire from an offer has neither `workerId` nor `newWorker`, or the candidate was erased and `newWorker.legalName` is missing |
 | `HCM-BEN-001` | 422 | Enrollment outside the open window or the life event's 30 days |
+| `HCM-PHI-AUDIT-UNAVAILABLE` | 503 | PHI read auditing is on and the read could not be recorded in the audit service; the data is not returned |
 | `HCM-BEN-002` | 422 | Worker not eligible for the plan on the effective date; the detail gives the reason |
 | `HCM-BEN-003` | 422 | The option is not offered by the plan |
 | `HCM-BEN-004` | 409 | The worker already has an enrollment in the plan that overlaps the effective date |

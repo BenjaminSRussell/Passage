@@ -2707,3 +2707,27 @@ test_agent_run_duties_open_only_their_routes if {
 	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
 	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
 }
+
+# HIPAA overlay (#606): reads of protected health information are recorded by the service that returned them (hr, under a
+# service-only duty), listed by an auditor, and exported with the chain verification under a separate export duty.
+test_audit_read_log_write_is_service_only_and_opens_only_the_record_route if {
+	data.duties["audit.read-log.write"].service_only
+	data.service_grants.hr.audit == ["audit.read-log.write"]
+	allowed("audit.read-log.write", "POST", "/v1/audit/reads")
+	not allowed("audit.read-log.write", "GET", "/v1/audit/reads")
+	not allowed("audit.read-log.write", "GET", "/v1/audit/reads:export")
+	not allowed("audit.read-log.write", "POST", "/v1/audit/changes")
+	not allowed("audit.write", "POST", "/v1/audit/reads")
+	not allowed("audit.read", "GET", "/v1/audit/reads")
+}
+
+test_audit_read_log_view_and_export_split if {
+	allowed("audit.read-log.view", "GET", "/v1/audit/reads")
+	not allowed("audit.read-log.view", "POST", "/v1/audit/reads")
+	not allowed("audit.read-log.view", "GET", "/v1/audit/reads:export")
+	not allowed("audit.read-log.view", "GET", "/v1/audit/reads:verify")
+	allowed("audit.read-log.export", "GET", "/v1/audit/reads:export")
+	allowed("audit.read-log.export", "GET", "/v1/audit/reads:verify")
+	not allowed("audit.read-log.export", "GET", "/v1/audit/reads")
+	not allowed("audit.read-log.export", "POST", "/v1/audit/reads")
+}
