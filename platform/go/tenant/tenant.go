@@ -119,6 +119,15 @@ const (
 	HeaderGatewaySecret = "X-Passage-Gateway-Secret"
 )
 
+// ForwardGatewaySecret adds the gateway secret (GatewaySecretEnv) to an outbound request that carries the caller's X-Passage-* identity headers
+// instead of a signed service token. A service that forwards a user's identity to a peer must call it wherever it sets HeaderTenant, or the
+// peer (which shares the secret under passage-server) refuses the call. It does nothing when the variable is unset.
+func ForwardGatewaySecret(req *http.Request) {
+	if secret := os.Getenv(GatewaySecretEnv); secret != "" {
+		req.Header.Set(HeaderGatewaySecret, secret)
+	}
+}
+
 // canonicalUUID returns the lowercase hyphenated form of s, or false when s is
 // not a 36-character UUID.
 func canonicalUUID(s string) (string, bool) {

@@ -340,3 +340,25 @@ func TestMiddlewareGatewaySecret(t *testing.T) {
 		t.Fatalf("readyz: %d", rec.Code)
 	}
 }
+
+func TestForwardGatewaySecret(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	tenant.ForwardGatewaySecret(req)
+	if req.Header.Get(tenant.HeaderGatewaySecret) != "" {
+		t.Fatal("must not set a header when the secret is not configured")
+	}
+	t.Setenv(tenant.GatewaySecretEnv, "s3cret-per-boot")
+	tenant.ForwardGatewaySecret(req)
+	if got := req.Header.Get(tenant.HeaderGatewaySecret); got != "s3cret-per-boot" {
+		t.Fatalf("header = %q", got)
+	}
+	// A request forwarded with the helper is accepted by a peer that shares the secret.
+	called := false
+	peer := tenant.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	req.Header.Set(tenant.HeaderTenant, validTenant)
+	rec := httptest.NewRecorder()
+	peer.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !called {
+		t.Fatalf("peer answered %d called=%v", rec.Code, called)
+	}
+}
