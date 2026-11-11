@@ -166,6 +166,15 @@ func props(e *domain.Entity, f domain.Field) []prop {
 	if f.PII != "" && f.PII != "none" {
 		p.Schema["x-passage-pii"] = f.PII
 	}
+	if f.PHI {
+		p.Schema["x-passage-phi"] = true
+	}
+	if f.Encrypted {
+		// The stored value is a fieldcrypt envelope: opaque bytes, sent as base64, with no plaintext length bound.
+		p.SQL, p.Schema["format"] = "bytea", "byte"
+		delete(p.Schema, "maxLength")
+		p.Schema["x-passage-encrypted"] = true
+	}
 	if f.Type != "money" {
 		return []prop{p}
 	}
