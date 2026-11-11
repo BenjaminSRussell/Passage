@@ -38,7 +38,9 @@ export type LookupEntityKey =
   | "mainAccount"
   | "customerGroup"
   | "paymentTerm"
-  | "postingProfile";
+  | "postingProfile"
+  | "qualityOrder"
+  | "inventoryJournal";
 
 export interface LookupOption {
   id: string;
@@ -635,6 +637,23 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
     },
   ),
   mainAccount: mainAccountDef,
+  qualityOrder: searchedEntity(
+    "quality order",
+    "/api/v1/quality/quality-orders",
+    (row) => {
+      const hit = option(row, ["number"], []);
+      return hit ? { ...hit, number: text(row, "status")?.replace(/_/g, " ").toLowerCase() } : null;
+    },
+  ),
+  inventoryJournal: searchedEntity(
+    "inventory journal",
+    "/api/v1/inventory/journals",
+    (row) => {
+      const hit = option(row, ["number"], []);
+      const number = [text(row, "journalType")?.replace(/_/g, " ").toLowerCase(), text(row, "status")?.toLowerCase(), text(row, "postingDate")].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined } : null;
+    },
+  ),
   customerGroup: listedEntity("customer group", "/api/v1/party/customer-groups", codeAndName),
   paymentTerm: listedEntity("payment term", "/api/v1/party/payment-terms", codeAndName),
   postingProfile: listedEntity("posting profile", "/api/v1/party/posting-profiles", codeAndName, (scope) => ({ legalEntityId: scope.legalEntityId })),

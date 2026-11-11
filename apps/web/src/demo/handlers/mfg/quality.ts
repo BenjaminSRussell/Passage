@@ -148,6 +148,7 @@ function build(s: Spec): { order: Order; view: OrderView } {
   const results = buildResults(s, group);
   const order: Order = {
     id: `QO-${s.n}`,
+    number: `QO-${String(s.n).padStart(6, "0")}`,
     trigger: s.trigger,
     sourceRef: { type: s.ref[0], id: s.ref[1] },
     itemId: itemByNumber(s.item).id,
@@ -205,7 +206,8 @@ route("POST", `${BASE}/quality-orders`, (req) => {
   const plan = input.samplingPlan;
   const sample = Math.max(1, Math.min(lot, plan?.method === "FIXED" ? Number(plan.fixedQty ?? 5) : plan?.method === "PERCENT" ? Math.ceil((lot * Number(plan.percent ?? 10)) / 100) : Math.min(lot, 8)));
   const order: Order = {
-    id: `QO-${nextOrder++}`,
+    id: `QO-${nextOrder}`,
+    number: `QO-${String(nextOrder++).padStart(6, "0")}`,
     trigger: input.trigger,
     sourceRef: input.sourceRef,
     itemId: input.itemId,

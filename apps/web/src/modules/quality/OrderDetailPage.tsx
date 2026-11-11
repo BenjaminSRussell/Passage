@@ -72,7 +72,7 @@ export function OrderDetailPage() {
   return (
     <div className={styles.stack}>
       <PageHeader
-        title={`Quality order ${shortId(order.id)}`}
+        title={`Quality order ${order.number ?? shortId(order.id)}`}
         description={
           <>
             {TRIGGER_LABELS[order.trigger] ?? order.trigger}, {order.sourceRef.type} <SourceDocument type={order.sourceRef.type} id={order.sourceRef.id} />
