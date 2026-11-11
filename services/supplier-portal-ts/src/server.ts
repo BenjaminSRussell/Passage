@@ -8,7 +8,7 @@ import { authorizationUrl, exchangeCode, LoginRefused, pkcePair, randomToken, ve
 import { PendingProvisioner, type UserProvisioner } from "./provision.ts";
 import { matchRoute, QUERY_ALLOWLIST, STRIPPED_BODY_KEYS, type Route } from "./routes.ts";
 import { screenUpload, type ScanPolicy } from "./scan.ts";
-import { DUTY_INVITE_ACCEPT, type Audience, type ServiceTokenSigner } from "./serviceToken.ts";
+import { DUTY_INVITE_ACCEPT, DUTY_PORTAL_ADMIN, type Audience, type ServiceTokenSigner } from "./serviceToken.ts";
 import { LOGIN_TTL_MS, parseCookies, RateLimiter, SESSION_COOKIE, sameToken, type Session, type SessionStore } from "./session.ts";
 
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
@@ -173,7 +173,10 @@ export function createHttpServer(deps: ServerDeps): Server {
       const v = url.searchParams.get(name);
       if (v !== null) target.searchParams.set(name, v);
     }
-    const token = deps.signer.mint(route.audience, { tenantId: session.identity.tenantId, legalEntityId: le, userId: session.identity.userId, vendorId: session.identity.vendorId });
+    // An administrator route is signed with the vendor-admin duty alone, and only for a session holding the supplier-admin role
+    // (checked in api() as well): party requires that duty on the invitation routes, so a supplier user's token cannot reach them.
+    const caller = { tenantId: session.identity.tenantId, legalEntityId: le, userId: session.identity.userId, vendorId: session.identity.vendorId, isAdmin: session.identity.isAdmin };
+    const token = deps.signer.mint(route.audience, caller, route.adminOnly ? [DUTY_PORTAL_ADMIN] : undefined);
     const headers: Record<string, string> = { "x-passage-service-token": token, accept: route.binary ? "*/*" : "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";
     if (route.method === "POST") {

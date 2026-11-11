@@ -160,10 +160,15 @@ describe("vendor-admin invitations", () => {
     expect(body.acceptUrl).toBe(`${APP}/accept-invite#token=${encodeURIComponent(TOKEN)}`);
     expect(rig.calls[0]!.url).toBe("http://party.test/v1/party/vendor-portal/invites");
     expect(claimsOf(0)).toMatchObject({ aud: "party", vnd: VENDOR_A });
-    expect(claimsOf(0)["duties"]).not.toContain("party.vendor-portal.invite-accept");
+    // Party requires the vendor-admin duty on these routes; the token carries it and nothing else.
+    expect(claimsOf(0)["duties"]).toEqual(["party.vendor-portal.admin"]);
     expect((await api(rig, admin, "GET", "/api/v1/invites")).status).toBe(200);
     expect((await api(rig, admin, "POST", `/api/v1/invites/${INVITE_ID}/revoke`)).status).toBe(200);
     expect(rig.calls[2]!.url).toBe(`http://party.test/v1/party/vendor-portal/invites/${INVITE_ID}:revoke`);
+    expect([claimsOf(1)["duties"], claimsOf(2)["duties"]]).toEqual([["party.vendor-portal.admin"], ["party.vendor-portal.admin"]]);
+    // The administrator's other calls carry the ordinary supplier duties, never the admin one.
+    await api(rig, admin, "GET", "/api/v1/requests");
+    expect(claimsOf(3)["duties"]).toEqual(["party.vendor-portal.read", "party.vendor-portal.write"]);
   });
 });
 

@@ -986,16 +986,17 @@
       {"resource": "/v1/party/vendor-portal/documents", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-portal/documents/*/content", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-portal/distributions", "methods": ["GET"]},
-      {"resource": "/v1/party/vendor-portal/distributions/*/content", "methods": ["GET"]},
-      {"resource": "/v1/party/vendor-portal/invites", "methods": ["GET"]}
+      {"resource": "/v1/party/vendor-portal/distributions/*/content", "methods": ["GET"]}
     ]},
     "party.vendor-portal.write": {"service_only": true, "permissions": [
       {"resource": "/v1/party/vendor-portal/requests", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/requests/*:submit", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/requests/*:withdraw", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/documents", "methods": ["POST"]},
-      {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]},
-      {"resource": "/v1/party/vendor-portal/invites", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]}
+    ]},
+    "party.vendor-portal.admin": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/invites", "methods": ["GET", "POST"]},
       {"resource": "/v1/party/vendor-portal/invites/*:revoke", "methods": ["POST"]}
     ]},
     "party.vendor-portal.invite-accept": {"service_only": true, "permissions": [
@@ -3985,7 +3986,7 @@
     "supplier-portal": {
       "purchasing": ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],
       "receiving": ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"],
-      "party": ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"],
+      "party": ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept", "party.vendor-portal.admin"],
       "payables": ["payables.vendor-portal.read"]
     },
     "customer-portal": {
