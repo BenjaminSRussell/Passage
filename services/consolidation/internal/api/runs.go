@@ -27,6 +27,7 @@ type RunStore interface {
 	ListRuns(ctx context.Context, f store.RunFilter, after string, limit int) (store.RunPage, error)
 	GetRun(ctx context.Context, id string) (store.RunDetail, error)
 	GetStatements(ctx context.Context, id string) (store.RunStatements, error)
+	RunInvestments(ctx context.Context, id string) ([]store.InvestmentRecord, error)
 }
 
 const (
@@ -83,6 +84,9 @@ type runResponse struct {
 	EliminationCount int       `json:"eliminationCount"`
 	CTAAmount        string    `json:"ctaAmount"`
 	CreatedAt        time.Time `json:"createdAt"`
+	// Warnings are what the run did on a fallback, such as the seller's margin for an IC layer with no group cost (CNS-0908). They are
+	// not stored.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type balanceBody struct {
@@ -420,12 +424,45 @@ func (a *API) startRunFromCollection(w http.ResponseWriter, r *http.Request, bod
 			in.Opening[u.ID] = basis
 		}
 	}
-	units, err := domain.RunUnits(in)
+	if in.Layers, err = a.groups.GetLayers(r.Context(), c.GroupID, c.Period); err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	// An equity-method unit's investment starts the fiscal year at the carrying amount of the register at the previous year end.
+	in.PreviousCarrying = map[string]decimal.Decimal{}
+	registers := map[string]map[string]store.InvestmentRecord{}
+	for _, u := range group.Units {
+		if t, ok := in.Terms[u.ID]; !ok || t.Method != domain.MethodEquity {
+			continue
+		}
+		end, err := a.previousYearEnd(r.Context(), u, c.Period)
+		if err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
+		reg, seen := registers[end]
+		if !seen {
+			got, found, err := a.groups.LatestInvestments(r.Context(), c.GroupID, end)
+			if err != nil {
+				httpx.Fail(w, r, problemFrom(err))
+				return
+			}
+			if found {
+				reg = got
+			}
+			registers[end] = reg
+		}
+		if line, ok := reg[u.ID]; ok && line.Method == domain.MethodEquity {
+			in.PreviousCarrying[u.ID] = line.ClosingCarrying
+		}
+	}
+	derived, err := domain.DeriveRun(in)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
-	run := domain.RunInput{GroupID: c.GroupID, Period: c.Period, Currency: c.Currency, Units: units}
+	units := derived.Units
+	run := domain.RunInput{GroupID: c.GroupID, Period: c.Period, Currency: c.Currency, Units: units, Associates: derived.Associates}
 	res, err := domain.ComputeRun(run)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
@@ -442,5 +479,7 @@ func (a *API) startRunFromCollection(w http.ResponseWriter, r *http.Request, bod
 		a.runsCompleted.Add(1)
 	}
 	w.Header().Set("Location", "/v1/consol/runs/"+rec.ID)
-	httpx.JSON(w, http.StatusCreated, toRunResponse(rec))
+	out := toRunResponse(rec)
+	out.Warnings = derived.Warnings
+	httpx.JSON(w, http.StatusCreated, out)
 }

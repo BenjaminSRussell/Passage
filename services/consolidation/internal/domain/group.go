@@ -192,12 +192,16 @@ const (
 	RoleICCost       = "ic_cost"
 	RoleICReceivable = "ic_receivable"
 	RoleICPayable    = "ic_payable"
+	// RoleDividendPaid is the account a subsidiary or associate books the dividends it declared to its shareholders on (a debit
+	// balance of the period, in the unit's currency). A run eliminates the subsidiary's against its owners' dividend income (E6), and
+	// the equity method takes an associate's, in the share held, off the investment.
+	RoleDividendPaid = "dividend_paid"
 )
 
 // ValidRole reports whether r is an account role or empty.
 func ValidRole(r string) bool {
 	switch r {
-	case "", RoleAsset, RoleLiability, RoleEquity, RoleICSales, RoleICCost, RoleICReceivable, RoleICPayable:
+	case "", RoleAsset, RoleLiability, RoleEquity, RoleICSales, RoleICCost, RoleICReceivable, RoleICPayable, RoleDividendPaid:
 		return true
 	}
 	return false
@@ -221,7 +225,7 @@ func ValidateMapping(rows []AccountMapping) error {
 			return invalid(fmt.Sprintf("account %s has the unknown role %q", r.MainAccount, r.Role))
 		}
 		switch r.Role {
-		case RoleAsset, RoleLiability, RoleEquity, RoleICReceivable, RoleICPayable:
+		case RoleAsset, RoleLiability, RoleEquity, RoleICReceivable, RoleICPayable, RoleDividendPaid:
 			if r.Type != AccountBalanceSheet {
 				return invalid(fmt.Sprintf("account %s has the balance sheet role %s but is not a balance_sheet account", r.MainAccount, r.Role))
 			}

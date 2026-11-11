@@ -55,6 +55,7 @@ const mapFields: RowField<MapKey>[] = [
       { value: "ic_payable", label: "Intercompany payable" },
       { value: "ic_sales", label: "Intercompany sales" },
       { value: "ic_cost", label: "Intercompany cost" },
+      { value: "dividend_paid", label: "Dividends declared" },
     ],
   },
 ];

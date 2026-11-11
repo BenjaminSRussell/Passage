@@ -1211,6 +1211,7 @@
       {"resource": "/v1/consol/groups/*/account-map", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units", "methods": ["POST"]},
       {"resource": "/v1/consol/groups/*/units/*", "methods": ["PATCH", "DELETE"]},
+      {"resource": "/v1/consol/groups/*/units/*/layers/*", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units/*/terms", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units/*/ownership", "methods": ["POST"]}
     ]},
@@ -1238,8 +1239,11 @@
       {"resource": "/v1/consol/groups/*/account-map/versions", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/unit-terms", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/collections", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/investments", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/layers/*", "methods": ["GET"]},
       {"resource": "/v1/consol/runs", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/consol/runs/*/investments", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*/statements", "methods": ["GET"]}
     ]},
     "mcp.copilot.use": {"permissions": [

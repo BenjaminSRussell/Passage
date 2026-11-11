@@ -655,6 +655,102 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/units/{unitId}/layers/{period}:
+    put:
+      operationId: setConsolidationIcLayers
+      summary: Replace the IC receipt layers a subsidiary's goods still sit in at the end of a period
+      description: >-
+        The layers (FR-40.16) are the remaining quantity of each intercompany receipt held by the buyer, with its legal unit cost and,
+        when known, the group's unit cost. A run over the collection of that period sums the unrealized profit over them for E3
+        (quantity times legal cost less group cost; a layer without a group cost uses the seller's margin and the run answers a
+        CNS-0908 warning) instead of taking it from the unsold share. An empty list removes the layers.
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: unitId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: period, in: path, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IcLayers' }
+      responses:
+        '200':
+          description: The stored layers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IcLayers' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/layers/{period}:
+    get:
+      operationId: listConsolidationIcLayers
+      summary: The IC receipt layers of every unit of the group for a period
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: period, in: path, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: Layers by unit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/IcLayers' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/investments:
+    get:
+      operationId: listConsolidationInvestments
+      summary: The investments register of the group's newest run for a period
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: period, in: query, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: One line per unit, empty when the group has no run for the period
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investments' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/runs/{id}/investments:
+    get:
+      operationId: getConsolidationRunInvestments
+      summary: The investments register of a run
+      description: >-
+        One line per unit in the group currency: a consolidated subsidiary at cost, an equity-method unit (terms method equity, up to 50
+        percent held) with its opening carrying amount (the register of the previous fiscal year end, else the investment cost), the
+        group's share of its profit, the dividends received and the closing carrying amount.
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: The register
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investments' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/consol/groups/{id}/units/{unitId}/ownership:
     post:
       operationId: addConsolidationOwnership
@@ -978,6 +1074,47 @@ components:
         sellerIsSubsidiary: { type: boolean }
         icNetInvestment: { type: boolean }
         fxGainLossAccount: { type: string }
+        method: { type: string, enum: [full, equity], default: full, description: 'full consolidates the unit line by line (E1 to E6); equity takes an associate or joint venture (up to 50 percent held) with the equity method into one line and the investments register, from investmentCost as its opening carrying amount in the first year.' }
+    IcLayers:
+      type: object
+      required: [layers]
+      properties:
+        unit: { type: string, format: uuid }
+        period: { type: string }
+        layers:
+          type: array
+          maxItems: 5000
+          items:
+            type: object
+            required: [ref, quantity, legalUnitCost]
+            properties:
+              ref: { type: string, maxLength: 128, description: The receipt layer, shown for drill }
+              quantity: { type: string }
+              legalUnitCost: { type: string }
+              groupUnitCost: { type: string, description: Without it E3 uses the seller's margin and the run warns CNS-0908 }
+    Investments:
+      type: object
+      required: [items]
+      properties:
+        runId: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        period: { type: string }
+        currency: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            required: [unit, method, ownershipPct, cost, openingCarrying, shareOfProfit, dividends, closingCarrying, unrecognizedLoss]
+            properties:
+              unit: { type: string, format: uuid }
+              method: { type: string, enum: [full, equity] }
+              ownershipPct: { type: string }
+              cost: { type: string }
+              openingCarrying: { type: string }
+              shareOfProfit: { type: string }
+              dividends: { type: string }
+              closingCarrying: { type: string }
+              unrecognizedLoss: { type: string, description: The part of a share of loss above the carrying amount that is not recognized (IAS 28.38) }
     UnitTerms:
       allOf:
         - $ref: '#/components/schemas/UnitTermsRequest'
@@ -1029,7 +1166,7 @@ components:
               mainAccount: { type: string }
               consolidationAccount: { type: string }
               accountType: { type: string, enum: [balance_sheet, income] }
-              role: { type: string, enum: [asset, liability, equity, ic_sales, ic_cost, ic_receivable, ic_payable], description: What a run reads the account for; asset, liability, equity and the IC balances are balance_sheet accounts, ic_sales and ic_cost income accounts }
+              role: { type: string, enum: [asset, liability, equity, ic_sales, ic_cost, ic_receivable, ic_payable, dividend_paid], description: 'What a run reads the account for; asset, liability, equity, dividend_paid and the IC balances are balance_sheet accounts, ic_sales and ic_cost income accounts. dividend_paid is where a unit books the dividends it declared (a debit): they come off its net assets, give E6 for a consolidated subsidiary and the dividends received of an equity-method unit.' }
     CollectRequest:
       type: object
       required: [period]

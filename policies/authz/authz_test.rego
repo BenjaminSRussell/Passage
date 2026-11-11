@@ -2781,3 +2781,15 @@ test_budget_plan_workbook_export_and_import if {
 	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios/s1:import")
 	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/scenarios/s1:import")
 }
+
+# #40: IC inventory layers are configured with consolidation.configure and read with consolidation.view; the investments register of a
+# run or group is a read.
+test_consolidation_ic_layers_and_investments_register if {
+	allowed("consolidation.configure", "PUT", "/v1/consol/groups/g1/units/u1/layers/2026-03")
+	not allowed("consolidation.view", "PUT", "/v1/consol/groups/g1/units/u1/layers/2026-03")
+	not allowed("consolidation.run", "PUT", "/v1/consol/groups/g1/units/u1/layers/2026-03")
+	allowed("consolidation.view", "GET", "/v1/consol/groups/g1/layers/2026-03")
+	allowed("consolidation.view", "GET", "/v1/consol/groups/g1/investments")
+	allowed("consolidation.view", "GET", "/v1/consol/runs/r1/investments")
+	not allowed("consolidation.configure", "GET", "/v1/consol/runs/r1/investments")
+}

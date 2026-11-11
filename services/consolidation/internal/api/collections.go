@@ -249,9 +249,11 @@ func (a *API) collect(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
+	// Income accounts and the dividends account run from the start of the unit's fiscal year: what a unit declared in earlier years is
+	// not part of this year's dividend (E6, the equity method).
 	income := map[string]bool{}
 	for _, m := range mapping {
-		income[m.MainAccount] = m.Type == domain.AccountIncome
+		income[m.MainAccount] = m.Type == domain.AccountIncome || m.Role == domain.RoleDividendPaid
 	}
 	if err := a.tableRates(r.Context(), group, group.Units, body.Period, rates); err != nil {
 		httpx.Fail(w, r, problemFrom(err))
