@@ -157,7 +157,7 @@ describe("vendor-admin invitations", () => {
     const res = await api(rig, admin, "POST", "/api/v1/invites", { email: "c@acme.example", displayName: "Casey" });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { token: string; acceptUrl: string };
-    expect(body.acceptUrl).toBe(`${APP}/accept-invite?token=${encodeURIComponent(TOKEN)}`);
+    expect(body.acceptUrl).toBe(`${APP}/accept-invite#token=${encodeURIComponent(TOKEN)}`);
     expect(rig.calls[0]!.url).toBe("http://party.test/v1/party/vendor-portal/invites");
     expect(claimsOf(0)).toMatchObject({ aud: "party", vnd: VENDOR_A });
     expect(claimsOf(0)["duties"]).not.toContain("party.vendor-portal.invite-accept");

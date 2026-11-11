@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import type { ReactElement } from "react";
@@ -187,7 +187,7 @@ describe("vendor-admin invitations", () => {
 
   it("invites a colleague, shows the link once, and revokes a pending invitation", async () => {
     routes["GET /api/v1/invites"] = { items: [{ id: "n1", email: "pat@acme.example", status: "PENDING", expiresAt: "2026-11-18T00:00:00Z", createdAt: "2026-11-11T00:00:00Z" }, { id: "n2", email: "old@acme.example", status: "ACCEPTED", expiresAt: "2026-11-01T00:00:00Z", createdAt: "2026-10-25T00:00:00Z" }] };
-    routes["POST /api/v1/invites"] = { invite: { id: "n3", email: "casey@acme.example" }, token: "t", acceptUrl: "https://supplier.example/accept-invite?token=t" };
+    routes["POST /api/v1/invites"] = { invite: { id: "n3", email: "casey@acme.example" }, token: "t", acceptUrl: "https://supplier.example/accept-invite#token=t" };
     routes["POST /api/v1/invites/n1/revoke"] = { id: "n1" };
     const { container } = at("/users", "/users", <Users isAdmin />);
     expect(await screen.findByText("pat@acme.example")).toBeInTheDocument();
@@ -197,7 +197,7 @@ describe("vendor-admin invitations", () => {
     await userEvent.clear(screen.getByLabelText("Email address"));
     await userEvent.type(screen.getByLabelText("Email address"), "casey@acme.example");
     await userEvent.click(screen.getByRole("button", { name: "Create invitation" }));
-    expect(await screen.findByLabelText("Invitation link")).toHaveValue("https://supplier.example/accept-invite?token=t");
+    expect(await screen.findByLabelText("Invitation link")).toHaveValue("https://supplier.example/accept-invite#token=t");
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ email: "casey@acme.example", displayName: "" });
     await accessible(container);
     expect(screen.queryByRole("button", { name: /Revoke invitation for old@/ })).toBeNull();
@@ -256,7 +256,7 @@ describe("public registration page", () => {
 
 describe("accepting an invitation", () => {
   const TOKEN = "inv1.t.l.v.i.secret";
-  const at2 = () => render(<MemoryRouter initialEntries={[`/accept-invite?token=${TOKEN}`]}><Routes><Route path="/accept-invite" element={<AcceptInvite />} /></Routes></MemoryRouter>);
+  const at2 = (entry = `/accept-invite#token=${TOKEN}`) => render(<MemoryRouter initialEntries={[entry]}><Routes><Route path="/accept-invite" element={<AcceptInvite />} /></Routes></MemoryRouter>);
 
   it("shows who it is for, then accepts with the name the invitee gives", async () => {
     routes["POST /bff/invites/verify"] = { email: "casey@acme.example", displayName: "Casey", vendorName: "Acme Valves" };
@@ -270,6 +270,18 @@ describe("accepting an invitation", () => {
     await userEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
     await waitFor(() => expect(calls.find((c) => c.url === "/bff/invites/accept")?.body).toEqual({ token: TOKEN, displayName: "Casey Q" }));
     expect(await screen.findByRole("status")).toHaveTextContent("administrator finishes setting up your account");
+  });
+
+  it("reads the token from the fragment, and still from the query string of an older link", async () => {
+    routes["POST /bff/invites/verify"] = { email: "casey@acme.example", displayName: "Casey", vendorName: "Acme Valves" };
+    at2();
+    expect(await screen.findByText("Acme Valves")).toBeInTheDocument();
+    expect(calls.find((c) => c.url === "/bff/invites/verify")?.body).toEqual({ token: TOKEN });
+    cleanup();
+    calls.length = 0;
+    at2(`/accept-invite?token=${TOKEN}`);
+    expect(await screen.findByText("Acme Valves")).toBeInTheDocument();
+    expect(calls.find((c) => c.url === "/bff/invites/verify")?.body).toEqual({ token: TOKEN });
   });
 
   it("says so plainly when the invitation is not valid", async () => {

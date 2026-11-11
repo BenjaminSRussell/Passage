@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { ApiError, publicPost } from "../api";
 import { Field, messageOf, Notice } from "../ui";
 
@@ -95,8 +95,10 @@ interface InviteInfo { email: string; displayName: string; vendorName: string }
 
 /** The page an invitation link opens: shows who invited whom, then creates the account. */
 export function AcceptInvite() {
-  const [params] = useSearchParams();
-  const token = params.get("token") ?? "";
+  // The token is in the fragment, so it is never sent to a server or kept in its logs; a link made before that carried it
+  // in the query string.
+  const location = useLocation();
+  const token = new URLSearchParams(location.hash.replace(/^#/, "")).get("token") ?? new URLSearchParams(location.search).get("token") ?? "";
   const [info, setInfo] = useState<InviteInfo>();
   const [problem, setProblem] = useState("");
   const [name, setName] = useState("");
