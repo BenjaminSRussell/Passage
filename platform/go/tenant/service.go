@@ -90,9 +90,10 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger":     {"ledger.inbox.read"},
 		"payables":   {"payables.inbox.read"},
 	},
-	// purchasing converts a requisition line's budget pre-encumbrance when it creates a PO line from it (FR-38.5).
+	// purchasing checks an approved requisition against the budget and gives back the pre-encumbrance of a cancelled line,
+	// and converts a requisition line's pre-encumbrance when it creates a PO line from it (FR-38.5).
 	"purchasing": {
-		"budgeting": {"budget.encumbrance.convert"},
+		"budgeting": {"budget.encumbrance.convert", "budget.requisition.check"},
 	},
 	"receiving": {
 		"ledger":     {"ledger.entry.post", "ledger.journal.reverse"},

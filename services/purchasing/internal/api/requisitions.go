@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,6 +39,9 @@ type requisitionLineBody struct {
 	SiteID             string `json:"siteId,omitempty"`
 	WarehouseID        string `json:"warehouseId,omitempty"`
 	PreferredVendorID  string `json:"preferredVendorId,omitempty"`
+	// GLAccount and CostCenter are the budget dimensions the line is charged to; budget control checks a line that has both.
+	GLAccount  string `json:"glAccount,omitempty"`
+	CostCenter string `json:"costCenter,omitempty"`
 	// CatalogEntryID picks the line from a published procurement catalog (FR-17.18).
 	CatalogEntryID string `json:"catalogEntryId,omitempty"`
 }
@@ -132,6 +136,8 @@ func buildRequisition(body requisitionBody, requester string) (store.Requisition
 	return out, needsEstimate, nil
 }
 
+var budgetDimension = regexp.MustCompile(`^[A-Za-z0-9._-]{1,20}$`)
+
 func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.RequisitionLine, error) {
 	field := func(name string) string { return "lines[" + strconv.Itoa(no-1) + "]." + name }
 	if l.ProductID == "" && (strings.TrimSpace(l.Description) == "" || strings.TrimSpace(l.Category) == "") {
@@ -141,6 +147,14 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 		if err := uuidField(field(f.name), f.value, false); err != nil {
 			return store.RequisitionLine{}, err
 		}
+	}
+	for _, f := range []struct{ name, value string }{{"glAccount", l.GLAccount}, {"costCenter", l.CostCenter}} {
+		if f.value != "" && !budgetDimension.MatchString(f.value) {
+			return store.RequisitionLine{}, invalid(field(f.name), "must be 1 to 20 letters, digits, dots, hyphens or underscores")
+		}
+	}
+	if (l.GLAccount == "") != (l.CostCenter == "") {
+		return store.RequisitionLine{}, invalid(field("costCenter"), "glAccount and costCenter go together: name both, or neither for a line that is not budget controlled")
 	}
 	qty, err := decimalField(field("qty"), l.Qty, "")
 	if err != nil {
@@ -177,6 +191,8 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 		WarehouseID:        l.WarehouseID,
 		PreferredVendorID:  l.PreferredVendorID,
 		CatalogEntryID:     l.CatalogEntryID,
+		GLAccount:          l.GLAccount,
+		CostCenter:         l.CostCenter,
 	}, nil
 }
 

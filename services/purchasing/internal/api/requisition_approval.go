@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/purchasing/internal/budget"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
@@ -119,6 +120,14 @@ func (a *API) decideRequisition(w http.ResponseWriter, r *http.Request, id, acti
 			return
 		}
 	}
+	if action == domain.ReqActionApprove && cur.Status == store.RequisitionInReview && cur.Version == version && cur.ApprovedSteps+1 == len(cur.ApproverChain) {
+		// The last level's approval reserves the funds: the budget check runs first, so an over-budget requisition is refused
+		// instead of approved and then found to have no funds (FR-38.4, FR-38.5).
+		if err := a.checkRequisitionBudget(r, cur); err != nil {
+			fail(w, r, err)
+			return
+		}
+	}
 	act := store.RequisitionAct{Action: action, ActorID: userID, Comment: comment}
 	out, err := a.store.ActOnRequisition(r.Context(), id, version, act,
 		store.Idem{Key: key, Hash: hashBody("requisition."+action, map[string]any{"id": id, "version": version, "comment": comment})})
@@ -131,6 +140,10 @@ func (a *API) decideRequisition(w http.ResponseWriter, r *http.Request, id, acti
 		a.requisitionDecisions.Add(1)
 	case domain.ReqActionCancel:
 		a.requisitionsCancelled.Add(1)
+		if a.budget != nil && cur.Status == store.RequisitionApproved {
+			// The cancelled lines give their pre-encumbrance back; a call that fails stays queued (budget-calls:retry).
+			budget.Flush(r.Context(), a.budget, a.budgetQueue, id)
+		}
 	}
 	w.Header().Set("ETag", etag(out.Version))
 	httpx.JSON(w, http.StatusOK, out)

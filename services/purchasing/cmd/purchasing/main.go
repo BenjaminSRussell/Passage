@@ -73,8 +73,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	st := store.New(pool)
-	// Budget control converts a requisition line's pre-encumbrance when a PO line is created from it (FR-38.5). Unset, orders
-	// are still created and the pre-encumbrance stays until budgeting is told some other way.
+	var budgetPort budget.Port
+	// Budget control checks an approved requisition and reserves its lines as pre-encumbrances, gives them back when it is cancelled and
+	// converts a line's pre-encumbrance when a PO line is created from it (FR-38.5). Calls that fail are queued in budget_call and repeated by
+	// POST /v1/procurement/budget-calls:retry. Unset, requisitions are approved unchecked and orders are still created.
 	if url := getenv("BUDGETING_URL"); url != "" {
 		signer, err := tenant.ServiceSignerFromEnv(getenv)
 		if err != nil {
@@ -83,11 +85,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 		if signer == nil {
 			return errors.New("BUDGETING_URL needs a service signing key (PASSAGE_SERVICE_SIGNING_KEY_FILE)")
 		}
-		st.WithOrderHook(budget.Hook(budget.New(url, nil, signer)))
+		client := budget.New(url, nil, signer)
+		st.WithBudgetCalls(true).WithOrderHook(budget.Hook(client, st))
+		budgetPort = client
 	} else {
 		slog.Warn("BUDGETING_URL is empty: requisition pre-encumbrances are not converted when a purchase order line is created")
 	}
 	a := api.New(st).WithVendorPrincipal(api.PortalVendorPrincipal{})
+	if budgetPort != nil {
+		a.WithBudget(budgetPort, st)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

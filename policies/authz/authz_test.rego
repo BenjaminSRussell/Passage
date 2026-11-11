@@ -1170,13 +1170,26 @@ test_budget_plan_generation_needs_the_maintain_duty if {
 
 test_budget_conversion_is_service_only_and_reaches_only_the_convert_routes if {
 	data.duties["budget.encumbrance.convert"].service_only
-	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert"]
+	data.service_grants.purchasing.budgeting == ["budget.encumbrance.convert", "budget.requisition.check"]
 	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:convert")
 	allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances:convert")
 	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/checks")
 	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/encumbrances/e1:release")
 	not allowed("budget.check", "POST", "/v1/budget/encumbrances/e1:convert")
 	not allowed("budget.view", "POST", "/v1/budget/encumbrances/e1:convert")
+}
+
+test_requisition_budget_check_is_service_only_and_reaches_only_its_two_routes if {
+	data.duties["budget.requisition.check"].service_only
+	allowed("budget.requisition.check", "POST", "/v1/budget/requisition-checks")
+	allowed("budget.requisition.check", "POST", "/v1/budget/requisition-checks:release-line")
+	not allowed("budget.requisition.check", "POST", "/v1/budget/checks")
+	not allowed("budget.requisition.check", "POST", "/v1/budget/encumbrances/e1:convert")
+	not allowed("budget.check", "POST", "/v1/budget/requisition-checks")
+	not allowed("budget.encumbrance.convert", "POST", "/v1/budget/requisition-checks")
+	allowed("procurement.purchase-order.maintain", "POST", "/v1/procurement/budget-calls:retry")
+	allowed("procurement.purchase-order.inquire", "GET", "/v1/procurement/budget-calls")
+	not allowed("procurement.purchase-order.inquire", "POST", "/v1/procurement/budget-calls:retry")
 }
 
 test_budget_view_reads_the_scenario_comparison_and_cannot_write_it if {

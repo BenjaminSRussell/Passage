@@ -571,7 +571,8 @@
       {"resource": "/v1/procurement/inbound-changes/*:retry", "methods": ["POST"]},
       {"resource": "/v1/procurement/inbound-changes/*:acknowledge", "methods": ["POST"]},
       {"resource": "/v1/procurement/requisition-lines/*:split", "methods": ["POST"]},
-      {"resource": "/v1/procurement/requisition-releases", "methods": ["POST"]}
+      {"resource": "/v1/procurement/requisition-releases", "methods": ["POST"]},
+      {"resource": "/v1/procurement/budget-calls:retry", "methods": ["POST"]}
     ]},
     "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}
@@ -625,6 +626,7 @@
       {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/budget-calls", "methods": ["GET"]},
       {"resource": "/v1/procurement/inquiries/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases/*", "methods": ["GET"]},
@@ -2163,6 +2165,10 @@
     "budget.encumbrance.convert": {"service_only": true, "permissions": [
       {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances:convert", "methods": ["POST"]}
+    ]},
+    "budget.requisition.check": {"service_only": true, "permissions": [
+      {"resource": "/v1/budget/requisition-checks", "methods": ["POST"]},
+      {"resource": "/v1/budget/requisition-checks:release-line", "methods": ["POST"]}
     ]},
     "budget.plan.workflow": {"service_only": true, "permissions": [
       {"resource": "/v1/budget/plans/*/stages/*:sign-off", "methods": ["POST"]},
@@ -3712,7 +3718,7 @@
       "payables": ["payables.inbox.read"]
     },
     "purchasing": {
-      "budgeting": ["budget.encumbrance.convert"]
+      "budgeting": ["budget.encumbrance.convert", "budget.requisition.check"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
