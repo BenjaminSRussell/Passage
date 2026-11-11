@@ -3252,6 +3252,7 @@
     "revrec.maintain": {"permissions": [
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
       {"resource": "/v1/revrec/contracts/*:allocate", "methods": ["POST"]},
+      {"resource": "/v1/revrec/contracts/*:modify", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]},
       {"resource": "/v1/revrec/recognition-templates/*", "methods": ["PUT"]}
     ]},

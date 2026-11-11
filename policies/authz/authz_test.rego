@@ -1797,6 +1797,9 @@ test_revrec_allocate_belongs_to_maintain_only if {
 	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:allocate")
 	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:allocate")
 	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:allocate")
+	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:modify")
+	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:modify")
+	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:modify")
 }
 
 test_tax_duties_reach_only_their_routes if {
