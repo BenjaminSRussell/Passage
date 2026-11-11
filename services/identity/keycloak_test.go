@@ -255,7 +255,7 @@ func TestKeycloakRealmUserProfileLocksTokenAttributesToAdmins(t *testing.T) {
 			locked[attribute.Name] = true
 		}
 	}
-	for _, name := range []string{"tenant_id", "legal_entity_id", "duties", "tier"} {
+	for _, name := range []string{"tenant_id", "legal_entity_id", "customer_id", "duties", "tier"} {
 		if !locked[name] {
 			t.Errorf("user attribute %s feeds a token claim and must be admin-edit only", name)
 		}

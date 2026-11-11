@@ -58,7 +58,7 @@ export function App() {
             {me.data.legalEntityIds.length > 1 ? (
               <label>Account with <select value={entity} onChange={(e) => setEntity(e.target.value)}>{me.data.legalEntityIds.map((id, n) => <option key={id} value={id}>Company {n + 1}</option>)}</select></label>
             ) : null}
-            <span>{me.data.name || me.data.userId}</span>
+            <span>{me.data.name || "Your account"}</span>
             <button type="button" className="secondary" onClick={() => void signOut()}>Sign out</button>
           </div>
         ) : null}
