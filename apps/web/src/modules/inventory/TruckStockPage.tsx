@@ -21,7 +21,7 @@ const columns: DataTableColumn<TruckStockLevel>[] = [
   { key: "maxQty", header: "Maximum", align: "end", mono: true },
   { key: "onHandQty", header: "On the truck", align: "end", mono: true },
   { key: "inboundQty", header: "On its way", align: "end", mono: true },
-  { key: "sourceWarehouseId", header: "Refilled from", mono: true },
+  { key: "sourceWarehouseId", header: "Refilled from", render: (row) => (UUID.test(row.sourceWarehouseId) ? <Named entity="warehouse" id={row.sourceWarehouseId} /> : <span className={styles.mono}>{row.sourceWarehouseId}</span>) },
   { key: "short", header: "Status", render: (row) => <Badge tone={row.short ? "warning" : "success"}>{row.short ? "Below minimum" : "Stocked"}</Badge> },
 ];
 

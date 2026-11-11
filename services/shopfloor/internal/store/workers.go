@@ -71,6 +71,9 @@ func (s *Postgres) CreateWorker(ctx context.Context, in Worker, idem Idem) (Work
 		if zone == "" {
 			zone = "UTC"
 		}
+		if err := checkZone(ctx, tx, zone); err != nil {
+			return err
+		}
 		out, err = scanWorker(tx.QueryRow(ctx, `insert into worker (tenant_id, id, party_id, name, badge_id, user_id, cost_rate, currency, time_zone)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning `+workerColumns,
 			p.TenantID, ids.New(), in.PartyID, in.Name, in.BadgeID, in.UserID, in.CostRate.String(), in.Currency, zone))
@@ -293,4 +296,19 @@ func (s *Postgres) ListWorkerDays(ctx context.Context, f DayFilter) ([]WorkerDay
 		return lines.Err()
 	})
 	return out, err
+}
+
+// checkZone refuses a zone Postgres does not know: Go's zone database and the server's (pg_timezone_names) can differ, and the
+// job-stop rate lookup converts with `at time zone`, which fails on a name Postgres lacks.
+func checkZone(ctx context.Context, tx pgx.Tx, zone string) error {
+	var known bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from pg_timezone_names where name = $1)`, zone).Scan(&known); err != nil {
+		return err
+	}
+	if !known {
+		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
+		p.Errors = map[string]string{"timeZone": "must be an IANA time zone name the database knows, such as America/Chicago"}
+		return p
+	}
+	return nil
 }

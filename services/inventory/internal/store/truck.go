@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -268,7 +269,8 @@ func (s *Postgres) replenishTruck(ctx context.Context, legalEntityID, siteID, wa
 // of waiting runs never holds every pooled connection while the holder needs one; it gives up when its context ends.
 func (s *Postgres) lockTruck(ctx context.Context, legalEntityID, siteID, warehouseID string) (func(), error) {
 	tp, _ := tenant.FromContext(ctx)
-	sum := sha256.Sum256([]byte("truck-replenish|" + tp.TenantID + "|" + legalEntityID + "|" + siteID + "|" + warehouseID))
+	// Ids arrive in either case (the truck consumer and the API lower-case them, a caller may not), and one truck is one lock.
+	sum := sha256.Sum256([]byte("truck-replenish|" + strings.ToLower(tp.TenantID) + "|" + strings.ToLower(legalEntityID) + "|" + strings.ToLower(siteID) + "|" + strings.ToLower(warehouseID)))
 	key := int64(binary.BigEndian.Uint64(sum[:8]))
 	for {
 		conn, err := s.pool.Acquire(ctx)

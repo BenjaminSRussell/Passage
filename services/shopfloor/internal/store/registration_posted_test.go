@@ -216,3 +216,20 @@ func TestRegistrationPosted_JobStopWorkDateIsLocalToTheWorkersSite(t *testing.T)
 		t.Fatalf("an edit with a zone: %+v %v", upd, err)
 	}
 }
+
+// A zone Postgres does not know is refused by the store, whatever the API's Go zone database accepts.
+func TestWorkerTimeZone_StoreRefusesAZonePostgresDoesNotKnow(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(89))
+	badge := "B-ZONE"
+	if _, err := s.CreateWorker(ctx, Worker{PartyID: ids.New(), Name: "Z", BadgeID: &badge, CostRate: decimal.RequireFromString("26"), Currency: "USD", TimeZone: "Mars/Olympus"}, idem("z-"+ids.New())); err == nil {
+		t.Fatal("an unknown zone was accepted")
+	}
+	w, err := s.CreateWorker(ctx, Worker{PartyID: ids.New(), Name: "Z", BadgeID: &badge, CostRate: decimal.RequireFromString("26"), Currency: "USD", TimeZone: "Asia/Kolkata"}, idem("z-"+ids.New()))
+	if err != nil || w.TimeZone != "Asia/Kolkata" {
+		t.Fatalf("a known zone: %+v %v", w, err)
+	}
+	if _, err := s.UpdateWorker(ctx, w.ID, w.Version, WorkerInput{Name: "Z", BadgeID: &badge, CostRate: w.CostRate, Currency: "USD", TimeZone: "Nope/Zone"}, "sup", idem("u-"+ids.New())); err == nil {
+		t.Fatal("an edit to an unknown zone was accepted")
+	}
+}

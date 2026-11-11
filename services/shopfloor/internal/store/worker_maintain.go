@@ -86,6 +86,11 @@ func (s *Postgres) UpdateWorker(ctx context.Context, workerID string, version in
 				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeCurrencyLocked, "the currency cannot change once pay of the worker is approved")
 			}
 		}
+		if in.TimeZone != "" {
+			if err := checkZone(ctx, tx, in.TimeZone); err != nil {
+				return err
+			}
+		}
 		out, err = scanWorker(tx.QueryRow(ctx, `update worker set name = $3, badge_id = $4, user_id = $5, cost_rate = $6, currency = $7,
 				time_zone = coalesce(nullif($9, ''), time_zone), version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2 and version = $8 returning `+workerColumns,
