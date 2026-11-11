@@ -38,9 +38,84 @@ var DeliveryFailed = events.Type(Context, "delivery", "failed", 1)
 // order (PRD §6.35.5; consumers: the monitor and analytics).
 var MessagePosted = events.Type(Context, "message", "posted", 1)
 
+// The B2B batch events (#35): an e-invoice handed to its network and the network's answer, a punchout cart returned for
+// requisition, a customer's self-billed document matched, and a self-billing dispute opened or decided.
+var (
+	EInvoiceSubmitted     = events.Type(Context, "einvoice", "submitted", 1)
+	EInvoiceAccepted      = events.Type(Context, "einvoice", "accepted", 1)
+	EInvoiceRejected      = events.Type(Context, "einvoice", "rejected", 1)
+	PunchoutReturned      = events.Type(Context, "punchout", "returned", 1)
+	SelfBillingReconciled = events.Type(Context, "selfbilling", "reconciled", 1)
+	DisputeOpened         = events.Type(Context, "dispute", "opened", 1)
+	DisputeResolved       = events.Type(Context, "dispute", "resolved", 1)
+)
+
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{MessageReceived, MessageAcked, MessageFailed, MessageSent, MessagePosted, DeliveryFailed}
+	return []string{MessageReceived, MessageAcked, MessageFailed, MessageSent, MessagePosted, DeliveryFailed,
+		EInvoiceSubmitted, EInvoiceAccepted, EInvoiceRejected, PunchoutReturned, SelfBillingReconciled, DisputeOpened, DisputeResolved}
+}
+
+// EInvoiceData is the payload of the e-invoice events. Reference is the network's submission reference, Reason the
+// network's rejection text.
+type EInvoiceData struct {
+	EInvoiceID    string `json:"einvoice_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	InvoiceID     string `json:"invoice_id"`
+	Number        string `json:"number"`
+	Mandate       string `json:"mandate"`
+	Reference     string `json:"reference,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+// PunchoutLine is one requisition line a returned cart contributes (BR-35.13): catalog-sourced, so Catalog is always true.
+type PunchoutLine struct {
+	Line           int    `json:"line"`
+	SupplierPartID string `json:"supplier_part_id"`
+	Description    string `json:"description"`
+	Quantity       string `json:"quantity"`
+	UnitCode       string `json:"unit_code"`
+	UnitPrice      string `json:"unit_price"`
+	Currency       string `json:"currency"`
+	UNSPSC         string `json:"unspsc,omitempty"`
+	LeadTimeDays   int    `json:"lead_time_days,omitempty"`
+	Catalog        bool   `json:"catalog"`
+	NeedsApproval  bool   `json:"needs_approval"`
+}
+
+// PunchoutReturnedData is the payload of PunchoutReturned: the lines to put on a requisition for the requester.
+type PunchoutReturnedData struct {
+	SessionID     string         `json:"session_id"`
+	PartnerID     string         `json:"partner_id"`
+	LegalEntityID string         `json:"legal_entity_id"`
+	RequesterID   string         `json:"requester_id"`
+	CartRejected  bool           `json:"cart_rejected"`
+	Lines         []PunchoutLine `json:"lines"`
+}
+
+// SelfBillingReconciledData is the payload of SelfBillingReconciled.
+type SelfBillingReconciledData struct {
+	DocumentID    string `json:"document_id"`
+	PartnerID     string `json:"partner_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Number        string `json:"number"`
+	Status        string `json:"status"`
+	MatchedLines  int    `json:"matched_lines"`
+	DisputedLines int    `json:"disputed_lines"`
+}
+
+// DisputeData is the payload of DisputeOpened and DisputeResolved (Decision is ACCEPTED or REJECTED on the latter).
+type DisputeData struct {
+	DisputeID     string `json:"dispute_id"`
+	PartnerID     string `json:"partner_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Kind          string `json:"kind"`
+	Code          string `json:"code"`
+	DocumentID    string `json:"document_id,omitempty"`
+	Line          string `json:"line,omitempty"`
+	ShipmentID    string `json:"shipment_id,omitempty"`
+	Detail        string `json:"detail"`
+	Decision      string `json:"decision,omitempty"`
 }
 
 // MessagePostedData is the payload of MessagePosted.

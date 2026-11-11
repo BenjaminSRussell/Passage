@@ -136,7 +136,7 @@ describe("GR/IR open items", () => {
 
     expect(await screen.findByRole("form", { name: "Vendor invoice" })).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent("/ap-invoices/post");
-    expect(screen.getByLabelText("Vendor ID")).toHaveValue(UUID_A);
+    expect(screen.getByLabelText("Vendor")).toHaveAttribute("data-value", UUID_A);
     expect(screen.getByLabelText("Line 1 receipt ID")).toHaveValue(RECEIPT);
     expect(screen.getByLabelText("Line 1 quantity")).toHaveValue("6");
     expect(screen.getByLabelText("Line 1 unit price")).toHaveValue("2.505");
@@ -172,8 +172,8 @@ describe("post vendor invoice", () => {
   }
 
   function fillValid() {
-    fill("Vendor ID", UUID_A);
-    fill("Legal entity ID", UUID_B);
+    fill("Vendor", UUID_A);
+    fill("Legal entity", UUID_B);
     fill("Invoice number", "INV-1");
     fill("Invoice date", "2026-10-26");
     fill("Posting date", "2026-10-26");

@@ -20,6 +20,11 @@ function lookup(id: string): Promise<string | null> {
   return pending;
 }
 
+/** The order number as text (for an export); the id when the order cannot be read. */
+export function orderNumberText(id: string): Promise<string> {
+  return id === "" ? Promise.resolve("") : lookup(id).then((found) => found ?? id);
+}
+
 /** A sales order reference shown as its order number, linked to the order. Rows that carry only the order id use this. */
 export function OrderNumber({ id, fallback = "Sales order", link = true }: { id: string; fallback?: string; link?: boolean }) {
   const [number, setNumber] = useState<string | null>(null);

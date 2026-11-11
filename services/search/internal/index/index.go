@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 
@@ -26,6 +28,11 @@ const (
 	SalesOrderTopic     = "passage.sales.order"
 	ShipmentTopic       = "passage.fulfillment.shipment"
 	BillingInvoiceTopic = "passage.billing.invoice"
+	// ProductionOrderTopic is production's order channel, not its outbox
+	// aggregate type: production writes every event under one aggregate type
+	// and names the topic after the event type's entity, as sales does.
+	ProductionOrderTopic = "passage.production.order"
+	WorkerTopic          = "passage.hr.worker"
 
 	PartyCreatedType       = "dev.passage.party.party.created.v1"
 	PartyUpdatedType       = "dev.passage.party.party.updated.v1"
@@ -44,10 +51,16 @@ const (
 	CustomerInvoicePostedType = "dev.passage.billing.invoice.posted.v1"
 	CreditNotePostedType      = "dev.passage.billing.creditnote.posted.v1"
 
+	ProductionOrderCreatedType       = "dev.passage.production.order.created.v1"
+	ProductionOrderStatusChangedType = "dev.passage.production.order.statuschanged.v1"
+	WorkerCreatedType                = "dev.passage.hr.worker.created.v1"
+
 	receivingSource   = "/passage/receiving/receiving"
 	salesSource       = "sales"
 	fulfillmentSource = "fulfillment"
 	billingSource     = "billing"
+	productionSource  = "production"
+	hrSource          = "hr"
 	statusPosted      = "POSTED"
 	statusCancelled   = "CANCELLED"
 	statusConfirmed   = "CONFIRMED"
@@ -107,7 +120,7 @@ type purchaseOrderData struct {
 	PriorStatus   string `json:"prior_status"`
 }
 
-// Handlers indexes party, product and purchase order events. Register them
+// Handlers indexes the events of every searchable record type. Register them
 // with a consumer named ConsumerName with Idempotent set: every write is an
 // ordered upsert, so a redelivery changes nothing.
 func Handlers(s Applier) map[string]eventing.Handler {
@@ -130,6 +143,10 @@ func Handlers(s Applier) map[string]eventing.Handler {
 		PackingSlipCancelledType:  h(indexPackingSlipCancelled),
 		CustomerInvoicePostedType: h(indexBillingDocument),
 		CreditNotePostedType:      h(indexBillingDocument),
+
+		ProductionOrderCreatedType:       h(indexProductionOrder),
+		ProductionOrderStatusChangedType: h(indexProductionOrder),
+		WorkerCreatedType:                h(indexWorker),
 	}
 }
 
@@ -360,4 +377,62 @@ func indexBillingDocument(ctx context.Context, s Applier, evt events.Event) erro
 	}
 	return scoped(ctx, s, evt, store.Record{Type: store.TypeCustomerInvoice, ID: id, LegalEntityID: d.LegalEntityID, Number: d.Number,
 		Title: d.Number, Subtitle: subtitle(d.Currency, d.Totals.Gross), Status: statusPosted})
+}
+
+// statusCode turns a CamelCase status (production's ReportedAsFinished) into
+// the upper snake case the other record types use (REPORTED_AS_FINISHED).
+func statusCode(status string) string {
+	var b strings.Builder
+	for i, r := range status {
+		if i > 0 && unicode.IsUpper(r) {
+			b.WriteByte('_')
+		}
+		b.WriteRune(unicode.ToUpper(r))
+	}
+	return b.String()
+}
+
+type productionOrderData struct {
+	OrderID       string `json:"orderId"`
+	OrderNumber   string `json:"orderNumber"`
+	LegalEntityID string `json:"legalEntityId"`
+	Status        string `json:"status"`
+	To            string `json:"to"`
+}
+
+// indexProductionOrder indexes a production order from order.created and keeps
+// its status from order.statuschanged, which names the order too, so a status
+// event never needs the create first. The record has no subtitle: the delivery
+// date and quantity change with order.updated, which the index does not read.
+func indexProductionOrder(ctx context.Context, s Applier, evt events.Event) error {
+	var d productionOrderData
+	if err := decode(evt, productionSource, &d); err != nil {
+		return err
+	}
+	status := d.Status
+	if evt.Type == ProductionOrderStatusChangedType {
+		status = d.To
+	}
+	return scoped(ctx, s, evt, store.Record{Type: store.TypeProductionOrder, ID: d.OrderID, LegalEntityID: d.LegalEntityID, Number: d.OrderNumber,
+		Title: d.OrderNumber, Status: statusCode(status)})
+}
+
+// indexWorker indexes a worker by personnel number. A worker is tenant-wide in
+// HR (its worker list is not legal-entity scoped), so it is here too. HR events
+// carry no personal data, so worker.created has no name: a worker is found by
+// number, and the person by name through its party record.
+func indexWorker(ctx context.Context, s Applier, evt events.Event) error {
+	var d struct {
+		ID              string `json:"id"`
+		PersonnelNumber string `json:"personnel_number"`
+		WorkerType      string `json:"worker_type"`
+	}
+	if err := decode(evt, hrSource, &d); err != nil {
+		return err
+	}
+	if !ids.Valid(d.ID) || d.PersonnelNumber == "" {
+		return eventing.Permanent(fmt.Errorf("%s needs id and personnel_number", evt.Type))
+	}
+	return apply(ctx, s, evt, store.Record{Type: store.TypeWorker, ID: d.ID, Number: d.PersonnelNumber, Title: d.PersonnelNumber,
+		Subtitle: strings.ToLower(d.WorkerType)})
 }

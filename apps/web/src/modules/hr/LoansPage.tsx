@@ -4,7 +4,7 @@ import { Badge, Button, Card, type DataTableColumn } from "../../shell/ui";
 import { DATE, UUID, dash, dayOf, todayIso } from "./format";
 import { closeLoanedItem, issueLoanedItem, listWorkerLoans, outstandingLoans, type LoanedItem, type NewLoanedItem } from "./api/safety";
 import styles from "./pages.module.css";
-import { BackLink, FormActions, humanize, ListPage, opt, Status, TextField, useAction, useSubmit } from "./parts";
+import { BackLink, FormActions, humanize, ListPage, LookupField, opt, Status, TextField, useAction, useSubmit } from "./parts";
 
 function loanColumns(
   showWorker: boolean,
@@ -105,7 +105,7 @@ export function validateLoan(v: LoanValues): { errors: Record<string, string>; i
   if (!DATE.test(v.issuedOn)) errors.issuedOn = "Choose the issue date.";
   if (v.dueOn !== "" && !DATE.test(v.dueOn)) errors.dueOn = "Choose a due date, or clear it.";
   else if (v.dueOn !== "" && DATE.test(v.issuedOn) && v.dueOn < v.issuedOn) errors.dueOn = "It can't be due before it was issued.";
-  if (v.legalEntityId.trim() !== "" && !UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity's id.";
+  if (v.legalEntityId.trim() !== "" && !UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity, or clear it.";
   if (Object.keys(errors).length > 0) return { errors };
   return {
     errors,
@@ -151,7 +151,20 @@ function IssueForm({ workerId, onIssued }: { workerId: string; onIssued(item: Lo
         {field("issuedOn", "Issued on", { type: "date" })}
         {field("dueOn", "Due on", { optional: true, type: "date" })}
         {field("conditionOut", "Condition", { optional: true })}
-        {field("legalEntityId", "Legal entity id", { optional: true, hint: "Needed when the worker is employed in several legal entities." })}
+        <LookupField
+          entity="legalEntity"
+          prefill={false}
+          id="loan-legalEntityId"
+          label="Legal entity"
+          optional
+          hint="Needed when the worker is employed in several legal entities."
+          value={values.legalEntityId}
+          error={form.errors.legalEntityId}
+          onChange={(legalEntityId) => {
+            setValues((prev) => ({ ...prev, legalEntityId }));
+            form.touch();
+          }}
+        />
         <FormActions errors={form.errors} busy={form.busy} submit="Lend item" failure={form.failure} failureTitle="Could not lend the item" />
       </form>
     </Card>

@@ -6,6 +6,7 @@ import { DEFAULT_CONTRACT_ACCOUNTS, RATE_KIND_LABELS } from "./contractFormat";
 import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface BrokerDraft {
   legalEntityId: string;
@@ -48,10 +49,10 @@ const ACCOUNT = /^\d{4,8}$/;
 /** Client checks that mirror the service (FR-26.16); the service has the last word. */
 export function validateBroker(v: BrokerDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
-  if (!UUID.test(v.brokerVendorId.trim())) errors.brokerVendorId = "Enter the broker's vendor id (a UUID).";
-  if (v.customerScope !== "all" && !UUID.test(v.customerKey.trim())) errors.customerKey = v.customerScope === "customer" ? "Enter the customer id (a UUID)." : "Enter the customer group id (a UUID).";
+  if (!UUID.test(v.brokerVendorId.trim())) errors.brokerVendorId = "Choose the broker's vendor.";
+  if (v.customerScope !== "all" && !UUID.test(v.customerKey.trim())) errors.customerKey = v.customerScope === "customer" ? "Choose a customer." : "Enter the customer group id (a UUID).";
   if (v.productScope !== "all" && (v.productKey.trim() === "" || v.productKey.trim().length > 64)) errors.productKey = "Enter the product or group (up to 64 characters).";
   const rate = Number(v.rate);
   if (!DECIMAL.test(v.rate.trim()) || rate <= 0 || (v.rateKind === "PERCENT_NET" && rate > 100)) {
@@ -148,9 +149,9 @@ export function NewBrokerPage() {
       <PageHeader title="New broker contract" description="The contract is active from creation: posted invoice lines in its scope and validity accrue broker commission." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("bk-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="bk-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {text("bk-name", "name", "Contract name")}
-          {text("bk-vendor", "brokerVendorId", "Broker vendor id", { mono: true })}
+          <LookupFormField id="bk-vendor" label="Broker vendor" entity="vendor" scope={{ legalEntityId: values.legalEntityId || undefined }} value={values.brokerVendorId} error={errors.brokerVendorId} onChange={(brokerVendorId) => update({ brokerVendorId })} />
           <FormField id="bk-customer-scope" label="Customers">
             {(c) => (
               <Select {...c} value={values.customerScope} onChange={(e) => update({ customerScope: e.target.value as BrokerDraft["customerScope"], customerKey: "" })}>
@@ -160,7 +161,11 @@ export function NewBrokerPage() {
               </Select>
             )}
           </FormField>
-          {values.customerScope === "all" ? null : text("bk-customer", "customerKey", values.customerScope === "customer" ? "Customer id" : "Customer group id", { mono: true })}
+          {values.customerScope === "customer" ? (
+            <LookupFormField id="bk-customer" label="Customer" entity="customer" scope={{ legalEntityId: values.legalEntityId || undefined }} value={values.customerKey} error={errors.customerKey} onChange={(customerKey) => update({ customerKey })} />
+          ) : values.customerScope === "group" ? (
+            text("bk-customer", "customerKey", "Customer group id", { mono: true })
+          ) : null}
           <FormField id="bk-product-scope" label="Products">
             {(c) => (
               <Select {...c} value={values.productScope} onChange={(e) => update({ productScope: e.target.value as BrokerDraft["productScope"], productKey: "" })}>

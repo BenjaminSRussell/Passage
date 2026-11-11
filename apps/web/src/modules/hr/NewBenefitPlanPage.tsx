@@ -13,6 +13,7 @@ import {
 import { currencyPlaces, DATE, planTypeLabel, UUID, validRate } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 interface OptionValues {
   code: string;
@@ -65,7 +66,7 @@ export function validateBenefitPlan(values: BenefitPlanValues): { errors: Errors
   const deduction = values.payrollDeductionCode.trim();
   if (deduction.length > 20) errors.payrollDeductionCode = "Keep the deduction code to 20 characters.";
   const provider = values.providerPartyId.trim();
-  if (provider && !UUID.test(provider)) errors.providerPartyId = "Enter the provider's party id (a UUID), or leave it empty.";
+  if (provider && !UUID.test(provider)) errors.providerPartyId = "Choose the provider, or leave it empty.";
   if (values.options.length === 0) errors.options = "Add at least one coverage option.";
 
   const places = CURRENCY.test(currency) ? currencyPlaces(currency) : 2;
@@ -189,7 +190,7 @@ export function NewBenefitPlanPage() {
           {text("enrollmentEnd", "Open enrollment to", "Inclusive.", { type: "date" })}
           {text("waitingDays", "Waiting days", "Days after the hire date before a worker is eligible.", { inputMode: "numeric" })}
           {text("payrollDeductionCode", "Payroll deduction code", "Payroll uses it to take the employee rate.", { maxLength: 20 }, true)}
-          {text("providerPartyId", "Provider party id", "The insurer or administrator as a party id.", undefined, true)}
+          <LookupFormField id="benefit-providerPartyId" label="Provider" entity="party" optional hint="The insurer or administrator." value={values.providerPartyId} error={errors.providerPartyId} onChange={(providerPartyId) => update({ providerPartyId })} />
           <div className={styles.check}>
             <Input id="benefit-preTax" type="checkbox" checked={values.preTax} onChange={(event) => update({ preTax: event.target.checked })} />
             <label htmlFor="benefit-preTax">Deducted before tax</label>

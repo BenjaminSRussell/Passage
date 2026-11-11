@@ -21,6 +21,7 @@ import { GROUP_LABELS, LOGISTICS_CODE, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { EntityName } from "../../shell/lookup/EntityName";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface WorkbenchValues {
   warehouseId: string;
@@ -45,8 +46,8 @@ function whole(value: string, max: number): boolean {
 export function validateWorkbench(v: WorkbenchValues): { errors: Record<string, string>; input?: WorkbenchInput } {
   const errors: Record<string, string> = {};
   const t = (s: string) => s.trim();
-  if (!UUID.test(t(v.warehouseId))) errors.warehouseId = "Enter the warehouse id (a UUID).";
-  if (t(v.customerId) !== "" && !UUID.test(t(v.customerId))) errors.customerId = "Enter a customer id (a UUID), or leave it empty.";
+  if (!UUID.test(t(v.warehouseId))) errors.warehouseId = "Choose a warehouse.";
+  if (t(v.customerId) !== "" && !UUID.test(t(v.customerId))) errors.customerId = "Choose a customer, or leave it empty.";
   if (t(v.carrier) !== "" && !LOGISTICS_CODE.test(t(v.carrier))) errors.carrier = "Use 1 to 32 letters, digits, '.', '_' or '-'.";
   if (t(v.zone) !== "" && !LOGISTICS_CODE.test(t(v.zone))) errors.zone = "Use 1 to 32 letters, digits, '.', '_' or '-'.";
   if (v.shipFrom !== "" && !DATE.test(v.shipFrom)) errors.shipFrom = "Enter a date.";
@@ -162,8 +163,16 @@ export function WorkbenchPage() {
       />
       <Card title="Filter and group">
         <form className={styles.form} onSubmit={runPreview} noValidate>
-          {field("warehouseId", "Warehouse id", "Released shipments of this warehouse.")}
-          {field("customerId", "Customer id")}
+          <LookupFormField
+            id="workbench-warehouseId"
+            label="Warehouse"
+            entity="warehouse"
+            hint="Released shipments of this warehouse."
+            value={values.warehouseId}
+            error={errors.warehouseId}
+            onChange={(warehouseId) => update({ warehouseId })}
+          />
+          <LookupFormField id="workbench-customerId" label="Customer" entity="customer" optional value={values.customerId} error={errors.customerId} onChange={(customerId) => update({ customerId })} />
           {field("carrier", "Carrier", "Carrier code given at release, such as UPS.", { maxLength: 32 })}
           {field("zone", "Pick zone", "Shipments with a line in this zone.", { maxLength: 32 })}
           {field("shipFrom", "Ship from", undefined, { type: "date" })}

@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "revrec.contract.from-invoice", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "edi.outbound.from-event", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "revrec.contract.from-invoice", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -537,6 +537,15 @@ test_payment_run_duties_are_separate_from_proposal_duties if {
 	not allowed("payment-proposal.read", "GET", "/v1/payables/payment-runs/r1")
 }
 
+test_payment_run_read_opens_the_remittance_advice_only if {
+	allowed("payment-run.read", "GET", "/v1/payables/payment-runs/r1/remittances/v1")
+	not allowed("payment-run.read", "POST", "/v1/payables/payment-runs/r1/remittances/v1")
+	not allowed("payment-run.read", "GET", "/v1/payables/payment-runs/r1/remittances")
+	not allowed("payment-run.execute", "GET", "/v1/payables/payment-runs/r1/remittances/v1")
+	not allowed("payment-proposal.read", "GET", "/v1/payables/payment-runs/r1/remittances/v1")
+	not allowed("open-item.read", "GET", "/v1/payables/payment-runs/r1/remittances/v1")
+}
+
 test_payment_proposal_duties_are_separate if {
 	allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals")
 	not allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals/p1:approve")
@@ -566,6 +575,16 @@ test_payment_hold_and_vendor_block_duties_open_only_their_routes if {
 	not allowed("vendor-block.manage", "POST", "/v1/payables/open-items/i1:hold")
 	not allowed("payment-proposal.write", "POST", "/v1/payables/vendors/v1:block")
 	not allowed("payment-proposal.approve", "POST", "/v1/payables/open-items/i1:release")
+}
+
+test_vendor_block_list_is_read_by_blockers_and_open_item_readers if {
+	allowed("vendor-block.manage", "GET", "/v1/payables/vendor-blocks")
+	allowed("open-item.read", "GET", "/v1/payables/vendor-blocks")
+	not allowed("open-item.read", "POST", "/v1/payables/vendors/v1:block")
+	not allowed("open-item.read", "POST", "/v1/payables/vendors/v1:unblock")
+	not allowed("vendor-block.manage", "POST", "/v1/payables/vendor-blocks")
+	not allowed("payment-hold.manage", "GET", "/v1/payables/vendor-blocks")
+	not allowed("payment-proposal.read", "GET", "/v1/payables/vendor-blocks")
 }
 
 test_fulfillment_operation_rules if {
@@ -666,6 +685,7 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 		"fulfillment": ["fulfillment.shipment.read"],
 		"billing": ["billing.invoice.read"],
 		"sales": ["sales.order.lookup", "sales.channel.intake"],
+		"purchasing": ["procurement.requisition.create"],
 	}
 	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
@@ -1966,6 +1986,18 @@ test_org_demo_company_manage_reaches_only_the_demo_load if {
 	not allowed("org.read", "POST", "/v1/org/demo-company")
 }
 
+test_org_demo_company_manage_reaches_the_demo_reset_and_nothing_else_does if {
+	allowed("org.demo-company.manage", "POST", "/v1/org/demo-company:reset")
+	not allowed("org.demo-company.manage", "GET", "/v1/org/demo-company:reset")
+	not allowed("org.demo-company.manage", "DELETE", "/v1/org/demo-company")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/demo-company:purge")
+	not allowed("org.demo-company.manage", "POST", "/v1/org/legal-entities/le-1:reset")
+	not allowed("org.package.manage", "POST", "/v1/org/demo-company:reset")
+	not allowed("org.legal-entity.write", "POST", "/v1/org/demo-company:reset")
+	not allowed("org.read", "POST", "/v1/org/demo-company:reset")
+	not allowed("tenant.administer", "POST", "/v1/org/demo-company:reset")
+}
+
 test_org_package_manage_reaches_only_export_and_import if {
 	allowed("org.package.manage", "POST", "/v1/org/export")
 	allowed("org.package.manage", "POST", "/v1/org/import")
@@ -2223,6 +2255,10 @@ test_global_search_route_is_open_to_each_source_read_duty_only if {
 	allowed("sales.order.read", "GET", "/v1/search")
 	allowed("fulfillment.warehouse.view", "GET", "/v1/search")
 	allowed("billing.invoice.view", "GET", "/v1/search")
+	allowed("production.order.read", "GET", "/v1/search")
+	allowed("hr.worker.inquire", "GET", "/v1/search")
+	not allowed("production.order.write", "GET", "/v1/search")
+	not allowed("hr.worker.maintain", "GET", "/v1/search")
 	not allowed("party.read", "POST", "/v1/search")
 	not allowed("party.write", "GET", "/v1/search")
 	not allowed("inbox.read", "GET", "/v1/search")
@@ -2386,6 +2422,44 @@ test_receivables_billing_consumer_holds_only_a_flag_duty_and_no_route if {
 	not principal_allowed("receivables-billing", "POST", "/v1/ledger/journal-entries")
 	not principal_allowed("receivables-billing", "POST", "/v1/billing/invoices")
 	not allowed("receivables.openitem.from-billing", "POST", "/v1/receivables/open-items")
+}
+
+test_edi_outbound_consumer_holds_only_a_flag_duty_and_no_route if {
+	data.service_principals["edi-outbound"] == ["edi.outbound.from-event"]
+	data.duties["edi.outbound.from-event"].flag
+	count(data.duties["edi.outbound.from-event"].permissions) == 0
+	every _, targets in data.service_grants {
+		every _, duties in targets {
+			not "edi.outbound.from-event" in duties
+		}
+	}
+	not principal_allowed("edi-outbound", "POST", "/edi/v1/partners/p1/outbound:from-source")
+	not principal_allowed("edi-outbound", "POST", "/edi/v1/partners/p1/outbound")
+	not principal_allowed("edi-outbound", "GET", "/v1/fulfillment/shipments/s1")
+	not principal_allowed("edi-outbound", "POST", "/v1/billing/invoices")
+}
+
+test_edi_b2b_routes_belong_to_their_duties if {
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/auto-outbound")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/self-billing")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/punchout")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml")
+	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/auto-outbound")
+	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices")
+	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
+	allowed("edi.einvoice.operate", "PUT", "/edi/v1/einvoice/parties/SELLER/s1")
+	not allowed("edi.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
+	allowed("edi.requisition.create", "POST", "/edi/v1/punchout/sessions")
+	allowed("edi.requisition.create", "POST", "/edi/v1/punchout/sessions/s1:create-requisition")
+	not allowed("edi.self-billing.reconcile", "POST", "/edi/v1/punchout/sessions")
+	allowed("edi.self-billing.reconcile", "POST", "/edi/v1/self-billing/disputes/d1:resolve")
+	allowed("edi.self-billing.reconcile", "POST", "/edi/v1/self-billing:sweep")
+	not allowed("edi.operate", "POST", "/edi/v1/self-billing/disputes/d1:resolve")
+}
+
+test_edi_requisition_grant_is_the_requester_duty_only if {
+	data.service_grants.edi.purchasing == ["procurement.requisition.create"]
+	not allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r1:approve")
 }
 
 test_rma_credit_operator_routes_belong_to_the_payment_duty if {

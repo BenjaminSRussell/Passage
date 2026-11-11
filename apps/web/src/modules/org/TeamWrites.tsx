@@ -15,6 +15,7 @@ import {
   type TeamMember,
 } from "./api/structure";
 import { dayNumber } from "./hierarchyTree";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -60,7 +61,7 @@ export function validateMember({ memberKind, memberId, validFrom, validTo }: Mem
     errors.memberKind = "Select user or party.";
   }
   if (!uuidPattern.test(memberId.trim())) {
-    errors.memberId = "Enter the member's id (a UUID).";
+    errors.memberId = "Choose the member.";
   }
   if (!validDate(validFrom)) {
     errors.validFrom = "Enter a date as YYYY-MM-DD.";
@@ -293,7 +294,7 @@ export function AddMemberForm({ team, onAdded }: { team: Team; onAdded(): void }
     <form onSubmit={submit} noValidate className={styles.form} aria-label={`Add member to ${team.code}`}>
       <FormField id="member-kind" label="Member kind" error={errors.memberKind}>
         {(control) => (
-          <Select {...control} {...text("memberKind")}>
+          <Select {...control} value={values.memberKind} onChange={(event) => setValues({ ...values, memberKind: event.target.value, memberId: "" })}>
             {memberKinds.map((kind) => (
               <option key={kind} value={kind}>
                 {kind}
@@ -302,8 +303,16 @@ export function AddMemberForm({ team, onAdded }: { team: Team; onAdded(): void }
           </Select>
         )}
       </FormField>
-      <FormField id="member-id" label="Member id" hint="The user or party id (a UUID)." error={errors.memberId}>
-        {(control) => <Input {...control} {...text("memberId")} />}
+      <FormField id="member-id" label="Member" hint={values.memberKind === "party" ? "The party in the team." : "The user in the team."} error={errors.memberId}>
+        {(control) => (
+          <EntityLookup
+            {...control}
+            entity={values.memberKind === "party" ? "party" : "user"}
+            value={values.memberId}
+            invalid={Boolean(errors.memberId)}
+            onChange={(event) => setValues({ ...values, memberId: event.target.value })}
+          />
+        )}
       </FormField>
       <FormField id="member-role" label="Role">
         {(control) => (

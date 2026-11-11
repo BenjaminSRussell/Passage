@@ -391,7 +391,7 @@ export function CaseDetailPage() {
           <Detail term="SLA" mono>{`${record.slaHours} h, due ${dateTime(record.slaDue)}`}</Detail>
           <Detail term="Opened" mono>{dateTime(record.createdAt)}</Detail>
           <Detail term="Closed" mono>{dateTime(record.closedAt)}</Detail>
-          <Detail term="Customer" mono>{record.customerId}</Detail>
+          <Detail term="Customer"><EntityName entity="customer" id={record.customerId} /></Detail>
           <Detail term="Close note">{record.closeNote ?? "None"}</Detail>
         </dl>
       </Card>

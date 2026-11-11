@@ -55,6 +55,7 @@ type RunStore interface {
 	SettleRun(ctx context.Context, id string) (store.PaymentRun, error)
 	CompleteRun(ctx context.Context, id string) (store.PaymentRun, error)
 	FailRun(ctx context.Context, id, reason string) (store.PaymentRun, error)
+	RunRemittance(ctx context.Context, runID, vendorID string) (store.Remittance, error)
 }
 
 type LedgerPoster interface {
@@ -110,6 +111,7 @@ func (a *API) registerRuns(r chi.Router) {
 	run.Post(pathRuns+"/{id}:complete", a.completeRun)
 	run.Post(pathRuns+"/{id}:fail", a.failRun)
 	r.With(authz.RequireDuty(dutyRunRead)).Get(pathRuns+"/{id}", a.getRun)
+	r.With(authz.RequireDuty(dutyRunRead)).Get(pathRuns+"/{id}/remittances/{vendorId}", a.getRemittance)
 	run.Get(pathRuns+"/{id}/file", a.getRunFile)
 }
 

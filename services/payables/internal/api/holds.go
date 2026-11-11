@@ -22,6 +22,7 @@ const (
 	dutyHoldManage     = "payment-hold.manage"
 	dutyVendorBlock    = "vendor-block.manage"
 	pathVendors        = "/v1/payables/vendors"
+	pathVendorBlocks   = "/v1/payables/vendor-blocks"
 	maxBlockReasonSize = 500
 	codeItemClosed     = "AP-OPN-001"
 )
@@ -35,6 +36,31 @@ func (a *API) registerHolds(r chi.Router) {
 	r.With(authz.RequireDuty(dutyHoldManage)).Post(pathOpenItems+"/{id}:release", a.setHold(false))
 	r.With(authz.RequireDuty(dutyVendorBlock)).Post(pathVendors+"/{id}:block", a.blockVendor)
 	r.With(authz.RequireDuty(dutyVendorBlock)).Post(pathVendors+"/{id}:unblock", a.unblockVendor)
+	r.With(authz.RequireAnyDuty(dutyVendorBlock, dutyOpenItemRead)).Get(pathVendorBlocks, a.listVendorBlocks)
+}
+
+// listVendorBlocks serves GET /v1/payables/vendor-blocks: the vendors blocked for payment in one legal entity
+// (legal_entity, defaulting to the caller's scope), optionally narrowed to one vendor.
+func (a *API) listVendorBlocks(w http.ResponseWriter, r *http.Request) {
+	if !a.validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	le, ok := a.resolveEntity(w, r, q.Get("legal_entity"))
+	if !ok {
+		return
+	}
+	vendor := q.Get("vendor")
+	if vendor != "" && !ids.Valid(vendor) {
+		a.invalid(w, r, map[string]string{"vendor": "must be a UUID"})
+		return
+	}
+	blocks, err := a.proposals.store.VendorBlocks(r.Context(), le, vendor)
+	if err != nil {
+		a.fault(w, r, "vendor block list failed", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": blocks})
 }
 
 func (a *API) identified(w http.ResponseWriter, r *http.Request, what string) (string, string, bool) {

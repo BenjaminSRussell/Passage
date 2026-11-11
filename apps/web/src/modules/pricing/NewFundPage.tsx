@@ -6,6 +6,7 @@ import { DECIMAL, UUID } from "./format";
 import { CURRENCY } from "./fundFormat";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -23,7 +24,7 @@ export const emptyFund: FundInput = {
 /** Client checks that mirror the service (FR-26.19); the service has the last word. */
 export function validateFund(v: FundInput): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (v.type.trim() === "" || v.type.trim().length > 32) errors.type = "Enter a fund type of up to 32 characters.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as USD.";
@@ -102,7 +103,7 @@ export function NewFundPage() {
       <PageHeader title="New trade fund" description="The budget applies to every fiscal period on its own; usage is attributed per period." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("tf-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="tf-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {text("tf-name", "name", "Fund name")}
           {text("tf-type", "type", "Fund type", { hint: "For example TRADE, COOP or MDF." })}
           {text("tf-currency", "currency", "Currency", { mono: true })}

@@ -62,8 +62,12 @@ describe("Invoices", () => {
     renderAt("/billing");
     expect(await screen.findByText("No invoices yet")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "POSTED" } });
-    expect(await screen.findByText("No posted invoices")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No invoices match these filters")).toBeInTheDocument();
     expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("POSTED");
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("No invoices yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Invoice posted packing slips" })).toHaveAttribute("href", "/billing/proposals/new");
   });
 
   it("loads the next page through the service cursor and stops on the last page", async () => {
@@ -97,12 +101,20 @@ describe("Invoices", () => {
   });
 
   it("shows the error state with a retry", async () => {
-    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty billing.invoice.view" });
+    server.handler = () => json(503, { code: "HTTP-503", detail: "billing unavailable" });
     renderAt("/billing");
-    expect(await findAlert()).toHaveTextContent("missing duty billing.invoice.view");
+    expect(await findAlert()).toHaveTextContent("billing unavailable");
+    expect(screen.getByText("Could not load invoices")).toBeInTheDocument();
     server.handler = () => json(200, { items: [proposal] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Invoices" })).toHaveTextContent("Proposal");
+  });
+
+  it("tells a user without the duty they cannot view invoices and offers no retry", async () => {
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty billing.invoice.view" });
+    renderAt("/billing");
+    expect(await screen.findByText("You can't view invoices")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 });
 
@@ -170,7 +182,7 @@ describe("New free-text invoice", () => {
   it("checks the form before calling the service", async () => {
     const { container } = renderAt("/billing/free-text-invoices/new");
     fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
-    expect(await screen.findByText("Enter the customer id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a customer.")).toBeInTheDocument();
     expect(screen.getByText("Enter the tax code in capitals, for example DE19.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
@@ -183,9 +195,9 @@ describe("New free-text invoice", () => {
       return undefined;
     };
     renderAt("/billing/free-text-invoices/new");
-    fill("Legal entity id", LE);
-    fill("Customer id", CUST);
-    fill("Invoice account id", ACCT);
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
+    fill("Invoice account", ACCT);
     fill("Invoice date", "2027-03-10");
     fill("Description", "Consulting March");
     fill("Unit price", "100.00");
@@ -227,9 +239,9 @@ describe("New free-text invoice", () => {
 
     server.handler = () => json(400, { code: "COM-0001", detail: "request failed validation", errors: { "lines[0].taxCode": "must be a tax code" } });
     renderAt("/billing/free-text-invoices/new");
-    fill("Legal entity id", LE);
-    fill("Customer id", CUST);
-    fill("Invoice account id", ACCT);
+    fill("Legal entity", LE);
+    fill("Customer", CUST);
+    fill("Invoice account", ACCT);
     fill("Description", "x");
     fill("Unit price", "1");
     fill("Revenue account", "4900");

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="punchout-return-1@supplier.example" timestamp="2026-11-05T11:00:00-05:00">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>SUPPLIER-1</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>BUYER-PASSAGE</Identity></Credential></To>
+    <Sender><Credential domain="NetworkId"><Identity>SUPPLIER-1</Identity></Credential><UserAgent>Supplier catalog</UserAgent></Sender>
+  </Header>
+  <Message>
+    <PunchOutOrderMessage>
+      <BuyerCookie>{{COOKIE}}</BuyerCookie>
+      <PunchOutOrderMessageHeader operationAllowed="create">
+        <Total><Money currency="USD">93.50</Money></Total>
+      </PunchOutOrderMessageHeader>
+      <ItemIn quantity="2">
+        <ItemID><SupplierPartID>SEAL-100</SupplierPartID></ItemID>
+        <ItemDetail>
+          <UnitPrice><Money currency="USD">25.00</Money></UnitPrice>
+          <Description xml:lang="en">Pump seal kit</Description>
+          <UnitOfMeasure>EA</UnitOfMeasure>
+          <Classification domain="UNSPSC">31161500</Classification>
+          <LeadTime>5</LeadTime>
+        </ItemDetail>
+      </ItemIn>
+      <ItemIn quantity="1">
+        <ItemID><SupplierPartID>OIL-5L</SupplierPartID></ItemID>
+        <ItemDetail>
+          <UnitPrice><Money currency="USD">43.50</Money></UnitPrice>
+          <Description xml:lang="en">Gear oil 5 litre</Description>
+          <UnitOfMeasure>CA</UnitOfMeasure>
+          <Classification domain="UNSPSC">15121500</Classification>
+        </ItemDetail>
+      </ItemIn>
+    </PunchOutOrderMessage>
+  </Message>
+</cXML>

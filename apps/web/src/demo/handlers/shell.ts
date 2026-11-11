@@ -2,13 +2,15 @@
 // the entity lookups that turn ids into names (shell/lookup/entities.ts). Imported after the area handlers, so an
 // area file that serves one of these paths more specifically wins.
 import type { InboxPage } from "../../shell/inbox/inbox";
-import { CUSTOMERS, ITEMS, LEGAL_ENTITIES, LEGAL_ENTITY, SITES, VENDORS, WAREHOUSES, WORKERS, type Item, type Party } from "../company";
+import { CUSTOMERS, ITEMS, LEGAL_ENTITY, SITES, VENDORS, WAREHOUSES, type Item, type Party } from "../company";
+import { rankBySearch } from "../../shell/search/match";
 import { reply, route } from "../backend";
 import { at, day } from "../store";
+import { PEOPLE } from "./hr/people";
 
 const ORG = "/api/v1/org";
 
-const legalEntities = LEGAL_ENTITIES.map((e) => ({ id: e.id, code: e.code, name: e.name, currency: e.currency, country: e.country, status: "active" }));
+const legalEntities = [{ id: LEGAL_ENTITY.id, code: LEGAL_ENTITY.code, name: LEGAL_ENTITY.name, currency: LEGAL_ENTITY.currency, country: LEGAL_ENTITY.country, status: "active" }];
 const sites = SITES.map((s) => ({ ...s, legalEntityId: LEGAL_ENTITY.id, status: "active" }));
 const warehouses = WAREHOUSES.map((w) => ({ ...w, legalEntityId: LEGAL_ENTITY.id, status: "active" }));
 const currencies = [
@@ -40,7 +42,6 @@ orgList("warehouses", warehouses, (w, query) => !query.get("siteId") || w.siteId
 route("GET", `${ORG}/currencies`, () => ({ items: currencies }));
 
 // The setup checklist only asks whether each of these lists has a row; the demo company is fully set up.
-route("GET", `${ORG}/fiscal-calendars`, () => ({ items: [{ id: "fc-2026", code: "FY2026", name: "Fiscal year 2026", legalEntityId: LEGAL_ENTITY.id, status: "active" }] }));
 route("GET", "/api/v1/ledger/ledgers", () => ({ items: [{ id: "ledger-crp", legalEntityId: LEGAL_ENTITY.id, name: `${LEGAL_ENTITY.name} general ledger`, currency: LEGAL_ENTITY.currency }] }));
 route("GET", "/api/v1/numbering/sequences", () => ({ items: [{ code: "SO", name: "Sales orders", nextValue: "SO-024190" }, { code: "PO", name: "Purchase orders", nextValue: "PO-048214" }] }));
 
@@ -90,7 +91,8 @@ route("GET", "/api/v1/product/products/{id}", ({ params }) => {
   return i ? product(i) : reply.problem(404, "PRD-0404", "No product with that id");
 });
 
-const workers = WORKERS.map((w) => ({ id: w.id, personnelNumber: w.number, legalName: w.name, preferredName: w.name, status: "active" }));
+// Every person of the demo company (hr/people.ts holds the six floor workers of company.ts under the same ids, plus the office staff).
+const workers = PEOPLE.map((p) => ({ id: p.id, personnelNumber: p.number, legalName: p.name, preferredName: p.preferredName ?? p.name, status: "active" }));
 route("GET", "/api/v1/hr/workers", ({ query }) => ({ items: limit(workers.filter((w) => matches(query.get("q"), w.legalName, w.personnelNumber)), query) }));
 route("GET", "/api/v1/hr/workers/{id}", ({ params }) => workers.find((w) => w.id === params.id) ?? reply.problem(404, "HR-0404", "No worker with that id"));
 
@@ -168,6 +170,8 @@ route("POST", "/api/v1/org/demo-company", () => ({ package: "demo-manufacturer",
 
 // Record search (GET /api/v1/search): customers, vendors and products from the company data, and the documents
 // the other areas hold, read back through their own list routes so the numbers always agree with those screens.
+// Matching and order are the search service's own (shell/search/match.ts): a number by its start, a name by what it
+// holds or a near miss. Workers are left out: the demo has no sample data for the worker page a result would open.
 interface SearchHit {
   type: string;
   id: string;
@@ -191,12 +195,13 @@ async function listed(path: string): Promise<Record<string, unknown>[]> {
 const str = (row: Record<string, unknown>, key: string): string => (typeof row[key] === "string" ? (row[key] as string) : "");
 
 async function documents(): Promise<SearchHit[]> {
-  const [pos, receipts, orders, slips, invoices] = await Promise.all([
+  const [pos, receipts, orders, slips, invoices, production] = await Promise.all([
     listed("/api/v1/procurement/purchase-orders"),
     listed("/api/v1/receiving/receipts"),
     listed("/api/v1/sales/orders"),
     listed("/api/v1/fulfillment/packing-slips"),
     listed("/api/v1/billing/invoices"),
+    listed("/api/v1/production/orders"),
   ]);
   const doc = (type: string, row: Record<string, unknown>, number: string, link: string, status: string, subtitle = ""): SearchHit => ({
     type,
@@ -213,6 +218,8 @@ async function documents(): Promise<SearchHit[]> {
     ...orders.map((r) => doc("sales_order", r, str(r, "orderNumber"), "/sales/orders", str(r, "status"))),
     ...slips.map((r) => doc("packing_slip", r, str(r, "packingSlipNumber"), "/fulfillment/packing-slips", str(r, "status"), str(r, "postingDate"))),
     ...invoices.map((r) => doc("customer_invoice", r, str(r, "number"), "/billing/invoices", str(r, "status"))),
+    // Production statuses are CamelCase (ReportedAsFinished); the service indexes them as REPORTED_AS_FINISHED.
+    ...production.map((r) => doc("production_order", r, str(r, "orderNumber"), "/production", str(r, "status").replace(/(?!^)([A-Z])/g, "_$1").toUpperCase())),
   ].filter((h) => h.number !== "" && h.id !== "");
 }
 
@@ -225,9 +232,5 @@ route("GET", "/api/v1/search", async ({ query }) => {
     ...ITEMS.map((i) => ({ type: "product", id: i.id, number: i.number, title: i.name, status: "active", link: `/product/${encodeURIComponent(i.number)}` })),
   ];
   const all = [...masters, ...(await documents())].filter((h) => wanted.size === 0 || wanted.has(h.type));
-  const rank = (h: SearchHit) => (h.number.toLowerCase() === needle ? 0 : h.number.toLowerCase().startsWith(needle) ? 1 : 2);
-  const results = all
-    .filter((h) => h.number.toLowerCase().includes(needle) || h.title.toLowerCase().includes(needle))
-    .sort((a, b) => rank(a) - rank(b) || a.number.localeCompare(b.number));
-  return { results: limit(results, query) };
+  return { results: limit(rankBySearch(all, needle, (h) => ({ number: h.number, name: h.title })), query) };
 });

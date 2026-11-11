@@ -1,8 +1,10 @@
-# The search index consumer (`search consume`, group search-index) keeps the record index current from the party,
-# product and purchase order events and parks what it cannot index on passage.search.index.dlq. The chart's
-# consumer.kafka.username names this user. Literal ACLs: the user reads only its three source topics and writes only
-# its dead-letter topic. The source topics are produced by outbox connectors for party, product and procurement
-# (deploy/kafka/connect.yaml); turn the consumer on per environment once those exist.
+# The search index consumer (`search consume`, group search-index) keeps the record index current from the events of
+# every searchable record type (services/search/internal/index) and parks what it cannot index on
+# passage.search.index.dlq. The chart's consumer.kafka.username names this user. Literal ACLs: the user reads only the
+# source topics it subscribes to and writes only its dead-letter topic. A topic added to the subscription needs an
+# entry here, or the consumer fails authorization at start. The source topics are produced by the outbox connectors
+# (deploy/kafka/connect.yaml); party, product, procurement, production and HR have none yet, so turn the consumer on
+# per environment once those exist (services/search/NOT-IMPLEMENTED.md).
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -21,6 +23,20 @@ spec:
       - resource: {type: topic, name: passage.product.product, patternType: literal}
         operations: [Read, Describe]
       - resource: {type: topic, name: passage.procurement.purchase_order, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.receiving.receipt, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.receiving.vendorinvoice, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.sales.order, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.fulfillment.shipment, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.billing.invoice, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.production.order, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.hr.worker, patternType: literal}
         operations: [Read, Describe]
       - resource: {type: topic, name: passage.search.index.dlq, patternType: literal}
         operations: [Write, Describe]

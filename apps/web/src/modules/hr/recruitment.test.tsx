@@ -253,8 +253,8 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
       [`GET /api/v1/hr/actions/${id(70)}`]: json(200, { id: id(70), actionType: "HIRE", workerId: id(2), effectiveDate: "2026-12-01", status: "PENDING", payload: {}, submittedBy: "u", submittedAt: "2026-10-31T10:00:00Z" }),
     });
     renderAt(`/hr/offers/${OFFER}`);
-    fireEvent.change(await screen.findByLabelText("Worker id"), { target: { value: id(2) } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
+    fireEvent.change(await screen.findByLabelText("Worker"), { target: { value: id(2) } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: id(5) } });
     fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(`/hr/actions/${id(70)}`));
     expect(api.posts("/hire")[0]?.body).toEqual({ workerId: id(2), legalEntityId: id(5), employmentType: "FULL_TIME" });
@@ -266,8 +266,8 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
       [`POST /api/v1/hr/offers/${OFFER}/hire`]: problem(409, "HCM-OFR-001", "offer already converted"),
     });
     renderAt(`/hr/offers/${OFFER}`);
-    fireEvent.change(await screen.findByLabelText("Worker id"), { target: { value: id(2) } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
+    fireEvent.change(await screen.findByLabelText("Worker"), { target: { value: id(2) } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: id(5) } });
     fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));
     expect((await findAlert()).textContent).toContain("This offer has already been converted to a hire.");
   });
@@ -332,14 +332,14 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     });
     const { container } = renderAt(`/hr/offers/${OFFER}`, ["hr.action.maintain", "hr.worker.maintain"]);
     fireEvent.change(await screen.findByLabelText("Worker record"), { target: { value: "new" } });
-    expect(screen.queryByLabelText("Worker id")).toBeNull();
+    expect(screen.queryByLabelText("Worker")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));
     expect(await screen.findAllByText("Enter the national id, at most 32 characters.")).not.toHaveLength(0);
     expect(api.posts("/hire")).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Personnel number"), { target: { value: "wrk-9" } });
-    fireEvent.change(screen.getByLabelText("Party person id"), { target: { value: id(8) } });
+    fireEvent.change(screen.getByLabelText("Party"), { target: { value: id(8) } });
     fireEvent.change(screen.getByLabelText("National id"), { target: { value: "123-45-6789" } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: id(5) } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(`/hr/actions/${id(70)}`));
@@ -353,7 +353,7 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
   it("offers no new-worker option without hr.worker.maintain", async () => {
     api.handler = routes({ [`GET /api/v1/hr/offers/${OFFER}`]: json(200, offer()) });
     renderAt(`/hr/offers/${OFFER}`, ["hr.action.maintain"]);
-    expect(await screen.findByLabelText("Worker id")).toBeTruthy();
+    expect(await screen.findByLabelText("Worker")).toBeTruthy();
     expect(screen.queryByLabelText("Worker record")).toBeNull();
   });
 
@@ -406,12 +406,12 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     renderAt("/hr/compensation/cycles/new");
     fireEvent.click(screen.getByRole("button", { name: "Create cycle" }));
     expect(await screen.findByText("Enter a name of up to 120 characters.")).toBeTruthy();
-    expect(screen.getByText("Budget 1: enter the department's id.")).toBeTruthy();
+    expect(screen.getByText("Budget 1: choose the department.")).toBeTruthy();
     expect(api.calls).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "FY27 merit" } });
     fireEvent.change(screen.getByLabelText("Effective date"), { target: { value: "2027-01-01" } });
     fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "usd" } });
-    fireEvent.change(screen.getByLabelText("Department id"), { target: { value: DEPT } });
+    fireEvent.change(screen.getByLabelText("Department"), { target: { value: DEPT } });
     fireEvent.change(screen.getByLabelText("Budget"), { target: { value: "50000" } });
     fireEvent.click(screen.getByRole("button", { name: "Create cycle" }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(`/hr/compensation/cycles/${CYCLE}`));
@@ -499,8 +499,8 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     renderAt("/hr/compensation/cycles/new");
     fireEvent.change(screen.getByLabelText("Compa-ratio below"), { target: { value: "0.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Create cycle" }));
-    await screen.findByText(/Budget 1: enter the department's id\./);
-    expect(screen.getByLabelText("Department id").getAttribute("aria-invalid")).toBe("true");
+    await screen.findByText(/Budget 1: choose the department\./);
+    expect(screen.getByLabelText("Department").getAttribute("aria-invalid")).toBe("true");
     expect(screen.getByLabelText("Rating").getAttribute("aria-invalid")).toBe("true");
   });
 

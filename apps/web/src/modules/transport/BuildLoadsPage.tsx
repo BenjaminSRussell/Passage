@@ -17,7 +17,7 @@ export interface BuildValues {
 
 const shipmentFields: RowField[] = [
   { key: "id", label: "Shipment id", mono: true, hint: "Sales, transfer or inbound shipment (UUID)." },
-  { key: "shipFromSiteId", label: "Ship-from site id", mono: true },
+  { key: "shipFromSiteId", label: "Ship-from site", lookup: "site" },
   { key: "shipToRegion", label: "Ship-to region", upper: true, hint: "Such as US-SE." },
   { key: "mode", label: "Mode", options: LOAD_MODES },
   { key: "pickupDate", label: "Pickup date", hint: "YYYY-MM-DD" },
@@ -44,7 +44,7 @@ export function validateBuild(v: BuildValues): { errors: Record<string, string>;
     const region = s.shipToRegion.trim().toUpperCase();
     if (!UUID.test(id)) errors[row] = "Enter the shipment id as a lower-case UUID.";
     else if (seen.has(id)) errors[row] = "List each shipment once.";
-    else if (!UUID.test(s.shipFromSiteId.trim())) errors[row] = "Enter the ship-from site id as a lower-case UUID.";
+    else if (!UUID.test(s.shipFromSiteId.trim())) errors[row] = "Choose the ship-from site.";
     else if (region.length < 1 || region.length > 20) errors[row] = "Enter a ship-to region of 1 to 20 characters.";
     else if (!DATE.test(s.pickupDate.trim())) errors[row] = "Enter the pickup date as YYYY-MM-DD.";
     else if (!AMOUNT.test(s.weightKg.trim())) errors[row] = "Enter the weight in kg, such as 1600.";

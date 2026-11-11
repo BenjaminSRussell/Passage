@@ -169,7 +169,7 @@ describe("build loads", () => {
         : undefined;
     const { container } = renderAt("/transport/loads/build");
     fill("Shipment 1 shipment id", SHIP1);
-    fill("Shipment 1 ship-from site id", SITE);
+    fill("Shipment 1 ship-from site", SITE);
     fill("Shipment 1 ship-to region", "us-se");
     fill("Shipment 1 pickup date", "2026-06-01");
     fill("Shipment 1 weight kg", "1600");
@@ -188,7 +188,7 @@ describe("build loads", () => {
     handler = () => problem(409, "TMS-0116", `shipment ${SHIP1} is already on load ${LOAD2}`);
     renderAt("/transport/loads/build");
     fill("Shipment 1 shipment id", SHIP1);
-    fill("Shipment 1 ship-from site id", SITE);
+    fill("Shipment 1 ship-from site", SITE);
     fill("Shipment 1 ship-to region", "US-SE");
     fill("Shipment 1 pickup date", "2026-06-01");
     fill("Shipment 1 weight kg", "1600");

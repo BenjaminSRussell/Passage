@@ -18,6 +18,7 @@ import { ALL_DIMENSIONS, money, ProblemAlert } from "./parts";
 import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const sourceLabels: Record<SourceType, string> = {
   INVENT_JOURNAL_LINE: "Journal line",
@@ -171,12 +172,8 @@ export function TransactionsPage() {
       <PageHeader title="Inventory transactions" description="Every posted movement with its status, physical date, value and the document behind it." />
       <Card title="Filter">
         <form onSubmit={apply} noValidate className={styles.form}>
-          <FormField id="txn-product" label="Product" optional error={errors.product}>
-            {(control) => <Input {...control} value={draft.product} onChange={set("product")} placeholder="Product id" invalid={Boolean(errors.product)} />}
-          </FormField>
-          <FormField id="txn-legal-entity" label="Legal entity" optional error={errors.legalEntity}>
-            {(control) => <Input {...control} value={draft.legalEntity} onChange={set("legalEntity")} placeholder="Legal entity id" invalid={Boolean(errors.legalEntity)} />}
-          </FormField>
+          <LookupFormField id="txn-product" label="Product" entity="product" optional prefill={false} value={draft.product} error={errors.product} onChange={(product) => setDraft({ ...draft, product })} />
+          <LookupFormField id="txn-legal-entity" label="Legal entity" entity="legalEntity" optional prefill={false} value={draft.legalEntity} error={errors.legalEntity} onChange={(legalEntity) => setDraft({ ...draft, legalEntity })} />
           {DIMENSION_FILTERS.map(([name, label]) => (
             <FormField key={name} id={`txn-${name}`} label={label} optional>
               {(control) => <Input {...control} value={draft[name]} onChange={set(name)} maxLength={100} />}

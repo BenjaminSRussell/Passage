@@ -957,9 +957,10 @@ components:
       contentType: application/json
       payload:
         type: object
-        required: [shipment_id, shipment_number, order_id, packing_slip_id, packing_slip_number, carrier, containers]
+        required: [shipment_id, legal_entity_id, shipment_number, order_id, packing_slip_id, packing_slip_number, carrier, containers]
         properties:
           shipment_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid, description: The shipment's legal entity (the EDI engine routes the notice by it). }
           shipment_number: { type: string }
           order_id: { type: string, format: uuid }
           packing_slip_id: { type: string, format: uuid }

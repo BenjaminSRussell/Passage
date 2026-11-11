@@ -43,6 +43,7 @@ type Client struct {
 	fulfillment string
 	billing     string
 	sales       string
+	purchasing  string
 }
 
 func New(signer *tenant.ServiceSigner, fulfillmentURL, billingURL, salesURL string, httpClient *http.Client) *Client {

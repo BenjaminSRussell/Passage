@@ -901,6 +901,10 @@ func (f *fakeStore) ListAddresses(_ context.Context, filter store.AddressFilter,
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
 
+func (f *fakeStore) RemoveDemoCompany(context.Context, string, string) (store.DemoRemoval, error) {
+	return store.DemoRemoval{}, f.err
+}
+
 func newRouter(f *fakeStore) (*chi.Mux, *api.API) {
 	a := api.New(f)
 	r := httpx.NewRouter()
