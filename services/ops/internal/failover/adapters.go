@@ -258,12 +258,17 @@ type DNSWebhook struct {
 	Record string
 	TTL    int
 	HTTP   *http.Client
+	// AllowInsecure permits a plain http URL (tests). The bearer token and the record must not cross an unencrypted link.
+	AllowInsecure bool
 }
 
 // Flip implements DNS.
 func (d DNSWebhook) Flip(ctx context.Context, region string) error {
 	if d.URL == "" {
 		return errors.New("no DNS webhook configured (OPS_DNS_WEBHOOK_URL)")
+	}
+	if u, perr := url.Parse(d.URL); perr != nil || (u.Scheme != "https" && !d.AllowInsecure) {
+		return errors.New("the DNS webhook URL must be https (OPS_DNS_WEBHOOK_URL)")
 	}
 	body, err := json.Marshal(map[string]any{"record": d.Record, "target": region, "ttlSeconds": d.TTL, "weight": 100})
 	if err != nil {

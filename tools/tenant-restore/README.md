@@ -51,12 +51,16 @@ tenant-restore clone --tenant <uuid> --schema <schema> --masks masks.json --appl
 ```
 
 The same copy as `copy`, with columns replaced on the way. `masks.json`:
-`{"salt": "per-clone secret", "columns": {"party_vendor.name": "hash", "*.email": "email", "*.phone": "digits", "party_contact.note": "null"}}`.
+`{"salt": "per-clone secret", "columns": {"party_vendor.name": "hash", "*.email": "email", "*.phone": "digits", "party_contact.note": "null", "party_vendor.id": "keep", "party_vendor.status": "keep"}}`.
 Rules: `hash` (salted, same length, equal inputs stay equal), `email` (valid-looking address at example.invalid), `digits`
-(digits replaced, shape kept), `redact`, `null`. A key is `table.column` or `*.column`; a `*.column` rule never touches a key
-column and an explicit rule on a key column is refused. Only text values are masked: a rule that meets any other type stops the
-clone instead of copying the value. The salt is at least 8 characters, and the source and target must be different databases.
-Which columns are personal or commercial is the operator's decision; the tool masks only what the file lists.
+(digits replaced, shape kept), `redact`, `null` (any column type), `keep` (copied as is). A key is `table.column` or `*.column`.
+The configuration is an allowlist: every text, json, jsonb, array or xml column of the tenant's tables needs a rule (`keep`
+included), and a clone with a column left without one is refused before any row is read, so a column added later is never copied
+unmasked by accident. A key column (primary key, `tenant_id`) can only be `keep`; a rule on a key column, wildcard or explicit,
+is an error. The text rules mask text only: one that meets another type stops the clone instead of copying the value. The salt is
+at least 8 characters. The source and target must be different databases: after connecting, the tool compares what each server
+says it is (`pg_control_system()` system identifier and `current_database()`), not the URLs, and refuses a match.
+Which columns are personal or commercial is the operator's decision; the tool only enforces that every column was decided.
 
 Tests need Postgres: `PASSAGE_TEST_DATABASE_URL` and `PASSAGE_TEST_APP_DATABASE_URL` (live database, admin and
 application role) and `PASSAGE_TEST_RESTORE_DATABASE_URL` (a second database standing in for the scratch one).

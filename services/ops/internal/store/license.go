@@ -30,9 +30,15 @@ func (s *Postgres) InstallLicense(ctx context.Context, l domain.License, payload
 	var rec LicenseRecord
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var cur int64
-		err := tx.QueryRow(ctx, `select version from ops_tenant_license where licensee_id = $1::uuid for update`, l.TenantID).Scan(&cur)
+		var installedIssued string
+		err := tx.QueryRow(ctx, `select version, to_char(issued_at, 'YYYY-MM-DD') from ops_tenant_license where licensee_id = $1::uuid for update`, l.TenantID).Scan(&cur, &installedIssued)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		}
+		// A signed licence never expires as a file, so an old one must not be reinstalled over a newer one (a rollback to a larger
+		// user count or a later expiry). issuedAt is the sequence: a licence issued before the installed one is refused.
+		if cur > 0 && l.IssuedAt < installedIssued {
+			return &domain.Error{Code: domain.CodeLicenseInvalid, Detail: "this licence was issued (" + l.IssuedAt + ") before the installed one (" + installedIssued + "); an older licence cannot replace a newer one"}
 		}
 		if cur != ifMatch {
 			return &domain.Error{Code: domain.CodeLicenseStale, Detail: "the installed licence changed; read it again and retry with its version"}

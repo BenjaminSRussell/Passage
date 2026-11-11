@@ -19,16 +19,23 @@ import (
 //	email   salted hash at example.invalid, so it is a valid-looking address that cannot receive mail
 //	digits  every digit replaced by a salted digit, other characters kept (phone and account numbers keep their shape)
 //	redact  the fixed text REDACTED
-//	null    NULL (the column must be nullable)
+//	null    NULL, for any column type (the column must be nullable)
+//	keep    the value is copied as it is: the operator's statement that the column holds nothing personal or commercial
 //
-// Only text values are masked. A rule that meets a non-text value stops the clone instead of copying the value, and so does
-// a rule on a key column: masking a key would break the references to it.
+// The configuration is an allowlist. Every text, json, jsonb, array or xml column of the cloned tenant's tables that is not a key
+// column needs a rule (keep included), and a clone with any column left without one is refused before a row is read, so a
+// column added after the configuration was written is never copied unmasked by accident. A key column (primary key, tenant_id)
+// can only be kept: a hash, redaction or null on a key would break the rows that reference it, and a rule that matches a key
+// column, wildcard or explicit, is an error rather than silently skipped. Name the table's key column explicitly with keep.
+//
+// The text rules (hash, email, digits, redact) mask text values only; one that meets another type stops the clone instead of
+// copying the value.
 type Masks struct {
 	Salt    string            `json:"salt"`
 	Columns map[string]string `json:"columns"`
 }
 
-var maskRules = map[string]bool{"hash": true, "email": true, "digits": true, "redact": true, "null": true}
+var maskRules = map[string]bool{"hash": true, "email": true, "digits": true, "redact": true, "null": true, "keep": true}
 
 // ParseMasks reads and validates a mask configuration. An empty salt is refused: without it the hashes can be guessed
 // from a dictionary of names.
@@ -50,7 +57,7 @@ func ParseMasks(raw []byte) (*Masks, error) {
 			return nil, fmt.Errorf("mask configuration: %q must be table.column or *.column", k)
 		}
 		if !maskRules[rule] {
-			return nil, fmt.Errorf("mask configuration: %q has unknown rule %q (hash, email, digits, redact, null)", k, rule)
+			return nil, fmt.Errorf("mask configuration: %q has unknown rule %q (hash, email, digits, redact, null, keep)", k, rule)
 		}
 	}
 	return &m, nil
@@ -64,12 +71,57 @@ func (m *Masks) rule(table, column string) (string, bool) {
 	return r, ok
 }
 
+// textLike reports whether a column of this type can carry free text or structured personal data and so needs a rule.
+func textLike(typ string) bool {
+	t := strings.ToLower(typ)
+	if strings.HasSuffix(t, "]") {
+		return true // arrays of anything
+	}
+	for _, p := range []string{"text", "character", "citext", "json", "xml", "name", "varchar", "bpchar"} {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKey(t table, col string) bool {
+	if col == "tenant_id" {
+		return true
+	}
+	for _, k := range t.Key {
+		if k == col {
+			return true
+		}
+	}
+	return false
+}
+
+// Check refuses a configuration that leaves a column unclassified or puts a rule on a key column. It runs over every table of
+// the clone before any row is read.
+func (m *Masks) Check(tables []table) error {
+	var missing []string
+	for _, t := range tables {
+		for _, c := range t.Columns {
+			rule, ok := m.rule(t.Name, c.Name)
+			switch {
+			case isKey(t, c.Name):
+				if ok && rule != "keep" {
+					return fmt.Errorf("%s.%s is a key column and cannot be masked (%s): the rows that reference it would break; use keep", t.Name, c.Name, rule)
+				}
+			case !ok && textLike(c.Type):
+				missing = append(missing, t.Name+"."+c.Name+" ("+c.Type+")")
+			}
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the mask configuration has no rule for %d text, json or array column(s); give each a rule (or keep, if it holds nothing personal): %s", len(missing), strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 // Apply masks the rows read for t (columns in t.Columns order) and returns them.
 func (m *Masks) Apply(t table, rows [][]any) ([][]any, error) {
-	keys := map[string]bool{}
-	for _, k := range t.Key {
-		keys[k] = true
-	}
 	type target struct {
 		at   int
 		rule string
@@ -77,14 +129,11 @@ func (m *Masks) Apply(t table, rows [][]any) ([][]any, error) {
 	var targets []target
 	for i, c := range t.Columns {
 		r, ok := m.rule(t.Name, c.Name)
-		if !ok {
+		if !ok || r == "keep" {
 			continue
 		}
-		if keys[c.Name] || c.Name == "tenant_id" {
-			if _, explicit := m.Columns[t.Name+"."+c.Name]; explicit {
-				return nil, fmt.Errorf("%s.%s is a key column and cannot be masked: the rows that reference it would break", t.Name, c.Name)
-			}
-			continue // a *.column rule never touches a key
+		if isKey(t, c.Name) {
+			return nil, fmt.Errorf("%s.%s is a key column and cannot be masked (%s): the rows that reference it would break; use keep", t.Name, c.Name, r)
 		}
 		targets = append(targets, target{i, r})
 	}
@@ -94,9 +143,13 @@ func (m *Masks) Apply(t table, rows [][]any) ([][]any, error) {
 			if v == nil {
 				continue
 			}
+			if tg.rule == "null" {
+				row[tg.at] = nil
+				continue
+			}
 			s, ok := v.(string)
 			if !ok {
-				return nil, fmt.Errorf("%s.%s: the %s rule masks text only, found %T; refusing to copy the value", t.Name, t.Columns[tg.at].Name, tg.rule, v)
+				return nil, fmt.Errorf("%s.%s: the %s rule masks text only, found %T; refusing to copy the value (use null or keep)", t.Name, t.Columns[tg.at].Name, tg.rule, v)
 			}
 			row[tg.at] = m.mask(tg.rule, t.Name+"."+t.Columns[tg.at].Name, s)
 		}
@@ -111,6 +164,8 @@ func (m *Masks) digest(scope, value string) []byte {
 
 func (m *Masks) mask(rule, scope, v string) any {
 	switch rule {
+	case "keep":
+		return v
 	case "null":
 		return nil
 	case "redact":

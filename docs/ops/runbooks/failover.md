@@ -16,6 +16,23 @@ from a second operator), runs the steps below and reports each one; if it stops,
 `GET /v1/ops/failovers/<id>/scorecard` gives the RTO and RPO. Without the `ops.failover.execute` duty, `passage-ops break-glass open` gives a
 logged, time-boxed window that another operator reviews. See `services/ops/README.md`.
 
+## When the old region is lost
+If the old primary's region cannot be reached, step 1 cannot fence its cluster and `passage-ops failover` stops there. Start the
+failover with `--accept-data-loss --fence-unreachable "<reason, ticket>"`: a lost region means the target may miss its last
+transactions, so a second operator approves the request (OPS-1702) as for any data loss. The runner still tries the fence first;
+only if it fails does it record the fence step as DONE and forced (the reason and the error are in the step, `forced: true`, and the
+scorecard shows `fenceForced` and fails a clean game day). `resume --fence-unreachable` does the same for a failover that stopped at
+the fence. The cluster of the lost region is **not** fenced by this: commit the region file with `region.role=FENCED` at once (step 1,
+last bullet) so Argo CD applies the fence and the NetworkPolicy the moment the region returns, and do not bring its applications up
+until it is re-seeded as PASSIVE.
+
+## What the fence does not cover
+The 503 fence is in `platform/go/httpx`, so it covers the HTTP API of every Go service built on it. It does not stop Kafka consumers
+and background workers (outbox relays, schedulers, the finreport and fulfillment consumers), which keep running against whatever
+database they can still reach, and it does not cover finreport's share-link download route, which does not go through the fence
+middleware's router. In a fenced region the database fence (CNPG `fencedInstances` and the NetworkPolicy) is what stops them: scale
+the consumers and workers to zero in step 7 of the old region, as for the application pods.
+
 ## Steps (`passage-ops failover --to eu-central`)
 1. **Fence the old primary.** Record the fence time and the target's lag (this is the RPO).
    - Revoke writes: `ALTER ROLE passage_app NOLOGIN` and terminate its sessions, if the old region answers.

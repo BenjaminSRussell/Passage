@@ -269,7 +269,10 @@ func TestDNSWebhook(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}))
 	defer srv.Close()
-	d := DNSWebhook{URL: srv.URL, Token: "s3", Record: "app.passage.example", TTL: 60}
+	d := DNSWebhook{URL: srv.URL, Token: "s3", Record: "app.passage.example", TTL: 60, AllowInsecure: true}
+	if err := (DNSWebhook{URL: srv.URL, Token: "s3"}).Flip(t.Context(), "r"); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("a plain http webhook must be refused: %v", err)
+	}
 	if err := d.Flip(t.Context(), "eu-central"); err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +281,7 @@ func TestDNSWebhook(t *testing.T) {
 	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(502) }))
 	defer bad.Close()
-	if err := (DNSWebhook{URL: bad.URL}).Flip(t.Context(), "r"); err == nil {
+	if err := (DNSWebhook{URL: bad.URL, AllowInsecure: true}).Flip(t.Context(), "r"); err == nil {
 		t.Fatal("a 502 must fail")
 	}
 	if err := (DNSWebhook{}).Flip(t.Context(), "r"); err == nil {

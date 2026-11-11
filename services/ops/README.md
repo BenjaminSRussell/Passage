@@ -67,6 +67,11 @@ ends or is revoked, another operator with `ops.breakglass.review` reviews it (AP
 the review is due 3 days after the window ends and `ops_break_glass_review_overdue` counts late ones. Duties are checked in this service from the
 token's duties claim (the gateway only validates the JWT), so the window needs no identity change; the window is not a role assignment and does not show in identity's effective permissions.
 
+Lag trust: a lag reading older than `OPS_LAG_STALE_S` (default 90 s, about three reporting intervals; 0 turns it off) is unknown (`lagStale`,
+`lagSeconds` 1073741824) and refuses a failover without `acceptDataLoss`; with `OPS_REQUIRE_LAG_REPORTS=true` (the chart sets it with `lagReporter.enabled`) a
+region that never reported is unknown too. A lost old region is failed over with `--accept-data-loss --fence-unreachable "<reason>"` (second operator
+approval; the step is recorded `forced`); see the failover runbook.
+
 Lag reporter: `passage-ops lag-report` reads `pg_stat_replication` (mode primary) or the standby's replay position (mode standby) and reports it with
 `PUT /v1/ops/regions/{name}/lag`; a measurement that fails reports a value far above the limit (`--unknown-lag-s`, default 86400) so a broken reporter
 blocks a failover instead of leaving a stale low number. The chart can run it (`lagReporter.enabled`).

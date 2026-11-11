@@ -152,3 +152,27 @@ func TestScorecardFromRecordedSteps(t *testing.T) {
 		t.Fatalf("view duty: %d", rec.Code)
 	}
 }
+
+func TestAnOlderSignedLicenceCannotReplaceANewerOne(t *testing.T) {
+	e, priv := licenseEnv(t, time.Date(2027, 1, 15, 12, 0, 0, 0, time.UTC))
+	tid := ids.New()
+	path := "/v1/ops/tenants/" + tid + "/license"
+	sign := func(issued, expires string) string {
+		payload := `{"tenantId":"` + tid + `","issuedAt":"` + issued + `","expiresAt":"` + expires + `","fullUsers":9,"operationalUsers":5,"selfserviceUsers":50}`
+		b, _ := json.Marshal(map[string]string{"payload": base64.StdEncoding.EncodeToString([]byte(payload)), "signature": base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(payload)))})
+		return string(b)
+	}
+	if rec := e.put(path, "alice", DutyLicenseInstall, "0", sign("2026-01-01", "2026-12-31")); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	if rec := e.put(path, "alice", DutyLicenseInstall, "1", sign("2026-12-01", "2027-12-31")); rec.Code != http.StatusOK {
+		t.Fatalf("renewal: %d %s", rec.Code, rec.Body)
+	}
+	rec := e.put(path, "alice", DutyLicenseInstall, "2", sign("2026-01-01", "2026-12-31"))
+	if rec.Code != http.StatusUnprocessableEntity || code(t, rec) != domain.CodeLicenseInvalid || !strings.Contains(rec.Body.String(), "older") {
+		t.Fatalf("the old licence must be refused: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.put(path, "alice", DutyLicenseInstall, "2", sign("2026-12-01", "2028-12-31")); rec.Code != http.StatusOK {
+		t.Fatalf("the same issue date is a correction and is allowed: %d %s", rec.Code, rec.Body)
+	}
+}

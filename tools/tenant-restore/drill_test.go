@@ -8,11 +8,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestParseMasksValidates(t *testing.T) {
-	good := `{"salt":"per-clone-secret","columns":{"account.name":"hash","*.email":"email","*.phone":"digits","account.note":"null","x.y":"redact"}}`
-	if m, err := ParseMasks([]byte(good)); err != nil || len(m.Columns) != 5 {
+	good := `{"salt":"per-clone-secret","columns":{"account.name":"hash","*.email":"email","*.phone":"digits","account.note":"null","x.y":"redact","a.k":"keep"}}`
+	if m, err := ParseMasks([]byte(good)); err != nil || len(m.Columns) != 6 {
 		t.Fatalf("%v %v", m, err)
 	}
 	for name, bad := range map[string]string{
@@ -55,23 +57,60 @@ func TestMaskRules(t *testing.T) {
 }
 
 func TestMaskApplyRefusesKeysAndNonText(t *testing.T) {
-	tb := table{Name: "account", Key: []string{"id"}, Columns: []column{{Name: "tenant_id"}, {Name: "id"}, {Name: "name"}, {Name: "balance"}}}
-	m, err := ParseMasks([]byte(`{"salt":"per-clone-secret","columns":{"account.name":"hash","*.id":"hash"}}`))
-	if err != nil {
+	tb := table{Name: "account", Key: []string{"id"}, Columns: []column{{Name: "tenant_id", Type: "uuid"}, {Name: "id", Type: "uuid"}, {Name: "name", Type: "text"}, {Name: "balance", Type: "numeric(12,2)"}}}
+	// a wildcard that matches a key column is an error, not a silent skip
+	wild := &Masks{Salt: "per-clone-secret", Columns: map[string]string{"account.name": "hash", "*.id": "hash"}}
+	if err := wild.Check([]table{tb}); err == nil || !strings.Contains(err.Error(), "key column") {
+		t.Fatalf("a *.column rule on a key must be an error: %v", err)
+	}
+	if _, err := wild.Apply(tb, [][]any{{"t", "id-1", "Alice", 1}}); err == nil {
+		t.Fatal("Apply must refuse it too")
+	}
+	// keep on a key is the way to say so
+	ok := &Masks{Salt: "per-clone-secret", Columns: map[string]string{"account.name": "hash", "account.id": "keep"}}
+	if err := ok.Check([]table{tb}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := m.Apply(tb, [][]any{{"t", "id-1", "Alice", 1}})
+	rows, err := ok.Apply(tb, [][]any{{"t", "id-1", "Alice", 1}})
 	if err != nil || rows[0][2] == "Alice" || rows[0][1] != "id-1" {
-		t.Fatalf("a *.column rule must skip a key: %v %v", rows, err)
-	}
-	if _, err := (&Masks{Salt: "per-clone-secret", Columns: map[string]string{"account.id": "hash"}}).Apply(tb, [][]any{{"t", "id-1", "A", 1}}); err == nil {
-		t.Fatal("masking a key column explicitly must be refused")
+		t.Fatalf("%v %v", rows, err)
 	}
 	if _, err := (&Masks{Salt: "per-clone-secret", Columns: map[string]string{"account.balance": "hash"}}).Apply(tb, [][]any{{"t", "id-1", "A", 1}}); err == nil || !strings.Contains(err.Error(), "text only") {
 		t.Fatalf("a non-text value must stop the clone: %v", err)
 	}
 	if rows, err := (&Masks{Salt: "per-clone-secret", Columns: map[string]string{"account.name": "hash"}}).Apply(tb, [][]any{{"t", "id-1", nil, 1}}); err != nil || rows[0][2] != nil {
 		t.Fatalf("NULL stays NULL: %v %v", rows, err)
+	}
+	// null works on any type
+	if rows, err := (&Masks{Salt: "per-clone-secret", Columns: map[string]string{"account.balance": "null"}}).Apply(tb, [][]any{{"t", "id-1", "A", 1}}); err != nil || rows[0][3] != nil {
+		t.Fatalf("null on a number: %v %v", rows, err)
+	}
+}
+
+func TestCheckRefusesAnyTextJsonOrArrayColumnWithoutARule(t *testing.T) {
+	tb := table{Name: "contact", Key: []string{"id"}, Columns: []column{
+		{Name: "tenant_id", Type: "uuid"}, {Name: "id", Type: "uuid"}, {Name: "full_name", Type: "text"}, {Name: "email", Type: "character varying(200)"},
+		{Name: "profile", Type: "jsonb"}, {Name: "tags", Type: "text[]"}, {Name: "amount", Type: "numeric"}, {Name: "created", Type: "timestamp with time zone"}, {Name: "ref", Type: "uuid"}}}
+	m := &Masks{Salt: "per-clone-secret", Columns: map[string]string{"contact.full_name": "hash"}}
+	err := m.Check([]table{tb})
+	if err == nil {
+		t.Fatal("columns without a rule must be refused")
+	}
+	for _, want := range []string{"contact.email", "contact.profile", "contact.tags", "3 text"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name %q: %v", want, err)
+		}
+	}
+	for _, not := range []string{"contact.amount", "contact.created", "contact.ref", "contact.full_name"} {
+		if strings.Contains(err.Error(), not) {
+			t.Errorf("%q needs no rule: %v", not, err)
+		}
+	}
+	m.Columns["contact.email"] = "email"
+	m.Columns["contact.profile"] = "null"
+	m.Columns["*.tags"] = "keep" // keep is the explicit allowlist, wildcards included
+	if err := m.Check([]table{tb}); err != nil {
+		t.Fatalf("every column classified: %v", err)
 	}
 }
 
@@ -82,7 +121,7 @@ func TestMaskedCloneCopiesTheTenantWithMaskedColumnsOnly(t *testing.T) {
 insert into S.account values ('` + tenantA + `','` + id(1) + `','Alice Example','{"k":[1]}',10.50,'{a}','call +49 30 1234');
 insert into S.account values ('` + tenantB + `','` + id(3) + `','Other Tenant',null,1,null,null);
 insert into S.entry values ('` + tenantA + `','` + id(1) + `','` + id(1) + `',5.25);`)
-	masks, err := ParseMasks([]byte(`{"salt":"per-clone-secret","columns":{"account.name":"hash","account.note":"digits"}}`))
+	masks, err := ParseMasks([]byte(`{"salt":"per-clone-secret","columns":{"account.name":"hash","account.note":"digits","account.meta":"keep","account.tags":"keep","account.id":"keep","entry.id":"keep"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,5 +225,61 @@ func TestRunDrillWritesTheRecordAndFailsTheCommand(t *testing.T) {
 	err = run(context.Background(), []string{"drill", "--tenant", "00000000-0000-0000-0000-0000000000ff", "--schema", p.schema}, &out, getenv, time.Now())
 	if err == nil || !strings.Contains(out.String(), `"status": "FAIL"`) {
 		t.Fatalf("a failing drill exits non-zero and still prints the record: %v\n%s", err, out.String())
+	}
+}
+
+func TestMaskedCloneRefusesAnUnclassifiedColumnBeforeReadingARow(t *testing.T) {
+	p := newPair(t, ledgerDDL)
+	exec(t, p.liveAdmin, strings.ReplaceAll(rlsTable("account")+rlsTable("entry"), "S.", p.schema+"."))
+	p.scratchOnly(`insert into S.account values ('` + tenantA + `','` + id(1) + `','Alice Example','{"k":[1]}',10.50,'{a}','secret note');`)
+	masks, err := ParseMasks([]byte(`{"salt":"per-clone-secret","columns":{"account.name":"hash","account.id":"keep","entry.id":"keep"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = CloneTenantMasked(context.Background(), p.scratch, p.liveApp, p.schema, tenantA, true, masks)
+	if err == nil || !strings.Contains(err.Error(), "account.note") || !strings.Contains(err.Error(), "account.meta") || !strings.Contains(err.Error(), "account.tags") {
+		t.Fatalf("meta, tags and note have no rule: %v", err)
+	}
+	if n := count(t, p, "select count(*) from S.account"); n != 0 {
+		t.Fatalf("nothing may be written: %d", n)
+	}
+}
+
+func TestMaskedCloneRefusesTheSameDatabaseWhateverTheURLLooksLike(t *testing.T) {
+	url := os.Getenv("PASSAGE_TEST_APP_DATABASE_URL")
+	if url == "" {
+		t.Skip("PASSAGE_TEST_APP_DATABASE_URL not set")
+	}
+	masks, err := ParseMasks([]byte(`{"salt":"per-clone-secret","columns":{"a.b":"keep"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	a, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.Close(ctx) }()
+	// the same database through another spelling of the URL (127.0.0.1 for localhost, an extra parameter)
+	respelled := strings.Replace(url, "localhost", "127.0.0.1", 1) + "&application_name=clone-target"
+	if respelled == url {
+		t.Fatal("test URL must name localhost")
+	}
+	b, err := pgx.Connect(ctx, respelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close(ctx) }()
+	if _, err := CloneTenantMasked(ctx, a, b, "public", tenantA, false, masks); err == nil || !strings.Contains(err.Error(), "same database") {
+		t.Fatalf("two spellings of one database must be refused: %v", err)
+	}
+	// another database of the same cluster is a different database
+	other, err := pgx.Connect(ctx, os.Getenv("PASSAGE_TEST_RESTORE_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close(ctx) }()
+	if same, err := sameDatabase(ctx, a, other); err != nil || same {
+		t.Fatalf("different databases: same=%v err=%v", same, err)
 	}
 }
