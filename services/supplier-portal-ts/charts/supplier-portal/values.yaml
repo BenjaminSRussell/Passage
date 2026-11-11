@@ -32,6 +32,11 @@ registration:
   tenantId: ""
   legalEntityId: ""
 publicRatePerHour: 10
+# PASSAGE_TRUSTED_PROXIES: comma-separated CIDRs (or addresses) of the proxies in front of the pod whose X-Forwarded-For is
+# believed, normally the edge (Envoy) pods' CIDR. Empty (the default) believes no header and counts each public request by the
+# TCP peer, so behind the edge every client shares the edge's one allowance: set it wherever registration is open. A client
+# address is the rightmost X-Forwarded-For entry that is not one of these proxies; an IPv6 client counts by its /64.
+trustedProxies: ""
 resources:
   requests: { cpu: 25m, memory: 96Mi }
   limits: { cpu: 500m, memory: 256Mi }
