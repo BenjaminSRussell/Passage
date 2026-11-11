@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityName } from "../../shell/lookup/EntityName";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -31,7 +32,7 @@ export const POSTING_SOURCE_LABELS: Record<PostingDateSource, string> = {
 
 const columns: DataTableColumn<OperationRule>[] = [
   { key: "warehouseId", header: "Warehouse", render: (row) => <PlainName entity="warehouse" id={row.warehouseId} /> },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => row.legalEntityId ?? dash },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => (row.legalEntityId ? <EntityName entity="legalEntity" id={row.legalEntityId} /> : dash) },
   { key: "postingDateSource", header: "Posting date", render: (row) => POSTING_SOURCE_LABELS[row.postingDateSource] },
   { key: "timeZone", header: "Time zone" },
   { key: "autoPackEnabled", header: "Auto-pack", render: (row) => <Badge tone={row.autoPackEnabled ? "neutral" : "warning"}>{row.autoPackEnabled ? "On" : "Off"}</Badge> },

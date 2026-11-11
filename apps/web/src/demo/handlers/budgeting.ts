@@ -173,7 +173,13 @@ route("GET", "/api/v1/controlling/cost-actuals", ({ query }) => {
 
 route("GET", `${BASE}/available`, ({ query }) => ({ items: query.get("rule") === uid(K_RULE, 1) ? balances : [] }));
 
-route("GET", "/api/v1/org/operating-units", () => ({ items: orgUnits.map((u) => ({ ...u, type: "cost_center", status: "active", version: 1, defaultLegalEntityId: LEGAL_ENTITY.id })) }));
+// The cost centers, and the pump assembly value stream the lean flows belong to (handlers/mfg/lean.ts).
+const operatingUnits = [
+  ...orgUnits.map((u) => ({ ...u, type: "cost_center", status: "active", version: 1, defaultLegalEntityId: LEGAL_ENTITY.id })),
+  { id: uid(271, 1), code: "VS-PUMP", name: "Pump assembly value stream", type: "value_stream", status: "active", version: 1, defaultLegalEntityId: LEGAL_ENTITY.id },
+];
+route("GET", "/api/v1/org/operating-units", () => ({ items: operatingUnits }));
+route("GET", "/api/v1/org/operating-units/{id}", ({ params }) => operatingUnits.find((u) => u.id === params.id) ?? reply.problem(404, "ORG-0404", "No operating unit with that id"));
 
 route("GET", `${BASE}/plans`, ({ query }) => ({
   items: plans

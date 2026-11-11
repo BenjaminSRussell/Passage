@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityName } from "../../shell/lookup/EntityName";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
@@ -15,7 +16,7 @@ const DUTY_SAVE = "fulfillment.warehouse.release";
 
 const columns: DataTableColumn<ReleaseRule>[] = [
   { key: "warehouseId", header: "Warehouse", render: (row) => <PlainName entity="warehouse" id={row.warehouseId} /> },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => row.legalEntityId ?? dash },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => (row.legalEntityId ? <EntityName entity="legalEntity" id={row.legalEntityId} /> : dash) },
   { key: "horizonDays", header: "Horizon (days)", align: "end" },
   { key: "requireFullAtp", header: "ATP", render: (row) => <Badge tone={row.requireFullAtp ? "neutral" : "info"}>{row.requireFullAtp ? "Full ATP only" : "Partial ATP allowed"}</Badge> },
   { key: "waveMaxLines", header: "Wave lines", align: "end" },

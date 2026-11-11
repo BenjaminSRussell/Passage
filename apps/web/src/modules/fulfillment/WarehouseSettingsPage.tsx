@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EntityName } from "../../shell/lookup/EntityName";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Badge, Button, Card, FormField, Select, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
 import {
@@ -25,7 +26,7 @@ export const ACTION_LABELS: Record<ShortPickAction, string> = {
 
 const columns: DataTableColumn<WarehouseSetting>[] = [
   { key: "warehouseId", header: "Warehouse", render: (row) => <PlainName entity="warehouse" id={row.warehouseId} /> },
-  { key: "legalEntityId", header: "Legal entity", mono: true, render: (row) => row.legalEntityId ?? dash },
+  { key: "legalEntityId", header: "Legal entity", render: (row) => (row.legalEntityId ? <EntityName entity="legalEntity" id={row.legalEntityId} /> : dash) },
   {
     key: "shortPickAction",
     header: "Short pick action",
