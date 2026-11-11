@@ -1,5 +1,5 @@
 /** Cost control workspace maths (FR-38.10): plan against actual and committed, variance and period comparison. No I/O. */
-import type { Balance } from "./api/client";
+import type { ActualRow, Balance } from "./api/client";
 import { fromUnits, toUnits } from "./logic";
 
 export type ControlLevel = "ok" | "near" | "over";
@@ -137,4 +137,102 @@ export function controlTotals(rows: ControlRow[]): ControlTotals {
     over: rows.filter((r) => r.level === "over").length,
     near: rows.filter((r) => r.level === "near").length,
   };
+}
+
+/** The months a time span covers: "2026-03", "2026-Q3", "FY2026-Q3", "2026Q3", "FY2026" or "2026". Null for a span it cannot read. */
+export function spanMonths(span: string): [string, string] | null {
+  const m = /^(?:FY)?(\d{4})(?:-?(?:Q([1-4])|(0[1-9]|1[0-2])))?$/.exec(span);
+  if (!m) return null;
+  const year = m[1];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (m[3]) return [`${year}-${m[3]}`, `${year}-${m[3]}`];
+  if (m[2]) {
+    const q = Number(m[2]);
+    return [`${year}-${pad(q * 3 - 2)}`, `${year}-${pad(q * 3)}`];
+  }
+  return [`${year}-01`, `${year}-12`];
+}
+
+/** The first and last month any span of the balances covers, for the default window of the cost-ledger comparison. */
+export function balanceWindow(balances: Balance[]): [string, string] | null {
+  let from = "";
+  let to = "";
+  for (const b of balances) {
+    const months = spanMonths(b.timeSpanKey);
+    if (!months) continue;
+    if (from === "" || months[0] < from) from = months[0];
+    if (to === "" || months[1] > to) to = months[1];
+  }
+  return from === "" ? null : [from, to];
+}
+
+/** The cost center part of a budget dimension key (`account|costCenter`); a key without an account is the cost center itself. */
+export function costCenterOf(dimension: string): string {
+  const i = dimension.indexOf("|");
+  return i < 0 ? dimension : dimension.slice(i + 1);
+}
+
+export interface CostCenterRow {
+  code: string;
+  name: string;
+  plan: string;
+  /** Actuals the budget register holds (posted by journals into budget control). */
+  registerActual: string;
+  /** Actual cost the cost ledger holds for the cost center, in the rule's currency. */
+  ledgerActual: string;
+  /** Ledger less register: what the two actuals disagree by, so a gap in either is seen. */
+  gap: string;
+  committed: string;
+  /** plan - ledger actual - committed - earmarked. */
+  left: string;
+  usedPct: string | null;
+  level: ControlLevel;
+}
+
+/**
+ * Plan, register actuals and commitments per cost center beside the cost ledger's actual cost of the cost object with the same
+ * code (FR-38.10). Only balances whose span lies inside from..to count, and only ledger rows in `currency` and inside the window.
+ */
+export function costCenterRows(balances: Balance[], actuals: ActualRow[], from: string, to: string, currency: string): CostCenterRow[] {
+  const by = new Map<string, { name: string; plan: bigint; register: bigint; ledger: bigint; committed: bigint; earmarked: bigint }>();
+  const slot = (code: string) => {
+    let t = by.get(code);
+    if (!t) {
+      t = { name: code, plan: 0n, register: 0n, ledger: 0n, committed: 0n, earmarked: 0n };
+      by.set(code, t);
+    }
+    return t;
+  };
+  for (const b of balances) {
+    const months = spanMonths(b.timeSpanKey);
+    if (!months || months[0] < from || months[1] > to) continue;
+    const t = slot(costCenterOf(b.controlDimensionKey));
+    t.plan += units(b.budgetTotal);
+    t.register += units(b.actuals);
+    t.committed += units(b.encumbrances) + units(b.preEncumbrances);
+    t.earmarked += units(b.reservations);
+  }
+  for (const a of actuals) {
+    if (a.currency !== currency || a.period < from || a.period > to) continue;
+    const t = slot(a.code);
+    t.name = a.name;
+    t.ledger += units(a.total);
+  }
+  return [...by.entries()]
+    .map(([code, t]): CostCenterRow => {
+      const used = t.ledger + t.committed + t.earmarked;
+      return {
+        code,
+        name: t.name,
+        plan: fromUnits(t.plan),
+        registerActual: fromUnits(t.register),
+        ledgerActual: fromUnits(t.ledger),
+        gap: fromUnits(t.ledger - t.register),
+        committed: fromUnits(t.committed),
+        left: fromUnits(t.plan - used),
+        usedPct: percentOf(used, t.plan),
+        level: controlLevel(t.plan, used),
+      };
+    })
+    .sort((a, b) => a.code.localeCompare(b.code));
 }

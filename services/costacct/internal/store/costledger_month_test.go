@@ -311,3 +311,71 @@ type failingGL struct{ *ledgerclient.Fake }
 func (failingGL) Balances(context.Context, ledgerclient.BalanceQuery) (ledgerclient.AccountBalances, error) {
 	return ledgerclient.AccountBalances{}, errors.New("ledger down")
 }
+
+// Cost control reads the cost ledger per cost object: the journal part and the allocated part stay apart, a period outside the
+// window and another currency's row stay out of a USD September, and another legal entity's objects are never read.
+func TestActuals_SplitJournalFromAllocatedPerCostObject(t *testing.T) {
+	f := newLedger(t, 39)
+	admin, it := f.object(t, "CostCenter", "CC-ADMIN"), f.object(t, "CostCenter", "CC-IT")
+	order := f.object(t, "InternalOrder", "IO-9")
+	line := func(account, object, period, currency, amount string) MirrorLine {
+		return MirrorLine{JournalLineID: ids.New(), MainAccount: account, CostObjectID: object, Period: period, Currency: currency, Amount: dec(amount)}
+	}
+	if _, _, err := f.st.MirrorJournalLines(f.ctx, ids.New(), "h", MirrorRequest{LegalEntityID: f.le, Lines: []MirrorLine{
+		line("610100", admin, "2026-09", "USD", "1000.00"),
+		line("610100", admin, "2026-09", "USD", "250.50"),
+		line("610100", admin, "2026-10", "USD", "70.00"),
+		line("610100", admin, "2026-09", "EUR", "5.00"),
+		line("610100", it, "2026-09", "USD", "400.00"),
+		line("610100", order, "2026-09", "USD", "99.00"),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := f.st.Actuals(f.ctx, f.le, "2026-09", "2026-10", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ActualRow{}
+	for _, r := range rows {
+		got[r.Code+"|"+r.Period+"|"+r.Currency] = r
+	}
+	if len(rows) != 5 {
+		t.Fatalf("rows = %+v; want five (admin Sep USD, admin Oct USD, admin Sep EUR, it Sep USD, order Sep USD)", rows)
+	}
+	a := got["CC-ADMIN|2026-09|USD"]
+	if !a.Primary.Equal(decimal.RequireFromString("1250.50")) || !a.Allocated.IsZero() || !a.Total.Equal(decimal.RequireFromString("1250.50")) || a.Kind != "CostCenter" || a.Name == "" {
+		t.Fatalf("CC-ADMIN September = %+v; want 1250.50 primary, nothing allocated", a)
+	}
+	if only, err := f.st.Actuals(f.ctx, f.le, "2026-09", "2026-09", "CostCenter"); err != nil || len(only) != 3 {
+		t.Fatalf("cost centers of September = %+v, %v; want admin USD, admin EUR and it USD", only, err)
+	}
+	if rows, err := f.st.Actuals(f.ctx, ids.New(), "2026-09", "2026-10", ""); err != nil || len(rows) != 0 {
+		t.Fatalf("another legal entity = %+v, %v; want none", rows, err)
+	}
+}
+
+func TestActuals_ShowAllocatedCostAfterATopDownRun(t *testing.T) {
+	f := newLedger(t, 40)
+	source := f.object(t, "CostCenter", "ENTITY")
+	north, south := f.object(t, "Product", "NORTH"), f.object(t, "Product", "SOUTH")
+	f.book(t, source, "1000.00")
+	if _, _, err := f.st.RunTopDown(f.ctx, ids.New(), "h", TopDownRequest{LegalEntityID: f.le, Period: "2026-09", ReferencePeriod: "2026-08", Currency: "USD",
+		SourceCostObjectID: source, CostElementID: f.primary, Amount: dec("1000.00"), Segments: []TopDownSegment{
+			{CostObjectID: north, Basis: dec("3")}, {CostObjectID: south, Basis: dec("1")}}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := f.st.Actuals(f.ctx, f.le, "2026-09", "2026-09", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ActualRow{}
+	for _, r := range rows {
+		got[r.Code] = r
+	}
+	if e := got["ENTITY"]; !e.Primary.Equal(decimal.RequireFromString("1000")) || !e.Allocated.Equal(decimal.RequireFromString("-1000")) || !e.Total.IsZero() {
+		t.Fatalf("ENTITY = %+v; want 1000 booked, 1000 allocated away, nothing left", e)
+	}
+	if n := got["NORTH"]; !n.Primary.IsZero() || !n.Allocated.Equal(decimal.RequireFromString("750")) || !n.Total.Equal(decimal.RequireFromString("750")) {
+		t.Fatalf("NORTH = %+v; want 750 allocated and nothing booked", n)
+	}
+}

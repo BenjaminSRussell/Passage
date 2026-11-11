@@ -55,14 +55,14 @@ func TestAddHolding_RejectsASecondIntervalOnTheSameDate(t *testing.T) {
 }
 
 func TestValidateMapping(t *testing.T) {
-	ok := []AccountMapping{{"1000", "CASH", AccountBalanceSheet}, {"4000", "REV", AccountIncome}}
+	ok := []AccountMapping{{"1000", "CASH", AccountBalanceSheet, ""}, {"4000", "REV", AccountIncome, ""}}
 	if err := ValidateMapping(ok); err != nil {
 		t.Fatal(err)
 	}
 	for name, rows := range map[string][]AccountMapping{
-		"duplicate main account": {{"1000", "CASH", AccountBalanceSheet}, {"1000", "BANK", AccountBalanceSheet}},
-		"unknown type":           {{"1000", "CASH", "equity"}},
-		"bad code":               {{"10 00", "CASH", AccountBalanceSheet}},
+		"duplicate main account": {{"1000", "CASH", AccountBalanceSheet, ""}, {"1000", "BANK", AccountBalanceSheet, ""}},
+		"unknown type":           {{"1000", "CASH", "equity", ""}},
+		"bad code":               {{"10 00", "CASH", AccountBalanceSheet, ""}},
 	} {
 		if err := ValidateMapping(rows); err == nil {
 			t.Errorf("%s must be refused", name)

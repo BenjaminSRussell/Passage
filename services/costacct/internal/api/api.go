@@ -47,6 +47,7 @@ type Store interface {
 	MirrorJournalLines(ctx context.Context, key, hash string, in store.MirrorRequest) (int, []byte, error)
 	RunAllocation(ctx context.Context, key, hash string, in store.RunRequest) (int, []byte, error)
 	EntriesFor(ctx context.Context, costObjectID, period string) ([]store.Entry, error)
+	Actuals(ctx context.Context, legalEntityID, from, to, kind string) ([]store.ActualRow, error)
 	ListCostObjects(ctx context.Context, legalEntityID, kind string) ([]store.CostObject, error)
 	GetCostObject(ctx context.Context, id string) (store.CostObject, error)
 	ListCostElements(ctx context.Context, legalEntityID string) ([]store.CostElement, error)
@@ -109,6 +110,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyRun)).Post("/v1/controlling/internal-orders/{id}:settle", a.settle)
 	view := r.With(authz.RequireDuty(DutyView))
 	view.Get("/v1/controlling/cost-objects/{id}/entries", a.entries)
+	view.Get("/v1/controlling/cost-actuals", a.actuals)
 	view.Get("/v1/controlling/cost-objects", a.listCostObjects)
 	view.Get("/v1/controlling/cost-objects/{id}", a.getCostObject)
 	view.Get("/v1/controlling/cost-elements", a.listCostElements)
@@ -369,6 +371,26 @@ func (a *API) entries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := a.st.EntriesFor(r.Context(), id, period)
+	list(w, r, items, err)
+}
+
+// actuals handles GET /cost-actuals?legalEntityId=&from=&to=&kind=: the cost ledger's actual cost per cost object and period,
+// which cost control (budgeting) sets beside the plan of the same cost center (FR-38.10).
+func (a *API) actuals(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	le, from, to, kind := q.Get("legalEntityId"), q.Get("from"), q.Get("to"), q.Get("kind")
+	if !ids.Valid(le) || !domain.ValidPeriod(from) || !domain.ValidPeriod(to) || from > to {
+		invalid(w, r, "legalEntityId must be a UUID, from and to must be YYYY-MM periods and from must not be after to")
+		return
+	}
+	if kind != "" && !domain.ValidObjectKind(kind) {
+		invalid(w, r, "kind must be CostCenter, InternalOrder, Product or Project")
+		return
+	}
+	items, err := a.st.Actuals(r.Context(), le, from, to, kind)
 	list(w, r, items, err)
 }
 

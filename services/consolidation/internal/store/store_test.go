@@ -49,7 +49,7 @@ func compute(t *testing.T, in domain.RunInput) domain.RunResult {
 
 func start(t *testing.T, s *store.Postgres, ctx context.Context, in domain.RunInput, key string) (store.RunRecord, bool, error) {
 	t.Helper()
-	return s.CreateRun(ctx, in, compute(t, in), key)
+	return s.CreateRun(ctx, in, compute(t, in), "", key)
 }
 
 func setup(t *testing.T) (*store.Postgres, *pgxpool.Pool, context.Context) {
@@ -170,7 +170,7 @@ func TestCreateRun_ConcurrentRerunsGetDistinctVersions(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			rec, _, err := s.CreateRun(ctx, runInput("G1", "2026-06", "150000"), compute(t, runInput("G1", "2026-06", "150000")), "")
+			rec, _, err := s.CreateRun(ctx, runInput("G1", "2026-06", "150000"), compute(t, runInput("G1", "2026-06", "150000")), "", "")
 			versions[i], errs[i] = rec.Version, err
 		}(i)
 	}
@@ -345,5 +345,46 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	again, _, err := start(t, s, two, runInput("G1", "2026-06", "150000"), "rls")
 	if err != nil || again.Version != 1 || again.ID == rec.ID {
 		t.Fatalf("tenant 2 with tenant 1's key and group: %+v, %v", again, err)
+	}
+}
+
+func TestCreateCollection_RefusesLinesOfAUnitThatLeftOrChangedCurrencyMeanwhile(t *testing.T) {
+	s, _, ctx := setup(t)
+	g, _, err := s.CreateGroup(ctx, domain.Group{Code: "RACE", Name: "Race group", Currency: "USD"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone, err := s.AddUnit(ctx, g.ID, domain.Unit{LegalEntityID: ids.New(), LedgerID: "L-1", Currency: "EUR"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, err := s.AddUnit(ctx, g.ID, domain.Unit{LegalEntityID: ids.New(), LedgerID: "L-2", Currency: "EUR"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(unit string) domain.CollectLine {
+		return domain.CollectLine{UnitID: unit, MainAccount: "1000", UnitCurrency: "EUR", UnitAmount: dec("10"), Rate: dec("1.1"), GroupAmount: dec("11")}
+	}
+	// The lines were read from the ledgers while the unit was still in the group; it is removed before they are stored.
+	if err := s.RemoveUnit(ctx, g.ID, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateCollection(ctx, g.ID, "2026-03", 0, []domain.CollectLine{line(gone.ID)}, map[string]string{}, ""); codeOf(err) != domain.CodeCollectionError {
+		t.Fatalf("lines of a removed unit: %v; want %s", err, domain.CodeCollectionError)
+	}
+	usd := "USD"
+	if _, err := s.UpdateUnit(ctx, g.ID, moved.ID, store.UnitChange{Currency: &usd}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateCollection(ctx, g.ID, "2026-03", 0, []domain.CollectLine{line(moved.ID)}, map[string]string{}, ""); codeOf(err) != domain.CodeCollectionError {
+		t.Fatalf("lines in the unit's old currency: %v; want %s", err, domain.CodeCollectionError)
+	}
+	// Once a collection holds the unit's lines, the unit stays and keeps its currency.
+	if _, _, err := s.CreateCollection(ctx, g.ID, "2026-03", 0, []domain.CollectLine{{UnitID: moved.ID, MainAccount: "1000", UnitCurrency: "USD",
+		UnitAmount: dec("10"), Rate: dec("1"), GroupAmount: dec("10")}}, map[string]string{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveUnit(ctx, g.ID, moved.ID); codeOf(err) != domain.CodeUnitInUse {
+		t.Fatalf("remove a collected unit: %v; want %s", err, domain.CodeUnitInUse)
 	}
 }

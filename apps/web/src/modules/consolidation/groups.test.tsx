@@ -71,6 +71,17 @@ describe("group form checks", () => {
     });
   });
 
+  it("sends the role of an account only when one is chosen", () => {
+    const { request } = validateMap([
+      { mainAccount: "3000", consolidationAccount: "EQUITY", accountType: "balance_sheet", role: "equity" },
+      { mainAccount: "1000", consolidationAccount: "CASH", accountType: "balance_sheet", role: "" },
+    ]);
+    expect(request).toEqual([
+      { mainAccount: "3000", consolidationAccount: "EQUITY", accountType: "balance_sheet", role: "equity" },
+      { mainAccount: "1000", consolidationAccount: "CASH", accountType: "balance_sheet" },
+    ]);
+  });
+
   it("rejects a main account mapped twice", () => {
     const rows = [
       { mainAccount: "1000", consolidationAccount: "CASH", accountType: "balance_sheet" },
@@ -160,6 +171,27 @@ describe("group page", () => {
     expect(post?.body).toEqual({ period: "2026-11", rates: [{ currency: "EUR", average: "1.084", closing: "1.095" }] });
     expect(post?.headers.get("Idempotency-Key")).toBeTruthy();
   });
+
+  it("starts a run from a stored collection and shows what it made, or the service's reason", async () => {
+    let answer: { status: number; body: unknown } = { status: 201, body: { id: "r-1", groupId: GROUP, period: "2026-10", currency: "USD", collectionId: "c-1", version: 3, unitCount: 2, eliminationCount: 34, ctaAmount: "39523.81" } };
+    handler = (url, method, body) => {
+      if (url.pathname === "/api/v1/consol/runs" && method === "POST") return answer;
+      return detailHandler(url, method, body);
+    };
+    renderAt(`/consolidation/groups/${GROUP}`);
+    await screen.findByRole("heading", { level: 2, name: "Cedar Ridge Pumps group" });
+    fireEvent.click(await screen.findByRole("button", { name: /Run the consolidation from the collection of 2026-10 version 2/ }));
+    await waitFor(() => expect(calls.map((c) => c.method + " " + c.url.pathname)).toContain("POST /api/v1/consol/runs"));
+    expect(await screen.findByText("Run version 3 stored")).toBeInTheDocument();
+    expect(screen.getByText(/Consolidated 2 units for 2026-10 from the collection, with 34 elimination entries and a translation difference of 39523.81 USD/)).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST" && c.url.pathname === "/api/v1/consol/runs");
+    expect(post?.body).toEqual({ collectionId: "c-1" });
+    expect(post?.headers.get("Idempotency-Key")).toBeTruthy();
+
+    answer = { status: 422, body: { code: "CNS-0930", detail: "unit u-2: has no acquisition terms; store its investment cost first" } };
+    fireEvent.click(screen.getByRole("button", { name: /Run the consolidation from the collection of 2026-10 version 2/ }));
+    expect(await screen.findByText("The run was not started")).toBeInTheDocument();
+  }, 20_000);
 
   it("reports an ownership that would exceed 100 percent", async () => {
     handler = (url, method, body) => {

@@ -26,7 +26,7 @@ const (
 	maxBody    = 8 << 20
 	maxPages   = 25
 	pageSize   = 200
-	arPageSize = 500 // receivables answers one page of at most 500 open items by due date
+	arPageSize = 500 // receivables answers a page of at most 500 open items by due date and id
 )
 
 // Result is what one source contributed and how complete it is.
@@ -166,24 +166,39 @@ type arItem struct {
 	OpenAmount string `json:"openAmount"`
 }
 
-// Contribute reads the open items (receivables answers one page of at most 500 by due date and has no date filter, so
-// the window is applied here) as inflows of their signed open amount: a credit note or unapplied payment is negative.
+// Contribute reads the open items due in the window, a page of 500 at a time (at most 25 pages) by due date and id, as
+// inflows of their signed open amount: a credit note or unapplied payment is negative.
 func (r *Receivables) Contribute(ctx context.Context, legalEntityID string, from, to time.Time) (Result, error) {
-	var body struct {
-		Items []arItem `json:"items"`
-	}
-	q := url.Values{"status": {"open"}, "limit": {fmt.Sprint(arPageSize)}}
-	if err := r.get(ctx, legalEntityID, "/v1/receivables/open-items", q, &body); err != nil {
-		return Result{}, err
-	}
-	res := Result{Truncated: len(body.Items) >= arPageSize}
-	for _, it := range body.Items {
-		amount, err := decimal.NewFromString(it.OpenAmount)
-		due, ok := day(it.DueDate)
-		if err != nil || !ok || amount.IsZero() || it.Currency == "" || due.Before(from) || due.After(to) {
-			continue
+	var res Result
+	cursor := ""
+	for page := 0; ; page++ {
+		if page == maxPages {
+			res.Truncated = true
+			break
 		}
-		res.Contributions = append(res.Contributions, domain.Contribution{SourceType: TypeAR, SourceID: it.ID, ExpectedDate: due, Amount: amount, Currency: it.Currency})
+		q := url.Values{"status": {"open"}, "due_from": {from.Format("2006-01-02")}, "due_to": {to.Format("2006-01-02")}, "limit": {fmt.Sprint(arPageSize)}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		var body struct {
+			Items      []arItem `json:"items"`
+			NextCursor string   `json:"nextCursor"`
+		}
+		if err := r.get(ctx, legalEntityID, "/v1/receivables/open-items", q, &body); err != nil {
+			return Result{}, err
+		}
+		for _, it := range body.Items {
+			amount, err := decimal.NewFromString(it.OpenAmount)
+			due, ok := day(it.DueDate)
+			if err != nil || !ok || amount.IsZero() || it.Currency == "" || due.Before(from) || due.After(to) {
+				continue
+			}
+			res.Contributions = append(res.Contributions, domain.Contribution{SourceType: TypeAR, SourceID: it.ID, ExpectedDate: due, Amount: amount, Currency: it.Currency})
+		}
+		if body.NextCursor == "" {
+			break
+		}
+		cursor = body.NextCursor
 	}
 	return res, nil
 }

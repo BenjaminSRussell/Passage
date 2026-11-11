@@ -90,9 +90,9 @@ func (s *Postgres) SplitRequisitionLine(ctx context.Context, lineID string, vers
 			newID, no := ids.New(), lastNo+1+i
 			if _, err := tx.Exec(ctx, `insert into purchase_requisition_line (tenant_id, id, requisition_id, line_no, product_id, description,
 				category, qty, unit, estimated_unit_price, amount, requested_date, site_id, preferred_vendor_id, status, catalog_entry_id,
-				warehouse_id, split_from_line_id)
+				warehouse_id, split_from_line_id, gl_account, cost_center)
 				select tenant_id, $3, requisition_id, $4, product_id, description, category, $5, unit, estimated_unit_price, $6,
-				requested_date, site_id, preferred_vendor_id, 'OPEN', catalog_entry_id, warehouse_id, id
+				requested_date, site_id, preferred_vendor_id, 'OPEN', catalog_entry_id, warehouse_id, id, gl_account, cost_center
 				from purchase_requisition_line where tenant_id = $1 and id = $2`,
 				p.TenantID, lineID, newID, no, piece.Qty, piece.Amount); err != nil {
 				return err
