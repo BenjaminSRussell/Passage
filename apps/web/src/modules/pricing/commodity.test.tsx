@@ -128,7 +128,7 @@ describe("Commodity cost basis types", () => {
     };
     const { container } = renderAt("/pricing/commodity/bases/new");
     expect(pageViolations(container)).toEqual([]);
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Code", "CU-LME");
     fill("Name", "LME copper cash");
     fill("Quoted per", "MT");
@@ -143,10 +143,10 @@ describe("Commodity cost basis types", () => {
   it("checks the form first and shows a duplicate code as a failure", async () => {
     renderAt("/pricing/commodity/bases/new");
     fireEvent.click(screen.getByRole("button", { name: "Save cost basis type" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a legal entity.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     server.handler = () => json(409, { code: "PRC-0054", detail: "a cost basis type with code CU-LME already exists in this legal entity" });
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Code", "CU-LME");
     fill("Name", "LME copper cash");
     fill("Quoted per", "MT");
@@ -227,7 +227,7 @@ describe("Commodity price calculations", () => {
     };
     const { container } = renderAt("/pricing/commodity/calculations/new");
     expect(pageViolations(container)).toEqual([]);
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Name", "Copper rod EA");
     fill("Cost basis type id", BASIS);
     fill("Conversion factor", "0.0012");
@@ -259,7 +259,7 @@ describe("Commodity price calculations", () => {
   it("shows an unknown cost basis type as a failure", async () => {
     server.handler = () => json(404, { code: "PRC-0050", detail: "no commodity cost basis type x" });
     renderAt("/pricing/commodity/calculations/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Name", "Copper rod EA");
     fill("Cost basis type id", BASIS);
     fill("Conversion factor", "0.0012");

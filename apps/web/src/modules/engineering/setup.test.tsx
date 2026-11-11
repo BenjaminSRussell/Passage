@@ -188,9 +188,9 @@ describe("ResourceCreatePage", () => {
     type("Code", "M1");
     type("Name", "Mill");
     type(/^Site/, "S1");
-    type(/^Group id/, "7f6c2b8e-0000-4000-8000-000000000001");
+    type(/^Resource group/, "7f6c2b8e-0000-4000-8000-000000000001");
     fireEvent.click(screen.getByRole("button", { name: "Create resource" }));
-    const group = screen.getByLabelText(/^Group id/);
+    const group = screen.getByLabelText(/^Resource group/);
     await waitFor(() => expect(group).toHaveFocus());
     expect(group).toHaveAttribute("aria-invalid", "true");
     expect(group).toHaveAccessibleDescription(/resource site must equal the site of its resource group/);

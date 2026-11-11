@@ -62,6 +62,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	admin.HandleFunc("/metrics", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = io.WriteString(writer, "# HELP metadata_up Metadata registry process status.\n# TYPE metadata_up gauge\nmetadata_up 1\n")
+		httpx.WriteMetrics(writer)
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

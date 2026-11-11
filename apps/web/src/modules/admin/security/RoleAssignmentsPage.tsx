@@ -10,6 +10,7 @@ import {
   type AssignmentQuery,
   type RoleAssignment,
 } from "./api";
+import { EntityLookup } from "../../../shell/lookup/EntityLookup";
 import styles from "./security.module.css";
 import {
   ApiFailure,
@@ -55,14 +56,14 @@ function standing(a: RoleAssignment, now: number): Standing {
 function validateFind(values: FindValues): Errors {
   const errors: Errors = {};
   const userId = values.userId.trim();
-  if (userId === "" && values.role.trim() === "") errors.userId = "Enter a user id or a role to look up.";
-  else if (userId !== "" && !UUID.test(userId)) errors.userId = "Enter the user id as a UUID.";
+  if (userId === "" && values.role.trim() === "") errors.userId = "Choose a user, a role, or both.";
+  else if (userId !== "" && !UUID.test(userId)) errors.userId = "Choose a user, or clear it.";
   return errors;
 }
 
 function validateAssign(values: AssignValues): Errors {
   const errors: Errors = {};
-  if (!UUID.test(values.userId.trim())) errors.userId = "Enter the user id as a UUID.";
+  if (!UUID.test(values.userId.trim())) errors.userId = "Choose the user to assign.";
   if (values.role.trim() === "") errors.role = "Enter the role to assign.";
   if (values.legalEntityId.trim() !== "" && !UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id as a UUID.";
   const from = toIsoFromLocal(values.validFrom);
@@ -205,8 +206,8 @@ export function RoleAssignmentsPage() {
       <Card title="Assign a role">
         <form className={styles.form} onSubmit={submitAssign} noValidate aria-label="Assign a role" ref={assignForm}>
           <fieldset className={styles.fields} disabled={assign.isPending}>
-            <FormField id="as-user" label="User to assign" hint="The user's UUID." error={errors.userId}>
-              {(c) => <Input {...c} value={values.userId} onChange={(e) => changeAssign({ userId: e.target.value })} invalid={Boolean(errors.userId)} autoComplete="off" />}
+            <FormField id="as-user" label="User to assign" hint="Search by name or email, or paste the user's id." error={errors.userId}>
+              {(c) => <EntityLookup {...c} entity="user" value={values.userId} onChange={(e) => changeAssign({ userId: e.target.value })} invalid={Boolean(errors.userId)} />}
             </FormField>
             <FormField id="as-role" label="Role to assign" hint="The name of a duty, for example identity.security-role.maintain." error={errors.role}>
               {(c) => <Input {...c} value={values.role} onChange={(e) => changeAssign({ role: e.target.value })} invalid={Boolean(errors.role)} />}
@@ -255,8 +256,8 @@ export function RoleAssignmentsPage() {
 
       <Card title="Find assignments">
         <form className={styles.form} onSubmit={submitFind} noValidate aria-label="Find assignments" ref={findForm}>
-          <FormField id="fa-user" label="Find by user id" hint="Enter a user id, a role, or both." error={findErrors.userId}>
-            {(c) => <Input {...c} value={find.userId} onChange={(e) => changeFind({ userId: e.target.value })} invalid={Boolean(findErrors.userId)} autoComplete="off" />}
+          <FormField id="fa-user" label="Find by user" hint="List by user, by role, or both." error={findErrors.userId}>
+            {(c) => <EntityLookup {...c} entity="user" value={find.userId} onChange={(e) => changeFind({ userId: e.target.value })} invalid={Boolean(findErrors.userId)} />}
           </FormField>
           <FormField id="fa-role" label="Find by role">
             {(c) => <Input {...c} value={find.role} onChange={(e) => changeFind({ role: e.target.value })} />}

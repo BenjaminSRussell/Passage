@@ -1,5 +1,6 @@
 import type { TourStop } from "../../tour";
 import { uid } from "../../store";
+import { KR } from "./arLedger";
 import { K } from "./model";
 
 // Order to cash screens for the home page demo tour, in walkthrough order.
@@ -17,4 +18,8 @@ export const TOUR: TourStop[] = [
   { area: "Order to cash", label: "Shipments", to: "/fulfillment/shipments", blurb: "Shipments from release to delivered, matching the shipped sales orders; open one for lines, pallets and tracking." },
   { area: "Order to cash", label: "Order to cash", to: "/sales/order-to-cash", blurb: "The five steps from order to payment with what waits at each, then open an order to see its document flow and next step." },
   { area: "Order to cash", label: "Invoices", to: "/billing", blurb: "Posted, part-paid and settled invoices for the shipped orders, plus a proposal ready to post." },
+  { area: "Order to cash", label: "AR workspace", to: "/receivables", blurb: "Open receivables aged by due date, the payments waiting to be applied and the disputes being worked." },
+  { area: "Order to cash", label: "Apply a payment", to: `/receivables/payments/${uid(KR.payment, 10)}`, blurb: "Bluewater's ACH for its open invoice: Find matches scores it 100 on reference and amount, then apply it and the invoice is settled." },
+  { area: "Order to cash", label: "Collections worklist", to: "/receivables/worklist", blurb: "Customers ranked by risk: Metro's broken promise, Summit's price dispute, Coastal's retention and Prairie's returned check." },
+  { area: "Order to cash", label: "Dunning runs", to: "/receivables/dunning-runs", blurb: "Two issued runs and a cancelled one. Start a new run to propose a reminder for Prairie, with the disputed and blocked items left out." },
 ];

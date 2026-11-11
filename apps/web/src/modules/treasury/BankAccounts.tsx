@@ -34,6 +34,7 @@ import { ACCOUNT_CODE, BIC, CURRENCY, dateTime, money, normalizeIban, STATEMENT_
 import { CommandFailure, Detail, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -213,7 +214,7 @@ export function NewBankAccountPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {field("legalEntityId", "Legal entity id")}
+          <LookupFormField id="ba-legalEntityId" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {field("accountCode", "Account code", "Unique per legal entity, for example OPS-01.")}
           {field("iban", "IBAN", "Spaces are allowed; the check digits are verified.")}
           {field(

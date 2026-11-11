@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listTrackingEvents, type TrackingEvent } from "./api/client";
 import { dash, formatDateTime, shortId, trackingCodeLabels, UUID } from "./format";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -28,7 +29,7 @@ export function TrackingPage() {
     event.preventDefault();
     const id = loadId.trim();
     if (!UUID.test(id)) {
-      setError("Enter the load id as a lower-case UUID.");
+      setError("Choose a load.");
       return;
     }
     setError(undefined);
@@ -48,8 +49,8 @@ export function TrackingPage() {
       />
       <Card title="Load timeline" headingLevel={3}>
         <form className={styles.inlineForm} onSubmit={open} noValidate>
-          <FormField id="tracking-load" label="Load id" error={error}>
-            {(control) => <Input {...control} className={styles.mono} value={loadId} onChange={(e) => setLoadId(e.target.value)} invalid={Boolean(error)} />}
+          <FormField id="tracking-load" label="Load" error={error}>
+            {(control) => <EntityLookup {...control} entity="load" value={loadId} onChange={(e) => setLoadId(e.target.value)} invalid={Boolean(error)} />}
           </FormField>
           <Button type="submit">Open timeline</Button>
         </form>

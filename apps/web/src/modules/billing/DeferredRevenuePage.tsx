@@ -15,6 +15,7 @@ import { CURRENCY, lastMonth, PERIOD, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 type Errors = Record<string, string>;
 
@@ -27,7 +28,7 @@ export interface RollForwardQuery {
 /** Client checks that mirror GET /revrec/roll-forward. */
 export function validateQuery(q: RollForwardQuery): Errors {
   const errors: Errors = {};
-  if (!UUID.test(q.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(q.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!CURRENCY.test(q.currency.trim())) errors.currency = "Enter a three-letter currency code such as USD.";
   if (!PERIOD.test(q.period.trim())) errors.period = "Enter the month as YYYY-MM, for example 2027-03.";
   return errors;
@@ -117,7 +118,9 @@ export function DeferredRevenuePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={show} noValidate>
-          {field("df-entity", "legalEntityId", "Legal entity id")}
+          <FormField id="df-entity" label="Legal entity" error={errors.legalEntityId}>
+            {(c) => <EntityLookup entity="legalEntity" {...c} value={form.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(e) => update({ legalEntityId: e.target.value })} />}
+          </FormField>
           {field("df-currency", "currency", "Currency")}
           {field("df-period", "period", "Month", "YYYY-MM")}
           <div className={styles.formActions}>

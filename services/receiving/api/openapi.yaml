@@ -507,6 +507,7 @@ paths:
   /v1/receiving/vendor/asns/{id}:
     get:
       operationId: vendorGetAsn
+      summary: "Get an advance ship notice as the vendor"
       x-passage-duty: receiving.vendor-portal.asn
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -575,6 +576,7 @@ paths:
   /v1/receiving/vendor/invoice-captures/{id}:
     get:
       operationId: vendorGetInvoiceDocument
+      summary: "Get a captured invoice document as the vendor"
       x-passage-duty: receiving.vendor-portal.invoice
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -612,6 +614,7 @@ paths:
   /v1/receiving/vendor/invoices/{id}:
     get:
       operationId: vendorGetInvoice
+      summary: "Get an invoice as the vendor"
       x-passage-duty: receiving.vendor-portal.invoice
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -700,6 +703,7 @@ paths:
   /v1/receiving/asns/{id}:
     get:
       operationId: getAsn
+      summary: "Get an advance ship notice"
       x-passage-duty: receiving.asn.maintain or receiving.asn.receive
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }

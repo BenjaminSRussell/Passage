@@ -1,0 +1,7 @@
+# customer-portal in dev: the BFF for the customer portal app, served from customer.dev.passage.dev and signing in
+# against the dev realm on idp.dev.passage.dev. The client secret (customer-portal-oidc) and the Ed25519 signing seed
+# (customer-portal-signing) are created outside Git; the live wiring is tracked in #213.
+oidc:
+  issuer: https://idp.dev.passage.dev/realms/passage
+  redirectUri: https://customer.dev.passage.dev/bff/callback
+appOrigin: https://customer.dev.passage.dev

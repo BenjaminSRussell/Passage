@@ -61,6 +61,7 @@ paths:
   /v1/payroll/runs/{id}:
     get:
       operationId: getPayRun
+      summary: "Get a pay run"
       x-passage-duty: payroll.run.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -172,6 +173,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: getPostingProfile
+      summary: "Get the payroll posting profile of a legal entity"
       x-passage-duty: payroll.run.read
       responses:
         '200':

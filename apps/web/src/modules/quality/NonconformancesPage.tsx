@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
@@ -346,7 +346,7 @@ export function NonconformanceDetailPage() {
       </div>
     );
   }
-  const detail = (term: string, value: string, mono = false) => (
+  const detail = (term: string, value: ReactNode, mono = false) => (
     <div className={styles.entry}>
       <dt className={styles.term}>{term}</dt>
       <dd className={mono ? `${styles.value} ${styles.mono}` : styles.value}>{value}</dd>
@@ -380,10 +380,10 @@ export function NonconformanceDetailPage() {
       ) : null}
       <Card title="Report">
         <dl className={styles.details}>
-          {detail("Item", ncr.itemId, true)}
+          {detail("Item", <EntityName entity="product" id={ncr.itemId} fallback={ncr.itemId} />)}
           {detail("Dimensions", Object.entries(ncr.dims ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || dash)}
-          {detail("Vendor", ncr.vendorId ?? dash, Boolean(ncr.vendorId))}
-          {detail("Customer", ncr.customerId ?? dash, Boolean(ncr.customerId))}
+          {detail("Vendor", ncr.vendorId ? <EntityName entity="vendor" id={ncr.vendorId} fallback={ncr.vendorId} /> : dash)}
+          {detail("Customer", ncr.customerId ? <EntityName entity="customer" id={ncr.customerId} fallback={ncr.customerId} /> : dash)}
           {detail("Raised", `${ncr.createdBy || dash}, ${formatDateTime(ncr.createdAt)}`)}
           {detail("Correction", correction ? CORRECTION_STATUS_LABELS[correction.status].label : "Not started")}
           <div className={styles.entry}>

@@ -47,7 +47,14 @@ jobs:
         with:
           go-version: '1.26'
           cache-dependency-path: '**/go.sum'
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils
+      # The runner's apt mirror has outages: fall back to archive.ubuntu.com and retry.
+      - run: |
+          for attempt in 1 2 3; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
+            sudo apt-get update -qq && sudo apt-get install -y -qq -o Acquire::Retries=3 libxml2-utils && break
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep $((attempt * 20))
+          done
       - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1
         with:
           version: 1.21.4
@@ -97,7 +104,14 @@ jobs:
         with:
           go-version: '1.26'
           cache-dependency-path: '**/go.sum'
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils
+      # The runner's apt mirror has outages: fall back to archive.ubuntu.com and retry.
+      - run: |
+          for attempt in 1 2 3; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
+            sudo apt-get update -qq && sudo apt-get install -y -qq -o Acquire::Retries=3 libxml2-utils && break
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep $((attempt * 20))
+          done
       - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1
         if: matrix.shard == 'identity'
         with:
@@ -141,7 +155,16 @@ jobs:
           node-version: '24'
       - run: |
           npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/playwright" playwright@1.64.1
-          "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium
+          for attempt in 1 2 3; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
+            "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "::warning::Chromium's system packages could not be installed; installing the browser alone"
+              "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install chromium
+              break
+            fi
+            sleep $((attempt * 20))
+          done
           echo "NODE_PATH=$RUNNER_TEMP/playwright/node_modules" >> "$GITHUB_ENV"
       - run: >-
           docker run -d --name keycloak -p 8080:8080
@@ -171,7 +194,7 @@ jobs:
       matrix:
         # excluded until clean: services/close engineering fx migration org party payables tax,
         # tools/connectors.
-        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/mobile, services/numbering, services/platform-health, services/product, services/receiving, services/search, tools/importexport, tools/rlscheck, tools/tenant-restore, tools/e2e]
+        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/mobile, services/numbering, services/ops, services/platform-health, services/product, services/receiving, services/search, tools/importexport, tools/rlscheck, tools/tenant-restore, tools/e2e]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -200,7 +223,17 @@ jobs:
       - run: npx vitest --run
       - run: npx tsc --noEmit
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - run: |
+          for attempt in 1 2 3; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
+            npx playwright install --with-deps chromium && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "::warning::Chromium's system packages could not be installed; installing the browser alone"
+              npx playwright install chromium
+              break
+            fi
+            sleep $((attempt * 20))
+          done
       - run: npx playwright test
 
   warehouse-mobile:

@@ -404,6 +404,57 @@ the AS2 port (`networkPolicy.as2Gateway`); the API and metrics ports keep their 
   receivables has no remittance-advice route. Consumers read `dev.passage.edi.message.received.v1`
   and the canonical document; `NOT-IMPLEMENTED.md` (Handoffs) lists what each posting needs.
 
+## Slice 10 scope: the B2B batch (#35, 35-1 to 35-5)
+
+Migration `0012_b2b_exchange.sql`. Every table is tenant-scoped with the legal-entity scope policy of the trade profile.
+
+- **35-1 Event-driven 856, DESADV, 810 and INVOIC.** `edi consume` (chart `consumer.enabled`, off by default) is a Kafka consumer
+  (`internal/autosend`, group and principal `edi-outbound`, one duty `edi.outbound.from-event`) of fulfillment's
+  `asn.issued` (now carrying `legal_entity_id`) and billing's `invoice.posted`. For each active partner of the event's legal
+  entity whose `PUT /partners/{id}/auto-outbound` lists the set (`856`, `DESADV` for a shipment, `810`, `INVOIC` for an invoice) it
+  generates the document through the same path as `outbound:from-source` (`API.SendFromSource`), under the same idempotency key
+  (partner, set, source document): a redelivered event, a replay from `passage.edi.outbound.dlq` and a route call made by hand
+  yield one interchange. A document that is not this partner's (another customer, EDI-0011), cannot be mapped (a partly shipped
+  shipment, EDI-0007), or a partner without a profile or EDIFACT identity is logged and skipped; a source outage is retried by the
+  consumer (2 s doubling, 10 attempts) and then dead-lettered. One 856 per shipment: a second packing slip of a shipment replays the
+  first.
+- **35-2 E-invoice store and mandate framework.** `POST /einvoice/invoices {legalEntityId, invoiceId, mandate}` reads the posted
+  billing invoice (or credit note), maps it (`EInvoiceFromBilling`: the VAT rate is derived from billing's tax amounts, one rate per
+  invoice, EINV-0113 for mixed rates; line discounts become one document allowance, header charges one charge; payable must equal
+  billing's gross, EINV-0112), builds it with the mandate and stores it VALID with its XML or INVALID with the blocking issues, one
+  per (invoice, mandate); a repeat returns the stored one and a repeat of an INVALID one builds again. Seller and buyer profiles
+  (address, VAT id, endpoint, IBAN, buyer reference) come from `PUT /einvoice/parties/{role}/{subjectId}`. Mandates
+  (`domain.Mandates`): PEPPOL (UBL 2.1, Peppol BIS Billing 3.0, built), IT_SDI (FatturaPA) and MX_CFDI (CFDI 4.0) as hooks that refuse
+  with EINV-0150 until a country pack installs a generator (`HookMandate.Generate`). `:submit` hands a VALID or rejected e-invoice
+  to the `AccessPoint` (a seam; 503 EDI-0029 while none is configured) and `:response` records the network's ACCEPTED or REJECTED;
+  `einvoice.submitted`, `.accepted` and `.rejected` are published.
+- **35-3 Punchout sessions to requisitions.** `PUT /partners/{id}/punchout` holds the supplier's setup URL, network identities,
+  shared-secret reference and the BR-35.13 inputs. `POST /punchout/sessions` opens the catalog for the caller: it stores an OPEN
+  session (secret hashed, BuyerCookie, expiry), sends the cXML `PunchOutSetupRequest` (OCI: builds the supplier URL with `HOOK_URL`)
+  and returns the start URL. The cart comes back to `POST /punchout/v1/return/{session}?t=<secret>` on the public listener (cXML
+  raw, `cxml-urlencoded` or `cxml-base64`, or the OCI form post), is validated (EDI-0133 lines, EDI-0134 total) and kept on the
+  session (RETURNED, or REJECTED) with one `punchout.returned` event. `POST /punchout/sessions/{id}:create-requisition` creates a
+  DRAFT requisition of the requester in purchasing (service grant `edi` -> `purchasing`, duty `procurement.requisition.create`, the
+  requester as `act`, Idempotency-Key `punchout:<session>`).
+- **35-4 cXML inbound exchange.** `PUT /partners/{id}/cxml` sets the partner's network identity and shared secret (only its hash is
+  kept) and returns its URL `POST /cxml/v1/{endpoint}` on the public listener. ConfirmationRequest, ShipNoticeRequest and
+  InvoiceDetailRequest are authenticated by the Sender credential, recorded as an interchange of standard CXML with a canonical
+  message (`CXMLCanonical`) and `message.received`, and answered with a cXML Response. The payloadID decision is BR-35.14: the same
+  payloadID with the same content returns the first answer and records nothing, other content is 409 EDI-0135. The message monitor
+  lists and filters them by document name.
+- **35-5 Self-billing intake.** An inbound EDIFACT INVOIC 389 (or 390) is mapped with `selfBilled`, the despatch advice (RFF AAK) and
+  order line (RFF LI) of each line and its line tax. The shipments a partner may bill itself for are registered when its 856 or
+  DESADV is generated (delivery note = shipment number, PO line, item = product id, price from the sales order line, VAT rate from
+  `PUT /partners/{id}/self-billing`). Each document is matched (BR-35.15) right after receipt, and by `POST /self-billing:sweep`
+  for any that missed it: claimed shipments are marked billed, a document number is accepted once, every DIFFERENCE (EDI-0136) or
+  UNMATCHED (EDI-0137) line opens a dispute, and the sweep opens one UNBILLED dispute (EDI-0138) per shipment past the wait days.
+  `GET /self-billing/disputes` is the worklist and `:resolve` accepts or rejects; the document becomes RESOLVED when its last dispute is
+  decided. `selfbilling.reconciled`, `dispute.opened` and `dispute.resolved` are published. Nothing is posted to billing or
+  receivables (wave 29 handoff).
+
+Sample files: `testdata/cxml/` (the three network documents, a punchout cart and setup response) and
+`testdata/edifact/invoic-389-selfbilled.edi`. Tests run against fakes (in-test supplier and access point, fake sources and purchasing).
+
 ## Wave 35 proof
 
 - **Partner simulator round trip** (`internal/api/partnersim_test.go`,
@@ -441,6 +492,7 @@ internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP a
 internal/delivery/  dispatcher (outbound AS2/SFTP deliveries) and SFTP poller
 internal/secrets/   resolves transport secret references from EDI_SECRETS_DIR
 internal/certtrust/ partner AS2 certificate chain and CRL checks (EDI_AS2_TRUST_ROOTS, EDI_AS2_CRL_DIR)
+internal/autosend/  the outbound consumer's handlers (asn.issued, invoice.posted) and the Sender seam (35-1)
 internal/events/    event type constants and payloads
 migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery), 0008_edifact_inbound.sql (partner EDIFACT identity and CONTRL mode, interchange.refusal), 0009_partner_update.sql (partner UPDATE column grant, partner_entity_index and edi_partner_in_entity_scope())
 api/openapi.yaml    OpenAPI 3.1 for the routes above
@@ -485,6 +537,24 @@ testdata/as2/       a third-party MDN
 | POST | /edi/v1/punchout/returns:parse | edi.requisition.create | Dry run of a returned cart (`format` CXML with `document`, or OCI with `fields`); 200 with lines, issues and the total check |
 | POST | /edi/v1/self-billing:match | edi.self-billing.reconcile | Dry run of BR-35.15 over the supplied shipments and self-billed lines; 200 with outcomes and unbilled shipments |
 | POST | /edi/v1/peppol/invoices:build | edi.einvoice.operate | Dry run of the UBL build; 200 with `xml` when `valid`, otherwise the blocking issues and no XML |
+| PUT, GET | /edi/v1/partners/{id}/auto-outbound | edi.admin | `{"transactionSets":["856","810","DESADV","INVOIC"]}`: what the partner receives when a shipment ships or an invoice posts; 409 EDI-0012 without a profile |
+| PUT, GET | /edi/v1/partners/{id}/self-billing | edi.admin | Tolerances, wait days and VAT rate of the partner's self-billing |
+| PUT, GET | /edi/v1/partners/{id}/punchout | edi.admin | Supplier setup URL, identities, secret reference and BR-35.13 inputs |
+| PUT, GET | /edi/v1/partners/{id}/cxml | edi.admin | Network identity and (write-only) shared secret; returns the partner's cXML URL |
+| PUT, GET | /edi/v1/einvoice/parties/{role}/{subjectId} | edi.einvoice.operate | Seller (legal entity) or buyer (customer) profile for e-invoices |
+| POST, GET | /edi/v1/einvoice/invoices | edi.einvoice.operate | Build and store the e-invoice of a billing invoice for a mandate; list |
+| GET | /edi/v1/einvoice/invoices/{id} | edi.einvoice.operate | One e-invoice with its XML and issues |
+| POST | /edi/v1/einvoice/invoices/{id}:submit | edi.einvoice.operate | Hand it to the access point; 503 EDI-0029 without one |
+| POST | /edi/v1/einvoice/invoices/{id}:response | edi.einvoice.operate | The network's ACCEPTED or REJECTED |
+| POST, GET | /edi/v1/punchout/sessions | edi.requisition.create | Open a supplier's catalog; the caller's sessions |
+| GET | /edi/v1/punchout/sessions/{id} | edi.requisition.create | One of the caller's sessions with its validated cart |
+| POST | /edi/v1/punchout/sessions/{id}:cancel | edi.requisition.create | Cancel an open session |
+| POST | /edi/v1/punchout/sessions/{id}:create-requisition | edi.requisition.create | DRAFT requisition of the requester in purchasing from a returned cart |
+| POST | /punchout/v1/return/{session}?t= | none (session secret) | Public listener only: the supplier returns the cart |
+| POST | /cxml/v1/{endpoint} | none (network identity and shared secret) | Public listener only: a cXML document from a network |
+| POST | /edi/v1/self-billing:sweep | edi.self-billing.reconcile | Match pending self-billed invoices; open UNBILLED disputes |
+| GET | /edi/v1/self-billing/documents, /edi/v1/self-billing/disputes | edi.self-billing.reconcile | Received self-billed documents; the dispute worklist |
+| POST | /edi/v1/self-billing/disputes/{id}:resolve | edi.self-billing.reconcile | ACCEPTED or REJECTED |
 
 The web screens live in `apps/web/src/modules/integration` (partners, interchanges,
 receive, send EDI document, message monitor with single and bulk reprocess, raw
@@ -506,7 +576,7 @@ and `EDI_ISA_ID` (our ISA06/GS02 identity on outbound documents, default ZZ/PASS
 `EDI_EDIFACT_ID` and `EDI_EDIFACT_QUALIFIER` (our UNB S002 identity on outbound EDIFACT, default
 PASSAGE/ZZZ; the qualifier may be empty),
 `PASSAGE_SERVICE_NAME=edi` with `PASSAGE_SERVICE_SIGNING_KEY` or `_FILE` (and `PASSAGE_SERVICE_KEY_ID`),
-`EDI_FULFILLMENT_URL`, `EDI_BILLING_URL`, `EDI_SALES_URL` (without a signing key the from-source
+`EDI_PURCHASING_URL` (optional; punchout requisitions, 35-3), `EDI_FULFILLMENT_URL`, `EDI_BILLING_URL`, `EDI_SALES_URL` (without a signing key the from-source
 or any source URL is unset the from-source route answers 503), `EDI_ALLOW_BODY_OUTBOUND` (off in the binary; the chart
 sets `allowBodyOutbound: true` so the integration screen and the 855 keep working).
 Transports: `EDI_SECRETS_DIR` (the mounted transport secrets; without it AS2 and SFTP transports
@@ -520,7 +590,8 @@ the SFTP poller; with the AS2 listener on, some replica must run them),
 waits for its asynchronous MDN, default 1440), `EDI_AS2_TRUST_ROOTS` (PEM bundle of the CAs partner AS2
 certificates must chain to; unset pins certificates only) and `EDI_AS2_CRL_DIR` (CRLs of those CAs,
 needs the roots; chart `transports.trust.rootsConfigMap`/`rootsKey` and `crlConfigMap`, mounted under
-`/etc/passage/edi-trust`). Chart values
+`/etc/passage/edi-trust`). `edi consume` (the outbound consumer, 35-1) reads `DATABASE_URL`, the service identity and the three source URLs like the API, plus
+`KAFKA_BROKERS`, `KAFKA_USERNAME`, `KAFKA_PASSWORD_FILE`, `KAFKA_TLS_CA_FILE` and `ADMIN_ADDR`; chart `consumer.*`. Chart values
 under `transports` set them, mount the Secret `transports.secretName` at
 `/var/run/passage/edi-secrets` and, with `transports.externalSecret.enabled`, create it from the
 Vault path `transports.externalSecret.key` (every property becomes one reference).
@@ -566,6 +637,18 @@ signing uses the standard library only.
 | EDI-0102 | 409 | Duplicate ISA13 or UNB 0020 inside the duplicate window; over AS2 or SFTP also answered with a TA1 R 025 or a CONTRL code 26 |
 | EDI-0103 | (in 200 map result) | CTT01 does not match the PO1 count; the transaction is rejected |
 | EDI-0105 | (in 200 map result) | No item cross-reference for the line; accepted with errors |
+| EDI-0025 to EDI-0026 | | Self-billing: EDI-0026 the dispute was already decided (EDI-0025 is reserved) |
+| EDI-0027 | 409 | E-invoice: the seller or buyer profile is missing |
+| EDI-0028 | 400 | Unknown e-invoice mandate |
+| EDI-0029 | 502 / 503 | No access point configured, or it did not take the document |
+| EDI-0030, EDI-0031 | 409 | E-invoice not in the right status, or INVALID and not submittable |
+| EDI-0032 | 503 | Punchout needs the public URL (`EDI_AS2_PUBLIC_URL`) |
+| EDI-0033 | 502 | The supplier refused or could not be reached for the punchout setup |
+| EDI-0034 | 422 | Purchasing refused the requisition of a returned cart |
+| EDI-0035 | 409 | The punchout session is not open, or its cart was not accepted |
+| EINV-0112 | (in issues) | The e-invoice payable differs from billing's gross |
+| EINV-0113 | (in issues) | The invoice implies more than one VAT rate; billing carries none per line |
+| EINV-0150 | (in issues) | The mandate is a hook and no generator is installed |
 | EDI-0133 | (in 200 punchout result) | Punchout line dropped: missing part id, quantity, price, price unit, allowed currency or mapped unit |
 | EDI-0134 | (in 200 punchout result) | Punchout cart total differs from the line sum by more than 0.01; the cart is rejected |
 | EDI-0135 | (domain only) | cXML payloadID reused with different content (no route yet) |

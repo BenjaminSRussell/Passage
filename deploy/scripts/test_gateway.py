@@ -62,7 +62,8 @@ def quantity_bytes(q):
 CLIENT_SUPPLIED = {"X-Passage-LegalEntity-Scope"}
 
 
-BACKEND_OF_ROUTE = {"inbox": "batch"}
+# A route is named after its public prefix; these two prefixes are served by a Service of another name.
+BACKEND_OF_ROUTE = {"inbox": "batch", "data": "metadata", "controlling": "costacct"}
 
 class GatewayManifests(unittest.TestCase):
     @classmethod
@@ -163,6 +164,22 @@ class GatewayManifests(unittest.TestCase):
         self.assertEqual(inverted["name"], "X-Passage-Tier")
         self.assertEqual(inverted["value"], "^(starter|professional|enterprise)$")
 
+    def test_campaign_contexts_are_routed_to_the_port_their_service_listens_on(self):
+        """FR-50.1: every context the load campaign calls has a route (load/PATH-CHECK.md, finding 1 and 2)."""
+        routes = {r["metadata"]["name"]: r for r in api_routes(self.docs)}
+        for name in ["ledger", "pricing", "sales", "party", "analytics", "planning", "data", "controlling"]:
+            self.assertIn(name, routes)
+            backend = BACKEND_OF_ROUTE.get(name, name)
+            chart = (DEPLOY.parent / "services" / backend / "charts" / backend / "templates" / "service.yaml").read_text()
+            chart_dir = DEPLOY.parent / "services" / backend / "charts" / backend
+            svc = (chart_dir / "templates" / "service.yaml").read_text()
+            found = re.findall(r"name: http, port: (\d+)", svc) or re.findall(r"name: http\s+port: (\d+)", svc)
+            if not found:  # the chart takes the Service port from its values
+                found = re.findall(r"^\s+port: (\d+)", (chart_dir / "values.yaml").read_text(), re.M)[:1]
+            (port,) = found
+            for rule in routes[name]["spec"]["rules"]:
+                self.assertEqual(rule["backendRefs"][0]["port"], int(port), name)
+
     def test_routes_strip_api_prefix_to_service_convention(self):
         for route in api_routes(self.docs):
             name = route["metadata"]["name"]
@@ -226,12 +243,14 @@ class AS2Edge(unittest.TestCase):
         self.assertEqual(spec["parentRefs"], [{"name": AS2_GATEWAY, "sectionName": self.listener["name"]}])
         self.assertEqual(spec["hostnames"], [self.listener["hostname"]])
         (rule,) = spec["rules"]
-        self.assertEqual(rule["matches"], [{"path": {"type": "PathPrefix", "value": "/as2/v1/"}, "method": "POST"}])
+        self.assertEqual(rule["matches"], [{"path": {"type": "PathPrefix", "value": prefix}, "method": "POST"}
+                                           for prefix in ("/as2/v1/", "/cxml/v1/", "/punchout/v1/return/")])
         self.assertNotIn("filters", rule)
         self.assertEqual(rule["backendRefs"], [{"name": AS2_SERVICE, "port": values["transports"]["as2"]["port"]}])
         # The listener serves exactly these paths.
         as2in = (EDI / "internal/api/as2in.go").read_text()
         self.assertEqual(set(re.findall(r'\.Post\("(/as2/v1/[^"]+)"', as2in)), {"/as2/v1/{endpoint}", "/as2/v1/{endpoint}/mdn"})
+        self.assertEqual(set(re.findall(r'\.Post\("(/(?:cxml|punchout)/v1/[^"]+)"', as2in)), {"/cxml/v1/{endpoint}", "/punchout/v1/return/{session}"})
 
     def test_as2_gateway_is_https_only_on_its_own_hostname_with_a_certificate(self):
         self.assertEqual(self.gateway["spec"]["gatewayClassName"], named(self.docs, "Gateway", API_GATEWAY)["spec"]["gatewayClassName"])

@@ -15,6 +15,7 @@ import { CUSTOMER_KIND_LABELS, MARGIN_LABELS } from "./commodityFormat";
 import { DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -37,7 +38,7 @@ export const emptyCalculation: CommodityCalculationInput = {
 /** Client checks that mirror the service (FR-26.21); the service has the last word. */
 export function validateCalculation(v: CommodityCalculationInput): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (!UUID.test(v.basisId.trim())) errors.basisId = "Enter the cost basis type id (a UUID).";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name (up to 120 characters).";
   if (!DECIMAL.test(v.factor.trim()) || Number(v.factor) <= 0) errors.factor = "Enter a factor above 0.";
@@ -149,7 +150,7 @@ export function NewCommodityCalculationPage() {
       <PageHeader title="New price calculation" description="Price = index x factor, plus a margin. A run reprices the active prices on the key below." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("cc-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="cc-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {text("cc-name", "name", "Name")}
           {text("cc-basis", "basisId", "Cost basis type id", { mono: true, hint: "Open a cost basis type to copy its id." })}
           {text("cc-factor", "factor", "Conversion factor", { mono: true, decimal: true, hint: "Turns the index per the cost basis unit into a price per product unit." })}

@@ -6,7 +6,7 @@ import { Alert, Button, Card, PageHeader } from "../../shell/ui";
 import { getOffer, hireFromOffer, moveOffer, type HireFromOffer, type OfferMove, type OfferStatus } from "./api/recruitment";
 import { UUID, dayOf, employmentTypeLabel, validFte } from "./format";
 import styles from "./pages.module.css";
-import { BackLink, ConfirmAction, Entry, Facts, FormActions, Loaded, Money, opt, SelectField, Status, TextField, useAction, useSubmit } from "./parts";
+import { BackLink, ConfirmAction, Entry, Facts, FormActions, Loaded, LookupField, Money, opt, SelectField, Status, TextField, useAction, useSubmit } from "./parts";
 import { useLoad } from "./useLoad";
 
 const MOVES: Record<string, Array<{ to: OfferMove; label: string; done: string }>> = {
@@ -43,13 +43,13 @@ export function validateHire(v: HireValues): { errors: Record<string, string>; i
   const legalName = (v.legalName ?? "").trim();
   if (creating) {
     if (!PERSONNEL_NUMBER.test(personnelNumber)) errors.personnelNumber = "Use 1 to 20 characters of A-Z, 0-9 or -.";
-    if (!UUID.test((v.partyPersonId ?? "").trim())) errors.partyPersonId = "Enter the person's party id.";
+    if (!UUID.test((v.partyPersonId ?? "").trim())) errors.partyPersonId = "Choose the person's party record.";
     if (nationalId === "" || nationalId.length > 32) errors.nationalId = "Enter the national id, at most 32 characters.";
     if (legalName.length > 200) errors.legalName = "Use at most 200 characters.";
-  } else if (!UUID.test(v.workerId.trim())) errors.workerId = "Enter the new worker's id.";
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity's id.";
+  } else if (!UUID.test(v.workerId.trim())) errors.workerId = "Choose the new worker.";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose the legal entity.";
   if (v.fteShare.trim() !== "" && !validFte(v.fteShare, 1)) errors.fteShare = "Use a decimal above 0 and up to 2.00, with at most two decimals.";
-  if (v.compPlanId.trim() !== "" && !UUID.test(v.compPlanId.trim())) errors.compPlanId = "Enter the compensation plan's id.";
+  if (v.compPlanId.trim() !== "" && !UUID.test(v.compPlanId.trim())) errors.compPlanId = "Choose a compensation plan, or clear it.";
   if (Object.keys(errors).length > 0) return { errors };
   const worker: Pick<HireFromOffer, "workerId" | "newWorker"> = creating
     ? {
@@ -93,7 +93,7 @@ function HireForm({ offerId, onConverted }: { offerId: string; onConverted(): vo
   const form = useSubmit({ "HCM-OFR-003": "legalEntityId", "HCM-OFR-002": "compPlanId", "HCM-OFR-004": "legalName", "HCM-WRK-DUPLICATE": "personnelNumber" });
   const creating = canCreateWorker && values.workerMode === "new";
   const set = (patch: Partial<HireValues>) => {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     form.touch();
   };
 
@@ -143,14 +143,14 @@ function HireForm({ offerId, onConverted }: { offerId: string; onConverted(): vo
               ["CONTRACTOR", "Contractor"],
             ]}
           />
-          {text("partyPersonId", "Party person id")}
+          <LookupField entity="party" id="hire-partyPersonId" label="Party" hint="The person record of the new worker." value={values.partyPersonId ?? ""} error={form.errors.partyPersonId} onChange={(partyPersonId) => set({ partyPersonId })} />
           {text("nationalId", "National id")}
           {text("legalName", "Legal name", true, "Leave empty to use the candidate's name.")}
         </>
       ) : (
-        text("workerId", "Worker id", false, "The worker record created for this person.")
+        <LookupField entity="worker" id="hire-workerId" label="Worker" hint="The worker record created for this person." value={values.workerId} error={form.errors.workerId} onChange={(workerId) => set({ workerId })} />
       )}
-      {text("legalEntityId", "Legal entity id")}
+      <LookupField entity="legalEntity" id="hire-legalEntityId" label="Legal entity" value={values.legalEntityId} error={form.errors.legalEntityId} onChange={(legalEntityId) => set({ legalEntityId })} />
       <SelectField
         id="hire-employmentType"
         label="Employment type"
@@ -160,7 +160,16 @@ function HireForm({ offerId, onConverted }: { offerId: string; onConverted(): vo
         options={Object.entries(employmentTypeLabel)}
       />
       {text("fteShare", "FTE share", true)}
-      {text("compPlanId", "Compensation plan id", true, "Setting pay needs the compensation administrator duty.")}
+      <LookupField
+        entity="compensationPlan"
+        id="hire-compPlanId"
+        label="Compensation plan"
+        optional
+        hint="Setting pay needs the compensation administrator duty."
+        value={values.compPlanId}
+        error={form.errors.compPlanId}
+        onChange={(compPlanId) => set({ compPlanId })}
+      />
       <FormActions errors={form.errors} busy={form.busy} submit="Hire from offer" failure={form.failure} failureTitle="Could not hire from the offer" />
     </form>
   );

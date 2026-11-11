@@ -26,7 +26,7 @@ const indexDuty = "search.index.write"
 func kafkaConfig(getenv func(string) string) (kafka.Config, error) {
 	return kafka.ConfigFromEnv(getenv, index.ConsumerName, index.ConsumerName,
 		[]string{index.PartyTopic, index.ProductTopic, index.PurchaseOrderTopic, index.ReceiptTopic, index.VendorInvoiceTopic,
-			index.SalesOrderTopic, index.ShipmentTopic, index.BillingInvoiceTopic})
+			index.SalesOrderTopic, index.ShipmentTopic, index.BillingInvoiceTopic, index.ProductionOrderTopic, index.WorkerTopic})
 }
 
 func seeded(table map[string][]string) bool {

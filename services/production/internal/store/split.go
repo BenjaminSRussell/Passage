@@ -201,7 +201,7 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 			return err
 		}
 		created := prodevents.OrderCreatedData{
-			OrderID: newID, OrderNumber: number, ProductID: out.New.ProductID, Quantity: out.New.Quantity.String(), SiteID: out.New.SiteID,
+			OrderID: newID, OrderNumber: number, LegalEntityID: out.New.LegalEntityID, Status: string(out.New.Status), ProductID: out.New.ProductID, Quantity: out.New.Quantity.String(), SiteID: out.New.SiteID,
 			DeliveryDate: out.New.DeliveryDate, OriginType: out.New.OriginType, OriginID: out.New.OriginID,
 		}
 		if ref := out.New.ReworkReference; ref != nil {
@@ -405,7 +405,7 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 				return err
 			}
 			if err := enqueue(ctx, tx, id, prodevents.OrderStatusChanged, p.TenantID, in.Actor, prodevents.OrderStatusChangedData{
-				OrderID: id, From: string(h.status), To: string(domain.Cancelled), Quantity: h.quantity.String(), QtyRAF: h.qtyRAF.String(),
+				OrderID: id, OrderNumber: h.orderNumber, LegalEntityID: h.legalEntityID, From: string(h.status), To: string(domain.Cancelled), Quantity: h.quantity.String(), QtyRAF: h.qtyRAF.String(),
 				QtyError: h.qtyError.String(), Actor: in.Actor, OccurredAt: time.Now().UTC().Format(time.RFC3339Nano),
 			}); err != nil {
 				return err

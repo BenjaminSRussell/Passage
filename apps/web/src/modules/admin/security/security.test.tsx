@@ -64,16 +64,16 @@ describe("admin security nav", () => {
 describe("effective permissions page", () => {
   it("rejects a malformed user id without calling the API", async () => {
     renderAt("/admin/security/permissions");
-    await fill("User id", "nope");
+    await fill("User", "nope");
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
-    expect(await screen.findByText("Enter the user id as a UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the user.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
 
   it("shows duties, ignored roles and allowed or denied routes, and filters them", async () => {
     server.handler = (url) => (url.pathname === `/api/v1/identity/users/${USER}/effective-permissions` ? json(200, report) : undefined);
     const { container } = renderAt("/admin/security/permissions");
-    await fill("User id", ` ${USER} `);
+    await fill("User", ` ${USER} `);
     await fill("Legal entity", ENTITY);
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     const table = await screen.findByRole("table", { name: "Route permissions" });
@@ -95,7 +95,7 @@ describe("effective permissions page", () => {
   it("shows the server reason first, then the scope hint, with no retry on 403", async () => {
     server.handler = () => json(403, { code: "IAM-0403", detail: "legal-entity scope must be all entities" });
     const { container } = renderAt("/admin/security/permissions");
-    await fill("User id", USER);
+    await fill("User", USER);
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     const alert = await screen.findByText("legal-entity scope must be all entities");
     expect(alert.parentElement).toHaveTextContent(/scope of all entities/);
@@ -108,7 +108,7 @@ describe("effective permissions page", () => {
     renderAt("/admin/security/permissions");
     const region = document.querySelector<HTMLElement>('p[role="status"]')!;
     expect(region).toBeEmptyDOMElement();
-    await fill("User id", USER);
+    await fill("User", USER);
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     await waitFor(() => expect(region).toHaveTextContent("Loading permissions…"));
     await screen.findByRole("table", { name: "Route permissions" });
@@ -117,13 +117,13 @@ describe("effective permissions page", () => {
   it("reports an unknown user and offers retry on a server error", async () => {
     server.handler = () => json(404, { code: "IDN-USER-NOT-FOUND", detail: "user not found" });
     const first = renderAt("/admin/security/permissions");
-    await fill("User id", USER);
+    await fill("User", USER);
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     expect(await screen.findByText("User not found")).toBeInTheDocument();
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "boom" });
     renderAt("/admin/security/permissions");
-    await fill("User id", USER);
+    await fill("User", USER);
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     expect(await screen.findByText("boom")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
@@ -132,7 +132,7 @@ describe("effective permissions page", () => {
   it("says when the user holds no duties", async () => {
     server.handler = () => json(200, { userId: USER, duties: [], ignoredRoles: [], permissions: [] });
     renderAt("/admin/security/permissions");
-    await fill("User id", USER);
+    await fill("User", USER);
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     expect(await screen.findByText("This user holds no duties right now.")).toBeInTheDocument();
   });
@@ -155,7 +155,7 @@ function assignmentsServer(extra?: (url: URL, method: string) => ReturnType<type
 }
 
 async function find(userId: string) {
-  await fill("Find by user id", userId);
+  await fill("Find by user", userId);
   fireEvent.click(screen.getByRole("button", { name: "Find assignments" }));
 }
 
@@ -164,7 +164,7 @@ describe("role assignments page", () => {
     assignmentsServer();
     renderAt("/admin/security/assignments");
     fireEvent.click(screen.getByRole("button", { name: "Find assignments" }));
-    expect(await screen.findByText("Enter a user id or a role to look up.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a user, a role, or both.")).toBeInTheDocument();
     expect(server.calls.some((c) => c.url.pathname === "/api/v1/authz/assignments")).toBe(false);
   });
 
@@ -249,7 +249,7 @@ describe("role assignments page", () => {
     await fill("Valid to", "2030-01-01T10:00");
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
     expect(await screen.findByText("Enter the role to assign.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the user id as a UUID.")).toBeInTheDocument();
+    expect(screen.getByText("Choose the user to assign.")).toBeInTheDocument();
     expect(screen.getByText("The end must be after the start.")).toBeInTheDocument();
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
   });

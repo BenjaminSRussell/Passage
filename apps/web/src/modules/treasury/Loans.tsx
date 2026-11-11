@@ -38,6 +38,7 @@ import { CURRENCY, DAY, fractionFromPercent, money, percent, PERCENT, UUID, vali
 import { CommandFailure, Detail, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -244,7 +245,7 @@ export function NewLoanPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("legalEntityId", "Legal entity id")}
+          <LookupFormField id="ln-legalEntityId" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => set({ legalEntityId })} />
           <FormField id="ln-role" label="Role">
             {(c) => (
               <Select {...c} value={values.role} onChange={(e) => set({ role: e.target.value as LoanDraft["role"] })}>

@@ -240,7 +240,7 @@ components:
           filled: {type: integer}
     WorkerCreated:
       name: dev.passage.hr.worker.created.v1
-      description: A worker record was created for a party person, with its personnel number and worker type. Carries no personal data.
+      description: A worker record was created for a party person, with its personnel number and worker type. Carries no personal data. The search index lists the worker by personnel number from it (#506).
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/WorkerCreatedData"

@@ -22,10 +22,11 @@ type DutyPermission struct {
 }
 
 type catalogueDuty struct {
-	permissions []compiledPermission
-	declared    []DutyPermission
-	size        int
-	serviceOnly bool
+	permissions  []compiledPermission
+	declared     []DutyPermission
+	size         int
+	serviceOnly  bool
+	operatorOnly bool
 }
 
 func (d *catalogueDuty) grants(method, resource string) bool {
@@ -65,8 +66,9 @@ type Catalogue struct {
 
 type catalogueFile struct {
 	Duties map[string]struct {
-		ServiceOnly bool `json:"service_only"`
-		Permissions []struct {
+		ServiceOnly  bool `json:"service_only"`
+		OperatorOnly bool `json:"operator_only"`
+		Permissions  []struct {
 			Resource string   `json:"resource"`
 			Methods  []string `json:"methods"`
 		} `json:"permissions"`
@@ -100,7 +102,7 @@ func LoadCatalogue(raw []byte) (*Catalogue, error) {
 	c := &Catalogue{duties: map[string]*catalogueDuty{}}
 	seen := map[Route]bool{}
 	for name, spec := range file.Duties {
-		duty := &catalogueDuty{serviceOnly: spec.ServiceOnly}
+		duty := &catalogueDuty{serviceOnly: spec.ServiceOnly, operatorOnly: spec.OperatorOnly}
 		for _, p := range spec.Permissions {
 			pattern, err := compileGlob(p.Resource)
 			if err != nil {
@@ -142,6 +144,28 @@ func (c *Catalogue) PersonAssignable(name string) bool {
 func (c *Catalogue) ServiceOnly(name string) bool {
 	d, ok := c.duties[name]
 	return ok && d.serviceOnly
+}
+
+// OperatorOnly reports whether the duty acts on platform-wide state and may be held only in the operator tenant
+// (`"operator_only": true` in data.json; authz.rego enforces it with the bundle's operator_tenant_id).
+func (c *Catalogue) OperatorOnly(name string) bool {
+	d, ok := c.duties[name]
+	return ok && d.operatorOnly
+}
+
+// HeldIn returns the duties of duties that a subject can exercise: every one in the operator tenant, and outside it all but
+// the operator-only duties, which authz.rego denies there. Use it before Evaluate or Effective so the report matches OPA.
+func (c *Catalogue) HeldIn(duties []string, operatorTenant bool) []string {
+	if operatorTenant {
+		return slices.Clone(duties)
+	}
+	out := make([]string, 0, len(duties))
+	for _, d := range duties {
+		if !c.OperatorOnly(d) {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // DutyInfo describes one seeded duty and the routes it grants.

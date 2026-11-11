@@ -17,6 +17,7 @@ import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
 import { EntityName } from "../../shell/lookup/EntityName";
+import { OrderNumber } from "../sales/OrderNumber";
 
 function Detail({ term, children, mono }: { term: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -187,14 +188,14 @@ export function RevenueContractDetailPage() {
           <Detail term="Contract date" mono>
             {contract.contractDate}
           </Detail>
-          <Detail term="Customer" mono>
-            {contract.customerId}
+          <Detail term="Customer">
+            <EntityName entity="customer" id={contract.customerId} />
           </Detail>
-          <Detail term="Sales order" mono>
-            {contract.orderId}
+          <Detail term="Sales order">
+            {contract.orderId ? <OrderNumber id={contract.orderId} /> : "None"}
           </Detail>
-          <Detail term="Legal entity" mono>
-            {contract.legalEntityId}
+          <Detail term="Legal entity">
+            <EntityName entity="legalEntity" id={contract.legalEntityId} />
           </Detail>
           <Detail term="Rounding residual to">{`${contract.residualRule.toLowerCase()} obligation`}</Detail>
           <Detail term="Ratable basis">{BASIS_LABELS[contract.ratableBasis] ?? contract.ratableBasis}</Detail>

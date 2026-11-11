@@ -243,7 +243,7 @@ func asnData(sh Shipment, slip PackingSlip) fulevents.ASNIssuedData {
 	for _, l := range sh.Lines {
 		orderLine[l.ID] = l.OrderLineID
 	}
-	data := fulevents.ASNIssuedData{ShipmentID: sh.ID, ShipmentNumber: sh.ShipmentNumber, OrderID: sh.OrderID,
+	data := fulevents.ASNIssuedData{ShipmentID: sh.ID, LegalEntityID: sh.LegalEntityID, ShipmentNumber: sh.ShipmentNumber, OrderID: sh.OrderID,
 		PackingSlipID: slip.ID, PackingSlipNumber: slip.Number, Containers: []fulevents.ASNContainer{}}
 	if sh.CarrierCode != nil {
 		data.Carrier = *sh.CarrierCode

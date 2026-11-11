@@ -90,6 +90,10 @@ export interface CorrectLineInput {
 
 export interface ReceiptQuery {
   state?: ReceiptState;
+  vendorId?: string;
+  /** Receipt date bounds, inclusive (YYYY-MM-DD). */
+  from?: string;
+  to?: string;
   cursor?: string;
   limit?: number;
 }
@@ -98,6 +102,9 @@ export interface ReceiptQuery {
 export function fetchReceipts(q: ReceiptQuery = {}, fetchImpl: FetchLike = defaultFetch): Promise<ReceiptPage> {
   const params = new URLSearchParams();
   if (q.state) params.set("state", q.state);
+  if (q.vendorId) params.set("vendorId", q.vendorId);
+  if (q.from) params.set("from", q.from);
+  if (q.to) params.set("to", q.to);
   if (q.cursor) params.set("cursor", q.cursor);
   if (q.limit) params.set("limit", String(q.limit));
   const query = params.size > 0 ? `?${params}` : "";

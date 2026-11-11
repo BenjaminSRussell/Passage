@@ -13,6 +13,7 @@ import {
 import { ACCOUNT, CURRENCY, DAY, DECIMAL, invoiceName, STATUS_LABELS, TAX_CODE, today, TYPE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -83,9 +84,9 @@ export function emptyShipment(day = today()): ShipmentValues {
 /** Client checks that mirror the service (FR-29.1, BR-29.4, BR-29.5); the service has the last word. */
 export function validateShipment(v: ShipmentValues): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
-  if (!UUID.test(v.customerId.trim())) errors.customerId = "Enter the customer id (a UUID).";
-  if (!UUID.test(v.invoiceAccountId.trim())) errors.invoiceAccountId = "Enter the invoice account id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
+  if (!UUID.test(v.customerId.trim())) errors.customerId = "Choose a customer.";
+  if (!UUID.test(v.invoiceAccountId.trim())) errors.invoiceAccountId = "Choose the invoice account.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter a three-letter currency code such as EUR.";
   if (!DAY.test(v.invoiceDate)) errors.invoiceDate = "Enter the invoice date as YYYY-MM-DD.";
   const days = Number(v.paymentTermDays);
@@ -109,7 +110,7 @@ export function validateShipment(v: ShipmentValues): Errors {
       else if (lineIds.has(lineId)) errors[ln("id")] = "A packing slip line is invoiced once; this one is already listed.";
       lineIds.add(lineId);
       if (!UUID.test(l.orderLineId.trim())) errors[ln("orderLineId")] = "Enter the order line id (a UUID).";
-      if (!UUID.test(l.productId.trim())) errors[ln("productId")] = "Enter the product id (a UUID).";
+      if (!UUID.test(l.productId.trim())) errors[ln("productId")] = "Choose a product.";
       if (l.description.trim() === "" || l.description.trim().length > 200) errors[ln("description")] = "Enter a description of up to 200 characters.";
       if (!DECIMAL.test(l.qty.trim()) || Number(l.qty) <= 0) errors[ln("qty")] = "Enter the shipped quantity, above zero.";
       if (!DECIMAL.test(l.unitPrice.trim())) errors[ln("unitPrice")] = "Enter the order line's unit price, such as 50.00.";
@@ -286,9 +287,26 @@ export function NewShipmentProposalPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {header("sp-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
-          {header("sp-customer", "customerId", "Customer id", { mono: true })}
-          {header("sp-account", "invoiceAccountId", "Invoice account id", { mono: true, hint: "Every slip in the list bills this account." })}
+          <LookupFormField id="sp-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
+          <LookupFormField
+            id="sp-customer"
+            label="Customer"
+            entity="customer"
+            scope={{ legalEntityId: values.legalEntityId || undefined }}
+            value={values.customerId}
+            error={errors.customerId}
+            onChange={(customerId) => update({ customerId, ...(values.invoiceAccountId === "" || values.invoiceAccountId === values.customerId ? { invoiceAccountId: customerId } : {}) })}
+          />
+          <LookupFormField
+            id="sp-account"
+            label="Invoice account"
+            entity="customer"
+            hint="Every slip in the list bills this customer account; it starts as the customer itself."
+            scope={{ legalEntityId: values.legalEntityId || undefined }}
+            value={values.invoiceAccountId}
+            error={errors.invoiceAccountId}
+            onChange={(invoiceAccountId) => update({ invoiceAccountId })}
+          />
           {header("sp-currency", "currency", "Currency", { mono: true })}
           {header("sp-date", "invoiceDate", "Invoice date", { type: "date", mono: true, hint: "Not before any packing slip's date." })}
           {header("sp-terms", "paymentTermDays", "Payment terms (days)", { mono: true, hint: "Due date = invoice date + these days." })}
@@ -312,7 +330,14 @@ export function NewShipmentProposalPage() {
                   <legend className={styles.groupsLegend}>{`Slip ${i + 1}, line ${j + 1}`}</legend>
                   {line(i, j, "id", "Slip line id", { mono: true })}
                   {line(i, j, "orderLineId", "Order line id", { mono: true })}
-                  {line(i, j, "productId", "Product id", { mono: true })}
+                  <LookupFormField
+                    id={`sp-line-${i}-${j}-productId`}
+                    label="Product"
+                    entity="product"
+                    value={values.slips[i].lines[j].productId}
+                    error={errors[`slips[${i}].lines[${j}].productId`]}
+                    onChange={(productId) => setLine(i, j, { productId })}
+                  />
                   {line(i, j, "description", "Description")}
                   {line(i, j, "qty", "Shipped quantity", { mono: true, decimal: true })}
                   {line(i, j, "unitPrice", "Unit price", { mono: true, decimal: true })}

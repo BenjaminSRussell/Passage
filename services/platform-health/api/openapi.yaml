@@ -9,6 +9,7 @@ paths:
   /v1/hello-ledger/entries:
     post:
       operationId: createEntry
+      summary: "Create a hello-ledger entry"
       x-passage-duty: hello.write
       parameters:
         - name: Idempotency-Key
@@ -31,6 +32,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listEntries
+      summary: "List hello-ledger entries"
       x-passage-duty: hello.read
       responses:
         '200':
@@ -71,6 +73,7 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listReleases
+      summary: "List platform releases"
       x-passage-duty: platform.release.view
       parameters:
         - name: service

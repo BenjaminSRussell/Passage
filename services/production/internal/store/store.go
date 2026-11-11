@@ -460,12 +460,13 @@ func estimateOnCreate(ctx context.Context, tx pgx.Tx, tenantID, actor, orderID s
 		return err
 	}
 	var updatedAt time.Time
-	if err := tx.QueryRow(ctx, `select updated_at from production_order where tenant_id = $1 and id = $2`, tenantID, orderID).Scan(&updatedAt); err != nil {
+	var number string
+	if err := tx.QueryRow(ctx, `select updated_at, order_number from production_order where tenant_id = $1 and id = $2`, tenantID, orderID).Scan(&updatedAt, &number); err != nil {
 		return err
 	}
 	zero := "0"
 	return enqueue(ctx, tx, orderID, prodevents.OrderStatusChanged, tenantID, actor, prodevents.OrderStatusChangedData{
-		OrderID: orderID, From: string(domain.Created), To: string(to), Quantity: in.Quantity.String(), QtyRAF: zero,
+		OrderID: orderID, OrderNumber: number, LegalEntityID: in.LegalEntityID, From: string(domain.Created), To: string(to), Quantity: in.Quantity.String(), QtyRAF: zero,
 		QtyError: zero, Actor: actor, OccurredAt: updatedAt.UTC().Format(time.RFC3339Nano),
 	})
 }
@@ -508,7 +509,7 @@ func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewO
 		return "", err
 	}
 	data := prodevents.OrderCreatedData{
-		OrderID: id, OrderNumber: number, ProductID: in.ProductID, Quantity: in.Quantity.String(), SiteID: in.SiteID,
+		OrderID: id, OrderNumber: number, LegalEntityID: in.LegalEntityID, Status: string(domain.Created), ProductID: in.ProductID, Quantity: in.Quantity.String(), SiteID: in.SiteID,
 		DeliveryDate: in.DeliveryDate, OriginType: in.OriginType, OriginID: in.OriginID, ConfigurationID: in.ConfigurationID,
 	}
 	if ref := in.ReworkReference; ref != nil {
@@ -695,6 +696,7 @@ type orderHead struct {
 	qtyRAF        decimal.Decimal
 	qtyError      decimal.Decimal
 	legalEntityID string
+	orderNumber   string
 	productID     string
 	siteID        string
 	warehouseID   string
@@ -726,14 +728,14 @@ func lockOrder(ctx context.Context, tx pgx.Tx, tenantID, orderID string, ifMatch
 func readOrderHead(ctx context.Context, q querier, tenantID, orderID string, lock bool) (orderHead, error) {
 	h := orderHead{id: orderID}
 	var status, qty, raf, qerr string
-	sql := `select status, version, quantity::text, qty_raf::text, qty_error::text, legal_entity_id::text,
+	sql := `select status, version, quantity::text, qty_raf::text, qty_error::text, legal_entity_id::text, order_number,
 			product_id::text, site_id::text, warehouse_id::text, item_group, currency::text, (created_at at time zone 'UTC')::date::text, origin_type
 		from production_order where tenant_id = $1 and id = $2`
 	if lock {
 		sql += ` for update`
 	}
 	err := q.QueryRow(ctx, sql, tenantID, orderID).Scan(&status, &h.version, &qty, &raf, &qerr,
-		&h.legalEntityID, &h.productID, &h.siteID, &h.warehouseID, &h.itemGroup, &h.currency, &h.createdOn, &h.originType)
+		&h.legalEntityID, &h.orderNumber, &h.productID, &h.siteID, &h.warehouseID, &h.itemGroup, &h.currency, &h.createdOn, &h.originType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return h, notFound()
 	}
@@ -998,7 +1000,7 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 			return nil // a re-estimate changes cost rows, not the status
 		}
 		if err := enqueue(ctx, tx, t.OrderID, prodevents.OrderStatusChanged, p.TenantID, t.Actor, prodevents.OrderStatusChangedData{
-			OrderID: t.OrderID, From: string(from), To: string(to), Quantity: out.Quantity.String(), QtyRAF: out.QtyRAF.String(),
+			OrderID: t.OrderID, OrderNumber: out.OrderNumber, LegalEntityID: out.LegalEntityID, From: string(from), To: string(to), Quantity: out.Quantity.String(), QtyRAF: out.QtyRAF.String(),
 			QtyError: out.QtyError.String(), StartDate: out.StartDate, EndDate: out.EndDate, Actor: t.Actor,
 			OccurredAt: out.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		}); err != nil {

@@ -143,8 +143,8 @@ describe("teams writes", () => {
     await findTable({ name: "Members of MRP" });
 
     await user.click(screen.getByRole("button", { name: "Add member" }));
-    expect(await screen.findByText("Enter the member's id (a UUID).")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Member id"), userId.toUpperCase());
+    expect(await screen.findByText("Choose the member.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Member"), userId.toUpperCase());
     await user.click(screen.getByRole("button", { name: "Add member" }));
     await waitFor(() => expect(callsTo(fetchMock, "POST", "/teams/t-1/members")).toHaveLength(1));
     expect(bodyOf(callsTo(fetchMock, "POST", "/teams/t-1/members")[0] as never)).toMatchObject({ memberKind: "user", memberId: userId, memberRole: "member" });
@@ -166,7 +166,7 @@ describe("teams writes", () => {
     const first = renderPage("/org/teams", TeamsPage, ADMIN);
     await findTable({ name: "Teams" });
     await first.user.click(screen.getByRole("button", { name: "Show members of MRP" }));
-    await first.user.type(await screen.findByLabelText("Member id"), userId);
+    await first.user.type(await screen.findByLabelText("Member"), userId);
     await first.user.click(screen.getByRole("button", { name: "Add member" }));
     expect(await screen.findByText(/already in the team/)).toBeInTheDocument();
     first.unmount();
