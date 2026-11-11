@@ -71,3 +71,30 @@
 .mono {
   font-family: var(--font-mono, monospace);
 }
+
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem) var(--space-4, 1rem);
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.checks legend {
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+}
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+}

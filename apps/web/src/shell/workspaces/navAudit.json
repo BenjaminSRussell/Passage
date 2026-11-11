@@ -33,6 +33,7 @@
     {"to": "/admin/security/assignments", "module": "admin", "label": "Role assignments", "area": "administration", "decision": "keep", "taskLabel": "Assign roles"},
     {"to": "/admin/security/legal-entities", "module": "admin", "label": "Legal entities", "area": "administration", "decision": "keep", "taskLabel": "Company access"},
     {"to": "/admin/security/users", "module": "admin", "label": "Users", "area": "administration", "decision": "keep", "taskLabel": "Users"},
+    {"to": "/admin/security/customer-contacts", "module": "admin", "label": "Portal contacts", "area": "administration", "decision": "advanced"},
     {"to": "/admin/security/roles", "module": "admin", "label": "Role catalogue", "area": "administration", "decision": "keep", "taskLabel": "Roles"},
     {"to": "/analytics/metrics", "module": "analytics", "label": "Governed metrics", "area": "administration", "decision": "advanced"},
     {"to": "/analytics/dashboards", "module": "analytics", "label": "Dashboards", "area": "administration", "decision": "keep", "taskLabel": "Dashboards"},
