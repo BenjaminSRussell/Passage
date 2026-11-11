@@ -1,14 +1,19 @@
 // HTTP surface: the session endpoints (/bff/login, /bff/callback, /bff/me, /bff/logout) and the /api/v1 routes of routes.ts.
-// Every /api/v1 call needs a session and a rate-limit slot, and becomes one read of one owning service with a service token
-// naming the session's customer. The portal reads only: any other method is refused. The browser never sees a token.
+// Every /api/v1 call needs a session and a rate-limit slot, and becomes one call to one owning service with a service token
+// naming the customer the contact acts for, and only the duty of that call. Reads are GET; the only writes are the two of
+// routes.ts, with a CSRF token, an Origin check and an Idempotency-Key. The browser never sees a token.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { authorizationUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
-import { matchRoute, QUERY_ALLOWLIST, type Route } from "./routes.ts";
+import { authorizationUrl, endSessionUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
+import { FORBIDDEN_BODY_FIELDS, IDEMPOTENCY_KEY, matchRoute, QUERY_ALLOWLIST, type Route } from "./routes.ts";
 import type { Audience, ServiceTokenSigner } from "./serviceToken.ts";
-import { LOGIN_TTL_MS, parseCookies, SESSION_COOKIE, sameToken, type RateLimiter, type Session, type SessionStore } from "./session.ts";
+import { LOGIN_TTL_MS, parseCookies, SESSION_COOKIE, sameToken, StoreUnavailable, type RateLimiter, type Session, type SessionStore } from "./session.ts";
 
 const UPSTREAM_TIMEOUT_MS = 15_000;
+const MAX_BODY_BYTES = 64 * 1024;
+const ACCOUNTS_TTL_MS = 60_000;
+const NAMES_TTL_MS = 10 * 60_000;
+const CACHE_MAX = 5000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface ServerDeps {
@@ -43,17 +48,56 @@ function problem(res: ServerResponse, status: number, code: string, detail: stri
   send(res, status, { type: `https://passage.dev/problems/${code}`, title: detail, status, code, detail });
 }
 
+class BodyRefused extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<string> {
+  const type = req.headers["content-type"] ?? "";
+  if (!/^application\/json\s*(;|$)/i.test(type)) throw new BodyRefused(415, "send application/json");
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new BodyRefused(413, "the request is too large");
+    chunks.push(chunk as Buffer);
+  }
+  const text = Buffer.concat(chunks).toString("utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new BodyRefused(400, "the request is not valid JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new BodyRefused(400, "the request must be a JSON object");
+  const named = FORBIDDEN_BODY_FIELDS.filter((f) => f in (parsed as Record<string, unknown>));
+  if (named.length > 0) throw new BodyRefused(400, `the request may not name ${named.join(", ")}: who it is for comes from your sign-in`);
+  return text;
+}
+
+function bounded<V>(cache: Map<string, V>): void {
+  if (cache.size > CACHE_MAX) cache.clear();
+}
+
 export function createHttpServer(deps: ServerDeps): Server {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((entry) => console.log(JSON.stringify(entry)));
   const cookieAttrs = `Path=/; HttpOnly; SameSite=Lax${deps.cookieSecure ? "; Secure" : ""}`;
   const setSession = (id: string, maxAgeSeconds: number): string => `${SESSION_COOKIE}=${id}; ${cookieAttrs}; Max-Age=${maxAgeSeconds}`;
+  /** The accounts a contact may act for, per session and legal entity, kept for a minute; derived data, so a pod's own copy is enough. */
+  const accountCache = new Map<string, { ids: Set<string>; expires: number }>();
+  /** Legal entity display names, per tenant and entity, kept for ten minutes. */
+  const nameCache = new Map<string, { name: string | null; expires: number }>();
 
   async function login(res: ServerResponse): Promise<void> {
     const state = randomToken();
     const nonce = randomToken();
     const { verifier, challenge } = pkcePair();
-    deps.sessions.putLogin(state, { nonce, verifier, expiresAt: now() + LOGIN_TTL_MS });
+    await deps.sessions.putLogin(state, { nonce, verifier, expiresAt: now() + LOGIN_TTL_MS });
     res.writeHead(302, { location: authorizationUrl(deps.oidc, state, nonce, challenge), "cache-control": "no-store" });
     res.end();
   }
@@ -61,12 +105,12 @@ export function createHttpServer(deps: ServerDeps): Server {
   async function callback(url: URL, res: ServerResponse): Promise<void> {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
-    const pending = state ? deps.sessions.takeLogin(state, now()) : undefined;
+    const pending = state ? await deps.sessions.takeLogin(state, now()) : undefined;
     if (!code || !pending) return problem(res, 400, "CUS-BFF-400", "the sign-in is not valid or has expired; start again");
     try {
       const idToken = await exchangeCode(deps.oidc, code, pending.verifier, deps.fetcher);
       const identity = await verifyIdToken(idToken, deps.oidc, deps.jwks, pending.nonce, now());
-      const session = deps.sessions.create(identity, now());
+      const session = await deps.sessions.create(identity, idToken, now());
       log({ msg: "sign-in", userId: identity.userId, customerId: identity.customerId });
       res.writeHead(302, { location: "/", "set-cookie": setSession(session.id, 8 * 3600), "cache-control": "no-store" });
       res.end();
@@ -91,34 +135,87 @@ export function createHttpServer(deps: ServerDeps): Server {
     return entities.length === 1 ? entities[0] : undefined;
   }
 
+  function mint(session: Session, audience: Audience, duty: string, le: string, customerId: string): string {
+    return deps.signer.mint(audience, { tenantId: session.identity.tenantId, legalEntityId: le, userId: session.identity.userId, customerId }, [duty]);
+  }
+
+  async function call(token: string, method: "GET" | "POST", target: URL, extra: Record<string, string>, body?: string): Promise<Response> {
+    const headers: Record<string, string> = { "x-passage-service-token": token, accept: "application/json", ...extra };
+    return deps.fetcher(target.toString(), { method, headers, ...(body !== undefined ? { body } : {}), signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+  }
+
+  /**
+   * The customer a call is for: the contact's own, or, when X-Customer names another, one of the accounts party lists for the
+   * contact's customer (its bill-to and ship-to accounts of the same customer group). Anything else is refused, never signed.
+   */
+  async function customerFor(session: Session, req: IncomingMessage, le: string): Promise<{ customerId: string } | { refused: string }> {
+    const wanted = req.headers["x-customer"];
+    const home = session.identity.customerId;
+    if (typeof wanted !== "string" || wanted.trim() === "") return { customerId: home };
+    const id = wanted.trim().toLowerCase();
+    if (id === home) return { customerId: home };
+    if (!UUID.test(id)) return { refused: "name one of your accounts in X-Customer" };
+    const key = `${session.id}:${le}`;
+    let entry = accountCache.get(key);
+    if (!entry || entry.expires < now()) {
+      const target = new URL("/v1/party/customer-portal/accounts", deps.upstreams.party);
+      const res = await call(mint(session, "party", "party.customer-portal.read", le, home), "GET", target, {});
+      if (!res.ok) return { refused: "your accounts could not be read" };
+      const body = (await res.json()) as { items?: { id?: unknown }[] };
+      entry = { ids: new Set((body.items ?? []).map((a) => String(a.id ?? "").toLowerCase())), expires: now() + ACCOUNTS_TTL_MS };
+      bounded(accountCache);
+      accountCache.set(key, entry);
+    }
+    return entry.ids.has(id) ? { customerId: id } : { refused: "that is not one of your accounts" };
+  }
+
   async function api(req: IncomingMessage, res: ServerResponse, url: URL, session: Session): Promise<void> {
     const method = req.method ?? "GET";
+    if (method === "GET" && url.pathname === "/api/v1/companies") return companies(res, session);
     const matched = matchRoute(method, url.pathname);
     if (!matched) return problem(res, 404, "CUS-BFF-404", "no such route");
     const { route, upstreamPath } = matched;
     const le = legalEntity(session, req);
     if (!le) return problem(res, 400, "CUS-BFF-401", "name one of your legal entities in X-Legal-Entity");
     if (!deps.limiter.allow(session.id, now())) return problem(res, 429, "CUS-BFF-429", "too many requests");
-    await forward(res, url, session, route, upstreamPath, le);
+    let body: string | undefined;
+    const extra: Record<string, string> = {};
+    if (route.method === "POST") {
+      const key = req.headers["idempotency-key"];
+      if (typeof key !== "string" || !IDEMPOTENCY_KEY.test(key)) return problem(res, 400, "CUS-BFF-405", "send an Idempotency-Key of 8 to 80 letters, digits, - or _, one per submit");
+      extra["idempotency-key"] = key;
+      try {
+        body = await readJsonBody(req);
+      } catch (err) {
+        if (err instanceof BodyRefused) return problem(res, err.status, "CUS-BFF-406", err.message);
+        throw err;
+      }
+    }
+    let customerId = session.identity.customerId;
+    if (!route.homeOnly) {
+      const chosen = await customerFor(session, req, le);
+      if ("refused" in chosen) return problem(res, 403, "CUS-BFF-407", chosen.refused);
+      customerId = chosen.customerId;
+    }
+    await forward(res, url, session, route, upstreamPath, le, customerId, extra, body);
   }
 
-  async function forward(res: ServerResponse, url: URL, session: Session, route: Route, upstreamPath: string, le: string): Promise<void> {
+  async function forward(res: ServerResponse, url: URL, session: Session, route: Route, upstreamPath: string, le: string, customerId: string, extra: Record<string, string>, body: string | undefined): Promise<void> {
     const target = new URL(upstreamPath, deps.upstreams[route.audience]);
     for (const name of QUERY_ALLOWLIST) {
       const v = url.searchParams.get(name);
       if (v !== null) target.searchParams.set(name, v);
     }
-    const token = deps.signer.mint(route.audience, { tenantId: session.identity.tenantId, legalEntityId: le, userId: session.identity.userId, customerId: session.identity.customerId });
-    const headers: Record<string, string> = { "x-passage-service-token": token, accept: "application/json" };
+    const token = mint(session, route.audience, route.duty, le, customerId);
     const started = now();
     let upstream: Response;
     try {
-      upstream = await deps.fetcher(target.toString(), { method: route.method, headers, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+      upstream = await call(token, route.method, target, extra, body);
     } catch (err) {
       log({ msg: "upstream unreachable", audience: route.audience, path: route.path, err: String(err) });
       return problem(res, 502, "CUS-BFF-502", "the service did not answer");
     }
-    log({ msg: "api", userId: session.identity.userId, customerId: session.identity.customerId, method: route.method, route: route.path, status: upstream.status, ms: now() - started });
+    log({ msg: "api", userId: session.identity.userId, customerId, method: route.method, route: route.path, status: upstream.status, ms: now() - started });
     // A rejected service token is this service's fault, never the user's: do not tell the browser to sign in again.
     const status = upstream.status === 401 ? 502 : upstream.status;
     const text = await upstream.text();
@@ -131,6 +228,35 @@ export function createHttpServer(deps: ServerDeps): Server {
     res.end(status === 502 && upstream.status === 401 ? JSON.stringify({ code: "CUS-BFF-502", status: 502, detail: "the service refused this portal" }) : text);
   }
 
+  /** The contact's companies with their customer-facing names, one small read of identity per legal entity (cached). */
+  async function companies(res: ServerResponse, session: Session): Promise<void> {
+    if (!deps.limiter.allow(session.id, now())) return problem(res, 429, "CUS-BFF-429", "too many requests");
+    const items = await Promise.all(
+      session.identity.legalEntityIds.map(async (le) => {
+        const key = `${session.identity.tenantId}:${le}`;
+        const hit = nameCache.get(key);
+        if (hit && hit.expires >= now()) return { legalEntityId: le, name: hit.name };
+        let name: string | null = null;
+        try {
+          const target = new URL("/v1/identity/customer-portal/legal-entity", deps.upstreams.identity);
+          const r = await call(mint(session, "identity", "identity.customer-portal.read", le, session.identity.customerId), "GET", target, {});
+          if (r.ok) {
+            const shown = ((await r.json()) as { displayName?: unknown }).displayName;
+            name = typeof shown === "string" && shown !== "" ? shown : null;
+          }
+          else log({ msg: "legal entity name unavailable", status: r.status });
+        } catch (err) {
+          log({ msg: "legal entity name unreachable", err: String(err) });
+        }
+        // A failed read is not cached for long: the selector falls back to a numbered name and the next load tries again.
+        bounded(nameCache);
+        nameCache.set(key, { name, expires: now() + (name === null ? 15_000 : NAMES_TTL_MS) });
+        return { legalEntityId: le, name };
+      }),
+    );
+    send(res, 200, { items });
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://bff.invalid");
     const method = req.method ?? "GET";
@@ -138,7 +264,7 @@ export function createHttpServer(deps: ServerDeps): Server {
     if (method === "GET" && url.pathname === "/bff/login") return login(res);
     if (method === "GET" && url.pathname === "/bff/callback") return callback(url, res);
 
-    const session = deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
+    const session = await deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
     if (!session) return problem(res, 401, "CUS-BFF-401", "sign in first");
     if (method !== "GET" && method !== "HEAD") {
       const origin = req.headers.origin;
@@ -151,9 +277,10 @@ export function createHttpServer(deps: ServerDeps): Server {
       return send(res, 200, { userId: i.userId, name: i.name, legalEntityIds: i.legalEntityIds, csrfToken: session.csrf });
     }
     if (method === "POST" && url.pathname === "/bff/logout") {
-      deps.sessions.delete(session.id);
-      res.writeHead(204, { "set-cookie": setSession("", 0), "cache-control": "no-store" });
-      res.end();
+      await deps.sessions.delete(session.id);
+      // The browser is sent on to Keycloak's end-session endpoint so the single sign-on session ends with this one; without that
+      // the next "sign in" would walk straight back in.
+      send(res, 200, { logoutUrl: endSessionUrl(deps.oidc, session.idToken) }, { "set-cookie": setSession("", 0) });
       return;
     }
     if (url.pathname.startsWith("/api/v1/")) return api(req, res, url, session);
@@ -163,7 +290,9 @@ export function createHttpServer(deps: ServerDeps): Server {
   return createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
       log({ msg: "unhandled", err: String(err) });
-      if (!res.headersSent) problem(res, 500, "CUS-BFF-500", "internal error");
+      // A store that cannot be reached is the service being unavailable, not the contact being signed out.
+      const status = err instanceof StoreUnavailable ? 503 : 500;
+      if (!res.headersSent) problem(res, status, status === 503 ? "CUS-BFF-503" : "CUS-BFF-500", status === 503 ? "the portal cannot reach its session store; retry" : "internal error");
       else res.end();
     });
   });

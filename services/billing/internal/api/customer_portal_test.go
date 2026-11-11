@@ -53,7 +53,7 @@ func newCustomerStore(leaky bool) *customerStore {
 			Currency: "USD", InvoiceDate: time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC), DueDate: time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC),
 			Totals: domain.Totals{Net: decimal.RequireFromString("100"), Gross: decimal.RequireFromString("119")}, Version: 3,
 			Lines: []store.Line{{Line: domain.Line{No: 1, Description: "Pump", Qty: decimal.NewFromInt(1), UnitPrice: decimal.RequireFromString("100"),
-				RevenueAccount: "4000-SECRET", TaxCode: "VAT19"}, Net: decimal.RequireFromString("100"), Source: domain.Source{OrderID: "order-secret"}}}}
+				RevenueAccount: "4000-SECRET", TaxCode: "VAT19"}, Net: decimal.RequireFromString("100"), Source: domain.Source{OrderID: "order-secret", ProductID: "0195f0a0-0000-7000-8000-0000000000d1"}}}}
 	}
 	s.invoices[invA] = mk(invA, custA, domain.StatusPosted, "INV-A-1")
 	s.invoices[invB] = mk(invB, custB, domain.StatusPosted, "INV-B-1")
@@ -158,6 +158,10 @@ func TestCustomerPortal_InvoicesHideInternals(t *testing.T) {
 	}
 	if !strings.Contains(body, `"description":"Pump"`) {
 		t.Errorf("the invoice lacks its lines: %s", body)
+	}
+	// The product id is what a return request names; it is the one source field a line shows.
+	if !strings.Contains(body, `"productId":"0195f0a0-0000-7000-8000-0000000000d1"`) {
+		t.Errorf("the invoice line lacks its product id: %s", body)
 	}
 }
 

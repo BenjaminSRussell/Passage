@@ -1,13 +1,18 @@
 // Entry point. Environment: HTTP_ADDR (default :8080); OIDC_ISSUER, OIDC_CLIENT_ID (default passage-portal-customer),
 // OIDC_CLIENT_SECRET, OIDC_REDIRECT_URI; optionally OIDC_AUTHORIZATION_ENDPOINT, OIDC_TOKEN_ENDPOINT and OIDC_JWKS_URI
-// (default to the Keycloak paths under the issuer); APP_ORIGIN; COOKIE_SECURE=false for local http;
-// RECEIVABLES_URL, BILLING_URL, SALES_URL; PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE.
+// (default to the Keycloak paths under the issuer); OIDC_END_SESSION_ENDPOINT (default: the Keycloak logout path) and
+// OIDC_POST_LOGOUT_REDIRECT_URI (default: APP_ORIGIN/); APP_ORIGIN; COOKIE_SECURE=false for local http;
+// RECEIVABLES_URL, BILLING_URL, SALES_URL, PARTY_URL, IDENTITY_URL; PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE;
+// SESSION_STORE_URL (redis:// or rediss:// of a Valkey or Redis server shared by the pods; unset keeps sessions in this pod's memory,
+// which suits development and a single pod only) with SESSION_STORE_PASSWORD or SESSION_STORE_PASSWORD_FILE.
 
 import { readFileSync } from "node:fs";
 import { Jwks, type OidcConfig } from "./oidc.ts";
+import { RedisSessionStore } from "./redisStore.ts";
+import { parseStoreUrl, RespClient } from "./resp.ts";
 import { createHttpServer } from "./server.ts";
 import { serviceTokenSignerFromEnv } from "./serviceToken.ts";
-import { RateLimiter, SessionStore } from "./session.ts";
+import { MemorySessionStore, RateLimiter, type SessionStore } from "./session.ts";
 
 function required(env: Record<string, string | undefined>, name: string): string {
   const v = env[name];
@@ -17,6 +22,7 @@ function required(env: Record<string, string | undefined>, name: string): string
 
 export function oidcFromEnv(env: Record<string, string | undefined>): OidcConfig {
   const issuer = required(env, "OIDC_ISSUER").replace(/\/$/, "");
+  const appOrigin = required(env, "APP_ORIGIN").replace(/\/$/, "");
   return {
     issuer,
     clientId: env["OIDC_CLIENT_ID"] ?? "passage-portal-customer",
@@ -25,7 +31,21 @@ export function oidcFromEnv(env: Record<string, string | undefined>): OidcConfig
     authorizationEndpoint: env["OIDC_AUTHORIZATION_ENDPOINT"] ?? `${issuer}/protocol/openid-connect/auth`,
     tokenEndpoint: env["OIDC_TOKEN_ENDPOINT"] ?? `${issuer}/protocol/openid-connect/token`,
     jwksUri: env["OIDC_JWKS_URI"] ?? `${issuer}/protocol/openid-connect/certs`,
+    endSessionEndpoint: env["OIDC_END_SESSION_ENDPOINT"] ?? `${issuer}/protocol/openid-connect/logout`,
+    postLogoutRedirectUri: env["OIDC_POST_LOGOUT_REDIRECT_URI"] ?? `${appOrigin}/`,
   };
+}
+
+/** The shared store when SESSION_STORE_URL is set, else this pod's memory (with a warning: a restart signs everyone out). */
+export function sessionStoreFromEnv(env: Record<string, string | undefined>, readFile: (path: string) => string, warn: (msg: string) => void = console.warn): SessionStore {
+  const url = env["SESSION_STORE_URL"];
+  if (!url) {
+    warn("SESSION_STORE_URL is not set: sessions live in this pod's memory, a restart signs everyone out and a second replica would not know them");
+    return new MemorySessionStore();
+  }
+  const file = env["SESSION_STORE_PASSWORD_FILE"];
+  const password = (file ? readFile(file).trim() : env["SESSION_STORE_PASSWORD"]) || undefined;
+  return new RedisSessionStore(new RespClient(parseStoreUrl(url, password)));
 }
 
 export function listenAddress(raw: string | undefined): { host?: string; port: number } {
@@ -44,9 +64,15 @@ function main(): void {
     oidc,
     jwks: new Jwks(oidc.jwksUri, fetch),
     fetcher: fetch,
-    sessions: new SessionStore(),
+    sessions: sessionStoreFromEnv(env, (p) => readFileSync(p, "utf8")),
     signer: serviceTokenSignerFromEnv(env, (p) => readFileSync(p, "utf8")),
-    upstreams: { receivables: required(env, "RECEIVABLES_URL"), billing: required(env, "BILLING_URL"), sales: required(env, "SALES_URL") },
+    upstreams: {
+      receivables: required(env, "RECEIVABLES_URL"),
+      billing: required(env, "BILLING_URL"),
+      sales: required(env, "SALES_URL"),
+      party: required(env, "PARTY_URL"),
+      identity: required(env, "IDENTITY_URL"),
+    },
     appOrigin: required(env, "APP_ORIGIN"),
     cookieSecure: env["COOKIE_SECURE"] !== "false",
     limiter: new RateLimiter(300, 60_000),

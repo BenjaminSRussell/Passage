@@ -21,7 +21,7 @@ describe("session rules on /api/v1", () => {
     expect(statuses).toEqual([200, 200, 200, 429, 429]);
   });
 
-  it("is read-only: a write is refused without CSRF and unroutable with it", async () => {
+  it("allows no write but the two of the table: any other is refused without CSRF and unroutable with it", async () => {
     rig = await startRig();
     const s = await signIn(rig);
     for (const [method, path] of [
@@ -64,7 +64,7 @@ describe("customer scoping", () => {
   it("never lets a client name another customer on any route", async () => {
     rig = await startRig();
     const s = await signIn(rig);
-    for (const r of ROUTES) {
+    for (const r of ROUTES.filter((x) => x.method === "GET")) {
       const path = r.path.replace(":id", ID_1);
       const before = rig.calls.length;
       expect((await api(rig, s, "GET", `${path}?customer=${CUSTOMER_B}&customerId=${CUSTOMER_B}&legalEntityId=${LE_2}`, undefined, { "x-customer-id": CUSTOMER_B })).status, path).toBe(200);
@@ -103,6 +103,8 @@ describe("customer scoping", () => {
       [`/api/v1/orders/${ID_1}`]: `http://sales.test/v1/sales/customer-portal/orders/${ID_1}`,
       "/api/v1/returns": "http://sales.test/v1/sales/customer-portal/returns",
       [`/api/v1/returns/${ID_1}`]: `http://sales.test/v1/sales/customer-portal/returns/${ID_1}`,
+      "/api/v1/products": "http://sales.test/v1/sales/customer-portal/products",
+      "/api/v1/accounts": "http://party.test/v1/party/customer-portal/accounts",
     };
     for (const [path, upstream] of Object.entries(expected)) {
       const before = rig.calls.length;
@@ -143,11 +145,12 @@ describe("routing", () => {
     expect(rig.calls).toHaveLength(0);
   });
 
-  it("covers every route with a distinct upstream under a customer-portal path, and only reads", () => {
+  it("covers every route with a distinct upstream under a customer-portal path, and only two writes", () => {
     for (const r of ROUTES) {
       expect(r.upstream, r.path).toContain("/customer-portal/");
-      expect(r.method).toBe("GET");
+      expect(r.duty, r.path).toContain("customer-portal");
     }
+    expect(ROUTES.filter((r) => r.method !== "GET").map((r) => `${r.method} ${r.path}`).sort()).toEqual(["POST /api/v1/orders", "POST /api/v1/returns"]);
     expect(new Set(ROUTES.map((r) => `${r.method} ${r.path}`)).size).toBe(ROUTES.length);
   });
 });

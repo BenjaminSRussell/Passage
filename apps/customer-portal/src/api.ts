@@ -1,5 +1,7 @@
-// The one place the portal talks to its BFF. The session lives in an HttpOnly cookie the page cannot read; the page holds no token
-// and only reads: there is no write route. The customer is never sent: the BFF knows it from the session.
+// The one place the portal talks to its BFF. The session lives in an HttpOnly cookie the page cannot read; the page holds no token.
+// The customer is never in a body or a query: the BFF knows it from the session. The only writes are an order and a return, each
+// with an Idempotency-Key. A contact who acts for a bill-to or ship-to account names it in X-Customer; the BFF signs it only when
+// party lists it for the contact.
 
 export class ApiError extends Error {
   status: number;
@@ -22,19 +24,28 @@ export interface Me {
 
 let csrfToken = "";
 let legalEntityId = "";
+let accountId = "";
 let onSignedOut: () => void = () => window.location.assign("/bff/login");
 
-export function configureApi(opts: { csrfToken?: string; legalEntityId?: string; onSignedOut?: () => void }): void {
+/** `accountId` is the account the contact acts for; empty means its own customer. */
+export function configureApi(opts: { csrfToken?: string; legalEntityId?: string; accountId?: string; onSignedOut?: () => void }): void {
   if (opts.csrfToken !== undefined) csrfToken = opts.csrfToken;
   if (opts.legalEntityId !== undefined) legalEntityId = opts.legalEntityId;
+  if (opts.accountId !== undefined) accountId = opts.accountId;
   if (opts.onSignedOut) onSignedOut = opts.onSignedOut;
 }
 
-function headers(method: string): Record<string, string> {
+function headers(method: string, homeOnly = false): Record<string, string> {
   const h: Record<string, string> = { accept: "application/json" };
   if (legalEntityId) h["x-legal-entity"] = legalEntityId;
+  if (accountId && !homeOnly) h["x-customer"] = accountId;
   if (method !== "GET") h["x-csrf-token"] = csrfToken;
   return h;
+}
+
+/** A new key for one submit of a form: a retry of the same submit reuses it, so a double click never places two orders. */
+export function newSubmitKey(): string {
+  return `p-${crypto.randomUUID()}`;
 }
 
 async function fail(res: Response): Promise<never> {
@@ -54,12 +65,31 @@ async function fail(res: Response): Promise<never> {
 }
 
 export async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path, { method: "GET", credentials: "same-origin", headers: headers("GET") });
+  const res = await fetch(path, { method: "GET", credentials: "same-origin", headers: headers("GET", path.startsWith("/api/v1/accounts")) });
   if (!res.ok) return fail(res);
   return (await res.json()) as T;
 }
 
+/** The two writes of the portal. `key` is one per submit (newSubmitKey). */
+export async function post<T>(path: string, body: unknown, key: string): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { ...headers("POST"), "content-type": "application/json", "idempotency-key": key },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return fail(res);
+  return (await res.json()) as T;
+}
+
+/** Ends the session here and sends the browser to Keycloak's end-session endpoint, so the single sign-on session ends too. */
 export async function signOut(): Promise<void> {
-  await fetch("/bff/logout", { method: "POST", credentials: "same-origin", headers: headers("POST") }).catch(() => undefined);
-  window.location.assign("/");
+  let target = "/";
+  try {
+    const res = await fetch("/bff/logout", { method: "POST", credentials: "same-origin", headers: headers("POST", true) });
+    if (res.ok) target = ((await res.json()) as { logoutUrl?: string }).logoutUrl ?? "/";
+  } catch {
+    /* the session ends on the server by itself after the idle time; go home */
+  }
+  window.location.assign(target);
 }

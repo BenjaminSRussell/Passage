@@ -1452,6 +1452,7 @@ components:
         originalNumber: { type: string }
         lines:
           type: array
+          description: Each line carries its description, quantity, price, net and tax, and the productId of a shipment line (what a return request names).
           items: { type: object }
     Invoice:
       allOf:

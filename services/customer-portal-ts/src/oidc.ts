@@ -12,6 +12,10 @@ export interface OidcConfig {
   authorizationEndpoint: string;
   tokenEndpoint: string;
   jwksUri: string;
+  /** Keycloak's end-session endpoint; signing out sends the browser here so the single sign-on session ends too. */
+  endSessionEndpoint: string;
+  /** Where Keycloak sends the browser after the end-session (a post.logout.redirect.uris entry of the client). */
+  postLogoutRedirectUri: string;
 }
 
 export interface CustomerIdentity {
@@ -53,6 +57,19 @@ export function authorizationUrl(cfg: OidcConfig, state: string, nonce: string, 
 }
 
 export class LoginRefused extends Error {}
+
+/**
+ * The URL that ends the contact's Keycloak session and brings the browser back to the portal: the ID token of the sign-in is the
+ * hint, so Keycloak signs out without asking. Without a token the client id stands in and Keycloak asks the contact to confirm.
+ */
+export function endSessionUrl(cfg: OidcConfig, idToken: string | undefined): string {
+  const url = new URL(cfg.endSessionEndpoint);
+  const params = new URLSearchParams({ post_logout_redirect_uri: cfg.postLogoutRedirectUri });
+  if (idToken) params.set("id_token_hint", idToken);
+  else params.set("client_id", cfg.clientId);
+  url.search = params.toString();
+  return url.toString();
+}
 
 export async function exchangeCode(cfg: OidcConfig, code: string, verifier: string, fetcher: Fetch): Promise<string> {
   const res = await fetcher(cfg.tokenEndpoint, {
