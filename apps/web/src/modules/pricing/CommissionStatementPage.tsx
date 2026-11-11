@@ -23,8 +23,8 @@ export function validateStatement(v: Draft): Errors {
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   const rep = v.repId.trim();
   // The rep id is a path segment: the service refuses / and :, and . or .. would be resolved away.
-  if (rep === "" || rep.length > 64) errors.repId = "Enter the rep id (up to 64 characters).";
-  else if (/[/:]/.test(rep) || rep === "." || rep === "..") errors.repId = "A rep id has no / or : and is not . or ..";
+  if (rep === "" || rep.length > 64) errors.repId = "Choose the sales rep.";
+  else if (/[/:]/.test(rep) || rep === "." || rep === "..") errors.repId = "Choose the sales rep from the list.";
   if (!MONTH.test(v.period.trim())) errors.period = "Use a month such as 2027-03.";
   return errors;
 }
@@ -107,7 +107,7 @@ export function CommissionStatementPage() {
       <Card>
         <form className={styles.form} onSubmit={show} noValidate>
           <LookupFormField id="cst-legalEntityId" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setValues((v) => ({ ...v, legalEntityId }))} />
-          {field("repId", "Rep id")}
+          <LookupFormField id="cst-repId" label="Sales rep" entity="worker" hint="The rep is a worker; the statement is kept under the worker's id." value={values.repId} error={errors.repId} onChange={(repId) => setValues((v) => ({ ...v, repId }))} />
           {field("period", "Invoice month", "For example 2027-03.")}
           <div className={styles.formActions}>
             <Button type="submit" variant="primary">

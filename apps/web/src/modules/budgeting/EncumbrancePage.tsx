@@ -132,7 +132,7 @@ export function EncumbrancePage() {
     e.preventDefault();
     const clean = { invoiceId: form.invoiceId.trim(), invoiceQuantity: form.invoiceQuantity.trim(), poUnitPrice: form.poUnitPrice.trim(), invoiceAmount: form.invoiceAmount.trim() };
     const found: typeof errors = {};
-    if (!UUID.test(clean.invoiceId)) found.invoiceId = "Enter the invoice id (a UUID).";
+    if (!UUID.test(clean.invoiceId)) found.invoiceId = "Choose the vendor invoice.";
     for (const f of ["invoiceQuantity", "poUnitPrice", "invoiceAmount"] as const) {
       if (!isMoney(clean[f]) || clean[f].startsWith("-")) found[f] = "Enter a positive decimal with at most 4 places.";
     }
@@ -223,7 +223,7 @@ export function EncumbrancePage() {
       <DataTable label="Encumbrance history" columns={historyColumns} rows={enc.history} getRowKey={(h, i) => `${h.at}-${i}`} />
       <Card title="Relieve from an invoice" headingLevel={3}>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {field("invoiceId", "Invoice id")}
+          <LookupFormField id="relief-invoiceId" label="Vendor invoice" entity="vendorInvoice" value={form.invoiceId} error={errors.invoiceId} onChange={(invoiceId) => setForm((f) => ({ ...f, invoiceId }))} />
           {field("invoiceQuantity", "Invoiced quantity")}
           {field("poUnitPrice", "PO unit price", "Relief is quantity × PO price, capped at the remaining reservation.")}
           {field("invoiceAmount", "Invoice amount")}

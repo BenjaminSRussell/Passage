@@ -111,3 +111,31 @@ route("GET", "/api/v1/hr/workers/{id}", ({ params }) => {
   const p = personById(params.id === USER.id ? JORDAN : params.id);
   return p ? workerDetail(p) : reply.problem(404, "HR-0404", "No worker with that id");
 });
+
+// Party setup records a customer role names (#500): customer groups, payment terms and the legal entity's posting
+// profiles, for the lookups on the customer role form and the pricing agreements.
+const K_PARTY_SETUP = 763;
+const customerGroups = [
+  { id: uid(K_PARTY_SETUP, 1), code: "UTIL", name: "Municipal utilities", version: 1 },
+  { id: uid(K_PARTY_SETUP, 2), code: "AGRI", name: "Agriculture and irrigation", version: 1 },
+  { id: uid(K_PARTY_SETUP, 3), code: "IND", name: "Industrial and mining", version: 1 },
+  { id: uid(K_PARTY_SETUP, 4), code: "DIST", name: "Distributors", version: 1 },
+];
+const paymentTerms = [
+  { id: uid(K_PARTY_SETUP, 11), code: "NET30", name: "Net 30 days", netDays: 30, offsetMonths: 0, version: 1 },
+  { id: uid(K_PARTY_SETUP, 12), code: "NET45", name: "Net 45 days", netDays: 45, offsetMonths: 0, version: 1 },
+  { id: uid(K_PARTY_SETUP, 13), code: "NET60", name: "Net 60 days", netDays: 60, offsetMonths: 0, version: 1 },
+  { id: uid(K_PARTY_SETUP, 14), code: "2-10-N30", name: "2% 10 days, net 30", netDays: 30, offsetMonths: 0, version: 1 },
+];
+const postingProfiles = [
+  { id: uid(K_PARTY_SETUP, 21), legalEntityId: LEGAL_ENTITY.id, code: "DOM", name: "Domestic customers", version: 1 },
+  { id: uid(K_PARTY_SETUP, 22), legalEntityId: LEGAL_ENTITY.id, code: "EXP", name: "Export customers", version: 1 },
+];
+for (const [path, rows, code] of [
+  ["customer-groups", customerGroups, "PTY-CUSTOMER-GROUP-NOT-FOUND"],
+  ["payment-terms", paymentTerms, "PTY-PAYMENT-TERM-NOT-FOUND"],
+  ["posting-profiles", postingProfiles, "PTY-POSTING-PROFILE-NOT-FOUND"],
+] as const) {
+  route("GET", `${PARTY}/${path}`, () => ({ items: rows }));
+  route("GET", `${PARTY}/${path}/{id}`, ({ params }) => (rows as readonly { id: string }[]).find((r) => r.id === params.id) ?? reply.problem(404, code, "not found"));
+}

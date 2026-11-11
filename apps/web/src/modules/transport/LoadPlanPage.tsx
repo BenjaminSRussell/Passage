@@ -14,7 +14,7 @@ export interface PlanValues {
 }
 
 const palletFields: RowField[] = [
-  { key: "id", label: "Pallet id" },
+  { key: "id", label: "Pallet reference", hint: "Your own label for the pallet." },
   { key: "lengthMm", label: "Length mm" },
   { key: "widthMm", label: "Width mm" },
   { key: "heightMm", label: "Height mm" },

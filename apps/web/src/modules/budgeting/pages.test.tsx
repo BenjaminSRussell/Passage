@@ -309,8 +309,8 @@ describe("EncumbrancePage", () => {
     expect(await findTable({ name: "Encumbrance history" })).toHaveTextContent("Reserve");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Relieve encumbrance" }));
-    expect(await screen.findByText("Enter the invoice id (a UUID).")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Invoice id"), { target: { value: D1 } });
+    expect(await screen.findByText("Choose the vendor invoice.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Vendor invoice"), { target: { value: D1 } });
     fireEvent.change(screen.getByLabelText("Invoiced quantity"), { target: { value: "10" } });
     fireEvent.change(screen.getByLabelText("PO unit price"), { target: { value: "50.00" } });
     fireEvent.change(screen.getByLabelText("Invoice amount"), { target: { value: "520.00" } });

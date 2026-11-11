@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { listSalesGroups, type SalesGroup } from "./api/client";
-import { describeReps } from "./commissionFormat";
+import { RepShares } from "./RepName";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -9,7 +9,7 @@ import { EntityName } from "../../shell/lookup/EntityName";
 
 const columns: DataTableColumn<SalesGroup>[] = [
   { key: "name", header: "Sales group" },
-  { key: "reps", header: "Reps and shares", mono: true, render: (row) => describeReps(row.reps) },
+  { key: "reps", header: "Reps and shares", render: (row) => <RepShares reps={row.reps} /> },
   { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
 ];
 
