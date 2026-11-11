@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -197,6 +200,15 @@ func (a *API) sendRecipe(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, "PMF-0504", "a control recipe is generated for a released or started batch order, this one is "+o.Status))
 		return
 	}
+	// An order has one control recipe: once it is made, a repeat answers with it. A recipe in error is sent again
+	// by the shopfloor service (POST /v1/shopfloor/control-recipes/{id}:resend), not made a second time here.
+	if link, err := a.store.GetControlRecipeLink(r.Context(), o.ID); err != nil {
+		fail(w, r, err)
+		return
+	} else if link.ControlRecipeID != nil {
+		httpx.JSON(w, http.StatusOK, link)
+		return
+	}
 	link, generated := a.generateRecipe(r.Context(), o)
 	if !generated {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, "PMF-0505", "no recipe target is set for the item of this batch order (PUT /v1/production/recipe-targets/{itemId})"))
@@ -219,10 +231,13 @@ func (a *API) generateRecipe(ctx context.Context, o store.BatchOrder) (store.Con
 	}
 	var link store.ControlRecipeLink
 	if err == nil {
-		var recipeID string
-		recipeID, err = a.recipes.CreateRecipe(ctx, o.LegalEntityID, "batch-order-recipe-"+o.ID, shopfloor.RecipeRequest{
-			OrderID: o.ID, ResourceID: target.ResourceID, Destination: target.Destination, EdgeID: target.EdgeID, Topic: target.Topic,
-			Recipe: ReleaseRecipe(o, target.Destination)})
+		req := shopfloor.RecipeRequest{OrderID: o.ID, ResourceID: target.ResourceID, Destination: target.Destination, EdgeID: target.EdgeID,
+			Topic: target.Topic, Recipe: ReleaseRecipe(o, target.Destination)}
+		var key, recipeID string
+		key, err = RecipeKey(o.ID, req)
+		if err == nil {
+			recipeID, err = a.recipes.CreateRecipe(ctx, o.LegalEntityID, key, req)
+		}
 		if err == nil {
 			link.ControlRecipeID = &recipeID
 		}
@@ -241,6 +256,19 @@ func (a *API) generateRecipe(ctx context.Context, o store.BatchOrder) (store.Con
 	return link, true
 }
 
+// RecipeKey is the Idempotency-Key of the request that makes an order's control recipe: the order and a hash
+// of the request. The same request sent again (a retry after a lost answer) replays the one recipe; a request
+// with another body (the order rescaled after a failed generation, or its target changed) is a new key, never
+// a reuse of the old one with a new body, which the shopfloor service refuses.
+func RecipeKey(orderID string, req shopfloor.RecipeRequest) (string, error) {
+	b, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return "batch-order-recipe-" + orderID + "-" + hex.EncodeToString(sum[:8]), nil
+}
+
 // ReleaseRecipe is the control recipe document of a released batch order: one unit procedure that makes the
 // batch, one operation with a phase for the charge, and in it the instruction to make the batch and the
 // material list scaled to the batch size (BR-24.1). A process control system gets the same document; its own
@@ -257,7 +285,13 @@ func ReleaseRecipe(o store.BatchOrder, destination string) map[string]any {
 		case domain.LinePhantom:
 			continue // a phantom explodes into its own components and is never charged
 		}
-		materials = append(materials, map[string]any{"itemId": l.ItemID, "qty": l.Qty.String(), "role": role})
+		m := map[string]any{"itemId": l.ItemID, "qty": l.Qty.String(), "role": role}
+		// Formula lines carry no unit of their own. A percent-controlled line is the batch × percent / 100
+		// (BR-24.1), so it is in the batch's unit; the unit of any other line is not recorded and is left out.
+		if l.PercentControlled && o.Unit != "" {
+			m["unit"] = o.Unit
+		}
+		materials = append(materials, m)
 	}
 	instructions := []map[string]any{
 		{"seq": 1, "category": "instruction-text", "text": fmt.Sprintf("Make %s %s under batch order %s (formula %s, version %d).",

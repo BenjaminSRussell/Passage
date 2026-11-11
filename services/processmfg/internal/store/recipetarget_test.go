@@ -80,3 +80,36 @@ func TestRecipeTargetsAndTheOrdersControlRecipeLink(t *testing.T) {
 		t.Fatal("deleted twice")
 	}
 }
+
+// A rescale is allowed while the order has no control recipe (none generated, or the generation failed), and
+// refused once the shopfloor service has one: that recipe would keep the old quantities and cannot be replaced.
+func TestRescaleIsRefusedOnceTheControlRecipeIsSent(t *testing.T) {
+	s, _ := setup(t)
+	ctx := ctxFor(1, "")
+	f, _, err := s.CreateFormula(ctx, ac241("DOUGH-RS"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, _, err := s.CreateBatchOrder(ctx, store.NewBatchOrder{LegalEntityID: entityA, FormulaID: f.ID, BatchSize: dec("1000")}, store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reason := "the shopfloor service answered 503"
+	if err := s.SetControlRecipe(ctx, o.ID, nil, &reason); err != nil {
+		t.Fatal(err)
+	}
+	o, _, err = s.RescaleBatchOrder(ctx, o.ID, dec("1500"), o.Version, store.Idem{})
+	if err != nil {
+		t.Fatalf("rescale after a failed generation: %v", err)
+	}
+	recipe := "0195f0a0-0000-7000-8000-0000000000c2"
+	if err := s.SetControlRecipe(ctx, o.ID, &recipe, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.RescaleBatchOrder(ctx, o.ID, dec("2000"), o.Version, store.Idem{}); problemCode(err) != store.CodeRecipeSent {
+		t.Fatalf("rescale with a recipe on the shop floor: %v", err)
+	}
+	if got, err := s.GetBatchOrder(ctx, o.ID); err != nil || !got.BatchSize.Equal(dec("1500")) {
+		t.Fatalf("batch size after the refused rescale: %v %v", got.BatchSize, err)
+	}
+}

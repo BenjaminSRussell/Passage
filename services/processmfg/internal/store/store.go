@@ -38,6 +38,9 @@ const (
 	CodeReportInvalid       = "PMF-0107"
 	CodeIdempotencyReuse    = "idempotency_key_reuse"
 	CodeIdempotencyInFlight = "idempotency_key_in_flight"
+	// CodeRecipeSent refuses a rescale of an order whose control recipe the shopfloor service already has: the
+	// recipe would keep the old quantities, and shopfloor has no way to replace or cancel it.
+	CodeRecipeSent = "PMF-0506"
 
 	uniqueViolation = "23505"
 	// MaxList bounds every list query.
@@ -603,6 +606,14 @@ func (s *Postgres) RescaleBatchOrder(ctx context.Context, id string, batchSize d
 		if !rescalable(o.Status) {
 			return httpx.NewProblem(http.StatusConflict, CodeOrderNotRescalable,
 				fmt.Sprintf("batch order %s is %s; only planned or released orders can be rescaled", o.OrderNumber, o.Status))
+		}
+		var recipeID *string
+		if err := tx.QueryRow(ctx, `select control_recipe_id::text from batch_order where id = $1`, id).Scan(&recipeID); err != nil {
+			return err
+		}
+		if recipeID != nil {
+			return httpx.NewProblem(http.StatusConflict, CodeRecipeSent,
+				fmt.Sprintf("batch order %s has control recipe %s on the shop floor at the current quantities; a rescale would leave it at the old ones", o.OrderNumber, *recipeID))
 		}
 		snapshot := make([]FormulaLine, len(o.Lines))
 		for i, l := range o.Lines {

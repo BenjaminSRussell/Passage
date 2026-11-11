@@ -1018,6 +1018,14 @@ const fieldService: Record<string, ProblemCatalogEntry> = {
   "INV-TRK-004": { message: "Truck stock isn't switched on for this service.", action: "Ask your administrator to enable it." },
 };
 
+/** Process manufacturing: batch orders and their control recipes (#25). */
+const processManufacturing: Record<string, ProblemCatalogEntry> = {
+  "PMF-0506": {
+    message: "This batch order can't be rescaled: its control recipe is already on the shop floor with the current quantities, and a recipe can't be replaced once it is sent.",
+    action: "Keep the current batch size. To make a different quantity, create another batch order for the difference.",
+  },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -1045,6 +1053,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...groupFinance,
   ...shared,
   ...fieldService,
+  ...processManufacturing,
 });
 
 /** The catalog entry for a problem code, if there is one. */

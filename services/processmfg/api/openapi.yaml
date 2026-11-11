@@ -185,7 +185,7 @@ paths:
           description: PMF-0102
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
-          description: PMF-0104 when the version is stale; PMF-0105 when the order has started.
+          description: PMF-0104 when the version is stale; PMF-0105 when the order has started; PMF-0506 when the order's control recipe is already on the shop floor (it would keep the old quantities).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: idempotency_key_reuse.
@@ -1536,7 +1536,7 @@ paths:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
-          description: The link after the attempt. The shopfloor service deduplicates by the order, so a recipe already generated is returned, not made twice.
+          description: The link after the attempt. An order whose control recipe is already made answers with it and sends nothing; a recipe in error is sent again by the shopfloor service (:resend). The Idempotency-Key sent to shopfloor is the order and a hash of the request, so a retry of the same request replays the one recipe.
           content: { application/json: { schema: { $ref: '#/components/schemas/ControlRecipeLink' } } }
         '404': { $ref: '#/components/responses/Problem' }
         '409':

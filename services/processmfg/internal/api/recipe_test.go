@@ -85,7 +85,7 @@ func TestReleaseGeneratesTheControlRecipe(t *testing.T) {
 	if rec.Code != http.StatusOK || sender.made != 1 {
 		t.Fatalf("release: %d %s; recipes made %d", rec.Code, rec.Body, sender.made)
 	}
-	if sender.key != "batch-order-recipe-"+orderID || sender.le != entityID || sender.got.OrderID != orderID || sender.got.Destination != "kiosk" || sender.got.ResourceID != kioskTarget().ResourceID {
+	if want, _ := RecipeKey(orderID, sender.got); sender.key != want || !strings.HasPrefix(sender.key, "batch-order-recipe-"+orderID+"-") || sender.le != entityID || sender.got.OrderID != orderID || sender.got.Destination != "kiosk" || sender.got.ResourceID != kioskTarget().ResourceID {
 		t.Fatalf("request %+v key %q le %q", sender.got, sender.key, sender.le)
 	}
 	if fs.link.ControlRecipeID == nil || *fs.link.ControlRecipeID == "" || fs.link.Error != nil {
@@ -208,6 +208,50 @@ func TestSendRecipeAndRecipeTargetRoutes(t *testing.T) {
 	}
 	if rec := (call{method: "GET", path: "/v1/production/recipe-targets", duties: DutyRead}).do(h); rec.Code != http.StatusOK {
 		t.Fatalf("list: %d", rec.Code)
+	}
+}
+
+// The Idempotency-Key follows the request: the same request is the same key, so a retry replays the one recipe;
+// an order rescaled after a failed generation is a new body and a new key, never shopfloor's key-reuse refusal.
+// Once the order keeps a recipe, :send-recipe answers with it and sends nothing.
+func TestRecipeKeyFollowsTheRequestAndARecipeIsMadeOnce(t *testing.T) {
+	fs := &fakeStore{order: releasedOrder(), target: kioskTarget()}
+	sender := &fakeSender{err: errors.New("the shopfloor service answered 503")}
+	h := httpxRouter(New(fs).WithShopfloor(sender))
+	send := func() int { return (call{method: "POST", path: orderPath + ":send-recipe", duties: DutyBatchOrderWrite}).do(h).Code }
+	if code := send(); code != http.StatusOK || fs.link.Error == nil {
+		t.Fatalf("a failed generation: %d %+v", code, fs.link)
+	}
+	first := sender.key
+	sender.err = nil
+	if send(); sender.key != first || sender.made != 1 {
+		t.Fatalf("the retry of the same request: key %q, want %q; made %d", sender.key, first, sender.made)
+	}
+	// The order is rescaled (allowed: the failed generation left no recipe), and the recipe is made again.
+	fs.link = store.ControlRecipeLink{}
+	fs.order.BatchSize, fs.order.Lines[0].Qty = decimal.RequireFromString("3000"), decimal.RequireFromString("1800")
+	if send(); sender.key == first || sender.made != 2 || sender.got.Recipe == nil {
+		t.Fatalf("the rescaled order kept the key %q (made %d)", sender.key, sender.made)
+	}
+	// Now the order keeps its recipe: a repeat answers with it and makes none.
+	rec := (call{method: "POST", path: orderPath + ":send-recipe", duties: DutyBatchOrderWrite}).do(h)
+	if rec.Code != http.StatusOK || sender.made != 2 || !strings.Contains(rec.Body.String(), *fs.link.ControlRecipeID) {
+		t.Fatalf("send-recipe with a recipe made: %d %s, made %d", rec.Code, rec.Body, sender.made)
+	}
+}
+
+// A percent-controlled line is the batch × percent / 100, so its material carries the batch's unit; a line with
+// a fixed quantity has no unit on record and none is sent.
+func TestReleaseRecipeMaterialUnits(t *testing.T) {
+	o := releasedOrder()
+	o.Lines[0].PercentControlled = true
+	ins := ReleaseRecipe(o, "kiosk")["procedure"].(map[string]any)["unitProcedures"].([]map[string]any)[0]["operations"].([]map[string]any)[0]["phases"].([]map[string]any)[0]["instructions"].([]map[string]any)
+	mats := ins[1]["materials"].([]map[string]any)
+	if mats[0]["unit"] != "kg" {
+		t.Fatalf("percent-controlled line unit %v, want kg", mats[0]["unit"])
+	}
+	if _, ok := mats[1]["unit"]; ok {
+		t.Fatalf("a fixed line got a unit: %v", mats[1])
 	}
 }
 
