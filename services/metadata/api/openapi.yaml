@@ -6,6 +6,7 @@ paths:
   /v1/metadata/entities:
     post:
       operationId: publishEntity
+      summary: "Publish an entity definition"
       x-passage-duty: metadata.write
       requestBody:
         required: true
@@ -18,6 +19,7 @@ paths:
   /v1/metadata/entities/{entity}/schema:
     get:
       operationId: getEffectiveEntitySchema
+      summary: "Get the effective schema of an entity, extensions included"
       x-passage-duty: metadata.read
       parameters:
         - { name: entity, in: path, required: true, schema: { type: string } }
@@ -31,6 +33,7 @@ paths:
   /v1/metadata/extensions:
     post:
       operationId: applyEntityExtension
+      summary: "Apply an extension to an entity as a new version"
       x-passage-duty: metadata.write
       requestBody:
         required: true
@@ -43,6 +46,7 @@ paths:
   /v1/metadata/rules/evaluate:
     post:
       operationId: evaluateDecisionTable
+      summary: "Evaluate a decision table for an input and explain the matched row"
       x-passage-duty: metadata.read
       requestBody:
         required: true
@@ -57,6 +61,7 @@ paths:
       - { name: entity, in: path, required: true, schema: { type: string } }
     get:
       operationId: listGeneratedEntityRecords
+      summary: "List the records of a generated entity"
       x-passage-duty: metadata.data.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -68,6 +73,7 @@ paths:
               schema: { type: array, items: { type: object } }
     post:
       operationId: createGeneratedEntityRecord
+      summary: "Create a record of a generated entity"
       x-passage-duty: metadata.data.write
       requestBody:
         required: true

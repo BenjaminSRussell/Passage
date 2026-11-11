@@ -642,7 +642,7 @@ paths:
   /v1/product-costing/activations/{id}/revaluation-report:
     get:
       operationId: getActivationRevaluationReport
-      summary: The value report of a standard cost activation (AC-39.4). Each stored line (quantity, old and new standard, amount) is set beside the inventory on-hand read again from the inventory service for the posting date (a replay before today, the live projection for today), with the difference. tiedToJournal is true when the line amounts sum to the activation total and the booked journal debits and credits equal it; tiedToOnHand is true when every line quantity equals the on-hand (null, with null per-line on-hand fields, for a reversal: its lines carry reversed quantities and inventory is not called). Read-only; inventory is called with the inventory.read duty only
+      summary: "The value report of a standard cost activation (AC-39.4). Each stored line (quantity, old and new standard, amount) is set beside the inventory on-hand read again from the inventory service for the posting date (a replay before today, the live projection for today), with the difference. tiedToJournal is true when the line amounts sum to the activation total and the booked journal debits and credits equal it; tiedToOnHand is true when every line quantity equals the on-hand (null, with null per-line on-hand fields, for a reversal: its lines carry reversed quantities and inventory is not called). Read-only; inventory is called with the inventory.read duty only"
       x-passage-duty: productcost.view
       parameters:
         - name: id

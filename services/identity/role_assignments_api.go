@@ -134,8 +134,8 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "a tenant-wide assignment requires the tenant.administer duty and a request without a legal-entity scope"))
 		return
 	}
-	if req.Role == dutyMaintainTenants && (a.operatorTenantID == "" || p.TenantID != a.operatorTenantID) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "identity.tenant.maintain can only be granted in the operator tenant"))
+	if (req.Role == dutyMaintainTenants || a.catalogue.OperatorOnly(req.Role)) && (a.operatorTenantID == "" || p.TenantID != a.operatorTenantID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, req.Role+" can only be granted in the operator tenant"))
 		return
 	}
 

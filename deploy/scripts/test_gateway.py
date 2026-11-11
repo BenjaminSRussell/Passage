@@ -62,7 +62,8 @@ def quantity_bytes(q):
 CLIENT_SUPPLIED = {"X-Passage-LegalEntity-Scope"}
 
 
-BACKEND_OF_ROUTE = {"inbox": "batch"}
+# A route is named after its public prefix; these two prefixes are served by a Service of another name.
+BACKEND_OF_ROUTE = {"inbox": "batch", "data": "metadata", "controlling": "costacct"}
 
 class GatewayManifests(unittest.TestCase):
     @classmethod
@@ -162,6 +163,22 @@ class GatewayManifests(unittest.TestCase):
         inverted = next(h for h in fallback["clientSelectors"][0]["headers"] if h.get("invert"))
         self.assertEqual(inverted["name"], "X-Passage-Tier")
         self.assertEqual(inverted["value"], "^(starter|professional|enterprise)$")
+
+    def test_campaign_contexts_are_routed_to_the_port_their_service_listens_on(self):
+        """FR-50.1: every context the load campaign calls has a route (load/PATH-CHECK.md, finding 1 and 2)."""
+        routes = {r["metadata"]["name"]: r for r in api_routes(self.docs)}
+        for name in ["ledger", "pricing", "sales", "party", "analytics", "planning", "data", "controlling"]:
+            self.assertIn(name, routes)
+            backend = BACKEND_OF_ROUTE.get(name, name)
+            chart = (DEPLOY.parent / "services" / backend / "charts" / backend / "templates" / "service.yaml").read_text()
+            chart_dir = DEPLOY.parent / "services" / backend / "charts" / backend
+            svc = (chart_dir / "templates" / "service.yaml").read_text()
+            found = re.findall(r"name: http, port: (\d+)", svc) or re.findall(r"name: http\s+port: (\d+)", svc)
+            if not found:  # the chart takes the Service port from its values
+                found = re.findall(r"^\s+port: (\d+)", (chart_dir / "values.yaml").read_text(), re.M)[:1]
+            (port,) = found
+            for rule in routes[name]["spec"]["rules"]:
+                self.assertEqual(rule["backendRefs"][0]["port"], int(port), name)
 
     def test_routes_strip_api_prefix_to_service_convention(self):
         for route in api_routes(self.docs):

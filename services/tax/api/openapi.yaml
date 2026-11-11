@@ -481,7 +481,7 @@ paths:
     get:
       operationId: getEuSalesList
       x-passage-duty: tax.vatreturn.read
-      summary: EU sales list: supplies to other member states grouped by country, VAT number and kind of supply
+      summary: "EU sales list: supplies to other member states grouped by country, VAT number and kind of supply"
       parameters:
         - { name: period_from, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
         - { name: period_to, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }

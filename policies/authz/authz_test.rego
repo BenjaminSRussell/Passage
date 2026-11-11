@@ -11,7 +11,56 @@ allowed(duty, method, resource) if {
 		"resource": resource,
 	}
 		with data.assignments as {"tenant-a": {"user-a": [duty]}}
+		with data.operator_tenant_id as "tenant-a"
 	result.allow
+}
+
+allowed_in(tenant, operator, duty, method, resource) if {
+	result := decision with input as {
+		"subject": {"tenant_id": tenant, "user_id": "user-a"},
+		"action": method,
+		"resource": resource,
+	}
+		with data.assignments as {tenant: {"user-a": [duty]}}
+		with data.operator_tenant_id as operator
+	result.allow
+}
+
+ops_operator_routes := [
+	["ops.region.view", "GET", "/v1/ops/regions"],
+	["ops.region.view", "GET", "/v1/ops/capacity/estimate"],
+	["ops.region.view", "GET", "/v1/ops/failover-requests/r1"],
+	["ops.region.report", "PUT", "/v1/ops/regions/eu-west/lag"],
+	["ops.failover.execute", "POST", "/v1/ops/failover"],
+	["ops.failover.execute", "POST", "/v1/ops/regions/us-east:rejoin"],
+	["ops.failover.execute", "POST", "/v1/ops/failover-requests/r1:approve"],
+]
+
+test_operator_only_duties_are_the_ops_duties if {
+	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute"}
+}
+
+test_operator_only_duties_grant_in_the_operator_tenant if {
+	every r in ops_operator_routes {
+		allowed_in("operator", "operator", r[0], r[1], r[2])
+	}
+}
+
+test_operator_only_duties_grant_nothing_in_another_tenant if {
+	every r in ops_operator_routes {
+		not allowed_in("tenant-b", "operator", r[0], r[1], r[2])
+	}
+}
+
+test_operator_only_duties_grant_nothing_without_an_operator_tenant if {
+	every r in ops_operator_routes {
+		not decision.allow with input as {"subject": {"tenant_id": "tenant-b", "user_id": "user-a"}, "action": r[1], "resource": r[2]}
+			with data.assignments as {"tenant-b": {"user-a": [r[0]]}}
+	}
+}
+
+test_ordinary_duties_ignore_the_operator_tenant if {
+	allowed_in("tenant-b", "operator", "platform.release.view", "GET", "/v1/platform/releases")
 }
 
 has_route_permissions(spec) if count(spec.permissions) > 0
@@ -105,6 +154,15 @@ segregation_denials := [
 	["reporting.statement.view", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
 	["reporting.statement.view", "GET", "/v1/reporting/definitions/d1/export"],
 	["platform.release.view", "POST", "/v1/platform/releases"],
+	["ops.region.view", "POST", "/v1/ops/failover"],
+	["ops.region.view", "PUT", "/v1/ops/regions/eu-west/lag"],
+	["ops.region.report", "GET", "/v1/ops/regions"],
+	["ops.region.report", "POST", "/v1/ops/failover"],
+	["ops.failover.execute", "GET", "/v1/ops/regions"],
+	["ops.failover.execute", "PUT", "/v1/ops/regions/eu-west/lag"],
+	["ops.region.view", "POST", "/v1/ops/failover-requests/r1:approve"],
+	["ops.region.report", "POST", "/v1/ops/failover-requests/r1:approve"],
+	["ops.region.report", "GET", "/v1/ops/failover-requests/r1"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
 	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],

@@ -28,6 +28,7 @@ paths:
   /v1/sod/rules:
     get:
       operationId: listSodRules
+      summary: "List the segregation-of-duties rules"
       x-passage-duty: compliance.sod.review
       responses:
         "200":
@@ -146,6 +147,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getSodConflict
+      summary: "Get a segregation-of-duties conflict"
       x-passage-duty: compliance.sod.review
       responses:
         "200":
@@ -520,6 +522,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getScreeningHit
+      summary: "Get a trade screening hit"
       x-passage-duty: compliance.trade-screening.view
       responses:
         "200":
@@ -679,6 +682,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       operationId: getSubjectRequest
+      summary: "Get a data subject privacy request"
       x-passage-duty: compliance.privacy-request.process
       responses:
         "200":
@@ -874,6 +878,7 @@ paths:
   /v1/privacy/holds/{id}:
     get:
       operationId: getLegalHold
+      summary: "Get a legal hold"
       x-passage-duty: compliance.legal-hold.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }

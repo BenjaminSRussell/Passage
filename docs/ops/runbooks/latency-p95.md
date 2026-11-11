@@ -23,11 +23,10 @@ row before acting:
 Known gaps, both handoffs to wave 5 observability (rows in `docs/ops/NOT-IMPLEMENTED.md`):
 
 - The rule has no `runbook_url` annotation, so the alert does not link here.
-- The rule reads `http_request_duration_seconds_bucket`. The services on main export prefixed histograms
-  (`payables_http_request_duration_seconds`, `receiving_http_request_duration_seconds`, and so on), so the
-  expression has no data and the alert cannot fire until the names are aligned. Until then, query the per-service
-  histograms, for example
-  `histogram_quantile(0.95, sum by (le, route) (rate(payables_http_request_duration_seconds_bucket[5m])))`.
+- The rule reads `http_request_duration_seconds_bucket`. `platform/go/httpx` records it per `route` for every service
+  built on `httpx.NewRouter` (bounds 5 ms to 10 s), exposed by the services that mount `httpx.WithMetrics` on their
+  admin `/metrics`. A service that does not (budgeting, billing, analytics) still shows only its prefixed histogram, for
+  example `histogram_quantile(0.95, sum by (le, route) (rate(payables_http_request_duration_seconds_bucket[5m])))`.
 
 ## First five minutes
 
