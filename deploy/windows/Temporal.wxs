@@ -60,7 +60,7 @@
     <!-- The config holds the Temporal database password: only SYSTEM, Administrators and the service account may read the folder. -->
     <SetProperty Id="TemporalSetAcl" Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[SCRIPTSFOLDER]Set-PassageAcl.ps1&quot; -DataDir &quot;[CommonAppDataFolder]PassageTemporal&quot; -Account &quot;[SERVICE_ACCOUNT]&quot;"
                  Sequence="execute" Before="TemporalSetAcl" Condition="NOT REMOVE~=&quot;ALL&quot;" />
-    <CustomAction Id="TemporalSetAcl" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec64" Execute="deferred" Return="check" Impersonate="no" />
+    <CustomAction Id="TemporalSetAcl" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec" Execute="deferred" Return="check" Impersonate="no" />
     <InstallExecuteSequence>
       <Custom Action="TemporalSetAcl" After="InstallServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
     </InstallExecuteSequence>
