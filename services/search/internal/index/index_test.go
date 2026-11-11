@@ -107,7 +107,7 @@ func TestIndexesEachRecordKindFromItsEvent(t *testing.T) {
 		{"production order status changed", event(t, ProductionOrderStatusChangedType, productionSource, map[string]any{"orderId": recordID, "orderNumber": "PO-000004", "legalEntityId": entityID, "from": "Started", "to": "ReportedAsFinished"}),
 			store.Record{Type: store.TypeProductionOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-000004", Title: "PO-000004", Status: "REPORTED_AS_FINISHED", At: eventTime}, entityID},
 		{"worker created", event(t, WorkerCreatedType, hrSource, map[string]any{"id": recordID, "personnel_number": "WRK-000012", "worker_type": "EMPLOYEE", "party_person_id": otherID}),
-			store.Record{Type: store.TypeWorker, ID: recordID, Number: "WRK-000012", Title: "WRK-000012", Subtitle: "employee", At: eventTime}, ""},
+			store.Record{Type: store.TypeWorker, ID: recordID, Number: "WRK-000012", Title: "WRK-000012", Subtitle: "employee", PartyID: otherID, At: eventTime}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeStore{}
@@ -221,7 +221,7 @@ func TestSourcePayloadsCarryTheFieldsTheIndexReads(t *testing.T) {
 	}{
 		{"../../../production/internal/events/events.go", "OrderCreatedData", []string{"orderId", "orderNumber", "legalEntityId", "status"}},
 		{"../../../production/internal/events/events.go", "OrderStatusChangedData", []string{"orderId", "orderNumber", "legalEntityId", "to"}},
-		{"../../../hr/internal/events/events.go", "WorkerCreatedData", []string{"id", "personnel_number", "worker_type"}},
+		{"../../../hr/internal/events/events.go", "WorkerCreatedData", []string{"id", "personnel_number", "worker_type", "party_person_id"}},
 	} {
 		src, err := os.ReadFile(tc.file)
 		if err != nil {
@@ -261,6 +261,7 @@ func TestMalformedEventsAreDeadLettered(t *testing.T) {
 		"production order wrong source": event(t, ProductionOrderCreatedType, "planning", map[string]any{"orderId": recordID, "orderNumber": "PO-000001", "legalEntityId": entityID}),
 		"worker no number":              event(t, WorkerCreatedType, hrSource, map[string]any{"id": recordID}),
 		"worker bad id":                 event(t, WorkerCreatedType, hrSource, map[string]any{"id": "x", "personnel_number": "WRK-1"}),
+		"worker bad party person":       event(t, WorkerCreatedType, hrSource, map[string]any{"id": recordID, "personnel_number": "WRK-1", "party_person_id": "x"}),
 	} {
 		f := &fakeStore{}
 		err := handle(t, f, evt)
