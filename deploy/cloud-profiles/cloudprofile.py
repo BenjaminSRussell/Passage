@@ -14,6 +14,7 @@ Everything else is generated from it or reads it:
     python3 deploy/cloud-profiles/cloudprofile.py sync --check   # exit 1 when a copy has drifted
     python3 deploy/cloud-profiles/cloudprofile.py check          # key parity and data rules
     python3 deploy/cloud-profiles/cloudprofile.py values gcc [--overlay hipaa] [--registry passage.azurecr.io]
+    python3 deploy/cloud-profiles/cloudprofile.py tofu-vars gcc-high+hipaa > gcc-high-hipaa.tfvars.json
 
 A profile selector is a base profile plus optional overlays written `gcc+hipaa` (env var PASSAGE_CLOUD_PROFILE)
 or `cloudProfile: gcc` with `cloudOverlays: [hipaa]` (Helm). One deployment is one profile: tokens from one cloud
@@ -39,6 +40,11 @@ TS_COPY = REPO / "services" / "agents-ts" / "src" / "cloudprofile" / "profiles.g
 
 ENV_PROFILE = "PASSAGE_CLOUD_PROFILE"
 STATUSES = ("verified", "unverified")
+DEPLOYMENT_KEYS = (
+    "azureEnvironment", "privateCluster", "customerManagedKeys", "managedHsm", "isolatedNodes", "isolatedNodesRegions",
+    "postgresSslMode", "source",
+)
+AZURE_ENVIRONMENTS = ("public", "usgovernment", "china")
 LLM_HOSTS = {
     "anthropic": "api.anthropic.com",
     "bedrock": "bedrock-runtime.*.amazonaws.com",
@@ -98,9 +104,18 @@ def check_parity(doc: dict[str, Any]) -> list[str]:
                 problems.append(f"{name}: endpoint {key} needs a Microsoft Learn source URL, got {ep.get('source')!r}")
             if ep.get("status", "verified") not in STATUSES:
                 problems.append(f"{name}: endpoint {key} status {ep.get('status')!r} is not one of {STATUSES}")
-        for field in ("cloud", "fips", "allowedRegions", "registry", "egress", "keycloak", "description"):
+        for field in ("cloud", "fips", "allowedRegions", "registry", "egress", "keycloak", "description", "deployment"):
             if field not in profile:
                 problems.append(f"{name}: {field} is missing")
+        dep = profile.get("deployment", {})
+        if sorted(dep) != sorted(DEPLOYMENT_KEYS):
+            problems.append(f"{name}: deployment keys are {sorted(dep)}, expected {sorted(DEPLOYMENT_KEYS)}")
+        if dep.get("azureEnvironment") not in AZURE_ENVIRONMENTS:
+            problems.append(f"{name}: deployment.azureEnvironment {dep.get('azureEnvironment')!r} is not one of {AZURE_ENVIRONMENTS}")
+        if dep.get("managedHsm") and not dep.get("customerManagedKeys"):
+            problems.append(f"{name}: deployment.managedHsm needs customerManagedKeys")
+        if dep.get("isolatedNodesRegions") and not set(dep["isolatedNodesRegions"]) <= set(profile.get("allowedRegions", [])):
+            problems.append(f"{name}: deployment.isolatedNodesRegions must be allowedRegions")
     shapes = {n: sorted(doc["profiles"][n]) for n in names}
     if len({json.dumps(s) for s in shapes.values()}) > 1:
         problems.append("profiles do not have the same top-level keys")
@@ -118,6 +133,13 @@ def resolve(doc: dict[str, Any], base: str, overlays: list[str] | None = None) -
     llm = list(p["egress"]["llmProviders"])
     pager = bool(p["egress"]["pagerDuty"])
     retention = int(p["keycloak"]["eventRetentionDays"])
+    enforce = bool(p["egress"]["enforceProviders"])
+    require_mirror = bool(p["registry"]["requireMirror"])
+    extra = list(p["egress"]["extraAllow"])
+    idle = 0
+    baa: dict[str, Any] | None = None
+    policy: dict[str, Any] | None = None
+    phi_services: list[str] = []
     removed: list[str] = []
     for name in overlays:
         if name not in doc["overlays"]:
@@ -129,12 +151,20 @@ def resolve(doc: dict[str, Any], base: str, overlays: list[str] | None = None) -
                 raise ValueError(f"overlay {name} cannot be combined with {base}: no region is allowed by both")
         fips = fips or bool(o.get("requireFips"))
         retention = max(retention, int(o.get("eventRetentionDays", 0)))
+        enforce = enforce or bool(o.get("enforceProviders"))
+        require_mirror = require_mirror or bool(o.get("requireMirror"))
+        idle = max(idle, int(o.get("idleTimeoutMinutes", 0)))
+        baa = o.get("baaCoveredServices", baa)
+        policy = o.get("azurePolicyInitiative", policy)
+        phi_services = o.get("phiServices", phi_services)
         for item in o.get("egressRemove", []):
             removed.append(item)
             if item == "pagerDuty":
                 pager = False
             if item in llm:
                 llm.remove(item)
+            if item in extra:
+                extra.remove(item)
     eps = {k: v["value"] for k, v in p["endpoints"].items()}
     out: dict[str, Any] = {
         "name": base,
@@ -144,13 +174,18 @@ def resolve(doc: dict[str, Any], base: str, overlays: list[str] | None = None) -
         "allowedRegions": regions,
         "endpoints": eps,
         "entraAuthorityAliases": p["endpoints"]["entraAuthority"].get("aliases", []),
-        "requireMirror": bool(p["registry"]["requireMirror"]),
+        "requireMirror": require_mirror,
         "registryDefault": p["registry"]["default"],
         "llmProviders": llm,
-        "enforceProviders": bool(p["egress"]["enforceProviders"]),
+        "enforceProviders": enforce,
         "pagerDutyAllowed": pager,
-        "extraAllow": list(p["egress"]["extraAllow"]),
+        "extraAllow": extra,
         "removed": removed,
+        "idleTimeoutMinutes": idle,
+        "deployment": {k: v for k, v in p["deployment"].items() if k != "source"},
+        "baaCoveredServices": list(baa["services"]) if baa else [],
+        "azurePolicyInitiative": policy["policySetDefinitionId"] if policy else "",
+        "phiServices": list(phi_services),
         "keycloak": {**p["keycloak"], "eventRetentionDays": retention},
     }
     out["egressAllowlist"] = egress_allowlist(out)
@@ -206,6 +241,9 @@ def helm_values(r: dict[str, Any], registry: str = "") -> str:
             "imageRegistryRequired": r["requireMirror"],
             "allowedRegions": r["allowedRegions"],
             "pagerDutyAllowed": r["pagerDutyAllowed"],
+            "idleTimeoutMinutes": r["idleTimeoutMinutes"],
+            "postgresSslMode": r["deployment"]["postgresSslMode"],
+            "enforceProviders": r["enforceProviders"],
             "endpoints": r["endpoints"],
             "egressAllowlist": allow,
         }
@@ -225,6 +263,14 @@ def tofu_vars(r: dict[str, Any]) -> str:
         "cloud_endpoints": r["endpoints"],
         "allowed_regions": r["allowedRegions"],
         "fips": r["fips"],
+        "azure_environment": r["deployment"]["azureEnvironment"],
+        "private_cluster": r["deployment"]["privateCluster"],
+        "customer_managed_keys": r["deployment"]["customerManagedKeys"],
+        "managed_hsm": r["deployment"]["managedHsm"],
+        "require_isolated_nodes": r["deployment"]["isolatedNodes"],
+        "isolated_nodes_regions": r["deployment"]["isolatedNodesRegions"],
+        "hipaa": "hipaa" in r["overlays"],
+        "azure_policy_initiative_id": r["azurePolicyInitiative"],
     }
     return json.dumps(doc, indent=2) + "\n"
 
@@ -265,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("sync", help="rewrite the generated copies")
     s.add_argument("--check", action="store_true")
     sub.add_parser("check", help="key parity and data rules")
+    t = sub.add_parser("tofu-vars", help="print the OpenTofu -var-file for a selector such as gcc-high+hipaa")
+    t.add_argument("profile")
     v = sub.add_parser("values", help="print the Helm values for one profile")
     v.add_argument("profile")
     v.add_argument("--overlay", action="append", default=[])
@@ -286,6 +334,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAIL  {problem}")
         print("CLOUD PROFILES " + ("FAILED" if problems else "PASSED") + f": {', '.join(sorted(doc['profiles']))}")
         return 1 if problems else 0
+    if args.cmd == "tofu-vars":
+        try:
+            base, overlays = parse_selector(args.profile)
+            print(tofu_vars(resolve(doc, base, overlays)), end="")
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return 0
     try:
         base, overlays = parse_selector(args.profile)
         print(helm_values(resolve(doc, base, overlays + args.overlay), args.registry), end="")

@@ -9,6 +9,9 @@ global:
   imageRegistryRequired: true
   allowedRegions: ["chinanorth", "chinaeast", "chinanorth2", "chinaeast2", "chinanorth3", "chinaeast3"]
   pagerDutyAllowed: false
+  idleTimeoutMinutes: 0
+  postgresSslMode: "require"
+  enforceProviders: true
   endpoints:
     entraAuthority: "https://login.partner.microsoftonline.cn"
     appRegistrationPortal: "portal.azure.cn"

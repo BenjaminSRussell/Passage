@@ -9,6 +9,9 @@ global:
   imageRegistryRequired: true
   allowedRegions: ["usdodeast", "usdodcentral", "usgovvirginia", "usgovarizona", "usgovtexas"]
   pagerDutyAllowed: false
+  idleTimeoutMinutes: 0
+  postgresSslMode: "verify-full"
+  enforceProviders: true
   endpoints:
     entraAuthority: "https://login.microsoftonline.us"
     appRegistrationPortal: "portal.azure.us"

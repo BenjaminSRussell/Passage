@@ -123,6 +123,85 @@ class ResolveTests(unittest.TestCase):
         self.assertTrue(cp.host_allowed("passage.azurecr.io", allow))
 
 
+class CloudEnvironmentTests(unittest.TestCase):
+    """GCC High, DoD, EU Data Boundary and HIPAA settings (#602, #603, #605, #606)."""
+
+    def setUp(self) -> None:
+        self.doc = cp.load()
+
+    def test_government_clouds_deploy_privately_with_customer_managed_keys_in_managed_hsm(self) -> None:
+        for name in ("gcc-high", "dod"):
+            d = cp.resolve(self.doc, name)["deployment"]
+            self.assertEqual(d["azureEnvironment"], "usgovernment", name)
+            self.assertTrue(d["privateCluster"] and d["customerManagedKeys"] and d["managedHsm"], name)
+            self.assertEqual(d["postgresSslMode"], "verify-full", name)
+
+    def test_only_dod_needs_isolated_nodes_and_only_in_the_us_gov_regions(self) -> None:
+        self.assertFalse(cp.resolve(self.doc, "gcc-high")["deployment"]["isolatedNodes"])
+        dod = cp.resolve(self.doc, "dod")["deployment"]
+        self.assertTrue(dod["isolatedNodes"])
+        self.assertEqual(sorted(dod["isolatedNodesRegions"]), ["usgovarizona", "usgovtexas", "usgovvirginia"])
+        self.assertTrue({"usdodeast", "usdodcentral"}.isdisjoint(dod["isolatedNodesRegions"]))
+
+    def test_gcc_high_and_dod_only_allow_azure_openai_in_azure_government(self) -> None:
+        for name in ("gcc-high", "dod"):
+            r = cp.resolve(self.doc, name)
+            self.assertEqual(r["llmProviders"], ["azure-openai"])
+            self.assertTrue(r["enforceProviders"])
+            self.assertTrue(cp.host_allowed("res.openai.azure.us", r["egressAllowlist"]))
+            self.assertFalse(cp.host_allowed("res.openai.azure.com", r["egressAllowlist"]))
+
+    def test_eu_overlay_enforces_providers_requires_a_mirror_and_keeps_the_global_authority(self) -> None:
+        r = cp.resolve(self.doc, "commercial", ["eu-data-boundary"])
+        self.assertTrue(r["enforceProviders"] and r["requireMirror"])
+        self.assertEqual(r["endpoints"]["entraAuthority"], "https://login.microsoftonline.com")
+        self.assertEqual(r["llmProviders"], ["azure-openai"])
+        self.assertNotIn("docker.io", r["extraAllow"])
+
+    def test_hipaa_overlay_sets_idle_timeout_baa_list_and_policy_initiative(self) -> None:
+        r = cp.resolve(self.doc, "commercial", ["hipaa"])
+        self.assertEqual(r["idleTimeoutMinutes"], 15)
+        self.assertTrue(r["enforceProviders"])
+        self.assertEqual(r["llmProviders"], ["azure-openai"])
+        self.assertIn("Azure OpenAI Service", r["baaCoveredServices"])
+        self.assertRegex(r["azurePolicyInitiative"], r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+        self.assertEqual(sorted(r["phiServices"]), ["expense", "fieldservice", "hr", "payroll"])
+        self.assertTrue(self.doc["overlays"]["hipaa"]["baaCoveredServices"]["source"].startswith("https://learn.microsoft.com/"))
+        self.assertEqual(cp.resolve(self.doc, "commercial")["idleTimeoutMinutes"], 0)
+
+    def test_hipaa_combines_with_the_government_clouds(self) -> None:
+        r = cp.resolve(self.doc, "gcc-high", ["hipaa"])
+        self.assertEqual(r["endpoints"]["entraAuthority"], "https://login.microsoftonline.us")
+        self.assertEqual(r["llmProviders"], ["azure-openai"])
+        self.assertGreaterEqual(r["keycloak"]["eventRetentionDays"], 2190)
+
+    def test_tofu_vars_carry_the_deployment_switches_and_overlays(self) -> None:
+        out = json.loads(cp.tofu_vars(cp.resolve(self.doc, "dod", ["hipaa"])))
+        self.assertEqual(out["azure_environment"], "usgovernment")
+        self.assertTrue(out["private_cluster"] and out["managed_hsm"] and out["require_isolated_nodes"] and out["hipaa"])
+        self.assertEqual(out["azure_policy_initiative_id"], self.doc["overlays"]["hipaa"]["azurePolicyInitiative"]["policySetDefinitionId"])
+        self.assertFalse(json.loads(cp.tofu_vars(cp.resolve(self.doc, "gcc-high")))["hipaa"])
+
+    def test_cli_prints_tofu_vars_for_a_selector(self) -> None:
+        proc = subprocess.run([sys.executable, str(HERE / "cloudprofile.py"), "tofu-vars", "gcc-high+hipaa"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(json.loads(proc.stdout)["hipaa"])
+
+    def test_unverified_china_suffixes_say_what_was_checked(self) -> None:
+        for key in ("containerRegistrySuffix", "azureOpenAISuffix"):
+            ep = self.doc["profiles"]["china"]["endpoints"][key]
+            self.assertEqual(ep["status"], "unverified")
+            self.assertIn("Checked on Microsoft Learn", ep["note"])
+
+    def test_parity_rejects_a_bad_deployment_block(self) -> None:
+        doc = copy.deepcopy(self.doc)
+        doc["profiles"]["dod"]["deployment"]["azureEnvironment"] = "mars"
+        doc["profiles"]["gcc"]["deployment"]["managedHsm"] = True
+        problems = cp.check_parity(doc)
+        self.assertTrue(any("dod: deployment.azureEnvironment" in p for p in problems), problems)
+        self.assertTrue(any("gcc: deployment.managedHsm needs" in p for p in problems), problems)
+
+
 class GeneratedCopiesTests(unittest.TestCase):
     def test_generated_copies_are_current(self) -> None:
         self.assertEqual(

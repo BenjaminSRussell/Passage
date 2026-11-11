@@ -9,6 +9,9 @@ global:
   imageRegistryRequired: false
   allowedRegions: []
   pagerDutyAllowed: true
+  idleTimeoutMinutes: 0
+  postgresSslMode: "require"
+  enforceProviders: false
   endpoints:
     entraAuthority: "https://login.microsoftonline.com"
     appRegistrationPortal: "portal.azure.com"

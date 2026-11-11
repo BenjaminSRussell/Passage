@@ -82,6 +82,16 @@
         "passwordHash": "pbkdf2-sha512",
         "passwordMinLength": 14,
         "eventRetentionDays": 90
+      },
+      "deployment": {
+        "azureEnvironment": "public",
+        "privateCluster": false,
+        "customerManagedKeys": false,
+        "managedHsm": false,
+        "isolatedNodes": false,
+        "isolatedNodesRegions": [],
+        "postgresSslMode": "require",
+        "source": "https://learn.microsoft.com/en-us/azure/aks/private-clusters"
       }
     },
     "gcc": {
@@ -157,10 +167,20 @@
         "passwordHash": "pbkdf2-sha512",
         "passwordMinLength": 14,
         "eventRetentionDays": 365
+      },
+      "deployment": {
+        "azureEnvironment": "public",
+        "privateCluster": true,
+        "customerManagedKeys": false,
+        "managedHsm": false,
+        "isolatedNodes": false,
+        "isolatedNodesRegions": [],
+        "postgresSslMode": "verify-full",
+        "source": "https://learn.microsoft.com/en-us/azure/aks/private-clusters"
       }
     },
     "gcc-high": {
-      "description": "Microsoft 365 GCC High on Azure Government. Entra authority login.microsoftonline.us, Graph graph.microsoft.us. Region, registry and egress detail is filled in by the GCC High issue (#602).",
+      "description": "Microsoft 365 GCC High on Azure Government (FedRAMP High, ITAR/EAR, CMMC). Entra authority login.microsoftonline.us, Graph graph.microsoft.us. Private cluster, customer-managed keys in Managed HSM, FIPS builds, mirror-only registry, Azure OpenAI in Azure Government only (#602).",
       "cloud": "AzureUSGovernment",
       "fips": true,
       "allowedRegions": [
@@ -226,10 +246,20 @@
         "passwordHash": "pbkdf2-sha512",
         "passwordMinLength": 14,
         "eventRetentionDays": 365
+      },
+      "deployment": {
+        "azureEnvironment": "usgovernment",
+        "privateCluster": true,
+        "customerManagedKeys": true,
+        "managedHsm": true,
+        "isolatedNodes": false,
+        "isolatedNodesRegions": [],
+        "postgresSslMode": "verify-full",
+        "source": "https://learn.microsoft.com/en-us/azure/azure-government/documentation-government-impact-level-5"
       }
     },
     "dod": {
-      "description": "Microsoft 365 DoD on Azure Government (IL5). Same Entra authority as GCC High; Graph is dod-graph.microsoft.us. Region and egress detail is filled in by the DoD issue (#603).",
+      "description": "Microsoft 365 DoD on Azure Government (IL5). Same Entra authority as GCC High; Graph is dod-graph.microsoft.us. Customer-managed keys in Managed HSM everywhere they apply, and in the US Gov regions (not US DoD East/Central) isolated VM sizes or a dedicated host group for node pools (#603).",
       "cloud": "AzureUSGovernment",
       "fips": true,
       "allowedRegions": [
@@ -297,6 +327,20 @@
         "passwordHash": "pbkdf2-sha512",
         "passwordMinLength": 14,
         "eventRetentionDays": 365
+      },
+      "deployment": {
+        "azureEnvironment": "usgovernment",
+        "privateCluster": true,
+        "customerManagedKeys": true,
+        "managedHsm": true,
+        "isolatedNodes": true,
+        "isolatedNodesRegions": [
+          "usgovvirginia",
+          "usgovarizona",
+          "usgovtexas"
+        ],
+        "postgresSslMode": "verify-full",
+        "source": "https://learn.microsoft.com/en-us/azure/azure-government/documentation-government-impact-level-5"
       }
     },
     "china": {
@@ -341,8 +385,9 @@
         },
         "containerRegistrySuffix": {
           "value": "azurecr.cn",
-          "source": "https://learn.microsoft.com/en-us/azure/china/resources-developer-guide",
-          "status": "unverified"
+          "source": "https://learn.microsoft.com/en-us/azure/china/concepts-service-availability",
+          "status": "unverified",
+          "note": "Checked on Microsoft Learn 2026-11-11: the Azure in China REST endpoints table (china/concepts-service-availability), the China section of private-link/private-endpoint-dns (its Containers section is empty and it has no OpenAI zone) and china/resources-developer-guide list no container registry or Azure OpenAI suffix. Value is the conventional one; confirm in a 21Vianet subscription before the China cloud ships."
         },
         "postgresSuffix": {
           "value": "postgres.database.chinacloudapi.cn",
@@ -350,8 +395,9 @@
         },
         "azureOpenAISuffix": {
           "value": "openai.azure.cn",
-          "source": "https://learn.microsoft.com/en-us/azure/china/resources-developer-guide",
-          "status": "unverified"
+          "source": "https://learn.microsoft.com/en-us/azure/china/concepts-service-availability",
+          "status": "unverified",
+          "note": "Checked on Microsoft Learn 2026-11-11: the Azure in China REST endpoints table (china/concepts-service-availability), the China section of private-link/private-endpoint-dns (its Containers section is empty and it has no OpenAI zone) and china/resources-developer-guide list no container registry or Azure OpenAI suffix. Value is the conventional one; confirm in a 21Vianet subscription before the China cloud ships."
         },
         "keyVaultPrivateLinkZone": {
           "value": "privatelink.vaultcore.azure.cn",
@@ -374,12 +420,22 @@
         "passwordHash": "pbkdf2-sha512",
         "passwordMinLength": 14,
         "eventRetentionDays": 90
+      },
+      "deployment": {
+        "azureEnvironment": "china",
+        "privateCluster": false,
+        "customerManagedKeys": false,
+        "managedHsm": false,
+        "isolatedNodes": false,
+        "isolatedNodesRegions": [],
+        "postgresSslMode": "require",
+        "source": "https://learn.microsoft.com/en-us/azure/aks/private-clusters"
       }
     }
   },
   "overlays": {
     "eu-data-boundary": {
-      "description": "EU Data Boundary: data, backups, logs and LLM calls stay in EU or EFTA regions. Cannot be combined with a profile whose regions are all outside the EU (gcc, gcc-high, dod, china).",
+      "description": "EU Data Boundary: data, backups, logs and LLM calls stay in EU or EFTA regions. Provider endpoints are enforced (Azure OpenAI deployed in an EU region only), paging SaaS and the US registries are removed from egress, and images come from a mirror. The Entra authority stays global. Cannot be combined with a profile whose regions are all outside the EU (gcc, gcc-high, dod, china).",
       "allowedRegions": [
         "northeurope",
         "westeurope",
@@ -398,11 +454,19 @@
         "switzerlandwest"
       ],
       "source": "https://learn.microsoft.com/en-us/privacy/eudb/eu-data-boundary-learn",
-      "egressRemove": [],
-      "requireFips": false
+      "egressRemove": [
+        "pagerDuty",
+        "anthropic",
+        "bedrock",
+        "openai",
+        "docker.io"
+      ],
+      "requireFips": false,
+      "enforceProviders": true,
+      "requireMirror": true
     },
     "hipaa": {
-      "description": "HIPAA: egress to SaaS without a recorded business associate agreement is removed (paging, hosted LLMs other than Azure OpenAI), and audit records are kept for 6 years. Detail is filled in by the HIPAA issue.",
+      "description": "HIPAA: egress to SaaS without a recorded business associate agreement is removed (paging, hosted LLMs other than Azure OpenAI) and provider endpoints are enforced; audit records are kept for 6 years; the web app signs out after 15 idle minutes; reads of PHI fields are audited; only the Azure services in baaCoveredServices may hold PHI; the Azure Policy HIPAA HITRUST initiative is assigned by OpenTofu (#606).",
       "allowedRegions": [],
       "source": "https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us",
       "egressRemove": [
@@ -412,7 +476,37 @@
         "openai"
       ],
       "requireFips": false,
-      "eventRetentionDays": 2190
+      "eventRetentionDays": 2190,
+      "enforceProviders": true,
+      "idleTimeoutMinutes": 15,
+      "azurePolicyInitiative": {
+        "displayName": "HIPAA HITRUST",
+        "policySetDefinitionId": "a169a624-5599-4385-a696-c8d643089fab",
+        "source": "https://learn.microsoft.com/en-us/azure/governance/policy/samples/hipaa-hitrust-9-2"
+      },
+      "baaCoveredServices": {
+        "source": "https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us",
+        "services": [
+          "Azure Kubernetes Service",
+          "Azure Container Registry",
+          "Azure Key Vault",
+          "Azure Managed HSM",
+          "Azure Storage",
+          "Azure Database for PostgreSQL",
+          "Azure OpenAI Service",
+          "Azure Monitor",
+          "Microsoft Entra ID",
+          "Azure Private Link",
+          "Azure Virtual Network",
+          "Azure Policy"
+        ]
+      },
+      "phiServices": [
+        "hr",
+        "payroll",
+        "expense",
+        "fieldservice"
+      ]
     }
   }
 }
