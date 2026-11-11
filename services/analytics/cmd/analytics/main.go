@@ -75,7 +75,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 	api.New(st).Register(router)
-	return httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), tenant.Middleware(router))
+	return httpx.ServeWithMetrics(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), tenant.Middleware(router))
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

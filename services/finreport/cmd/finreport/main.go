@@ -95,7 +95,7 @@ func runWith(ctx context.Context, getenv func(string) string, consume bool) erro
 		addr = ":8080"
 	}
 	st := store.New(pool)
-	return httpx.Serve(ctx, addr, newHandler(st, cfg, withVerifier(verifier(getenv, st))))
+	return httpx.ServeWithMetrics(ctx, addr, newHandler(st, cfg, withVerifier(verifier(getenv, st))))
 }
 
 // verifier builds the balance verification service when the ledger can be read

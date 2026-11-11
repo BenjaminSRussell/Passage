@@ -11,3 +11,6 @@ spec:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
+    - name: admin
+      port: 9090
+      targetPort: admin

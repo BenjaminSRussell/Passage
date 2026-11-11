@@ -77,5 +77,5 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if addr == "" {
 		addr = defaultHTTPAddr
 	}
-	return httpx.Serve(ctx, addr, router)
+	return httpx.ServeWithMetrics(ctx, addr, router)
 }

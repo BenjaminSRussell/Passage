@@ -1,6 +1,9 @@
 package httpx
 
 import (
+	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -63,5 +66,55 @@ func TestHistogramIsCumulativeAndRouteSetIsBounded(t *testing.T) {
 	}
 	if m.routes[overflowRoute] == nil {
 		t.Error("routes past the cap are not counted under the overflow route")
+	}
+}
+
+func TestServeWithMetricsServesTheSharedSeriesOnTheAdminPort(t *testing.T) {
+	free := func() string {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := l.Addr().String()
+		_ = l.Close()
+		return addr
+	}
+	api, admin := free(), free()
+	t.Setenv("ADMIN_ADDR", admin)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	r := NewRouterWithoutTenant()
+	r.Get("/v1/ping", func(w http.ResponseWriter, _ *http.Request) { JSON(w, 200, map[string]string{"ok": "1"}) })
+	go func() { done <- ServeWithMetrics(ctx, api, r) }()
+	get := func(url string) (int, string) {
+		var last error
+		for range 50 {
+			resp, err := http.Get(url)
+			if err == nil {
+				defer func() { _ = resp.Body.Close() }()
+				b, _ := io.ReadAll(resp.Body)
+				return resp.StatusCode, string(b)
+			}
+			last = err
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal(last)
+		return 0, ""
+	}
+	if code, _ := get("http://" + api + "/v1/ping"); code != 200 {
+		t.Fatalf("api %d", code)
+	}
+	code, body := get("http://" + admin + "/metrics")
+	if code != 200 || !strings.Contains(body, `http_requests_total{route="/v1/ping",status="200"}`) {
+		t.Fatalf("admin metrics %d: %s", code, body)
+	}
+	if code, _ := get("http://" + admin + "/v1/ping"); code != 404 {
+		t.Fatalf("the admin port serves /metrics only, got %d", code)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ServeWithMetrics did not stop with its context")
 	}
 }
