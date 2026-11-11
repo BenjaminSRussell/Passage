@@ -367,6 +367,7 @@ describe("EncumbrancePage", () => {
     at(`/budgeting/encumbrances/${E1}`);
     fireEvent.click(await screen.findByRole("button", { name: "Release remaining funds" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm release" }));
-    expect(await screen.findByText("the encumbrance has nothing open to release")).toBeInTheDocument();
+    // BUD-0010 has a catalog entry, so the page shows its plain-language message rather than the service's detail.
+    expect(await screen.findByText(/That budget reservation has nothing left to release/)).toBeInTheDocument();
   });
 });
