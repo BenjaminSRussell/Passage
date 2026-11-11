@@ -154,6 +154,8 @@ func (a *API) ReconcileSelfBilled(ctx context.Context, limit int) (int, error) {
 		switch {
 		case err == nil:
 			done++
+		case errors.Is(err, store.ErrSelfBillReconciled):
+			// Another run matched this message between the listing and now.
 		case errors.Is(err, store.ErrDuplicate):
 			// The document number was matched before (the customer sent it twice): the second one is a duplicate, never matched again.
 			if perr := a.store.ParkMessage(ctx, p.MessageID, "EDI-0102", "self-billed invoice "+inv.Number+" was already received"); perr != nil && first == nil {

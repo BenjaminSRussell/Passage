@@ -220,3 +220,28 @@ func TestSelfBilling_ConfigValidation(t *testing.T) {
 		t.Fatalf("get: %s", rec.Body.String())
 	}
 }
+
+// The receipt and the sweep can both take up one message. The run that comes second finds the document the first one matched for
+// this very message: it neither matches it again nor parks the message as a duplicate of itself.
+func TestSelfBilling_SecondRunOverTheSameMessageIsANoOp(t *testing.T) {
+	f := newFake()
+	f.order.Lines[0].UnitPrice = decimal.NewFromInt(8)
+	a, h, pool, partner, _ := autoSetupWith(t, f, edifactDistributor)
+	sendShipment(t, f, h, partner, srcShipment, "SHP-0001", time.Now().AddDate(0, 0, -3))
+	receiveEdifactBody(t, h, selfBilledSample(t))
+	// The second run listed the message while it was still MAPPED.
+	if _, err := pool.Exec(context.Background(), `update message set status = 'MAPPED' where transaction_set = 'INVOIC'`); err != nil {
+		t.Fatal(err)
+	}
+	done, err := a.ReconcileSelfBilled(store.SystemContext(context.Background(), "00000000-0000-0000-0000-000000000007"), 10)
+	if err != nil || done != 0 {
+		t.Fatalf("second run: matched %d, %v", done, err)
+	}
+	var docs, failed int
+	if err := pool.QueryRow(context.Background(), `select (select count(*) from self_billing_document), (select count(*) from message where status = 'FAILED')`).Scan(&docs, &failed); err != nil {
+		t.Fatal(err)
+	}
+	if docs != 1 || failed != 0 {
+		t.Fatalf("documents %d, parked messages %d; want 1 and 0", docs, failed)
+	}
+}

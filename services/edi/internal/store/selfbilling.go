@@ -141,6 +141,9 @@ type SelfBillDispute struct {
 	CreatedAt  time.Time  `json:"createdAt"`
 }
 
+// ErrSelfBillReconciled means this very message was matched already (by a concurrent run); there is nothing left to do.
+var ErrSelfBillReconciled = errors.New("edi: self-billed message already reconciled")
+
 // ErrSelfBillNoProfile means the partner has no trade profile, so no legal entity to match in.
 var ErrSelfBillNoProfile = errors.New("edi: partner has no trade profile")
 
@@ -166,12 +169,20 @@ func (s *Store) ReconcileSelfBill(ctx context.Context, partnerID string, in Self
 			Scan(&cfg.QuantityTolerance, &cfg.PriceTolerance, &cfg.WaitDays, &cfg.TaxRatePct); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		var exists bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from self_billing_document where partner_id = $1 and number = $2)`, partnerID, in.Number).Scan(&exists); err != nil {
+		// The receipt and the sweep can take up the same message at once: one lock per document number makes the second wait and
+		// then see the first one's document, so it is neither matched twice nor parked as a duplicate of itself.
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "edi:selfbill:"+tid+":"+partnerID+":"+in.Number); err != nil {
 			return err
 		}
-		if exists {
+		var priorMessage string
+		err = tx.QueryRow(ctx, `select coalesce(message_id::text, '') from self_billing_document where partner_id = $1 and number = $2`, partnerID, in.Number).Scan(&priorMessage)
+		switch {
+		case err == nil && in.MessageID != "" && priorMessage == in.MessageID:
+			return ErrSelfBillReconciled
+		case err == nil:
 			return ErrDuplicate
+		case !errors.Is(err, pgx.ErrNoRows):
+			return err
 		}
 		rows, err := tx.Query(ctx, `select id::text, delivery_note, po_line, item, quantity, unit_price, tax_rate_pct, shipped_on from self_billing_shipment
 			where partner_id = $1 and billed_by is null order by shipped_on, delivery_note, po_line, item for update`, partnerID)
