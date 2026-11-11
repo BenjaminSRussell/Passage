@@ -23,6 +23,20 @@ type fakeStore struct {
 	releaseIn     store.ReleaseRequest
 	calls         int
 	lastFilter    string
+	// rule is what ActiveRule answers; ruleFound false means the legal entity has none.
+	rule        store.Rule
+	ruleFound   bool
+	checkIn     store.CheckRequest
+	releaseLine string
+}
+
+func (f *fakeStore) ActiveRule(context.Context, string, string) (store.Rule, bool, error) {
+	return f.rule, f.ruleFound, nil
+}
+
+func (f *fakeStore) ReleasePreEncumbranceByLine(_ context.Context, _, _, lineID, _ string) (int, []byte, error) {
+	f.releaseLine = lineID
+	return http.StatusOK, []byte(`{"status":"Released"}`), nil
 }
 
 func (f *fakeStore) CreateRule(context.Context, string, string, store.NewRule) (int, []byte, error) {
@@ -30,8 +44,9 @@ func (f *fakeStore) CreateRule(context.Context, string, string, store.NewRule) (
 	return http.StatusCreated, []byte(`{"id":"r"}`), nil
 }
 
-func (f *fakeStore) CheckBudget(_ context.Context, _, _ string, _ store.CheckRequest, override bool) (int, []byte, error) {
+func (f *fakeStore) CheckBudget(_ context.Context, _, _ string, in store.CheckRequest, override bool) (int, []byte, error) {
 	f.calls++
+	f.checkIn = in
 	f.checkOverride = override
 	return http.StatusOK, []byte(`{"result":"pass"}`), nil
 }

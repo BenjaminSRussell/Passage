@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -99,5 +100,38 @@ func TestSources_FailLoudlyWithoutAKeyOrOnAnErrorStatus(t *testing.T) {
 	}
 	if _, err := NewReceivables(srv.URL, signer(t), nil).Contribute(ctxFor(le), le, from, to); err == nil {
 		t.Fatal("a 403 must be an error")
+	}
+}
+
+func TestReceivables_ReadsEveryPageOfTheWindowAndMarksARunawayListTruncated(t *testing.T) {
+	le := ids.New()
+	var queries []url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query())
+		switch r.URL.Query().Get("cursor") {
+		case "":
+			_, _ = w.Write([]byte(`{"items":[{"id":"p1","dueDate":"2026-11-01","currency":"USD","openAmount":"10"}],"nextCursor":"c2"}`))
+		case "c2":
+			_, _ = w.Write([]byte(`{"items":[{"id":"p2","dueDate":"2026-11-02","currency":"USD","openAmount":"20"}],"nextCursor":"c3"}`))
+		default:
+			_, _ = w.Write([]byte(`{"items":[{"id":"p3","dueDate":"2026-11-03","currency":"USD","openAmount":"30"}]}`))
+		}
+	}))
+	defer srv.Close()
+	res, err := NewReceivables(srv.URL, signer(t), nil).Contribute(ctxFor(le), le, from, to)
+	if err != nil || len(res.Contributions) != 3 || res.Truncated {
+		t.Fatalf("contributions = %+v, truncated %v, %v; want all three pages and a complete result", res.Contributions, res.Truncated, err)
+	}
+	if q := queries[0]; q.Get("due_from") != "2026-10-01" || q.Get("due_to") != "2026-12-31" || q.Get("status") != "open" || queries[2].Get("cursor") != "c3" {
+		t.Fatalf("queries = %v; want the window on every request and the cursor passed on", queries)
+	}
+
+	endless := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"id":"x","dueDate":"2026-11-01","currency":"USD","openAmount":"1"}],"nextCursor":"more"}`))
+	}))
+	defer endless.Close()
+	res, err = NewReceivables(endless.URL, signer(t), nil).Contribute(ctxFor(le), le, from, to)
+	if err != nil || !res.Truncated || len(res.Contributions) != maxPages {
+		t.Fatalf("endless = %d contributions, truncated %v, %v; want %d and truncated", len(res.Contributions), res.Truncated, err, maxPages)
 	}
 }

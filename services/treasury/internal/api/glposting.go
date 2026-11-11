@@ -36,6 +36,11 @@ type GLProfile struct {
 	FeeAccount      string            `json:"feeAccount"`
 	InterestAccount string            `json:"interestAccount"`
 	SuspenseAccount string            `json:"suspenseAccount"`
+	// CashAccounts maps a cash desk's cash account (its mainAccountId) to the ledger account it posts to. A profile with
+	// CashAccounts turns on ledger posting for the cash desks of the legal entity; CashDifferenceAccount then takes
+	// the cash over and short entry of a day closed with a difference.
+	CashAccounts          map[string]string `json:"cashAccounts,omitempty"`
+	CashDifferenceAccount string            `json:"cashDifferenceAccount,omitempty"`
 }
 
 func ParseGLProfiles(raw string) (map[string]GLProfile, error) {
@@ -57,13 +62,22 @@ func ParseGLProfiles(raw string) (map[string]GLProfile, error) {
 			valid = valid && ok && accountText.MatchString(account)
 			banks[canonical] = account
 		}
+		cash := make(map[string]string, len(p.CashAccounts))
+		for desk, account := range p.CashAccounts {
+			canonical, ok := ids.Canonical(desk)
+			valid = valid && ok && accountText.MatchString(account)
+			cash[canonical] = account
+		}
+		if len(cash) > 0 && !accountText.MatchString(p.CashDifferenceAccount) {
+			return nil, fmt.Errorf("%s entry for %q has cashAccounts but no cashDifferenceAccount (at most 20 characters)", EnvGLProfiles, p.LegalEntityID)
+		}
 		if !valid {
-			return nil, fmt.Errorf("%s entry for %q needs legalEntityId and ledgerId UUIDs, bankAccounts (bank account UUID to ledger account), feeAccount, interestAccount and suspenseAccount (at most 20 characters)", EnvGLProfiles, p.LegalEntityID)
+			return nil, fmt.Errorf("%s entry for %q needs legalEntityId and ledgerId UUIDs, bankAccounts (bank account UUID to ledger account), feeAccount, interestAccount and suspenseAccount (at most 20 characters); cashAccounts is optional", EnvGLProfiles, p.LegalEntityID)
 		}
 		if _, dup := out[le]; dup {
 			return nil, fmt.Errorf("%s names legal entity %s twice", EnvGLProfiles, le)
 		}
-		p.LegalEntityID, p.LedgerID, p.BankAccounts = le, ledger, banks
+		p.LegalEntityID, p.LedgerID, p.BankAccounts, p.CashAccounts = le, ledger, banks, cash
 		out[le] = p
 	}
 	return out, nil

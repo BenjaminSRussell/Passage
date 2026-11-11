@@ -387,7 +387,7 @@ func (s *Postgres) AwardRFQ(ctx context.Context, id string, ifMatch int, awards 
 		for _, ao := range orders {
 			order := ao.Order
 			order.ID = ids.New()
-			po, err := insertPurchaseOrder(ctx, tx, order)
+			po, err := insertPurchaseOrder(ctx, tx, order, s.queueBudget)
 			if err != nil {
 				return err
 			}

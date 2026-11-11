@@ -47,6 +47,8 @@ type RunRecord struct {
 	EliminationCount int
 	CTA              decimal.Decimal
 	CreatedAt        time.Time
+	// CollectionID is the collection the run was derived from; empty for a run computed from the units of the request.
+	CollectionID string
 }
 
 type RunDetail struct {
@@ -70,7 +72,7 @@ type RunPage struct {
 	Next  string
 }
 
-const runColumns = `id::text, group_id, period, currency, version, status, inputs_hash, created_by, unit_count, elimination_count, cta_amount::text, created_at`
+const runColumns = `id::text, group_id, period, currency, version, status, inputs_hash, created_by, unit_count, elimination_count, cta_amount::text, created_at, coalesce(collection_id::text, '')`
 
 func errRunNotFound(id string) error {
 	return &domain.Error{Code: domain.CodeRunNotFound, Detail: "no consolidation run with id " + id}
@@ -88,7 +90,7 @@ func principal(ctx context.Context) (tenant.Principal, error) {
 // currency and publishes consol.run.completed in the same transaction. With an
 // Idempotency-Key a retry returns the stored run and replayed=true; reusing the
 // key with other inputs fails with CNS-0922.
-func (s *Postgres) CreateRun(ctx context.Context, in domain.RunInput, res domain.RunResult, key string) (RunRecord, bool, error) {
+func (s *Postgres) CreateRun(ctx context.Context, in domain.RunInput, res domain.RunResult, collectionID, key string) (RunRecord, bool, error) {
 	pr, err := principal(ctx)
 	if err != nil {
 		return RunRecord{}, false, err
@@ -111,7 +113,9 @@ func (s *Postgres) CreateRun(ctx context.Context, in domain.RunInput, res domain
 		replayed bool
 	)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		create := func() (RunRecord, error) { return insertRun(ctx, tx, pr.TenantID, createdBy, in, res, raw, hash) }
+		create := func() (RunRecord, error) {
+			return insertRun(ctx, tx, pr.TenantID, createdBy, in, res, raw, hash, collectionID)
+		}
 		if key == "" {
 			var err error
 			rec, err = create()
@@ -127,7 +131,7 @@ func (s *Postgres) CreateRun(ctx context.Context, in domain.RunInput, res domain
 	return rec, replayed, nil
 }
 
-func insertRun(ctx context.Context, tx pgx.Tx, tenantID, createdBy string, in domain.RunInput, res domain.RunResult, raw []byte, hash string) (RunRecord, error) {
+func insertRun(ctx context.Context, tx pgx.Tx, tenantID, createdBy string, in domain.RunInput, res domain.RunResult, raw []byte, hash, collectionID string) (RunRecord, error) {
 	lock := fmt.Sprintf("%s|%s|%s|%s", tenantID, in.GroupID, in.Period, in.Currency)
 	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, lock); err != nil {
 		return RunRecord{}, err
@@ -139,11 +143,11 @@ func insertRun(ctx context.Context, tx pgx.Tx, tenantID, createdBy string, in do
 	}
 	id := ids.New()
 	rec, err := scanRun(tx.QueryRow(ctx, `insert into consolidation_run (tenant_id, id, group_id, period, currency, version, status, inputs_hash, inputs,
-			unit_count, elimination_count, cta_amount, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::numeric, $13)
+			unit_count, elimination_count, cta_amount, created_by, collection_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::numeric, $13, nullif($14, '')::uuid)
 		returning `+runColumns,
 		tenantID, id, in.GroupID, in.Period, in.Currency, version, StatusCompleted, hash, raw,
-		len(in.Units), len(res.Entries), res.CTA.String(), createdBy))
+		len(in.Units), len(res.Entries), res.CTA.String(), createdBy, collectionID))
 	if err != nil {
 		return RunRecord{}, err
 	}
@@ -320,7 +324,7 @@ func scanRun(row pgx.Row) (RunRecord, error) {
 	var rec RunRecord
 	var cta string
 	err := row.Scan(&rec.ID, &rec.GroupID, &rec.Period, &rec.Currency, &rec.Version, &rec.Status, &rec.InputsHash, &rec.CreatedBy,
-		&rec.UnitCount, &rec.EliminationCount, &cta, &rec.CreatedAt)
+		&rec.UnitCount, &rec.EliminationCount, &cta, &rec.CreatedAt, &rec.CollectionID)
 	if err != nil {
 		return RunRecord{}, err
 	}

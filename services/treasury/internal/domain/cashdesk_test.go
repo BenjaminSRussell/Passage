@@ -55,3 +55,43 @@ func TestCloseDifference_NeedsAReasonOnlyWhenTheCountDiffers(t *testing.T) {
 		t.Fatalf("surplus with reason: %s, %v", diff, err)
 	}
 }
+
+func TestDenominationTotal_SumsValueTimesCountAndRefusesBadLines(t *testing.T) {
+	got, err := DenominationTotal([]Denomination{{Value: "20", Count: 3}, {Value: "0.25", Count: 4}, {Value: "5", Count: 0}}, 2)
+	if err != nil || !got.Equal(decimal.RequireFromString("61")) {
+		t.Fatalf("total = %s, %v; want 61", got, err)
+	}
+	for name, lines := range map[string][]Denomination{
+		"zero value":  {{Value: "0", Count: 1}},
+		"negative":    {{Value: "-5", Count: 1}},
+		"not a value": {{Value: "five", Count: 1}},
+		"too precise": {{Value: "0.001", Count: 1}},
+		"twice":       {{Value: "5", Count: 1}, {Value: "5.0", Count: 2}},
+		"count":       {{Value: "5", Count: -1}},
+		"huge count":  {{Value: "5", Count: 2_000_000}},
+	} {
+		if _, err := DenominationTotal(lines, 2); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	many := make([]Denomination, 41)
+	for i := range many {
+		many[i] = Denomination{Value: decimal.NewFromInt(int64(i + 1)).String(), Count: 1}
+	}
+	if _, err := DenominationTotal(many, 2); err == nil {
+		t.Error("41 lines accepted")
+	}
+	if total, err := DenominationTotal(nil, 2); err != nil || !total.IsZero() {
+		t.Errorf("no lines = %s, %v; want zero", total, err)
+	}
+}
+
+func TestSecondSigner_RefusesTheSamePerson(t *testing.T) {
+	if err := SecondSigner("a", "b"); err != nil {
+		t.Fatal(err)
+	}
+	var de *Error
+	if err := SecondSigner("a", "a"); !errors.As(err, &de) || de.Code != CodeDeskSameSigner {
+		t.Fatalf("same person = %v; want %s", err, CodeDeskSameSigner)
+	}
+}
