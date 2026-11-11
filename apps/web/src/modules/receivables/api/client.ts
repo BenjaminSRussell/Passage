@@ -1093,3 +1093,73 @@ export interface AdviceResult {
 export function importAdvice(input: AdviceInput): Promise<AdviceResult> {
   return send<AdviceResult>("/remittance-advices", { method: "POST", body: JSON.stringify(input) });
 }
+
+export interface BankAccountMapping {
+  legalEntityId: string;
+  currency: string;
+  accountRef: string;
+  glAccount: string;
+  name: string;
+}
+
+/** GET /bank-accounts - the ledger account each bank account's cash is booked to (1000 where none is mapped). */
+export function listBankAccounts(legalEntityId: string, signal?: AbortSignal): Promise<BankAccountMapping[]> {
+  return items<BankAccountMapping>(`/bank-accounts${query({ legalEntityId })}`, signal);
+}
+
+/** PUT /bank-accounts - creates or replaces a mapping. */
+export function putBankAccount(input: BankAccountMapping): Promise<BankAccountMapping> {
+  return send<BankAccountMapping>("/bank-accounts", { method: "PUT", body: JSON.stringify(input) });
+}
+
+/** DELETE /bank-accounts - removes a mapping; its cash books to 1000 again. */
+export async function deleteBankAccount(legalEntityId: string, currency: string, accountRef: string): Promise<void> {
+  const res = await apiFetch(`${base}/bank-accounts${query({ legalEntityId, currency, accountRef })}`, { method: "DELETE", credentials: "same-origin", headers: { Accept: "application/json" } });
+  if (!res.ok) throw await toError(res);
+}
+
+export interface FXSetting {
+  legalEntityId: string;
+  crossCurrencyEnabled: boolean;
+  functionalCurrency: string;
+  gainAccount: string;
+  lossAccount: string;
+}
+
+/** GET /fx-settings - how a legal entity settles across currencies (the default when none is stored). */
+export function getFXSetting(legalEntityId: string, signal?: AbortSignal): Promise<FXSetting> {
+  return send<FXSetting>(`/fx-settings${query({ legalEntityId })}`, {}, signal);
+}
+
+/** PUT /fx-settings - sets cross-currency settlement, the functional currency and the realized gain and loss accounts. */
+export function putFXSetting(input: FXSetting): Promise<FXSetting> {
+  return send<FXSetting>("/fx-settings", { method: "PUT", body: JSON.stringify(input) });
+}
+
+export interface BackfillInput {
+  legalEntityId: string;
+  openingAccount?: string;
+  openingDate?: string;
+}
+
+export interface BackfillResult {
+  receipts: number;
+  applications: number;
+  openingItems: number;
+  openingAlreadyQueued: number;
+  dunningFees: number;
+  interest: number;
+  downPayments: number;
+  deductions: number;
+  more: boolean;
+}
+
+/** POST /gl-journals:backfill - queues the journals owed for what happened before receivables posted to the ledger. */
+export function backfillGLJournals(input: BackfillInput): Promise<BackfillResult> {
+  return send<BackfillResult>("/gl-journals:backfill", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** POST /payments/{id}:reverse - undoes the cash receipt of a payment that was never applied. */
+export function reversePayment(id: string, version: number): Promise<unknown> {
+  return send<unknown>(`/payments/${id}:reverse`, { method: "POST", headers: { "If-Match": `"${version}"` } });
+}

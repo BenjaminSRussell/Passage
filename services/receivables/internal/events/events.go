@@ -91,6 +91,10 @@ type SettlementData struct {
 	Amount       decimal.Decimal `json:"amount"`
 	CashDiscount decimal.Decimal `json:"cash_discount"`
 	WriteOff     decimal.Decimal `json:"write_off"`
+	// ItemCurrency and ItemAmount are set for a cross-currency settlement: the item's currency and what the settlement took off the
+	// item in it (amount is then the cash in the payment currency).
+	ItemCurrency string          `json:"item_currency,omitempty"`
+	ItemAmount   decimal.Decimal `json:"item_amount,omitempty"`
 }
 
 // PaymentAppliedData is the payload of dev.passage.receivables.payment.applied.v1.
