@@ -131,12 +131,13 @@
 
     <!-- Data folders are created, never removed on uninstall (REMOVE_DATA below). Permissions are set by Set-PassageAcl.ps1 after the
          service account exists. -->
+    <!-- A folder cannot be the key path of a component with a generated GUID (WIX0230), so each one is keyed by a registry value. -->
     <ComponentGroup Id="DataFolders">
-      <Component Id="DataFolder" Directory="DATAFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
-      <Component Id="LogsFolder" Directory="LOGSFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
-      <Component Id="KeysFolder" Directory="KEYSFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
-      <Component Id="CertsFolder" Directory="CERTSFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
-      <Component Id="ConfDFolder" Directory="CONFDFOLDER" Guid="*" Bitness="always64"><CreateFolder /></Component>
+      <Component Id="DataFolder" Directory="DATAFOLDER" Guid="*" Bitness="always64"><CreateFolder /><RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Folders" Name="Data" Type="integer" Value="1" KeyPath="yes" /></Component>
+      <Component Id="LogsFolder" Directory="LOGSFOLDER" Guid="*" Bitness="always64"><CreateFolder /><RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Folders" Name="Logs" Type="integer" Value="1" KeyPath="yes" /></Component>
+      <Component Id="KeysFolder" Directory="KEYSFOLDER" Guid="*" Bitness="always64"><CreateFolder /><RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Folders" Name="Keys" Type="integer" Value="1" KeyPath="yes" /></Component>
+      <Component Id="CertsFolder" Directory="CERTSFOLDER" Guid="*" Bitness="always64"><CreateFolder /><RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Folders" Name="Certs" Type="integer" Value="1" KeyPath="yes" /></Component>
+      <Component Id="ConfDFolder" Directory="CONFDFOLDER" Guid="*" Bitness="always64"><CreateFolder /><RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Folders" Name="ConfD" Type="integer" Value="1" KeyPath="yes" /></Component>
     </ComponentGroup>
 
     <Component Id="FirewallRule" Directory="INSTALLFOLDER" Guid="*" Bitness="always64" Condition="OPEN_FIREWALL=&quot;1&quot; AND LISTEN AND NOT LISTEN~&lt;&lt;&quot;127.&quot; AND NOT LISTEN~&lt;&lt;&quot;localhost&quot; AND NOT LISTEN~&lt;&lt;&quot;[::1]&quot;">

@@ -52,6 +52,8 @@
       </Component>
       <Component Id="TemporalLogs" Directory="TLOGSFOLDER" Guid="*" Bitness="always64">
         <CreateFolder />
+        <!-- A folder cannot be the key path of a component with a generated GUID (WIX0230). -->
+        <RegistryValue Root="HKLM" Key="SOFTWARE\PassageTemporal\Folders" Name="Logs" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </Feature>
 
