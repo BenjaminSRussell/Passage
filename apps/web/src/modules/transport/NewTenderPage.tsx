@@ -21,6 +21,7 @@ import styles from "./pages.module.css";
 import { RowsEditor, type RowField } from "./RowsEditor";
 import { useLoad, type LoadState } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface TenderValues {
   loadId: string;
@@ -40,7 +41,7 @@ const blankCarrier = () => ({ carrierId: "", rateQuoted: "" });
 export function validateTender(v: TenderValues): { errors: Record<string, string>; loadId?: string; input?: NewTender } {
   const errors: Record<string, string> = {};
   const loadId = v.loadId.trim();
-  if (!UUID.test(loadId)) errors.loadId = "Enter the load id as a lower-case UUID.";
+  if (!UUID.test(loadId)) errors.loadId = "Choose the load.";
   const seen = new Set<string>();
   const carriers = v.carriers.map((c, i) => {
     const carrierId = c.carrierId.trim();
@@ -178,9 +179,7 @@ export function NewTenderPage() {
       </Alert>
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="tender-load" label="Load id" hint="The load to tender (UUID)." error={errors.loadId}>
-            {(control) => <Input {...control} className={styles.mono} value={values.loadId} onChange={(e) => update({ loadId: e.target.value })} invalid={Boolean(errors.loadId)} />}
-          </FormField>
+          <LookupFormField id="tender-load" label="Load" entity="load" hint="The load to tender." value={values.loadId} error={errors.loadId} onChange={(loadId) => update({ loadId })} />
           <FormField id="tender-timeout" label="Response time (minutes)" hint="Per carrier; 5 to 1440, default 120." error={errors.timeoutMin}>
             {(control) => <Input {...control} inputMode="numeric" value={values.timeoutMin} onChange={(e) => update({ timeoutMin: e.target.value })} invalid={Boolean(errors.timeoutMin)} />}
           </FormField>

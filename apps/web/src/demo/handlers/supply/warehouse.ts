@@ -107,6 +107,9 @@ const works = table<Work>([
   work(WH_DAL, "TRANSFER_RECEIPT", "OPEN", 30, 0.4, [wline(1, "CP-200", "PUT", 15, 0)]),
 ]);
 
+/** Directed work, shared with ASN receiving in docks.ts (a received pallet gets its put-away work). */
+export const workTable = works;
+
 route("GET", `${BASE}/work`, ({ query }) => {
   const wh = query.get("warehouseId");
   const status = query.get("status");

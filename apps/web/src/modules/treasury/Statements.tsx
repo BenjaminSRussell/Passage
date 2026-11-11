@@ -15,6 +15,7 @@ import { dateTime, money, UUID } from "./format";
 import { CommandFailure, Detail, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 /** The service's default upload limit (TREASURY_MAX_FILE_MB = 50); larger files get TRS-0490 anyway. */
 export const MAX_BYTES = 50 * 1024 * 1024;
@@ -31,7 +32,7 @@ export interface ImportDraft {
 
 export function validateImport(v: ImportDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.bankAccountId.trim())) errors.bankAccountId = "Enter the bank account id (a UUID).";
+  if (!UUID.test(v.bankAccountId.trim())) errors.bankAccountId = "Choose the bank account.";
   if (!v.file) errors.file = "Choose the camt.053, BAI2 or MT940 file from the bank.";
   else if (v.file.size > MAX_BYTES) errors.file = "The file is larger than 50 MB; ask the bank for daily statements.";
   return errors;
@@ -104,17 +105,14 @@ export function ImportStatementPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="st-account" label="Bank account id" error={errors.bankAccountId}>
-            {(c) => (
-              <Input
-                {...c}
-                className={styles.mono}
-                value={values.bankAccountId}
-                onChange={(e) => setValues((prev) => ({ ...prev, bankAccountId: e.target.value }))}
-                invalid={Boolean(errors.bankAccountId)}
-              />
-            )}
-          </FormField>
+          <LookupFormField
+            id="st-account"
+            label="Bank account"
+            entity="bankAccount"
+            value={values.bankAccountId}
+            error={errors.bankAccountId}
+            onChange={(bankAccountId) => setValues((prev) => ({ ...prev, bankAccountId }))}
+          />
           <FormField id="st-file" label="Statement file" hint="camt.053 XML, BAI2 or MT940 text, up to 50 MB." error={errors.file}>
             {(c) => (
               <Input

@@ -31,6 +31,7 @@ const (
 	idempotencyKey = "Idempotency-Key"
 
 	maxIdempotencyKeyLength = 200
+	reservedKeyPrefix       = "seed:"
 	dutyRead                = "org.read"
 	dutyLegalEntity         = "org.legal-entity.write"
 	dutyReference           = store.DutyReference
@@ -160,6 +161,12 @@ func idempotencyKeyOf(w http.ResponseWriter, r *http.Request) (string, bool) {
 	key := r.Header.Get(idempotencyKey)
 	if len(key) > maxIdempotencyKeyLength {
 		badQuery(w, r, idempotencyKey, "at most 200 bytes")
+		return "", false
+	}
+	// Keys that start with "seed:" mark the records a seed package created, which the demo company reset deletes.
+	// A request may not write one, so a record someone made by hand can never be taken for a demo record.
+	if strings.HasPrefix(key, reservedKeyPrefix) {
+		badQuery(w, r, idempotencyKey, "must not start with "+reservedKeyPrefix+", which is reserved")
 		return "", false
 	}
 	return key, true

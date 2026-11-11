@@ -9,7 +9,7 @@ import { ProblemMessage } from "../../shell/errors";
 
 export const verificationColumns: DataTableColumn<VerificationSummary>[] = [
   { key: "verifiedAt", header: "Checked", mono: true, render: (v) => <time dateTime={v.verifiedAt}>{v.verifiedAt}</time> },
-  { key: "ledgerId", header: "Ledger", mono: true },
+  { key: "ledgerId", header: "Ledger", mono: true, render: (v) => <span title={v.ledgerId}>{v.ledgerId.slice(0, 8)}</span> },
   { key: "status", header: "Result", render: (v) => <Badge tone={VERIFICATION_TONES[v.status]}>{VERIFICATION_LABELS[v.status]}</Badge> },
   { key: "accountsCompared", header: "Accounts", mono: true, align: "end" },
   { key: "diffCount", header: "Differing", mono: true, align: "end" },

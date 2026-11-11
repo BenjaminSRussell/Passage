@@ -19,9 +19,15 @@ import styles from "./pages.module.css";
 import { emptyPlan, planFieldErrors, PlanFields, validatePlan, type PlanErrors, type PlanValues } from "./PlanFields";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type AssocTrigger = Exclude<Trigger, "MANUAL">;
 const TRIGGERS = (Object.keys(TRIGGER_LABELS) as Trigger[]).filter((t): t is AssocTrigger => t !== "MANUAL");
+
+/** What a scope's reference names, and the lookup that finds it. */
+const REF_ENTITIES: Record<string, LookupEntityKey> = { ITEM: "product", ITEM_GROUP: "itemGroup", PARTY: "party", SITE: "site" };
+const REF_NOUNS: Record<string, string> = { ITEM: "item", ITEM_GROUP: "item group", PARTY: "vendor or customer", SITE: "site" };
 
 function scope(kind: string, ref?: string): string {
   return kind === "ALL" ? "All" : `${kind === "ITEM_GROUP" ? "Group" : kind.charAt(0) + kind.slice(1).toLowerCase()} ${shortId(ref)}`;
@@ -100,7 +106,7 @@ export function validateAssociation(values: Values, plan: PlanValues): { errors:
     ["siteScope", "siteRef"],
   ] as const;
   for (const [s, r] of refs) {
-    if (values[s] !== "ALL" && !UUID.test(values[r].trim())) errors[r] = "Enter the id (a UUID) for this scope.";
+    if (values[s] !== "ALL" && !UUID.test(values[r].trim())) errors[r] = "Choose what this scope applies to.";
   }
   if (!/^\d{1,6}$/.test(values.sequence.trim())) errors.sequence = "Enter a whole number, 0 or more.";
   if (!UUID.test(values.testGroupId)) errors.testGroupId = "Choose a test group.";
@@ -146,7 +152,7 @@ export function NewAssociationPage() {
   const key = useRef(newKey());
 
   function update(patch: Partial<Values>) {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     key.current = newKey();
   }
 
@@ -189,7 +195,7 @@ export function NewAssociationPage() {
     <>
       <FormField id={`assoc-${s}`} label={label}>
         {(control) => (
-          <Select {...control} value={values[s]} onChange={(event) => update({ [s]: event.target.value } as Partial<Values>)}>
+          <Select {...control} value={values[s]} onChange={(event) => update({ [s]: event.target.value, [r]: "" } as Partial<Values>)}>
             {options.map(([value, text]) => (
               <option key={value} value={value}>
                 {text}
@@ -199,9 +205,15 @@ export function NewAssociationPage() {
         )}
       </FormField>
       {values[s] !== "ALL" ? (
-        <FormField id={`assoc-${r}`} label={`${label} id`} error={errors[r]}>
-          {(control) => <Input {...control} value={values[r]} invalid={Boolean(errors[r])} onChange={(event) => update({ [r]: event.target.value } as Partial<Values>)} />}
-        </FormField>
+        <LookupFormField
+          key={values[s]}
+          id={`assoc-${r}`}
+          label={`Which ${REF_NOUNS[values[s]] ?? label.toLowerCase()}`}
+          entity={REF_ENTITIES[values[s]] ?? "party"}
+          value={values[r]}
+          error={errors[r]}
+          onChange={(v) => update({ [r]: v } as Partial<Values>)}
+        />
       ) : null}
     </>
   );

@@ -134,7 +134,42 @@ describe("receipts list", () => {
     expect(screen.queryByRole("button", { name: "Load more receipts" })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("State"), { target: { value: "POSTED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(receiptCalls().at(-1)?.url.searchParams.get("state")).toBe("POSTED"));
+  });
+
+  it("filters by receipt date on the service and sends no vendor from typed text", async () => {
+    server.handler = (url) => (url.pathname === "/api/v1/receiving/receipts" ? json(200, { items: [receipt()] }) : undefined);
+    renderAt("/receiving/receipts");
+    await screen.findByRole("button", { name: "RCV-00000001" });
+
+    fireEvent.change(screen.getByLabelText("Receipt date from"), { target: { value: "2026-10-01" } });
+    fireEvent.change(screen.getByLabelText("Receipt date to"), { target: { value: "2026-10-31" } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    await waitFor(() => expect(receiptCalls().at(-1)?.url.searchParams.get("from")).toBe("2026-10-01"));
+    expect(receiptCalls().at(-1)?.url.searchParams.get("to")).toBe("2026-10-31");
+    expect(receiptCalls().at(-1)?.url.searchParams.has("vendorId")).toBe(false);
+  });
+
+  it("says nothing matches a filter and clears it", async () => {
+    server.handler = (url) =>
+      url.pathname === "/api/v1/receiving/receipts" ? json(200, { items: url.searchParams.get("state") === "CANCELLED" ? [] : [receipt()] }) : undefined;
+    renderAt("/receiving/receipts");
+    await screen.findByRole("button", { name: "RCV-00000001" });
+    fireEvent.change(screen.getByLabelText("State"), { target: { value: "CANCELLED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No receipts match these filters")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByRole("button", { name: "RCV-00000001" })).toBeInTheDocument();
+  });
+
+  it("tells a user without access they cannot view receipts and offers no retry", async () => {
+    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty" });
+    renderAt("/receiving/receipts");
+    expect(await screen.findByText("You can't view receipts")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
   it("opens a receipt from its number", async () => {
@@ -149,6 +184,7 @@ describe("receipts list", () => {
     server.handler = () => json(200, { items: [] });
     const { container, unmount } = renderAt("/receiving/receipts");
     expect(await screen.findByText("No receipts yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Record the first arrival" })).toHaveAttribute("href", "/receiving/receipts/new");
     expect(pageViolations(container)).toEqual([]);
     unmount();
 

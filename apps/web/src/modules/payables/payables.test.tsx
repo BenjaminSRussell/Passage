@@ -8,7 +8,8 @@ import { WorkContextProvider } from "../../shell/lookup/workContext";
 import { PrincipalProvider } from "../../shell/principal";
 import { json, pageViolations, server, useFakeServer } from "../../shell/testing/fakeServer";
 import type { OpenItem, Proposal } from "./api/client";
-import { formatAmount, today, utcToday } from "./format";
+import { formatAmount, formatDecimal, personLabel, sumDecimals, today, utcToday } from "./format";
+import { remittanceDocument } from "./remittanceDocument";
 import payables from "./module";
 import { validateDraft } from "./NewProposalPage";
 
@@ -119,6 +120,7 @@ function api(overrides: (url: URL, init: RequestInit) => ReturnType<typeof json>
     if (url.pathname === "/api/v1/party/parties/p1") return json(200, { name: "Contoso Ltd" });
     if (url.pathname === "/api/v1/party/parties/p2") return json(200, { name: "Fabrikam GmbH" });
     if (url.pathname === "/api/v1/org/currencies") return json(200, { items: [{ code: "USD", name: "US dollar" }] });
+    if (url.pathname === "/api/v1/payables/vendor-blocks") return json(200, { items: [] });
     return undefined;
   };
 }
@@ -563,5 +565,331 @@ describe("payment runs", () => {
     renderAt(`/payables/runs/${RUN}`, [...READ, "payment-run.read"]);
     expect(await screen.findByText(/You don't have rights to run payments/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Generate the bank file" })).not.toBeInTheDocument();
+  });
+});
+
+describe("who created a proposal", () => {
+  const OTHER = "0190a000-0000-7000-8000-00000000beef";
+
+  it("shows You, a sign-in name or Another user in Created by, never a raw user id", async () => {
+    api((url) =>
+      url.pathname === "/api/v1/payables/payment-proposals"
+        ? json(200, { items: [{ ...proposal({ createdBy: "t.u" }), groups: undefined }, { ...proposal({ id: "p2", createdBy: OTHER }), groups: undefined }, { ...proposal({ id: "p3", createdBy: "ana.ortiz" }), groups: undefined }] })
+        : undefined,
+    );
+    renderAt("/payables");
+    expect(await screen.findByRole("cell", { name: "You" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Another user" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "ana.ortiz" })).toBeInTheDocument();
+    expect(screen.queryByText(OTHER)).not.toBeInTheDocument();
+    expect(personLabel(undefined, "t.u")).toBe("Not recorded");
+  });
+});
+
+describe("proposal to payment run", () => {
+  const RUN = "77777777-7777-4777-8777-777777777777";
+  const detail = (p: Proposal) => api((url) => (url.pathname === `/api/v1/payables/payment-proposals/${PROPOSAL}` ? json(200, p) : undefined));
+
+  it.each(["EXECUTING", "EXECUTED", "FAILED"] as const)("links a proposal that is %s to its payment run", async (status) => {
+    detail(proposal({ status, paymentRunId: RUN }));
+    renderAt(`/payables/proposals/${PROPOSAL}`, [...READ, "payment-run.read", "payment-run.execute"]);
+    expect(await screen.findByRole("link", { name: "Open payment run" })).toHaveAttribute("href", `/payables/runs/${RUN}`);
+    expect(screen.queryByRole("button", { name: /payment run/ })).not.toBeInTheDocument();
+    expect(calls("POST", "/api/v1/payables/payment-runs")).toHaveLength(0);
+  });
+
+  it("offers no run link without the right to read runs or before a run starts", async () => {
+    detail(proposal({ status: "EXECUTED", paymentRunId: RUN }));
+    const view = renderAt(`/payables/proposals/${PROPOSAL}`);
+    await screen.findByText("Payment proposal for 2026-11-20");
+    expect(screen.queryByRole("link", { name: "Open payment run" })).not.toBeInTheDocument();
+    view.unmount();
+    detail(proposal({ status: "APPROVED" }));
+    renderAt(`/payables/proposals/${PROPOSAL}`, [...READ, "payment-run.read", "payment-run.execute"]);
+    expect(await screen.findByRole("button", { name: "Start payment run" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open payment run" })).not.toBeInTheDocument();
+  });
+});
+
+describe("vendor payment holds", () => {
+  const BLOCKS = "/api/v1/payables/vendor-blocks";
+  const block = (patch: Record<string, unknown> = {}) => ({ vendorId: V1, legalEntityId: LE, reason: "Bank details under review", blockedBy: "hana", blockedAt: "2026-11-09T08:00:00Z", ...patch });
+  const HOLD = ["open-item.read", "payment-proposal.read", "vendor-block.manage"];
+
+  it("lists the vendors on hold with the reason and marks their open invoices", async () => {
+    api((url) => {
+      if (url.pathname === BLOCKS) return json(200, { items: [block()] });
+      if (url.pathname === "/api/v1/payables/open-items") return json(200, { items: [item(), item({ id: "i2", invoiceNumber: "INV-2000", vendorId: V2 })] });
+      return undefined;
+    });
+    const { container } = renderAt("/payables/open-items");
+    const held = within(await screen.findByRole("table", { name: "Vendors on payment hold" }));
+    expect(await held.findByText("Contoso Ltd (V-1)")).toBeInTheDocument();
+    expect(held.getByText("Bank details under review")).toBeInTheDocument();
+    expect(held.getByText("2026-11-09")).toBeInTheDocument();
+    expect(held.getByText("hana")).toBeInTheDocument();
+    expect(screen.getAllByText("Vendor on hold: Bank details under review")).toHaveLength(1);
+    expect(calls("GET", BLOCKS)[0].url.searchParams.get("legal_entity")).toBe(LE);
+    // Reading the holds needs no extra duty; changing them does.
+    expect(screen.queryByRole("button", { name: /Release hold on/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hold payments to a vendor" })).not.toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("asks for the vendor and a reason, then puts the vendor on hold", async () => {
+    const user = userEvent.setup();
+    let held = false;
+    api((url, init) => {
+      if (url.pathname === BLOCKS) return json(200, { items: held ? [block({ vendorId: V2, reason: "Sanctions check" })] : [] });
+      if (url.pathname === "/api/v1/party/vendors:search") return json(200, { items: [{ id: V2, name: "Fabrikam GmbH", accountNumber: "V-2", legalEntityId: LE }] });
+      if (url.pathname === `/api/v1/payables/vendors/${V2}:block` && init.method === "POST") {
+        held = true;
+        return json(200, { vendorId: V2, legalEntityId: LE, blocked: true, reason: "Sanctions check" });
+      }
+      if (url.pathname === "/api/v1/payables/open-items") return json(200, { items: [] });
+      return undefined;
+    });
+    const { container } = renderAt("/payables/open-items", HOLD);
+    await user.click(await screen.findByRole("button", { name: "Hold payments to a vendor" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Hold payments to a vendor" }));
+    expect(dialog.getByRole("combobox", { name: /^Vendor/ })).toHaveFocus();
+    expect(pageViolations(container)).toEqual([]);
+    await user.click(dialog.getByRole("button", { name: "Put vendor on hold" }));
+    expect(dialog.getByText("Choose the vendor to put on hold.")).toBeInTheDocument();
+    expect(dialog.getByText("Say why payments to the vendor are on hold.")).toBeInTheDocument();
+    expect(calls("POST", `/api/v1/payables/vendors/${V2}:block`)).toHaveLength(0);
+
+    await user.click(dialog.getByLabelText(/^Vendor/));
+    await user.click(await dialog.findByRole("option", { name: /Fabrikam GmbH/ }));
+    await user.type(dialog.getByLabelText(/Reason for the hold/), "  Sanctions check ");
+    await user.click(dialog.getByRole("button", { name: "Put vendor on hold" }));
+    expect(await screen.findByText(/Payments to Fabrikam GmbH \(V-2\) are on hold/)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(calls("POST", `/api/v1/payables/vendors/${V2}:block`)[0].body).toEqual({ legalEntityId: LE, reason: "Sanctions check" });
+    expect(await screen.findByRole("button", { name: "Release hold on Fabrikam GmbH (V-2)" })).toBeInTheDocument();
+  });
+
+  it("keeps the dialog open and explains a refused hold, and closes on Cancel", async () => {
+    const user = userEvent.setup();
+    api((url, init) => {
+      if (url.pathname === "/api/v1/party/vendors:search") return json(200, { items: [{ id: V2, name: "Fabrikam GmbH", accountNumber: "V-2", legalEntityId: LE }] });
+      if (url.pathname.endsWith(":block") && init.method === "POST") return json(403, { code: "AUTH-0003", detail: "legal entity out of scope" });
+      if (url.pathname === "/api/v1/payables/open-items") return json(200, { items: [] });
+      return undefined;
+    });
+    renderAt("/payables/open-items", HOLD);
+    await user.click(await screen.findByRole("button", { name: "Hold payments to a vendor" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.click(dialog.getByLabelText(/^Vendor/));
+    await user.click(await dialog.findByRole("option", { name: /Fabrikam GmbH/ }));
+    await user.type(dialog.getByLabelText(/Reason for the hold/), "Sanctions check");
+    await user.click(dialog.getByRole("button", { name: "Put vendor on hold" }));
+    expect(await dialog.findByText("Could not put the vendor on hold")).toBeInTheDocument();
+    await user.click(dialog.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("releases a vendor hold once and says the invoices can be paid again", async () => {
+    const user = userEvent.setup();
+    let held = true;
+    api((url, init) => {
+      if (url.pathname === BLOCKS) return json(200, { items: held ? [block()] : [] });
+      if (url.pathname === `/api/v1/payables/vendors/${V1}:unblock` && init.method === "POST") {
+        held = false;
+        return json(200, { vendorId: V1, legalEntityId: LE, blocked: false });
+      }
+      if (url.pathname === "/api/v1/payables/open-items") return json(200, { items: [item()] });
+      return undefined;
+    });
+    renderAt("/payables/open-items", HOLD);
+    const release = await screen.findByRole("button", { name: "Release hold on Contoso Ltd (V-1)" });
+    await user.dblClick(release);
+    expect(await screen.findByText("The hold on Contoso Ltd (V-1) is released. Its invoices can be paid again.")).toBeInTheDocument();
+    expect(calls("POST", `/api/v1/payables/vendors/${V1}:unblock`)).toHaveLength(1);
+    expect(calls("POST", `/api/v1/payables/vendors/${V1}:unblock`)[0].body).toEqual({ legalEntityId: LE });
+    await waitFor(() => expect(screen.queryByRole("table", { name: "Vendors on payment hold" })).not.toBeInTheDocument());
+    expect(screen.queryByText(/Vendor on hold:/)).not.toBeInTheDocument();
+  });
+
+  it("explains a release that is refused and a list of holds that can't be loaded", async () => {
+    const user = userEvent.setup();
+    let listFails = false;
+    api((url, init) => {
+      if (url.pathname === BLOCKS) return listFails ? json(503, { code: "COM-0503", detail: "down" }) : json(200, { items: [block()] });
+      if (url.pathname.endsWith(":unblock") && init.method === "POST") return json(404, { code: "COM-0404", detail: "vendor is not blocked in this legal entity" });
+      if (url.pathname === "/api/v1/payables/open-items") return json(200, { items: [item()] });
+      return undefined;
+    });
+    const view = renderAt("/payables/open-items", HOLD);
+    await user.click(await screen.findByRole("button", { name: "Release hold on Contoso Ltd (V-1)" }));
+    expect(await screen.findByText("Could not release the vendor hold")).toBeInTheDocument();
+    view.unmount();
+    listFails = true;
+    renderAt("/payables/open-items", HOLD);
+    expect(await screen.findByText("Could not load the vendors on payment hold")).toBeInTheDocument();
+    expect(await screen.findByText("INV-1001")).toBeInTheDocument();
+  });
+});
+
+describe("remittance advice", () => {
+  const RUN = "77777777-7777-4777-8777-777777777777";
+  const ADVICE = `/api/v1/payables/payment-runs/${RUN}/remittances/${V1}`;
+  const run = (patch: Record<string, unknown> = {}) => ({
+    id: RUN,
+    legalEntityId: LE,
+    proposalId: PROPOSAL,
+    status: "COMPLETED",
+    requestedBy: "marcus",
+    createdAt: "2026-11-11T09:00:00Z",
+    completedAt: "2026-11-11T09:05:00Z",
+    settledAt: "2026-11-11T09:04:00Z",
+    fileGeneratedAt: "2026-11-11T09:01:00Z",
+    journalPostedAt: "2026-11-11T09:02:00Z",
+    payments: [
+      { groupId: "g1", vendorId: V1, currency: "USD", paymentMethod: "TRANSFER", endToEndId: "E2E-1", amount: "968.10", valuedAmount: "968.10" },
+      { groupId: "g2", vendorId: V2, currency: "EUR", paymentMethod: "WIRE", endToEndId: "E2E-2", amount: "500", valuedAmount: "552.25" },
+    ],
+    ...patch,
+  });
+  const advice = () => ({
+    runId: RUN,
+    proposalId: PROPOSAL,
+    legalEntityId: LE,
+    vendorId: V1,
+    paymentDate: "2026-11-20",
+    completedAt: "2026-11-11T09:05:00Z",
+    payments: [
+      {
+        endToEndId: "E2E-1",
+        currency: "USD",
+        paymentMethod: "TRANSFER",
+        amount: "968.1",
+        lines: [
+          { openItemId: ITEM, invoiceNumber: "INV-1001", invoiceDate: "2026-09-01", openAmount: "600.1", discount: "20", withheld: "12", paid: "568.1" },
+          { openItemId: "55555555-5555-4555-8555-555555555555", invoiceNumber: "INV-1002", invoiceDate: "2026-09-03", openAmount: "400", discount: "0", withheld: "0", paid: "400" },
+        ],
+      },
+    ],
+  });
+  const DUTIES = [...READ, "payment-run.read", "print.document.render"];
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  });
+
+  function serve(state: () => Record<string, unknown> = run) {
+    api((url) => {
+      if (url.pathname === `/api/v1/payables/payment-runs/${RUN}`) return json(200, state());
+      if (url.pathname === ADVICE) return json(200, advice());
+      if (url.pathname === `/api/v1/org/legal-entities/${LE}`) return json(200, { name: "Cedar Ridge Pumps" });
+      if (url.pathname === "/api/v1/print/documents:render") return json(200, {});
+      return undefined;
+    });
+  }
+
+  it("shows the invoices a completed run paid to a vendor and what was paid", async () => {
+    const user = userEvent.setup();
+    serve();
+    const { container } = renderAt(`/payables/runs/${RUN}`, DUTIES);
+    await user.click(await screen.findByRole("button", { name: "Remittance advice for Contoso Ltd (V-1)" }));
+    const lines = within(await screen.findByRole("table", { name: "Invoices paid with payment E2E-1" }));
+    expect(lines.getByText("INV-1001")).toBeInTheDocument();
+    expect(lines.getByText("600.10 USD")).toBeInTheDocument();
+    expect(lines.getByText("20.00 USD")).toBeInTheDocument();
+    expect(lines.getByText("12.00 USD")).toBeInTheDocument();
+    expect(lines.getByText("568.10 USD")).toBeInTheDocument();
+    expect(lines.getByText("INV-1002")).toBeInTheDocument();
+    expect(screen.getByText(/Paid on 2026-11-20/)).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Payment E2E-1" })).getByText("968.10 USD")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remittance advice for Contoso Ltd (V-1)" })).toHaveAttribute("aria-expanded", "true");
+    expect(pageViolations(container)).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Hide remittance advice" }));
+    expect(screen.queryByRole("table", { name: "Invoices paid with payment E2E-1" })).not.toBeInTheDocument();
+  });
+
+  it("downloads the advice as CSV and as a PDF from the print service", async () => {
+    const user = userEvent.setup();
+    serve();
+    renderAt(`/payables/runs/${RUN}`, DUTIES);
+    await user.click(await screen.findByRole("button", { name: "Remittance advice for Contoso Ltd (V-1)" }));
+    await user.click(await screen.findByRole("button", { name: "Download CSV" }));
+    await waitFor(() => expect(server.calls.some((c) => c.url.pathname === ADVICE && c.url.searchParams.get("format") === "csv")).toBe(true));
+    await user.click(screen.getByRole("button", { name: "Download PDF" }));
+    await waitFor(() => expect(calls("POST", "/api/v1/print/documents:render")).toHaveLength(1));
+    expect(calls("POST", "/api/v1/print/documents:render")[0].body).toMatchObject({
+      documentType: "REMITTANCE_ADVICE",
+      number: "E2E-1",
+      legalEntity: { name: "Cedar Ridge Pumps" },
+      counterparty: { label: "Vendor", name: "Contoso Ltd (V-1)" },
+      lines: [
+        ["INV-1001", "2026-09-01", "600.10", "20.00", "12.00", "568.10"],
+        ["INV-1002", "2026-09-03", "400.00", "0.00", "0.00", "400.00"],
+      ],
+      totals: [
+        { label: "Discount taken", value: "20.00" },
+        { label: "Tax withheld", value: "12.00" },
+        { label: "Total paid USD", value: "968.10" },
+      ],
+    });
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(2));
+  });
+
+  it("leaves the discount and tax columns out of a PDF that has neither", async () => {
+    serve();
+    const plain = advice();
+    plain.payments[0].lines = [{ ...plain.payments[0].lines[1] }];
+    const doc = await remittanceDocument(plain as Parameters<typeof remittanceDocument>[0], plain.payments[0] as Parameters<typeof remittanceDocument>[1]);
+    expect(doc.columns.map((c) => c.header)).toEqual(["Invoice", "Invoice date", "Amount open", "Paid"]);
+    expect(doc.lines).toEqual([["INV-1002", "2026-09-03", "400.00", "400.00"]]);
+    expect(doc.totals).toEqual([{ label: "Total paid USD", value: "968.10" }]);
+  });
+
+  it("offers no remittance advice until the run is complete, or a PDF without the print duty", async () => {
+    const user = userEvent.setup();
+    serve(() => run({ status: "RUNNING", completedAt: undefined }));
+    const view = renderAt(`/payables/runs/${RUN}`, DUTIES);
+    expect(await screen.findByText("E2E-1")).toBeInTheDocument();
+    await screen.findByText("Contoso Ltd (V-1)");
+    expect(screen.queryByRole("button", { name: /Remittance advice for/ })).not.toBeInTheDocument();
+    view.unmount();
+    serve();
+    renderAt(`/payables/runs/${RUN}`, [...READ, "payment-run.read"]);
+    await user.click(await screen.findByRole("button", { name: "Remittance advice for Contoso Ltd (V-1)" }));
+    expect(await screen.findByRole("button", { name: "Download CSV" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download PDF" })).not.toBeInTheDocument();
+  });
+
+  it("explains an advice that can't be loaded and a PDF the print service refuses", async () => {
+    const user = userEvent.setup();
+    let adviceFails = true;
+    api((url) => {
+      if (url.pathname === `/api/v1/payables/payment-runs/${RUN}`) return json(200, run());
+      if (url.pathname === ADVICE) return adviceFails ? json(409, { code: "AP-RUN-018", detail: "the run is RUNNING" }) : json(200, advice());
+      if (url.pathname === `/api/v1/org/legal-entities/${LE}`) return json(200, { name: "Cedar Ridge Pumps" });
+      if (url.pathname === "/api/v1/print/documents:render") return json(422, { code: "PRN-0008", detail: "documentType must be PURCHASE_ORDER, CUSTOMER_INVOICE or PACKING_SLIP" });
+      return undefined;
+    });
+    renderAt(`/payables/runs/${RUN}`, DUTIES);
+    await user.click(await screen.findByRole("button", { name: "Remittance advice for Contoso Ltd (V-1)" }));
+    expect(await screen.findByText("Could not load the remittance advice")).toBeInTheDocument();
+    expect(screen.getByText(/A remittance advice is available only once the payment run is complete/)).toBeInTheDocument();
+    adviceFails = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await user.click(await screen.findByRole("button", { name: "Download PDF" }));
+    expect(await screen.findByText("This document can't be downloaded as a PDF")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download CSV" })).toBeEnabled();
+  });
+
+  it("adds decimal amounts exactly and formats them without the currency for documents", () => {
+    expect(sumDecimals(["0.1", "0.2"])).toBe("0.3");
+    expect(sumDecimals(["600.10", "400", "-0.105"])).toBe("999.995");
+    expect(sumDecimals([])).toBe("0");
+    expect(sumDecimals(["abc", "", "5"])).toBe("5");
+    expect(sumDecimals(["-1.50", "0.25"])).toBe("-1.25");
+    expect(formatDecimal("1234.5", "USD")).toBe("1,234.50");
+    expect(formatDecimal("1234", "JPY")).toBe("1,234");
+    expect(formatDecimal("", "USD")).toBeNull();
   });
 });

@@ -155,14 +155,18 @@ type SubcontractPORequestedData struct {
 
 // OrderCreatedData is the payload of order.created.v1.
 type OrderCreatedData struct {
-	OrderID      string  `json:"orderId"`
-	OrderNumber  string  `json:"orderNumber"`
-	ProductID    string  `json:"productId"`
-	Quantity     string  `json:"quantity"`
-	SiteID       string  `json:"siteId"`
-	DeliveryDate *string `json:"deliveryDate"`
-	OriginType   string  `json:"originType"`
-	OriginID     *string `json:"originId"`
+	OrderID     string `json:"orderId"`
+	OrderNumber string `json:"orderNumber"`
+	// LegalEntityID and Status let the search index list the order under its
+	// number inside its legal entity (#506).
+	LegalEntityID string  `json:"legalEntityId"`
+	Status        string  `json:"status"`
+	ProductID     string  `json:"productId"`
+	Quantity      string  `json:"quantity"`
+	SiteID        string  `json:"siteId"`
+	DeliveryDate  *string `json:"deliveryDate"`
+	OriginType    string  `json:"originType"`
+	OriginID      *string `json:"originId"`
 	// ConfigurationID is the saved configuration of a SalesOrderLine order; null otherwise.
 	ConfigurationID *string `json:"configurationId"`
 	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20); null otherwise.
@@ -188,12 +192,16 @@ type OrderUpdatedData struct {
 
 // OrderStatusChangedData is the payload of order.statuschanged.v1.
 type OrderStatusChangedData struct {
-	OrderID  string `json:"orderId"`
-	From     string `json:"from"`
-	To       string `json:"to"`
-	Quantity string `json:"quantity"`
-	QtyRAF   string `json:"qtyRaf"`
-	QtyError string `json:"qtyError"`
+	OrderID string `json:"orderId"`
+	// OrderNumber and LegalEntityID let the search index keep the order's
+	// status current inside its legal entity (#506).
+	OrderNumber   string `json:"orderNumber"`
+	LegalEntityID string `json:"legalEntityId"`
+	From          string `json:"from"`
+	To            string `json:"to"`
+	Quantity      string `json:"quantity"`
+	QtyRAF        string `json:"qtyRaf"`
+	QtyError      string `json:"qtyError"`
 	// StartDate and EndDate are the order's scheduled dates; null while it is unscheduled.
 	StartDate  *string `json:"startDate"`
 	EndDate    *string `json:"endDate"`

@@ -48,7 +48,7 @@ export function validateOrder(values: Values, plan: PlanValues): { errors: Error
     if (!UUID.test(values[name].trim())) errors[name] = choose[name];
   }
   for (const name of ["itemGroupId", "partyId"] as const) {
-    if (values[name].trim() !== "" && !UUID.test(values[name].trim())) errors[name] = name === "partyId" ? "Choose a vendor or customer, or leave it empty." : "Enter a UUID, or leave it empty.";
+    if (values[name].trim() !== "" && !UUID.test(values[name].trim())) errors[name] = name === "partyId" ? "Choose a vendor or customer, or leave it empty." : "Choose an item group, or leave it empty.";
   }
   const batch = values.batch.trim();
   if (batch.length > MAX_BATCH) errors.batch = `Keep the batch to ${MAX_BATCH} characters.`;
@@ -200,7 +200,7 @@ export function NewOrderPage() {
             text("sourceId", "Source document", "The reference of the document line that triggered the order.")
           )}
           {lookup("itemId", "Item", "product")}
-          {text("itemGroupId", "Item group id", "Matches item-group associations.", true)}
+          {lookup("itemGroupId", "Item group", "itemGroup", "Matches item-group associations.", true)}
           {lookup("partyId", "Vendor or customer", "party", "Matches party associations.", true)}
           {lookup("siteId", "Site", "site")}
           {lookup("warehouseId", "Warehouse", "warehouse", undefined, false, { siteId: values.siteId || undefined })}

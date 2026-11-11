@@ -7,6 +7,7 @@ import { fieldErrors } from "../../shell/api/http";
 import { DECIMAL, UUID, type InvoiceNavState } from "./parts";
 import styles from "../../shell/pageLayout.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const MAX_LINES = 500;
 
@@ -47,9 +48,9 @@ export const emptyInvoice: InvoiceDraft = {
 /** Client checks that mirror POST /invoices:post; the service has the last word. */
 export function validateInvoice(v: InvoiceDraft): Errors {
   const errors: Errors = {};
-  for (const key of ["vendorId", "legalEntityId", "ledgerId"] as const) {
-    if (!UUID.test(v[key])) errors[key] = "Enter a UUID.";
-  }
+  if (!UUID.test(v.vendorId)) errors.vendorId = "Choose a vendor.";
+  if (!UUID.test(v.legalEntityId)) errors.legalEntityId = "Choose a legal entity.";
+  if (!UUID.test(v.ledgerId)) errors.ledgerId = "Enter a UUID.";
   if (v.invoiceNumber.trim() === "" || v.invoiceNumber.trim().length > 64) errors.invoiceNumber = "Enter an invoice number of up to 64 characters.";
   for (const key of ["invoiceDate", "postingDate"] as const) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(v[key])) errors[key] = "Enter a date.";
@@ -154,13 +155,25 @@ export function PostInvoicePage() {
     </FormField>
   );
 
+  const lookup = (field: "vendorId" | "legalEntityId", label: string) => (
+    <FormField id={`invoice-${field}`} label={label} error={errors[field]}>
+      {(c) =>
+        field === "vendorId" ? (
+          <EntityLookup entity="vendor" scope={{ legalEntityId: values.legalEntityId || undefined }} {...c} value={values.vendorId} invalid={Boolean(errors.vendorId)} onChange={(e) => update({ vendorId: e.target.value })} />
+        ) : (
+          <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} invalid={Boolean(errors.legalEntityId)} onChange={(e) => update({ legalEntityId: e.target.value })} />
+        )
+      }
+    </FormField>
+  );
+
   return (
     <div className={styles.stack}>
       <PageHeader title="Post vendor invoice" description="Checks the AP period, clears GR/IR for the quantities invoiced and posts the vendor liability. A price difference goes to inventory, or to PPV for standard-cost lines." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Vendor invoice">
-          {text("vendorId", "Vendor ID", { mono: true })}
-          {text("legalEntityId", "Legal entity ID", { mono: true })}
+          {lookup("legalEntityId", "Legal entity")}
+          {lookup("vendorId", "Vendor")}
           {text("invoiceNumber", "Invoice number", { hint: "Unique per vendor, ignoring case." })}
           {text("invoiceDate", "Invoice date", { type: "date" })}
           {text("postingDate", "Posting date", { type: "date", hint: "Sets the fiscal period; it must be an open AP period." })}

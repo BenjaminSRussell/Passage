@@ -2,6 +2,7 @@ import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Check, Facility, FacilityInstrument, Loan } from "./api/client";
+import { setLookupFetcher } from "../../shell/lookup/entities";
 import { header, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
 
 useFakeServer();
@@ -95,12 +96,13 @@ describe("check register", () => {
     };
     const { container } = renderAt("/treasury/checks");
     expect(screen.getByRole("heading", { name: "Choose a bank account" })).toBeInTheDocument();
-    fill("Bank account id", "nope");
+    fill("Bank account", "nope");
+    expect(screen.getByLabelText("Bank account")).toHaveAttribute("data-value", "");
     fireEvent.click(screen.getByRole("button", { name: "Show checks" }));
-    expect(await screen.findByText("Enter the bank account id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a bank account.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
 
-    fill("Bank account id", ACCT);
+    fill("Bank account", ACCT);
     fireEvent.click(screen.getByRole("button", { name: "Show checks" }));
     const table = await findTable({ name: "Checks" });
     await waitFor(() => expect(table).toHaveTextContent("Acme Supplies"));
@@ -136,7 +138,7 @@ describe("issue check", () => {
       return undefined;
     };
     const { container } = renderAt(`/treasury/checks/new?bankAccountId=${ACCT}`);
-    expect(screen.getByLabelText("Bank account id")).toHaveValue(ACCT);
+    expect(screen.getByLabelText("Bank account")).toHaveAttribute("data-value", ACCT);
     fill("Payee", "Acme Supplies");
     fill("Amount", "1500.005");
     fill("Currency", "USD");
@@ -151,6 +153,22 @@ describe("issue check", () => {
     const post = server.calls.find((c) => c.method === "POST")!;
     expect(post.body).toEqual({ bankAccountId: ACCT, payee: "Acme Supplies", amount: "1500.00", currency: "USD" });
     expect(header(post, "Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("picks the bank account by its code across legal entities and takes its currency", async () => {
+    setLookupFetcher(async (url) => {
+      const path = new URL(url, "http://localhost");
+      if (path.pathname === "/api/v1/org/legal-entities") return Response.json({ items: [{ id: LE, name: "Germany", code: "DE01" }] });
+      if (path.pathname === "/api/v1/treasury/bank-accounts" && path.searchParams.get("legalEntityId") === LE)
+        return Response.json({ items: [{ id: ACCT, legalEntityId: LE, accountCode: "EUR-OPS", ibanMasked: "DE** 3000", currency: "EUR" }] });
+      return Response.json({ items: [] });
+    });
+    renderAt("/treasury/checks/new");
+    fireEvent.change(screen.getByLabelText("Bank account"), { target: { value: "ops" } });
+    fireEvent.click(await screen.findByRole("option", { name: /EUR-OPS/ }));
+    expect(screen.getByLabelText("Bank account")).toHaveAttribute("data-value", ACCT);
+    expect(screen.getByLabelText("Bank account")).toHaveValue("EUR-OPS (DE** 3000 · EUR · DE01)");
+    expect(screen.getByLabelText("Currency")).toHaveValue("EUR");
   });
 
   it("explains an inactive account and puts a currency mismatch on the field", async () => {

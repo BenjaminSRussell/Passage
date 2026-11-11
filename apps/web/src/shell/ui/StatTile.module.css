@@ -27,6 +27,16 @@
   line-height: var(--text-sm-leading);
 }
 
+.link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:hover {
+  color: var(--color-text);
+}
+
 .value {
   font-size: var(--text-2xl-size);
   line-height: var(--text-2xl-leading);

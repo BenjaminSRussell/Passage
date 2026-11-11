@@ -259,7 +259,7 @@ describe("New trade agreement", () => {
   it("checks the form before calling the service", async () => {
     const { container } = renderAt("/pricing/agreements/new");
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a legal entity.")).toBeInTheDocument();
     expect(screen.getByText("Enter the customer or customer group.")).toBeInTheDocument();
     expect(screen.getByText("Enter the price.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
@@ -273,7 +273,7 @@ describe("New trade agreement", () => {
       return undefined;
     };
     renderAt("/pricing/agreements/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Customer", "C1");
     fill("Product", "SHIRT");
     fill("Currency", "EUR");
@@ -305,7 +305,7 @@ describe("New trade agreement", () => {
   it("puts the service's field errors next to the fields", async () => {
     handler = () => json(422, { code: "COM-0001", detail: "request is invalid", errors: { currency: "must be an ISO 4217 code in capitals" } });
     renderAt("/pricing/agreements/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Customer", "C1");
     fill("Product", "BOLT");
     fill("Price", "1");

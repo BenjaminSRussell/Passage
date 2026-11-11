@@ -5,6 +5,7 @@ import { checkIn, describeProblem, newKey, VISIT_DIRECTIONS, type NewCheckIn, ty
 import { statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface CheckInValues {
   siteId: string;
@@ -53,9 +54,9 @@ function minutes(value: string, max: number): number | null {
 export function validateCheckIn(v: CheckInValues): { errors: Record<string, string>; input?: NewCheckIn } {
   const errors: Record<string, string> = {};
   const siteId = v.siteId.trim();
-  if (!UUID.test(siteId)) errors.siteId = "Enter the site id as a lower-case UUID.";
+  if (!UUID.test(siteId)) errors.siteId = "Choose the site.";
   const loadId = v.loadId.trim();
-  if (loadId !== "" && !UUID.test(loadId)) errors.loadId = "Enter the load id as a lower-case UUID, or leave it empty.";
+  if (loadId !== "" && !UUID.test(loadId)) errors.loadId = "Choose a load, or clear it.";
   const scac = v.carrierScac.trim().toUpperCase();
   if (!/^[A-Z]{2,4}$/.test(scac)) errors.carrierScac = "Enter the carrier's 2 to 4 letter SCAC.";
   const trailer = v.trailerNo.trim().toUpperCase();
@@ -156,7 +157,7 @@ export function CheckInPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {field("siteId", "checkin-site", "Site id", "The site whose gate this is (UUID).", { mono: true })}
+          <LookupFormField id="checkin-site" label="Site" entity="site" hint="The site whose gate this is." value={values.siteId} error={errors.siteId} onChange={(siteId) => update({ siteId })} />
           <FormField id="checkin-direction" label="Direction" hint="Inbound delivers to the site; outbound collects a load.">
             {(control) => (
               <Select {...control} value={values.direction} onChange={(e) => update({ direction: e.target.value as VisitDirection })}>
@@ -171,7 +172,7 @@ export function CheckInPage() {
           {field("carrierScac", "checkin-scac", "Carrier SCAC", "Such as ABCD.", { mono: true, upper: true, max: 4 })}
           {field("trailerNo", "checkin-trailer", "Trailer or container", undefined, { mono: true, upper: true, max: 20 })}
           {field("sealNo", "checkin-seal", "Seal number", "The seal of an inbound sealed trailer.", { mono: true, max: 20, optional: true })}
-          {field("loadId", "checkin-load", "Load id", "The load being collected or delivered.", { mono: true, optional: true })}
+          <LookupFormField id="checkin-load" label="Load" entity="load" optional hint="The load being collected or delivered." value={values.loadId} error={errors.loadId} onChange={(loadId) => update({ loadId })} />
           {field("driverName", "checkin-driver", "Driver name")}
           {field("driverLicenseId", "checkin-license", "Driver license id", undefined, { max: 32 })}
           {field("appointmentId", "checkin-appointment", "Appointment id", "Leave empty for a walk-in.", { mono: true, optional: true })}

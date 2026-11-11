@@ -7,6 +7,7 @@ import { ALL_DIMENSIONS, ProblemAlert, stateTones } from "./parts";
 import { Named } from "../purchasing/Named";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -129,14 +130,8 @@ export function TransferLinesPage() {
           <FormField id="transfer-lines-to-warehouse" label="Receiving warehouse" optional>
             {(control) => <Input {...control} value={draft.toWarehouseId} onChange={set("toWarehouseId")} />}
           </FormField>
-          <FormField id="transfer-lines-product" label="Product" optional error={errors.productId}>
-            {(control) => <Input {...control} value={draft.productId} onChange={set("productId")} placeholder="Product id" invalid={Boolean(errors.productId)} />}
-          </FormField>
-          <FormField id="transfer-lines-legal-entity" label="Legal entity" optional error={errors.legalEntityId}>
-            {(control) => (
-              <Input {...control} value={draft.legalEntityId} onChange={set("legalEntityId")} placeholder="Legal entity id" invalid={Boolean(errors.legalEntityId)} />
-            )}
-          </FormField>
+          <LookupFormField id="transfer-lines-product" label="Product" entity="product" optional prefill={false} value={draft.productId} error={errors.productId} onChange={(productId) => setDraft({ ...draft, productId })} />
+          <LookupFormField id="transfer-lines-legal-entity" label="Legal entity" entity="legalEntity" optional prefill={false} value={draft.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setDraft({ ...draft, legalEntityId })} />
           <FormField id="transfer-lines-from" label="Ship date from" optional>
             {(control) => <Input {...control} type="date" value={draft.from} onChange={set("from")} />}
           </FormField>

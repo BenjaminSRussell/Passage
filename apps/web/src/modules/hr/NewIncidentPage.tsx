@@ -4,7 +4,7 @@ import { Alert, Button, buttonClassName, Card, PageHeader } from "../../shell/ui
 import { BODY_PARTS, INCIDENT_TYPES, reportIncident, type Incident, type IncidentType, type NewIncident } from "./api/safety";
 import { UUID, utcFromLocalInput } from "./format";
 import styles from "./pages.module.css";
-import { CheckField, FormActions, humanize, labelled, opt, SelectField, TextAreaField, TextField, useSubmit } from "./parts";
+import { CheckField, FormActions, humanize, labelled, LookupField, opt, SelectField, TextAreaField, TextField, useSubmit } from "./parts";
 
 export interface IncidentValues {
   workerId: string;
@@ -60,7 +60,7 @@ const lines = (raw: string) => raw.split("\n").map((l) => l.trim()).filter((l) =
 export function validateIncident(v: IncidentValues, now: Date = new Date()): { errors: Record<string, string>; input?: NewIncident } {
   const errors: Record<string, string> = {};
   for (const [name, label] of [["workerId", "worker"], ["legalEntityId", "legal entity"], ["siteId", "site"]] as const) {
-    if (!UUID.test(v[name].trim())) errors[name] = `Enter the ${label}'s id.`;
+    if (!UUID.test(v[name].trim())) errors[name] = `Choose the ${label}.`;
   }
   const occurredAt = utcFromLocalInput(v.occurredAt);
   if (!occurredAt) errors.occurredAt = "Choose when it happened.";
@@ -117,7 +117,7 @@ export function NewIncidentPage() {
   const [reported, setReported] = useState<Incident | null>(null);
   const form = useSubmit({ "HCM-INC-001": "overrideReason", "HCM-WRK-NOT-FOUND": "workerId" });
   const set = (patch: Partial<IncidentValues>) => {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     form.touch();
   };
 
@@ -169,9 +169,9 @@ export function NewIncidentPage() {
       <PageHeader title="Report an incident" description="What happened, to whom and where. Descriptions, witnesses and treatments are stored sealed." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("workerId", "Worker id")}
-          {text("legalEntityId", "Legal entity id")}
-          {text("siteId", "Site id")}
+          <LookupField entity="worker" id="incident-workerId" label="Worker" value={values.workerId} error={form.errors.workerId} onChange={(workerId) => set({ workerId })} />
+          <LookupField entity="legalEntity" id="incident-legalEntityId" label="Legal entity" value={values.legalEntityId} error={form.errors.legalEntityId} onChange={(legalEntityId) => set({ legalEntityId })} />
+          <LookupField entity="site" id="incident-siteId" label="Site" value={values.siteId} error={form.errors.siteId} onChange={(siteId) => set({ siteId })} />
           <SelectField id="incident-incidentType" label="Type" value={values.incidentType} error={form.errors.incidentType} onChange={(v) => set({ incidentType: v })} options={labelled(INCIDENT_TYPES)} />
           {text("occurredAt", "When it happened", { type: "datetime-local", hint: "Read as UTC." })}
           {text("location", "Location")}

@@ -61,7 +61,8 @@ func handle(t *testing.T, s Applier, evt events.Event) error {
 
 func TestHandlersCoverEverySubscribedEventType(t *testing.T) {
 	for _, typ := range []string{PartyCreatedType, PartyUpdatedType, PartyMergedType, ProductCreatedType, ProductUpdatedType, PurchaseOrderConfirmed, PurchaseOrderCancelled,
-		ReceiptPostedType, ReceiptCorrectedType, VendorInvoicePostedType, SalesOrderConfirmedType, PackingSlipPostedType, PackingSlipCancelledType, CustomerInvoicePostedType, CreditNotePostedType} {
+		ReceiptPostedType, ReceiptCorrectedType, VendorInvoicePostedType, SalesOrderConfirmedType, PackingSlipPostedType, PackingSlipCancelledType, CustomerInvoicePostedType, CreditNotePostedType,
+		ProductionOrderCreatedType, ProductionOrderStatusChangedType, WorkerCreatedType} {
 		if _, ok := Handlers(&fakeStore{})[typ]; !ok {
 			t.Errorf("no handler for %s", typ)
 		}
@@ -101,6 +102,12 @@ func TestIndexesEachRecordKindFromItsEvent(t *testing.T) {
 			store.Record{Type: store.TypeCustomerInvoice, ID: recordID, LegalEntityID: entityID, Number: "INV-8", Title: "INV-8", Subtitle: "USD 10.00", Status: "POSTED", At: eventTime}, entityID},
 		{"credit note posted", event(t, CreditNotePostedType, billingSource, map[string]any{"credit_note_id": recordID, "number": "CN-1", "legal_entity_id": entityID, "currency": "USD", "totals": map[string]any{"gross": "1.00"}}),
 			store.Record{Type: store.TypeCustomerInvoice, ID: recordID, LegalEntityID: entityID, Number: "CN-1", Title: "CN-1", Subtitle: "USD 1.00", Status: "POSTED", At: eventTime}, entityID},
+		{"production order created", event(t, ProductionOrderCreatedType, productionSource, map[string]any{"orderId": recordID, "orderNumber": "PO-000004", "legalEntityId": entityID, "status": "Created", "deliveryDate": "2026-11-30"}),
+			store.Record{Type: store.TypeProductionOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-000004", Title: "PO-000004", Status: "CREATED", At: eventTime}, entityID},
+		{"production order status changed", event(t, ProductionOrderStatusChangedType, productionSource, map[string]any{"orderId": recordID, "orderNumber": "PO-000004", "legalEntityId": entityID, "from": "Started", "to": "ReportedAsFinished"}),
+			store.Record{Type: store.TypeProductionOrder, ID: recordID, LegalEntityID: entityID, Number: "PO-000004", Title: "PO-000004", Status: "REPORTED_AS_FINISHED", At: eventTime}, entityID},
+		{"worker created", event(t, WorkerCreatedType, hrSource, map[string]any{"id": recordID, "personnel_number": "WRK-000012", "worker_type": "EMPLOYEE", "party_person_id": otherID}),
+			store.Record{Type: store.TypeWorker, ID: recordID, Number: "WRK-000012", Title: "WRK-000012", Subtitle: "employee", At: eventTime}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeStore{}
@@ -166,6 +173,7 @@ func TestEverySubscribedTopicMatchesTheSourceOutboxAggregate(t *testing.T) {
 		{SalesOrderTopic, "../../../sales/internal/store/store.go", `enqueue\(ctx, tx, "([a-z_]+)", o\.ID, salesevents\.OrderConfirmed`},
 		{ShipmentTopic, "../../../fulfillment/internal/store/store.go", `enqueueFor\(ctx, tx, "([a-z_]+)", aggregateID`},
 		{BillingInvoiceTopic, "../../../billing/internal/store/store.go", `outbox\.Enqueue\(ctx, tx, "([a-z_]+)", inv\.ID, evt\)`},
+		{WorkerTopic, "../../../hr/internal/store/store.go", `enqueue\(ctx, tx, "([a-z_]+)", w\.ID, hrevents\.WorkerCreated`},
 	} {
 		src, err := os.ReadFile(tc.file)
 		if err != nil {
@@ -181,24 +189,78 @@ func TestEverySubscribedTopicMatchesTheSourceOutboxAggregate(t *testing.T) {
 	}
 }
 
+// Production writes every event under one outbox aggregate type and names its
+// topics after the event type's entity (its AsyncAPI channels; scheduling reads
+// the same order channel), so the order topic is tied to the channel address
+// and the event type. HR's worker channel is checked the same way.
+func TestProductionAndWorkerTopicsMatchTheSourceChannels(t *testing.T) {
+	for _, tc := range []struct{ topic, eventType, file string }{
+		{ProductionOrderTopic, ProductionOrderCreatedType, "../../../production/events/asyncapi.yaml"},
+		{ProductionOrderTopic, ProductionOrderStatusChangedType, "../../../production/events/asyncapi.yaml"},
+		{WorkerTopic, WorkerCreatedType, "../../../hr/events/asyncapi.yaml"},
+	} {
+		if got := events.Topic(tc.eventType); got != tc.topic {
+			t.Errorf("%s is published on %s, the consumer reads %s", tc.eventType, got, tc.topic)
+		}
+		spec, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !regexp.MustCompile(`(?m)^\s+address: ` + regexp.QuoteMeta(tc.topic) + `\s*$`).Match(spec) {
+			t.Errorf("%s has no channel with address %s", tc.file, tc.topic)
+		}
+	}
+}
+
+// The production and HR payloads are read by JSON name; a renamed or dropped
+// field in the producer would leave the index empty without an error.
+func TestSourcePayloadsCarryTheFieldsTheIndexReads(t *testing.T) {
+	for _, tc := range []struct {
+		file, payload string
+		tags          []string
+	}{
+		{"../../../production/internal/events/events.go", "OrderCreatedData", []string{"orderId", "orderNumber", "legalEntityId", "status"}},
+		{"../../../production/internal/events/events.go", "OrderStatusChangedData", []string{"orderId", "orderNumber", "legalEntityId", "to"}},
+		{"../../../hr/internal/events/events.go", "WorkerCreatedData", []string{"id", "personnel_number", "worker_type"}},
+	} {
+		src, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := regexp.MustCompile(`(?s)type ` + tc.payload + ` struct \{(.*?)\n\}`).FindSubmatch(src)
+		if m == nil {
+			t.Fatalf("%s: no struct %s", tc.file, tc.payload)
+		}
+		for _, tag := range tc.tags {
+			if !strings.Contains(string(m[1]), `json:"`+tag+`"`) {
+				t.Errorf("%s.%s has no field %q", tc.file, tc.payload, tag)
+			}
+		}
+	}
+}
+
 func TestMalformedEventsAreDeadLettered(t *testing.T) {
 	good := map[string]any{"party_id": recordID, "party_number": "P-1"}
 	noTime := event(t, PartyCreatedType, partySource, good)
 	noTime.Time = time.Time{}
 	for name, evt := range map[string]events.Event{
-		"wrong source":      event(t, PartyCreatedType, "/passage/other", good),
-		"no time":           noTime,
-		"bad json":          {Type: PartyCreatedType, Source: partySource, Time: eventTime, Data: []byte("{")},
-		"party no number":   event(t, PartyUpdatedType, partySource, map[string]any{"party_id": recordID}),
-		"party bad id":      event(t, PartyUpdatedType, partySource, map[string]any{"party_id": "x", "party_number": "P"}),
-		"product no number": event(t, ProductCreatedType, productSource, map[string]any{"productId": recordID}),
-		"merge empty":       event(t, PartyMergedType, partySource, mergeData()),
-		"merge bad survivor": event(t, PartyMergedType, partySource, map[string]any{"survivorPartyId": "x", "mergedPartyIds": []string{recordID}}),
-		"merge bad id":      event(t, PartyMergedType, partySource, mergeData("x")),
-		"po no entity":      event(t, PurchaseOrderConfirmed, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-1"}),
-		"receipt no entity": event(t, ReceiptPostedType, receivingSource, map[string]any{"receipt_id": recordID, "receipt_number": "RC-1"}),
-		"slip wrong source": event(t, PackingSlipPostedType, "billing", map[string]any{"packing_slip_id": recordID, "packing_slip_number": "PS", "legal_entity_id": entityID}),
-		"po no number":      event(t, PurchaseOrderCancelled, purchasingSource, map[string]any{"po_id": recordID, "legal_entity_id": entityID}),
+		"wrong source":                  event(t, PartyCreatedType, "/passage/other", good),
+		"no time":                       noTime,
+		"bad json":                      {Type: PartyCreatedType, Source: partySource, Time: eventTime, Data: []byte("{")},
+		"party no number":               event(t, PartyUpdatedType, partySource, map[string]any{"party_id": recordID}),
+		"party bad id":                  event(t, PartyUpdatedType, partySource, map[string]any{"party_id": "x", "party_number": "P"}),
+		"product no number":             event(t, ProductCreatedType, productSource, map[string]any{"productId": recordID}),
+		"merge empty":                   event(t, PartyMergedType, partySource, mergeData()),
+		"merge bad survivor":            event(t, PartyMergedType, partySource, map[string]any{"survivorPartyId": "x", "mergedPartyIds": []string{recordID}}),
+		"merge bad id":                  event(t, PartyMergedType, partySource, mergeData("x")),
+		"po no entity":                  event(t, PurchaseOrderConfirmed, purchasingSource, map[string]any{"po_id": recordID, "number": "PO-1"}),
+		"receipt no entity":             event(t, ReceiptPostedType, receivingSource, map[string]any{"receipt_id": recordID, "receipt_number": "RC-1"}),
+		"slip wrong source":             event(t, PackingSlipPostedType, "billing", map[string]any{"packing_slip_id": recordID, "packing_slip_number": "PS", "legal_entity_id": entityID}),
+		"po no number":                  event(t, PurchaseOrderCancelled, purchasingSource, map[string]any{"po_id": recordID, "legal_entity_id": entityID}),
+		"production order no entity":    event(t, ProductionOrderStatusChangedType, productionSource, map[string]any{"orderId": recordID, "orderNumber": "PO-000001", "to": "Released"}),
+		"production order wrong source": event(t, ProductionOrderCreatedType, "planning", map[string]any{"orderId": recordID, "orderNumber": "PO-000001", "legalEntityId": entityID}),
+		"worker no number":              event(t, WorkerCreatedType, hrSource, map[string]any{"id": recordID}),
+		"worker bad id":                 event(t, WorkerCreatedType, hrSource, map[string]any{"id": "x", "personnel_number": "WRK-1"}),
 	} {
 		f := &fakeStore{}
 		err := handle(t, f, evt)

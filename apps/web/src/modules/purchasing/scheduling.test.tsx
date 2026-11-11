@@ -136,8 +136,8 @@ describe("new scheduling agreement", () => {
     renderAt("/purchasing/scheduling-agreements/new");
     fireEvent.change(await screen.findByLabelText("Firm zone (days)"), { target: { value: "40" } });
     fireEvent.click(screen.getByRole("button", { name: "Save scheduling agreement" }));
-    expect(await screen.findByText("Enter the vendor id (a UUID).")).toBeInTheDocument();
-    expect(screen.getByText("Enter the site id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a vendor.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a site.")).toBeInTheDocument();
     expect(screen.getByText("Enter the agreed price per unit.")).toBeInTheDocument();
     expect(screen.getByText("The trade-off zone cannot end before the firm zone.")).toBeInTheDocument();
     expect(screen.getByText("Enter a positive quantity.")).toBeInTheDocument();
@@ -147,10 +147,10 @@ describe("new scheduling agreement", () => {
   it("posts the agreement, profile and schedule with an Idempotency-Key and opens it", async () => {
     const fetchMock = stubFetch((_url, init) => (init.method === "POST" ? json(agreement, 201, { ETag: '"1"' }) : json(agreement)));
     const { router } = renderAt("/purchasing/scheduling-agreements/new");
-    fireEvent.change(await screen.findByLabelText("Legal entity id"), { target: { value: LE } });
-    fireEvent.change(screen.getByLabelText("Vendor id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product id"), { target: { value: PRODUCT } });
-    fireEvent.change(screen.getByLabelText("Site id"), { target: { value: SITE } });
+    fireEvent.change(await screen.findByLabelText("Legal entity"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "2.50" } });
     fireEvent.change(screen.getByLabelText("Valid from"), { target: { value: "2027-01-01" } });
     fireEvent.change(screen.getByLabelText("Release frequency"), { target: { value: "DAILY" } });
@@ -188,10 +188,10 @@ describe("new scheduling agreement", () => {
     stubFetch(() => problem(422, "COM-0001", "lines[0].qty must be greater than zero", { "lines[0].qty": "must be greater than zero" }));
     renderAt("/purchasing/scheduling-agreements/new");
     for (const [label, value] of [
-      ["Legal entity id", LE],
-      ["Vendor id", VENDOR],
-      ["Product id", PRODUCT],
-      ["Site id", SITE],
+      ["Legal entity", LE],
+      ["Vendor", VENDOR],
+      ["Product", PRODUCT],
+      ["Site", SITE],
       ["Unit price", "1"],
       ["Delivery date", "2099-01-01"],
       ["Quantity (EA)", "5"],

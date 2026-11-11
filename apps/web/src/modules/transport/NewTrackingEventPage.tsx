@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { describeProblem, recordTrackingEvent, TRACKING_CODES, TRACKING_SOURCES, type NewTrackingEvent, type Problem, type TrackingCode, type TrackingSource } from "./api/client";
 import { trackingCodeLabels, UUID } from "./format";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -20,7 +21,7 @@ export interface TrackingValues {
 export function validateTracking(v: TrackingValues): { errors: Record<string, string>; input?: NewTrackingEvent } {
   const errors: Record<string, string> = {};
   const loadId = v.loadId.trim();
-  if (!UUID.test(loadId)) errors.loadId = "Enter the load id as a lower-case UUID.";
+  if (!UUID.test(loadId)) errors.loadId = "Choose the load.";
   const stopNo = Number(v.stopNo);
   if (!Number.isInteger(stopNo) || stopNo < 1 || stopNo > 999) errors.stopNo = "Enter a stop number from 1 to 999.";
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(v.occurredAt)) errors.occurredAt = "Enter when it happened, in UTC.";
@@ -75,9 +76,7 @@ export function NewTrackingEventPage() {
       <PageHeader title="Record status" description="Source and reference identify the report: sending the same one twice records it once." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="track-load" label="Load id" error={errors.loadId}>
-            {(control) => <Input {...control} className={styles.mono} value={values.loadId} onChange={(e) => update({ loadId: e.target.value })} invalid={Boolean(errors.loadId)} />}
-          </FormField>
+          <LookupFormField id="track-load" label="Load" entity="load" value={values.loadId} error={errors.loadId} onChange={(loadId) => update({ loadId })} />
           <FormField id="track-stop" label="Stop number" error={errors.stopNo}>
             {(control) => <Input {...control} inputMode="numeric" value={values.stopNo} onChange={(e) => update({ stopNo: e.target.value })} invalid={Boolean(errors.stopNo)} />}
           </FormField>
