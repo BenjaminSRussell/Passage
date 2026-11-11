@@ -167,7 +167,7 @@ components:
         (0 for a manual completion without an action log).
       payload:
         type: object
-        required: [workOrderId, number, customerId, legalEntityId, caseId, technicianId, firstTimeFix, durationMinutes, completedAt, lines]
+        required: [workOrderId, number, customerId, legalEntityId, caseId, technicianId, firstTimeFix, durationMinutes, completedAt, truck, lines]
         additionalProperties: false
         properties:
           workOrderId: { type: string, format: uuid }
@@ -179,17 +179,30 @@ components:
           firstTimeFix: { type: boolean }
           durationMinutes: { type: integer, minimum: 0 }
           completedAt: { type: string, format: date-time }
+          truck:
+            description: The technician's truck as an inventory address; null without a technician or a truck. Inventory issues the consumed PART lines from it (BR-45.7).
+            oneOf:
+              - type: "null"
+              - type: object
+                required: [siteId, warehouseId, locationId]
+                additionalProperties: false
+                properties:
+                  siteId: { type: string, format: uuid }
+                  warehouseId: { type: string, format: uuid }
+                  locationId: { type: [string, "null"], format: uuid }
           lines:
             type: array
             items:
               type: object
-              required: [lineId, kind, qty, consumedQty]
+              required: [lineId, kind, qty, consumedQty, productId, unit]
               additionalProperties: false
               properties:
                 lineId: { type: string, format: uuid }
                 kind: { type: string, enum: [LABOR, PART, TRAVEL, FEE] }
                 qty: { type: string, description: Planned quantity as a decimal string. }
                 consumedQty: { type: string, description: Reported consumption as a decimal string; "0" when none. }
+                productId: { type: string, description: The stock item of a PART line (a UUID); empty for a line that moves no stock. }
+                unit: { type: string, description: The unit consumedQty is in; empty without a productId. }
     WorkOrderPosted:
       name: dev.passage.service.workorder.posted.v1
       contentType: application/cloudevents+json

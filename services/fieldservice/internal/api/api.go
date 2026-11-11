@@ -48,6 +48,7 @@ const (
 var (
 	profileCode = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{1,19}$`)
 	currency    = regexp.MustCompile(`^[A-Z]{3}$`)
+	unitCode    = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
 )
 
 // API holds the store and the counters exported on /metrics.
@@ -101,6 +102,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerIntake(r)
 	a.registerDispatch(r)
 	a.registerActions(r)
+	a.registerDay(r)
 }
 
 // Metrics serves the service counters in Prometheus text format.
@@ -388,6 +390,8 @@ type workOrderRequest struct {
 	// SignatureExempt is set when the incident type's rule waives the customer
 	// signature at completion (SVC-WO-001).
 	SignatureExempt bool `json:"signatureExempt"`
+	// Checklist is the steps the technician ticks off on the visit (FR-45.8).
+	Checklist []checklistRequest `json:"checklist"`
 }
 
 func (a *API) createWorkOrder(w http.ResponseWriter, r *http.Request) {
@@ -423,6 +427,7 @@ func (a *API) createWorkOrder(w http.ResponseWriter, r *http.Request) {
 	for i := range req.Lines {
 		fields = validateLine(fields, i, &req.Lines[i])
 	}
+	checklist := checklistOf(fields, req.Checklist)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -431,7 +436,7 @@ func (a *API) createWorkOrder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	in := store.WorkOrder{CustomerPartyID: req.CustomerPartyID, LegalEntityID: req.LegalEntityID, TerritoryID: req.TerritoryID,
+	in := store.WorkOrder{Checklist: checklist, CustomerPartyID: req.CustomerPartyID, LegalEntityID: req.LegalEntityID, TerritoryID: req.TerritoryID,
 		CaseID: req.CaseID, AgreementID: req.AgreementID, IncidentTypeID: req.IncidentTypeID,
 		EstDurationMinutes: req.EstDurationMinutes, Currency: req.Currency, Lines: req.Lines,
 		RequiredSkills: sc.RequiredSkills, WindowStart: sc.WindowStart, WindowEnd: sc.WindowEnd, Address: sc.Address, Latitude: sc.Latitude, Longitude: sc.Longitude,
@@ -461,6 +466,15 @@ func validateLine(fields map[string]string, i int, l *domain.WorkLine) map[strin
 	}
 	if l.UnitPrice.IsNegative() || l.UnitCost.IsNegative() {
 		fields[key] = "unit price and unit cost must not be negative"
+	}
+	if len([]rune(l.Description)) > 200 {
+		fields[key] = "description must be at most 200 characters"
+	}
+	if l.ProductID != "" && (l.Kind != domain.KindPart || !ids.Valid(l.ProductID) || !unitCode.MatchString(l.Unit)) {
+		fields[key] = "productId (a UUID) belongs on a PART line and needs a unit of 1 to 10 upper-case letters or digits"
+	}
+	if l.ProductID == "" && l.Unit != "" {
+		fields[key] = "unit applies only with a productId"
 	}
 	return fields
 }

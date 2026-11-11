@@ -2396,3 +2396,18 @@ test_receiving_document_flow_is_read_only_and_separate if {
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
 }
+
+# #45: the technician's day and capture routes belong to the technician duty; reading a capture
+# back is an inquiry; the checklist is set by office staff who maintain work orders.
+test_fieldservice_technician_day_and_captures if {
+	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/me/day")
+	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/t1/day")
+	allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.work-order.execute", "GET", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/checklist")
+	allowed("fieldservice.inquire", "GET", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.inquire", "PUT", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.inquire", "GET", "/v1/service/technicians/me/day")
+	allowed("fieldservice.work-order.maintain", "PUT", "/v1/service/work-orders/w1/checklist")
+	not allowed("fieldservice.work-order.maintain", "PUT", "/v1/service/work-orders/w1/captures/c1")
+}
