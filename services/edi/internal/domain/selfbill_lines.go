@@ -24,7 +24,14 @@ type SBShipmentLine struct {
 // SelfBillingLines lists what a shipment shipped, one line per (PO line, item), from its shipped containers. A shipment that
 // shipped nothing yields no lines.
 func SelfBillingLines(p TradeProfile, sh SourceShipment, o SourceOrder) ([]SBShipmentLine, error) {
-	if err := ValidateShipmentSource(p, sh); err != nil {
+	return SelfBillingLinesForSlip(p, sh, o, nil)
+}
+
+// SelfBillingLinesForSlip lists what one packing slip shipped, under the delivery note its notice carries (nil: the whole shipment).
+func SelfBillingLinesForSlip(p TradeProfile, sh SourceShipment, o SourceOrder, slip *SlipRef) ([]SBShipmentLine, error) {
+	note := DeliveryNote(sh, slip)
+	sh = OnlySlip(sh, slip)
+	if err := validateShipmentSource(p, sh, slip.perSlip()); err != nil {
 		return nil, err
 	}
 	shipLines := make(map[string]SourceShipLine, len(sh.Lines))
@@ -48,7 +55,7 @@ func SelfBillingLines(p TradeProfile, sh SourceShipment, o SourceOrder) ([]SBShi
 			k := key{strconv.Itoa(po.LineNo), sl.ProductID}
 			row, seen := byKey[k]
 			if !seen {
-				row = &SBShipmentLine{DeliveryNote: sh.ShipmentNumber, POLine: k.line, Item: k.item, UnitPrice: po.UnitPrice,
+				row = &SBShipmentLine{DeliveryNote: note, POLine: k.line, Item: k.item, UnitPrice: po.UnitPrice,
 					ShippedOn: sh.ActualShipDate.UTC(), ShipmentID: sh.ID}
 				byKey[k] = row
 				order = append(order, k)

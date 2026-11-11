@@ -23,6 +23,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
+	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 )
 
@@ -44,7 +45,7 @@ const (
 
 // Sender generates the outbound document of one source document for one partner. API.SendFromSource implements it.
 type Sender interface {
-	SendFromSource(ctx context.Context, partnerID, transactionSet, sourceID string) (store.OutboundResult, bool, error)
+	SendFromSource(ctx context.Context, partnerID, transactionSet, sourceID string, slip *domain.SlipRef) (store.OutboundResult, bool, error)
 }
 
 // Partners finds the partners of a legal entity that receive the given sets automatically.
@@ -53,8 +54,30 @@ type Partners interface {
 }
 
 type asnData struct {
-	ShipmentID    string `json:"shipment_id"`
-	LegalEntityID string `json:"legal_entity_id"`
+	ShipmentID        string `json:"shipment_id"`
+	LegalEntityID     string `json:"legal_entity_id"`
+	PackingSlipID     string `json:"packing_slip_id"`
+	PackingSlipNumber string `json:"packing_slip_number"`
+	Containers        []struct {
+		SSCC string `json:"sscc"`
+	} `json:"containers"`
+}
+
+// slip is the packing slip the notice is for, nil when the event names none or no containers (then the whole shipment is sent).
+func (d asnData) slip() *domain.SlipRef {
+	if !ids.Valid(d.PackingSlipID) || len(d.Containers) == 0 {
+		return nil
+	}
+	s := &domain.SlipRef{ID: d.PackingSlipID, Number: d.PackingSlipNumber}
+	for _, c := range d.Containers {
+		if c.SSCC != "" {
+			s.SSCCs = append(s.SSCCs, c.SSCC)
+		}
+	}
+	if len(s.SSCCs) == 0 {
+		return nil
+	}
+	return s
 }
 
 type invoiceData struct {
@@ -70,19 +93,19 @@ func Handlers(p Partners, s Sender) map[string]eventing.Handler {
 			if err := json.Unmarshal(evt.Data, &d); err != nil {
 				return eventing.Permanent(fmt.Errorf("asn.issued data: %w", err))
 			}
-			return send(ctx, p, s, evt, FulfillmentSource, d.LegalEntityID, d.ShipmentID, []string{"856", "DESADV"})
+			return send(ctx, p, s, evt, FulfillmentSource, d.LegalEntityID, d.ShipmentID, d.slip(), []string{"856", "DESADV"})
 		}),
 		InvoicePostedType: eventing.HandlerFunc(func(ctx context.Context, _ pgx.Tx, evt events.Event) error {
 			var d invoiceData
 			if err := json.Unmarshal(evt.Data, &d); err != nil {
 				return eventing.Permanent(fmt.Errorf("invoice.posted data: %w", err))
 			}
-			return send(ctx, p, s, evt, BillingSource, d.LegalEntityID, d.InvoiceID, []string{"810", "INVOIC"})
+			return send(ctx, p, s, evt, BillingSource, d.LegalEntityID, d.InvoiceID, nil, []string{"810", "INVOIC"})
 		}),
 	}
 }
 
-func send(ctx context.Context, p Partners, s Sender, evt events.Event, source, legalEntityID, sourceID string, sets []string) error {
+func send(ctx context.Context, p Partners, s Sender, evt events.Event, source, legalEntityID, sourceID string, slip *domain.SlipRef, sets []string) error {
 	actor, ok := tenant.FromContext(ctx)
 	if !ok || !actor.HasDuty(Duty) {
 		return eventing.Permanent(errors.New("outbound consumer has no principal with " + Duty))
@@ -108,7 +131,7 @@ func send(ctx context.Context, p Partners, s Sender, evt events.Event, source, l
 	var retry error
 	for _, ap := range partners {
 		for _, set := range ap.TransactionSets {
-			_, created, err := s.SendFromSource(ctx, ap.PartnerID, set, sourceID)
+			_, created, err := s.SendFromSource(ctx, ap.PartnerID, set, sourceID, slip)
 			switch kind := classify(err); kind {
 			case outcomeSent:
 				slog.InfoContext(ctx, "edi outbound sent from event", "type", evt.Type, "partner", ap.PartnerID, "set", set, "source", sourceID, "created", created)

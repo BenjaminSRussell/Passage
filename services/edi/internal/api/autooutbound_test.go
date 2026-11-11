@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
@@ -16,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/autosend"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
 )
@@ -209,5 +211,46 @@ func TestAutoOutbound_RejectsEventsItCannotTrust(t *testing.T) {
 	// Without the consumer's principal nothing runs.
 	if err := handlers[autosend.ASNIssuedType](context.Background(), event(t, autosend.ASNIssuedType, autosend.FulfillmentSource, data)); err == nil {
 		t.Fatal("no principal must be refused")
+	}
+}
+
+// A second packing slip of the same shipment sends its own 856 (keyed by shipment and slip) with only its containers and its own
+// delivery note; a redelivery of either slip sends nothing more.
+func TestAutoOutbound_SecondPackingSlipSendsItsOwn856(t *testing.T) {
+	f := newFake()
+	f.shipment.Status = "PARTIALLY_SHIPPED"
+	f.shipment.Containers = append(f.shipment.Containers, domain.SourceContainer{SSCC: "003456789012340026", Status: "SHIPPED", GrossKg: decimal.NewFromInt(40),
+		Lines: []domain.SourceContainerLine{{ShipmentLineID: "sl-1", Qty: decimal.NewFromInt(4)}}})
+	_, h, pool, partner, handlers := autoSetup(t, f)
+	do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/auto-outbound", `{"transactionSets":["856"]}`, "edi.admin", srcScope)
+	slip := func(id, number, sscc string) events.Event {
+		return event(t, autosend.ASNIssuedType, autosend.FulfillmentSource, map[string]any{"shipment_id": srcShipment, "legal_entity_id": srcLE,
+			"packing_slip_id": id, "packing_slip_number": number, "containers": []map[string]string{{"sscc": sscc}}})
+	}
+	one := slip("00000000-0000-0000-0000-0000000000d1", "PS-1", "003456789012340019")
+	two := slip("00000000-0000-0000-0000-0000000000d2", "PS-2", "003456789012340026")
+	for _, e := range []events.Event{one, two, one, two} {
+		if err := handlers[autosend.ASNIssuedType](consumerCtx(t), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := countInterchanges(t, h, "OUT"); n != 2 {
+		t.Fatalf("one 856 per slip expected, got %d", n)
+	}
+	var notes []string
+	rows, err := pool.Query(context.Background(), `select delivery_note from self_billing_shipment order by delivery_note`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		notes = append(notes, n)
+	}
+	if strings.Join(notes, ",") != "SHP-0001-PS-1,SHP-0001-PS-2" {
+		t.Fatalf("delivery notes: %v", notes)
 	}
 }
