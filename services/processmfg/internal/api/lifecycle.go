@@ -51,6 +51,10 @@ func (a *API) advance(cmd string) http.HandlerFunc {
 			fail(w, r, err)
 			return
 		}
+		if fresh && cmd == domain.CmdRelease {
+			// The release has happened; the control recipe follows it, and a failure shows on the order.
+			a.generateRecipe(r.Context(), o)
+		}
 		writeCommand(w, fresh, http.StatusOK, o)
 	}
 }

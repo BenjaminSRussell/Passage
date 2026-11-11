@@ -2557,8 +2557,8 @@ test_dev_seed_every_user_reads_features_but_cannot_change_them if {
 	not dev_seed_decision("clerk", "PUT", "/v1/tenant/features").allow
 }
 
-test_processmfg_service_grant_reads_features_only if {
-	data.service_grants.processmfg == {"identity": ["identity.feature.view"]}
+test_processmfg_service_grant_reads_features_and_creates_recipes if {
+	data.service_grants.processmfg == {"identity": ["identity.feature.view"], "shopfloor": ["shopfloor.controlrecipe.create"]}
 	allowed("identity.feature.view", "GET", "/v1/tenant/features")
 	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
 	not allowed("identity.feature.view", "GET", "/v1/tenants")
@@ -2770,6 +2770,71 @@ test_receiving_document_flow_is_read_only_and_separate if {
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
+}
+
+# The shopfloor sweeper reads the registry of active tenants and nothing else of identity (#25).
+test_shopfloor_service_grant_reads_the_tenant_registry_only if {
+	data.service_grants.shopfloor == {"identity": ["identity.tenant-registry.read"]}
+	allowed("identity.tenant-registry.read", "GET", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "POST", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "PATCH", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "GET", "/v1/tenants/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("identity.tenant-registry.read", "GET", "/v1/legal-entities")
+}
+
+# A released batch order may create control recipes and nothing else of the shop floor (#25).
+test_processmfg_may_create_control_recipes_only if {
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes")
+	not allowed("shopfloor.controlrecipe.create", "GET", "/v1/shopfloor/edge-nodes/e1/control-recipes")
+	not allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/edge-nodes/e1/control-recipes/r1:report")
+}
+
+# Recipe targets and the control recipe of a released batch order (#25): the targets are set with the formula
+# duty, read with the batch order read duty, and sending the recipe again needs the batch order write duty.
+test_recipe_target_duties if {
+	allowed("production.formula.write", "PUT", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("production.formula.write", "DELETE", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("production.batch-order.read", "PUT", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("production.batch-order.read", "GET", "/v1/production/recipe-targets")
+	allowed("production.batch-order.read", "GET", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/control-recipe")
+	allowed("production.batch-order.write", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
+	not allowed("production.batch-order.read", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
+}
+
+# The PI sheet designer (#25, FR-25.16): designing and releasing needs the maintain duty, reading the view duty, and a
+# control recipe made from a released sheet the control recipe create duty.
+test_pi_sheet_duties if {
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.pisheet.maintain", "PUT", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:release")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:new-version")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:obsolete")
+	not allowed("shopfloor.pisheet.maintain", "GET", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/pi-sheets")
+	not allowed("shopfloor.view", "PUT", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
+	not allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
+}
+
+# RFID ingest and warehouse automation (#32): readers and the PLC connector hold their own duties, people read, and
+# a supervisor gives transport work to a PLC.
+test_warehouse_rfid_and_automation_duties if {
+	allowed("warehouse.rfid.ingest", "POST", "/v1/warehouse/rfid-reads:ingest")
+	not allowed("warehouse.rfid.ingest", "GET", "/v1/warehouse/rfid-reads")
+	not allowed("warehouse.inquiry.view", "POST", "/v1/warehouse/rfid-reads:ingest")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/rfid-reads")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.automation.execute", "GET", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:report")
+	allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/events")
+	not allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/transport-orders")
+	not allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/events")
+	allowed("warehouse.setup.maintain", "PUT", "/v1/warehouse/gs1-settings")
+	allowed("warehouse.setup.view", "GET", "/v1/warehouse/gs1-settings")
+	not allowed("warehouse.setup.view", "PUT", "/v1/warehouse/gs1-settings")
 }
 
 test_consolidation_unit_edit_terms_and_mapping_versions_follow_configure_and_view if {

@@ -1,6 +1,6 @@
 // Shop floor service (/api/v1/shopfloor) for the demo: machines, the andon board and OEE.
 // Resources and sites carry the real ids of company.ts; the screens show their names.
-import type { Andon, ControlRecipeDetail, Downtime, Job, Machine, OeeBucket, OeeTile } from "../../../modules/shopfloor/api/client";
+import type { Andon, ControlRecipeDetail, Downtime, Job, Machine, OeeBucket, OeeTile, PISheet, RecipeDocument } from "../../../modules/shopfloor/api/client";
 import { reply, route } from "../../backend";
 import { PLANT, resourceByCode } from "../../company";
 import { at, table, uid } from "../../store";
@@ -193,7 +193,7 @@ route("GET", `${BASE}/jobs/{id}`, (req) => jobs.get(req.params.id) ?? reply.prob
 
 // Control recipes (FR-25.15): the recipe of a released order sent to a kiosk or to a process control system.
 const orderId = (number: string): string => orders.all().find((o) => o.orderNumber === number)?.id ?? uid(234, 99);
-const recipeDoc = (setpoint?: { node: string; value: number }): ControlRecipeDetail["recipe"] => ({
+const recipeDoc = (setpoint?: { node: string; value: number }): RecipeDocument => ({
   procedure: {
     name: "Impeller balancing",
     unitProcedures: [
@@ -206,8 +206,8 @@ const recipeDoc = (setpoint?: { node: string; value: number }): ControlRecipeDet
               {
                 name: "Spin-up",
                 instructions: [
-                  { seq: 1, category: "instruction-text", text: "Mount the impeller on the arbor and check the runout." },
-                  ...(setpoint ? [{ seq: 2, category: "process-parameter-setpoint", node: setpoint.node, value: setpoint.value }] : []),
+                  { seq: 1, category: "instruction-text" as const, text: "Mount the impeller on the arbor and check the runout." },
+                  ...(setpoint ? [{ seq: 2, category: "process-parameter-setpoint" as const, node: setpoint.node, value: setpoint.value }] : []),
                 ],
               },
             ],
@@ -217,6 +217,41 @@ const recipeDoc = (setpoint?: { node: string; value: number }): ControlRecipeDet
     ],
   },
 });
+/** The pump assembly sheet a kiosk runs: instruction, setpoint, a measured value with limits, an inspection and a signature. */
+function assemblySheet(): RecipeDocument {
+  return {
+    procedure: {
+      name: "Pump assembly",
+      unitProcedures: [
+        {
+          name: "Assembly cell",
+          operations: [
+            {
+              name: "Assemble",
+              phases: [
+                {
+                  name: "Fit the impeller",
+                  instructions: [
+                    { seq: 1, category: "instruction-text", text: "Check that the casing is clean and the wear ring is seated." },
+                    { seq: 2, category: "process-parameter-setpoint", text: "Set the torque wrench for the impeller nut.", value: 45, characteristic: { name: "Nut torque", type: "numeric", unit: "N m", min: 40, max: 50 } },
+                    { seq: 3, category: "process-data-request", text: "Measure the impeller end float.", characteristic: { name: "End float", type: "numeric", unit: "mm", min: 0.2, max: 0.5 } },
+                  ],
+                },
+                {
+                  name: "Test and sign",
+                  instructions: [
+                    { seq: 1, category: "inspection-characteristic", text: "Spin the shaft by hand. Does it turn freely?", characteristic: { name: "Turns freely", type: "boolean" } },
+                    { seq: 2, category: "signature-request", text: "Sign to confirm the assembly followed this sheet." },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
 const recipeBase = { topic: null, version: 3, createdBy: "Maya Okafor", createdAt: at(-0.5), updatedAt: at(-0.2) };
 const recipes = table<ControlRecipeDetail>([
   {
@@ -248,7 +283,7 @@ const recipes = table<ControlRecipeDetail>([
     destination: "kiosk",
     edgeId: null,
     status: "sent",
-    recipe: recipeDoc(),
+    recipe: assemblySheet(),
     sendCount: 1,
     lastSentAt: at(-0.1),
     lastError: null,
@@ -301,4 +336,79 @@ route("POST", `${BASE}/control-recipes/{id}:resend`, (req) => {
     history: [...row.history, { id: crypto.randomUUID(), fromStatus: "error", toStatus: "sent", actor: "Jordan Avery", note: body.reason?.trim() || null, forced: Boolean(body.force), at: new Date().toISOString() }],
   });
   return reply.ok(next ? asRow(next) : row);
+});
+
+// Kiosk reports and the values the operator enters (FR-25.16): the demo keeps the status and accepts the messages.
+route("POST", `${BASE}/control-recipes/{id}:report`, (req) => {
+  const row = recipes.get(req.params.id);
+  if (!row) return reply.problem(404, "SF-0174", "Control recipe not found.");
+  const body = (req.body ?? {}) as { status?: ControlRecipeDetail["status"]; error?: string };
+  if (!body.status) return reply.problem(400, "COM-0001", "The request is not valid.");
+  const next = recipes.update(row.id, {
+    status: body.status,
+    lastError: body.status === "error" ? (body.error ?? null) : null,
+    history: [...row.history, { id: crypto.randomUUID(), fromStatus: row.status, toStatus: body.status, actor: "Sam Ortiz", note: null, forced: false, at: new Date().toISOString() }],
+  });
+  return reply.ok(next ? asRow(next) : row);
+});
+route("POST", `${BASE}/process-messages`, (req) => {
+  const body = (req.body ?? {}) as { sourceMessageId?: string; categoryCode?: string; orderId?: string; values?: unknown[] };
+  return reply.created({ message: { id: crypto.randomUUID(), sourceMessageId: body.sourceMessageId, categoryCode: body.categoryCode, orderId: body.orderId, status: "delivered", values: body.values ?? [] }, duplicate: false });
+});
+
+// PI sheets (FR-25.16): the designer's versioned templates.
+const sheetBase = { createdBy: "Maya Okafor", updatedBy: "Maya Okafor" };
+const piSheets = table<PISheet>([
+  { ...sheetBase, id: uid(388, 1), code: "PUMP-ASSY", version: 2, name: "Pump assembly", status: "released", recipe: assemblySheet(), rev: 4, createdAt: at(-20), updatedAt: at(-9), releasedBy: "Maya Okafor", releasedAt: at(-9) },
+  { ...sheetBase, id: uid(388, 2), code: "PUMP-ASSY", version: 1, name: "Pump assembly", status: "obsolete", recipe: recipeDoc(), rev: 5, createdAt: at(-60), updatedAt: at(-9), releasedBy: "Maya Okafor", releasedAt: at(-50) },
+  { ...sheetBase, id: uid(388, 3), code: "IMPELLER-BAL", version: 1, name: "Impeller balancing", status: "draft", recipe: recipeDoc({ node: "ns=2;s=Balancer1.SpeedSP", value: 1800 }), rev: 2, createdAt: at(-3), updatedAt: at(-1), releasedBy: null, releasedAt: null },
+]);
+const NO_SHEET = () => reply.problem(404, "SF-0180", "PI sheet not found.");
+route("GET", `${BASE}/pi-sheets`, (req) => {
+  const status = req.query.get("status");
+  const code = req.query.get("code");
+  return { items: piSheets.all().filter((s) => (!status || s.status === status) && (!code || s.code === code)).sort((a, b) => a.code.localeCompare(b.code) || b.version - a.version) };
+});
+route("GET", `${BASE}/pi-sheets/{id}`, (req) => piSheets.get(req.params.id) ?? NO_SHEET());
+route("POST", `${BASE}/pi-sheets`, (req) => {
+  const body = (req.body ?? {}) as { code?: string; name?: string; recipe?: RecipeDocument };
+  if (!body.code || !/^[A-Z0-9][A-Z0-9_.-]{0,39}$/.test(body.code)) return reply.problem(400, "COM-0001", "The request is not valid.", { code: "Use upper-case letters, digits, '_', '.' or '-'." });
+  if (piSheets.all().some((s) => s.code === body.code)) return reply.problem(409, "SF-0183", "A PI sheet with this code exists.");
+  const now = new Date().toISOString();
+  return reply.created(piSheets.insert({ ...sheetBase, id: crypto.randomUUID(), code: body.code, version: 1, name: body.name ?? body.code, status: "draft", recipe: body.recipe ?? assemblySheet(), rev: 1, createdAt: now, updatedAt: now, releasedBy: null, releasedAt: null }));
+});
+route("PUT", `${BASE}/pi-sheets/{id}`, (req) => {
+  const row = piSheets.get(req.params.id);
+  if (!row) return NO_SHEET();
+  const body = (req.body ?? {}) as { name?: string; rev?: number; recipe?: RecipeDocument };
+  if (row.status !== "draft") return reply.problem(409, "SF-0181", "Only a draft can be edited.");
+  if (body.rev !== row.rev) return reply.problem(409, "SF-0182", "The PI sheet changed since you read it.");
+  return reply.ok(piSheets.update(row.id, { name: body.name ?? row.name, recipe: body.recipe ?? row.recipe, rev: row.rev + 1, updatedAt: new Date().toISOString() }));
+});
+route("POST", `${BASE}/pi-sheets/{id}:release`, (req) => {
+  const row = piSheets.get(req.params.id);
+  if (!row) return NO_SHEET();
+  const body = (req.body ?? {}) as { rev?: number };
+  if (row.status !== "draft") return reply.problem(409, "SF-0181", "Only a draft can be released.");
+  if (body.rev !== row.rev) return reply.problem(409, "SF-0182", "The PI sheet changed since you read it.");
+  for (const other of piSheets.all()) if (other.code === row.code && other.status === "released") piSheets.update(other.id, { status: "obsolete", rev: other.rev + 1 });
+  const now = new Date().toISOString();
+  return reply.ok(piSheets.update(row.id, { status: "released", rev: row.rev + 1, releasedBy: "Jordan Avery", releasedAt: now, updatedAt: now }));
+});
+route("POST", `${BASE}/pi-sheets/{id}:new-version`, (req) => {
+  const row = piSheets.get(req.params.id);
+  if (!row) return NO_SHEET();
+  if (row.status !== "released") return reply.problem(409, "SF-0181", "A new version is made from a released sheet.");
+  if (piSheets.all().some((s) => s.code === row.code && s.status === "draft")) return reply.problem(409, "SF-0183", "The PI sheet has a draft already.");
+  const now = new Date().toISOString();
+  const version = Math.max(...piSheets.all().filter((s) => s.code === row.code).map((s) => s.version)) + 1;
+  return reply.ok(piSheets.insert({ ...row, id: crypto.randomUUID(), version, status: "draft", rev: 1, createdAt: now, updatedAt: now, releasedBy: null, releasedAt: null }));
+});
+route("POST", `${BASE}/pi-sheets/{id}:obsolete`, (req) => {
+  const row = piSheets.get(req.params.id);
+  if (!row) return NO_SHEET();
+  const body = (req.body ?? {}) as { rev?: number };
+  if (row.status !== "released") return reply.problem(409, "SF-0181", "Only a released sheet can be made obsolete.");
+  if (body.rev !== row.rev) return reply.problem(409, "SF-0182", "The PI sheet changed since you read it.");
+  return reply.ok(piSheets.update(row.id, { status: "obsolete", rev: row.rev + 1, updatedAt: new Date().toISOString() }));
 });

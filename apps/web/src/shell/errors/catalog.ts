@@ -1007,6 +1007,11 @@ const treasury: Record<string, ProblemCatalogEntry> = {
 
 const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0143": { message: "Someone else changed the worker after you opened it.", action: RELOAD_AND_REDO },
+  "SF-0180": { message: "That PI sheet does not exist.", action: "Go back to the list of PI sheets and open it from there." },
+  "SF-0181": { message: "That change is not possible in the sheet's current state: only a draft can be edited or released, and only a released sheet can get a new version or be retired.", action: "Make a new version of the released sheet and edit that." },
+  "SF-0182": { message: "Someone else changed this PI sheet after you opened it.", action: RELOAD_AND_REDO },
+  "SF-0183": { message: "A PI sheet with this code exists, or the sheet already has a draft in progress.", action: "Open the existing sheet or its draft, or use another code." },
+  "SF-0184": { message: "A control recipe can only be made from a released PI sheet whose steps fit where the recipe goes.", action: "Release the sheet, or give each setpoint the node it is written to when the recipe goes to a process control system." },
 };
 
 const companySetup: Record<string, ProblemCatalogEntry> = {
@@ -1056,6 +1061,14 @@ const fieldService: Record<string, ProblemCatalogEntry> = {
   "INV-TRK-004": { message: "Truck stock isn't switched on for this service.", action: "Ask your administrator to enable it." },
 };
 
+/** Process manufacturing: batch orders and their control recipes (#25). */
+const processManufacturing: Record<string, ProblemCatalogEntry> = {
+  "PMF-0506": {
+    message: "This batch order can't be rescaled: its control recipe is already on the shop floor with the current quantities, and a recipe can't be replaced once it is sent.",
+    action: "Keep the current batch size. To make a different quantity, create another batch order for the difference.",
+  },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -1083,6 +1096,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...groupFinance,
   ...shared,
   ...fieldService,
+  ...processManufacturing,
 });
 
 /** The catalog entry for a problem code, if there is one. */

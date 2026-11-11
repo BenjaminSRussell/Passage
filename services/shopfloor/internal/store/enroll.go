@@ -224,3 +224,17 @@ func bindCertificate(ctx context.Context, tx pgx.Tx, tenantID, edgeID string, cs
 	return EdgeCertificate{EdgeID: edgeID, Subject: subject, Certificate: issued.CertPEM, CAChain: issued.ChainPEM,
 		Serial: issued.Serial, NotBefore: issued.NotBefore, NotAfter: issued.NotAfter}, nil
 }
+
+// EdgeNodeTenant finds the tenant of an edge node by its id with the SECURITY DEFINER function edge_node_tenant,
+// before any tenant is known (the gateway forwards a connector's certificate, which names a node and no tenant).
+// It returns "" for an unknown node.
+func (s *Postgres) EdgeNodeTenant(ctx context.Context, id string) (string, error) {
+	var tenantID *string
+	if err := s.pool.QueryRow(ctx, `select edge_node_tenant($1::uuid)::text`, id).Scan(&tenantID); err != nil {
+		return "", err
+	}
+	if tenantID == nil {
+		return "", nil
+	}
+	return *tenantID, nil
+}

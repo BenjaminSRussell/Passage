@@ -1,0 +1,41 @@
+# The only route on Gateway passage-edge: what an iot-edge connector calls, to the shopfloor Service.
+#   POST /v1/shopfloor/edge-nodes/{id}:enroll              redeem an enrollment token (no session, no certificate)
+#   POST /v1/shopfloor/edge-nodes/{id}:renew-certificate   renew the certificate (mTLS)
+#   POST /v1/shopfloor/edge-nodes/{id}:heartbeat           heartbeat (mTLS)
+#   GET  /v1/shopfloor/edge-nodes/{id}/config              the configuration (mTLS)
+#   GET  /v1/shopfloor/edge-nodes/{id}/control-recipes     its control recipes (mTLS)
+#   POST /v1/shopfloor/edge-nodes/{id}/control-recipes/{rid}:report   a recipe's status and writes (mTLS)
+#   POST /v1/shopfloor/machine-events                      machine events (mTLS)
+# Nothing else of the shop floor service is reachable here; the people's routes are on passage-api behind the JWT.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: shopfloor-edge
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-edge
+      sectionName: edge-https
+  hostnames:
+    - edge.dev.passage.dev
+  rules:
+    - matches:
+        - path:
+            type: RegularExpression
+            value: '^/v1/shopfloor/edge-nodes/[0-9a-fA-F-]{36}:(enroll|renew-certificate|heartbeat)$'
+          method: POST
+        - path:
+            type: RegularExpression
+            value: '^/v1/shopfloor/edge-nodes/[0-9a-fA-F-]{36}/(config|control-recipes)$'
+          method: GET
+        - path:
+            type: RegularExpression
+            value: '^/v1/shopfloor/edge-nodes/[0-9a-fA-F-]{36}/control-recipes/[0-9a-fA-F-]{36}:report$'
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/shopfloor/machine-events
+          method: POST
+      backendRefs:
+        - name: shopfloor
+          port: 8080
