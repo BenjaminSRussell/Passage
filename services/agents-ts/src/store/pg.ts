@@ -42,6 +42,22 @@ export async function migrate(pool: pg.Pool, dir: URL = MIGRATIONS_DIR): Promise
   }
 }
 
+/** An `agent_run` row. Status is RUNNING until the run ends (a run waiting for approval is RUNNING). */
+export interface StoredRun {
+  runId: string;
+  agentId: string;
+  agentVersion: number;
+  invokerUserId: string;
+  status: string;
+  code?: string;
+  reason?: string;
+  tokensIn: number;
+  tokensOut: number;
+  estimated: boolean;
+  postCommitError?: string;
+  createdAt: string;
+}
+
 export interface BudgetLimits {
   limitIn: number;
   limitOut: number;
@@ -127,6 +143,33 @@ export class PgAgentStore implements AuditPort, BudgetPort {
     return this.withTenant(req.tenantId, async (c) => {
       const res = await c.query<{ status: string }>("select status from agent_run where tenant_id = $1 and run_id = $2", [req.tenantId, req.runId]);
       return res.rows[0]?.status;
+    });
+  }
+
+  /** One run of the tenant as the run view shows it, or undefined when the tenant has no such run. */
+  async getRun(tenantId: string, runId: string): Promise<StoredRun | undefined> {
+    return this.withTenant(tenantId, async (c) => {
+      const r = (
+        await c.query<{
+          run_id: string; agent_id: string; agent_version: number; invoker_user_id: string; status: string; code: string | null;
+          reason: string | null; tokens_in: string; tokens_out: string; estimated: boolean; post_commit_error: string | null; created_at: Date;
+        }>("select * from agent_run where tenant_id = $1 and run_id = $2", [tenantId, runId])
+      ).rows[0];
+      if (r === undefined) return undefined;
+      return {
+        runId: r.run_id,
+        agentId: r.agent_id,
+        agentVersion: r.agent_version,
+        invokerUserId: r.invoker_user_id,
+        status: r.status,
+        ...(r.code !== null ? { code: r.code } : {}),
+        ...(r.reason !== null ? { reason: r.reason } : {}),
+        tokensIn: Number(r.tokens_in),
+        tokensOut: Number(r.tokens_out),
+        estimated: r.estimated,
+        ...(r.post_commit_error !== null ? { postCommitError: r.post_commit_error } : {}),
+        createdAt: r.created_at.toISOString(),
+      };
     });
   }
 

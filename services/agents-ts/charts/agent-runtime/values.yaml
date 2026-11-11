@@ -1,0 +1,53 @@
+image: { repository: ghcr.io/benjaminsrussell/passage-agents, digest: "", tag: "", pullPolicy: IfNotPresent }
+# Secret with the key DATABASE_URL (database passage_agents, role passage_app).
+databaseSecret: agents-db
+# Run the migrations at start, as the owner role. Off by default: migrations run from the pipeline.
+migrateOnStart: false
+# Several replicas are safe for the API and runs, but the kill switch is not shared between pods until
+# the Kafka feed is built (NOT-IMPLEMENTED.md): a toggle reaches only the pod that took it.
+replicaCount: 1
+# The MCP gateway every tool call goes through, with the caller's own token.
+mcpUrl: http://mcp-gateway.passage.svc.cluster.local:8080
+model:
+  # anthropic, openai (OpenAI-compatible and Azure OpenAI) or bedrock.
+  provider: anthropic
+  # Model id for agents and for the copilot. Claude defaults: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5.
+  default: claude-sonnet-5-5
+  copilot: ""
+  # JSON object of agent id to model id, for example '{"ap_coding":"claude-opus-5-5","anomaly":"claude-haiku-5-5"}'.
+  overrides: ""
+# Secret holding the provider credentials as env keys: ANTHROPIC_API_KEY, or OPENAI_API_KEY, or
+# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN). Never put a key in values.
+providerSecret: agents-provider
+# Optional endpoint settings for the openai and bedrock providers.
+openai: { baseUrl: "", auth: bearer, apiVersion: "" }
+bedrock: { region: "" }
+runTokenCap: 20000
+copilot: { tokenCap: 8000, maxTurns: 4 }
+# agent.approval_expiry_h (BR-47.3): 1 to 240; empty means 72.
+approvalExpiryHours: ""
+# Above this amount an approver who started the run may not approve it (wave-48 SoD limit).
+selfApprovalLimit: { amount: "0", currency: USD }
+# agent@version pairs whose evaluation passed (set by the eval pipeline, FR-47.10); an agent not listed answers AGT-0204.
+evalPassed: ""
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+serviceMonitor: { enabled: false }
+# Caller authentication: the runtime verifies every caller's bearer token itself (RS256, issuer, audience, expiry) and
+# never trusts the X-Passage-* edge headers on their own. issuer is the realm that signs the tokens; the keys come from
+# jwksUrl (the realm's certs endpoint) or from a ConfigMap holding the key set (the gateway's localJWKS). The process
+# refuses to start without an issuer and keys.
+auth:
+  issuer: ""
+  audience: passage-api
+  jwksUrl: ""
+  jwksConfigMap: { name: "", key: jwks }
+# Who may open a connection to the API port: the edge gateway's namespaces and, for an in-cluster caller such as a
+# copilot BFF, pods matching one of ingressPodLabels in this namespace. Nothing else in the namespace is admitted, and
+# with both lists empty no one reaches the API. metricsNamespace may reach only the admin port.
+networkPolicy:
+  metricsNamespace: observability
+  ingressNamespaces: []
+  # For example: [{ app.kubernetes.io/name: copilot-bff }]
+  ingressPodLabels: []

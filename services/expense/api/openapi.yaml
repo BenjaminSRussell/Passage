@@ -59,6 +59,7 @@ paths:
   /v1/expense/cash-advance-settlements:
     post:
       operationId: previewAdvanceSettlement
+      summary: "Preview how cash advances settle against an expense report"
       x-passage-duty: expense.report.write
       requestBody:
         required: true
@@ -75,6 +76,7 @@ paths:
   /v1/expense/travel-variances:
     post:
       operationId: checkRequisitionVariance
+      summary: "Check a travel requisition's actual total against its estimate and tolerance"
       x-passage-duty: expense.report.write
       requestBody:
         required: true
@@ -293,6 +295,7 @@ paths:
       - $ref: '#/components/parameters/ReportId'
     get:
       operationId: getReport
+      summary: "Get an expense report"
       x-passage-duty: expense.report.write
       responses:
         '200':
@@ -535,6 +538,7 @@ paths:
       - $ref: '#/components/parameters/ResourceId'
     get:
       operationId: getCashAdvance
+      summary: "Get a cash advance"
       x-passage-duty: expense.report.write
       responses:
         '200':
@@ -674,6 +678,7 @@ paths:
       - $ref: '#/components/parameters/ResourceId'
     get:
       operationId: getTravelRequisition
+      summary: "Get a travel requisition"
       x-passage-duty: expense.report.write
       responses:
         '200':

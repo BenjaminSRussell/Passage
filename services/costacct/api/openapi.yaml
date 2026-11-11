@@ -32,6 +32,7 @@ paths:
   /v1/controlling/cost-objects:
     get:
       operationId: listCostObjects
+      summary: "List cost objects"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -43,6 +44,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createCostObject
+      summary: "Create a cost object"
       x-passage-duty: controlling.maintain
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -57,6 +59,7 @@ paths:
   /v1/controlling/cost-objects/{id}:
     get:
       operationId: getCostObject
+      summary: "Get a cost object"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -68,6 +71,7 @@ paths:
   /v1/controlling/cost-elements:
     get:
       operationId: listCostElements
+      summary: "List cost elements"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -78,6 +82,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createCostElement
+      summary: "Create a cost element"
       x-passage-duty: controlling.maintain
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -92,6 +97,7 @@ paths:
   /v1/controlling/cost-behavior-rules:
     get:
       operationId: listCostBehaviorRules
+      summary: "List cost behavior rules"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -123,6 +129,7 @@ paths:
   /v1/controlling/cost-entries:mirror:
     post:
       operationId: mirrorJournalLines
+      summary: "Mirror posted journal lines into cost entries"
       x-passage-duty: controlling.maintain
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -139,6 +146,7 @@ paths:
   /v1/controlling/allocation-runs:
     get:
       operationId: listAllocationRuns
+      summary: "List allocation runs"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -149,6 +157,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: runAllocation
+      summary: "Run an allocation"
       x-passage-duty: controlling.run
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -171,6 +180,7 @@ paths:
   /v1/controlling/allocation-runs/{id}:
     get:
       operationId: getAllocationRun
+      summary: "Get an allocation run"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -205,6 +215,7 @@ paths:
   /v1/controlling/cost-objects/{id}/entries:
     get:
       operationId: listCostObjectEntries
+      summary: "List the cost entries of a cost object"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -217,6 +228,7 @@ paths:
   /v1/controlling/top-down-runs:
     get:
       operationId: listTopDownRuns
+      summary: "List top-down distribution runs"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -227,6 +239,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: runTopDown
+      summary: "Run a top-down distribution"
       x-passage-duty: controlling.run
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -246,6 +259,7 @@ paths:
   /v1/controlling/top-down-runs/{id}:
     get:
       operationId: getTopDownRun
+      summary: "Get a top-down distribution run"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -257,6 +271,7 @@ paths:
   /v1/controlling/internal-orders/{id}:settle:
     post:
       operationId: settleInternalOrder
+      summary: "Settle an internal order"
       x-passage-duty: controlling.run
       parameters:
         - { name: id, in: path, required: true, description: Internal order cost object id., schema: { type: string, format: uuid } }
@@ -275,6 +290,7 @@ paths:
   /v1/controlling/internal-orders/{id}/settlements:
     get:
       operationId: listSettlements
+      summary: "List the settlements of an internal order"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -287,6 +303,7 @@ paths:
   /v1/controlling/statistical-measures:
     get:
       operationId: listStatisticalMeasures
+      summary: "List statistical measures"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -297,6 +314,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createStatisticalMeasure
+      summary: "Create a statistical measure"
       x-passage-duty: controlling.maintain
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -311,6 +329,7 @@ paths:
   /v1/controlling/statistical-measures/{id}/values:
     get:
       operationId: listStatisticalMeasureValues
+      summary: "List the values of a statistical measure"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -365,6 +384,7 @@ paths:
   /v1/controlling/allocation-templates:
     get:
       operationId: listAllocationTemplates
+      summary: "List allocation templates"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -396,6 +416,7 @@ paths:
   /v1/controlling/allocation-templates/{id}:
     get:
       operationId: getAllocationTemplate
+      summary: "Get an allocation template"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -429,6 +450,7 @@ paths:
   /v1/controlling/template-allocations/runs:
     get:
       operationId: listTemplateRuns
+      summary: "List template allocation runs"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -468,6 +490,7 @@ paths:
   /v1/controlling/template-allocations/runs/{id}:
     get:
       operationId: getTemplateRun
+      summary: "Get a template allocation run"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -479,6 +502,7 @@ paths:
   /v1/controlling/cost-object-hierarchies:
     get:
       operationId: listHierarchies
+      summary: "List cost object hierarchies"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -489,6 +513,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createHierarchy
+      summary: "Create a cost object hierarchy"
       x-passage-duty: controlling.maintain
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -505,6 +530,7 @@ paths:
   /v1/controlling/cost-object-hierarchies/{id}:
     get:
       operationId: getHierarchy
+      summary: "Get a cost object hierarchy"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -516,6 +542,7 @@ paths:
   /v1/controlling/cost-object-hierarchies/{id}/nodes:
     post:
       operationId: createHierarchyNode
+      summary: "Add a node to a cost object hierarchy"
       x-passage-duty: controlling.maintain
       parameters:
         - { name: id, in: path, required: true, description: Hierarchy id., schema: { type: string, format: uuid } }
@@ -534,6 +561,7 @@ paths:
   /v1/controlling/cost-object-hierarchies/{id}/balances:
     get:
       operationId: listHierarchyBalances
+      summary: "List the balances of a cost object hierarchy"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -548,6 +576,7 @@ paths:
   /v1/controlling/hierarchy-nodes/{id}:collect:
     post:
       operationId: collectAtHierarchyNode
+      summary: "Collect costs at a hierarchy node"
       x-passage-duty: controlling.run
       parameters:
         - { name: id, in: path, required: true, description: Hierarchy node id., schema: { type: string, format: uuid } }
@@ -566,6 +595,7 @@ paths:
   /v1/controlling/hierarchy-distributions:
     get:
       operationId: listHierarchyDistributions
+      summary: "List hierarchy distributions"
       x-passage-duty: controlling.view
       parameters:
         - { $ref: '#/components/parameters/LegalEntity' }
@@ -577,6 +607,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: runHierarchyDistribution
+      summary: "Run a hierarchy distribution"
       x-passage-duty: controlling.run
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
@@ -599,6 +630,7 @@ paths:
   /v1/controlling/hierarchy-distributions/{id}:
     get:
       operationId: getHierarchyDistribution
+      summary: "Get a hierarchy distribution"
       x-passage-duty: controlling.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }

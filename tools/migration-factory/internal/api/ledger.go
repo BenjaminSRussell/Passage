@@ -25,11 +25,19 @@ const (
 	CodeLedgerForeign       = "MIG-1531"
 	CodeLedgerPinned        = "MIG-1532"
 	CodeLedgerUnavailable   = "MIG-1533"
+	// CodeSubledgerNotConfigured is a replay with documents of an area no subledger port posts (49-4).
+	CodeSubledgerNotConfigured = "MIG-1534"
+	// CodeSubledgerUnavailable is a subledger that failed during the replay; it can be repeated.
+	CodeSubledgerUnavailable = "MIG-1535"
 )
 
 // WithLedger sets the general ledger the parallel-run replay and the rollback compensations post
 // through. Without one those endpoints answer 503 MIG-1530.
 func (s *Server) WithLedger(l ledgerclient.Ledger) *Server { s.ledger = l; return s }
+
+// WithSubledgers sets the ports the parallel-run replay posts subledger documents through, one per area (AR, AP,
+// INV, FA). A replay with documents of an area without a port answers 503 MIG-1534.
+func (s *Server) WithSubledgers(p replay.Ports) *Server { s.subledgers = p; return s }
 
 func (s *Server) ledgerReady(w http.ResponseWriter, r *http.Request) bool {
 	if s.ledger == nil {
@@ -48,6 +56,11 @@ func failLedger(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeLedgerForeign, err.Error()))
 	case errors.Is(err, replay.ErrLedgerUnavailable):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeLedgerUnavailable, err.Error()))
+	case errors.Is(err, replay.ErrNoSubledgerPort):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, CodeSubledgerNotConfigured,
+			"no subledger port is configured for the replayed area: "+err.Error()))
+	case errors.Is(err, replay.ErrSubledgerUnavailable):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadGateway, CodeSubledgerUnavailable, err.Error()))
 	default:
 		fail(w, r, err)
 	}
@@ -90,6 +103,28 @@ type replayRequest struct {
 	ExplainedMaxPct    string              `json:"explainedMaxPct,omitempty"`
 	Documents          []replayDocumentDTO `json:"documents"`
 	LegacyTrialBalance []tbAccountDTO      `json:"legacyTrialBalance,omitempty"`
+	// Subledger are the period's AR, AP, INV and FA documents, posted through the subledger ports (49-4).
+	Subledger []subledgerDocumentDTO `json:"subledger,omitempty"`
+	// LegacySubledger is the legacy movement per (area, key, currency); without it the documents' own sums are the legacy side.
+	LegacySubledger []subledgerBalanceDTO `json:"legacySubledger,omitempty"`
+}
+
+type subledgerDocumentDTO struct {
+	Seq         int    `json:"seq"`
+	DocumentID  string `json:"documentId"`
+	Area        string `json:"area"`
+	Kind        string `json:"kind"`
+	PostingDate string `json:"postingDate"`
+	Key         string `json:"key"`
+	Currency    string `json:"currency"`
+	Amount      string `json:"amount"`
+}
+
+type subledgerBalanceDTO struct {
+	Area     string `json:"area"`
+	Key      string `json:"key"`
+	Currency string `json:"currency"`
+	Amount   string `json:"amount"`
 }
 
 type replayDTO struct {
@@ -103,13 +138,14 @@ type replayDTO struct {
 // legacy trial balance as a parallel run for review (FR-49.5, D4). Every document is posted under a
 // fixed idempotency key and the run is idempotent by (period, system), so a replay may be repeated.
 func (s *Server) replayParallelRun(w http.ResponseWriter, r *http.Request) {
-	if !s.ledgerReady(w, r) {
-		return
-	}
 	var req replayRequest
 	idem, err := readCommand(r, &req, parallelBodyLimit)
 	if err != nil {
 		fail(w, r, err)
+		return
+	}
+	// The rehearsal ledger is needed for journal documents only; a replay of subledger documents alone does not read it.
+	if (len(req.Documents) > 0 || len(req.Subledger) == 0) && !s.ledgerReady(w, r) {
 		return
 	}
 	p, ok := principal(w, r)
@@ -125,7 +161,7 @@ func (s *Server) replayParallelRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	if strings.TrimSpace(req.LedgerID) == "" {
+	if strings.TrimSpace(req.LedgerID) == "" && len(req.Documents) > 0 {
 		fail(w, r, invalid("ledgerId is required: the rehearsal ledger the documents are replayed into"))
 		return
 	}
@@ -161,10 +197,40 @@ func (s *Server) replayParallelRun(w http.ResponseWriter, r *http.Request) {
 		}
 		in.LegacyTB = append(in.LegacyTB, domain.TBAccount{Account: strings.TrimSpace(a.Account), Currency: strings.TrimSpace(a.Currency), Net: amt})
 	}
-	if err := domain.ValidateReplay(in.Period, in.Documents); err != nil {
+	for _, d := range req.Subledger {
+		amt, err := parseMoney(d.Amount)
+		if err != nil {
+			fail(w, r, invalid(fmt.Sprintf("subledger document %s amount %q %s", d.DocumentID, d.Amount, err)))
+			return
+		}
+		area, err := domain.ParseArea(strings.TrimSpace(d.Area))
+		if err != nil || area == "TB" {
+			fail(w, r, invalid(fmt.Sprintf("subledger document %s area %q must be one of INV, AP, AR, FA", d.DocumentID, d.Area)))
+			return
+		}
+		in.Subledger = append(in.Subledger, domain.SubledgerDocument{Seq: d.Seq, DocumentID: strings.TrimSpace(d.DocumentID), Area: area, Kind: strings.ToUpper(strings.TrimSpace(d.Kind)),
+			PostingDate: strings.TrimSpace(d.PostingDate), Key: strings.TrimSpace(d.Key), Currency: strings.TrimSpace(d.Currency), Amount: amt})
+	}
+	for _, b := range req.LegacySubledger {
+		amt, err := parseMoney(b.Amount)
+		area, aerr := domain.ParseArea(strings.TrimSpace(b.Area))
+		if err != nil || aerr != nil || area == "TB" || strings.TrimSpace(b.Key) == "" {
+			fail(w, r, invalid(fmt.Sprintf("legacy subledger %s %q amount %q is not valid", b.Area, b.Key, b.Amount)))
+			return
+		}
+		in.LegacySubledger = append(in.LegacySubledger, domain.SubledgerBalance{Area: area, Key: strings.TrimSpace(b.Key), Currency: strings.TrimSpace(b.Currency), Net: amt})
+	}
+	if len(in.Documents) > 0 || len(in.Subledger) == 0 {
+		if err := domain.ValidateReplay(in.Period, in.Documents); err != nil {
+			fail(w, r, err)
+			return
+		}
+	}
+	if err := domain.ValidateSubledger(in.Period, in.Subledger); err != nil {
 		fail(w, r, err)
 		return
 	}
+	in.Ports = s.subledgers
 	res, err := replay.Run(r.Context(), s.ledger, in)
 	if err != nil {
 		failLedger(w, r, err)

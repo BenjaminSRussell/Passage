@@ -9,6 +9,7 @@ paths:
   /v1/localization/packs:
     get:
       operationId: listPacks
+      summary: "List the country packs"
       x-passage-duty: localization.admin
       responses:
         "200":
@@ -26,6 +27,7 @@ paths:
   /v1/localization/packs/{code}:
     get:
       operationId: getPack
+      summary: "Get a country pack"
       x-passage-duty: localization.admin
       parameters:
         - { name: code, in: path, required: true, schema: { type: string, enum: [US, UK, DE, FR, IN, MX, CA] } }
@@ -39,6 +41,7 @@ paths:
   /v1/localization/packs/{code}/install:check:
     post:
       operationId: checkPackInstall
+      summary: "Check whether a country pack can be installed"
       x-passage-duty: localization.admin
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -68,6 +71,7 @@ paths:
   /v1/localization/tax-ids:validate:
     post:
       operationId: validateTaxId
+      summary: "Validate a tax identifier for a scheme"
       x-passage-duty: localization.admin
       requestBody:
         required: true
@@ -131,6 +135,7 @@ paths:
   /v1/localization/statutory/uk-mtd-vat:validate:
     post:
       operationId: validateUkMtdVat
+      summary: "Validate a UK Making Tax Digital VAT return"
       x-passage-duty: localization.admin
       requestBody:
         required: true

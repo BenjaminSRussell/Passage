@@ -139,6 +139,15 @@ func (a *API) receiveEdifactInterchange(ctx context.Context, body []byte, o rece
 	if err != nil {
 		return receiveResponse{}, err
 	}
+	for _, m := range res.Messages {
+		if m.TransactionSet == "INVOIC" && m.Status == "MAPPED" {
+			// A self-billed invoice is matched right away; anything this misses is picked up by POST /self-billing:sweep.
+			if _, err := a.ReconcileSelfBilled(ctx, 50); err != nil {
+				slog.WarnContext(ctx, "self-billing match deferred", "interchange", res.InterchangeID, "err", err)
+			}
+			break
+		}
+	}
 	return receiveResponse{
 		InterchangeID: res.InterchangeID,
 		AckStatus:     res.AckStatus,

@@ -9,6 +9,7 @@ paths:
   /v1/workflows/definitions:
     post:
       operationId: saveWorkflowDefinition
+      summary: "Save a workflow definition"
       x-passage-duty: workflow.write
       requestBody:
         required: true
@@ -19,6 +20,7 @@ paths:
   /v1/workflows/instances:
     post:
       operationId: submitInstance
+      summary: "Submit a workflow instance"
       x-passage-duty: workflow.write
       requestBody:
         required: true
@@ -29,6 +31,7 @@ paths:
   /v1/workflows/instances/{id}:
     get:
       operationId: getInstance
+      summary: "Get a workflow instance"
       x-passage-duty: workflow.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -38,6 +41,7 @@ paths:
   /v1/workflows/instances/{id}/actions:
     post:
       operationId: instanceAction
+      summary: "Act on a workflow instance"
       x-passage-duty: workflow.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -51,6 +55,7 @@ paths:
   /v1/workitems:
     get:
       operationId: listWorkItems
+      summary: "List the work items waiting for the caller"
       x-passage-duty: workflow.approve
       parameters:
         - { name: assignee, in: query, schema: { type: string } }
@@ -85,6 +90,7 @@ paths:
   /v1/workitems/{id}/actions:
     post:
       operationId: actOnWorkItem
+      summary: "Act on a work item"
       x-passage-duty: workflow.approve
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -97,6 +103,7 @@ paths:
   /v1/batch/jobs:
     post:
       operationId: saveJob
+      summary: "Save a batch job"
       x-passage-duty: batch.write
       requestBody:
         required: true
@@ -107,6 +114,7 @@ paths:
   /v1/batch/jobs/{code}:
     get:
       operationId: getJob
+      summary: "Get a batch job"
       x-passage-duty: batch.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -115,6 +123,7 @@ paths:
   /v1/batch/jobs/{code}/runs:
     post:
       operationId: startRun
+      summary: "Start a run of a batch job"
       x-passage-duty: batch.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -130,6 +139,7 @@ paths:
   /v1/batch/runs/{id}:
     get:
       operationId: getRun
+      summary: "Get a batch run"
       x-passage-duty: batch.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -138,6 +148,7 @@ paths:
   /v1/notify/templates:
     post:
       operationId: publishTemplate
+      summary: "Publish a notification template"
       x-passage-duty: notify.write
       requestBody:
         required: true
@@ -148,6 +159,7 @@ paths:
   /v1/notify/messages:
     get:
       operationId: listMessages
+      summary: "List notification messages"
       x-passage-duty: notify.read
       parameters:
         - { name: status, in: query, schema: { type: string } }
@@ -155,6 +167,7 @@ paths:
         '200': { description: Outbound messages. }
     post:
       operationId: enqueueMessage
+      summary: "Queue a notification message"
       x-passage-duty: notify.send
       requestBody:
         required: true
@@ -164,6 +177,7 @@ paths:
   /v1/notify/messages/{id}/retry:
     post:
       operationId: retryMessage
+      summary: "Retry a notification message"
       x-passage-duty: notify.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -174,6 +188,7 @@ paths:
   /v1/notify/preferences/me:
     put:
       operationId: putMyPreference
+      summary: "Set the caller's notification preference"
       x-passage-duty: notify.write
       requestBody:
         required: true
@@ -183,12 +198,14 @@ paths:
   /v1/events/topics:
     get:
       operationId: listTopics
+      summary: "List the event topics"
       x-passage-duty: events.read
       responses:
         '200': { description: Topic catalog. }
   /v1/events/asyncapi/{domain}:
     get:
       operationId: getAsyncAPI
+      summary: "Get the AsyncAPI document of an event domain"
       x-passage-duty: events.read
       parameters:
         - { name: domain, in: path, required: true, schema: { type: string } }
@@ -197,6 +214,7 @@ paths:
   /v1/events/schemas/{type}:
     get:
       operationId: getSchema
+      summary: "Get an event schema"
       x-passage-duty: events.read
       parameters:
         - { name: type, in: path, required: true, schema: { type: string } }
@@ -204,6 +222,7 @@ paths:
         '200': { description: Schema. }
     post:
       operationId: registerSchema
+      summary: "Register an event schema"
       x-passage-duty: events.write
       parameters:
         - { name: type, in: path, required: true, schema: { type: string } }
@@ -216,6 +235,7 @@ paths:
   /v1/events/replay:
     post:
       operationId: replayTopic
+      summary: "Replay a topic"
       x-passage-duty: batch.write
       responses:
         '202': { description: Replay accepted. }

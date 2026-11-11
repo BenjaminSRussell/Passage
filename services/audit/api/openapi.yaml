@@ -9,6 +9,7 @@ paths:
   /v1/audit/changes:
     post:
       operationId: ingestChange
+      summary: "Record a change to an audited record"
       x-passage-duty: audit.write
       requestBody:
         required: true
@@ -20,6 +21,7 @@ paths:
   /v1/audit/records/{entity}/{recordId}:
     get:
       operationId: queryRecord
+      summary: "Get the audit history of one record"
       x-passage-duty: audit.read
       parameters:
         - { name: entity, in: path, required: true, schema: { type: string } }
@@ -34,6 +36,7 @@ paths:
   /v1/audit/alert-rules:
     post:
       operationId: createAlertRule
+      summary: "Create an audit alert rule"
       x-passage-duty: audit.write
       requestBody:
         required: true
@@ -44,6 +47,7 @@ paths:
   /v1/audit/alerts:
     get:
       operationId: listAlerts
+      summary: "List raised audit alerts"
       x-passage-duty: audit.read
       responses:
         '200': { description: Alert inbox. }
@@ -51,6 +55,7 @@ paths:
   /v1/audit/texts/expand:
     post:
       operationId: expandText
+      summary: "Replace placeholders in a text with the given values"
       x-passage-duty: authenticated
       requestBody:
         required: true
