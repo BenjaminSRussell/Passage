@@ -261,7 +261,7 @@ var serviceGrants = map[string]map[string][]string{
 	"supplier-portal": {
 		"purchasing": {"procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"},
 		"receiving":  {"receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"},
-		"party":      {"party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept"},
+		"party":      {"party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept", "party.vendor-portal.admin"},
 		"payables":   {"payables.vendor-portal.read"},
 	},
 	// The customer portal BFF acts for one customer contact at a time (#30). Every token it signs carries the customer id (cus)

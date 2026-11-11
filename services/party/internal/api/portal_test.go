@@ -132,13 +132,39 @@ func TestProspectRegistration_IsValidatedAndBounded(t *testing.T) {
 	}
 }
 
+// Every signed-in supplier user's token carries the vendor-portal read and write duties; only a vendor administrator's carries
+// party.vendor-portal.admin, and the invitation list, create and revoke need it whatever else the token holds.
+func TestInviteRoutes_ListCreateAndRevokeNeedTheAdminDuty(t *testing.T) {
+	p := newPortalHarness(t)
+	user := []string{"party.vendor-portal.read", "party.vendor-portal.write"}
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodGet, "/v1/party/vendor-portal/invites", ""},
+		{http.MethodPost, "/v1/party/vendor-portal/invites", `{"email":"new@acme.example"}`},
+		{http.MethodPost, "/v1/party/vendor-portal/invites/" + knownID + ":revoke", ""},
+	} {
+		if rec := p.call(t, portalVendorA, user, tc.method, tc.path, tc.body); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+			t.Errorf("%s %s with a supplier user's token: %d %s, want 403 AUTH-0003", tc.method, tc.path, rec.Code, rec.Body)
+		}
+	}
+	// A buyer holding the admin duty by name is still not a supplier.
+	if rec := do(p.h, http.MethodPost, "/v1/party/vendor-portal/invites", `{"email":"new@acme.example"}`, "party.vendor-portal.admin", true); rec.Code != http.StatusForbidden {
+		t.Errorf("buyer with the admin duty: %d %s, want 403", rec.Code, rec.Body)
+	}
+	if len(p.f.vendors) != 0 {
+		t.Fatalf("a refused call reached the store: %v", p.f.vendors)
+	}
+	if rec := p.call(t, portalVendorA, []string{"party.vendor-portal.admin"}, http.MethodPost, "/v1/party/vendor-portal/invites", `{"email":"new@acme.example"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("admin token: %d %s, want 201", rec.Code, rec.Body)
+	}
+}
+
 func TestInviteRoutes_TheVendorIsTheTokensAndTheTokenMustNameTheInvitation(t *testing.T) {
 	p := newPortalHarness(t)
-	rec := p.call(t, portalVendorA, []string{"party.vendor-portal.write"}, http.MethodPost, "/v1/party/vendor-portal/invites", `{"email":"New@Acme.example","displayName":"Casey"}`)
+	rec := p.call(t, portalVendorA, []string{"party.vendor-portal.admin"}, http.MethodPost, "/v1/party/vendor-portal/invites", `{"email":"New@Acme.example","displayName":"Casey"}`)
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"token":"inv1.secret"`) || p.f.vendors[0] != portalVendorA {
 		t.Fatalf("create: %d %s vendors=%v", rec.Code, rec.Body, p.f.vendors)
 	}
-	if rec := p.call(t, portalVendorA, []string{"party.vendor-portal.write"}, http.MethodPost, "/v1/party/vendor-portal/invites", `{"email":"nope"}`); rec.Code != http.StatusUnprocessableEntity {
+	if rec := p.call(t, portalVendorA, []string{"party.vendor-portal.admin"}, http.MethodPost, "/v1/party/vendor-portal/invites", `{"email":"nope"}`); rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("bad email: %d %s", rec.Code, rec.Body)
 	}
 	// The default portal token never carries the accept duty; the accept routes need a token minted for them.

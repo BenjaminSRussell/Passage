@@ -20,6 +20,10 @@ import (
 const (
 	dutyPortalRegister     = "party.vendor-portal.register"
 	dutyPortalInviteAccept = "party.vendor-portal.invite-accept"
+	// dutyPortalAdmin lists, creates and revokes the vendor's invitations. Every signed-in supplier user's token carries
+	// party.vendor-portal.write; only the vendor administrator's (the supplier-admin role) carries this one, and the portal
+	// signs it only for the invitation routes.
+	dutyPortalAdmin = "party.vendor-portal.admin"
 	// registerBodyLimit is the largest registration the page may send.
 	registerBodyLimit = 16 << 10
 )
@@ -31,12 +35,12 @@ func (a *API) WithPortal(s store.PortalStore) *API {
 }
 
 func (a *API) registerPortal(r chi.Router) {
-	read, write := authz.RequireDuty(dutyPortalRead), authz.RequireDuty(dutyPortalWrite)
+	admin := authz.RequireDuty(dutyPortalAdmin)
 	accept, register := authz.RequireDuty(dutyPortalInviteAccept), authz.RequireDuty(dutyPortalRegister)
 	r.With(register).Post("/v1/party/vendor-portal/prospects", a.registerProspect)
-	r.With(read).Get("/v1/party/vendor-portal/invites", a.listInvites)
-	r.With(write).Post("/v1/party/vendor-portal/invites", a.createInvite)
-	r.With(write).Post("/v1/party/vendor-portal/invites/{id}:revoke", a.revokeInvite)
+	r.With(admin).Get("/v1/party/vendor-portal/invites", a.listInvites)
+	r.With(admin).Post("/v1/party/vendor-portal/invites", a.createInvite)
+	r.With(admin).Post("/v1/party/vendor-portal/invites/{id}:revoke", a.revokeInvite)
 	r.With(accept).Post("/v1/party/vendor-portal/invites/{id}:verify", a.invite(false))
 	r.With(accept).Post("/v1/party/vendor-portal/invites/{id}:accept", a.invite(true))
 

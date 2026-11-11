@@ -4,11 +4,12 @@
 
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { clientAddress, NO_TRUSTED_PROXIES, rateKey, type TrustedProxies } from "./clientAddress.ts";
 import { authorizationUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
 import { PendingProvisioner, type UserProvisioner } from "./provision.ts";
 import { matchRoute, QUERY_ALLOWLIST, STRIPPED_BODY_KEYS, type Route } from "./routes.ts";
 import { screenUpload, type ScanPolicy } from "./scan.ts";
-import { DUTY_INVITE_ACCEPT, type Audience, type ServiceTokenSigner } from "./serviceToken.ts";
+import { DUTY_INVITE_ACCEPT, DUTY_PORTAL_ADMIN, type Audience, type ServiceTokenSigner } from "./serviceToken.ts";
 import { LOGIN_TTL_MS, parseCookies, RateLimiter, SESSION_COOKIE, sameToken, type Session, type SessionStore } from "./session.ts";
 
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
@@ -21,6 +22,8 @@ const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const INVITE_TOKEN = new RegExp(`^inv1\\.(${UUID_PATTERN})\\.(${UUID_PATTERN})\\.(${UUID_PATTERN})\\.(${UUID_PATTERN})\\.[A-Za-z0-9_-]{32,64}$`);
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The key of the budget every public request shares, in `limiter`. A session id is 43 base64url characters, so it never collides. */
+const PUBLIC_SHARED_KEY = "public";
 
 export interface ServerDeps {
   oidc: OidcConfig;
@@ -42,6 +45,8 @@ export interface ServerDeps {
   registration?: { tenantId: string; legalEntityId: string };
   /** A limit per client address for the public routes (registration, invitation checks); default 10 an hour. */
   publicLimiter?: RateLimiter;
+  /** The proxies in front whose X-Forwarded-For is believed (PASSAGE_TRUSTED_PROXIES). Default none: the client is the TCP peer. */
+  trustedProxies?: TrustedProxies;
   now?: () => number;
   log?: (entry: Record<string, unknown>) => void;
 }
@@ -79,6 +84,7 @@ export function createHttpServer(deps: ServerDeps): Server {
   const scanPolicy: ScanPolicy = deps.scan ?? { allowUnscanned: false };
   const provisioner = deps.provisioner ?? new PendingProvisioner(log);
   const publicLimiter = deps.publicLimiter ?? new RateLimiter(10, 3_600_000);
+  const trustedProxies = deps.trustedProxies ?? NO_TRUSTED_PROXIES;
   const cookieAttrs = `Path=/; HttpOnly; SameSite=Lax${deps.cookieSecure ? "; Secure" : ""}`;
   const setSession = (id: string, maxAgeSeconds: number): string => `${SESSION_COOKIE}=${id}; ${cookieAttrs}; Max-Age=${maxAgeSeconds}`;
 
@@ -173,7 +179,10 @@ export function createHttpServer(deps: ServerDeps): Server {
       const v = url.searchParams.get(name);
       if (v !== null) target.searchParams.set(name, v);
     }
-    const token = deps.signer.mint(route.audience, { tenantId: session.identity.tenantId, legalEntityId: le, userId: session.identity.userId, vendorId: session.identity.vendorId });
+    // An administrator route is signed with the vendor-admin duty alone, and only for a session holding the supplier-admin role
+    // (checked in api() as well): party requires that duty on the invitation routes, so a supplier user's token cannot reach them.
+    const caller = { tenantId: session.identity.tenantId, legalEntityId: le, userId: session.identity.userId, vendorId: session.identity.vendorId, isAdmin: session.identity.isAdmin };
+    const token = deps.signer.mint(route.audience, caller, route.adminOnly ? [DUTY_PORTAL_ADMIN] : undefined);
     const headers: Record<string, string> = { "x-passage-service-token": token, accept: route.binary ? "*/*" : "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";
     if (route.method === "POST") {
@@ -212,18 +221,14 @@ export function createHttpServer(deps: ServerDeps): Server {
     res.end(status === 502 && upstream.status === 401 ? JSON.stringify({ code: "SUP-BFF-502", status: 502, detail: "the service refused this portal" }) : text);
   }
 
-  /** The address the edge saw: the rightmost X-Forwarded-For entry (the one the trusted proxy appended), else the socket's. */
-  function clientAddress(req: IncomingMessage): string {
-    const xff = req.headers["x-forwarded-for"];
-    const last = typeof xff === "string" ? xff.split(",").pop()?.trim() : undefined;
-    return last || req.socket.remoteAddress || "unknown";
-  }
-
   /** What every public POST needs: the portal's own origin, a small JSON object, and a slot in the per-address limit. */
   async function publicBody(req: IncomingMessage, res: ServerResponse): Promise<Record<string, unknown> | undefined> {
     const origin = req.headers.origin;
     if (origin !== undefined && origin !== deps.appOrigin) return void problem(res, 403, "SUP-BFF-403", "the request does not come from the portal");
-    if (!deps.limiter.allow("public", now()) || !publicLimiter.allow(clientAddress(req), now())) return void problem(res, 429, "SUP-BFF-429", "too many requests; try again later");
+    // The client's own allowance first: a client over it is refused without spending the shared budget, so one client can take
+    // at most its own allowance from it and cannot exhaust it for everyone else.
+    const client = rateKey(clientAddress(req.socket.remoteAddress, req.headers["x-forwarded-for"], trustedProxies));
+    if (!publicLimiter.allow(client, now()) || !deps.limiter.allow(PUBLIC_SHARED_KEY, now())) return void problem(res, 429, "SUP-BFF-429", "too many requests; try again later");
     const raw = await readBody(req, MAX_PUBLIC_BODY_BYTES);
     if (raw === "too-large") return void problem(res, 413, "SUP-BFF-413", "the request is too large");
     try {

@@ -1,6 +1,7 @@
 import { generateKeyPairSync, sign, randomBytes, type KeyObject } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import { parseTrustedProxies } from "../src/clientAddress.ts";
 import { Jwks, type OidcConfig } from "../src/oidc.ts";
 import { createHttpServer } from "../src/server.ts";
 import type { UserProvisioner } from "../src/provision.ts";
@@ -61,6 +62,8 @@ export interface RigOptions {
   provisioner?: UserProvisioner;
   registration?: { tenantId: string; legalEntityId: string };
   publicLimit?: number;
+  /** PASSAGE_TRUSTED_PROXIES; the rig's requests come from 127.0.0.1. Default none. */
+  trustedProxies?: string;
 }
 
 export async function startRig(opts: RigOptions = {}): Promise<Rig> {
@@ -104,6 +107,7 @@ export async function startRig(opts: RigOptions = {}): Promise<Rig> {
     ...(opts.provisioner ? { provisioner: opts.provisioner } : {}),
     ...(opts.registration ? { registration: opts.registration } : {}),
     publicLimiter: new RateLimiter(opts.publicLimit ?? 1000, 3_600_000),
+    ...(opts.trustedProxies !== undefined ? { trustedProxies: parseTrustedProxies(opts.trustedProxies) } : {}),
     now: () => now.ms,
     log: () => {},
   });
