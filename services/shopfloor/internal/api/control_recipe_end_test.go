@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
@@ -22,6 +24,7 @@ type recipeEnv struct {
 	calls int
 	node  store.EdgeNode
 	db    func(query string, dest ...any)
+	admin *pgxpool.Pool
 }
 
 func newRecipeEnv(t *testing.T) *recipeEnv {
@@ -30,7 +33,7 @@ func newRecipeEnv(t *testing.T) *recipeEnv {
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	e := &recipeEnv{t: t, h: fullRouter(New(store.New(app)))}
+	e := &recipeEnv{t: t, h: fullRouter(New(store.New(app))), admin: admin}
 	e.db = func(query string, dest ...any) {
 		t.Helper()
 		if err := admin.QueryRow(context.Background(), query).Scan(dest...); err != nil {

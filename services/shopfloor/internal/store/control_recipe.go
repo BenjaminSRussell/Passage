@@ -156,40 +156,48 @@ func recordRecipeChange(ctx context.Context, tx pgx.Tx, tenantID string, c Contr
 // edge node. A process control destination needs an edge node that exists and is switched on (SF-0178).
 // Idempotent by the Idempotency-Key.
 func (s *Postgres) CreateControlRecipe(ctx context.Context, in ControlRecipeInput, createdBy string, idem Idem) (ControlRecipe, error) {
+	var out ControlRecipe
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = createControlRecipeTx(ctx, tx, in, nil, createdBy, idem)
+		return err
+	})
+	return out, err
+}
+
+// createControlRecipeTx stores and sends a recipe inside tx; piSheetID names the PI sheet it was made from, if any.
+func createControlRecipeTx(ctx context.Context, tx pgx.Tx, in ControlRecipeInput, piSheetID *string, createdBy string, idem Idem) (ControlRecipe, error) {
 	p, _ := tenant.FromContext(ctx)
 	doc, err := json.Marshal(in.Recipe)
 	if err != nil {
 		return ControlRecipe{}, err
 	}
-	var out ControlRecipe
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if in.EdgeID != nil {
-			var active bool
-			err := tx.QueryRow(ctx, `select active from edge_node where tenant_id = $1 and id = $2`, p.TenantID, *in.EdgeID).Scan(&active)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRecipeDestination, "the edge node does not exist")
-			}
-			if err != nil {
-				return err
-			}
-			if !active {
-				return httpx.NewProblem(http.StatusUnprocessableEntity, CodeRecipeDestination, "the edge node is switched off")
-			}
+	if in.EdgeID != nil {
+		var active bool
+		err := tx.QueryRow(ctx, `select active from edge_node where tenant_id = $1 and id = $2`, p.TenantID, *in.EdgeID).Scan(&active)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ControlRecipe{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeRecipeDestination, "the edge node does not exist")
 		}
-		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into control_recipe (tenant_id, id, order_id, resource_id, destination, edge_id, topic, status, recipe, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7, 'sent', $8, $9)`, p.TenantID, id, in.OrderID, in.ResourceID, in.Destination, in.EdgeID, in.Topic, doc, createdBy); err != nil {
-			return err
+		if err != nil {
+			return ControlRecipe{}, err
 		}
-		if out, err = scanRecipe(tx.QueryRow(ctx, `select `+recipeColumns+` from control_recipe r where r.id = $1`, id)); err != nil {
-			return err
+		if !active {
+			return ControlRecipe{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeRecipeDestination, "the edge node is switched off")
 		}
-		if err := recordRecipeChange(ctx, tx, p.TenantID, out, nil, createdBy, nil, false); err != nil {
-			return err
-		}
-		return remember(ctx, tx, idem, http.StatusCreated, out)
-	})
-	return out, err
+	}
+	id := ids.New()
+	if _, err := tx.Exec(ctx, `insert into control_recipe (tenant_id, id, order_id, resource_id, destination, edge_id, topic, status, recipe, created_by, pi_sheet_id)
+		values ($1, $2, $3, $4, $5, $6, $7, 'sent', $8, $9, $10)`, p.TenantID, id, in.OrderID, in.ResourceID, in.Destination, in.EdgeID, in.Topic, doc, createdBy, piSheetID); err != nil {
+		return ControlRecipe{}, err
+	}
+	out, err := scanRecipe(tx.QueryRow(ctx, `select `+recipeColumns+` from control_recipe r where r.id = $1`, id))
+	if err != nil {
+		return out, err
+	}
+	if err := recordRecipeChange(ctx, tx, p.TenantID, out, nil, createdBy, nil, false); err != nil {
+		return out, err
+	}
+	return out, remember(ctx, tx, idem, http.StatusCreated, out)
 }
 
 // ListControlRecipes is the control recipe monitor: newest first, at most f.Limit rows.

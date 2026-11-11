@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
@@ -200,5 +201,50 @@ func TestPISheetLifecycleOnADatabase(t *testing.T) {
 	_ = json.Unmarshal(lr.Body.Bytes(), &list)
 	if len(list.Items) != 2 || list.Items[0].Version != 2 {
 		t.Fatalf("list: %s", lr.Body)
+	}
+}
+
+// The sheet is read under a share lock in the transaction that makes the recipe: a recipe asked for while the
+// sheet is being made obsolete waits for that change, then sees it and makes nothing.
+func TestRecipeFromPISheetReadsTheSheetInItsTransaction(t *testing.T) {
+	e := newRecipeEnv(t)
+	const duties = DutyPISheetMaintain + "," + DutyView + "," + DutyControlRecipeCreate
+	rec := e.send(http.MethodPost, "/v1/shopfloor/pi-sheets", sheetBody("LOCK-1", 72), duties, "designer-1")
+	var sh store.PISheet
+	_ = json.Unmarshal(rec.Body.Bytes(), &sh)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.send(http.MethodPost, "/v1/shopfloor/pi-sheets/"+sh.ID+":release", `{"rev":1}`, duties, "designer-1"); rec.Code != http.StatusOK {
+		t.Fatalf("release: %d %s", rec.Code, rec.Body)
+	}
+	ctx := context.Background()
+	tx, err := e.admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `update pi_sheet set status = 'obsolete', rev = rev + 1 where id = $1`, sh.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- e.send(http.MethodPost, "/v1/shopfloor/control-recipes:from-pi-sheet", fmt.Sprintf(`{"piSheetId":%q,"orderId":%q,"resourceId":%q}`, sh.ID, recipeOrder, recipeResource), duties, "planner-1")
+	}()
+	select {
+	case rec := <-done:
+		t.Fatalf("the recipe did not wait for the sheet being changed: %d %s", rec.Code, rec.Body)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rec := <-done; rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), store.CodePISheetUnusable) {
+		t.Fatalf("a recipe from a sheet made obsolete meanwhile: %d %s", rec.Code, rec.Body)
+	}
+	var n int
+	e.db(`select count(*) from control_recipe where pi_sheet_id = '`+sh.ID+`'`, &n)
+	if n != 0 {
+		t.Fatalf("%d recipes made from the obsolete sheet", n)
 	}
 }

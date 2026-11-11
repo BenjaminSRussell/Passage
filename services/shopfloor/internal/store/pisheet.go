@@ -229,31 +229,32 @@ func (s *Postgres) ObsoletePISheet(ctx context.Context, id string, rev int, by s
 }
 
 // CreateControlRecipeFromPISheet makes a kiosk or process control recipe from the document of a released
-// sheet, for an order and resource; the sheet's id is kept on the recipe. Idempotent by the key.
+// sheet, for an order and resource; the sheet's id is kept on the recipe. The sheet is read under a share lock in
+// the transaction that stores the recipe, so it cannot be made obsolete or changed in between. Idempotent by the key.
 func (s *Postgres) CreateControlRecipeFromPISheet(ctx context.Context, piSheetID string, in ControlRecipeInput, by string, idem Idem) (ControlRecipe, error) {
-	sh, err := s.GetPISheet(ctx, piSheetID)
-	if err != nil {
-		return ControlRecipe{}, err
-	}
-	if sh.Status != "released" {
-		return ControlRecipe{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodePISheetUnusable, "a control recipe is made from a released PI sheet; this one is "+sh.Status)
-	}
-	var doc domain.RecipeDoc
-	if err := json.Unmarshal(sh.Doc, &doc); err != nil {
-		return ControlRecipe{}, err
-	}
-	if f := doc.FieldErrors(in.Destination); len(f) > 0 {
-		for k, v := range f {
-			return ControlRecipe{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodePISheetUnusable, "the sheet does not fit this destination: "+strings.TrimPrefix(k, "recipe.")+" "+v)
+	var out ControlRecipe
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		sh, err := scanPISheet(tx.QueryRow(ctx, `select `+piCols+` from pi_sheet where id = $1 for share`, piSheetID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return piNotFound()
 		}
-	}
-	in.Recipe = doc
-	out, err := s.CreateControlRecipe(ctx, in, by, idem)
-	if err != nil {
-		return out, err
-	}
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `update control_recipe set pi_sheet_id = $2 where id = $1`, out.ID, piSheetID)
+		if err != nil {
+			return err
+		}
+		if sh.Status != "released" {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodePISheetUnusable, "a control recipe is made from a released PI sheet; this one is "+sh.Status)
+		}
+		var doc domain.RecipeDoc
+		if err := json.Unmarshal(sh.Doc, &doc); err != nil {
+			return err
+		}
+		if f := doc.FieldErrors(in.Destination); len(f) > 0 {
+			for k, v := range f {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, CodePISheetUnusable, "the sheet does not fit this destination: "+strings.TrimPrefix(k, "recipe.")+" "+v)
+			}
+		}
+		in.Recipe = doc
+		out, err = createControlRecipeTx(ctx, tx, in, &sh.ID, by, idem)
 		return err
 	})
 	return out, err
