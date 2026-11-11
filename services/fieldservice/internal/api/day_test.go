@@ -118,7 +118,8 @@ func TestAPI_TechnicianDayAndCapture(t *testing.T) {
 	}
 
 	base := time.Now().UTC().Truncate(time.Minute)
-	start := base.Add(time.Hour)
+	// The visit is tomorrow at 10:00 UTC, inside the technician's 08:00 to 17:00 shift whatever the time the test runs at.
+	start := base.Truncate(24 * time.Hour).Add(34 * time.Hour)
 	path := "/v1/service/work-orders/" + wo.ID
 	if rec := call(t, h, ctx, http.MethodPost, path+":assign", `{"technicianId":"`+tech.ID+`","start":"`+start.Format(time.RFC3339)+`"}`, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK {
 		t.Fatalf("assign: %d %s", rec.Code, rec.Body.String())
