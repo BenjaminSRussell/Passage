@@ -7,6 +7,7 @@ import { changedNames, namesOf, NameFieldset, validateNames, type NameValues } f
 import styles from "./pages.module.css";
 import { ProblemAlert } from "./parts";
 import { useWriteForm, type Errors } from "./useWriteForm";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 function Text({
   id,
@@ -184,7 +185,7 @@ export function VendorRoleCard({ partyId, onCreated }: { partyId: string; onCrea
     (values) => {
       const errors: Errors = {};
       requireCommon(errors, values.accountNumber, values.currencyCode);
-      requireUuid(errors, "vendorGroupId", values.vendorGroupId, "vendor group id");
+      if (!isUuid(values.vendorGroupId)) errors.vendorGroupId = "Choose a vendor group.";
       requireUuid(errors, "paymentTermId", values.paymentTermId, "payment term id", true);
       return errors;
     },
@@ -216,13 +217,13 @@ export function VendorRoleCard({ partyId, onCreated }: { partyId: string; onCrea
           mono
           onChange={(v) => form.set("accountNumber", v)}
         />
-        <Text
+        <LookupFormField
           id="vendor-group"
-          label="Vendor group id"
+          label="Vendor group"
+          entity="vendorGroup"
+          hint="A group that is not registered yet can be pasted by its id."
           value={form.values.vendorGroupId}
           error={form.errors.vendorGroupId}
-          maxLength={36}
-          mono
           onChange={(v) => form.set("vendorGroupId", v)}
         />
         <Text

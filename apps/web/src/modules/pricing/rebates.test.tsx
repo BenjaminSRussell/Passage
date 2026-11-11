@@ -89,7 +89,7 @@ describe("New rebate agreement", () => {
   it("checks the form before calling the service", async () => {
     const { container } = renderAt("/pricing/rebates/new");
     fireEvent.click(screen.getByRole("button", { name: "Save agreement" }));
-    expect(await screen.findByText("Enter the customer id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a customer.")).toBeInTheDocument();
     expect(screen.getByText("Enter a rate above 0 and up to 100.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
@@ -103,9 +103,9 @@ describe("New rebate agreement", () => {
       return undefined;
     };
     renderAt("/pricing/rebates/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Agreement name", "Acme quarterly");
-    fill("Customer id", C1);
+    fill("Customer", C1);
     fill("Valid from", "2027-01-01");
     fill("Valid to", "2027-12-31");
     fill("Rate %", "1");
@@ -138,9 +138,9 @@ describe("New rebate agreement", () => {
   it("shows a service error it cannot place on a field", async () => {
     server.handler = () => json(503, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/pricing/rebates/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Agreement name", "x");
-    fill("Customer id", C1);
+    fill("Customer", C1);
     fill("Valid from", "2027-01-01");
     fill("Valid to", "2027-12-31");
     fill("Rate %", "2");
@@ -266,7 +266,7 @@ describe("rebate form rules", () => {
   it("limits an agreement to a product or product group", () => {
     const ok = { ...emptyRebate, legalEntityId: LE, name: "x", customer: C1, validFrom: "2027-01-01", validTo: "2027-12-31", tiers: [{ from: "0", value: "2" }] };
     expect(toAgreementInput(ok)).not.toHaveProperty("productId");
-    expect(validateRebate({ ...ok, productScope: "product" }).productKey).toBe("Enter the product id (a UUID).");
+    expect(validateRebate({ ...ok, productScope: "product" }).productKey).toBe("Choose a product.");
     expect(validateRebate({ ...ok, productScope: "group", productKey: "nope" }).productKey).toBe("Enter the product group id (a UUID).");
     expect(validateRebate({ ...ok, productScope: "group", productKey: G1 })).toEqual({});
     expect(toAgreementInput({ ...ok, productScope: "group", productKey: G1 })).toMatchObject({ productGroupId: G1 });

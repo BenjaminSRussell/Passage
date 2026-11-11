@@ -6,6 +6,7 @@ import { DAY, DECIMAL, UUID } from "./format";
 import { CURRENCY } from "./fundFormat";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -22,7 +23,7 @@ export const emptyCampaign: CampaignInput = {
 /** Client checks that mirror the service (FR-26.10); the service has the last word. */
 export function validateCampaign(v: CampaignInput): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (!DAY.test(v.validFrom)) errors.validFrom = "Enter the first day as YYYY-MM-DD.";
   if (!DAY.test(v.validTo)) errors.validTo = "Enter the last day as YYYY-MM-DD.";
@@ -108,7 +109,7 @@ export function NewCampaignPage() {
       <PageHeader title="New campaign" description="A campaign groups trade agreements under one validity, customer group, budget and kill switch." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("cp-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="cp-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {text("cp-name", "name", "Campaign name")}
           {text("cp-from", "validFrom", "Valid from", { type: "date", mono: true })}
           {text("cp-to", "validTo", "Valid to", { type: "date", mono: true, hint: "Inclusive." })}

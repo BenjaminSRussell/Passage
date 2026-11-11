@@ -8,7 +8,7 @@ User-facing text follows `apps/web/docs/ux-writing.md`. Server failures render t
 
 A test (`errors/bareCode.test.ts`) fails when a module renders a failure's code as text, and `errors/catalogCoverage.test.ts` fails when a purchase-to-pay, order-to-cash or master-data service defines a problem code with no catalog message. Domain words get a tooltip from `<Term id="...">` (`src/shell/glossary`), and the full list is the Glossary page at `/glossary`.
 
-Command palette (#506): typing two or more characters also calls `GET /api/v1/search` and lists records by type (`src/shell/search`). Alt+F favourites the active record; recent and favourite records are kept per user in this browser. Those calls still use `fetch`; switch them to `apiFetch` once `shell/api/http.ts` from main is merged.
+Command palette (#506): typing two or more characters also calls `GET /api/v1/search` and lists records by type (`src/shell/search`): customers and vendors, products, purchase orders, receipts, vendor invoices, sales orders, packing slips, customer invoices, production orders and workers. Alt+F favourites the active record; recent and favourite records are kept per user in this browser. `src/shell/search/match.ts` holds the service's matching rules (a number by its start, a name by what it holds or a near miss) for rows filtered in the browser; see `docs/lists.md`, "Text search". `recordLinks.test.ts` fails when the service returns a record type the palette does not know or links to a page that does not exist.
 
 ## Needs
 

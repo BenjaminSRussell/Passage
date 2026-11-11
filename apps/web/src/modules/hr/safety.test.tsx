@@ -183,9 +183,9 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
     fireEvent.click(screen.getByRole("button", { name: "Report incident" }));
     expect(await screen.findByText("Describe what happened, up to 4000 characters.")).toBeTruthy();
     expect(api.calls).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
-    fireEvent.change(screen.getByLabelText("Site id"), { target: { value: id(6) } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: id(5) } });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: id(6) } });
     fireEvent.change(screen.getByLabelText("When it happened"), { target: { value: "2026-10-30T09:00" } });
     fireEvent.change(screen.getByLabelText("Location"), { target: { value: "Dock 3" } });
     fireEvent.change(screen.getByLabelText("What happened"), { target: { value: "Slipped on oil" } });
@@ -203,9 +203,9 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
   it("puts a refused recordable override on the reason field", async () => {
     api.handler = routes({ "POST /api/v1/hr/incidents": problem(422, "HCM-INC-001", "overriding the recordable decision needs a justification") });
     renderAt("/hr/incidents/new");
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
-    fireEvent.change(screen.getByLabelText("Site id"), { target: { value: id(6) } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: id(5) } });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: id(6) } });
     fireEvent.change(screen.getByLabelText("When it happened"), { target: { value: "2026-10-30T09:00" } });
     fireEvent.change(screen.getByLabelText("Location"), { target: { value: "Dock 3" } });
     fireEvent.change(screen.getByLabelText("What happened"), { target: { value: "Slipped" } });

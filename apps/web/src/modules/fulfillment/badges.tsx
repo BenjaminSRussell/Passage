@@ -22,10 +22,14 @@ export function ShipmentStatusBadge({ status }: { status: ShipmentStatus }) {
 const slipTones: Record<PackingSlipStatus, BadgeTone> = { PENDING: "neutral", POSTED: "success", CANCELLED: "danger", INVOICED: "info" };
 const slipLabels: Record<PackingSlipStatus, string> = { PENDING: "Pending", POSTED: "Posted", CANCELLED: "Cancelled", INVOICED: "Invoiced" };
 
+/** Packing slip state in words; a reversing slip says so instead of "Posted". */
+export function slipStatusText(status: PackingSlipStatus, reversal = false): string {
+  return reversal ? "Reversal" : (slipLabels[status] ?? status);
+}
+
 /** Packing slip state; a reversing slip says so instead of "Posted". */
 export function SlipStatusBadge({ status, reversal }: { status: PackingSlipStatus; reversal?: boolean }) {
-  if (reversal) return <Badge tone="neutral">Reversal</Badge>;
-  return <Badge tone={slipTones[status] ?? "neutral"}>{slipLabels[status] ?? status}</Badge>;
+  return <Badge tone={reversal ? "neutral" : (slipTones[status] ?? "neutral")}>{slipStatusText(status, reversal)}</Badge>;
 }
 
 const containerTones: Record<ContainerStatus, BadgeTone> = { OPEN: "neutral", CLOSED: "info", SHIPPED: "success", UNPACKED: "neutral" };

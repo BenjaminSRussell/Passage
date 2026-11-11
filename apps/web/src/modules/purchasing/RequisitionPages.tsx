@@ -63,6 +63,7 @@ import {
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const STATUSES: RequisitionStatus[] = ["DRAFT", "IN_REVIEW", "APPROVED", "REJECTED", "CLOSED", "CANCELLED"];
 
@@ -220,7 +221,7 @@ type Errors = Record<string, string>;
 /** Client-side checks mirroring the service's validation, keyed like its `errors` map. */
 export function validateRequisition(legalEntityId: string, currency: string, lines: LineDraft[], operatingUnitId = ""): Errors {
   const errors: Errors = {};
-  if (operatingUnitId !== "" && !uuidPattern.test(operatingUnitId)) errors.operatingUnitId = "Operating unit id must be a UUID.";
+  if (operatingUnitId !== "" && !uuidPattern.test(operatingUnitId)) errors.operatingUnitId = "Choose an operating unit, or clear it.";
   if (!uuidPattern.test(legalEntityId)) errors.legalEntityId = "Enter the legal entity id (a UUID).";
   if (!currencyPattern.test(currency)) errors.currency = "Use a three-letter ISO code such as USD.";
   if (lines.length === 0) errors.lines = "Add at least one line.";
@@ -333,7 +334,7 @@ const LINE_FIELDS: Record<string, [string, string]> = {
 const HEADER_TARGETS: Record<string, FormFieldTarget> = {
   legalEntityId: { id: "req-legal-entity", label: "Legal entity" },
   currency: { id: "req-currency", label: "Currency" },
-  operatingUnitId: { id: "req-operating-unit", label: "Operating unit id" },
+  operatingUnitId: { id: "req-operating-unit", label: "Operating unit" },
   lines: { label: "Lines" },
 };
 
@@ -432,9 +433,16 @@ function RequisitionForm({ existing }: { existing?: Requisition }) {
               )}
             </FormField>
             <FormSection collapse="more" defaultOpen={operatingUnitId !== ""}>
-              <FormField id="req-operating-unit" label="Operating unit id" optional hint={copy.fieldHelp.requisitionOperatingUnit} error={field("operatingUnitId")}>
-                {(control) => <Input {...control} value={operatingUnitId} onChange={(e) => setOperatingUnitId(e.target.value)} />}
-              </FormField>
+              <LookupFormField
+                id="req-operating-unit"
+                label="Operating unit"
+                entity="operatingUnit"
+                optional
+                hint={copy.fieldHelp.requisitionOperatingUnit}
+                value={operatingUnitId}
+                error={field("operatingUnitId")}
+                onChange={setOperatingUnitId}
+              />
             </FormSection>
           </div>
         </Card>

@@ -345,11 +345,11 @@ describe("Transfer order lines", () => {
     expect(calls[0].url.search).toBe("");
 
     fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: "nope" } });
+    expect(screen.getByLabelText(/^Product/)).toHaveAttribute("data-value", "");
     fireEvent.change(screen.getByLabelText(/^Ship date from/), { target: { value: "2026-09-10" } });
     fireEvent.change(screen.getByLabelText(/^Ship date to/), { target: { value: "2026-09-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("Enter the product id (a UUID).")).toBeInTheDocument();
-    expect(screen.getByText("The end date is before the start date.")).toBeInTheDocument();
+    expect(await screen.findByText("The end date is before the start date.")).toBeInTheDocument();
     expect(calls).toHaveLength(1);
 
     fireEvent.change(screen.getByLabelText(/^Product/), { target: { value: PRODUCT_ID } });

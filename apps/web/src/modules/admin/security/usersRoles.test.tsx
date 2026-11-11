@@ -170,12 +170,12 @@ describe("effective permissions deep link", () => {
         : undefined;
     renderAt(`/admin/security/permissions?userId=${U1}`);
     expect(await screen.findByRole("list", { name: "Duties in effect" })).toBeInTheDocument();
-    expect(screen.getByLabelText("User id")).toHaveValue(U1);
+    expect(screen.getByLabelText("User")).toHaveAttribute("data-value", U1);
   });
 
   it("ignores a malformed user id in the query string", () => {
     renderAt("/admin/security/permissions?userId=nope");
-    expect(screen.getByLabelText("User id")).toHaveValue("");
+    expect(screen.getByLabelText("User")).toHaveAttribute("data-value", "");
     expect(server.calls).toHaveLength(0);
   });
 });
@@ -324,9 +324,9 @@ describe("review follow-ups", () => {
     };
     renderAt(`/admin/security/permissions?userId=${U1}`);
     await screen.findByRole("list", { name: "Duties in effect" });
-    fireEvent.change(screen.getByLabelText("User id"), { target: { value: U2 } });
+    fireEvent.change(screen.getByLabelText("User"), { target: { value: U2 } });
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.pathname.includes(U2))).toBe(true));
-    expect(screen.getByLabelText("User id")).toHaveValue(U2);
+    expect(screen.getByLabelText("User")).toHaveAttribute("data-value", U2);
   });
 });

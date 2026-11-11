@@ -40,6 +40,7 @@ import { ACCOUNT_CODE, CURRENCY, DAY, money, UUID, validAmount } from "./format"
 import { CommandFailure, Detail, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 type Errors = Record<string, string>;
 
@@ -220,7 +221,7 @@ export function NewFacilityPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {field("legalEntityId", "Legal entity id")}
+          <LookupFormField id="fa-legalEntityId" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setValues((prev) => ({ ...prev, legalEntityId }))} />
           {field("code", "Facility code", { hint: "Unique per legal entity, for example LC-DB-01." })}
           {field("bankName", "Bank", { mono: false })}
           {field("currency", "Currency", { hint: "ISO 4217, for example EUR." })}

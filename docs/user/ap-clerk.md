@@ -44,6 +44,7 @@ Payment is a two-person job: one person proposes, a different person approves.
 
 1. Open **Accounts payable**, choose **Vendor open items** and check what is due. Filter by **Vendor**, **Due by** or **Status**.
 2. To keep an invoice out of payment, select **Hold payment of ...**, add a **Reason for the hold**, then **Put on hold**. Select **Release hold on ...** when it can be paid.
+3. To stop every payment to a vendor, select **Hold payments to a vendor**, choose the **Vendor**, give the **Reason for the hold**, then select **Put vendor on hold**. The vendor appears under **Vendors on payment hold** with the reason, and its invoices show **Vendor on hold**. Select **Release hold on ...** in that list when the vendor can be paid again. The hold applies to the legal entity you are working in.
 
 ### Create a payment proposal
 
@@ -51,7 +52,7 @@ Payment is a two-person job: one person proposes, a different person approves.
 2. Choose the **Company currency** and the **Payment date**. The date cannot be in the past.
 3. Set **Include invoices due by** if you want to look further ahead than the payment date. Choose how to pay in **Pay by**.
 4. For a vendor who is paid another way, select **Pay a vendor a different way** and pick the vendor and method.
-5. Select **Create proposal**. It saves every invoice that is due as a draft, grouped by vendor and currency. Invoices on hold and vendors blocked for payment are left out.
+5. Select **Create proposal**. It saves every invoice that is due as a draft, grouped by vendor and currency. Invoices on hold and vendors on payment hold are left out.
 
 ### Approve a payment proposal
 
@@ -68,6 +69,16 @@ A different person from the one who created the proposal does this.
 2. Work down the steps in order, selecting the button for the next one: **Generate the bank file**, **Post to the ledger**, **Settle the invoices**, then **Complete the run**.
 3. Select **Download bank file** once it is generated, and send it to your bank.
 4. If the bank refuses the file, select **Mark run as failed** and give the reason. Create a new proposal to pay those invoices.
+
+A proposal that is running, paid or failed shows **Open payment run**, which takes you to its run.
+
+### Send a remittance advice
+
+A remittance advice tells a vendor which invoices a payment covers. It is available once the run is complete.
+
+1. Open the payment run. On the vendor's row, select **Remittance advice for ...**.
+2. Check the invoices, the discount, the tax withheld and the amount paid.
+3. Select **Download CSV** for a spreadsheet of everything the run paid the vendor, and send it to the vendor.
 
 ## What the statuses mean
 
@@ -126,7 +137,7 @@ Open items on the goods-received list:
 
 ## Not available yet
 
-- **Blocking a vendor and remittance advice.** Neither has a screen yet.
+- **Remittance advice as a PDF.** The **Download PDF** button is on the remittance advice, but the print service does not produce this document yet. Use **Download CSV** until it does.
 - **Pick-lists on receiving and invoice forms.** Vendor, purchase order, legal entity, ledger and location are the code or number you type in.
 
 ## Glossary

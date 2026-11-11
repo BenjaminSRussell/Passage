@@ -21,7 +21,7 @@ import {
   type InputProps,
 } from "../../shell/ui";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import type { LookupEntityKey } from "../../shell/lookup/entities";
+import type { LookupEntityKey, LookupOption, LookupScope } from "../../shell/lookup/entities";
 import { describeProblem, newKey, type Page, type Problem } from "./api/client";
 import styles from "./pages.module.css";
 import { useLoad, type LoadState } from "./useLoad";
@@ -463,10 +463,11 @@ export function LookupField({
   value,
   onChange,
   prefill,
-}: FieldBase & { entity: LookupEntityKey; value: string; onChange(value: string): void; prefill?: boolean }) {
+  scope,
+}: FieldBase & { entity: LookupEntityKey; value: string; onChange(value: string, option: LookupOption | null): void; prefill?: boolean; scope?: LookupScope }) {
   return (
     <FormField id={id} label={label} hint={hint} error={error} optional={optional}>
-      {(control) => <EntityLookup {...control} entity={entity} prefill={prefill} value={value} invalid={Boolean(error)} onChange={(event) => onChange(event.target.value)} />}
+      {(control) => <EntityLookup {...control} entity={entity} prefill={prefill} scope={scope} value={value} invalid={Boolean(error)} onChange={(event) => onChange(event.target.value, event.option)} />}
     </FormField>
   );
 }

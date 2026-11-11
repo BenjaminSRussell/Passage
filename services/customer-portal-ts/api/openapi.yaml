@@ -1,0 +1,24 @@
+openapi: 3.1.0
+info:
+  title: Passage customer portal BFF
+  version: 0.1.0
+  description: >-
+    The session and proxy API of apps/customer-portal. Every /api/v1 route needs the session cookie and is a read (there is no
+    write route). The customer comes from the session, never from the request: a customer, customerId or legalEntityId parameter
+    is not forwarded, and the owning services ignore it on these routes. Each /api/v1 route is one call to an owning service
+    (table in src/routes.ts) and returns that service's answer, with 401 from a service turned into 502.
+paths:
+  /bff/login: { get: { summary: Start the OIDC sign-in (302 to the identity provider), responses: { '302': { description: Redirect } } } }
+  /bff/callback: { get: { summary: Finish the sign-in and set the session cookie, parameters: [ { name: code, in: query, schema: { type: string } }, { name: state, in: query, schema: { type: string } } ], responses: { '302': { description: Signed in }, '400': { description: Unknown or expired sign-in }, '403': { description: Not a customer account } } } }
+  /bff/me: { get: { summary: The signed-in contact and the CSRF token, responses: { '200': { description: OK }, '401': { description: No session } } } }
+  /bff/logout: { post: { summary: End the session, responses: { '204': { description: Signed out }, '403': { description: CSRF } } } }
+  /api/v1/invoices: { get: { summary: The customer's posted invoices and credit notes, x-upstream: billing GET /v1/billing/customer-portal/invoices, responses: { '200': { description: OK } } } }
+  /api/v1/invoices/{id}: { get: { summary: One invoice with its lines, responses: { '200': { description: OK }, '404': { description: Not found or not the customer's } } } }
+  /api/v1/open-items: { get: { summary: The customer's open items, x-upstream: receivables GET /v1/receivables/customer-portal/open-items, responses: { '200': { description: OK } } } }
+  /api/v1/open-items/{id}: { get: { summary: One open item, responses: { '200': { description: OK }, '404': { description: Not found or not the customer's } } } }
+  /api/v1/payments: { get: { summary: The customer's payments, responses: { '200': { description: OK } } } }
+  /api/v1/statement: { get: { summary: The customer's account statement (asOf), responses: { '200': { description: OK } } } }
+  /api/v1/orders: { get: { summary: The customer's orders, x-upstream: sales GET /v1/sales/customer-portal/orders, responses: { '200': { description: OK } } } }
+  /api/v1/orders/{id}: { get: { summary: One order with its lines, responses: { '200': { description: OK }, '404': { description: Not found or not the customer's } } } }
+  /api/v1/returns: { get: { summary: The customer's return orders, responses: { '200': { description: OK } } } }
+  /api/v1/returns/{id}: { get: { summary: One return order, responses: { '200': { description: OK }, '404': { description: Not found or not the customer's } } } }

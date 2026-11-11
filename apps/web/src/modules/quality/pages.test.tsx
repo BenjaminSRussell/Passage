@@ -402,7 +402,7 @@ describe("setup pages", () => {
     const { container } = renderAt("/quality/associations/new");
     await screen.findByRole("option", { name: "INCOMING-STEEL v2" });
     fireEvent.change(screen.getByLabelText("Item"), { target: { value: "ITEM" } });
-    fireEvent.change(screen.getByLabelText("Item id"), { target: { value: ITEM } });
+    fireEvent.change(screen.getByLabelText("Which item"), { target: { value: ITEM } });
     fireEvent.change(screen.getByLabelText("Test group"), { target: { value: GROUP } });
     fireEvent.change(screen.getByLabelText("Sampling method"), { target: { value: "PERCENT" } });
     fireEvent.change(screen.getByLabelText("Percentage"), { target: { value: "10" } });

@@ -178,6 +178,8 @@
 html {
   -webkit-text-size-adjust: 100%;
   scrollbar-gutter: stable;
+  /* The top bar is sticky: keep a focused or scrolled-to element clear of it (WCAG 2.4.11). */
+  scroll-padding-block-start: calc(var(--topbar-height) + var(--space-2));
 }
 
 body {

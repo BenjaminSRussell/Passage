@@ -243,12 +243,14 @@ class AS2Edge(unittest.TestCase):
         self.assertEqual(spec["parentRefs"], [{"name": AS2_GATEWAY, "sectionName": self.listener["name"]}])
         self.assertEqual(spec["hostnames"], [self.listener["hostname"]])
         (rule,) = spec["rules"]
-        self.assertEqual(rule["matches"], [{"path": {"type": "PathPrefix", "value": "/as2/v1/"}, "method": "POST"}])
+        self.assertEqual(rule["matches"], [{"path": {"type": "PathPrefix", "value": prefix}, "method": "POST"}
+                                           for prefix in ("/as2/v1/", "/cxml/v1/", "/punchout/v1/return/")])
         self.assertNotIn("filters", rule)
         self.assertEqual(rule["backendRefs"], [{"name": AS2_SERVICE, "port": values["transports"]["as2"]["port"]}])
         # The listener serves exactly these paths.
         as2in = (EDI / "internal/api/as2in.go").read_text()
         self.assertEqual(set(re.findall(r'\.Post\("(/as2/v1/[^"]+)"', as2in)), {"/as2/v1/{endpoint}", "/as2/v1/{endpoint}/mdn"})
+        self.assertEqual(set(re.findall(r'\.Post\("(/(?:cxml|punchout)/v1/[^"]+)"', as2in)), {"/cxml/v1/{endpoint}", "/punchout/v1/return/{session}"})
 
     def test_as2_gateway_is_https_only_on_its_own_hostname_with_a_certificate(self):
         self.assertEqual(self.gateway["spec"]["gatewayClassName"], named(self.docs, "Gateway", API_GATEWAY)["spec"]["gatewayClassName"])

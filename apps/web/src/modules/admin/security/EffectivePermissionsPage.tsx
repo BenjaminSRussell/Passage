@@ -34,7 +34,7 @@ const columns: DataTableColumn<Permission>[] = [
 
 function validate(values: Request): Errors {
   const errors: Errors = {};
-  if (!UUID.test(values.userId.trim())) errors.userId = "Enter the user id as a UUID.";
+  if (!UUID.test(values.userId.trim())) errors.userId = "Choose the user.";
   if (values.legalEntityId.trim() !== "" && !UUID.test(values.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id as a UUID.";
   return errors;
 }
@@ -99,8 +99,8 @@ export function EffectivePermissionsPage() {
       />
       <Card title="Choose a user">
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Choose a user" ref={form}>
-          <FormField id="ep-user" label="User id" hint="The user's UUID." error={errors.userId}>
-            {(c) => <Input {...c} value={values.userId} onChange={(e) => change({ userId: e.target.value })} invalid={Boolean(errors.userId)} autoComplete="off" />}
+          <FormField id="ep-user" label="User" hint="Search by name or email, or paste the user's id." error={errors.userId}>
+            {(c) => <EntityLookup {...c} entity="user" value={values.userId} onChange={(e) => change({ userId: e.target.value })} invalid={Boolean(errors.userId)} />}
           </FormField>
           <FormField
             id="ep-entity"

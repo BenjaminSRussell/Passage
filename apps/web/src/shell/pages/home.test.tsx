@@ -6,6 +6,7 @@ import { loadModules, type PassageModule } from "../../modules/registry";
 import { Shell } from "../Shell";
 import { json, pageViolations, server, useFakeServer } from "../testing/fakeServer";
 import { HomePage } from "./HomePage";
+import { workspaceKpis } from "./kpi";
 
 useFakeServer();
 
@@ -100,10 +101,13 @@ describe("role home", () => {
 
   it("keeps the number of links on home within the limit even for a user with many workspaces", async () => {
     const all = loadModules();
-    const duties = [...new Set(all.flatMap((m) => m.nav.flatMap((n) => (n.duty ? [n.duty] : []))).concat("inbox.read"))];
+    const kpiDuties = Object.values(workspaceKpis).flatMap((tiles) => tiles.map((t) => t.duty));
+    const duties = [...new Set(all.flatMap((m) => m.nav.flatMap((n) => (n.duty ? [n.duty] : []))).concat("inbox.read", ...kpiDuties))];
     server.handler = () => json(200, { items: [1, 2, 3, 4, 5, 6, 7].map(item), unavailable: [], truncated: [] });
     renderHome(duties, all);
     await main().findByText("7 items are waiting for you.");
+    // The current workspace's number tiles count toward the limit too.
+    await waitFor(() => expect(main().getAllByRole("list", { name: / at a glance$/ }).length).toBeGreaterThan(1));
     expect(main().getAllByRole("link").length).toBeLessThanOrEqual(MAX_HOME_LINKS);
   });
 

@@ -15,6 +15,7 @@ import { DAY, DECIMAL, UUID } from "./format";
 import styles from "./pages.module.css";
 import { BASIS_LABELS, PARTY_LABELS, PERIOD_LABELS, VENDOR_BASIS_LABELS } from "./rebateFormat";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface TierDraft {
   from: string;
@@ -73,13 +74,13 @@ const ACCOUNT = /^\d{4,8}$/;
 /** Client checks that mirror the service (FR-26.11, BR-26.8); the service has the last word. */
 export function validateRebate(v: RebateDraft): Errors {
   const errors: Errors = {};
-  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
+  if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (!UUID.test(v.customer.trim())) {
-    errors.customer = v.party === "VENDOR" ? "Enter the vendor id (a UUID)." : v.scope === "customer" ? "Enter the customer id (a UUID)." : "Enter the customer group id (a UUID).";
+    errors.customer = v.party === "VENDOR" ? "Choose a vendor." : v.scope === "customer" ? "Choose a customer." : "Enter the customer group id (a UUID).";
   }
   if (v.productScope !== "all" && !UUID.test(v.productKey.trim())) {
-    errors.productKey = v.productScope === "product" ? "Enter the product id (a UUID)." : "Enter the product group id (a UUID).";
+    errors.productKey = v.productScope === "product" ? "Choose a product." : "Enter the product group id (a UUID).";
   }
   if (!/^[A-Z]{3}$/.test(v.currency)) errors.currency = "Use a three-letter ISO 4217 code, such as USD.";
   if (!DAY.test(v.validFrom)) errors.validFrom = "Enter the first valid day.";
@@ -202,7 +203,7 @@ export function NewRebatePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("rb-legal-entity", "legalEntityId", "Legal entity id", { mono: true })}
+          <LookupFormField id="rb-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           {text("rb-name", "name", "Agreement name")}
           <FormField id="rb-party" label="Type" hint={vendor ? "Earned from a vendor on its invoices and settled by period claims." : "Paid to a customer on its posted invoices."}>
             {(c) => (
@@ -210,7 +211,7 @@ export function NewRebatePage() {
                 {...c}
                 value={values.party}
                 onChange={(e) => {
-                  setValues((prev) => withParty(prev, e.target.value as RebatePartyRole));
+                  setValues((prev) => ({ ...withParty(prev, e.target.value as RebatePartyRole), customer: "" }));
                   key.current = newKey();
                 }}
               >
@@ -225,24 +226,41 @@ export function NewRebatePage() {
           {vendor ? null : (
             <FormField id="rb-scope" label="Rebates">
               {(c) => (
-                <Select {...c} value={values.scope} onChange={(e) => update({ scope: e.target.value as RebateDraft["scope"] })}>
+                <Select {...c} value={values.scope} onChange={(e) => update({ scope: e.target.value as RebateDraft["scope"], customer: "" })}>
                   <option value="customer">One customer</option>
                   <option value="group">A customer group</option>
                 </Select>
               )}
             </FormField>
           )}
-          {text("rb-customer", "customer", vendor ? "Vendor id" : values.scope === "customer" ? "Customer id" : "Customer group id", { mono: true })}
+          {vendor || values.scope === "customer" ? (
+            <LookupFormField
+              key={vendor ? "vendor" : "customer"}
+              id="rb-customer"
+              label={vendor ? "Vendor" : "Customer"}
+              entity={vendor ? "vendor" : "customer"}
+              scope={{ legalEntityId: values.legalEntityId || undefined }}
+              value={values.customer}
+              error={errors.customer}
+              onChange={(customer) => update({ customer })}
+            />
+          ) : (
+            text("rb-customer", "customer", "Customer group id", { mono: true })
+          )}
           <FormField id="rb-product-scope" label="Products" hint="Limit the agreement to the invoice lines of one product or one product group.">
             {(c) => (
-              <Select {...c} value={values.productScope} onChange={(e) => update({ productScope: e.target.value as RebateDraft["productScope"] })}>
+              <Select {...c} value={values.productScope} onChange={(e) => update({ productScope: e.target.value as RebateDraft["productScope"], productKey: "" })}>
                 <option value="all">All products</option>
                 <option value="product">One product</option>
                 <option value="group">A product group</option>
               </Select>
             )}
           </FormField>
-          {values.productScope === "all" ? null : text("rb-product-key", "productKey", values.productScope === "product" ? "Product id" : "Product group id", { mono: true })}
+          {values.productScope === "product" ? (
+            <LookupFormField id="rb-product-key" label="Product" entity="product" value={values.productKey} error={errors.productKey} onChange={(productKey) => update({ productKey })} />
+          ) : values.productScope === "group" ? (
+            text("rb-product-key", "productKey", "Product group id", { mono: true })
+          ) : null}
           <FormField id="rb-basis" label="Basis">
             {(c) => (
               <Select {...c} value={values.basis} onChange={(e) => update({ basis: e.target.value as RebateBasis })}>

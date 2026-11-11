@@ -290,7 +290,7 @@ describe("Freight bills", () => {
   it("creates a bill and opens it", async () => {
     handler = (_url, init) => (init.method === "POST" ? json(201, bill()) : json(200, { ...bill() }));
     renderAt("/transport/freight-bills/new");
-    fill("Load id", LOAD);
+    fill("Load", LOAD);
     fill("Carrier id", CARRIER);
     fill("Charge 1 amount", "400.00");
     fireEvent.click(screen.getByRole("button", { name: "Add charge" }));
@@ -313,7 +313,7 @@ describe("Freight bills", () => {
 
   it("checks the charge lines before calling", async () => {
     renderAt("/transport/freight-bills/new");
-    fill("Load id", LOAD);
+    fill("Load", LOAD);
     fill("Carrier id", CARRIER);
     fill("Charge 1 amount", "-3");
     fireEvent.click(screen.getByRole("button", { name: "Create freight bill" }));

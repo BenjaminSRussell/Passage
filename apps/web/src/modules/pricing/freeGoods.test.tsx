@@ -119,7 +119,7 @@ describe("New free goods rule", () => {
       return undefined;
     };
     renderAt("/pricing/free-goods/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Product", "BOLT");
     fill("For every quantity ordered", "10");
     fill("Free quantity", "1");
@@ -148,7 +148,7 @@ describe("New free goods rule", () => {
   it("shows an overlapping rule as a form failure", async () => {
     server.handler = () => json(409, { code: "PRC-0002", detail: "overlapping free goods rule x" });
     renderAt("/pricing/free-goods/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Product", "BOLT");
     fill("For every quantity ordered", "10");
     fill("Free quantity", "1");
@@ -354,7 +354,7 @@ describe("Free goods for a product group", () => {
       return undefined;
     };
     renderAt("/pricing/free-goods/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fireEvent.change(screen.getByLabelText("Applies to"), { target: { value: "product_group" } });
     fill("Product group", "FASTENERS");
     fill("For every quantity ordered", "10");
