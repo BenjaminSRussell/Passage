@@ -3,6 +3,7 @@ package httpx
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -26,7 +27,14 @@ import (
 //
 // The role is read by one background goroutine every interval and cached in an atomic, so a request never waits on
 // the file or the network. A source that cannot be read keeps the last known state (not fenced at start): an
-// unreadable source must not take a healthy region down. /healthz, /readyz, /healthz/region and /metrics stay
+// unreadable source must not take a healthy region down. Only PRIMARY, PASSIVE and FENCED are roles; anything else (a
+// role of UNKNOWN, a missing role, a garbage body, an HTTP status other than 200 or 503) is a read error and keeps the
+// last state. That matters in a failover: fencing the old region's database makes its ops service report it cannot say what
+// it is, and that must not unfence the services.
+//
+// Start-up choice: a pod that starts while the source is unreadable serves as not fenced (fail open). The alternative, to
+// refuse everything until a role is read, would take a healthy region down whenever ops restarts; a region whose database
+// was fenced has no working database for the pod to serve from anyway. /healthz, /readyz, /healthz/region and /metrics stay
 // reachable while fenced so probes, DNS checks and scrapes still work.
 const (
 	FenceFileEnv     = "PASSAGE_REGION_FENCE_FILE"
@@ -50,6 +58,14 @@ type FenceSource func(ctx context.Context) (fenced bool, err error)
 type Fence struct {
 	fenced atomic.Bool
 	known  atomic.Bool
+	stop   context.CancelFunc
+}
+
+// Stop ends the background poll. A nil or already stopped Fence is fine.
+func (f *Fence) Stop() {
+	if f != nil && f.stop != nil {
+		f.stop()
+	}
 }
 
 // NewFence builds a fence over src and polls it every interval (minimum 1s) until ctx ends. The first read happens
@@ -58,7 +74,8 @@ func NewFence(ctx context.Context, src FenceSource, interval time.Duration) *Fen
 	if interval < minFenceInterval {
 		interval = minFenceInterval
 	}
-	f := &Fence{}
+	ctx, cancel := context.WithCancel(ctx)
+	f := &Fence{stop: cancel}
 	f.refresh(ctx, src)
 	go func() {
 		t := time.NewTicker(interval)
@@ -121,6 +138,19 @@ func (f *Fence) Middleware(next http.Handler) http.Handler {
 // RoleFenced maps a role string to the fenced state: only FENCED fences.
 func RoleFenced(role string) bool { return strings.EqualFold(strings.TrimSpace(role), "FENCED") }
 
+// ParseRole accepts only PRIMARY, PASSIVE and FENCED (any case, surrounding space ignored) and reports whether the region
+// is fenced. Anything else is an error, so it cannot be mistaken for "not fenced".
+func ParseRole(role string) (fenced bool, err error) {
+	switch r := strings.ToUpper(strings.TrimSpace(role)); r {
+	case "FENCED":
+		return true, nil
+	case "PRIMARY", "PASSIVE":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%q is not a region role (PRIMARY, PASSIVE or FENCED)", role)
+	}
+}
+
 // FileFenceSource reads the role from a file. A missing file is "not fenced".
 func FileFenceSource(path string) FenceSource {
 	return func(context.Context) (bool, error) {
@@ -131,7 +161,7 @@ func FileFenceSource(path string) FenceSource {
 		if err != nil {
 			return false, err
 		}
-		return RoleFenced(string(b)), nil
+		return ParseRole(string(b))
 	}
 }
 
@@ -148,16 +178,18 @@ func URLFenceSource(client *http.Client, url string) FenceSource {
 			return false, err
 		}
 		defer func() { _ = resp.Body.Close() }()
+		// The ops /healthz/region answers 200 for PRIMARY and 503 with the role for PASSIVE and FENCED. A 503 from ops that
+		// cannot read its database, or any other status (a proxy's 502, a 404), carries no role and is an error.
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
+			return false, fmt.Errorf("region health answered %d", resp.StatusCode)
+		}
 		var body struct {
 			Role string `json:"role"`
 		}
 		if err := json.NewDecoder(io.LimitReader(resp.Body, fenceReadLimit)).Decode(&body); err != nil {
 			return false, err
 		}
-		if body.Role == "" {
-			return false, io.ErrUnexpectedEOF
-		}
-		return RoleFenced(body.Role), nil
+		return ParseRole(body.Role)
 	}
 }
 
@@ -183,7 +215,7 @@ func FenceFromEnv(ctx context.Context, getenv func(string) string) *Fence {
 
 var (
 	processFenceOnce sync.Once
-	processFence     *Fence
+	processFence     atomic.Pointer[Fence]
 	fenceDisabled    atomic.Bool
 )
 
@@ -191,11 +223,18 @@ var (
 // run the rejoin. Call it before the first router is built.
 func DisableFence() { fenceDisabled.Store(true) }
 
+// stopProcessFence ends the process fence's poll; Serve calls it when it returns.
+func stopProcessFence() {
+	if f := processFence.Load(); f != nil {
+		f.Stop()
+	}
+}
+
 // processFenceMiddleware is the fence every router of this process shares, built once from the environment.
 func processFenceMiddleware(next http.Handler) http.Handler {
 	if fenceDisabled.Load() {
 		return next
 	}
-	processFenceOnce.Do(func() { processFence = FenceFromEnv(context.Background(), os.Getenv) })
-	return processFence.Middleware(next)
+	processFenceOnce.Do(func() { processFence.Store(FenceFromEnv(context.Background(), os.Getenv)) })
+	return processFence.Load().Middleware(next)
 }

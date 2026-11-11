@@ -170,7 +170,9 @@ func WithMetrics(h http.Handler) http.Handler {
 const DefaultAdminAddr = ":9090"
 
 // ServeWithMetrics serves h on addr like Serve and the shared HTTP series on the admin address (ADMIN_ADDR, default :9090,
-// path /metrics only) for a service that has no admin listener of its own. It returns when either listener stops.
+// path /metrics only) for a service that has no admin listener of its own. Both listeners drain on shutdown and it returns
+// only when both have stopped: when one fails, the other is cancelled and still drains its in-flight requests. The first
+// non-nil error is returned.
 func ServeWithMetrics(ctx context.Context, addr string, h http.Handler) error {
 	adminAddr := os.Getenv("ADMIN_ADDR")
 	if adminAddr == "" {
@@ -181,9 +183,22 @@ func ServeWithMetrics(ctx context.Context, addr string, h http.Handler) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errs := make(chan error, 2)
-	go func() { errs <- Serve(ctx, addr, h) }()
-	go func() { errs <- Serve(ctx, adminAddr, admin) }()
-	return <-errs
+	for _, l := range []struct {
+		addr string
+		h    http.Handler
+	}{{addr, h}, {adminAddr, admin}} {
+		go func() {
+			err := Serve(ctx, l.addr, l.h)
+			cancel()
+			errs <- err
+		}()
+	}
+	first := <-errs
+	second := <-errs
+	if first != nil {
+		return first
+	}
+	return second
 }
 
 // MetricsHandler serves only the shared HTTP series, for a service with no metrics of its own.

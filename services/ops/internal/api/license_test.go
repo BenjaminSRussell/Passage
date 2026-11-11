@@ -22,8 +22,8 @@ import (
 
 func licenseEnv(t *testing.T, now time.Time) (*env, ed25519.PrivateKey) {
 	t.Helper()
-	pool := testkit.DB(t)
-	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+	admin, pool := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	st := store.New(pool)
@@ -34,7 +34,7 @@ func licenseEnv(t *testing.T, now time.Time) (*env, ed25519.PrivateKey) {
 	r := httpx.NewRouterWithoutTenant()
 	operator := ids.New()
 	New(st, Config{MaxLagSeconds: 300, OperatorTenantID: operator, LicensePublicKey: pub, Now: func() time.Time { return now }}).Register(r)
-	return &env{router: r, tenant: operator, pool: pool}, priv
+	return &env{router: r, tenant: operator, pool: pool, admin: admin}, priv
 }
 
 func signedLicense(priv ed25519.PrivateKey, tenantID, expires string, full int) string {

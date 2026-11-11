@@ -286,16 +286,20 @@ paths:
     get:
       operationId: regionHealth
       summary: Region health for DNS checks
-      description: 200 only while the region this replica runs in is PRIMARY; 503 with Retry-After 30 otherwise, and when the role cannot be read.
+      description: >
+        200 only while the region this replica runs in is PRIMARY; 503 with Retry-After 30 and the role otherwise. When the role cannot be read (database
+        unreadable, region not registered) the 503 is a problem with no role, so a consumer never mistakes it for a role: the services' fence keeps its last state.
       x-passage-duty: public
       responses:
         '200':
           description: This region is PRIMARY.
           content: { application/json: { schema: { $ref: '#/components/schemas/RegionHealth' } } }
         '503':
-          description: This region is not PRIMARY.
+          description: This region is not PRIMARY (a RegionHealth body), or its role cannot be read (a problem body with no role).
           headers: { Retry-After: { schema: { type: integer } } }
-          content: { application/json: { schema: { $ref: '#/components/schemas/RegionHealth' } } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/RegionHealth' } }
+            application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } }
   /healthz:
     get:
       operationId: liveness
@@ -508,7 +512,7 @@ components:
       required: [region, role]
       properties:
         region: { type: string }
-        role: { type: string, enum: [PRIMARY, PASSIVE, FENCED, UNKNOWN] }
+        role: { type: string, enum: [PRIMARY, PASSIVE, FENCED] }
     CapacityEstimate:
       type: object
       required: [modelVersion, derived, pods, nodes, postgres, kafka]

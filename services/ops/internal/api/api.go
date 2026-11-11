@@ -139,25 +139,33 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-// regionHealth is what DNS health checks read: 200 only while this region is PRIMARY, 503 with Retry-After otherwise
-// (FENCED and PASSIVE regions serve no writes, BR-50.2). A store error is 503 too, so DNS never routes to a region
-// that cannot say what it is.
+// regionHealth is what DNS health checks and every service's fence read: 200 with {"region","role":"PRIMARY"} while this region is
+// PRIMARY, 503 with the role for PASSIVE and FENCED regions (they serve no writes, BR-50.2). When this service cannot say what
+// the region is (its database is unreadable, or REGION_NAME names no registered region) it answers a 503 problem with no role,
+// never a made-up one: DNS still sees a failing region, and the fence of the services reads it as "cannot tell" and keeps its
+// last state instead of unfencing a region whose database was just fenced.
 func (a *API) regionHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Retry-After", "30")
 	regions, err := a.store.Regions(r.Context())
-	role := domain.Role("UNKNOWN")
-	if err == nil {
-		for _, reg := range regions {
-			if reg.Name == a.cfg.Region {
-				role = reg.Role
-			}
+	if err != nil {
+		slog.Error("region health: cannot read the regions", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "this region's role cannot be read"))
+		return
+	}
+	for _, reg := range regions {
+		if reg.Name != a.cfg.Region {
+			continue
 		}
+		status := http.StatusOK
+		if reg.Role != domain.Primary {
+			status = http.StatusServiceUnavailable
+		} else {
+			w.Header().Del("Retry-After")
+		}
+		httpx.JSON(w, status, map[string]string{"region": a.cfg.Region, "role": string(reg.Role)})
+		return
 	}
-	status := http.StatusOK
-	if role != domain.Primary {
-		status = http.StatusServiceUnavailable
-		w.Header().Set("Retry-After", "30")
-	}
-	httpx.JSON(w, status, map[string]string{"region": a.cfg.Region, "role": string(role)})
+	httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "region "+a.cfg.Region+" is not registered"))
 }
 
 func (a *API) regions(w http.ResponseWriter, r *http.Request) {

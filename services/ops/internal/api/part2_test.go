@@ -173,7 +173,7 @@ func TestBreakGlassExpires(t *testing.T) {
 		t.Fatal(rec.Body)
 	}
 	// move the whole window into the past; the CHECK keeps its length valid
-	if _, err := e.pool.Exec(context.Background(), `update ops_break_glass set granted_at = now() - interval '2 hours', expires_at = now() - interval '1 hour', review_due_at = now() - interval '1 minute'`); err != nil {
+	if _, err := e.admin.Exec(context.Background(), `update ops_break_glass set granted_at = now() - interval '2 hours', expires_at = now() - interval '1 hour', review_due_at = now() - interval '1 minute'`); err != nil {
 		t.Fatal(err)
 	}
 	if rec := e.do("POST", "/v1/ops/failover", "carol", DutyBreakGlassRequest, "evt-x", `{"to":"eu-west"}`); rec.Code != http.StatusForbidden {

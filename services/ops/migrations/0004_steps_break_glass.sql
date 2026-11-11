@@ -50,7 +50,7 @@ CREATE TABLE ops_break_glass_use (
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
-    EXECUTE 'GRANT SELECT, INSERT ON ops_failover_step TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON ops_failover_step TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON ops_break_glass TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON ops_break_glass_use TO passage_app';
     EXECUTE format('GRANT USAGE ON SEQUENCE %I TO passage_app', 'ops_break_glass_use_id_seq');

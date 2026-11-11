@@ -118,3 +118,61 @@ func TestServeWithMetricsServesTheSharedSeriesOnTheAdminPort(t *testing.T) {
 		t.Fatal("ServeWithMetrics did not stop with its context")
 	}
 }
+
+func TestServeWithMetricsDrainsAnInFlightRequestOnShutdown(t *testing.T) {
+	free := func() string {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := l.Addr().String()
+		_ = l.Close()
+		return a
+	}
+	api, admin := free(), free()
+	t.Setenv("ADMIN_ADDR", admin)
+	started, release := make(chan struct{}), make(chan struct{})
+	r := NewRouterWithoutTenant()
+	r.Get("/v1/slow", func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		JSON(w, 200, map[string]string{"done": "1"})
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- ServeWithMetrics(ctx, api, r) }()
+	for range 100 {
+		if resp, err := http.Get("http://" + admin + "/metrics"); err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	result := make(chan string, 1)
+	go func() {
+		resp, err := http.Get("http://" + api + "/v1/slow")
+		if err != nil {
+			result <- "error: " + err.Error()
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		result <- resp.Status + " " + string(b)
+	}()
+	<-started
+	cancel() // shutdown begins while the request is in flight
+	select {
+	case err := <-done:
+		t.Fatalf("ServeWithMetrics returned (%v) while a request was still in flight", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	if got := <-result; !strings.HasPrefix(got, "200") {
+		t.Fatalf("the in-flight request must complete: %s", got)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ServeWithMetrics did not return after draining")
+	}
+}

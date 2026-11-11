@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,5 +143,104 @@ func TestFenceFromEnvPicksFile(t *testing.T) {
 	f := FenceFromEnv(t.Context(), func(k string) string { return env[k] })
 	if f == nil || !f.Fenced() {
 		t.Fatal("file source must fence at once")
+	}
+}
+
+func TestURLSourceTreatsAnythingButARoleAsAReadError(t *testing.T) {
+	cases := map[string]struct {
+		status int
+		body   string
+	}{
+		"UNKNOWN role":      {503, `{"region":"eu-west","role":"UNKNOWN"}`},
+		"no role (problem)": {503, `{"type":"x","title":"Service Unavailable","status":503,"code":"COM-0503"}`},
+		"garbage body":      {200, `<html>bad gateway</html>`},
+		"500":               {500, `{"role":"FENCED"}`},
+		"404":               {404, `{"role":"FENCED"}`},
+		"502 from a proxy":  {502, ``},
+		"lower role typo":   {200, `{"role":"PRIMARYY"}`},
+	}
+	for name, c := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(c.status)
+			_, _ = w.Write([]byte(c.body))
+		}))
+		if _, err := URLFenceSource(srv.Client(), srv.URL)(t.Context()); err == nil {
+			t.Errorf("%s must be a read error", name)
+		}
+		srv.Close()
+	}
+	// and a read error keeps the last state: a fenced region does not unfence because ops cannot read its database
+	var body atomic.Value
+	body.Store(`{"role":"FENCED"}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(503)
+		_, _ = w.Write([]byte(body.Load().(string)))
+	}))
+	defer srv.Close()
+	f := &Fence{}
+	src := URLFenceSource(srv.Client(), srv.URL)
+	f.refresh(t.Context(), src)
+	if !f.Fenced() {
+		t.Fatal("must fence")
+	}
+	body.Store(`{"region":"eu-west","role":"UNKNOWN"}`)
+	f.refresh(t.Context(), src)
+	if !f.Fenced() {
+		t.Fatal("UNKNOWN must keep the fence")
+	}
+	body.Store(`{"title":"unavailable","status":503}`)
+	f.refresh(t.Context(), src)
+	if !f.Fenced() {
+		t.Fatal("a problem body must keep the fence")
+	}
+	body.Store(`{"role":"PASSIVE"}`)
+	f.refresh(t.Context(), src)
+	if f.Fenced() {
+		t.Fatal("a real PASSIVE role unfences")
+	}
+}
+
+func TestFileSourceRejectsAGarbageRole(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "role")
+	if err := os.WriteFile(path, []byte("UNKNOWN"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FileFenceSource(path)(t.Context()); err == nil {
+		t.Fatal("an unknown role in the file is a read error")
+	}
+}
+
+func TestFenceStopEndsThePoll(t *testing.T) {
+	var reads atomic.Int64
+	f := NewFence(t.Context(), func(context.Context) (bool, error) { reads.Add(1); return false, nil }, time.Second)
+	f.Stop()
+	n := reads.Load()
+	time.Sleep(1300 * time.Millisecond)
+	if reads.Load() != n {
+		t.Fatal("the poll kept running after Stop")
+	}
+	(*Fence)(nil).Stop() // a nil fence is fine
+}
+
+func TestFencedRequestsAreCountedAndLogged(t *testing.T) {
+	shared = &httpMetrics{routes: map[string]*routeStat{}}
+	var fenced atomic.Bool
+	fenced.Store(true)
+	f := NewFence(t.Context(), func(context.Context) (bool, error) { return fenced.Load(), nil }, time.Second)
+	// the process fence sits in newRouter after metrics; emulate it for this router
+	processFence.Store(f)
+	processFenceOnce.Do(func() {})
+	defer processFence.Store(nil)
+	r := NewRouterWithoutTenant()
+	r.Get("/v1/thing", func(w http.ResponseWriter, _ *http.Request) { JSON(w, 200, nil) })
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/thing", nil))
+	if rec.Code != 503 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var out strings.Builder
+	shared.write(&out)
+	if !strings.Contains(out.String(), `status="503"`) {
+		t.Fatalf("a fenced 503 must be counted: %s", out.String())
 	}
 }
