@@ -8,7 +8,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/print/internal/domain"
 )
 
@@ -80,6 +83,14 @@ func (a *API) registerDocgen(r chi.Router) {
 	r.With(read).Get("/output-plan", a.outputPlan)
 }
 
+// canonicalID lowercases a UUID; anything else is returned as it came, for validation to refuse.
+func canonicalID(s string) string {
+	if c, ok := ids.Canonical(s); ok {
+		return c
+	}
+	return s
+}
+
 // docgenStore returns the docgen store, or answers 503 when there is none.
 func (a *API) docgenStore(w http.ResponseWriter, r *http.Request) (context.Context, bool) {
 	if _, ok := principal(w, r); !ok {
@@ -113,6 +124,16 @@ func (a *API) putTemplate(w http.ResponseWriter, r *http.Request) {
 	in := domain.DocumentTemplate{Code: chi.URLParam(r, "code"), Name: req.Name, DocumentType: req.DocumentType, Default: req.Default, Config: req.Config}
 	if fields := in.Validate(); len(fields) > 0 {
 		validationFailed(w, r, fields)
+		return
+	}
+	blocks := func(code string) ([]domain.TextBlock, error) { return a.docs.TextBlockVersions(ctx, code) }
+	problems, err := domain.CheckTemplateBlocks(in, blocks)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if len(problems) > 0 {
+		validationFailed(w, r, problems)
 		return
 	}
 	out, err := a.docs.PutTemplate(ctx, in)
@@ -171,6 +192,15 @@ func (a *API) putTextBlock(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	all, err := a.docs.ListTemplates(ctx, "")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if why := domain.DefaultTemplateBlockProblem(all, in.Code, in.Body); why != "" {
+		validationFailed(w, r, map[string]string{"body": why})
+		return
+	}
 	out, err := a.docs.PutTextBlock(ctx, in)
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -223,10 +253,22 @@ func (a *API) createOutputRule(w http.ResponseWriter, r *http.Request) {
 	if req.Copies == 0 {
 		req.Copies = 1
 	}
-	in := domain.OutputRule{DocumentType: req.DocumentType, LegalEntityID: req.LegalEntityID, AccountID: req.AccountID, CopyKind: req.CopyKind,
+	in := domain.OutputRule{DocumentType: req.DocumentType, LegalEntityID: canonicalID(req.LegalEntityID), AccountID: canonicalID(req.AccountID), CopyKind: req.CopyKind,
 		Channel: req.Channel, Destination: req.Destination, Copies: req.Copies, Sequence: req.Sequence}
 	if fields := in.Validate(); len(fields) > 0 {
 		validationFailed(w, r, fields)
+		return
+	}
+	// A rule of one legal entity needs that entity in the caller's scope; a rule for every
+	// legal entity needs tenant-wide authority (no entity claim, tenant.administer, print.admin).
+	p, _ := tenant.FromContext(ctx)
+	if in.LegalEntityID != "" {
+		if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside your scope"))
+			return
+		}
+	} else if !dbx.TenantWide(p, dutyPrintAdmin) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "only a tenant administrator can add a rule that applies to every legal entity"))
 		return
 	}
 	out, _, err := a.docs.CreateOutputRule(ctx, in, key)
@@ -261,7 +303,8 @@ func (a *API) deleteOutputRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := a.docs.DeleteOutputRule(ctx, id); err != nil {
+	p, _ := tenant.FromContext(ctx)
+	if err := a.docs.DeleteOutputRule(ctx, id, dbx.TenantWide(p, dutyPrintAdmin)); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
@@ -276,7 +319,7 @@ func (a *API) outputPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	doc := domain.OutputDocument{Type: q.Get("documentType"), LegalEntityID: q.Get("legalEntityId"), AccountID: q.Get("accountId")}
+	doc := domain.OutputDocument{Type: q.Get("documentType"), LegalEntityID: canonicalID(q.Get("legalEntityId")), AccountID: canonicalID(q.Get("accountId"))}
 	known := false
 	for _, t := range domain.DocumentTypes() {
 		known = known || t == doc.Type

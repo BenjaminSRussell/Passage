@@ -62,7 +62,7 @@ paths:
         Planned exactly like POST /v1/analytics/query (published metrics, one grain, the caller's legal-entity scope as filters),
         then run on Cube with a short-lived token that carries the tenant and the same scope. Only metrics the Cube model has a
         measure for can run; another published metric is a 400 naming it. A caller with no scope gets an empty result and Cube is
-        not called. Measures come back as decimal strings. Cube not configured or not answering is 503 ANA-0120. At most 10,000 rows.
+        not called. Amounts are in each ledger's own currency, so the query must include the currency dimension (400 otherwise) and rows come back per currency. Measures come back as decimal strings. Cube not configured or not answering is 503 ANA-0120. At most 10,000 rows.
       x-passage-duty: analytics.view
       requestBody:
         required: true
@@ -489,7 +489,7 @@ paths:
         Each tile's metric over its period (MTD, QTD, YTD or the trailing 12 months up to today). A tile that cannot be
         computed does not fail the dashboard: its status says why, OK (value may be null when there are no rows),
         NO_SCOPE (the caller has no legal-entity scope), NOT_MODELLED (the metric has no Cube measure yet) or UNAVAILABLE
-        (Cube is not configured or did not answer).
+        (Cube is not configured or did not answer) or MIXED_CURRENCY (the scope holds amounts in more than one currency, which are never added; no value).
       x-passage-duty: analytics.view
       responses:
         "200":
@@ -1056,13 +1056,16 @@ components:
           format: date
         status:
           type: string
-          enum: [OK, NO_SCOPE, NOT_MODELLED, UNAVAILABLE]
+          enum: [OK, NO_SCOPE, NOT_MODELLED, UNAVAILABLE, MIXED_CURRENCY]
         value:
           type: [string, "null"]
           description: A decimal string; null without a value.
         unit:
           type: string
           enum: [REPORTING_CURRENCY, RATIO]
+        currency:
+          type: string
+          description: The ledger currency of value; absent for a ratio and when there is no value.
     DashboardValues:
       type: object
       required: [dashboardId, title, refreshSeconds, computedAt, tiles]

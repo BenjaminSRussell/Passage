@@ -4,14 +4,16 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
 // Output routing (#46-2): where the original and the copies of a business document go.
 // A rule names a document type, optionally a legal entity and an account (customer or
 // vendor), the kind of copy and a destination channel. The plan for one document is the
-// set of rules of the most specific scope that matches, per copy kind and channel, so an
-// account can have its invoices e-mailed while everyone else's original goes to a printer
-// and the copy to the archive.
+// set of rules of the most specific scope that matches, per copy kind: an account that has
+// any rule for the original replaces the default destinations of the original altogether, so
+// it never gets both its own e-mail and the default printer's paper original.
 
 const (
 	CopyOriginal = "ORIGINAL"
@@ -109,15 +111,15 @@ func (r OutputRule) Validate() map[string]string {
 		f["sequence"] = "must be at least 1"
 	}
 	for name, v := range map[string]string{"legalEntityId": r.LegalEntityID, "accountId": r.AccountID} {
-		if len(v) > 64 {
-			f[name] = "is longer than 64 characters"
+		if v != "" && !ids.Valid(v) {
+			f[name] = "must be an id"
 		}
 	}
 	return f
 }
 
-// ResolveOutputs returns the destinations for doc: for each copy kind and channel, every
-// rule of the most specific scope that matches. The result is ordered original first, then
+// ResolveOutputs returns the destinations for doc: for each copy kind, every rule (of any
+// channel) of the most specific scope that has a rule for it. The result is ordered original first, then
 // by channel and sequence, so it is stable.
 func ResolveOutputs(rules []OutputRule, doc OutputDocument) []OutputRule {
 	best := map[string]int{}
@@ -125,14 +127,13 @@ func ResolveOutputs(rules []OutputRule, doc OutputDocument) []OutputRule {
 		if !r.matches(doc) {
 			continue
 		}
-		k := r.CopyKind + "/" + r.Channel
-		if b, ok := best[k]; !ok || r.scope() < b {
-			best[k] = r.scope()
+		if b, ok := best[r.CopyKind]; !ok || r.scope() < b {
+			best[r.CopyKind] = r.scope()
 		}
 	}
 	out := []OutputRule{}
 	for _, r := range rules {
-		if r.matches(doc) && r.scope() == best[r.CopyKind+"/"+r.Channel] {
+		if r.matches(doc) && r.scope() == best[r.CopyKind] {
 			out = append(out, r)
 		}
 	}

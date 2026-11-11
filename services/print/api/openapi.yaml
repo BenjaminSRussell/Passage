@@ -269,6 +269,8 @@ paths:
       operationId: createOutputRule
       summary: Add an output rule (46-2)
       description: >-
+        Every rule is for one legal entity, which must be in the caller's scope (403 otherwise; row-level security enforces it too), or for
+        every legal entity, which only a tenant administrator (no legal-entity claim, tenant.administer, print.admin) may add or delete.
         A rule sends one kind of copy (ORIGINAL or COPY) of a document type to a destination channel: a print queue of the
         site print agent, an e-mail address, the e-invoice network, the archive or the portal. It may be limited to a legal
         entity, an account (customer or vendor) or both. The rule says where; delivery is done by the caller or a later
@@ -299,7 +301,7 @@ paths:
     get:
       operationId: resolveOutputPlan
       summary: Where the original and the copies of one document go (46-2)
-      description: For each copy kind and channel, the rules of the most specific matching scope (legal entity and account, then account, then legal entity, then the document type's default), original first.
+      description: For each copy kind (original, copy), every rule of the most specific matching scope that has a rule for it (legal entity and account, then account, then legal entity, then the document type's default), whatever its channel, so an account's own original replaces the default original instead of adding to it. Original first.
       x-passage-duty: print.job.submit
       parameters:
         - { name: documentType, in: query, required: true, schema: { type: string } }
@@ -585,8 +587,8 @@ components:
       required: [documentType, copyKind, channel, sequence]
       properties:
         documentType: { type: string }
-        legalEntityId: { type: string, maxLength: 64 }
-        accountId: { type: string, maxLength: 64 }
+        legalEntityId: { type: string, format: uuid, description: 'Only within the caller''s legal-entity scope (403 otherwise).' }
+        accountId: { type: string, format: uuid, description: The customer or vendor party. }
         copyKind: { type: string, enum: [ORIGINAL, COPY] }
         channel: { type: string, enum: [PRINTER, EMAIL, EINVOICE, ARCHIVE, PORTAL] }
         destination: { type: string, description: 'A queue code for PRINTER, one address for EMAIL; empty for the other channels.' }

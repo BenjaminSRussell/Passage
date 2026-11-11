@@ -68,6 +68,7 @@ const TILE_STATUS_TEXT: Record<Exclude<TileValue["status"], "OK">, string> = {
   NO_SCOPE: "No data scope",
   NOT_MODELLED: "Not modelled yet",
   UNAVAILABLE: "Unavailable",
+  MIXED_CURRENCY: "Several currencies",
 };
 
 /** What a tile shows: the value (a percentage for a ratio), "No data" without rows, or why there is no value. */
@@ -77,7 +78,8 @@ export function tileValueText(t: TileValue): string {
   const n = Number(t.value);
   if (!Number.isFinite(n)) return t.value;
   if (t.unit === "RATIO") return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(n * 100)}%`;
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n);
+  const amount = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n);
+  return t.currency ? `${amount} ${t.currency}` : amount;
 }
 
 /** One line under a tile value that explains a status the person cannot fix themselves. */
@@ -87,9 +89,11 @@ export function tileStatusHint(t: TileValue): string {
       return "You have no legal entity assigned, so no figures are shown.";
     case "NOT_MODELLED":
       return "This metric is governed but the analytics engine does not calculate it yet.";
+    case "MIXED_CURRENCY":
+      return "Your data scope holds more than one currency, and amounts are never added across currencies. Use the explorer, grouped by currency.";
     case "UNAVAILABLE":
       return "The analytics engine did not answer. The tile refreshes on its own.";
     default:
-      return t.unit === "RATIO" ? "Share of the period" : "Reporting currency";
+      return t.unit === "RATIO" ? "Share of the period" : t.currency ? "Ledger currency" : "No amounts in the period";
   }
 }

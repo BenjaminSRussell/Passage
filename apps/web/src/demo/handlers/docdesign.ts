@@ -20,10 +20,10 @@ const templates: DocumentTemplate[] = [
 ];
 
 const blocks: TextBlock[] = [
-  { code: "PAYMENT-TERMS", language: "en", body: "Payment is due within {{days}} days of the invoice date.", placeholders: ["days"], version: 2 },
-  { code: "PAYMENT-TERMS", language: "de", body: "Zahlbar innerhalb von {{days}} Tagen nach Rechnungsdatum.", placeholders: ["days"], version: 1 },
+  { code: "PAYMENT-TERMS", language: "en", body: "Payment is due within 30 days of the invoice date.", placeholders: [], version: 2 },
+  { code: "PAYMENT-TERMS", language: "de", body: "Zahlbar innerhalb von 30 Tagen nach Rechnungsdatum.", placeholders: [], version: 1 },
   { code: "PO-CONDITIONS", language: "en", body: "Goods are accepted subject to our general conditions of purchase.", placeholders: [], version: 1 },
-  { code: "STATEMENT-COVER", language: "en", body: "Dear {{counterpartyName}}, this statement lists the open items on your account up to {{statementDate}}.", placeholders: ["counterpartyName", "statementDate"], version: 1 },
+  { code: "STATEMENT-COVER", language: "en", body: "Dear {{counterpartyName}}, this statement lists the open items on your account up to the statement date shown above.", placeholders: ["counterpartyName"], version: 1 },
   { code: "BALANCE-CONFIRMATION", language: "en", body: "As of {{balanceDate}} our records show a balance of {{amount}} on your account. If this differs from yours, tell us within 14 days.", placeholders: ["amount", "balanceDate"], version: 1 },
 ];
 

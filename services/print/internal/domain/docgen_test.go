@@ -119,10 +119,15 @@ func balanceConfirmation() DocumentRequest {
 }
 
 func TestRenderDocument_CorrespondenceMatchesGolden(t *testing.T) {
-	templated := sampleDocument(DocCustomerInvoice)
-	templated.Title = "Tax invoice"
-	templated.FooterText = "Cedar Ridge Pumps, Inc. - Registered in Ohio"
-	templated.Notes = "Payment is due within 30 days of the invoice date."
+	// The templated invoice goes through Compose, so the golden pins the whole docgen path.
+	invoice := sampleDocument(DocCustomerInvoice)
+	invoice.Notes = ""
+	templated, err := Compose(invoice, &DocumentTemplate{Code: "INV-STD", DocumentType: DocCustomerInvoice, Config: TemplateConfig{
+		Title: "Tax invoice", FooterText: "Cedar Ridge Pumps, Inc. - Registered in Ohio", NoteBlocks: []string{"TERMS"},
+	}}, ComposeInput{}, memBlocks(TextBlock{Code: "TERMS", Language: "en", Body: "Payment is due within 30 days of the invoice date."}))
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := map[string]DocumentRequest{
 		"statement-of-account.pdf":  statementLetter(),
 		"balance-confirmation.pdf":  balanceConfirmation(),
@@ -188,9 +193,14 @@ func TestResolveOutputs_MostSpecificScopePerCopyKindAndChannel(t *testing.T) {
 		}
 		return strings.Join(s, ",")
 	}
-	// Entity and account: the printer rule of that pair wins over the entity's and the default; the account's e-mail is its own channel.
-	if got := ids(OutputDocument{Type: DocCustomerInvoice, LegalEntityID: "le-1", AccountID: "cust-1"}); got != "5,3,2" {
+	// Entity and account: the rules of that pair replace every other original destination (the account's e-mail
+	// and the entity's printer as well as the default's); the copy has no narrower rule and stays the default's.
+	if got := ids(OutputDocument{Type: DocCustomerInvoice, LegalEntityID: "le-1", AccountID: "cust-1"}); got != "5,2" {
 		t.Errorf("entity+account = %s", got)
+	}
+	// An account of another entity: the account's own original replaces the default printer original.
+	if got := ids(OutputDocument{Type: DocCustomerInvoice, LegalEntityID: "le-3", AccountID: "cust-1"}); got != "3,2" {
+		t.Errorf("account plus default = %s", got)
 	}
 	if got := ids(OutputDocument{Type: DocCustomerInvoice, LegalEntityID: "le-1", AccountID: "cust-9"}); got != "4,2" {
 		t.Errorf("entity only = %s", got)
@@ -215,6 +225,8 @@ func TestOutputRuleValidation(t *testing.T) {
 		}
 	}
 	bad := []OutputRule{
+		{DocumentType: DocCustomerInvoice, AccountID: "cust-1", CopyKind: CopyCopy, Channel: ChannelArchive, Copies: 1, Sequence: 1},
+		{DocumentType: DocCustomerInvoice, LegalEntityID: "x", CopyKind: CopyCopy, Channel: ChannelArchive, Copies: 1, Sequence: 1},
 		{DocumentType: "INVOICE", CopyKind: CopyOriginal, Channel: ChannelArchive, Copies: 1, Sequence: 1},
 		{DocumentType: DocCustomerInvoice, CopyKind: "DUPLICATE", Channel: ChannelArchive, Copies: 1, Sequence: 1},
 		{DocumentType: DocCustomerInvoice, CopyKind: CopyCopy, Channel: ChannelEmail, Destination: "a@b.example, c@d.example", Copies: 1, Sequence: 1},
@@ -226,5 +238,23 @@ func TestOutputRuleValidation(t *testing.T) {
 		if f := r.Validate(); len(f) == 0 {
 			t.Errorf("%+v was accepted", r)
 		}
+	}
+}
+
+func TestFillText_BlankValuesAreMissingAndBuiltinsCannotBeOverridden(t *testing.T) {
+	if _, err := FillText("X", "Due {{dueDate}}.", map[string]string{"dueDate": "  \t"}); err == nil {
+		t.Fatal("a blank value was printed")
+	}
+	tpl := &DocumentTemplate{Code: "T", DocumentType: DocCustomerInvoice, Config: TemplateConfig{NoteBlocks: []string{"N"}}}
+	req := DocumentRequest{DocumentType: DocCustomerInvoice, Number: "INV-1", LegalEntity: DocParty{Name: "Cedar Ridge Pumps"}, Columns: []DocColumn{{Header: "Item"}}}
+	blocks := memBlocks(TextBlock{Code: "N", Language: "en", Body: "{{documentNumber}} by {{legalEntityName}} for {{counterpartyName}}"})
+	// No counterparty: the placeholder is missing even if the caller sends a value for it.
+	if _, err := Compose(req, tpl, ComposeInput{Values: map[string]string{"counterpartyName": "Someone Else"}}, blocks); err == nil {
+		t.Fatal("the caller supplied a built-in value")
+	}
+	req.Counterparty = &DocParty{Name: "Bluewater"}
+	got, err := Compose(req, tpl, ComposeInput{Values: map[string]string{"documentNumber": "FAKE", "legalEntityName": "Fake Inc", "counterpartyName": "Fake"}}, blocks)
+	if err != nil || got.Notes != "INV-1 by Cedar Ridge Pumps for Bluewater" {
+		t.Fatalf("notes = %q, %v", got.Notes, err)
 	}
 }

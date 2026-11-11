@@ -32,12 +32,12 @@ func TestPeriodRange(t *testing.T) {
 
 func TestPlan_ToCubeQueryQualifiesMembersAndKeepsTheScope(t *testing.T) {
 	from, to := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
-	plan, err := BuildPlan(Query{Measures: []string{"revenue", "cogs"}, Dimensions: []string{"fiscal_period"}, From: from, To: to},
+	plan, err := BuildPlan(Query{Measures: []string{"revenue", "cogs"}, Dimensions: []string{"fiscal_period", "currency"}, From: from, To: to},
 		GovernedMetrics(), Scope{LegalEntityIDs: []string{"le-2", "le-1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := plan.ToCubeQuery()
+	q, err := plan.ToCubeQuery("t-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,22 +45,39 @@ func TestPlan_ToCubeQueryQualifiesMembersAndKeepsTheScope(t *testing.T) {
 		q.TimeDimensions[0].Dimension != "fin_journal_line.posting_date" || q.TimeDimensions[0].DateRange[1] != "2026-10-31" {
 		t.Fatalf("query = %+v", q)
 	}
-	if len(q.Filters) != 1 || q.Filters[0].Member != "fin_journal_line.legal_entity_id" || q.Filters[0].Values[0] != "le-1" {
-		t.Fatalf("scope filter = %+v", q.Filters)
+	if len(q.Filters) != 2 || q.Filters[0].Member != "fin_journal_line.legal_entity_id" || q.Filters[0].Values[0] != "le-1" ||
+		q.Filters[1].Member != "fin_journal_line.tenant_id" || q.Filters[1].Values[0] != "t-1" {
+		t.Fatalf("filters = %+v", q.Filters)
 	}
 }
 
 func TestPlan_ToCubeQueryRefusesNoScopeAndUnmodelledMetrics(t *testing.T) {
 	from, to := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
 	none, _ := BuildPlan(Query{Measures: []string{"revenue"}, From: from, To: to}, GovernedMetrics(), Scope{})
-	if _, err := none.ToCubeQuery(); err == nil || err.Code != CodeNoScope {
+	if _, err := none.ToCubeQuery("t-1"); err == nil || err.Code != CodeNoScope {
 		t.Fatalf("no scope: %v", err)
 	}
 	dso, _ := BuildPlan(Query{Measures: []string{"dso_days"}, From: from, To: to}, GovernedMetrics(), Scope{Unrestricted: true})
-	if _, err := dso.ToCubeQuery(); err == nil || err.Fields["measures"] == "" {
+	if _, err := dso.ToCubeQuery("t-1"); err == nil || err.Fields["measures"] == "" {
 		t.Fatalf("dso_days: %v", err)
 	}
 	if got := ShortMember("fin_journal_line.revenue"); got != "revenue" {
 		t.Errorf("ShortMember = %s", got)
+	}
+}
+
+func TestPlan_ToCubeQueryAlwaysFiltersTheTenantAndRequiresCurrency(t *testing.T) {
+	from, to := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
+	all, _ := BuildPlan(Query{Measures: []string{"revenue"}, Dimensions: []string{"currency"}, From: from, To: to}, GovernedMetrics(), Scope{Unrestricted: true})
+	q, err := all.ToCubeQuery("t-9")
+	if err != nil || len(q.Filters) != 1 || q.Filters[0].Member != "fin_journal_line.tenant_id" || q.Filters[0].Values[0] != "t-9" {
+		t.Fatalf("unrestricted: %+v %v", q.Filters, err)
+	}
+	if _, err := all.ToCubeQuery(""); err == nil {
+		t.Error("a query without a tenant was built")
+	}
+	bare, _ := BuildPlan(Query{Measures: []string{"revenue"}, From: from, To: to}, GovernedMetrics(), Scope{Unrestricted: true})
+	if _, err := bare.ToCubeQuery("t-9"); err == nil || err.Fields["dimensions"] == "" {
+		t.Errorf("a monetary query without the currency dimension: %v", err)
 	}
 }

@@ -22,6 +22,19 @@ const (
 	defaultLanguage  = "en"
 )
 
+// BuiltinPlaceholders are the placeholders every document can fill without the caller's
+// values. A default template, which applies to every render of its type, may only use these.
+var BuiltinPlaceholders = []string{"documentNumber", "legalEntityName", "counterpartyName"}
+
+func isBuiltin(name string) bool {
+	for _, b := range BuiltinPlaceholders {
+		if b == name {
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	blockCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_-]{1,39}$`)
 	languagePattern  = regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
@@ -141,12 +154,13 @@ func Placeholders(body string) []string {
 	return out
 }
 
-// FillText replaces every placeholder with its value. A placeholder without a value is an
-// error naming all of them: a letter must never print "{{amountDue}}".
+// FillText replaces every placeholder with its value. A placeholder without a value, or
+// with a blank one, is an error naming all of them: a letter must never print "{{amountDue}}"
+// or an empty gap.
 func FillText(code, body string, values map[string]string) (string, error) {
 	var missing []string
 	for _, p := range Placeholders(body) {
-		if _, ok := values[p]; !ok {
+		if v, ok := values[p]; !ok || strings.TrimSpace(v) == "" {
 			missing = append(missing, p)
 		}
 	}
@@ -188,12 +202,16 @@ type ComposeInput struct {
 // Compose applies a template (which may be nil) and text blocks to a document request.
 // Request fields win over the template: a Title, FooterText or Body the caller sent stays.
 func Compose(req DocumentRequest, tpl *DocumentTemplate, in ComposeInput, blocks BlockSource) (DocumentRequest, error) {
-	values := map[string]string{"documentNumber": req.Number, "legalEntityName": req.LegalEntity.Name}
-	if req.Counterparty != nil {
-		values["counterpartyName"] = req.Counterparty.Name
-	}
+	// The caller's values come first; the built-ins always win, so a request cannot make
+	// a letter name another entity or number than the document it is printed on.
+	values := map[string]string{}
 	for k, v := range in.Values {
 		values[k] = v
+	}
+	values["documentNumber"], values["legalEntityName"] = req.Number, req.LegalEntity.Name
+	delete(values, "counterpartyName")
+	if req.Counterparty != nil {
+		values["counterpartyName"] = req.Counterparty.Name
 	}
 	resolve := func(code string) (string, error) {
 		versions, err := blocks(code)
@@ -277,4 +295,85 @@ func Compose(req DocumentRequest, tpl *DocumentTemplate, in ComposeInput, blocks
 		req.Notes += text
 	}
 	return req, nil
+}
+
+// CheckTemplateBlocks checks, when a template is saved, that rendering with it cannot fail
+// later for a reason the template itself causes: every text block it names exists with an
+// English version (the fallback), the form notes fit one document, and a default template,
+// which every render of its type uses, needs no placeholder beyond the built-in ones. It
+// returns field errors, or none.
+func CheckTemplateBlocks(t DocumentTemplate, versions BlockSource) (map[string]string, error) {
+	f := map[string]string{}
+	check := func(field, code string) (TextBlock, error) {
+		vs, err := versions(code)
+		if err != nil {
+			return TextBlock{}, err
+		}
+		if len(vs) == 0 {
+			f[field] = "text block " + code + " does not exist"
+			return TextBlock{}, nil
+		}
+		en, ok := PickBlock(vs, defaultLanguage)
+		if !ok || en.Language != defaultLanguage {
+			f[field] = "text block " + code + " has no English version to fall back on"
+			return TextBlock{}, nil
+		}
+		if t.Default {
+			for _, v := range vs {
+				for _, ph := range v.Placeholders {
+					if !isBuiltin(ph) {
+						f[field] = fmt.Sprintf("text block %s (%s) needs the value %s, which a default template cannot get; use only %s", code, v.Language, ph, strings.Join(BuiltinPlaceholders, ", "))
+						return TextBlock{}, nil
+					}
+				}
+			}
+		}
+		return en, nil
+	}
+	if t.Config.BodyBlock != "" {
+		en, err := check("config.bodyBlock", t.Config.BodyBlock)
+		if err != nil {
+			return nil, err
+		}
+		if len([]rune(en.Body)) > maxDocBody {
+			f["config.bodyBlock"] = fmt.Sprintf("text is longer than the %d characters a letter body holds", maxDocBody)
+		}
+	}
+	notes := 0
+	for _, code := range t.Config.NoteBlocks {
+		en, err := check("config.noteBlocks", code)
+		if err != nil {
+			return nil, err
+		}
+		notes += len([]rune(en.Body)) + 2
+	}
+	if notes > maxDocNotes {
+		f["config.noteBlocks"] = fmt.Sprintf("the form notes together are longer than the %d characters a document's notes hold", maxDocNotes)
+	}
+	return f, nil
+}
+
+// DefaultTemplateBlockProblem reports why body cannot be saved as a version of block code
+// when a default template uses the block: it would need a value no render supplies.
+func DefaultTemplateBlockProblem(templates []DocumentTemplate, code, body string) string {
+	for _, t := range templates {
+		if !t.Default || (t.Config.BodyBlock != code && !containsString(t.Config.NoteBlocks, code)) {
+			continue
+		}
+		for _, ph := range Placeholders(body) {
+			if !isBuiltin(ph) {
+				return fmt.Sprintf("is used by the default template %s, which cannot supply the value %s; use only %s", t.Code, ph, strings.Join(BuiltinPlaceholders, ", "))
+			}
+		}
+	}
+	return ""
+}
+
+func containsString(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

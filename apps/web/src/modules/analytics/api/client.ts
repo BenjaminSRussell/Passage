@@ -405,7 +405,7 @@ const dashboardSchema = z.object({
   updatedAt: z.string().optional(),
 });
 
-export const TILE_STATUSES = ["OK", "NO_SCOPE", "NOT_MODELLED", "UNAVAILABLE"] as const;
+export const TILE_STATUSES = ["OK", "NO_SCOPE", "NOT_MODELLED", "UNAVAILABLE", "MIXED_CURRENCY"] as const;
 
 const tileValueSchema = z.object({
   title: z.string(),
@@ -417,6 +417,7 @@ const tileValueSchema = z.object({
   status: z.enum(TILE_STATUSES),
   value: z.string().nullable(),
   unit: z.enum(["REPORTING_CURRENCY", "RATIO"]).optional(),
+  currency: z.string().optional(),
 });
 
 const dashboardValuesSchema = z.object({

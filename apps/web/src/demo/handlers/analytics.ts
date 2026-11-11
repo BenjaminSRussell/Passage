@@ -57,12 +57,12 @@ route("PUT", `${BASE}/dashboards/{id}`, ({ params, body }) => {
 });
 
 // Current tile values (46-3), in the demo's net revenue and shipment figures. A metric without a value says why.
-const TILE_VALUES: Record<string, { value: string | null; unit?: "REPORTING_CURRENCY" | "RATIO" }> = {
-  net_revenue: { value: "4182650.40" },
+const TILE_VALUES: Record<string, { value: string | null; unit?: "REPORTING_CURRENCY" | "RATIO"; currency?: string; mixed?: boolean }> = {
+  net_revenue: { value: "4182650.40", currency: "USD" },
   gross_margin_pct: { value: "0.3825", unit: "RATIO" },
-  cogs: { value: "2582800.15" },
+  cogs: { value: null, mixed: true }, // the group books in USD and EUR; the tile never adds them
   pump_units_shipped: { value: "1286" },
-  open_order_value: { value: "1934120.00" },
+  open_order_value: { value: "1934120.00", currency: "USD" },
   on_time_delivery_pct: { value: "0.947", unit: "RATIO" },
   machine_utilisation_pct: { value: "0.812", unit: "RATIO" },
   scrap_rate_pct: { value: "0.0213", unit: "RATIO" },
@@ -85,9 +85,10 @@ route("GET", `${BASE}/dashboards/{id}/values`, ({ params }) => {
         period: t.period,
         from: `${to.slice(0, 4)}-01-01`,
         to,
-        status: v ? "OK" : "NOT_MODELLED",
+        status: v?.mixed ? "MIXED_CURRENCY" : v ? "OK" : "NOT_MODELLED",
         value: v?.value ?? null,
-        ...(v?.unit ? { unit: v.unit } : {}),
+        ...(v?.unit ? { unit: v.unit } : v ? { unit: "REPORTING_CURRENCY" } : {}),
+        ...(v?.currency ? { currency: v.currency } : {}),
       };
     }),
   };

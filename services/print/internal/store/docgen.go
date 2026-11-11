@@ -28,7 +28,10 @@ type DocStore interface {
 	ListTextBlocks(ctx context.Context) ([]domain.TextBlock, error)
 	CreateOutputRule(ctx context.Context, r domain.OutputRule, idempotencyKey string) (domain.OutputRule, bool, error)
 	ListOutputRules(ctx context.Context) ([]domain.OutputRule, error)
-	DeleteOutputRule(ctx context.Context, id string) error
+	// DeleteOutputRule removes a rule. A rule with no legal entity is the tenant's own: it is
+	// deleted only when tenantWide is true (403 otherwise). A rule of a legal entity outside
+	// the caller's scope does not exist for them (404, by row-level security).
+	DeleteOutputRule(ctx context.Context, id string, tenantWide bool) error
 }
 
 var _ DocStore = (*Postgres)(nil)
@@ -183,7 +186,7 @@ func (s *Postgres) ListTextBlocks(ctx context.Context) ([]domain.TextBlock, erro
 	return s.queryBlocks(ctx, "")
 }
 
-const outputColumns = "id::text, document_type, coalesce(legal_entity_id, ''), coalesce(account_id, ''), copy_kind, channel, destination, copies, sequence"
+const outputColumns = "id::text, document_type, coalesce(legal_entity_id::text, ''), coalesce(account_id::text, ''), copy_kind, channel, destination, copies, sequence"
 
 func scanOutput(row pgx.Row) (domain.OutputRule, error) {
 	var r domain.OutputRule
@@ -200,7 +203,7 @@ func (s *Postgres) CreateOutputRule(ctx context.Context, in domain.OutputRule, i
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		out, err = scanOutput(tx.QueryRow(ctx, `insert into print_output_rule (tenant_id, id, document_type, legal_entity_id, account_id, copy_kind, channel, destination, copies, sequence, idempotency_key)
-			values ($1, $2, $3, nullif($4, ''), nullif($5, ''), $6, $7, $8, $9, $10, $11)
+			values ($1, $2, $3, nullif($4, '')::uuid, nullif($5, '')::uuid, $6, $7, $8, $9, $10, $11)
 			on conflict (tenant_id, idempotency_key) do nothing
 			returning `+outputColumns, p.TenantID, ids.New(), in.DocumentType, in.LegalEntityID, in.AccountID, in.CopyKind, in.Channel, in.Destination, in.Copies, in.Sequence, idempotencyKey))
 		if err == nil {
@@ -246,17 +249,21 @@ func (s *Postgres) ListOutputRules(ctx context.Context) ([]domain.OutputRule, er
 	return out, err
 }
 
-// DeleteOutputRule removes a rule.
-func (s *Postgres) DeleteOutputRule(ctx context.Context, id string) error {
+// DeleteOutputRule removes a rule; see DocStore.
+func (s *Postgres) DeleteOutputRule(ctx context.Context, id string, tenantWide bool) error {
 	p, _ := tenant.FromContext(ctx)
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `delete from print_output_rule where tenant_id = $1 and id = $2`, p.TenantID, id)
-		if err != nil {
+		var global bool
+		if err := tx.QueryRow(ctx, `select legal_entity_id is null from print_output_rule where tenant_id = $1 and id = $2`, p.TenantID, id).Scan(&global); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.NewProblem(http.StatusNotFound, domain.CodeOutputRuleNotFound, "output rule not found")
+			}
 			return err
 		}
-		if tag.RowsAffected() == 0 {
-			return httpx.NewProblem(http.StatusNotFound, domain.CodeOutputRuleNotFound, "output rule not found")
+		if global && !tenantWide {
+			return httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "only a tenant administrator can change a rule that applies to every legal entity")
 		}
-		return nil
+		_, err := tx.Exec(ctx, `delete from print_output_rule where tenant_id = $1 and id = $2`, p.TenantID, id)
+		return err
 	})
 }

@@ -99,19 +99,24 @@ from this pod; nothing connects inbound to the cluster.
     document type a tenant sets the title, a footer line, renamed columns and hidden columns (by the header the caller
     sends, with their cells), the text block that is the letter body and text blocks appended to the notes (form notes).
     Each save raises the version; one template per type can be the default and is used when `documentType` has no
-    `templateCode`. A request's own `title`, `footerText` and `body` win over the template.
+    `templateCode`. A template is checked when it is saved: its text blocks must exist with an English version, the form
+    notes must fit one document, and a default template (used by every render of its type, by callers that send no
+    `values`) may only use the built-in placeholders; a text block of a default template cannot grow another one.
+    A request's own `title`, `footerText` and `body` win over the template.
   - **Text blocks** (`PUT /print/v1/text-blocks/{code}/{language}`, `GET /print/v1/text-blocks`): wording with
     `{{placeholders}}`, one version per language tag (`en`, `de-CH`). A render picks the requested language, then
     its base language, then English. `documentNumber`, `legalEntityName` and `counterpartyName` are filled in; the
-    request's `values` give the rest, and a placeholder without a value is refused (PRN-0014) rather than printed.
+    request's `values` give the rest (they cannot override the built-ins), and a placeholder without a value, or with a blank one, is refused (PRN-0014) rather than printed.
   - **Correspondence**: `documentType` may be `PERIODIC_STATEMENT`, `PAYMENT_NOTICE` or `BALANCE_CONFIRMATION`: a letter
     with a required `body` (or a `bodyBlock` text block) printed after the parties, and an optional table and totals.
     `render` takes `templateCode`, `language`, `bodyBlock` and `values` besides the document data.
   - **Output rules** (`POST/GET /print/v1/output-rules`, `DELETE /print/v1/output-rules/{id}`, print.admin to change):
     a rule sends the ORIGINAL or a COPY of a document type to a `PRINTER` queue (1 to 9 copies), an `EMAIL` address, the
-    `EINVOICE` network, the `ARCHIVE` or the `PORTAL`, optionally for one legal entity and/or account.
-    `GET /print/v1/output-plan?documentType=&legalEntityId=&accountId=` returns, for each copy kind and channel, the
-    rules of the most specific scope that matches (entity and account, then account, then entity, then the default).
+    `EINVOICE` network, the `ARCHIVE` or the `PORTAL`, optionally for one legal entity and/or account (UUIDs). A rule of a legal entity needs that entity in the caller's scope
+    (restrictive row-level security policy, migration 0007); a rule for every entity needs a tenant administrator.
+    `GET /print/v1/output-plan?documentType=&legalEntityId=&accountId=` returns, for each copy kind, every rule of the
+    most specific scope that matches (entity and account, then account, then entity, then the default), so an
+    account's own original replaces the default original.
     The service only answers where a document goes; sending it there is the caller's job (see NOT-IMPLEMENTED.md).
 - **Queue management** (print.admin): `PATCH /print/v1/printers/{id}` edits a printer or moves it to
   another queue or failover rank (PRN-0006 when the rank is held; the code and device type never

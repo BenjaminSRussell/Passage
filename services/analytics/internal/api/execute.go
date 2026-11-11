@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -62,7 +63,7 @@ func (a *API) execute(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, ExecuteResponse{Plan: plan, Rows: []map[string]any{}})
 		return
 	}
-	cq, qerr := plan.ToCubeQuery()
+	cq, qerr := plan.ToCubeQuery(p.TenantID)
 	if qerr != nil {
 		httpx.Fail(w, r, problemOf(qerr))
 		return
@@ -117,63 +118,104 @@ func (a *API) dashboardValues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := a.now()
+	// One deadline for the whole dashboard: a slow Cube makes tiles UNAVAILABLE, not the page hang.
+	ctx, cancel := context.WithTimeout(r.Context(), valuesDeadline)
+	defer cancel()
 	httpx.JSON(w, http.StatusOK, DashboardValuesResponse{
 		DashboardID: d.ID, Title: d.Title, RefreshSeconds: d.RefreshSeconds, ComputedAt: now.UTC(),
-		Tiles: a.tileValues(r.Context(), p, d, now),
+		Tiles: a.tileValues(ctx, p, d, now),
 	})
 }
 
+const (
+	valuesDeadline  = 10 * time.Second
+	tileConcurrency = 4
+)
+
 // tileValues computes each tile of d for the caller: its metric over its period, in the
-// caller's scope.
+// caller's scope, at most tileConcurrency tiles at a time. The order of d.Tiles is kept.
 func (a *API) tileValues(ctx context.Context, p tenant.Principal, d domain.Dashboard, now time.Time) []domain.TileValue {
 	scope := domain.ScopeFromPrincipal(p)
-	out := make([]domain.TileValue, 0, len(d.Tiles))
-	for _, t := range d.Tiles {
-		tv := domain.TileValue{Title: t.Title, Metric: t.Metric, Period: t.Period, Status: domain.TileUnavail}
-		m, ok := domain.CatalogMetric(a.catalog, t.Metric)
-		if !ok {
-			out = append(out, tv)
-			continue
-		}
-		tv.MetricName = m.Name
-		tv.Unit = "REPORTING_CURRENCY"
-		if t.Metric == "gross_margin_pct" {
-			tv.Unit = "RATIO"
-		}
-		from, to, err := domain.PeriodRange(t.Period, now)
-		if err != nil {
-			out = append(out, tv)
-			continue
-		}
-		tv.From, tv.To = from, to
-		if !domain.CubeServes(t.Metric) {
-			tv.Status = domain.TileNotModeled
-			out = append(out, tv)
-			continue
-		}
-		fromT, _ := time.Parse(time.DateOnly, from)
-		toT, _ := time.Parse(time.DateOnly, to)
-		plan, qerr := domain.BuildPlan(domain.Query{Measures: []string{t.Metric}, From: fromT, To: toT}, a.catalog, scope)
-		switch {
-		case qerr != nil:
-		case plan.Reason == domain.ReasonNoScope:
-			tv.Status = domain.TileNoScope
-		case a.exec == nil:
-		default:
-			cq, qerr := plan.ToCubeQuery()
-			if qerr != nil {
-				break
-			}
-			rows, err := a.exec.Load(ctx, p.TenantID, scope, cq)
-			if err != nil || len(rows) > 1 { // a tile is one number
-				break
-			}
-			tv.Status = domain.TileOK
-			if len(rows) == 1 {
-				tv.Value = cube.Text(rows[0][cq.Measures[0]])
-			}
-		}
-		out = append(out, tv)
+	out := make([]domain.TileValue, len(d.Tiles))
+	sem := make(chan struct{}, tileConcurrency)
+	var wg sync.WaitGroup
+	for i, t := range d.Tiles {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			out[i] = a.tileValue(ctx, p, scope, t, now)
+		}()
 	}
+	wg.Wait()
 	return out
+}
+
+// tileValue computes one tile. The plan groups by currency, because amounts are in each
+// ledger's own currency: one currency gives the value with its code, several give
+// MIXED_CURRENCY and no number rather than a sum of unlike units.
+func (a *API) tileValue(ctx context.Context, p tenant.Principal, scope domain.Scope, t domain.Tile, now time.Time) domain.TileValue {
+	tv := domain.TileValue{Title: t.Title, Metric: t.Metric, Period: t.Period, Status: domain.TileUnavail}
+	m, ok := domain.CatalogMetric(a.catalog, t.Metric)
+	if !ok {
+		return tv
+	}
+	tv.MetricName = m.Name
+	tv.Unit = "REPORTING_CURRENCY"
+	if t.Metric == "gross_margin_pct" {
+		tv.Unit = "RATIO"
+	}
+	from, to, err := domain.PeriodRange(t.Period, now)
+	if err != nil {
+		return tv
+	}
+	tv.From, tv.To = from, to
+	if !domain.CubeServes(t.Metric) {
+		tv.Status = domain.TileNotModeled
+		return tv
+	}
+	fromT, _ := time.Parse(time.DateOnly, from)
+	toT, _ := time.Parse(time.DateOnly, to)
+	plan, qerr := domain.BuildPlan(domain.Query{Measures: []string{t.Metric}, Dimensions: []string{"currency"}, From: fromT, To: toT}, a.catalog, scope)
+	if qerr != nil || a.exec == nil {
+		return tv
+	}
+	if plan.Reason == domain.ReasonNoScope {
+		tv.Status = domain.TileNoScope
+		return tv
+	}
+	cq, qerr := plan.ToCubeQuery(p.TenantID)
+	if qerr != nil {
+		return tv
+	}
+	rows, err := a.exec.Load(ctx, p.TenantID, scope, cq)
+	if err != nil {
+		return tv
+	}
+	measure, dimension := cq.Measures[0], plan.Model+".currency"
+	var value *string
+	currencies := map[string]bool{}
+	for _, row := range rows {
+		v := cube.Text(row[measure])
+		if v == nil {
+			continue // a currency with no amounts is not a currency of this figure
+		}
+		cur, _ := row[dimension].(string)
+		currencies[cur] = true
+		value, tv.Currency = v, cur
+	}
+	switch len(currencies) {
+	case 0:
+		tv.Currency = ""
+		tv.Status = domain.TileOK
+	case 1:
+		tv.Status, tv.Value = domain.TileOK, value
+		if tv.Unit == "RATIO" {
+			tv.Currency = ""
+		}
+	default:
+		tv.Status, tv.Currency = domain.TileMixedCurrency, ""
+	}
+	return tv
 }

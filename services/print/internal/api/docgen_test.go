@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/print/internal/api"
 	"github.com/BenjaminSRussell/passage/services/print/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/print/internal/store"
@@ -125,11 +127,14 @@ func (m *memDocs) ListOutputRules(context.Context) ([]domain.OutputRule, error) 
 	return append([]domain.OutputRule{}, m.rules...), nil
 }
 
-func (m *memDocs) DeleteOutputRule(_ context.Context, id string) error {
+func (m *memDocs) DeleteOutputRule(_ context.Context, id string, tenantWide bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, r := range m.rules {
 		if r.ID == id {
+			if r.LegalEntityID == "" && !tenantWide {
+				return httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "tenant administrators only")
+			}
 			m.rules = append(m.rules[:i], m.rules[i+1:]...)
 			return nil
 		}
@@ -167,14 +172,14 @@ func TestTemplates_PutVersionDefaultAndDuties(t *testing.T) {
 	}
 }
 
-func TestRenderDocument_UsesDefaultTemplateAndTextBlocksInTheRequestedLanguage(t *testing.T) {
+func TestRenderDocument_UsesNamedTemplateAndTextBlocksInTheRequestedLanguage(t *testing.T) {
 	h := docRouter()
 	call(t, h, http.MethodPut, "/print/v1/text-blocks/PAY-TERMS/en", `{"body":"Pay within {{days}} days."}`, "print.admin", "")
 	call(t, h, http.MethodPut, "/print/v1/text-blocks/PAY-TERMS/de", `{"body":"Zahlbar innerhalb von {{days}} Tagen."}`, "print.admin", "")
 	call(t, h, http.MethodPut, "/print/v1/document-templates/INV-STD",
-		`{"name":"Standard","documentType":"CUSTOMER_INVOICE","default":true,"config":{"title":"Tax invoice","noteBlocks":["PAY-TERMS"]}}`, "print.admin", "")
+		`{"name":"Standard","documentType":"CUSTOMER_INVOICE","default":false,"config":{"title":"Tax invoice","noteBlocks":["PAY-TERMS"]}}`, "print.admin", "")
 	doc := func(extra string) string {
-		return `{"documentType":"CUSTOMER_INVOICE","number":"INV-9","legalEntity":{"name":"Cedar Ridge Pumps"},"columns":[{"header":"Item"}],"lines":[["Casting"]]` + extra + `}`
+		return `{"documentType":"CUSTOMER_INVOICE","number":"INV-9","legalEntity":{"name":"Cedar Ridge Pumps"},"columns":[{"header":"Item"}],"lines":[["Casting"]],"templateCode":"INV-STD"` + extra + `}`
 	}
 	de := call(t, h, http.MethodPost, "/print/v1/documents:render", doc(`,"language":"de","values":{"days":"30"}`), "print.document.render", "")
 	if de.Code != http.StatusOK || !strings.HasPrefix(de.Body.String(), "%PDF-") {
@@ -189,7 +194,7 @@ func TestRenderDocument_UsesDefaultTemplateAndTextBlocksInTheRequestedLanguage(t
 	if miss.Code != http.StatusUnprocessableEntity || !strings.Contains(miss.Body.String(), "PRN-0014") || !strings.Contains(miss.Body.String(), "days") {
 		t.Fatalf("missing value: %d %s", miss.Code, miss.Body)
 	}
-	if rec := call(t, h, http.MethodPost, "/print/v1/documents:render", doc(`,"templateCode":"GONE-1"`), "print.document.render", ""); rec.Code != http.StatusNotFound {
+	if rec := call(t, h, http.MethodPost, "/print/v1/documents:render", strings.Replace(doc(``), "INV-STD", "GONE-1", 1), "print.document.render", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown template: %d", rec.Code)
 	}
 }
@@ -208,20 +213,49 @@ func TestRenderDocument_LetterFromABodyBlock(t *testing.T) {
 	}
 }
 
-func TestOutputRules_PlanFollowsTheMostSpecificScope(t *testing.T) {
+const (
+	leOne   = "11111111-0000-4000-8000-0000000000e1"
+	leTwo   = "11111111-0000-4000-8000-0000000000e2"
+	custOne = "22222222-0000-4000-8000-000000000001"
+)
+
+// callAs is call with a legal-entity claim (empty for none).
+func callAs(t *testing.T, h http.Handler, method, path, body, duties, key, le string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-User", "admin-1")
+	req.Header.Set("X-Passage-Duties", duties)
+	if le != "" {
+		req.Header.Set("X-Passage-Legal-Entity", le)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+const tenantAdmin = "print.admin,tenant.administer"
+
+func TestOutputRules_PlanFollowsTheMostSpecificScopePerCopyKind(t *testing.T) {
 	h := docRouter()
 	post := func(key, body string) {
 		t.Helper()
-		if rec := call(t, h, http.MethodPost, "/print/v1/output-rules", body, "print.admin", key); rec.Code != http.StatusCreated {
+		if rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", body, tenantAdmin, key, ""); rec.Code != http.StatusCreated {
 			t.Fatalf("%s: %d %s", key, rec.Code, rec.Body)
 		}
 	}
 	post("o1", `{"documentType":"CUSTOMER_INVOICE","copyKind":"ORIGINAL","channel":"PRINTER","destination":"OFFICE","sequence":1}`)
 	post("o2", `{"documentType":"CUSTOMER_INVOICE","copyKind":"COPY","channel":"ARCHIVE","sequence":1}`)
-	post("o3", `{"documentType":"CUSTOMER_INVOICE","accountId":"cust-1","copyKind":"ORIGINAL","channel":"EMAIL","destination":"ap@contoso.example","sequence":1}`)
-	post("o4", `{"documentType":"CUSTOMER_INVOICE","accountId":"cust-1","copyKind":"ORIGINAL","channel":"PRINTER","destination":"VIP","copies":2,"sequence":1}`)
-	if rec := call(t, h, http.MethodPost, "/print/v1/output-rules", `{"documentType":"CUSTOMER_INVOICE","copyKind":"ORIGINAL","channel":"EMAIL","destination":"nope","sequence":1}`, "print.admin", "o5"); rec.Code != http.StatusBadRequest {
+	post("o3", `{"documentType":"CUSTOMER_INVOICE","accountId":"`+strings.ToUpper(custOne)+`","copyKind":"ORIGINAL","channel":"EMAIL","destination":"ap@contoso.example","sequence":1}`)
+	if rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", `{"documentType":"CUSTOMER_INVOICE","copyKind":"ORIGINAL","channel":"EMAIL","destination":"nope","sequence":1}`, tenantAdmin, "o5", ""); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad address: %d", rec.Code)
+	}
+	if rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", `{"documentType":"CUSTOMER_INVOICE","accountId":"cust-1","copyKind":"COPY","channel":"ARCHIVE","sequence":1}`, tenantAdmin, "o5b", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("account that is not an id: %d", rec.Code)
 	}
 	if rec := call(t, h, http.MethodPost, "/print/v1/output-rules", `{}`, "print.job.submit", "o6"); rec.Code != http.StatusForbidden {
 		t.Fatalf("worker created a rule: %d", rec.Code)
@@ -241,7 +275,8 @@ func TestOutputRules_PlanFollowsTheMostSpecificScope(t *testing.T) {
 	if got := strings.Join(plan(""), "|"); got != "ORIGINAL PRINTER OFFICE|COPY ARCHIVE " {
 		t.Errorf("default plan = %s", got)
 	}
-	if got := strings.Join(plan("&accountId=cust-1"), "|"); got != "ORIGINAL PRINTER VIP|ORIGINAL EMAIL ap@contoso.example|COPY ARCHIVE " {
+	// The account's own original replaces the default printer original; the copy stays the default's.
+	if got := strings.Join(plan("&accountId="+strings.ToUpper(custOne)), "|"); got != "ORIGINAL EMAIL ap@contoso.example|COPY ARCHIVE " {
 		t.Errorf("account plan = %s", got)
 	}
 	if rec := call(t, h, http.MethodGet, "/print/v1/output-plan?documentType=INVOICE", "", "print.job.submit", ""); rec.Code != http.StatusBadRequest {
@@ -250,13 +285,46 @@ func TestOutputRules_PlanFollowsTheMostSpecificScope(t *testing.T) {
 	listed := call(t, h, http.MethodGet, "/print/v1/output-rules", "", "print.job.submit", "")
 	var l struct{ Items []domain.OutputRule }
 	_ = json.Unmarshal(listed.Body.Bytes(), &l)
-	if len(l.Items) != 4 {
-		t.Fatalf("listed %d rules", len(l.Items))
+	if len(l.Items) != 3 || l.Items[2].AccountID != custOne {
+		t.Fatalf("listed %+v", l.Items)
 	}
-	if rec := call(t, h, http.MethodDelete, "/print/v1/output-rules/"+l.Items[0].ID, "", "print.admin", ""); rec.Code != http.StatusNoContent {
-		t.Fatalf("delete: %d", rec.Code)
+}
+
+func TestOutputRules_ScopeOfTheCaller(t *testing.T) {
+	h := docRouter()
+	rule := func(le string) string {
+		return `{"documentType":"PACKING_SLIP","legalEntityId":"` + le + `","copyKind":"ORIGINAL","channel":"ARCHIVE","sequence":1}`
 	}
-	if rec := call(t, h, http.MethodDelete, "/print/v1/output-rules/"+l.Items[0].ID, "", "print.admin", ""); rec.Code != http.StatusNotFound {
+	global := `{"documentType":"PACKING_SLIP","copyKind":"ORIGINAL","channel":"ARCHIVE","sequence":1}`
+	// An administrator of entity one may add rules for entity one only, and no rule for every entity.
+	if rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", rule(leOne), "print.admin", "s1", leOne); rec.Code != http.StatusCreated {
+		t.Fatalf("own entity: %d %s", rec.Code, rec.Body)
+	}
+	if rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", rule(leTwo), "print.admin", "s2", leOne); rec.Code != http.StatusForbidden {
+		t.Fatalf("other entity: %d", rec.Code)
+	}
+	if rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", global, "print.admin,tenant.administer", "s3", leOne); rec.Code != http.StatusForbidden {
+		t.Fatalf("global rule with an entity claim: %d", rec.Code)
+	}
+	if rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", global, "print.admin", "s4", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("global rule without tenant.administer: %d", rec.Code)
+	}
+	if rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", rule(leTwo), "print.admin,tenant.administer", "s5", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("entity rule by a caller with no entity scope: %d", rec.Code)
+	}
+	rec := callAs(t, h, http.MethodPost, "/print/v1/output-rules", global, tenantAdmin, "s6", "")
+	var made domain.OutputRule
+	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &made) != nil {
+		t.Fatalf("tenant-wide: %d %s", rec.Code, rec.Body)
+	}
+	// Deleting the global rule is tenant-wide authority only.
+	if rec := callAs(t, h, http.MethodDelete, "/print/v1/output-rules/"+made.ID, "", "print.admin", "", leOne); rec.Code != http.StatusForbidden {
+		t.Fatalf("entity admin deleted a global rule: %d", rec.Code)
+	}
+	if rec := callAs(t, h, http.MethodDelete, "/print/v1/output-rules/"+made.ID, "", tenantAdmin, "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("tenant admin delete: %d", rec.Code)
+	}
+	if rec := callAs(t, h, http.MethodDelete, "/print/v1/output-rules/"+made.ID, "", tenantAdmin, "", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("second delete: %d", rec.Code)
 	}
 }
@@ -269,5 +337,47 @@ func TestDocgenRoutes_Answer503WithoutAStore(t *testing.T) {
 	// Rendering without templates still works.
 	if rec := call(t, h, http.MethodPost, "/print/v1/documents:render", poDoc, "print.document.render", ""); rec.Code != http.StatusOK {
 		t.Fatalf("render without docgen store: %d", rec.Code)
+	}
+}
+
+func TestTemplates_SaveChecksItsTextBlocks(t *testing.T) {
+	h := docRouter()
+	save := func(code, cfg string, def bool) int {
+		body := fmt.Sprintf(`{"name":"T","documentType":"CUSTOMER_INVOICE","default":%v,"config":%s}`, def, cfg)
+		return call(t, h, http.MethodPut, "/print/v1/document-templates/"+code, body, "print.admin", "").Code
+	}
+	if got := save("INV-A", `{"noteBlocks":["TERMS"]}`, true); got != http.StatusBadRequest {
+		t.Fatalf("missing block: %d", got)
+	}
+	call(t, h, http.MethodPut, "/print/v1/text-blocks/TERMS/de", `{"body":"Nur deutsch."}`, "print.admin", "")
+	if got := save("INV-A", `{"noteBlocks":["TERMS"]}`, true); got != http.StatusBadRequest {
+		t.Fatalf("block without English: %d", got)
+	}
+	call(t, h, http.MethodPut, "/print/v1/text-blocks/TERMS/en", `{"body":"Pay within {{days}} days."}`, "print.admin", "")
+	rec := call(t, h, http.MethodPut, "/print/v1/document-templates/INV-A", `{"name":"T","documentType":"CUSTOMER_INVOICE","default":true,"config":{"noteBlocks":["TERMS"]}}`, "print.admin", "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "days") {
+		t.Fatalf("default template needing a value: %d %s", rec.Code, rec.Body)
+	}
+	// Not a default: it is only used when named, and the caller gives the values.
+	if got := save("INV-A", `{"noteBlocks":["TERMS"]}`, false); got != http.StatusOK {
+		t.Fatalf("non-default template: %d", got)
+	}
+	call(t, h, http.MethodPut, "/print/v1/text-blocks/NAME-ONLY/en", `{"body":"Thank you, {{counterpartyName}}."}`, "print.admin", "")
+	if got := save("INV-B", `{"noteBlocks":["NAME-ONLY"]}`, true); got != http.StatusOK {
+		t.Fatalf("default with built-in placeholders: %d", got)
+	}
+	// An existing default template's block cannot grow a placeholder nobody supplies.
+	if rec := call(t, h, http.MethodPut, "/print/v1/text-blocks/NAME-ONLY/en", `{"body":"Due {{dueDate}}."}`, "print.admin", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("block of a default template given a new placeholder: %d %s", rec.Code, rec.Body)
+	}
+	// Form notes that cannot fit one document are refused.
+	call(t, h, http.MethodPut, "/print/v1/text-blocks/LONG/en", `{"body":"`+strings.Repeat("x", 1500)+`"}`, "print.admin", "")
+	if got := save("INV-C", `{"noteBlocks":["LONG","LONG"]}`, false); got != http.StatusBadRequest {
+		t.Fatalf("notes too long: %d", got)
+	}
+	// The default template then renders a plain invoice without any values.
+	doc := `{"documentType":"CUSTOMER_INVOICE","number":"INV-9","legalEntity":{"name":"Cedar Ridge Pumps"},"counterparty":{"name":"Bluewater"},"columns":[{"header":"Item"}],"lines":[["Casting"]]}`
+	if rec := call(t, h, http.MethodPost, "/print/v1/documents:render", doc, "print.document.render", ""); rec.Code != http.StatusOK {
+		t.Fatalf("render with the default template and no values: %d %s", rec.Code, rec.Body)
 	}
 }

@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS print_output_rule (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
   document_type text NOT NULL CHECK (document_type IN ('PURCHASE_ORDER', 'CUSTOMER_INVOICE', 'PACKING_SLIP', 'REMITTANCE_ADVICE', 'PERIODIC_STATEMENT', 'PAYMENT_NOTICE', 'BALANCE_CONFIRMATION')),
-  legal_entity_id text,
-  account_id text,
+  legal_entity_id uuid,
+  account_id uuid,
   copy_kind text NOT NULL CHECK (copy_kind IN ('ORIGINAL', 'COPY')),
   channel text NOT NULL CHECK (channel IN ('PRINTER', 'EMAIL', 'EINVOICE', 'ARCHIVE', 'PORTAL')),
   destination text NOT NULL DEFAULT '',
@@ -54,6 +54,12 @@ ALTER TABLE print_output_rule FORCE ROW LEVEL SECURITY;
 CREATE POLICY print_output_rule_tenant_access ON print_output_rule AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+-- A rule of one legal entity is visible and writable only within the caller's legal-entity scope;
+-- a rule with no legal entity applies to the whole tenant (the API lets only a tenant administrator write it).
+CREATE POLICY print_output_rule_legal_entity_scope ON print_output_rule AS RESTRICTIVE
+  USING (legal_entity_id IS NULL
+         OR current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 DO $$
 BEGIN

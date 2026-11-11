@@ -1,9 +1,11 @@
 package store_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/print/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/print/internal/store"
@@ -59,7 +61,7 @@ func TestDocgen_TemplatesBlocksAndOutputRulesUnderRLS(t *testing.T) {
 		t.Fatalf("versions: %+v %v", versions, err)
 	}
 
-	rule := domain.OutputRule{DocumentType: domain.DocCustomerInvoice, AccountID: "cust-1", CopyKind: domain.CopyOriginal, Channel: domain.ChannelEmail, Destination: "ap@contoso.example", Copies: 1, Sequence: 1}
+	rule := domain.OutputRule{DocumentType: domain.DocCustomerInvoice, AccountID: "22222222-0000-4000-8000-000000000001", CopyKind: domain.CopyOriginal, Channel: domain.ChannelEmail, Destination: "ap@contoso.example", Copies: 1, Sequence: 1}
 	created, inserted, err := s.CreateOutputRule(ctx, rule, "k-1")
 	if err != nil || !inserted || created.ID == "" {
 		t.Fatalf("create rule: %+v %v %v", created, inserted, err)
@@ -83,10 +85,57 @@ func TestDocgen_TemplatesBlocksAndOutputRulesUnderRLS(t *testing.T) {
 	if rs, _ := s.ListOutputRules(other2); len(rs) != 0 {
 		t.Fatalf("tenant 2 rules: %+v", rs)
 	}
-	if err := s.DeleteOutputRule(other2, created.ID); err == nil {
+	if err := s.DeleteOutputRule(other2, created.ID, true); err == nil {
 		t.Fatal("tenant 2 deleted tenant 1's rule")
 	}
-	if err := s.DeleteOutputRule(ctx, created.ID); err != nil {
+	if err := s.DeleteOutputRule(ctx, created.ID, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDocgen_OutputRulesFollowTheLegalEntityScope(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	base := tenantCtx(1)
+	if err := dbx.Migrate(base, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	const leOne, leTwo = "11111111-0000-4000-8000-0000000000e1", "11111111-0000-4000-8000-0000000000e2"
+	as := func(le string) context.Context {
+		p, _ := tenant.FromContext(base)
+		p.LegalEntityID = le
+		return tenant.With(base, p)
+	}
+	rule := func(le string) domain.OutputRule {
+		return domain.OutputRule{DocumentType: domain.DocPackingSlip, LegalEntityID: le, CopyKind: domain.CopyOriginal, Channel: domain.ChannelArchive, Copies: 1, Sequence: 1}
+	}
+	one, _, err := s.CreateOutputRule(as(leOne), rule(leOne), "k1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	global, _, err := s.CreateOutputRule(base, rule(""), "k2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Writing a rule for another entity is refused by row-level security, whatever the API did.
+	if _, _, err := s.CreateOutputRule(as(leTwo), rule(leOne), "k3"); err == nil {
+		t.Fatal("entity two created a rule for entity one")
+	}
+	// Entity two sees the tenant-wide rule but not entity one's, and cannot delete it.
+	got, err := s.ListOutputRules(as(leTwo))
+	if err != nil || len(got) != 1 || got[0].ID != global.ID {
+		t.Fatalf("entity two sees %+v %v", got, err)
+	}
+	if err := s.DeleteOutputRule(as(leTwo), one.ID, false); err == nil {
+		t.Fatal("entity two deleted entity one's rule")
+	}
+	if err := s.DeleteOutputRule(as(leOne), global.ID, false); err == nil {
+		t.Fatal("an entity administrator deleted the tenant-wide rule")
+	}
+	if err := s.DeleteOutputRule(as(leOne), one.ID, false); err != nil {
+		t.Fatalf("entity one deleting its own rule: %v", err)
+	}
+	if err := s.DeleteOutputRule(base, global.ID, true); err != nil {
 		t.Fatal(err)
 	}
 }

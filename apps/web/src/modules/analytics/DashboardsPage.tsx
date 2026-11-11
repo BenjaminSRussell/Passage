@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -28,6 +28,7 @@ import {
   putDashboard,
   TILE_PERIODS,
   type Dashboard,
+  type DashboardValues,
   type Metric,
   type Problem,
   type Tile,
@@ -327,6 +328,10 @@ export function DashboardDetailPage() {
   );
   // Tile values refresh on the dashboard's own interval (FR-46.8); a failed refresh keeps the last values.
   const values = useLoad((signal) => getDashboardValues(id, undefined, signal), `dashboard-values/${id}`);
+  // A refresh that fails keeps the last values on screen (useLoad drops its data on a failure).
+  const lastValues = useRef<DashboardValues | null>(null);
+  if (values.data) lastValues.current = values.data;
+  const shownValues = values.data ?? lastValues.current;
   const refreshMs = (state.data?.dashboard.refreshSeconds ?? 60) * 1000;
   const reloadValues = values.reload;
   useEffect(() => {
@@ -369,12 +374,20 @@ export function DashboardDetailPage() {
       {values.error ? (
         <Alert tone="warning" title="Could not load the tile values" live="status" action={<Button size="sm" onClick={values.reload}>Try again</Button>}>
           <ProblemMessage problem={values.error} />
+          {shownValues ? ` The values below are from ${dateTime(shownValues.computedAt)}.` : null}
         </Alert>
-      ) : null}
+      ) : (
+        <div className={styles.formActions}>
+          <Button size="sm" onClick={values.reload} loading={values.loading && shownValues !== null}>
+            Refresh values
+          </Button>
+          {shownValues ? <span className={styles.muted}>Values from {dateTime(shownValues.computedAt)}.</span> : null}
+        </div>
+      )}
       <CardGrid label="Tiles">
         {dashboard.tiles.map((t, i) => {
           const metric = metricOf(t.metric);
-          const tv = values.data?.tiles[i]?.metric === t.metric ? values.data.tiles[i] : undefined;
+          const tv = shownValues?.tiles[i]?.metric === t.metric ? shownValues.tiles[i] : undefined;
           return (
             <Card key={`${i}-${t.metric}`} title={t.title}>
               <p className={styles.tileValue} aria-live="off">
