@@ -53,6 +53,7 @@ var allowlist = map[string]string{
 	"edi.transport_work:" + problemNoTenantPol:                    "permanent: no passage_app grant; maintained by the SECURITY DEFINER partner_transport, transport_delivery and transport_mdn triggers and read only by edi_as2_endpoint() (endpoint id to tenant and partner for the unauthenticated AS2 listener) and edi_transport_due_tenants() (due tenants for the dispatcher, the MDN timeout sweep and the SFTP poller) (0006_partner_transport, 0007_as2_mdn_queue, #483)",
 	"identity.identity_tenants:" + problemExtraPolicy:             "permanent: SELECT-only operator policy gated on identity_operator, whose own policy is tenant-scoped; lets the provisioning operator list tenants",
 	"ledger.description_template:" + problemNullEntity:            "permanent: NULL legal_entity_id is a tenant-wide description template, not a missing scope",
+	"print.print_output_rule:" + problemNullEntity:                "permanent: NULL legal_entity_id is a tenant-wide output rule; only callers with tenant-wide authority may create or delete one (#622 review)",
 	"org.address_purpose:" + problemNullEntity:                    "permanent: NULL legal_entity_id is tenant-wide reference data",
 	"org.currency_rounding:" + problemNullEntity:                  "permanent: NULL legal_entity_id is tenant-wide reference data",
 	"org.org_unit_translation:" + problemNullEntity:               "permanent: NULL legal_entity_id is tenant-wide reference data",
