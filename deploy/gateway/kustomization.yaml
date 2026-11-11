@@ -14,3 +14,5 @@ resources:
   - as2-httproute.yaml
   - as2-clienttrafficpolicy.yaml
   - as2-backendtrafficpolicy.yaml
+  # Region health edge (PSG-50, OPS-1703): GET /healthz/region without a JWT, a Gateway of its own.
+  - region-gateway.yaml

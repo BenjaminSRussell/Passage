@@ -16,6 +16,9 @@ API_GATEWAY = "passage-api"
 AS2_GATEWAY = "passage-as2"
 AS2_ROUTE = "edi-as2"
 AS2_SERVICE = "edi-as2"
+# The region health edge (OPS-1703): GET /healthz/region without a JWT, its own Gateway with one route.
+REGION_GATEWAY = "passage-region"
+REGION_ROUTE = "ops-region-health"
 
 
 def render():
@@ -215,14 +218,15 @@ class AS2Edge(unittest.TestCase):
         (cls.listener,) = cls.gateway["spec"]["listeners"]
         cls.route = named(cls.docs, "HTTPRoute", AS2_ROUTE)
 
-    def test_only_two_gateways_and_every_route_on_exactly_one(self):
-        self.assertEqual({g["metadata"]["name"] for g in of_kind(self.docs, "Gateway")}, {API_GATEWAY, AS2_GATEWAY})
+    def test_only_three_gateways_and_every_route_on_exactly_one(self):
+        self.assertEqual({g["metadata"]["name"] for g in of_kind(self.docs, "Gateway")}, {API_GATEWAY, AS2_GATEWAY, REGION_GATEWAY})
         for route in of_kind(self.docs, "HTTPRoute"):
             name = route["metadata"]["name"]
             gateways = parent_gateways(route)
             self.assertEqual(len(route["spec"]["parentRefs"]), 1, name)
             # Only edi-as2 attaches to the AS2 edge, and it attaches nowhere else.
-            self.assertEqual(gateways, {AS2_GATEWAY} if name == AS2_ROUTE else {API_GATEWAY}, name)
+            expected = {AS2_ROUTE: AS2_GATEWAY, REGION_ROUTE: REGION_GATEWAY}.get(name, API_GATEWAY)
+            self.assertEqual(gateways, {expected}, name)
 
     def test_api_routes_still_require_a_jwt_and_the_as2_edge_never_does(self):
         (sp,) = of_kind(self.docs, "SecurityPolicy")
@@ -314,6 +318,56 @@ class AS2Edge(unittest.TestCase):
             "gateway.envoyproxy.io/owning-gateway-namespace": self.gateway["metadata"]["namespace"],
         })
         self.assertEqual(np["as2Gateway"]["namespaces"], ["envoy-gateway-system"])
+
+
+class RegionHealthEdge(unittest.TestCase):
+    """GET /healthz/region is reachable without a JWT on a Gateway of its own, and nothing else is exposed there."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.docs = render()
+        cls.gateway = named(cls.docs, "Gateway", REGION_GATEWAY)
+        (cls.listener,) = cls.gateway["spec"]["listeners"]
+        cls.route = named(cls.docs, "HTTPRoute", REGION_ROUTE)
+
+    def test_no_security_policy_reaches_the_region_edge(self):
+        for policy in of_kind(self.docs, "SecurityPolicy"):
+            self.assertFalse(target_names(policy) & {("Gateway", REGION_GATEWAY), ("HTTPRoute", REGION_ROUTE)})
+
+    def test_only_the_region_check_is_exposed_and_only_to_the_ops_service(self):
+        spec = self.route["spec"]
+        self.assertEqual(spec["parentRefs"], [{"name": REGION_GATEWAY, "sectionName": self.listener["name"]}])
+        (rule,) = spec["rules"]
+        (match,) = rule["matches"]
+        self.assertEqual(match["path"], {"type": "Exact", "value": "/healthz/region"})
+        self.assertEqual(match["method"], "GET")
+        self.assertEqual(rule["backendRefs"], [{"name": "ops", "port": 8080}])
+        # The public route is the one the service really serves without a token.
+        self.assertIn('r.Get("/healthz/region"', (DEPLOY.parent / "services/ops/internal/api/api.go").read_text())
+        # Nothing on the API gateway or the AS2 edge reaches the ops region check by its public path.
+        for route in api_routes(self.docs):
+            for rule in route["spec"]["rules"]:
+                for m in rule["matches"]:
+                    self.assertNotEqual(m["path"].get("value"), "/healthz/region")
+
+    def test_region_gateway_is_https_only_with_a_certificate_and_strips_identity_headers(self):
+        listener = self.listener
+        self.assertEqual((listener["protocol"], listener["port"], listener["tls"]["mode"]), ("HTTPS", 443, "Terminate"))
+        self.assertEqual(listener["allowedRoutes"]["kinds"], [{"kind": "HTTPRoute"}])
+        (ref,) = listener["tls"]["certificateRefs"]
+        cert = named(self.docs, "Certificate", ref["name"])
+        self.assertEqual(cert["spec"]["dnsNames"], [listener["hostname"]])
+        self.assertEqual(self.route["spec"]["hostnames"], [listener["hostname"]])
+        header_consts = set(re.findall(r'Header\w+\s*=\s*"(X-Passage-[A-Za-z-]+)"', TENANT_GO.read_text()))
+        ctp = named(self.docs, "ClientTrafficPolicy", "passage-region-client")
+        self.assertEqual(target_names(ctp), {("Gateway", REGION_GATEWAY)})
+        self.assertTrue(header_consts <= set(ctp["spec"]["headers"]["earlyRequestHeaders"]["remove"]))
+        self.assertIn(ctp["spec"]["tls"]["minVersion"], {"1.2", "1.3"})
+
+    def test_region_route_is_rate_limited_per_client(self):
+        btp = named(self.docs, "BackendTrafficPolicy", "passage-region-limits")
+        self.assertEqual(target_names(btp), {("HTTPRoute", REGION_ROUTE)})
+        self.assertEqual(btp["spec"]["rateLimit"]["type"], "Global")
 
 
 if __name__ == "__main__":

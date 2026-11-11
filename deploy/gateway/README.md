@@ -16,6 +16,10 @@ Each service has an `HTTPRoute` named after it. `/api/v1/<svc>` is rewritten to 
 
 The Gateway has two listeners. `https` (443, TLS terminate, Secret `passage-api-tls`, to be issued by cert-manager or supplied by the environment) is the listener for stage and prod. `http-dev` (80) is for dev only; remove it in any non-dev environment.
 
+## Region health edge (PSG-50, OPS-1703)
+
+DNS health checks read `GET /healthz/region` of each region without a Passage token, so it cannot sit behind the JWT SecurityPolicy that targets Gateway `passage-api`. It has a Gateway of its own, `passage-region`, like the AS2 edge: `region-gateway.yaml` holds the Gateway (one HTTPS listener `region-https`, hostname `region.dev.passage.dev`), its Certificate, HTTPRoute `ops-region-health` (the exact path `/healthz/region`, `GET`, to Service `ops` port 8080 and nothing else), a ClientTrafficPolicy that strips the identity headers and requires TLS 1.2, and a per-address rate limit. The answer names the region and its role (`200` while PRIMARY, `503` with `Retry-After: 30` otherwise). `test_gateway.py` (`RegionHealthEdge`) checks that no SecurityPolicy reaches it and nothing else is routed there. Per region, override the hostname in the environment's overlay (`region.<env>.passage.dev`).
+
 ## AS2 edge (#483)
 
 Trading partners post AS2 messages and asynchronous MDNs to the edi AS2 listener without a Passage token: edi authenticates each request by its AS2 signature against the partner certificate pinned on the transport (see `services/edi/README.md`, "AS2 listener security"). They come in through a second Gateway, `passage-as2`, so the JWT SecurityPolicy, which targets Gateway `passage-api`, cannot apply to them, and the API routes cannot be reached without a token through it:
