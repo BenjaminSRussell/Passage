@@ -24,6 +24,14 @@ const (
 	MaxSubmissionLines = 200
 )
 
+// maxStoredAmount bounds a quantity, unit price, line amount and total to what numeric(20,6) holds: below 10^14.
+var maxStoredAmount = decimal.New(1, 14)
+
+// fitsStored reports whether d fits numeric(20,6) without rounding: at most 6 decimals and below 10^14 in size.
+func fitsStored(d decimal.Decimal) bool {
+	return d.Equal(d.Round(6)) && d.Abs().LessThan(maxStoredAmount)
+}
+
 // SubmissionLine is one received line a vendor bills.
 type SubmissionLine struct {
 	ReceiptID     string          `json:"receiptId"`
@@ -48,6 +56,7 @@ func CheckSubmission(number string, lines []SubmissionLine, note string) map[str
 		return errs
 	}
 	seen := map[[2]any]bool{}
+	total := decimal.Zero
 	for _, l := range lines {
 		key := [2]any{l.ReceiptID, l.ReceiptLineNo}
 		switch {
@@ -59,8 +68,16 @@ func CheckSubmission(number string, lines []SubmissionLine, note string) map[str
 			errs["lines"] = "a line needs a positive quantity"
 		case l.UnitPrice.IsNegative():
 			errs["lines"] = "a line needs a unit price of zero or more"
+		case !fitsStored(l.Qty) || !fitsStored(l.UnitPrice):
+			errs["lines"] = "a quantity or unit price has more than 6 decimals or is too large"
+		case !fitsStored(l.Amount):
+			errs["lines"] = "a line amount is too large"
 		}
 		seen[key] = true
+		total = total.Add(l.Amount)
+	}
+	if _, bad := errs["lines"]; !bad && !fitsStored(total) {
+		errs["lines"] = "the invoice total is too large"
 	}
 	return errs
 }

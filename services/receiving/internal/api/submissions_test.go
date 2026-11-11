@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -157,6 +158,31 @@ func TestInvoiceSubmission_BadRequestsNeverReachTheStore(t *testing.T) {
 			t.Errorf("%s: %d %s, want 400", name, rec.Code, rec.Body)
 		}
 	}
+	// Numbers the numeric(20,6) columns cannot hold are a validation error, not a database failure.
+	line := func(qty, price string) string {
+		return `{"receiptId":"` + receiptA + `","receiptLineNo":1,"qty":"` + qty + `","unitPrice":"` + price + `"}`
+	}
+	// The decoder already caps a quantity and a price at 10^12; their product, and the sum of 200 lines, can still overflow.
+	many := make([]string, 0, 120)
+	for n := 1; n <= 120; n++ {
+		many = append(many, strings.Replace(line("1", "1000000000000"), `"receiptLineNo":1`, `"receiptLineNo":`+strconv.Itoa(n), 1))
+	}
+	for name, lines := range map[string]string{
+		"seven decimals of quantity":   line("1.0000001", "1"),
+		"seven decimals of unit price": line("1", "0.0000001"),
+		"a huge line amount":           line("10000000", "10000000"),
+		"a huge total":                 strings.Join(many, ","),
+	} {
+		rec := s.vendor(t, vendorID, http.MethodPost, path, `{"legalEntityId":"`+legalEntityID+`","invoiceNumber":"I","invoiceDate":"2026-03-05","currency":"USD","lines":[`+lines+`]}`)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"COM-0001"`) || !strings.Contains(rec.Body.String(), `"lines"`) {
+			t.Errorf("%s: %d %s, want the 400 validation problem on lines", name, rec.Code, rec.Body)
+		}
+	}
+	// Six decimals, with trailing zeros past them, are fine.
+	if rec := s.vendor(t, vendorID, http.MethodPost, path, `{"legalEntityId":"`+legalEntityID+`","invoiceNumber":"I","invoiceDate":"2026-03-05","currency":"USD","lines":[`+line("1.123456000", "0.000001")+`]}`); rec.Code != http.StatusCreated {
+		t.Errorf("six decimals: %d %s", rec.Code, rec.Body)
+	}
+	s.f.created = nil
 	// A legal entity the token is not in.
 	other := strings.Replace(submissionJSON(""), legalEntityID, "00000000-0000-0000-0000-0000000000ee", 1)
 	if rec := s.vendor(t, vendorID, http.MethodPost, path, other); rec.Code != http.StatusForbidden {
