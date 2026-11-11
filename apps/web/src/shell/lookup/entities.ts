@@ -420,6 +420,29 @@ function listedEntity(
   };
 }
 
+/**
+ * A lookup over a document list route that searches on the server: the typed text goes as `q` (the service keeps the documents
+ * whose number, or for a payment payer, reference or amount, contains it), so a document past the first pages is still found.
+ * The legal entity in scope is kept in the browser, as the routes take it from the caller's scope.
+ */
+function searchedEntity(
+  noun: string,
+  path: string,
+  map: (row: Raw) => LookupOption | null,
+  params: Record<string, string> = {},
+): LookupDef {
+  return {
+    noun,
+    search: async (q, scope, signal) =>
+      present(
+        (await listRows(path, { ...params, limit: "100", q: q.trim() || undefined }, signal))
+          .filter((row) => !scope.legalEntityId || text(row, "legalEntityId") === undefined || text(row, "legalEntityId") === scope.legalEntityId)
+          .map(map),
+      ).slice(0, PAGE_SIZE),
+    resolve: async (id, signal) => map(await getOne(path, id, signal)),
+  };
+}
+
 /** A bank account reads "OPS-EUR (DE89 **** 3000 · EUR · DE01)": accounts carry a code, not a name. */
 function bankAccountOption(row: Raw, entityCode?: string): LookupOption | null {
   const hit = option(row, ["accountCode"], []);
@@ -503,7 +526,7 @@ function ledgerOption(row: Raw): LookupOption | null {
 }
 
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
-  purchaseOrder: listedEntity(
+  purchaseOrder: searchedEntity(
     "purchase order",
     "/api/v1/procurement/purchase-orders",
     (row) => {
@@ -511,10 +534,8 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
       const number = [text(row, "currency"), text(row, "documentStatus")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
       return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
     },
-    () => ({ limit: "100" }),
-    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
   ),
-  batch: listedEntity(
+  batch: searchedEntity(
     "batch",
     "/api/v1/production/batches",
     (row) => {
@@ -522,8 +543,6 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
       const number = [text(row, "disposition")?.replace(/_/g, " ").toLowerCase(), text(row, "expiryDate") ? `expires ${text(row, "expiryDate")}` : undefined].filter(Boolean).join(" · ");
       return hit ? { ...hit, number: number || undefined } : null;
     },
-    () => ({ limit: "100" }),
-    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
   ),
   formula: listedEntity("formula", "/api/v1/production/formulas", codeAndName, () => ({ limit: "100" })),
   ecr: listedEntity(
@@ -537,7 +556,7 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
     },
     () => ({ limit: "100" }),
   ),
-  openItem: listedEntity(
+  openItem: searchedEntity(
     "open item",
     "/api/v1/receivables/open-items",
     (row) => {
@@ -548,10 +567,9 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
       const number = [open && currency ? `${open} ${currency} open` : undefined, due ? `due ${due}` : undefined].filter(Boolean).join(" · ");
       return hit ? { ...hit, number: number || undefined, currency } : null;
     },
-    () => ({ status: "open", limit: "100" }),
-    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+    { status: "open" },
   ),
-  arPayment: listedEntity(
+  arPayment: searchedEntity(
     "payment",
     "/api/v1/receivables/payments",
     (row) => {
@@ -562,10 +580,8 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
       if (!id || !amount) return null;
       return { id, name: `${amount} ${currency ?? ""}${received ? ` received ${received}` : ""}`.trim(), number: text(row, "payerName", "sourceRef"), currency };
     },
-    () => ({ limit: "100" }),
-    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
   ),
-  salesOrder: listedEntity(
+  salesOrder: searchedEntity(
     "sales order",
     "/api/v1/sales/orders",
     (row) => {
@@ -573,10 +589,8 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
       const number = [text(row, "orderType"), text(row, "status")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
       return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
     },
-    () => ({ limit: "100" }),
-    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
   ),
-  packingSlip: listedEntity(
+  packingSlip: searchedEntity(
     "packing slip",
     "/api/v1/fulfillment/packing-slips",
     (row) => {

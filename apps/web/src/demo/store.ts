@@ -56,6 +56,12 @@ export function dec(n: number, places = 2): string {
   return n.toFixed(places);
 }
 
+/** The `q` filter of a list route, as the services apply it: true when q is empty or one of the values contains it, ignoring case. */
+export function matchesQ(query: URLSearchParams, ...values: (string | null | undefined)[]): boolean {
+  const q = (query.get("q") ?? "").trim().toLowerCase();
+  return q === "" || values.some((v) => (v ?? "").toLowerCase().includes(q));
+}
+
 /** Filters rows by every query parameter that names a field (?status=OPEN&customerId=...), ignoring paging keys. */
 export function filterBy<T extends object>(rows: T[], query: URLSearchParams, ignore: string[] = ["cursor", "limit", "offset", "page", "pageSize", "sort", "order"]): T[] {
   let out = rows;

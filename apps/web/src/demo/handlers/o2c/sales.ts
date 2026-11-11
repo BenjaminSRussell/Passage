@@ -15,7 +15,7 @@ import type {
 } from "../../../modules/sales/api/client";
 import { LEGAL_ENTITY, PLANT, SITES, WAREHOUSES, WH_FG, itemByNumber } from "../../company";
 import { reply, route } from "../../backend";
-import { at, day, dec, filterBy, uid } from "../../store";
+import { at, day, dec, filterBy, matchesQ, uid } from "../../store";
 import { setBackorderCount } from "./quotations";
 import { K, SALES_ACTOR, balanceOf, creditProfiles, customerById, evaluateCredit, exposureOf, itemById, orderNumber, orderSeq, orders, progress, r2, recordVersion, scheduleLines, versions } from "./model";
 
@@ -68,9 +68,10 @@ route("GET", `${BASE}/orders`, ({ query }) => {
   const hold = query.get("hold");
   const rest = new URLSearchParams(query);
   rest.delete("hold");
+  rest.delete("q");
   const limit = Number(query.get("limit") ?? 0);
   const rows = filterBy(orders.all(), rest)
-    .filter((o) => !hold || o.holds.some((h) => h.status === "ACTIVE" && h.holdType === hold))
+    .filter((o) => (!hold || o.holds.some((h) => h.status === "ACTIVE" && h.holdType === hold)) && matchesQ(query, o.orderNumber))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return { items: (limit > 0 ? rows.slice(0, limit) : rows).map(summary) };
 });
