@@ -138,7 +138,7 @@ describe("Rate cards", () => {
     handler = () => json(200, { items: [] });
     renderAt("/transport/rate-cards");
     expect(await screen.findByText("No rate cards yet")).toBeInTheDocument();
-    fill("Carrier id", CARRIER);
+    fill("Carrier", CARRIER);
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("carrierId")).toBe(CARRIER));
   });
@@ -156,7 +156,7 @@ describe("Rate cards", () => {
 
 describe("New rate card", () => {
   function fillCard() {
-    fill("Carrier id", CARRIER);
+    fill("Carrier", CARRIER);
     fill("Service id", SERVICE);
     fill("Valid from", "2026-01-01");
     fill("Row 1 rate", "0.50");
@@ -165,7 +165,7 @@ describe("New rate card", () => {
   it("shows field errors without calling the service", async () => {
     renderAt("/transport/rate-cards/new");
     fireEvent.click(screen.getByRole("button", { name: "Save rate card" }));
-    expect(await screen.findByText("Enter the carrier id as a lower-case UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the carrier.")).toBeInTheDocument();
     expect(screen.getByText("Enter the first day the card applies.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
   });
@@ -291,7 +291,7 @@ describe("Freight bills", () => {
     handler = (_url, init) => (init.method === "POST" ? json(201, bill()) : json(200, { ...bill() }));
     renderAt("/transport/freight-bills/new");
     fill("Load", LOAD);
-    fill("Carrier id", CARRIER);
+    fill("Carrier", CARRIER);
     fill("Charge 1 amount", "400.00");
     fireEvent.click(screen.getByRole("button", { name: "Add charge" }));
     fill("Charge 2 code", "fuel");
@@ -314,7 +314,7 @@ describe("Freight bills", () => {
   it("checks the charge lines before calling", async () => {
     renderAt("/transport/freight-bills/new");
     fill("Load", LOAD);
-    fill("Carrier id", CARRIER);
+    fill("Carrier", CARRIER);
     fill("Charge 1 amount", "-3");
     fireEvent.click(screen.getByRole("button", { name: "Create freight bill" }));
     expect(await screen.findByText("Enter an amount such as 412.50.")).toBeInTheDocument();
@@ -377,7 +377,7 @@ describe("Carrier invoices", () => {
       init.method === "POST" ? json(201, { invoice: invoice(), freightBill: bill({ matchStatus: "VARIANCE" }) }) : json(200, bill({ matchStatus: "VARIANCE" }));
     renderAt(`/transport/carrier-invoices/new?freightBillId=${BILL}&carrierId=${CARRIER}&currency=USD`);
     expect(screen.getByLabelText("Freight bill id")).toHaveValue(BILL);
-    expect(screen.getByLabelText("Carrier id")).toHaveValue(CARRIER);
+    expect(screen.getByLabelText("Carrier")).toHaveAttribute("data-value", CARRIER);
     fill("Invoice number", " INV-1 ");
     fill("Invoice date", "2026-10-27");
     fill("Charge 1 amount", "418.00");
@@ -397,7 +397,7 @@ describe("Carrier invoices", () => {
   it("puts a duplicate invoice number (TMS-0108) on the invoice number field", async () => {
     handler = () => json(409, { code: "TMS-0108", detail: "carrier invoice INV-1 is already registered for this carrier" });
     renderAt("/transport/carrier-invoices/new");
-    fill("Carrier id", CARRIER);
+    fill("Carrier", CARRIER);
     fill("Invoice number", "INV-1");
     fill("Invoice date", "2026-10-27");
     fill("Charge 1 amount", "10");
@@ -410,7 +410,7 @@ describe("Carrier invoices", () => {
     handler = () =>
       json(422, { code: "TMS-0112", detail: "the invoice does not belong to this freight bill", errors: { currency: "must be the freight bill currency USD" } });
     renderAt(`/transport/carrier-invoices/new?freightBillId=${BILL}`);
-    fill("Carrier id", CARRIER);
+    fill("Carrier", CARRIER);
     fill("Invoice number", "INV-9");
     fill("Invoice date", "2026-10-27");
     fill("Currency", "eur");

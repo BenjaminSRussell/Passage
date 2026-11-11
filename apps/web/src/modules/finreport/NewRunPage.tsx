@@ -5,7 +5,8 @@ import { createRun, CURRENCY_TYPES, describeProblem, listDefinitions, listHierar
 import { CURRENCY_TYPE_LABELS, fiscalCalendar, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 export interface RunValues {
   definition: string;
@@ -67,7 +68,7 @@ export function validateRun(v: RunValues): Errors {
     else if (ledgers.some((l) => (l.label ?? "").length > MAX_LEDGER_LABEL)) errors.consolidation = `A label may have at most ${MAX_LEDGER_LABEL} characters.`;
     else if (v.currencyType !== "rpt") errors.consolidation = "Ledger amounts are added as stored, so a consolidated run needs the reporting currency type.";
     else if (v.hierarchy !== "" || v.tree) errors.consolidation = "A consolidated run cannot also use a hierarchy or a reporting tree.";
-  } else if (!UUID.test(v.ledgerId.trim())) errors.ledgerId = "Enter the ledger id (a UUID).";
+  } else if (!UUID.test(v.ledgerId.trim())) errors.ledgerId = "Choose the ledger.";
   if (!INTEGER.test(v.year) || Number(v.year) < 1900) errors.year = "Enter the fiscal year, such as 2026.";
   if (!INTEGER.test(v.periodsPerYear) || Number(v.periodsPerYear) < 1 || Number(v.periodsPerYear) > 16) errors.periodsPerYear = "Enter 1 to 16 periods per year.";
   else if (!INTEGER.test(v.period) || Number(v.period) > Number(v.periodsPerYear)) errors.period = `Enter a period from 0 to ${v.periodsPerYear}.`;
@@ -219,7 +220,7 @@ export function NewRunPage() {
             )}
           </FormField>
           {text("fr-run-version", "version", "Version", { optional: true, hint: "Empty runs the latest published version.", inputMode: "numeric" })}
-          {text("fr-run-ledger", "ledgerId", "Ledger id", { mono: true })}
+          <LookupFormField id="fr-run-ledger" label="Ledger" entity="ledger" value={values.ledgerId} error={errors.ledgerId} onChange={(ledgerId) => update({ ledgerId })} />
           <FormField id="fr-run-currency" label="Currency type" hint="Columns that do not name a currency type use this one.">
             {(control) => (
               <Select {...control} value={values.currencyType} onChange={(e) => update({ currencyType: e.target.value as CurrencyType })}>
@@ -237,7 +238,7 @@ export function NewRunPage() {
             optional
             hint={
               hierarchies.error
-                ? `The hierarchies could not be loaded (${hierarchies.error.code}). The run uses the definition's own rows.`
+                ? `The hierarchies could not be loaded. ${problemSummary(hierarchies.error)} The run uses the definition's own rows.`
                 : "One row per node of a published hierarchy, with the definition's columns. Empty uses the definition's own rows."
             }
             error={errors.hierarchy}
@@ -278,7 +279,7 @@ export function NewRunPage() {
             optional
             hint={
               trees.error
-                ? `The trees could not be loaded (${trees.error.code}). The run covers the whole ledger.`
+                ? `The trees could not be loaded. ${problemSummary(trees.error)} The run covers the whole ledger.`
                 : "Run the statement for one unit of a tree, rolled up over the units below it. Empty covers the whole ledger."
             }
           >

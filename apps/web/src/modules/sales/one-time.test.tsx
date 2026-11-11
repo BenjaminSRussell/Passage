@@ -125,7 +125,7 @@ describe("One-time customer order", () => {
     set("City", walkIn.city);
     set("Postal code", walkIn.postalCode);
     set("Country", "de");
-    set("Tax id", walkIn.taxId);
+    set("Tax registration number", walkIn.taxId);
     fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
     expect(await screen.findByRole("heading", { name: "Sales order SO-0000077" })).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ oneTime: walkIn });

@@ -14,6 +14,8 @@ import { ACCOUNT, CURRENCY, DAY, DECIMAL, invoiceName, STATUS_LABELS, TAX_CODE, 
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 import { LookupFormField } from "../../shell/lookup/LookupFormField";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import type { LookupEntityKey } from "../../shell/lookup/entities";
 
 type Errors = Record<string, string>;
 
@@ -96,10 +98,10 @@ export function validateShipment(v: ShipmentValues): Errors {
   v.slips.forEach((s, i) => {
     const at = (f: string) => `slips[${i}].${f}`;
     const id = s.id.trim().toLowerCase();
-    if (!UUID.test(id)) errors[at("id")] = "Enter the packing slip id (a UUID).";
+    if (!UUID.test(id)) errors[at("id")] = "Choose the packing slip.";
     else if (slipIds.has(id)) errors[at("id")] = "This packing slip is already in the list.";
     slipIds.add(id);
-    if (!UUID.test(s.orderId.trim())) errors[at("orderId")] = "Enter the sales order id (a UUID).";
+    if (!UUID.test(s.orderId.trim())) errors[at("orderId")] = "Choose the sales order.";
     if (!DAY.test(s.date)) errors[at("date")] = "Enter the slip's posting date as YYYY-MM-DD.";
     else if (DAY.test(v.invoiceDate) && s.date > v.invoiceDate) errors[at("date")] = "The invoice date may not precede the slip date (BIL-0006).";
     if (s.chargeAmount.trim() !== "" && !DECIMAL.test(s.chargeAmount.trim())) errors[at("chargeAmount")] = "Enter the charge as a number such as 12.50, or leave it empty.";
@@ -182,7 +184,7 @@ const createdColumns: DataTableColumn<Invoice>[] = [
 
 type HeaderField = "legalEntityId" | "customerId" | "invoiceAccountId" | "currency" | "invoiceDate" | "paymentTermDays";
 type SlipField = Exclude<keyof SlipValues, "lines">;
-type FieldOpts = { hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean; type?: string };
+type FieldOpts = { hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean; type?: string; lookup?: LookupEntityKey };
 
 /** Invoice shipments (FR-29.1, FR-29.2): turn posted packing slips into invoice proposals, one per order or consolidated. */
 export function NewShipmentProposalPage() {
@@ -233,7 +235,10 @@ export function NewShipmentProposalPage() {
   function control(id: string, name: string, label: string, value: string, onChange: (v: string) => void, opts: FieldOpts = {}) {
     return (
       <FormField id={id} label={label} hint={opts.hint} optional={opts.optional} error={errors[name]}>
-        {(c) => (
+        {(c) =>
+          opts.lookup ? (
+            <EntityLookup {...c} entity={opts.lookup} value={value} onChange={(e) => onChange(e.target.value)} invalid={Boolean(errors[name])} />
+          ) : (
           <Input
             {...c}
             type={opts.type}
@@ -243,7 +248,7 @@ export function NewShipmentProposalPage() {
             onChange={(e) => onChange(e.target.value)}
             invalid={Boolean(errors[name])}
           />
-        )}
+          )}
       </FormField>
     );
   }
@@ -321,8 +326,8 @@ export function NewShipmentProposalPage() {
           {values.slips.map((s, i) => (
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.groupsLegend}>{`Packing slip ${i + 1}`}</legend>
-              {slip(i, "id", "Packing slip id", { mono: true })}
-              {slip(i, "orderId", "Sales order id", { mono: true })}
+              {slip(i, "id", "Packing slip", { lookup: "packingSlip" })}
+              {slip(i, "orderId", "Sales order", { lookup: "salesOrder" })}
               {slip(i, "date", "Slip date", { type: "date", mono: true })}
               {slip(i, "chargeAmount", "Slip charge", { optional: true, mono: true, decimal: true, hint: "Freight or handling of this slip." })}
               {s.lines.map((_, j) => (

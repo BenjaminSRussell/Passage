@@ -17,6 +17,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/billingclient"
+	"github.com/BenjaminSRussell/passage/services/receivables/internal/fxclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/taxclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/migrations"
@@ -144,6 +145,11 @@ func run() error {
 		return err
 	} else if bc != nil {
 		s.WithBilling(bc).WithReservations(bc)
+	}
+	if fc, err := fxclient.FromEnv(os.Getenv); err != nil {
+		return err
+	} else if fc != nil {
+		s.WithRates(fc)
 	}
 	h := api.New(s)
 	r := httpx.NewRouter()

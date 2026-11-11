@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
 import { createOrder, describeProblem, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem, type Proposal } from "./api/client";
 import { sentence, today, UUID } from "./format";
 import { emptyLine, validateLines, type LineValues } from "./lines";
@@ -97,6 +97,7 @@ export function NewOrderPage() {
     key.current = newKey();
   }
 
+  const { prompt, release } = useUnsavedChanges(useFormBaseline(values));
   async function submit(event: FormEvent) {
     event.preventDefault();
     const { errors: found, input } = validateOrder(values);
@@ -106,6 +107,7 @@ export function NewOrderPage() {
     setBusy(true);
     try {
       const created = await createOrder(input, key.current);
+      release();
       navigate(`/sales/orders/${created.value.id}`, { state: { warnings: created.value.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
@@ -202,6 +204,7 @@ export function NewOrderPage() {
             </Link>
           </div>
         </form>
+      {prompt}
       </Card>
       <OrderProposals legalEntityId={values.legalEntityId} customerId={values.customerId} lines={values.lines} onAccept={acceptProposal} />
     </div>

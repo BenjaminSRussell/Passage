@@ -123,12 +123,12 @@ describe("ledger module", () => {
     expect(loadModules().map((m) => m.id)).toContain("ledger");
   });
 
-  it("validates the ledger id before calling the API", () => {
+  it("asks for a ledger before calling the API", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     renderScreen();
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
-    expect(screen.getByRole("alert").textContent).toContain("UUID");
+    expect(screen.getByRole("alert").textContent).toContain("Choose the ledger");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -150,7 +150,7 @@ describe("ledger module", () => {
       })),
     );
     renderScreen();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER_ID } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER_ID } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     await waitFor(() => expect(screen.getByTestId("tb-balanced").textContent).toBe("Balanced"));
     expect(screen.getByRole("table", { name: "Trial balance" }).textContent).toContain("1000");

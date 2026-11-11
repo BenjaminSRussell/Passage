@@ -487,6 +487,7 @@ func TestRoutes_RefuseWithoutDutyTenantOrKey(t *testing.T) {
 		{"bad id", call{method: "GET", path: "/v1/procurement/purchase-orders/nope", duties: []string{dutyPurchaseOrderInquire}}, 422, codeInvalid},
 		{"missing PO", call{method: "GET", path: "/v1/procurement/purchase-orders/" + ids.New(), duties: []string{dutyPurchaseOrderInquire}}, 404, store.CodePurchaseOrderNotFound},
 		{"bad cursor", call{method: "GET", path: "/v1/procurement/purchase-orders?cursor=x", duties: []string{dutyPurchaseOrderInquire}}, 422, codeInvalid},
+		{"long search", call{method: "GET", path: "/v1/procurement/purchase-orders?q=" + strings.Repeat("x", 101), duties: []string{dutyPurchaseOrderInquire}}, 422, codeInvalid},
 		{"limit over max", call{method: "GET", path: "/v1/procurement/trade-agreements?limit=500", duties: []string{dutyTradeAgreementMaintain}}, 422, codeInvalid},
 		{"bad status filter", call{method: "GET", path: "/v1/procurement/requisitions?status=OPEN", duties: []string{dutyRequisitionCreate}}, 422, codeInvalid},
 	}
@@ -697,12 +698,12 @@ func TestLists_PassFiltersCursorAndLimit(t *testing.T) {
 	h := newHarness(t)
 	cursor := ids.New()
 	vendor := ids.New()
-	rec := h.do(call{method: "GET", path: "/v1/procurement/purchase-orders?approvalStatus=DRAFT&vendorId=" + vendor + "&limit=10&cursor=" + cursor,
+	rec := h.do(call{method: "GET", path: "/v1/procurement/purchase-orders?approvalStatus=DRAFT&vendorId=" + vendor + "&limit=10&q=+po-0012+&cursor=" + cursor,
 		duties: []string{dutyPurchaseOrderInquire}})
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("orders: %d %s", rec.Code, rec.Body)
 	}
-	if h.fake.lastOrderFilter.ApprovalStatus != "DRAFT" || h.fake.lastOrderFilter.VendorID != vendor || h.fake.lastAfter != cursor || h.fake.lastLimit != 10 {
+	if h.fake.lastOrderFilter.ApprovalStatus != "DRAFT" || h.fake.lastOrderFilter.VendorID != vendor || h.fake.lastOrderFilter.Q != "po-0012" || h.fake.lastAfter != cursor || h.fake.lastLimit != 10 {
 		t.Fatalf("filter %+v after %s limit %d", h.fake.lastOrderFilter, h.fake.lastAfter, h.fake.lastLimit)
 	}
 	rec = h.do(call{method: "GET", path: "/v1/procurement/requisitions?mine=true&status=DRAFT", user: userA, duties: []string{dutyRequisitionCreate}})

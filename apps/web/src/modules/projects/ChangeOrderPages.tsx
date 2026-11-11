@@ -428,7 +428,7 @@ export function NewChangeOrderPage() {
                   </Button>
                 }
               >
-                Lines can still be saved for the whole project. {wbs.error.message} ({wbs.error.code})
+                Lines can still be saved for the whole project. <ProblemMessage problem={wbs.error} />
               </Alert>
             ) : wbs.loading ? (
               <Skeleton height="tile" />

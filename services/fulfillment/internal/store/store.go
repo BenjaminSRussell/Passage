@@ -132,7 +132,9 @@ type PackingSlipFilter struct {
 	ShipmentID string
 	OrderID    string
 	Status     string
-	Limit      int
+	// Q keeps the slips whose number contains it, ignoring case.
+	Q     string
+	Limit int
 }
 
 // ShipmentLine is one schedule line of a shipment with its pick and pack quantities.
@@ -810,8 +812,9 @@ func (s *Postgres) ListPackingSlips(ctx context.Context, f PackingSlipFilter) ([
 			where ($1 = '' or shipment_id::text = $1)
 			  and ($2 = '' or order_id::text = $2)
 			  and ($3 = '' or status = $3)
+			  and ($5 = '' or strpos(lower(packing_slip_number), lower($5)) > 0)
 			order by created_at desc, packing_slip_number desc
-			limit $4`, f.ShipmentID, f.OrderID, f.Status, f.Limit)
+			limit $4`, f.ShipmentID, f.OrderID, f.Status, f.Limit, f.Q)
 		if err != nil {
 			return err
 		}

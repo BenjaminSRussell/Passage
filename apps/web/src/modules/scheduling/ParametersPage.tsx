@@ -169,11 +169,11 @@ function Form({ initial, onReload }: { initial: SchedulingParameters; onReload: 
                   </Button>
                 }
               >
-                {failure.message} ({failure.code}). Loading the latest version discards your changes on this screen.
+                <ProblemMessage problem={failure} /> Loading the latest version discards your changes on this screen.
               </Alert>
             ) : (
               <Alert tone="danger" title="Could not save the parameters" live="alert">
-                {failure.message} ({failure.code}). Changing the parameters needs the scheduling.setup.write duty (Maintain scheduling setup).
+                <ProblemMessage problem={failure} /> Changing the parameters needs the scheduling.setup.write duty (Maintain scheduling setup).
               </Alert>
             )}
           </div>

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -177,7 +178,11 @@ func (a *API) listBatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.BatchFilter{ItemID: q.Get("itemId"), Disposition: q.Get("disposition"), Limit: limit}
+	f := store.BatchFilter{ItemID: q.Get("itemId"), Disposition: q.Get("disposition"), Q: strings.TrimSpace(q.Get("q")), Limit: limit}
+	if utf8.RuneCountInString(f.Q) > 100 {
+		invalid(w, r, map[string]string{"q": "must be at most 100 characters"})
+		return
+	}
 	if f.ItemID != "" && !ids.Valid(f.ItemID) {
 		invalid(w, r, map[string]string{"itemId": "must be a UUID"})
 		return

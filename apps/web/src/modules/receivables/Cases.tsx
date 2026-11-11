@@ -276,7 +276,7 @@ export function NewCasePage() {
             )}
           </FormField>
           {text("nc-owner", "owner", "Owner")}
-          {text("nc-item", "openItemId", "Open item id", { mono: true, optional: true, hint: "Links the case to one item; the case takes its currency." })}
+          {text("nc-item", "openItemId", "Open item", { entity: "openItem", optional: true, hint: "Links the case to one item; the case takes its currency." })}
           {text("nc-currency", "currency", "Currency", { mono: true, optional: true, hint: "Needed when no open item is linked." })}
           {text("nc-amount", "attachedAmount", "Amount", { mono: true, optional: true })}
           <div className={styles.wide}>

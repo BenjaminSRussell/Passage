@@ -1,3 +1,4 @@
+import { ProblemMessage } from "../../shell/errors";
 import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, Textarea } from "../../shell/ui";
 import { deactivateWorker, describeProblem, newKey, reactivateWorker, updateWorker, type Problem, type Worker } from "./api/client";
@@ -10,7 +11,7 @@ type Errors = Partial<Record<Field, string>>;
 
 const REASON_MAX = 500;
 
-function explain(problem: Problem): string {
+function explain(problem: Problem): string | undefined {
   switch (problem.code) {
     case "SF-0143":
       return "The worker was changed by someone else. Reload the page and try again.";
@@ -25,7 +26,7 @@ function explain(problem: Problem): string {
     case "SF-0168":
       return "The worker is already active. Reload the page.";
     default:
-      return problem.message;
+      return undefined;
   }
 }
 
@@ -147,7 +148,7 @@ export function WorkerMaintenance({ worker, onSaved }: { worker: Worker; onSaved
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the worker" live="alert">
-                {explain(failure)} ({failure.code})
+                <ProblemMessage problem={failure} message={explain(failure)} />
               </Alert>
             </div>
           ) : null}
@@ -179,7 +180,7 @@ export function WorkerMaintenance({ worker, onSaved }: { worker: Worker; onSaved
             {stateFailure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not deactivate the worker" live="alert">
-                  {explain(stateFailure)} ({stateFailure.code})
+                  <ProblemMessage problem={stateFailure} message={explain(stateFailure)} />
                 </Alert>
               </div>
             ) : null}
@@ -208,7 +209,7 @@ export function WorkerMaintenance({ worker, onSaved }: { worker: Worker; onSaved
             {stateFailure ? (
               <div className={styles.formActions}>
                 <Alert tone="danger" title="Could not reactivate the worker" live="alert">
-                  {explain(stateFailure)} ({stateFailure.code})
+                  <ProblemMessage problem={stateFailure} message={explain(stateFailure)} />
                 </Alert>
               </div>
             ) : null}

@@ -81,7 +81,8 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 		return err
 	}
 	ports.FieldCrypt = keys
-	a := api.New(store.New(pool).WithPendingPool(pendingPool).WithFieldCrypt(keys), ports)
+	st := store.New(pool).WithPendingPool(pendingPool).WithFieldCrypt(keys)
+	a := api.New(st, ports).WithSubmissions(st)
 	if consume {
 		return runConsumer(ctx, getenv, a, pool)
 	}

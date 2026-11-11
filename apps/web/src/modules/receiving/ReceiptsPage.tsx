@@ -95,6 +95,7 @@ export function ReceiptsPage() {
       columns={columns}
       filters={filters}
       useRows={useReceiptRows}
+      search={(r) => ({ number: r.receiptNumber })}
       getRowKey={(r) => r.id}
       onRowOpen={(r) => navigate(`/receiving/receipts/${encodeURIComponent(r.id)}`)}
       empty={{

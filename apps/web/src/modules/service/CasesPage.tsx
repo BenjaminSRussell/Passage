@@ -24,7 +24,7 @@ import { formatDateTime, sentence, shortId, UUID } from "./format";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
+import { ProblemMessage, problemSummary } from "../../shell/errors";
 
 const columns: DataTableColumn<ServiceCase>[] = [
   { key: "number", header: "Case", mono: true },
@@ -215,7 +215,7 @@ export function OpenCasePage() {
           <FormField
             id="case-fallbackSlaProfileId"
             label="Fallback SLA profile"
-            hint={profiles.error ? `Profiles could not be loaded (${profiles.error.code}).` : "Applies when no agreement matches; without one such a case is refused (SVC-ENT-002)."}
+            hint={profiles.error ? `Profiles could not be loaded. ${problemSummary(profiles.error)}` : "Applies when no agreement matches; without one, such a case is refused."}
             error={errors.fallbackSlaProfileId}
             optional
           >

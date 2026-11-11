@@ -105,6 +105,14 @@ type Store interface {
 	RecordPayablesBatch(ctx context.Context, runID string, lease time.Duration, b store.PayablesBatchSent) error
 	RejectPayablesRows(ctx context.Context, runID string, lease time.Duration, rejects []store.PayablesReject) error
 	FinishPayablesLoad(ctx context.Context, runID string, fin store.PayablesFinish) (domain.PayablesLoad, []domain.ControlTotal, error)
+	GetOpeningLoad(ctx context.Context, runID string) (domain.OpeningLoad, error)
+	ClaimOpeningLoad(ctx context.Context, runID, legalEntityID, startedBy string, lease time.Duration) (domain.OpeningLoad, store.OpeningRun, []store.PlannedOpening, []store.PendingOpening, error)
+	PlanOpeningBatch(ctx context.Context, runID, legalEntityID string, lease time.Duration, p store.PlannedOpening) error
+	DropOpeningPlan(ctx context.Context, runID, key string) error
+	RecordOpeningBatch(ctx context.Context, runID, legalEntityID string, lease time.Duration, b store.OpeningBatchSent) error
+	RejectOpeningRows(ctx context.Context, runID, legalEntityID string, lease time.Duration, rejects []store.OpeningReject) error
+	ListOpeningRejects(ctx context.Context, runID string, limit int) ([]store.OpeningRejectRow, error)
+	FinishOpeningLoad(ctx context.Context, runID string, fin store.OpeningFinish) (domain.OpeningLoad, []domain.ControlTotal, error)
 }
 
 // Server serves the API over a Store.
@@ -114,7 +122,10 @@ type Server struct {
 	target Target
 	// payables is the target of the AP lines of an open_items run (49-3).
 	payables PayablesTarget
-	ledger   ledgerclient.Ledger
+	// inventory and treasury are the targets of the staged opening stock and opening bank balances (H-S9-1, H-S10-1).
+	inventory StockTarget
+	treasury  BankTarget
+	ledger    ledgerclient.Ledger
 	// subledgers post the subledger documents of a parallel-run replay (49-4).
 	subledgers replay.Ports
 }
@@ -146,6 +157,8 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/load", s.runTargetLoad)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/load-payables", s.runPayablesLoad)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/payables-load", s.getPayablesLoad)
+		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/opening-load", s.runOpeningLoad)
+		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/opening-load", s.getOpeningLoad)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/opening-journal", s.postOpeningJournal)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/opening-journal", s.getOpeningJournal)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/target-load", s.getTargetLoad)
