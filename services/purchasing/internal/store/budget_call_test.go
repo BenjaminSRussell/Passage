@@ -96,28 +96,3 @@ func TestRequisitionLine_KeepsItsBudgetDimensions(t *testing.T) {
 		t.Fatalf("created = %+v, %v", r.Lines, err)
 	}
 }
-
-func TestQueueBudgetReleases_QueuesOncePerLineAndOnlyWhenBudgetCallsAreOn(t *testing.T) {
-	pool := migrated(t)
-	ctx := principalContext(31)
-	on := store.New(pool).WithBudgetCalls(true)
-	req := approvedFor(t, on, ids.New(), ids.New())
-	lines := []string{req.Lines[0].ID, req.Lines[1].ID}
-	for i := 0; i < 2; i++ {
-		if err := on.QueueBudgetReleases(ctx, req.LegalEntityID, req.ID, lines); err != nil {
-			t.Fatal(err)
-		}
-	}
-	calls, err := on.BudgetCallsFor(ctx, "", req.ID)
-	if err != nil || len(calls) != 2 || calls[0].Kind != store.BudgetCallRelease || calls[0].Status != store.BudgetCallPending {
-		t.Fatalf("calls = %+v, %v; want one pending release per line however often it is queued", calls, err)
-	}
-	off := store.New(pool)
-	req2 := approvedFor(t, off, ids.New())
-	if err := off.QueueBudgetReleases(ctx, req2.LegalEntityID, req2.ID, []string{req2.Lines[0].ID}); err != nil {
-		t.Fatal(err)
-	}
-	if calls, _ := off.BudgetCallsFor(ctx, "", req2.ID); len(calls) != 0 {
-		t.Fatalf("without budget calls turned on nothing is queued: %+v", calls)
-	}
-}

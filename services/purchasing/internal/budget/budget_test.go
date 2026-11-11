@@ -42,13 +42,6 @@ func (q *fakeQueue) ListBudgetCalls(_ context.Context, status string, _ int) ([]
 	return out, nil
 }
 
-func (q *fakeQueue) QueueBudgetReleases(_ context.Context, le, req string, lineIDs []string) error {
-	for _, id := range lineIDs {
-		q.calls = append(q.calls, store.BudgetCall{ID: "queued-" + id, LegalEntityID: le, Kind: store.BudgetCallRelease, RequisitionID: req, RequisitionLineID: id, Status: store.BudgetCallPending})
-	}
-	return nil
-}
-
 func (q *fakeQueue) RecordBudgetCall(_ context.Context, id string, err error) error {
 	for i := range q.calls {
 		if q.calls[i].ID == id {

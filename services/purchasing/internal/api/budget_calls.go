@@ -74,23 +74,6 @@ func (a *API) checkRequisitionBudget(r *http.Request, cur store.Requisition) err
 	return p
 }
 
-// releaseAfterFailedApproval gives back the funds the budget check reserved when the approval then failed (a stale
-// version, a concurrent decision, a database error). It first re-reads the requisition: if it is APPROVED the approval
-// went through (a concurrent request won), the reservation belongs to it and stays. If the state cannot be read the
-// reservation also stays, because releasing an approved requisition's funds is the worse mistake; the unanswered case
-// is repeated by the next approval, whose check key is the same.
-func (a *API) releaseAfterFailedApproval(r *http.Request, id string, checked store.Requisition) {
-	now, err := a.store.GetRequisition(r.Context(), id)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "requisition not re-read after a failed approval; its budget reservation was kept", "err", err, "requisitionId", id, "correlationId", middleware.GetReqID(r.Context()))
-		return
-	}
-	if now.Status == store.RequisitionApproved {
-		return
-	}
-	budget.ReleaseReserved(r.Context(), a.budget, a.budgetQueue, checked)
-}
-
 // repeatApprover reports whether the user approved a level of the requisition since it was last submitted, read from its
 // history the way the store's own check (PRC-REQ-010) reads it under the row lock.
 func repeatApprover(cur store.Requisition, userID string) bool {

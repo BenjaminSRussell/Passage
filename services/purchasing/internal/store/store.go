@@ -51,7 +51,6 @@ type Store interface {
 	ListBudgetCalls(ctx context.Context, status string, limit int) ([]BudgetCall, error)
 	BudgetCallsFor(ctx context.Context, purchaseOrderID, requisitionID string) ([]BudgetCall, error)
 	RecordBudgetCall(ctx context.Context, id string, callErr error) error
-	QueueBudgetReleases(ctx context.Context, legalEntityID, requisitionID string, lineIDs []string) error
 	CreateRequisition(ctx context.Context, in Requisition, idem Idem) (Requisition, error)
 	GetRequisition(ctx context.Context, id string) (Requisition, error)
 	ListRequisitions(ctx context.Context, f RequisitionFilter, after string, limit int) (Page[RequisitionSummary], error)

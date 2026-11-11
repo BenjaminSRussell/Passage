@@ -234,7 +234,6 @@ type Queue interface {
 	BudgetCallsFor(ctx context.Context, purchaseOrderID, requisitionID string) ([]store.BudgetCall, error)
 	ListBudgetCalls(ctx context.Context, status string, limit int) ([]store.BudgetCall, error)
 	RecordBudgetCall(ctx context.Context, id string, callErr error) error
-	QueueBudgetReleases(ctx context.Context, legalEntityID, requisitionID string, lineIDs []string) error
 }
 
 // Run makes one owed call and records the outcome: done when budgeting accepted it, one more failed attempt otherwise.
@@ -317,26 +316,4 @@ func Retry(ctx context.Context, p Port, q Queue) (RetryResult, error) {
 		res.Done++
 	}
 	return res, nil
-}
-
-// ReleaseReserved gives back what CheckRequisition reserved for a requisition whose approval then failed, so the funds
-// are not held by a requisition that stays unapproved. Each line that was sent to the check is released directly; one
-// budgeting does not release is queued and repeated by Retry. It reports the lines it could not release at once.
-func ReleaseReserved(ctx context.Context, p Port, q Queue, r store.Requisition) []string {
-	var failed []string
-	for _, l := range r.Lines {
-		if l.Status != "OPEN" || l.GLAccount == "" || l.CostCenter == "" {
-			continue
-		}
-		if err := p.ReleaseLine(ctx, r.LegalEntityID, r.ID, l.ID); err != nil {
-			slog.ErrorContext(ctx, "budget reservation of a failed approval not released; queued", "err", err, "requisitionId", r.ID, "requisitionLineId", l.ID, "correlationId", middleware.GetReqID(ctx))
-			failed = append(failed, l.ID)
-		}
-	}
-	if len(failed) > 0 {
-		if err := q.QueueBudgetReleases(ctx, r.LegalEntityID, r.ID, failed); err != nil {
-			slog.ErrorContext(ctx, "release of a failed approval's reservation not queued", "err", err, "requisitionId", r.ID, "correlationId", middleware.GetReqID(ctx))
-		}
-	}
-	return failed
 }

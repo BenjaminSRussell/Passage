@@ -120,7 +120,6 @@ func (a *API) decideRequisition(w http.ResponseWriter, r *http.Request, id, acti
 			return
 		}
 	}
-	reserved := false
 	if action == domain.ReqActionApprove && cur.Status == store.RequisitionInReview && cur.Version == version && cur.ApprovedSteps+1 == len(cur.ApproverChain) {
 		// The last level's approval reserves the funds: the budget check runs first, so an over-budget requisition is refused
 		// instead of approved and then found to have no funds (FR-38.4, FR-38.5). The check reserves, so an approval the store
@@ -135,15 +134,11 @@ func (a *API) decideRequisition(w http.ResponseWriter, r *http.Request, id, acti
 			fail(w, r, err)
 			return
 		}
-		reserved = a.budget != nil
 	}
 	act := store.RequisitionAct{Action: action, ActorID: userID, Comment: comment}
 	out, err := a.store.ActOnRequisition(r.Context(), id, version, act,
 		store.Idem{Key: key, Hash: hashBody("requisition."+action, map[string]any{"id": id, "version": version, "comment": comment})})
 	if err != nil {
-		if reserved {
-			a.releaseAfterFailedApproval(r, id, cur)
-		}
 		fail(w, r, err)
 		return
 	}

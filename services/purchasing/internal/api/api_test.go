@@ -143,13 +143,6 @@ func (f *fakeStore) BudgetCallsFor(_ context.Context, poID, reqID string) ([]sto
 	return out, nil
 }
 
-func (f *fakeStore) QueueBudgetReleases(_ context.Context, le, req string, lineIDs []string) error {
-	for _, id := range lineIDs {
-		f.budgetCalls = append(f.budgetCalls, store.BudgetCall{ID: ids.New(), LegalEntityID: le, Kind: store.BudgetCallRelease, RequisitionID: req, RequisitionLineID: id, Status: store.BudgetCallPending})
-	}
-	return nil
-}
-
 func (f *fakeStore) RecordBudgetCall(_ context.Context, id string, callErr error) error {
 	for i := range f.budgetCalls {
 		if f.budgetCalls[i].ID == id {

@@ -165,42 +165,25 @@ func TestApproveRequisition_ARepeatApproverIsRefusedBeforeTheBudgetCheckReserves
 	}
 }
 
-// The check reserved the funds; an approval the store then refuses must give them back, and one that budgeting does not
-// release at once is queued for budget-calls:retry. An approval that a concurrent request won keeps its reservation.
-func TestApproveRequisition_AFailedApprovalReleasesWhatTheCheckReserved(t *testing.T) {
-	b := &fakeBudget{check: budget.Check{Result: "PASS"}}
+// The check reserved the funds. An approval the store then refuses must NOT release them: budgeting refuses a new reservation
+// for a line whose pre-encumbrance was released (BUD-0011), so a release here would make the requisition unapprovable, or
+// approved with nothing encumbered after a replayed PASS. The re-approval checks again and keeps the reservation.
+func TestApproveRequisition_AFailedApprovalKeepsTheReservationAndAReApprovalSucceeds(t *testing.T) {
+	b := &fakeBudget{check: budget.Check{Result: "PASS"}, releaseOK: true}
 	h, id := budgetHarness(t, b)
-	lineID := h.fake.requisitions[id].Lines[0].ID
 	h.fake.approval.err = httpx.NewProblem(http.StatusConflict, "PRC-REQ-VERSION", "changed meanwhile")
-	b.releaseOK = true
 	if code := decide(h, id, "approve", userApprover, []string{dutyRequisitionApprove}, ""); code != http.StatusConflict {
 		t.Fatalf("approve: %d, want the store's 409", code)
 	}
-	if len(b.checked) != 1 || len(b.releases) != 1 || b.releases[0] != lineID || len(h.fake.budgetCalls) != 0 {
-		t.Fatalf("checked %d, released %v, queued %+v; want the reserved line released at once", len(b.checked), b.releases, h.fake.budgetCalls)
+	if len(b.checked) != 1 || len(b.releases) != 0 || len(h.fake.budgetCalls) != 0 {
+		t.Fatalf("checked %d, released %v, queued %+v; want the reservation left alone", len(b.checked), b.releases, h.fake.budgetCalls)
 	}
-
-	// Budgeting down at release time: the release is queued, not lost.
-	b2 := &fakeBudget{check: budget.Check{Result: "PASS"}}
-	h2, id2 := budgetHarness(t, b2)
-	h2.fake.approval.err = errors.New("database is down")
-	decide(h2, id2, "approve", userApprover, []string{dutyRequisitionApprove}, "")
-	if len(h2.fake.budgetCalls) != 1 || h2.fake.budgetCalls[0].Kind != store.BudgetCallRelease || h2.fake.budgetCalls[0].RequisitionLineID != h2.fake.requisitions[id2].Lines[0].ID {
-		t.Fatalf("queued %+v; want one pending release for the line", h2.fake.budgetCalls)
+	h.fake.approval.err = nil
+	if code := decide(h, id, "approve", userApprover, []string{dutyRequisitionApprove}, ""); code != http.StatusOK {
+		t.Fatalf("re-approval: %d", code)
 	}
-
-	// A concurrent request approved it: the reservation is the approval's, so nothing is released.
-	b3 := &fakeBudget{check: budget.Check{Result: "PASS"}, releaseOK: true}
-	h3, id3 := budgetHarness(t, b3)
-	h3.fake.approval.err = httpx.NewProblem(http.StatusConflict, "PRC-REQ-VERSION", "changed meanwhile")
-	h3.fake.approval.beforeErr = func() {
-		r := h3.fake.requisitions[id3]
-		r.Status = store.RequisitionApproved
-		h3.fake.requisitions[id3] = r
-	}
-	decide(h3, id3, "approve", userApprover, []string{dutyRequisitionApprove}, "")
-	if len(b3.checked) != 1 || len(b3.releases) != 0 {
-		t.Fatalf("released %v for a requisition that was approved", b3.releases)
+	if len(b.checked) != 2 || len(b.releases) != 0 {
+		t.Fatalf("checked %d times, released %v; want a second check and still no release", len(b.checked), b.releases)
 	}
 }
 
