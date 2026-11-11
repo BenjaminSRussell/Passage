@@ -182,6 +182,10 @@ func TestRecordTransactionsValidation(t *testing.T) {
 		{"code with separator", `{"transactions":[{"id":"` + ids.New() + `","code":"A|B","direction":"output","tax_date":"2026-01-10","amount":"1"}]}`, http.StatusBadRequest},
 		{"missing date", `{"transactions":[{"id":"` + ids.New() + `","code":"VAT19","direction":"output","amount":"1"}]}`, http.StatusBadRequest},
 		{"unknown field", `{"transactions":[],"x":1}`, http.StatusBadRequest},
+		{"input tax with a recoverable amount", `{"transactions":[{"id":"` + ids.New() + `","code":"VAT19","direction":"input","tax_date":"2026-01-10","amount":"19.00","recoverable_amount":"9.50"}]}`, http.StatusCreated},
+		{"recoverable above the tax", `{"transactions":[{"id":"` + ids.New() + `","code":"VAT19","direction":"input","tax_date":"2026-01-10","amount":"19.00","recoverable_amount":"20.00"}]}`, http.StatusBadRequest},
+		{"recoverable on an output tax", `{"transactions":[{"id":"` + ids.New() + `","code":"VAT19","direction":"output","tax_date":"2026-01-10","amount":"19.00","recoverable_amount":"9.50"}]}`, http.StatusBadRequest},
+		{"recoverable of the wrong sign", `{"transactions":[{"id":"` + ids.New() + `","code":"VAT19","direction":"input","tax_date":"2026-01-10","amount":"19.00","recoverable_amount":"-5.00"}]}`, http.StatusBadRequest},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

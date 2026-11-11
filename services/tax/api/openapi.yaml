@@ -465,12 +465,16 @@ paths:
       parameters:
         - { name: period_from, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
         - { name: period_to, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
+        - { name: format, in: query, required: false, schema: { type: string, enum: [gb-mtd-json, de-ustva-csv] }, description: "Return the figures as a national filing file instead of JSON. Needs the matching layout applied; refused while transactions lack a base amount." }
+        - { name: period_key, in: query, required: false, schema: { type: string, maxLength: 8 }, description: "The authority's period key; required for gb-mtd-json." }
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VatReturn" }
+            text/csv:
+              schema: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -485,12 +489,15 @@ paths:
       parameters:
         - { name: period_from, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
         - { name: period_to, in: query, required: true, schema: { $ref: "#/components/schemas/Date" } }
+        - { name: format, in: query, required: false, schema: { type: string, enum: [de-zm-csv] }, description: "Return the list as a national filing file instead of JSON; refused while sales lack a VAT number or a base amount." }
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Esl" }
+            text/csv:
+              schema: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -749,10 +756,444 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/exemption-certificates:
+    get:
+      operationId: listExemptionCertificates
+      x-passage-duty: tax.config.read
+      summary: Stored exemption certificates
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfCertificate" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/exemption-certificates/{number}:
+    put:
+      operationId: putExemptionCertificate
+      x-passage-duty: tax.config.manage
+      summary: Create or replace an exemption certificate; stored_config calculations read it by party.certificate
+      parameters:
+        - { name: number, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Certificate" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteExemptionCertificate
+      x-passage-duty: tax.config.manage
+      summary: Delete an exemption certificate
+      parameters:
+        - { name: number, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/master:seed:
+    post:
+      operationId: seedIntrastatMaster
+      x-passage-duty: tax.intrastatmaster.manage
+      summary: Add the standard Intrastat lists (transaction codes, transport modes, delivery terms, countries, ports, a starter set of CN8 codes) that the tenant does not have yet; edited entries are kept
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SeedRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/master:import:
+    post:
+      operationId: importIntrastatMaster
+      x-passage-duty: tax.intrastatmaster.manage
+      summary: Load master data in bulk (for example the CN8 table); existing entries are kept unless overwrite is true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/vat-layouts:
+    get:
+      operationId: listVatLayouts
+      x-passage-duty: tax.config.read
+      summary: National return layouts that ship with the service (box ids, labels and which transactions feed each)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfLayout" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/vat-layouts/{country}/apply:
+    post:
+      operationId: applyVatLayout
+      x-passage-duty: tax.config.manage
+      summary: Replace the legal entity's return boxes with a national layout, mapping its own tax codes to each box
+      parameters:
+        - { name: country, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplyLayoutRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfBox" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/recovery-policies:
+    get:
+      operationId: listRecoveryPolicies
+      x-passage-duty: tax.config.read
+      summary: How much of an input tax is recoverable per code and item tax group, effective-dated
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfRecoveryPolicy" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/recovery-policies/{code}:
+    put:
+      operationId: putRecoveryPolicy
+      x-passage-duty: tax.config.manage
+      summary: Create or replace the recovery policy of a code, item tax group and start date; stored_config calculations apply it to input tax
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecoveryPolicy" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryPolicy" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteRecoveryPolicy
+      x-passage-duty: tax.config.manage
+      summary: Delete a recovery policy
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: item_group, in: query, required: false, schema: { type: string } }
+        - { name: valid_from, in: query, required: false, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/vat-reclaim:
+    get:
+      operationId: getVatReclaim
+      x-passage-duty: tax.vatreturn.read
+      summary: "Input tax of a period per code: what may be reclaimed and what stays in the cost of the purchases"
+      parameters:
+        - { name: period_from, in: query, required: false, schema: { type: string } }
+        - { name: period_to, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reclaim" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/withholding/entries:
+    post:
+      operationId: recordWithholdingEntries
+      x-passage-duty: tax.withholding.record
+      summary: Record the withholding of payments (the result of withholding/calculate) so a remittance run can remit it; an id is recorded once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WithholdingEntriesRequest" }
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordedResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/withholding/remittance-runs:
+    post:
+      operationId: runWithholdingRemittance
+      x-passage-duty: tax.withholding.remit
+      summary: "Remit the withholding of a period: totals per code and currency, and one numbered certificate per payee, code and currency; TAX-0014 when nothing is waiting"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RemittanceRunRequest" }
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemittanceRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listWithholdingRemittanceRuns
+      x-passage-duty: tax.withholding.read
+      summary: Remittance runs of the legal entity, newest first
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfRemittanceRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/withholding/remittance-runs/{id}:
+    get:
+      operationId: getWithholdingRemittanceRun
+      x-passage-duty: tax.withholding.read
+      summary: One remittance run with its certificates
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemittanceRun" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/withholding/certificates:
+    get:
+      operationId: listWithholdingCertificates
+      x-passage-duty: tax.withholding.read
+      summary: Withholding certificates, optionally of one payee
+      parameters:
+        - { name: party_ref, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfWithholdingCertificate" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/products:
+    get:
+      operationId: listIntrastatProducts
+      x-passage-duty: tax.intrastat.read
+      summary: "Intrastat mapping of products: commodity code, origin and mass per unit"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfIntrastatProduct" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/products/{product_id}:
+    put:
+      operationId: putIntrastatProduct
+      x-passage-duty: tax.intrastatmaster.manage
+      summary: Create or replace the Intrastat mapping of a product
+      parameters:
+        - { name: product_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntrastatProduct" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IntrastatProduct" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteIntrastatProduct
+      x-passage-duty: tax.intrastatmaster.manage
+      summary: Delete the Intrastat mapping of a product
+      parameters:
+        - { name: product_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: OK }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/movements:
+    post:
+      operationId: stageIntrastatMovements
+      x-passage-duty: tax.intrastat.feed
+      summary: Stage the goods movements of shipments (dispatch) and receipts (arrival); a source reference is staged once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MovementsRequest" }
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StagedResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listIntrastatMovements
+      x-passage-duty: tax.intrastat.read
+      summary: Staged movements of the legal entity, newest first
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsOfMovement" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /v1/tax/intrastat/journals/{id}/transfer-movements:
+    post:
+      operationId: transferIntrastatMovements
+      x-passage-duty: tax.intrastat.manage
+      summary: Fill a draft journal from the staged movements of its flow and month; movements with an unmapped product stay staged and are named in the answer
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MovementDefaults" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MovementTransfer" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
 components:
   responses:
     Problem:
-      description: RFC 7807 problem (COM-0001, COM-0500, COM-0502, COM-0503, AUTH-0001, AUTH-0003, TAX-0001 to TAX-0009, TAX-0011 to TAX-0013)
+      description: RFC 7807 problem (COM-0001, COM-0500, COM-0502, COM-0503, AUTH-0001, AUTH-0003, TAX-0001 to TAX-0009, TAX-0011 to TAX-0014)
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -791,7 +1232,8 @@ components:
         document_date: { $ref: "#/components/schemas/Date" }
         tax_date: { $ref: "#/components/schemas/Date" }
         ship_from_country: { type: string }
-        provider: { type: string, description: External provider name; empty uses the internal engine. }
+        document_ref: { type: string, description: "Names the document at an external provider so a later commit or void can find it; without it a provider only quotes." }
+        provider: { type: string, enum: [avalara, vertex], description: External provider name (avalara or vertex, when configured); empty uses the internal engine. }
         stored_config: { type: boolean, description: Use the persisted tax configuration (GET /v1/tax/config) instead of an inline config. }
         party:
           type: object
@@ -942,6 +1384,7 @@ components:
               tax_date: { $ref: "#/components/schemas/Date" }
               amount: { $ref: "#/components/schemas/Decimal" }
               base_amount: { $ref: "#/components/schemas/Decimal" }
+              recoverable_amount: { $ref: "#/components/schemas/Decimal", description: "Input or use tax only: the part found recoverable under the recovery policies; the VAT reclaim totals it, else it applies the code recoverable_pct." }
               counterparty_country: { type: string, pattern: '^[A-Z]{2}$' }
               counterparty_vat_id: { type: string, maxLength: 20 }
               supply_kind: { type: string, enum: [goods, services, triangular] }
@@ -1182,3 +1625,254 @@ components:
         line_count: { type: integer }
         error_count: { type: integer }
         lines: { type: array, items: { $ref: "#/components/schemas/IntrastatLine" } }
+    Certificate:
+      type: object
+      required: [codes, valid_from]
+      properties:
+        number: { type: string, pattern: '^[A-Za-z0-9._/-]{1,64}$' }
+        party_ref: { type: string, maxLength: 64 }
+        note: { type: string, maxLength: 200 }
+        codes: { type: array, minItems: 1, maxItems: 100, items: { type: string } }
+        valid_from: { $ref: "#/components/schemas/Date" }
+        valid_to: { $ref: "#/components/schemas/Date" }
+    ItemsOfCertificate:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Certificate" } }
+    SeedRequest:
+      type: object
+      properties:
+        kinds: { type: array, items: { type: string, enum: [commodity, transaction_code, transport_mode, port, country, delivery_terms] } }
+    ImportRequest:
+      type: object
+      required: [entries]
+      properties:
+        entries: { type: array, minItems: 1, maxItems: 5000, items: { $ref: "#/components/schemas/MasterEntry" } }
+        overwrite: { type: boolean }
+    ImportResult:
+      type: object
+      properties:
+        added: { type: integer }
+        skipped: { type: integer }
+    ApplyLayoutRequest:
+      type: object
+      required: [mapping]
+      properties:
+        mapping:
+          type: object
+          description: Per box id, the tax codes and directions that feed it; a payable box takes none.
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              required: [code, direction]
+              properties:
+                code: { type: string }
+                direction: { type: string, enum: [output, input, use] }
+    ItemsOfBox:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Box" } }
+    ItemsOfLayout:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              country: { type: string }
+              name: { type: string }
+              format: { type: string, enum: [gb-mtd-json, de-ustva-csv] }
+              boxes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    box: { type: string }
+                    label: { type: string }
+                    kind: { type: string, enum: [base, tax, payable] }
+                    role: { type: string }
+    RecoveryPolicy:
+      type: object
+      required: [recoverable_pct, valid_from]
+      properties:
+        code: { type: string }
+        item_group: { type: string, description: "An item tax group; empty applies to every group of the code, and a policy for the line's own group wins." }
+        recoverable_pct: { $ref: "#/components/schemas/Decimal" }
+        valid_from: { $ref: "#/components/schemas/Date" }
+        valid_to: { $ref: "#/components/schemas/Date" }
+        note: { type: string, maxLength: 200 }
+    ItemsOfRecoveryPolicy:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/RecoveryPolicy" } }
+    Reclaim:
+      type: object
+      properties:
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date" }
+        total_input_tax: { type: string }
+        total_recoverable: { type: string }
+        total_non_recoverable: { type: string }
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              input_tax: { type: string }
+              recoverable: { type: string }
+              non_recoverable: { type: string }
+              transactions: { type: integer }
+              estimated: { type: integer, description: "Transactions recorded without a recoverable amount, which took the code's own recoverable_pct." }
+    WithholdingEntry:
+      type: object
+      required: [id, party_type, party_ref, code, payment_date, currency, gross_amount, taxable_base, withholding_amount]
+      properties:
+        id: { type: string, format: uuid }
+        party_type: { type: string, enum: [vendor, customer] }
+        party_ref: { type: string, maxLength: 64 }
+        code: { type: string }
+        payment_date: { $ref: "#/components/schemas/Date" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        gross_amount: { $ref: "#/components/schemas/Decimal" }
+        taxable_base: { $ref: "#/components/schemas/Decimal" }
+        withholding_amount: { $ref: "#/components/schemas/Decimal" }
+    WithholdingEntriesRequest:
+      type: object
+      required: [entries]
+      properties:
+        entries: { type: array, minItems: 1, maxItems: 1000, items: { $ref: "#/components/schemas/WithholdingEntry" } }
+    RecordedResult:
+      type: object
+      properties:
+        recorded: { type: integer }
+        duplicates: { type: integer }
+    RemittanceRunRequest:
+      type: object
+      required: [period_from, period_to]
+      properties:
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date", description: "In the same calendar year as period_from." }
+    WithholdingCertificate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, description: "WHC-<year>-<sequence>, gap-free per legal entity and year." }
+        run_id: { type: string, format: uuid }
+        party_type: { type: string }
+        party_ref: { type: string }
+        code: { type: string }
+        currency: { type: string }
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date" }
+        gross_amount: { type: string }
+        taxable_base: { type: string }
+        withholding_amount: { type: string }
+        entry_count: { type: integer }
+    ItemsOfWithholdingCertificate:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/WithholdingCertificate" } }
+    RemittanceRun:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, description: "WHR-<year>-<sequence>, gap-free per legal entity and year." }
+        period_from: { $ref: "#/components/schemas/Date" }
+        period_to: { $ref: "#/components/schemas/Date" }
+        created_at: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              currency: { type: string }
+              gross_amount: { type: string }
+              taxable_base: { type: string }
+              withholding_amount: { type: string }
+              entries: { type: integer }
+              payees: { type: integer }
+        certificates: { type: array, items: { $ref: "#/components/schemas/WithholdingCertificate" } }
+    ItemsOfRemittanceRun:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/RemittanceRun" } }
+    IntrastatProduct:
+      type: object
+      required: [commodity_code, origin_country, net_mass_per_unit]
+      properties:
+        product_id: { type: string, format: uuid }
+        commodity_code: { type: string, pattern: '^[0-9]{8}$' }
+        origin_country: { type: string, pattern: '^[A-Z]{2}$' }
+        net_mass_per_unit: { $ref: "#/components/schemas/Decimal" }
+        supplementary_per_unit: { $ref: "#/components/schemas/Decimal" }
+    ItemsOfIntrastatProduct:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/IntrastatProduct" } }
+    Movement:
+      type: object
+      required: [flow, source_ref, movement_date, partner_country, lines]
+      properties:
+        id: { type: string, format: uuid }
+        flow: { type: string, enum: [arrival, dispatch] }
+        source_ref: { type: string, maxLength: 100 }
+        movement_date: { $ref: "#/components/schemas/Date" }
+        partner_country: { type: string, pattern: '^[A-Z]{2}$' }
+        transaction_code: { type: string }
+        transport_mode: { type: string }
+        delivery_terms: { type: string }
+        port: { type: string }
+        status: { type: string, enum: [staged, transferred, ignored] }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [line_no, product_id, qty, value]
+            properties:
+              line_no: { type: integer, minimum: 1 }
+              product_id: { type: string, format: uuid }
+              qty: { $ref: "#/components/schemas/Decimal" }
+              value: { $ref: "#/components/schemas/Decimal" }
+    MovementsRequest:
+      type: object
+      required: [movements]
+      properties:
+        movements: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/Movement" } }
+    ItemsOfMovement:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Movement" } }
+    StagedResult:
+      type: object
+      properties:
+        staged: { type: integer }
+        duplicates: { type: integer }
+    MovementDefaults:
+      type: object
+      description: Fills what a movement does not carry; whatever stays empty is flagged by the journal's validation.
+      properties:
+        transaction_code: { type: string }
+        transport_mode: { type: string }
+        delivery_terms: { type: string }
+        port: { type: string }
+    MovementTransfer:
+      type: object
+      properties:
+        added: { type: integer }
+        skipped: { type: integer }
+        ignored: { type: integer, description: "Movements to or from the entity's own country or a country outside the EU." }
+        complete_movements: { type: integer }
+        unmapped:
+          type: array
+          items:
+            type: object
+            properties:
+              source_ref: { type: string }
+              line_no: { type: integer }
+              product_id: { type: string, format: uuid }

@@ -78,7 +78,7 @@ func TestTaxReport_QueuedOnlyWhenBookedNegativeOnCreditNoteIdempotent(t *testing
 	}
 	body := storedTaxBody(t, admin, posted.ID)
 	if len(body.Transactions) != 1 || body.Transactions[0].Code != "DE19" || body.Transactions[0].Direction != "output" ||
-		body.Transactions[0].Amount != "19.00" || body.Transactions[0].TaxDate != "2027-03-12" || !ids.Valid(body.Transactions[0].ID) {
+		body.Transactions[0].Amount != "19.00" || body.Transactions[0].BaseAmount != "100.00" || body.Transactions[0].CounterpartyCountry != "" || body.Transactions[0].TaxDate != "2027-03-12" || !ids.Valid(body.Transactions[0].ID) {
 		t.Fatalf("invoice body = %+v", body)
 	}
 
@@ -109,7 +109,7 @@ func TestTaxReport_QueuedOnlyWhenBookedNegativeOnCreditNoteIdempotent(t *testing
 	}
 }
 
-// #29: a document with no tax queues nothing; amounts per code sum to the document's tax (the figure the GL booking credits to the
+// #29: a zero-tax document still reports its base per code (zero-rated sales belong in the return); amounts per code sum to the document's tax (the figure the GL booking credits to the
 // tax account), so the tax service's settlement reconciliation ties to the booking.
 func TestTaxReport_PerCodeAmountsTieToTheDocumentTax(t *testing.T) {
 	admin, pool := testkit.DBWithApp(t)
@@ -158,9 +158,55 @@ func TestTaxReport_PerCodeAmountsTieToTheDocumentTax(t *testing.T) {
 	if _, err := s.MarkGLBooked(tctx, postedFree.ID, ids.New(), nil); err != nil {
 		t.Fatal(err)
 	}
-	var n int
-	if err := admin.QueryRow(ctx, `select count(*) from tax_transaction_report where invoice_id = $1`, postedFree.ID).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("a document without tax queued %d reports (%v)", n, err)
+	free := storedTaxBody(t, admin, postedFree.ID)
+	if len(free.Transactions) != 1 || free.Transactions[0].Amount != "0.00" || free.Transactions[0].BaseAmount != "100.00" {
+		t.Fatalf("a zero-tax document reported %+v, want one 0.00 transaction with base 100.00", free)
+	}
+}
+
+// #13: the report carries the base amount per code and, when the invoice names its customer's registration, the counterparty; a
+// credit note carries its original's counterparty and a negative base.
+func TestTaxReport_CarriesBaseAndCounterpartyForTheSalesList(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	ctx := context.Background()
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	inv := newProposal(t, ids.New())
+	inv.Lines[0].Tax = decimal.Zero
+	inv.Totals = domain.Totals{Net: decimal.NewFromInt(100), Charges: decimal.Zero, Tax: decimal.Zero, Gross: decimal.NewFromInt(100)}
+	inv.CounterpartyCountry, inv.CounterpartyVATID, inv.SupplyKind = "FR", "FR40303265045", "goods"
+	created, err := s.CreateProposal(tctx, inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := s.PostProposal(tctx, created.ID, time.Date(2027, 3, 12, 0, 0, 0, 0, time.UTC), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkGLBooked(tctx, posted.ID, ids.New(), nil); err != nil {
+		t.Fatal(err)
+	}
+	got := storedTaxBody(t, admin, posted.ID).Transactions
+	if len(got) != 1 || got[0].BaseAmount != "100.00" || got[0].CounterpartyCountry != "FR" || got[0].CounterpartyVATID != "FR40303265045" || got[0].SupplyKind != "goods" {
+		t.Fatalf("invoice transaction = %+v", got)
+	}
+	cn, err := creditNote(t, s, tctx, posted.ID, []domain.CreditQty{{LineNo: 1, Qty: decimal.NewFromInt(1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	postedCN, err := s.PostCreditNote(tctx, cn.ID, time.Date(2027, 3, 21, 0, 0, 0, 0, time.UTC), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkGLBooked(tctx, postedCN.ID, ids.New(), nil); err != nil {
+		t.Fatal(err)
+	}
+	got = storedTaxBody(t, admin, postedCN.ID).Transactions
+	if len(got) != 1 || got[0].BaseAmount != "-100.00" || got[0].CounterpartyVATID != "FR40303265045" || got[0].SupplyKind != "goods" {
+		t.Fatalf("credit note transaction = %+v", got)
 	}
 }
 

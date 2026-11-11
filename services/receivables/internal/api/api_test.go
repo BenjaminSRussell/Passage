@@ -22,18 +22,22 @@ import (
 // fakeStore answers the Store port without a database. It records the last
 // apply call so tests can assert what the handler forwarded.
 type fakeStore struct {
-	lastVersion int
-	lastPlan    store.ApplyRequest
-	lastKey     string
-	lastFilter  store.PaymentFilter
-	payment     store.Payment
-	lockbox     store.LockboxImport
-	seenFiles   map[string]bool
-	statement   statementCall
-	snapshots   store.SnapshotFilter
-	opening     store.OpeningImport
-	rmaRetries  []string
-	rmaFilter   store.RMACreditFilter
+	lastVersion   int
+	lastPlan      store.ApplyRequest
+	lastKey       string
+	lastFilter    store.PaymentFilter
+	payment       store.Payment
+	lockbox       store.LockboxImport
+	adviceOptions store.AdviceOptions
+	banks         []store.BankAccount
+	backfill      store.BackfillRequest
+	deletedBank   string
+	seenFiles     map[string]bool
+	statement     statementCall
+	snapshots     store.SnapshotFilter
+	opening       store.OpeningImport
+	rmaRetries    []string
+	rmaFilter     store.RMACreditFilter
 }
 
 func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenItem, error) {
@@ -98,6 +102,27 @@ func (f *fakeStore) ListRMACredits(_ context.Context, rf store.RMACreditFilter) 
 }
 func (f *fakeStore) SweepRMACredits(context.Context, time.Time, int) (store.RMASweepResult, error) {
 	return store.RMASweepResult{Posted: 1}, nil
+}
+
+func (f *fakeStore) BackfillGLJournals(_ context.Context, req store.BackfillRequest) (store.BackfillResult, error) {
+	f.backfill = req
+	return store.BackfillResult{Receipts: 2}, nil
+}
+func (f *fakeStore) ListBankAccounts(context.Context, string) ([]store.BankAccount, error) {
+	return f.banks, nil
+}
+func (f *fakeStore) PutBankAccount(_ context.Context, b store.BankAccount) error {
+	f.banks = append(f.banks, b)
+	return nil
+}
+func (f *fakeStore) DeleteBankAccount(_ context.Context, le, currency, ref string) error {
+	f.deletedBank = le + "|" + currency + "|" + ref
+	return nil
+}
+
+func (f *fakeStore) ApplyRemittanceAdviceWith(_ context.Context, le string, lines []domain.AdviceLine, opts store.AdviceOptions) (store.AdviceResult, error) {
+	f.adviceOptions = opts
+	return f.ApplyRemittanceAdvice(context.Background(), le, lines)
 }
 
 func (f *fakeStore) ApplyRemittanceAdvice(context.Context, string, []domain.AdviceLine) (store.AdviceResult, error) {

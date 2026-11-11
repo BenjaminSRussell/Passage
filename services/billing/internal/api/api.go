@@ -67,6 +67,7 @@ const (
 
 var (
 	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
+	countryCode  = regexp.MustCompile(`^[A-Z]{2}$`)
 	decimalText  = regexp.MustCompile(`^[0-9]{1,14}(\.[0-9]{1,6})?$`)
 	accountText  = regexp.MustCompile(`^[A-Za-z0-9._-]{1,20}$`)
 	statuses     = map[string]bool{domain.StatusProposal: true, domain.StatusPosted: true, domain.StatusPartiallySettled: true, domain.StatusSettled: true, domain.StatusReversed: true}
@@ -210,6 +211,14 @@ type proposalRequest struct {
 	ChargeAmount     string               `json:"chargeAmount,omitempty"`
 	InstallmentTerms []installmentTermDTO `json:"installmentTerms,omitempty"`
 	Lines            []lineDTO            `json:"lines"`
+	// Counterparty is the customer's tax registration, passed to the tax report for an EU sales list.
+	Counterparty *counterpartyDTO `json:"counterparty,omitempty"`
+}
+
+type counterpartyDTO struct {
+	Country    string `json:"country"`
+	VATID      string `json:"vatId,omitempty"`
+	SupplyKind string `json:"supplyKind,omitempty"`
 }
 
 type totalsDTO struct {
@@ -452,6 +461,18 @@ func (a *API) validate(req proposalRequest) (store.Invoice, []domain.Line, decim
 	inv := store.Invoice{ID: ids.New(), LegalEntityID: req.LegalEntityID, CustomerID: req.CustomerID, InvoiceAccountID: req.InvoiceAccountID,
 		Type: domain.TypeFreeText, Status: domain.StatusProposal, Currency: req.Currency, InvoiceDate: invoiceDate,
 		DueDate: invoiceDate.AddDate(0, 0, req.PaymentTermDays), PaymentTermDays: req.PaymentTermDays}
+	if c := req.Counterparty; c != nil {
+		switch {
+		case !countryCode.MatchString(c.Country):
+			fields["counterparty.country"] = "must be a 2-letter ISO 3166 code in capitals"
+		case len(c.VATID) > 20 || strings.ContainsAny(c.VATID, " \t"):
+			fields["counterparty.vatId"] = "must be at most 20 characters with no spaces"
+		case c.SupplyKind != "" && c.SupplyKind != "goods" && c.SupplyKind != "services" && c.SupplyKind != "triangular":
+			fields["counterparty.supplyKind"] = "must be goods, services or triangular"
+		default:
+			inv.CounterpartyCountry, inv.CounterpartyVATID, inv.SupplyKind = c.Country, c.VATID, c.SupplyKind
+		}
+	}
 	return inv, lines, charges, fields
 }
 

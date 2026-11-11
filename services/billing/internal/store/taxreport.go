@@ -58,11 +58,19 @@ type taxTransaction struct {
 	Direction string `json:"direction"`
 	TaxDate   string `json:"tax_date"`
 	Amount    string `json:"amount"`
+	// BaseAmount is the taxable net of the code's lines, negated on a credit note; the counterparty fields are
+	// the customer's country, VAT number and kind of supply when the invoice carries them (EU sales list).
+	BaseAmount          string `json:"base_amount,omitempty"`
+	CounterpartyCountry string `json:"counterparty_country,omitempty"`
+	CounterpartyVATID   string `json:"counterparty_vat_id,omitempty"`
+	SupplyKind          string `json:"supply_kind,omitempty"`
 }
 
 // queueTaxReport writes the PENDING report of a document just booked to the GL, inside the booking transaction: one output
-// transaction per tax code with the tax the lines already carry (never re-quoted), negated on a credit note. A document without tax
-// reports nothing. The unique (invoice, kind) makes a second call a no-op.
+// transaction per tax code with the tax the lines already carry (never re-quoted) and the lines' net as base_amount, negated on a
+// credit note. A code with a zero tax is still reported when it has a base, because zero-rated and exempt sales belong in the
+// return's base boxes and the EU sales list; it adds nothing to the settlement. A credit note carries its original's counterparty.
+// The unique (invoice, kind) makes a second call a no-op.
 func queueTaxReport(ctx context.Context, tx pgx.Tx, id string) error {
 	doc, err := scanInvoice(tx.QueryRow(ctx, `select `+invoiceColumns+` from invoice where id = $1::uuid`, id))
 	if err != nil {
@@ -73,13 +81,14 @@ func queueTaxReport(ctx context.Context, tx pgx.Tx, id string) error {
 		return err
 	}
 	creditNote := doc.Type == domain.TypeCreditNote
-	byCode := map[string]decimal.Decimal{}
+	byCode, baseByCode := map[string]decimal.Decimal{}, map[string]decimal.Decimal{}
 	for _, l := range lines {
 		byCode[l.TaxCode] = byCode[l.TaxCode].Add(l.Tax)
+		baseByCode[l.TaxCode] = baseByCode[l.TaxCode].Add(l.Net)
 	}
 	codes := make([]string, 0, len(byCode))
 	for code, tax := range byCode {
-		if !tax.IsZero() {
+		if !tax.IsZero() || !baseByCode[code].IsZero() {
 			codes = append(codes, code)
 		}
 	}
@@ -91,26 +100,36 @@ func queueTaxReport(ctx context.Context, tx pgx.Tx, id string) error {
 	body := struct {
 		Transactions []taxTransaction `json:"transactions"`
 	}{}
+	var country, vatID, kind string
+	counterpartyOf := doc.ID
+	if creditNote {
+		counterpartyOf = doc.OriginalInvoiceID
+	}
+	if err := tx.QueryRow(ctx, `select coalesce(counterparty_country, ''), coalesce(counterparty_vat_id, ''), coalesce(supply_kind, '')
+		from invoice where id = $1::uuid`, counterpartyOf).Scan(&country, &vatID, &kind); err != nil {
+		return fmt.Errorf("read counterparty: %w", err)
+	}
 	for _, code := range codes {
-		amount := byCode[code]
+		amount, base := byCode[code], baseByCode[code]
 		if creditNote {
-			amount = amount.Neg()
+			amount, base = amount.Neg(), base.Neg()
 		}
 		body.Transactions = append(body.Transactions, taxTransaction{ID: ids.New(), Code: code, Direction: taxDirectionOut,
-			TaxDate: doc.PostingDate.Format(dateLayout), Amount: amount.StringFixed(exp)})
+			TaxDate: doc.PostingDate.Format(dateLayout), Amount: amount.StringFixed(exp), BaseAmount: base.StringFixed(exp),
+			CounterpartyCountry: country, CounterpartyVATID: vatID, SupplyKind: kind})
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	kind, original := taxKindInvoice, any(nil)
+	reportKind, original := taxKindInvoice, any(nil)
 	if creditNote {
-		kind, original = taxKindCreditNote, doc.OriginalInvoiceID
+		reportKind, original = taxKindCreditNote, doc.OriginalInvoiceID
 	}
 	p, _ := tenant.FromContext(ctx)
 	if _, err := tx.Exec(ctx, `insert into tax_transaction_report (tenant_id, id, legal_entity_id, invoice_id, original_invoice_id, kind, source_ref, body)
 		values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict (tenant_id, invoice_id, kind) do nothing`,
-		p.TenantID, ids.New(), doc.LegalEntityID, doc.ID, original, kind, doc.Number, raw); err != nil {
+		p.TenantID, ids.New(), doc.LegalEntityID, doc.ID, original, reportKind, doc.Number, raw); err != nil {
 		return fmt.Errorf("queue tax report: %w", err)
 	}
 	return nil

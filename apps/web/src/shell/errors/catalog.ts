@@ -716,6 +716,7 @@ const tax: Record<string, ProblemCatalogEntry> = {
   "TAX-0011": { message: "The currency doesn't match the ledger's accounting currency.", action: "Use the ledger's accounting currency." },
   "TAX-0012": { message: "The ledger data can't be turned into a valid tax audit file.", action: TRY_LATER },
   "TAX-0013": { message: "This tax setup item is still used by something else, so it can't be deleted.", action: "Remove it from the jurisdictions, tax groups or return boxes that use it, then try again." },
+  "TAX-0014": { message: "No withholding is waiting to be remitted in this period.", action: "Check the dates, or record the payments that withheld tax first." },
 };
 
 const product: Record<string, ProblemCatalogEntry> = {
@@ -878,6 +879,7 @@ const p2pMore: Record<string, ProblemCatalogEntry> = {
   "AR-PROMISE-EXISTS": { message: "This open item already has a promise to pay that hasn't been broken.", action: "Update the existing promise, or wait until it is broken." },
   "AR-PROMISE-STATE": { message: "This promise to pay can't be changed in its current status.", action: "Reload the open item to see the promise as it is now." },
   "AR-ADVICE-MALFORMED": { message: "The remittance advice file couldn't be read.", action: "Check the row or segment named in the details, or upload the original file from the customer." },
+  "AR-BANK-NOT-FOUND": { message: "We couldn't find that bank account mapping. It may have been removed, or the link is out of date.", action: "Reload the list of bank accounts and try again." },
   "AR-GL-UNAVAILABLE": { message: "The general ledger isn't available or isn't set up for this legal entity.", action: "Try again in a few minutes. If it keeps happening, contact support with the details below." },
   "AR-JOURNAL-NOT-FOUND": { message: "We couldn't find that ledger journal. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
   "AR-JOURNAL-STATE": { message: "This ledger journal is already posted.", action: "Reload the list to see its current status." },

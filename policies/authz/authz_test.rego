@@ -1749,6 +1749,56 @@ test_tax_configuration_vat_and_intrastat_duties_reach_only_their_routes if {
 	not allowed("tax.intrastat.export", "POST", "/v1/tax/intrastat/journals/j-1/validate")
 }
 
+test_tax_certificates_recovery_layouts_reclaim_and_master_seed_reach_only_their_routes if {
+	allowed("tax.config.read", "GET", "/v1/tax/exemption-certificates")
+	allowed("tax.config.read", "GET", "/v1/tax/recovery-policies")
+	allowed("tax.config.read", "GET", "/v1/tax/vat-layouts")
+	not allowed("tax.config.read", "PUT", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "PUT", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "DELETE", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "PUT", "/v1/tax/recovery-policies/VAT19")
+	allowed("tax.config.manage", "DELETE", "/v1/tax/recovery-policies/VAT19")
+	allowed("tax.config.manage", "POST", "/v1/tax/vat-layouts/GB/apply")
+	not allowed("tax.config.read", "POST", "/v1/tax/vat-layouts/GB/apply")
+	allowed("tax.vatreturn.read", "GET", "/v1/tax/vat-reclaim")
+	not allowed("tax.config.manage", "GET", "/v1/tax/vat-reclaim")
+	allowed("tax.intrastatmaster.manage", "POST", "/v1/tax/intrastat/master:seed")
+	allowed("tax.intrastatmaster.manage", "POST", "/v1/tax/intrastat/master:import")
+	not allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/master:seed")
+	not allowed("tax.intrastat.read", "POST", "/v1/tax/intrastat/master:import")
+}
+
+test_intrastat_feed_products_and_movement_transfer_reach_only_their_routes if {
+	allowed("tax.intrastat.feed", "POST", "/v1/tax/intrastat/movements")
+	not allowed("tax.intrastat.feed", "GET", "/v1/tax/intrastat/movements")
+	not allowed("tax.intrastat.feed", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/movements")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/products")
+	allowed("tax.intrastatmaster.manage", "PUT", "/v1/tax/intrastat/products/p-1")
+	allowed("tax.intrastatmaster.manage", "DELETE", "/v1/tax/intrastat/products/p-1")
+	not allowed("tax.intrastat.read", "PUT", "/v1/tax/intrastat/products/p-1")
+	allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+	not allowed("tax.intrastat.read", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+}
+
+test_withholding_remittance_duties_reach_only_their_routes if {
+	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
+	allowed("tax.withholding.remit", "POST", "/v1/tax/withholding/remittance-runs")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/remittance-runs")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/remittance-runs/r1")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/certificates")
+	not allowed("tax.withholding.read", "POST", "/v1/tax/withholding/remittance-runs")
+	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/remittance-runs")
+	not allowed("tax.withholding.remit", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.calculate", "POST", "/v1/tax/withholding/entries")
+}
+
+test_revrec_allocate_belongs_to_maintain_only if {
+	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:allocate")
+	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:allocate")
+	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:allocate")
+}
+
 test_tax_duties_reach_only_their_routes if {
 	allowed("tax.transaction.record", "POST", "/v1/tax/transactions")
 	allowed("tax.settlement.run", "POST", "/v1/tax/settlements:run")
@@ -2557,10 +2607,21 @@ test_subscription_usage_and_due_job_belong_to_invoice_maintain if {
 test_gl_journal_routes_split_between_view_and_payment_duties if {
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals/j1:retry")
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:sweep")
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:backfill")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:backfill")
 	allowed("receivables.view", "GET", "/v1/receivables/gl-journals")
 	allowed("receivables.view", "GET", "/v1/receivables/gl-reconciliation")
 	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:sweep")
 	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals/j1:retry")
+}
+
+test_bank_account_mappings_are_read_by_view_and_written_by_their_own_duty if {
+	allowed("receivables.view", "GET", "/v1/receivables/bank-accounts")
+	allowed("receivables.bankaccount.manage", "PUT", "/v1/receivables/bank-accounts")
+	allowed("receivables.bankaccount.manage", "DELETE", "/v1/receivables/bank-accounts")
+	not allowed("receivables.view", "PUT", "/v1/receivables/bank-accounts")
+	not allowed("receivables.payment.post", "DELETE", "/v1/receivables/bank-accounts")
+	not allowed("receivables.bankaccount.manage", "GET", "/v1/receivables/bank-accounts")
 }
 
 test_asn_duties_do_not_cross if {
