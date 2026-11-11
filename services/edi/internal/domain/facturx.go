@@ -42,18 +42,9 @@ func ciiDateTime(name, iso string) string {
 
 func ciiAmount(v decimal.Decimal) string { return v.StringFixed(2) }
 
-func ciiTax(category string, percent decimal.Decimal, withAmounts bool, calc, basis decimal.Decimal) string {
-	var b strings.Builder
-	if withAmounts {
-		b.WriteString(ram("CalculatedAmount", ciiAmount(calc)))
-	}
-	b.WriteString(ram("TypeCode", "VAT"))
-	if withAmounts {
-		b.WriteString(ram("BasisAmount", ciiAmount(basis)))
-	}
-	b.WriteString(ram("CategoryCode", category))
-	b.WriteString(ram("RateApplicablePercent", rate(category, percent)))
-	return b.String()
+// ciiLineTax is the VAT of one line: type, category and rate (the amounts are in the header's breakdowns).
+func ciiLineTax(category string, percent decimal.Decimal) string {
+	return ram("TypeCode", "VAT") + ram("CategoryCode", category) + ram("RateApplicablePercent", rate(category, percent))
 }
 
 func ciiParty(p UBLParty) string {
@@ -121,7 +112,7 @@ func BuildCII(inv UBLInvoice) (string, []Issue) {
 				ram("SpecifiedLineTradeAgreement", ram("NetPriceProductTradePrice", ram("ChargeAmount", l.UnitPrice.String())))+
 				ram("SpecifiedLineTradeDelivery", `<ram:BilledQuantity unitCode="`+esc(l.UnitCode)+`">`+l.Quantity.String()+`</ram:BilledQuantity>`)+
 				ram("SpecifiedLineTradeSettlement",
-					ram("ApplicableTradeTax", ciiTax(l.Category, l.Percent, false, decimal.Zero, decimal.Zero))+
+					ram("ApplicableTradeTax", ciiLineTax(l.Category, l.Percent))+
 						ram("SpecifiedTradeSettlementLineMonetarySummation", ram("LineTotalAmount", ciiAmount(lineTotal))))))
 	}
 	agreement := ""
