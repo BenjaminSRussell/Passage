@@ -101,7 +101,7 @@ describe("data-quality rule form", () => {
     expect(await screen.findByText(/Use 2 to 63 lowercase letters/)).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
 
-    fireEvent.change(screen.getByLabelText("Rule id"), { target: { value: "vendor_tax_id" } });
+    fireEvent.change(screen.getByLabelText("Rule key"), { target: { value: "vendor_tax_id" } });
     fireEvent.change(screen.getByLabelText("Asset"), { target: { value: "core.vendor" } });
     fireEvent.change(screen.getByLabelText("Expression"), { target: { value: "tax_id" } });
     fireEvent.change(screen.getByLabelText("Owner"), { target: { value: OWNER } });
@@ -128,7 +128,7 @@ describe("data-quality rule detail", () => {
     const history = await findTable({ name: "Score history" });
     expect(within(history).getByText("2026-10-28")).toBeInTheDocument();
     expect(server.calls.find((c) => c.url.pathname.endsWith("scores"))?.url.searchParams.get("rule")).toBe("vendor_tax_id");
-    expect(screen.getByLabelText("Rule id")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Rule key")).toHaveAttribute("readonly");
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Threshold %"), { target: { value: "95" } });

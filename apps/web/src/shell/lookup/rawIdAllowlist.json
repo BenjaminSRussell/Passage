@@ -1,17 +1,5 @@
 {
   "entries": {
-    "modules/analytics/DashboardsPage.tsx": {
-      "labels": [
-        "Dashboard id"
-      ],
-      "reason": "The dashboard's own key, typed when the dashboard is created and read-only after; it does not point at another record."
-    },
-    "modules/analytics/DataQualityPage.tsx": {
-      "labels": [
-        "Rule id"
-      ],
-      "reason": "The owner is a user lookup. The rule id is the rule's own key, typed when the rule is created and read-only after; it does not point at another record."
-    },
     "modules/analytics/SchedulesPage.tsx": {
       "labels": [
         "Report id"
@@ -126,18 +114,6 @@
       ],
       "reason": "Worker, legal entity, position and compensation plan are lookups. Employments have no list route to search yet."
     },
-    "modules/hr/NewWorkerPage.tsx": {
-      "labels": [
-        "National ID"
-      ],
-      "reason": "The party is a lookup. A national ID is a government number the user types, not a record to look up."
-    },
-    "modules/hr/OfferPage.tsx": {
-      "labels": [
-        "National id"
-      ],
-      "reason": "Party, worker, legal entity and compensation plan are lookups. A national id is a government number the user types, not a record to look up."
-    },
     "modules/hr/QuestionnairesPage.tsx": {
       "labels": [
         "Schedule id"
@@ -146,20 +122,12 @@
     },
     "modules/integration/NewClientPage.tsx": {
       "labels": [
-        "Client id",
         "Sandbox tenant id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/integration/NewPartnerPage.tsx": {
-      "labels": [
-        "ISA sender id"
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
     },
     "modules/integration/NewSyncSubscriptionPage.tsx": {
       "labels": [
-        "Client id",
         "Outbound mapping id"
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
@@ -213,18 +181,6 @@
         "Ledger id"
       ],
       "reason": "The ledger service has no list route to search yet."
-    },
-    "modules/migration-factory/XrefLookupPage.tsx": {
-      "labels": [
-        "Legacy id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/migration/XrefPages.tsx": {
-      "labels": [
-        "Passage id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/party/PartyWriteCards.tsx": {
       "labels": [
@@ -329,12 +285,6 @@
       ],
       "reason": "The project category's own code, typed when the category is created and read-only after; it does not point at another record."
     },
-    "modules/projects/NewProjectPage.tsx": {
-      "labels": [
-        "Project id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
     "modules/projects/SetupPages.tsx": {
       "labels": [
         "Group id"
@@ -347,13 +297,6 @@
         "Debit account id"
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
-    "modules/purchasing/InboundPages.tsx": {
-      "labels": [
-        "Event id",
-        "Source id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
     },
     "modules/purchasing/PurchaseOrderPages.tsx": {
       "labels": [
@@ -424,12 +367,6 @@
       ],
       "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
-    "modules/sales/OneTimeFields.tsx": {
-      "labels": [
-        "Tax id"
-      ],
-      "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
     "modules/transport/BuildLoadsPage.tsx": {
       "labels": [
         "Shipment id"
@@ -438,8 +375,7 @@
     },
     "modules/transport/CheckInPage.tsx": {
       "labels": [
-        "Appointment id",
-        "Driver license id"
+        "Appointment id"
       ],
       "reason": "Site and load are lookups. Dock appointments have no route to search, and a driver license id is a number the guard types."
     },
@@ -451,16 +387,9 @@
     },
     "modules/transport/NewCarrierInvoicePage.tsx": {
       "labels": [
-        "Carrier id",
         "Freight bill id"
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/transport/NewFreightBillPage.tsx": {
-      "labels": [
-        "Carrier id"
-      ],
-      "reason": "The load is a lookup. Carriers are listed only by the carrier gateway, which is service-to-service; there is no carrier route the browser can search."
     },
     "modules/transport/NewGoodsInTransitPage.tsx": {
       "labels": [
@@ -470,7 +399,6 @@
     },
     "modules/transport/NewRateCardPage.tsx": {
       "labels": [
-        "Carrier id",
         "Service id"
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
@@ -482,29 +410,11 @@
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
     },
-    "modules/transport/NewTenderPage.tsx": {
-      "labels": [
-        "Carrier id"
-      ],
-      "reason": "The load is a lookup. Carriers are listed only by the carrier gateway, which is service-to-service; there is no carrier route the browser can search."
-    },
-    "modules/transport/RateCardsPage.tsx": {
-      "labels": [
-        "Carrier id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
-    },
     "modules/transport/RateShopPage.tsx": {
       "labels": [
         "Shipment id"
       ],
       "reason": "No lookup adapter exists for this entity yet (ledger account, dimension, unit, document and similar are follow-ups for #500)."
-    },
-    "modules/transport/TenderDetailPage.tsx": {
-      "labels": [
-        "Responding carrier id"
-      ],
-      "reason": "No lookup route or adapter for this entity yet; tracked for the follow-up to #500."
     },
     "modules/treasury/BankAccounts.tsx": {
       "labels": [
@@ -517,12 +427,6 @@
         "General ledger account id"
       ],
       "reason": "No ledger account lookup adapter exists yet (the same gap as the bank account's GL main account id); tracked with the follow-up to #500."
-    },
-    "modules/vendorgroups/VendorGroupsPage.tsx": {
-      "labels": [
-        "Existing group ID"
-      ],
-      "reason": "Gives a code to a group id vendors already carry but that has no vendor group record yet, so there is nothing to look up."
     }
   }
 }

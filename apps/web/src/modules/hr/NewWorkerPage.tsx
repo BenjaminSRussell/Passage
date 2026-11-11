@@ -125,7 +125,7 @@ export function NewWorkerPage() {
           {field("legalName", "Legal name", undefined, false, { maxLength: 200 })}
           {field("preferredName", "Preferred name", undefined, true, { maxLength: 200 })}
           {field("userId", "Sign-in user", "The user's id, so they can use self-service.", true)}
-          {field("nationalId", "National ID", "Encrypted at rest. Shown masked, for example ***-**-6789.", false, { maxLength: 32, autoComplete: "off" })}
+          {field("nationalId", "National identification number", "Encrypted at rest. Shown masked, for example ***-**-6789.", false, { maxLength: 32, autoComplete: "off" })}
           {field("bankAccount", "Bank account", "Encrypted at rest. IBAN or account number.", true, { maxLength: 34, autoComplete: "off" })}
           {failure ? (
             <div className={styles.formActions}>

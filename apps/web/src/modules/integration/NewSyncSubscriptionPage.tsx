@@ -269,7 +269,7 @@ export function NewSyncSubscriptionPage() {
           {values.authType === "oauth2-client-credentials" ? (
             <>
               {text("tokenUrl", "Token endpoint", undefined, false, { spellCheck: false })}
-              {text("clientId", "Client id")}
+              {text("clientId", "Client identifier")}
               {secret("clientSecret", "Client secret")}
               {text("scope", "Scope", undefined, true)}
             </>

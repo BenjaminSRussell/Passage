@@ -19,7 +19,7 @@ interface Values {
 export function validateBill(v: Values): { errors: Record<string, string>; input?: NewFreightBill } {
   const errors = validateLines(v.lines, "expectedLines");
   if (!UUID.test(v.loadId.trim())) errors.loadId = "Choose the load.";
-  if (!UUID.test(v.carrierId.trim())) errors.carrierId = "Enter the carrier id as a lower-case UUID.";
+  if (!UUID.test(v.carrierId.trim())) errors.carrierId = "Choose the carrier.";
   if (!CURRENCY.test(v.currency)) errors.currency = "Enter a three-letter currency code such as USD.";
   if (Object.keys(errors).length > 0) return { errors };
   return { errors, input: { loadId: v.loadId.trim(), carrierId: v.carrierId.trim(), currency: v.currency, expectedLines: cleanLines(v.lines) } };
@@ -79,7 +79,7 @@ export function NewFreightBillPage() {
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
           <LookupFormField id="bill-loadId" label="Load" entity="load" hint="The shipped load." value={values.loadId} error={errors.loadId} onChange={(loadId) => update({ loadId })} />
-          {text("carrierId", "Carrier id", "The carrier that hauls the load (UUID).")}
+          <LookupFormField id="bill-carrierId" label="Carrier" entity="vendor" hint="The carrier that hauls the load." value={values.carrierId} error={errors.carrierId} onChange={(carrierId) => update({ carrierId })} />
           {text("currency", "Currency")}
           <ChargeLinesEditor field="expectedLines" legend="Expected charges" lines={values.lines} errors={errors} onChange={(lines) => update({ lines })} />
           {failure ? (

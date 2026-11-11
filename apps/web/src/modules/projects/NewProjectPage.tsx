@@ -155,7 +155,7 @@ export function NewProjectPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New project">
-          {text("id", "Project id", "Up to 20 capital letters, digits or hyphens, for example ES-1001.", { mono: true })}
+          {text("id", "Project code", "Up to 20 capital letters, digits or hyphens, for example ES-1001.", { mono: true })}
           {text("legalEntityId", "Legal entity", "UUID of the legal entity that runs the project.", { mono: true })}
           {text("parentProjectId", "Parent project", "Set it to create a sub-project. Group, customer and contract then default to the parent's.", { mono: true, optional: true })}
           <FormField id="project-projectType" label="Project type" error={errors.projectType}>
