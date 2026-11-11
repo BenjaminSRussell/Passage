@@ -52,6 +52,13 @@ func readOpeningMapping(ctx context.Context, tx pgx.Tx, system, company string) 
 	return &t, err
 }
 
+// lockOpeningCompany serialises the writes that decide a company's opening target (the plan's mapping and the
+// first posting's pin), so neither can be recorded against the other's stale read.
+func lockOpeningCompany(ctx context.Context, tx pgx.Tx, system, company string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended('gl-opening|' || current_setting('passage.tenant_id', true) || '|' || $1 || '|' || $2, 0))`, system, company)
+	return err
+}
+
 func openingTargetMapped(company string) error {
 	return fmt.Errorf("%w: the cutover plan assigns the opening balances of %s to another legal entity or ledger", ErrOpeningTargetTaken, company)
 }
@@ -67,6 +74,9 @@ func (s *Postgres) SetOpeningMapping(ctx context.Context, planID string, system 
 			if err == pgx.ErrNoRows {
 				return ErrNotFound
 			}
+			return err
+		}
+		if err := lockOpeningCompany(ctx, tx, string(system), company); err != nil {
 			return err
 		}
 		pin, err := readOpeningTarget(ctx, tx, string(system), company)
