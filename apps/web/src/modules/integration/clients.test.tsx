@@ -147,7 +147,7 @@ describe("register API client", () => {
     };
     const { container } = renderAt("/integration/clients/new");
     expect(pageViolations(container)).toEqual([]);
-    fill("Client id", "acme-erp");
+    fill("Client identifier", "acme-erp");
     fill("Name", "Acme ERP");
     fill("Scopes", "sales.order.read\ninventory.onhand.read");
     fill("Owner e-mail", "it@acme.example");
@@ -166,7 +166,7 @@ describe("register API client", () => {
     expect(await screen.findByText(/Use 3 to 64 characters/)).toBeInTheDocument();
     expect(calls).toHaveLength(0);
 
-    fill("Client id", "acme-erp");
+    fill("Client identifier", "acme-erp");
     fill("Name", "Acme ERP");
     fill("Scopes", "sales.order.read");
     fill("Owner e-mail", "it@acme.example");

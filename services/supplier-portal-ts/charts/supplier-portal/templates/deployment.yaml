@@ -54,6 +54,24 @@ spec:
               value: {{ .Values.upstreams.receiving | quote }}
             - name: PARTY_URL
               value: {{ .Values.upstreams.party | quote }}
+            - name: PAYABLES_URL
+              value: {{ .Values.upstreams.payables | quote }}
+            - name: SCAN_ALLOW_UNSCANNED
+              value: {{ .Values.scan.allowUnscanned | quote }}
+            {{- if .Values.scan.clamavAddr }}
+            - name: CLAMAV_ADDR
+              value: {{ .Values.scan.clamavAddr | quote }}
+            - name: CLAMAV_TIMEOUT_MS
+              value: {{ .Values.scan.clamavTimeoutMs | quote }}
+            {{- end }}
+            {{- if or .Values.registration.tenantId .Values.registration.legalEntityId }}
+            - name: REGISTRATION_TENANT_ID
+              value: {{ required "registration.tenantId is required with registration.legalEntityId" .Values.registration.tenantId | quote }}
+            - name: REGISTRATION_LEGAL_ENTITY_ID
+              value: {{ required "registration.legalEntityId is required with registration.tenantId" .Values.registration.legalEntityId | quote }}
+            {{- end }}
+            - name: PUBLIC_RATE_PER_HOUR
+              value: {{ .Values.publicRatePerHour | quote }}
             - name: PASSAGE_SERVICE_NAME
               value: supplier-portal
             - name: PASSAGE_SERVICE_SIGNING_KEY

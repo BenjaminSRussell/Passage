@@ -15,6 +15,7 @@ import {
 import { AMOUNT, CURRENCY, DATE, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 interface RowValues {
   origin: string;
@@ -52,7 +53,7 @@ const emptyRow = (): RowValues => ({ origin: "*", destination: "*", breakFrom: "
 /** Checks that mirror RateCard.Validate in the service, and the request the form sends. */
 export function validateCard(v: CardValues): { errors: Errors; input?: NewRateCard } {
   const errors: Errors = {};
-  if (!UUID.test(v.carrierId.trim())) errors.carrierId = "Enter the carrier id as a lower-case UUID.";
+  if (!UUID.test(v.carrierId.trim())) errors.carrierId = "Choose the carrier.";
   if (!UUID.test(v.serviceId.trim())) errors.serviceId = "Enter the carrier service id as a lower-case UUID.";
   if (!CURRENCY.test(v.currency)) errors.currency = "Enter a three-letter currency code such as USD.";
   if (!DATE.test(v.validFrom)) errors.validFrom = "Enter the first day the card applies.";
@@ -173,7 +174,7 @@ export function NewRateCardPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("carrierId", "Carrier id", "The carrier party (UUID).", false, { className: styles.mono })}
+          <LookupFormField id="card-carrierId" label="Carrier" entity="vendor" hint="The carrier party." value={values.carrierId} error={errors.carrierId} onChange={(carrierId) => update({ carrierId })} />
           {text("serviceId", "Service id", "The carrier service (UUID).", false, { className: styles.mono })}
           <FormField id="card-basis" label="Basis" error={errors.basis}>
             {(control) => (

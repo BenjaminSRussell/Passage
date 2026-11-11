@@ -15,6 +15,7 @@ import {
 import { ApiError, createEco, getEco, listEcos, releaseEco, type Eco, type EcoReplacement } from "./api/client";
 import { EcoImpactPanel } from "./impact";
 import styles from "./pages.module.css";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const ecoStates = ["draft", "submitted", "approved", "scheduled", "released", "rejected", "cancelled"];
 const releasable = ["submitted", "approved", "scheduled"];
@@ -339,9 +340,7 @@ export function EcoCreatePage({ onCreated, onCancel, initialEcrId = "" }: { onCr
             </FormField>
           </div>
           <div className={styles.field}>
-            <FormField id="new-eco-ecr" label="Change request ID" optional hint="An approved ECR that lists every product this ECO replaces." error={fields.ecrId}>
-              {(control) => <Input {...control} value={ecrId} onChange={(e) => setEcrId(e.target.value)} />}
-            </FormField>
+            <LookupFormField id="new-eco-ecr" label="Change request" entity="ecr" optional hint="An approved ECR that lists every product this ECO replaces." value={ecrId} error={fields.ecrId} onChange={setEcrId} />
           </div>
           {pairs.map((pair, index) => (
             <Fragment key={pair.key}>

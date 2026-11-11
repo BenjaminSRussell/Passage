@@ -1,3 +1,4 @@
+import { ProblemMessage } from "../../shell/errors";
 import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, Select } from "../../shell/ui";
 import { describeProblem, newKey, postDecision, type DecisionKind, type DecisionLine, type OrderView, type Problem } from "./api/client";
@@ -133,7 +134,7 @@ export function UsageDecisionForm({ order, onPosted }: { order: OrderView; onPos
             ) : null}
             {failure ? (
               <Alert tone="danger" title="Could not post the decision" live="alert">
-                {failure.code === "conflict_version" ? "The order changed since you opened it. Reload and decide again." : failure.message} ({failure.code})
+                <ProblemMessage problem={failure} message={failure.code === "conflict_version" ? "The order changed since you opened it. Reload and decide again." : undefined} />
               </Alert>
             ) : null}
           </div>

@@ -126,6 +126,7 @@ func (a *API) Register(r chi.Router) {
 	r.Route("/v1/ledger", func(r chi.Router) {
 		r.Use(a.periodGate)
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Post("/ledgers", a.createLedger)
+		r.With(authz.RequireDuty(dutyRead)).Get("/ledgers", a.listLedgers)
 		r.With(authz.RequireAnyDuty(dutyRead, dutyLedgerLookup)).Get("/ledgers/{id}", a.getLedger)
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Patch("/ledgers/{id}", a.patchLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)
@@ -437,6 +438,28 @@ func (a *API) createLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, created)
+}
+
+// listLedgers returns the ledgers the caller may see, optionally of one legal entity (?legalEntityId=), in pages.
+func (a *API) listLedgers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	after, ok := pageCursor(w, r)
+	if !ok {
+		return
+	}
+	entity := r.URL.Query().Get("legalEntityId")
+	if entity != "" && !ids.Valid(entity) {
+		validationFailed(w, r, map[string]string{"legalEntityId": "must be a UUID"})
+		return
+	}
+	ledgers, next, err := a.store.ListLedgers(r.Context(), entity, after)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	writePage(w, ledgers, next)
 }
 
 func (a *API) getLedger(w http.ResponseWriter, r *http.Request) {

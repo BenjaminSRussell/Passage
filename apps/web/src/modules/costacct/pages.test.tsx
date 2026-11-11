@@ -150,7 +150,7 @@ describe("CostObjectsPage", () => {
       "GET /api/v1/controlling/cost-objects": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/costacct");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No cost objects yet")).toBeInTheDocument();
@@ -171,7 +171,7 @@ describe("CostObjectsPage", () => {
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "CC-A" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Maintenance" } });
     fireEvent.click(screen.getByRole("button", { name: "Save cost object" }));
-    expect(await screen.findByText(/CST-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/cost object code already exists/)).toBeInTheDocument();
     dup = false;
     fireEvent.click(screen.getByRole("button", { name: "Save cost object" }));
     expect(await screen.findByRole("heading", { name: "CC-A Maintenance" })).toBeInTheDocument();
@@ -315,7 +315,7 @@ describe("Allocation runs", () => {
     fireEvent.click(await screen.findByLabelText("CC-A Maintenance"));
     fireEvent.click(screen.getByLabelText("CC-B IT"));
     fireEvent.click(screen.getByRole("button", { name: "Run allocation" }));
-    expect(await screen.findByText(/CST-0005/)).toBeInTheDocument();
+    expect(await screen.findByText(/the cycle is closed/)).toBeInTheDocument();
   });
 });
 

@@ -132,8 +132,8 @@ describe("batch record list (slice 15)", () => {
     renderAt("/processmfg/batch-records");
     await screen.findByText("No batch records yet");
     fireEvent.click(screen.getByRole("button", { name: "Compile record" }));
-    expect(await screen.findByText("Enter the batch id as a UUID.")).toBeInTheDocument();
-    fill("Batch id", BATCH);
+    expect(await screen.findByText("Choose the batch.")).toBeInTheDocument();
+    fill("Batch", BATCH);
     fireEvent.click(screen.getByRole("button", { name: "Compile record" }));
     expect(await screen.findByText("Batch record of L-100")).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST")!;
@@ -150,7 +150,7 @@ describe("batch record list (slice 15)", () => {
     handler = (_url, init) => (init.method === "POST" ? { status: 409, body: { code: "PMF-0119", detail: "item has no active batch record profile" } } : { status: 200, body: { items: [] } });
     renderAt("/processmfg/batch-records");
     await screen.findByText("No batch records yet");
-    fill("Batch id", BATCH);
+    fill("Batch", BATCH);
     fireEvent.click(screen.getByRole("button", { name: "Compile record" }));
     expect(await findAlert()).toHaveTextContent("PMF-0119");
   });

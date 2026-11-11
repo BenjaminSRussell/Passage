@@ -141,6 +141,7 @@ export function InvoicesPage() {
         columns={columns}
         filters={filters}
         useRows={useInvoiceRows}
+        search={(i) => ({ number: i.invoiceNumber })}
         getRowKey={(i) => i.id}
         empty={{
           title: "No vendor invoices",

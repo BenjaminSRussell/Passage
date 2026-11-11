@@ -38,6 +38,7 @@ type Store interface {
 	GetAccount(ctx context.Context, chartCode, number string) (Account, error)
 	CreateLedger(ctx context.Context, in Ledger) (Ledger, error)
 	GetLedger(ctx context.Context, id string) (Ledger, error)
+	ListLedgers(ctx context.Context, legalEntityID, after string) ([]Ledger, string, error)
 	UpdateLedgerSettings(ctx context.Context, id string, version int, in LedgerSettings) (Ledger, error)
 	PostEntry(ctx context.Context, in PostInput) (EntryResult, error)
 	ReverseEntry(ctx context.Context, in ReverseInput) (EntryResult, error)

@@ -42,5 +42,6 @@ return <div>...{prompt}</div>;
 
 - `src/modules/receivables/NewPaymentPage.tsx` (record a payment).
 - `src/modules/purchasing/RequisitionPages.tsx` (`RequisitionForm`).
+- `src/modules/sales/NewOrderPage.tsx`, `src/modules/sales/QuotationsPage.tsx` (`NewQuotationPage`), `src/modules/billing/NewFreeTextInvoicePage.tsx` and `src/modules/receiving/NewArrivalPage.tsx` (the unsaved-changes guard on a create form).
 
 Tests: `src/shell/ui/forms.test.tsx`.

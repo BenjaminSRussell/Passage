@@ -20,6 +20,7 @@ import { dash, QUANTITY, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 /** Duty that creates rework orders and receives their output; enforced by the service (FR-24.18). */
 export const REWORK_DUTY = "production.batch-order.write";
@@ -141,7 +142,7 @@ export function NewReworkOrderPage() {
     event.preventDefault();
     const found: Record<string, string> = {};
     if (!UUID.test(formulaId.trim())) found.formulaId = "Enter the rework formula id as a UUID.";
-    if (!UUID.test(batchId.trim())) found.batchId = "Enter the batch id as a UUID.";
+    if (!UUID.test(batchId.trim())) found.batchId = "Choose the batch.";
     for (const [name, value, text] of [
       ["batchSize", batchSize, "the batch size"],
       ["batchQty", batchQty, "the quantity of the batch"],
@@ -191,15 +192,11 @@ export function NewReworkOrderPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="rw-formula" label="Rework formula id" error={errors.formulaId}>
-            {(c) => <Input {...c} value={formulaId} onChange={(e) => on(setFormulaId)(e.target.value)} invalid={Boolean(errors.formulaId)} />}
-          </FormField>
+          <LookupFormField id="rw-formula" label="Rework formula" entity="formula" value={formulaId} error={errors.formulaId} onChange={(id) => on(setFormulaId)(id)} />
           <FormField id="rw-size" label="Batch size" error={errors.batchSize}>
             {(c) => <Input {...c} inputMode="decimal" value={batchSize} onChange={(e) => on(setBatchSize)(e.target.value)} invalid={Boolean(errors.batchSize)} />}
           </FormField>
-          <FormField id="rw-batch" label="Batch id" error={errors.batchId}>
-            {(c) => <Input {...c} value={batchId} onChange={(e) => on(setBatchId)(e.target.value)} invalid={Boolean(errors.batchId)} />}
-          </FormField>
+          <LookupFormField id="rw-batch" label="Batch" entity="batch" value={batchId} error={errors.batchId} onChange={(id) => on(setBatchId)(id)} />
           <FormField id="rw-batch-qty" label="Quantity of the batch" error={errors.batchQty}>
             {(c) => <Input {...c} inputMode="decimal" value={batchQty} onChange={(e) => on(setBatchQty)(e.target.value)} invalid={Boolean(errors.batchQty)} />}
           </FormField>
