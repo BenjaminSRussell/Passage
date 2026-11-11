@@ -25,10 +25,19 @@ const (
 type EffectivePermissionsAPI struct {
 	pool      *pgxpool.Pool
 	catalogue *Catalogue
+	// operatorTenantID is the tenant in which operator-only duties grant; empty means none.
+	operatorTenantID string
 }
 
 func NewEffectivePermissionsAPI(pool *pgxpool.Pool, catalogue *Catalogue) *EffectivePermissionsAPI {
 	return &EffectivePermissionsAPI{pool: pool, catalogue: catalogue}
+}
+
+// WithOperatorTenant names the operator tenant, the only tenant whose users can exercise operator-only duties; outside it
+// such a duty is reported among the ignored roles, as authz.rego grants nothing for it there.
+func (a *EffectivePermissionsAPI) WithOperatorTenant(operatorTenantID string) *EffectivePermissionsAPI {
+	a.operatorTenantID = operatorTenantID
+	return a
 }
 
 func requireAnyDuty(duties ...string) func(http.Handler) http.Handler {
@@ -129,8 +138,9 @@ func (a *EffectivePermissionsAPI) get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	duties, ignored := []string{}, []string{}
+	operator := a.operatorTenantID != "" && p.TenantID == a.operatorTenantID
 	for _, role := range roles {
-		if a.catalogue.HasDuty(role) {
+		if a.catalogue.HasDuty(role) && (operator || !a.catalogue.OperatorOnly(role)) {
 			duties = append(duties, role)
 		} else {
 			ignored = append(ignored, role)

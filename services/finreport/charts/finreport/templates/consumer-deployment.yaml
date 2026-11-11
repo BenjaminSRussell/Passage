@@ -34,7 +34,7 @@ spec:
             defaultMode: 0440
       containers:
         - name: finreport-consumer
-          image: {{ if .Values.image.digest }}{{ printf "%s@%s" .Values.image.repository .Values.image.digest | quote }}{{ else }}{{ printf "%s:%s" .Values.image.repository (.Values.image.tag | default "latest") | quote }}{{ end }}
+          image: {{ if .Values.image.digest }}{{ printf "%s@%s" (include "passage.imageRepository" $) .Values.image.digest | quote }}{{ else }}{{ printf "%s:%s" (include "passage.imageRepository" $) (.Values.image.tag | default "latest") | quote }}{{ end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: [consume]
           securityContext:
@@ -43,6 +43,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

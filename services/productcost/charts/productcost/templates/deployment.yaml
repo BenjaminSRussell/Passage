@@ -35,6 +35,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

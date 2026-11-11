@@ -46,6 +46,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             {{- include "receiving.env" . | nindent 12 }}
           {{- if or .Values.serviceIdentity.signingKeySecret .Values.fieldCrypt.keysSecret }}
           volumeMounts:

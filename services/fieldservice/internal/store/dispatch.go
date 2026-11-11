@@ -51,10 +51,14 @@ type Technician struct {
 	HomeLatitude     *float64 `json:"homeLatitude,omitempty"`
 	HomeLongitude    *float64 `json:"homeLongitude,omitempty"`
 	TruckLocationID  *string  `json:"truckLocationId,omitempty"`
-	MaxDailyMinutes  int      `json:"maxDailyMinutes"`
-	OvertimeAllowed  bool     `json:"overtimeAllowed"`
-	Active           bool     `json:"active"`
-	Version          int      `json:"version"`
+	// TruckSiteID and TruckWarehouseID, with the location, address the truck's stock in
+	// inventory (BR-45.7); both or neither.
+	TruckSiteID      *string `json:"truckSiteId,omitempty"`
+	TruckWarehouseID *string `json:"truckWarehouseId,omitempty"`
+	MaxDailyMinutes  int     `json:"maxDailyMinutes"`
+	OvertimeAllowed  bool    `json:"overtimeAllowed"`
+	Active           bool    `json:"active"`
+	Version          int     `json:"version"`
 }
 
 func (t Technician) dispatchable() domain.Technician {
@@ -64,12 +68,12 @@ func (t Technician) dispatchable() domain.Technician {
 }
 
 const technicianColumns = `id::text, code, name, worker_id::text, legal_entity_id::text, territory_ids::text[], skills, time_zone, shift_days,
-	shift_start_minute, shift_end_minute, home_lat::float8, home_lon::float8, truck_location_id::text, max_daily_minutes, overtime_allowed, active, version`
+	shift_start_minute, shift_end_minute, home_lat::float8, home_lon::float8, truck_location_id::text, truck_site_id::text, truck_warehouse_id::text, max_daily_minutes, overtime_allowed, active, version`
 
 func scanTechnician(row pgx.Row) (Technician, error) {
 	var t Technician
 	err := row.Scan(&t.ID, &t.Code, &t.Name, &t.WorkerID, &t.LegalEntityID, &t.TerritoryIDs, &t.Skills, &t.TimeZone, &t.ShiftDays,
-		&t.ShiftStartMinute, &t.ShiftEndMinute, &t.HomeLatitude, &t.HomeLongitude, &t.TruckLocationID, &t.MaxDailyMinutes, &t.OvertimeAllowed, &t.Active, &t.Version)
+		&t.ShiftStartMinute, &t.ShiftEndMinute, &t.HomeLatitude, &t.HomeLongitude, &t.TruckLocationID, &t.TruckSiteID, &t.TruckWarehouseID, &t.MaxDailyMinutes, &t.OvertimeAllowed, &t.Active, &t.Version)
 	if t.Skills == nil {
 		t.Skills = []string{}
 	}
@@ -109,11 +113,11 @@ func (s *Postgres) CreateTechnician(ctx context.Context, in Technician, key, req
 			in.Skills = []string{}
 		}
 		if _, err := tx.Exec(ctx, `insert into service_technician (tenant_id, id, code, name, worker_id, legal_entity_id, territory_ids, skills, time_zone,
-			shift_days, shift_start_minute, shift_end_minute, home_lat, home_lon, truck_location_id, max_daily_minutes, overtime_allowed, active,
+			shift_days, shift_start_minute, shift_end_minute, home_lat, home_lon, truck_location_id, truck_site_id, truck_warehouse_id, max_daily_minutes, overtime_allowed, active,
 			idempotency_key, request_hash)
-			values ($1, $2, $3, $4, $5, $6, $7::uuid[], $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+			values ($1, $2, $3, $4, $5, $6, $7::uuid[], $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
 			tid, id, in.Code, in.Name, in.WorkerID, in.LegalEntityID, in.TerritoryIDs, in.Skills, in.TimeZone, in.ShiftDays, in.ShiftStartMinute,
-			in.ShiftEndMinute, in.HomeLatitude, in.HomeLongitude, in.TruckLocationID, in.MaxDailyMinutes, in.OvertimeAllowed, in.Active,
+			in.ShiftEndMinute, in.HomeLatitude, in.HomeLongitude, in.TruckLocationID, in.TruckSiteID, in.TruckWarehouseID, in.MaxDailyMinutes, in.OvertimeAllowed, in.Active,
 			nullable(key), requestHash); err != nil {
 			return err
 		}
@@ -185,10 +189,10 @@ func (s *Postgres) UpdateTechnician(ctx context.Context, id string, version int,
 		}
 		if _, err := tx.Exec(ctx, `update service_technician set name = $3, worker_id = $4, territory_ids = $5::uuid[], skills = $6, time_zone = $7,
 			shift_days = $8, shift_start_minute = $9, shift_end_minute = $10, home_lat = $11, home_lon = $12, truck_location_id = $13,
-			max_daily_minutes = $14, overtime_allowed = $15, active = $16, version = version + 1, updated_at = now()
+			truck_site_id = $17, truck_warehouse_id = $18, max_daily_minutes = $14, overtime_allowed = $15, active = $16, version = version + 1, updated_at = now()
 			where tenant_id = $1 and id = $2`,
 			tid, id, in.Name, in.WorkerID, in.TerritoryIDs, in.Skills, in.TimeZone, in.ShiftDays, in.ShiftStartMinute, in.ShiftEndMinute,
-			in.HomeLatitude, in.HomeLongitude, in.TruckLocationID, in.MaxDailyMinutes, in.OvertimeAllowed, in.Active); err != nil {
+			in.HomeLatitude, in.HomeLongitude, in.TruckLocationID, in.MaxDailyMinutes, in.OvertimeAllowed, in.Active, in.TruckSiteID, in.TruckWarehouseID); err != nil {
 			return err
 		}
 		out, err = getTechnician(ctx, tx, tid, id, false)

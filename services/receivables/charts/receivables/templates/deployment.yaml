@@ -17,9 +17,15 @@ spec:
         app.kubernetes.io/name: passage-receivables
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- if .Values.sftpPoll.sources }}
+      # The image runs as the distroless nonroot user (65532); the SFTP key Secret is root-owned, so the pod's fsGroup and a
+      # group-readable mode are what let the service read it.
+      securityContext:
+        fsGroup: 65532
+      {{- end }}
       containers:
         - name: receivables
-          image: "{{ .Values.image.repository }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ .Values.image.tag }}{{ end }}"
+          image: "{{ (include "passage.imageRepository" $) }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ .Values.image.tag }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -27,6 +33,7 @@ spec:
             - name: admin
               containerPort: {{ .Values.service.adminPort }}
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: PASSAGE_ENV
               value: production
             - name: SERVICE_NAME
@@ -42,6 +49,34 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.secretName }}
                   key: {{ .Values.database.secretKey }}
+            {{- if .Values.autoApply.tenantIds }}
+            - name: RECEIVABLES_AUTO_APPLY_TENANT_IDS
+              value: {{ join "," .Values.autoApply.tenantIds | quote }}
+            {{- if .Values.autoApply.at }}
+            - name: RECEIVABLES_AUTO_APPLY_AT
+              value: {{ .Values.autoApply.at | quote }}
+            {{- else }}
+            - name: RECEIVABLES_AUTO_APPLY_INTERVAL
+              value: {{ .Values.autoApply.interval | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.sftpPoll.sources }}
+            - name: RECEIVABLES_SFTP_SOURCES
+              value: {{ .Values.sftpPoll.sources | toJson | quote }}
+            - name: RECEIVABLES_SFTP_KEY_FILE
+              value: /var/run/passage/sftp/{{ .Values.sftpPoll.keySecretKey }}
+            {{- if .Values.sftpPoll.at }}
+            - name: RECEIVABLES_SFTP_POLL_AT
+              value: {{ .Values.sftpPoll.at | quote }}
+            {{- else }}
+            - name: RECEIVABLES_SFTP_POLL_INTERVAL
+              value: {{ .Values.sftpPoll.interval | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if .Values.sftpPoll.sources }}
+          volumeMounts:
+            - { name: sftp-key, mountPath: /var/run/passage/sftp, readOnly: true }
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -52,3 +87,10 @@ spec:
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.sftpPoll.sources }}
+      volumes:
+        - name: sftp-key
+          secret:
+            secretName: {{ required "sftpPoll.keySecret names the Secret holding the client private key" .Values.sftpPoll.keySecret }}
+            defaultMode: 0440
+      {{- end }}

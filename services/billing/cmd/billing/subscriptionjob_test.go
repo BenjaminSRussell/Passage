@@ -68,3 +68,53 @@ func TestSubscriptionJob_Config(t *testing.T) {
 		}
 	}
 }
+
+func TestSubscriptionJob_DailyScheduleConfigAndNextRun(t *testing.T) {
+	good := ids.New()
+	job, err := newSubscriptionJob(env(map[string]string{"BILLING_SUBSCRIPTION_JOB_TENANT_IDS": good, "BILLING_SUBSCRIPTION_JOB_AT": "03:00"}), nil)
+	if err != nil || job == nil || job.at != 180 {
+		t.Fatalf("03:00 = %+v, %v", job, err)
+	}
+	if j, err := newSubscriptionJob(env(map[string]string{"BILLING_SUBSCRIPTION_JOB_TENANT_IDS": good}), nil); err != nil || j.at != -1 {
+		t.Fatalf("no schedule keeps the interval: %+v, %v", j, err)
+	}
+	for name, m := range map[string]map[string]string{
+		"not a time":          {"BILLING_SUBSCRIPTION_JOB_AT": "3am"},
+		"out of range":        {"BILLING_SUBSCRIPTION_JOB_AT": "25:00"},
+		"schedule + interval": {"BILLING_SUBSCRIPTION_JOB_AT": "03:00", "BILLING_SUBSCRIPTION_JOB_INTERVAL": "2h"},
+	} {
+		m["BILLING_SUBSCRIPTION_JOB_TENANT_IDS"] = good
+		if _, err := newSubscriptionJob(env(m), nil); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+	for _, c := range []struct{ now, want string }{
+		{"2027-03-31T02:59:59Z", "2027-03-31T03:00:00Z"},
+		{"2027-03-31T03:00:00Z", "2027-04-01T03:00:00Z"},
+		{"2027-03-31T23:00:00Z", "2027-04-01T03:00:00Z"},
+		{"2027-12-31T10:00:00+02:00", "2028-01-01T03:00:00Z"},
+	} {
+		now, _ := time.Parse(time.RFC3339, c.now)
+		if got := nextDaily(now, 180).Format(time.RFC3339); got != c.want {
+			t.Errorf("after %s the next run is %s, want %s", c.now, got, c.want)
+		}
+	}
+}
+
+func TestSubscriptionJob_DailyLoopWaitsForItsTimeAndStopsOnCancel(t *testing.T) {
+	billing := &recordingBiller{entities: map[string][]string{}}
+	job := &subscriptionJob{interval: time.Hour, at: 180, tenants: []string{ids.New()}, billing: billing, now: time.Now}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { job.loop(ctx); close(done) }()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("the daily loop ignored cancellation")
+	}
+	if len(billing.runs) != 0 {
+		t.Errorf("the daily loop ran %d times at start, want none before its time", len(billing.runs))
+	}
+}

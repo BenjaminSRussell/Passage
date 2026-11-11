@@ -104,6 +104,11 @@ channels:
     messages:
       packingSlipCancelled:
         $ref: '#/components/messages/PackingSlipCancelledConsumed'
+  serviceWorkOrderCompleted:
+    address: passage.service.workorder.completed
+    messages:
+      workOrderCompleted:
+        $ref: '#/components/messages/WorkOrderCompletedConsumed'
 operations:
   receiveReceiptPosted:
     action: receive
@@ -129,6 +134,12 @@ operations:
     messages:
       - $ref: '#/channels/fulfillmentPackingSlip/messages/packingSlipCancelled'
     summary: Book the exact mirror of each delivery line booked for the cancelled slip
+  receiveWorkOrderCompleted:
+    action: receive
+    channel: { $ref: '#/channels/serviceWorkOrderCompleted' }
+    messages:
+      - $ref: '#/channels/serviceWorkOrderCompleted/messages/workOrderCompleted'
+    summary: Issue each consumed PART line from the technician's truck at DEDUCTED (origin SERVICE_LINE), then draft a replenishment transfer order when the truck is below its minimum (BR-45.7)
   publishTransactionPosted:
     action: send
     channel: { $ref: '#/channels/transactionPosted' }
@@ -215,6 +226,16 @@ components:
         legal_entity_id, posting_date and per line order_line_id, qty. The delivery booked under the slip number gives
         quantity, cases and value; a delivery not booked yet is retried with back-off before the event is parked.
       contentType: application/json
+      payload: { $ref: '#/components/schemas/ConsumedPayload' }
+    WorkOrderCompletedConsumed:
+      name: dev.passage.service.workorder.completed.v1
+      title: Service work order completed (consumed)
+      summary: >-
+        Field service completed a work order. Read: workOrderId, number, legalEntityId, completedAt, currency, truck
+        (siteId, warehouseId) and per line lineId, kind, consumedQty, productId, unit. A PART line with a product and a
+        consumed quantity is issued from the truck; negative truck stock is refused (INV-NEG-001) unless
+        INV_ALLOW_NEGATIVE_TRUCK is on, and a technician with no truck parks the event (INV-TRK-003).
+      contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/ConsumedPayload' }
     TransactionPosted:
       title: Inventory transaction posted
@@ -490,7 +511,7 @@ components:
       properties:
         transactionId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE], description: 'Origin type of the transaction; OWNERSHIP_CHANGE is the receipt leg of an ownership-change line; TRANSFER_IN is the destination receipt leg of a TRANSFER journal line; PURCH_LINE, RECEIPT_LINE, SALES_LINE and PROD_LINE are registered by other services through transactions:apply' }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE, CONSIGNMENT_LINE, OWNERSHIP_CHANGE, TRANSFER_IN, PURCH_LINE, RECEIPT_LINE, SALES_LINE, PROD_LINE, SERVICE_LINE], description: 'Origin type of the transaction; OWNERSHIP_CHANGE is the receipt leg of an ownership-change line; TRANSFER_IN is the destination receipt leg of a TRANSFER journal line; SERVICE_LINE is the truck issue of a completed service work order line; PURCH_LINE, RECEIPT_LINE, SALES_LINE and PROD_LINE are registered by other services through transactions:apply' }
         journalId: { type: [string, 'null'], format: uuid, description: 'Inventory journal of a journal line (both legs of an ownership change or of a transfer journal line); null for other origins' }
         referenceId: { type: [string, 'null'], description: 'Source document of a non-journal origin: the blocking, transfer or replenishment order id, or the document reference a caller of transactions:apply gave; null for journal lines' }
         originId: { type: string, format: uuid }

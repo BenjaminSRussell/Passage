@@ -132,6 +132,41 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/revrec/contracts/{id}:allocate:
+    post:
+      operationId: allocateContract
+      summary: Modify a contract by adding obligations for products first invoiced after it was opened.
+      x-passage-duty: revrec.maintain (RevRecMaintain)
+      description: >
+        The added goods or services are accounted for as a separate contract (ASC 606-10-25-12): `transactionPriceIncrease`
+        is allocated over the new obligations only, the contract's transaction price grows by it, and the obligations and
+        schedules already there keep their allocation. A completed contract is reopened when a new obligation has
+        recognition left. The new lines are numbered after the last. REV-0105 (409) when the contract already has an
+        obligation for a product, REV-0104 (409) for a cancelled contract. If-Match, when sent, must carry the contract
+        version the caller reviewed. Emits dev.passage.revrec.contract.allocated.v1 again with every obligation.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: false, schema: { type: string }, description: 'Contract version as an entity tag, e.g. "1".' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AllocateRequest" }
+      responses:
+        "200":
+          description: The modified contract.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contract" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /v1/revrec/milestones/{id}:satisfy:
     post:
       operationId: satisfyMilestone
@@ -199,7 +234,10 @@ paths:
         `id` is the product id. The revrec invoice consumer opens one contract per invoiced order with one
         obligation per product, its invoiced net as the SSP. A RATABLE template spreads the obligation over
         `termMonths` from the invoice posting date; a product with no template, or POINT_IN_TIME, is recognized
-        at the posting date. A contract that already exists is never changed.
+        at the posting date; MILESTONE waits for `:satisfy`; USAGE has no schedule until usage posts and keeps the
+        contract open. An invoice of an order that already has a contract changes nothing already there: a product
+        the contract has no obligation for yet is added to it at its invoiced net (a separate contract in the sense
+        of ASC 606-10-25-12, see `:allocate`).
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -211,8 +249,8 @@ paths:
               required: [method]
               additionalProperties: false
               properties:
-                method: { type: string, enum: [POINT_IN_TIME, RATABLE] }
-                termMonths: { type: integer, minimum: 1, maximum: 120, description: "Required for RATABLE, absent for POINT_IN_TIME." }
+                method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
+                termMonths: { type: integer, minimum: 1, maximum: 120, description: "Required for RATABLE, absent for the other methods." }
       responses:
         "200":
           description: Stored template.
@@ -424,7 +462,7 @@ components:
       required: [productId, method, updatedAt]
       properties:
         productId: { type: string, format: uuid }
-        method: { type: string, enum: [POINT_IN_TIME, RATABLE] }
+        method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
         termMonths: { type: integer }
         updatedAt: { type: string, format: date-time }
     PreviewRequest:
@@ -516,6 +554,13 @@ components:
               termStart: { type: string, format: date, description: "Required for RATABLE." }
               termEnd: { type: string, format: date, description: "Required for RATABLE; on or after termStart." }
               satisfiedOn: { type: string, format: date, description: "Required for POINT_IN_TIME (the transfer date); refused for other methods." }
+    AllocateRequest:
+      type: object
+      required: [transactionPriceIncrease, obligations]
+      additionalProperties: false
+      properties:
+        transactionPriceIncrease: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "The price of the added obligations, allocated over them." }
+        obligations: { $ref: "#/components/schemas/ContractRequest/properties/obligations" }
     ContractSummary:
       type: object
       required: [id, legalEntityId, orderId, customerId, currency, transactionPrice, recognized, remaining, residualRule, ratableBasis, contractDate, status, version]

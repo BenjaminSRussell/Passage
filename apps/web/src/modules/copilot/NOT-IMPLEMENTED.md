@@ -11,9 +11,9 @@ agent runtime's new `GET`/`POST /api/v1/agents/kill-switch`.
 
 | Deliverable / criterion | Status | Reason |
 |---|---|---|
-| Server-sent streaming response from `POST /api/v1/copilot/chat` (FR-47.3, first-token p95 < 2 s, 9.47.10) | later slice of PSG-47 | The client side is built and the panel renders streamed tokens. The BFF must send `token`/`done`/`error` frames; that server is `passage-copilot-bff`, outside this module's paths |
+| Server-sent streaming response from `POST /api/v1/copilot/chat` (FR-47.3, first-token p95 < 2 s, 9.47.10) | partly built | `services/agents-ts` serves the route and sends `token`/`done` frames, but the provider layer is not a streaming API: the answer is complete before the first frame, so first-token latency equals full-answer latency. Provider-side streaming is a later slice |
 | Screens for the rest of the agent runtime: token budget status, provider and failover status (9.47.6) | later slice of PSG-47 | The kill switch screen is built. `services/agents-ts` serves no budget or provider endpoint yet (9.47.5 `GET /api/v1/agents/budgets/{tenant}` comes with the persisted budgets) |
-| `POST /api/v1/copilot/chat` server (copilot BFF) | later slice of PSG-47 | The BFF is a separate service (`passage-copilot-bff`), not in this module's paths |
+| `POST /api/v1/copilot/chat` server | built | Served by `services/agents-ts` (`src/runtime/copilot.ts`): read tools as the user, duty gate AGT-0203, 5-minute per-user cache, budget hold, redaction, one audited run per turn. The `explain` mode reads only what the tools return; the knowledge search tool behind AGT-0212 is not built |
 | `Ctrl+/` opens the copilot with the current record context (9.47.6) | later slice of PSG-47 | Needs the shell's keyboard and record context hooks (shell owner, wave 5) |
 | Explain-this-record reads the record's audit trail and related documents (FR-47.3) | later slice of PSG-47 | The panel sends `recordRef`; the server side does the reading |
 | Mode remembered per workspace per user: the panel saves and restores the mode through an injected `memory` store (`domain.ts`, `CopilotPanel`) | handoff | The shell (wave 5) must pass the browser store and the signed-in user id and workspace. Without it the mode is not remembered |

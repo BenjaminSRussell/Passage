@@ -76,7 +76,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", a.Metrics())
+	admin.Handle("/metrics", httpx.WithMetrics(a.Metrics()))
 	admin.HandleFunc("/readyz", ready(st.Ping))
 
 	ctx, cancel := context.WithCancel(ctx)

@@ -53,7 +53,10 @@ type journalLine struct {
 // journalSpec is a journal receivables owes the ledger, stored in the transaction of its cause.
 type journalSpec struct {
 	LegalEntityID, SourceType, SourceID, SourceKey, DocumentID, PostingDate, Currency string
-	Lines                                                                             []journalLine
+	// BankRef names the bank account the cash came through (the statement's account id) so that its ledger account replaces 1000;
+	// empty uses the legal entity's default for the currency.
+	BankRef string
+	Lines   []journalLine
 }
 
 func debit(account string, amount decimal.Decimal, text string) journalLine {
@@ -90,6 +93,19 @@ func enqueueJournal(ctx context.Context, tx pgx.Tx, tenantID string, j journalSp
 	if len(lines) < 2 {
 		return nil
 	}
+	bank := ""
+	for i := range lines {
+		if lines[i].Account != domain.AccountBank {
+			continue
+		}
+		if bank == "" {
+			var err error
+			if bank, err = bankLedgerAccount(ctx, tx, tenantID, j.LegalEntityID, j.Currency, j.BankRef); err != nil {
+				return err
+			}
+		}
+		lines[i].Account = bank
+	}
 	raw, err := json.Marshal(lines)
 	if err != nil {
 		return err
@@ -101,11 +117,12 @@ func enqueueJournal(ctx context.Context, tx pgx.Tx, tenantID string, j journalSp
 	return err
 }
 
-// receiptJournal owes the ledger the cash of a received payment: Dr 1000 bank / Cr 1205 unapplied cash. Applying the
+// receiptJournal owes the ledger the cash of a received payment: Dr the bank account (1000 unless the legal entity maps its bank
+// accounts, see ar_bank_account) / Cr 1205 unapplied cash. Applying the
 // payment moves it from 1205 to 1200 (applyJournal), so 1205 always equals the payments' unapplied amounts.
 func receiptJournal(ctx context.Context, tx pgx.Tx, tenantID string, pay Payment) error {
 	return enqueueJournal(ctx, tx, tenantID, journalSpec{LegalEntityID: pay.LegalEntityID, SourceType: JournalPaymentReceipt, SourceID: pay.ID,
-		SourceKey: "receipt:" + pay.ID, DocumentID: "PAY-" + pay.ID, PostingDate: pay.ValueDate, Currency: pay.Currency,
+		SourceKey: "receipt:" + pay.ID, DocumentID: "PAY-" + pay.ID, PostingDate: pay.ValueDate, Currency: pay.Currency, BankRef: deref(pay.BankAccountRef),
 		Lines: []journalLine{debit(domain.AccountBank, pay.Amount, "Payment received"), credit(domain.AccountUnappliedCash, pay.Amount, "Unapplied cash")}})
 }
 

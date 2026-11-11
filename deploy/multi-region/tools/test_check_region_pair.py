@@ -271,6 +271,51 @@ class TestCheck(unittest.TestCase):
         )
 
 
+US_EAST = """
+region:
+  id: eastus2
+  role: PRIMARY
+  provider: aks
+postgres:
+  primary:
+    host: passage-pg-rw.centralus.passage.internal
+backup:
+  store: azure-blob
+  azure:
+    storageAccount: acct1
+    storageAccountRegion: eastus2
+    container: pg-backups
+kafka:
+  localAlias: eastus2
+  remoteAlias: centralus
+mm2:
+  sourceAlias: eastus2
+  targetAlias: centralus
+"""
+
+US_CENTRAL = """
+region:
+  id: centralus
+  role: PASSIVE
+  provider: aks
+postgres:
+  primary:
+    host: passage-pg-rw.eastus2.passage.internal
+backup:
+  store: azure-blob
+  azure:
+    storageAccount: acct2
+    storageAccountRegion: centralus
+    container: pg-backups
+kafka:
+  localAlias: centralus
+  remoteAlias: eastus2
+mm2:
+  sourceAlias: eastus2
+  targetAlias: centralus
+"""
+
+
 class TestMain(unittest.TestCase):
     def _run(self, *argv: str) -> tuple[int, str]:
         buf = io.StringIO()
@@ -290,7 +335,74 @@ class TestMain(unittest.TestCase):
     def test_repository_values_pass(self):
         code, text = self._run()
         self.assertEqual(code, 0, text)
-        self.assertIn("REGION PAIR PASSED: eu-central, eu-west", text)
+        self.assertIn("values: eu-central, eu-west", text)
+        self.assertIn("us: centralus, eastus2", text)
+
+    def _profile_layout(self, root: Path, east: str, central: str, subdir: str = "us") -> list[str]:
+        values = root / "values" / subdir
+        values.mkdir(parents=True)
+        (values / "eastus2.yaml").write_text(east, encoding="utf-8")
+        (values / "centralus.yaml").write_text(central, encoding="utf-8")
+        chart_path = root / "chart-values.yaml"
+        chart_path.write_text(CHART, encoding="utf-8")
+        return ["--values-dir", str(values), "--chart-values", str(chart_path)]
+
+    def test_us_pair_passes_gcc_and_commercial(self):
+        for selector in ("gcc", "commercial", "commercial+hipaa"):
+            code, text = self._run("--values-dir", str(crp.VALUES_DIR / "us"), "--cloud-profile", selector)
+            self.assertEqual(code, 0, text)
+
+    def test_a_region_outside_allowed_regions_fails(self):
+        code, text = self._run("--values-dir", str(crp.VALUES_DIR), "--cloud-profile", "gcc")
+        self.assertEqual(code, 1)
+        self.assertIn("eu-west: region is not in the gcc allowedRegions", text)
+        code, text = self._run("--values-dir", str(crp.VALUES_DIR / "us"), "--cloud-profile", "gcc-high")
+        self.assertEqual(code, 1)
+        self.assertIn("eastus2: region is not in the gcc-high allowedRegions", text)
+
+    def test_region_cloud_profile_in_the_file_is_enforced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            east = US_EAST.replace("  provider: aks", "  provider: aks\n  cloudProfile: gcc")
+            central = US_CENTRAL.replace("  provider: aks", "  provider: aks\n  cloudProfile: gcc")
+            self.assertEqual(self._run(*self._profile_layout(Path(tmp), east, central))[0], 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            east = US_EAST.replace("eastus2", "eastus2").replace("  provider: aks", "  provider: aks\n  cloudProfile: gcc-high")
+            central = US_CENTRAL.replace("  provider: aks", "  provider: aks\n  cloudProfile: gcc-high")
+            code, text = self._run(*self._profile_layout(Path(tmp), east, central))
+            self.assertEqual(code, 1, text)
+
+    def test_files_naming_different_profiles_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            east = US_EAST.replace("  provider: aks", "  provider: aks\n  cloudProfile: gcc")
+            central = US_CENTRAL.replace("  provider: aks", "  provider: aks\n  cloudProfile: commercial")
+            code, text = self._run(*self._profile_layout(Path(tmp), east, central))
+            self.assertEqual(code, 1)
+            self.assertIn("different cloud profiles", text)
+
+    def test_aks_backups_must_be_azure_blob_in_the_same_allowed_region(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = self._profile_layout(Path(tmp), US_EAST.replace("store: azure-blob", "store: s3"), US_CENTRAL)
+            code, text = self._run(*argv, "--cloud-profile", "gcc")
+            self.assertEqual(code, 1)
+            self.assertIn("needs backup.store azure-blob", text)
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = self._profile_layout(Path(tmp), US_EAST.replace("storageAccountRegion: eastus2", "storageAccountRegion: westeurope"), US_CENTRAL)
+            code, text = self._run(*argv, "--cloud-profile", "gcc")
+            self.assertEqual(code, 1)
+            self.assertIn("expected the region itself", text)
+            self.assertIn("westeurope' is not in the gcc allowedRegions", text)
+
+    def test_backup_destination_must_be_on_the_profile_blob_suffix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            east = US_EAST.replace("    container: pg-backups", "    container: pg-backups\n  destinationPath: https://acct.blob.core.usgovcloudapi.net/pg/")
+            code, text = self._run(*self._profile_layout(Path(tmp), east, US_CENTRAL), "--cloud-profile", "gcc")
+            self.assertEqual(code, 1)
+            self.assertIn("must be an https URL on *.blob.core.windows.net", text)
+
+    def test_unknown_profile_is_reported(self):
+        code, text = self._run("--values-dir", str(crp.VALUES_DIR / "us"), "--cloud-profile", "azure-stack")
+        self.assertEqual(code, 1)
+        self.assertIn("unknown cloud profile", text)
 
     def test_two_primaries_exit_one(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -679,6 +679,17 @@ func TestRoleAssignmentGuards(t *testing.T) {
 		decode[assignmentRow](t, assign(operator, map[string]any{"userId": userID, "role": dutyTenants}), http.StatusCreated)
 	})
 
+	t.Run("operator-only ops duties are grantable only in the operator tenant", func(t *testing.T) {
+		for _, role := range []string{"ops.failover.execute", "ops.region.view", "ops.region.report"} {
+			wantProblem(t, assign(c, map[string]any{"userId": userID, "role": role}), http.StatusForbidden, "AUTH-0003")
+		}
+		if got := count(t, f.app, f.tenantA, "", `select count(*) from identity_role_assignments where role like 'ops.%'`); got != 0 {
+			t.Fatalf("a refused ops grant left %d rows", got)
+		}
+		operator := caller{tenantID: f.operator, user: "operator-1", duties: []string{dutyRoles, dutyAllScope, dutyTenantAdmin}}
+		decode[assignmentRow](t, assign(operator, map[string]any{"userId": userID, "role": "ops.failover.execute"}), http.StatusCreated)
+	})
+
 	t.Run("past validity is refused beyond the clock-skew allowance", func(t *testing.T) {
 		now := time.Now().UTC()
 		p := wantProblem(t, assign(c, map[string]any{"userId": userID, "role": "party.vendor.view", "validFrom": now.Add(-time.Hour)}), http.StatusBadRequest, "COM-0001")

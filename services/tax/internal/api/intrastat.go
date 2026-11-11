@@ -24,6 +24,8 @@ func (a *API) registerIntrastat(r chi.Router) {
 	read, master, manage, export := authz.RequireDuty(dutyIntrastatRead), authz.RequireDuty(dutyIntrastatMaster),
 		authz.RequireDuty(dutyIntrastatManage), authz.RequireDuty(dutyIntrastatExport)
 	r.With(read).Get("/v1/tax/intrastat/master/{kind}", a.listMaster)
+	r.With(master).Post("/v1/tax/intrastat/master:seed", a.seedMaster)
+	r.With(master).Post("/v1/tax/intrastat/master:import", a.importMaster)
 	r.With(master).Put("/v1/tax/intrastat/master/{kind}/{code}", a.putMaster)
 	r.With(master).Delete("/v1/tax/intrastat/master/{kind}/{code}", a.deleteMaster)
 	r.With(read).Get("/v1/tax/intrastat/journals", a.listJournals)
@@ -36,6 +38,7 @@ func (a *API) registerIntrastat(r chi.Router) {
 	r.With(manage).Put("/v1/tax/intrastat/journals/{id}/lines/{lineNo}", a.putLine)
 	r.With(manage).Delete("/v1/tax/intrastat/journals/{id}/lines/{lineNo}", a.deleteLine)
 	r.With(export).Get("/v1/tax/intrastat/journals/{id}/export", a.export)
+	a.registerIntrastatFeed(r)
 }
 
 func masterKind(r *http.Request) (string, error) {
@@ -287,4 +290,61 @@ func (a *API) export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="intrastat-%s-%s.csv"`, j.Flow, j.PeriodFrom.Format("2006-01")))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(buf.Bytes())
+}
+
+type seedRequest struct {
+	// Kinds names the lists to seed; none seeds every kind.
+	Kinds []string `json:"kinds"`
+}
+
+// seedMaster adds the standard lists the tenant does not have yet and never overwrites an entry it edited.
+func (a *API) seedMaster(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	var req seedRequest
+	if r.ContentLength != 0 {
+		if err := httpx.Decode(r, &req); err != nil {
+			a.reject(w, r, err)
+			return
+		}
+	}
+	entries, err := domain.SeedEntries(req.Kinds)
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	res, err := a.config.ImportMaster(r.Context(), entries, false)
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+type importRequest struct {
+	Entries   []domain.MasterEntry `json:"entries"`
+	Overwrite bool                 `json:"overwrite"`
+}
+
+// importMaster loads master data in bulk (for example a CN8 table); existing entries are kept unless overwrite is set.
+func (a *API) importMaster(w http.ResponseWriter, r *http.Request) {
+	if !a.configReady(w, r) {
+		return
+	}
+	var req importRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	if err := domain.ValidateMasterImport(req.Entries); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	res, err := a.config.ImportMaster(r.Context(), req.Entries, req.Overwrite)
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
 }

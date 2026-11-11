@@ -470,6 +470,83 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/load-payables:
+    post:
+      operationId: loadPackRunPayables
+      summary: Load the open AP lines of a run into payables as opening batches and reconcile the batches
+      description: |
+        For a run started with `load.payables`: sends its pending AP rows (`ledger` AP) to payables,
+        POST /v1/payables/opening-batches, in batches of at most 1000 rows, as the service
+        `migration-factory`. Payables takes a batch all or nothing with a control total per currency
+        (the factory sends the totals of the rows in the batch) and amounts in whole minor units. The
+        batch key is derived from the import source and the rows (`mf-ap-<importSource>-<hash>`), so
+        the same rows are the same request on every try and payables answers a repeat as a replay.
+        A refusal that names rows (422 AP-OPB-001, AP-OPB-004: unknown vendor, bad date, reference
+        already held by another batch) stores those rows as REJECTED with payables' reason and sends
+        the rest of the batch again at once. A 5xx, a 429 or a timeout is retried with backoff and
+        then leaves the rows pending (PARTIAL; call again to resume). A refusal of the whole request
+        (control totals that do not add up, a changed batch under an old key) stops the load as
+        FAILED with 502 MIG-1552 and the rows stay pending; a refused service token is 502 MIG-1551.
+        Rows equal to what payables already accepted under the import source are SKIPPED, so a rerun
+        of an unchanged snapshot sends nothing. Once no row is pending, the batches payables holds
+        for the legal entity (GET /v1/payables/opening-batches, every page) are summed for the
+        factory's batch keys of the import source and compared with what the factory sent: item
+        count, and the total per currency in minor units. A difference is MISMATCH; totals that
+        cannot be read are UNRECONCILED. The lines are control totals of the run named
+        `target.payables.*`. While AP lines are not loaded and reconciled the run stays staged in the
+        go/no-go (`payables_staged`); a RECONCILED load with no rejected row clears it. Without
+        PAYABLES_URL and a service signing key the answer is 503 MIG-1550. One load runs at a time per
+        import source and legal entity (409 MIG-1522); a run older than one already loaded is refused
+        (409 MIG-1525); a run without `load.payables` is 409 MIG-1553.
+        Writes dev.passage.migration.pack.loaded.v1 with target `payables`.
+      x-passage-duty: migration.factory.run
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The AP load after this pass.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayablesLoad"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/payables-load:
+    get:
+      operationId: getPayablesLoad
+      summary: Status, reconciliation lines and first rejects of a run's payables load
+      description: |
+        `reconciliation` holds the run's `target.payables.*` control totals (factory side as source,
+        payables as target). `rejects` lists up to 50 REJECTED AP rows. 409 MIG-1553 when the run was
+        started without `load.payables`.
+      x-passage-duty: migration.factory.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The AP load.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayablesLoadDetail"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
   /api/v1/migration/runs/{id}/target-load:
     get:
       operationId: getTargetLoad
@@ -1393,6 +1470,18 @@ paths:
         (BR-49.7). A document the ledger
         refuses is listed in `rejected` and shows as TB variances; any other ledger failure is 502
         MIG-1533 and the replay can be repeated. Without a configured ledger the answer is 503 MIG-1530.
+        Subledger documents (49-4): `subledger` carries the period's AR, AP, INV and FA documents (an
+        invoice, credit note, payment, inventory movement or asset transaction with its signed effect
+        on the balance of its `key`: the party for AR and AP, `item@site` for INV, the asset for FA).
+        They are posted area by area, in the same posting-date-then-seq order, through the subledger
+        port of the area, each under a fixed idempotency key; the period movement of every key is
+        read back and diffed against the legacy side (`legacySubledger` when given, else the
+        documents' own sums) as the INV, AP, AR and FA tuples of the same parallel run, with the
+        same per-document RND-001 tolerance. A document the subledger refuses is in `rejected`
+        (with its `area`) and shows as a variance. Documents of an area no port posts are 503
+        MIG-1534 before anything is posted; a subledger that fails mid-replay is 502 MIG-1535 and
+        the replay can be repeated. A replay of subledger documents alone (no `documents`) needs
+        neither the ledger nor `ledgerId`.
       x-passage-duty: migration.factory.run
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1402,7 +1491,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [period, sourceSystem, legalEntityId, ledgerId, revenue, documents]
+              required: [period, sourceSystem, legalEntityId, revenue]
               properties:
                 period: {type: string, pattern: "^[0-9]{4}-[0-9]{2}$"}
                 sourceSystem: {type: string, enum: [AX2012, D365FO, SAPECC, S4HANA]}
@@ -1438,6 +1527,33 @@ paths:
                       account: {type: string}
                       currency: {type: string}
                       amount: {type: string}
+                subledger:
+                  type: array
+                  items:
+                    type: object
+                    required: [seq, documentId, area, kind, postingDate, key, currency, amount]
+                    properties:
+                      seq: {type: integer, minimum: 1}
+                      documentId: {type: string}
+                      area: {type: string, enum: [AR, AP, INV, FA]}
+                      kind:
+                        type: string
+                        enum: [INVOICE, CREDIT_NOTE, PAYMENT, ADJUSTMENT, RECEIPT, ISSUE, TRANSFER, ACQUISITION, DEPRECIATION, DISPOSAL]
+                        description: "AR and AP: INVOICE, CREDIT_NOTE, PAYMENT, ADJUSTMENT. INV: RECEIPT, ISSUE, TRANSFER, ADJUSTMENT. FA: ACQUISITION, DEPRECIATION, DISPOSAL, ADJUSTMENT."
+                      postingDate: {type: string, format: date}
+                      key: {type: string, description: "Party (AR, AP), item@site (INV) or asset (FA); no '|'."}
+                      currency: {type: string}
+                      amount: {type: string, description: "Signed effect on the balance: an invoice, receipt or acquisition is positive, a credit note, payment, issue, depreciation or disposal negative."}
+                legacySubledger:
+                  type: array
+                  items:
+                    type: object
+                    required: [area, key, currency, amount]
+                    properties:
+                      area: {type: string, enum: [AR, AP, INV, FA]}
+                      key: {type: string}
+                      currency: {type: string}
+                      amount: {type: string, description: "The legacy ledger's net movement of the key in the period."}
       responses:
         "201":
           description: The stored parallel run with its variances, the number of documents posted and the rejected ones.
@@ -1784,7 +1900,11 @@ components:
         ledger:
           type: string
           enum: [AR, AP]
-          description: Default AR. An AP record is NOT_AVAILABLE at the target (payables has no opening-item API yet).
+          description: Default AR. An AP record is NOT_AVAILABLE unless the load names `payables`, then it is staged for the payables opening-batch load.
+        vendorId:
+          type: string
+          format: uuid
+          description: Passage vendor id of an AP record. Defaults to load.payables.vendorIds[party], then to the party when that is a UUID; a record with none is rejected MIG-REF-UNRESOLVED.
         documentNumber:
           type: string
           description: Defaults to the legacy id.
@@ -1835,6 +1955,21 @@ components:
           additionalProperties:
             type: string
             format: uuid
+        payables:
+          type: object
+          additionalProperties: false
+          description: |
+            Stages the run's AP records (ledger AP) for the payables opening-batch load, POST /migration/runs/{id}/load-payables.
+            Without it AP records are NOT_AVAILABLE. An AP amount carries the ledger sign (owed to the vendor is a credit,
+            negative); a positive AP amount (a vendor debit balance) is rejected MIG-LOAD-AP-DEBIT-BALANCE, an amount with a
+            fraction of a minor unit MIG-LOAD-AP-PRECISION.
+          properties:
+            vendorIds:
+              type: object
+              description: Legacy vendor id to Passage vendor id. A record may carry `vendorId` instead; a vendor that is itself a UUID needs no entry.
+              additionalProperties:
+                type: string
+                format: uuid
     PackRunRequest:
       type: object
       required: [sourceSystem, sourceCompany, cutoffTs, freezeTs, parties, records]
@@ -2171,7 +2306,8 @@ components:
           type: string
           enum: [open_items.amount, open_items.amount_by_account, open_items.count, gl_balances.balance, gl_balances.nonzero_count,
             gl_balances.trial_balance, gl_balances.control_account, onhand.quantity, onhand.value, onhand.value_entity, onhand.inventory_account, bank_balances.balance, bank_balances.balance_entity, bank_balances.count, open_orders.open_quantity, open_orders.open_value, open_orders.line_count, open_orders.order_count, project_wip.cost, project_wip.sales, project_wip.wip_cost, project_wip.wip_sales,
-            target.receivables.item_count, target.receivables.debit_open, target.receivables.credit_open, target.receivables.net_open]
+            target.receivables.item_count, target.receivables.debit_open, target.receivables.credit_open, target.receivables.net_open,
+            target.payables.item_count, target.payables.total_minor]
         key:
           type: object
           additionalProperties:
@@ -2353,6 +2489,44 @@ components:
               entryId: {type: string, description: The journal entry the ledger booked.}
               alreadyPosted: {type: boolean, description: True when an earlier call posted it; nothing was sent now.}
               postedAt: {type: string, format: date-time}
+    PayablesLoad:
+      type: object
+      required: [runId, target, legalEntityId, importSource, status, clean, staged, loaded, unchanged, skipped, rejected, pending, attempts, version]
+      properties:
+        runId: {type: string, format: uuid}
+        target: {type: string, enum: [payables]}
+        legalEntityId: {type: string, format: uuid}
+        importSource: {type: string}
+        status:
+          type: string
+          enum: [STAGED, LOADING, PARTIAL, UNRECONCILED, MISMATCH, RECONCILED, FAILED]
+          description: Like the receivables load; MISMATCH when the batches payables holds differ from what the factory sent.
+        clean: {type: boolean, description: RECONCILED with no row pending or rejected.}
+        staged: {type: integer}
+        loaded: {type: integer, description: Rows in batches payables stored now.}
+        unchanged: {type: integer, description: Rows in batches payables already held.}
+        skipped: {type: integer, description: Rows equal to what payables accepted earlier, not sent.}
+        rejected: {type: integer}
+        pending: {type: integer}
+        attempts: {type: integer}
+        lastError: {type: string}
+        startedAt: {type: string, format: date-time}
+        finishedAt: {type: string, format: date-time}
+        version: {type: integer}
+    PayablesLoadDetail:
+      allOf:
+        - $ref: "#/components/schemas/PayablesLoad"
+        - type: object
+          required: [reconciliation, rejects]
+          properties:
+            reconciliation:
+              type: array
+              items:
+                $ref: "#/components/schemas/ControlTotal"
+            rejects:
+              type: array
+              items:
+                $ref: "#/components/schemas/TargetRow"
     TargetLoad:
       type: object
       required: [runId, target, legalEntityId, importSource, status, clean, staged, created, updated, unchanged, skipped, rejected, notAvailable, pending, attempts, version]

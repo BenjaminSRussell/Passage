@@ -12,7 +12,7 @@ Requires Envoy Gateway v1.4 or newer: `localJWKS` on the JWT provider and `share
 
 ## Routes and listeners
 
-Each service has an `HTTPRoute` named after it. `/api/v1/<svc>` is rewritten to `/v1/<svc>` (the BFF convention from #199); `/v1/<svc>` passes through for partners and agents. The one exception is the `inbox` route (My work, `GET /v1/inbox`), which is served by the `batch` Service. Health endpoints are not routed. Add a service by adding its HTTPRoute and listing it in the `targetRefs` of the BackendTrafficPolicy (the SecurityPolicy targets the Gateway); `deploy/scripts/test_gateway.py` fails if a route is left out.
+Each service has an `HTTPRoute` named after it. `/api/v1/<svc>` is rewritten to `/v1/<svc>` (the BFF convention from #199); `/v1/<svc>` passes through for partners and agents. Exceptions: `inbox` (My work, `GET /v1/inbox`) is served by the `batch` Service, `data` by `metadata` (port 80) and `controlling` by `costacct`. Health endpoints are not routed. Add a service by adding its HTTPRoute and listing it in the `targetRefs` of the BackendTrafficPolicy (the SecurityPolicy targets the Gateway); `deploy/scripts/test_gateway.py` fails if a route is left out.
 
 The Gateway has two listeners. `https` (443, TLS terminate, Secret `passage-api-tls`, to be issued by cert-manager or supplied by the environment) is the listener for stage and prod. `http-dev` (80) is for dev only; remove it in any non-dev environment.
 

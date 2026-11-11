@@ -48,6 +48,7 @@ spec:
             capabilities:
               drop: [ALL]
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: TEMPORAL_ADDRESS
               value: {{ .Values.temporal.address | quote }}
             - name: TEMPORAL_NAMESPACE

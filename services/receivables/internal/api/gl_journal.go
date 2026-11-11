@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/store"
 )
 
+var glAccountPattern = regexp.MustCompile(`^[0-9A-Za-z._-]{1,20}$`)
+
 var glJournalStatuses = map[string]bool{"PENDING": true, "POSTED": true}
 
 // glJournalRoutes mounts the ledger journal operations (30-2): the owed journals, the sweep, the retry of one and the
@@ -20,6 +23,7 @@ var glJournalStatuses = map[string]bool{"PENDING": true, "POSTED": true}
 func (a *API) glJournalRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/gl-journals", a.listGLJournals)
 	r.With(authz.RequireDuty(dutyPayment)).Post("/gl-journals:sweep", a.sweepGLJournals)
+	r.With(authz.RequireDuty(dutyPayment)).Post("/gl-journals:backfill", a.backfillGLJournals)
 	r.Post("/gl-journals/{ref}", a.glJournalAction)
 	r.With(authz.RequireDuty(dutyView)).Get("/gl-reconciliation", a.glReconciliation)
 }
@@ -140,6 +144,53 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 	out, err := a.store.GLReconcile(r.Context(), le, currency, asOf)
 	if err != nil {
 		a.fail("reconcile gl", w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+type backfillRequest struct {
+	LegalEntityID string `json:"legalEntityId"`
+	// OpeningAccount and OpeningDate switch on the opening-item journals (both or neither).
+	OpeningAccount string `json:"openingAccount"`
+	OpeningDate    string `json:"openingDate"`
+}
+
+// backfillGLJournals queues the journals owed for payments recorded before 30-2 and, when asked, for opening-item imports.
+func (a *API) backfillGLJournals(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req backfillRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if !ids.Valid(req.LegalEntityID) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
+	if (req.OpeningAccount == "") != (req.OpeningDate == "") {
+		fields["openingAccount"] = "give the opening account and the opening date together, or neither"
+	}
+	if req.OpeningAccount != "" && !glAccountPattern.MatchString(req.OpeningAccount) {
+		fields["openingAccount"] = "must be a ledger account number of at most 20 letters, digits, dots, dashes or underscores"
+	}
+	if req.OpeningDate != "" {
+		if _, err := store.ParseDay(req.OpeningDate); err != nil {
+			fields["openingDate"] = "must be YYYY-MM-DD"
+		}
+	}
+	if len(fields) > 0 {
+		writeFields(w, r, fields)
+		return
+	}
+	if !scopeAllows(w, r, req.LegalEntityID) {
+		return
+	}
+	out, err := a.store.BackfillGLJournals(r.Context(), store.BackfillRequest{LegalEntityID: req.LegalEntityID, OpeningAccount: req.OpeningAccount, OpeningDate: req.OpeningDate})
+	if err != nil {
+		a.fail("backfill gl journals", w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)

@@ -65,16 +65,19 @@ func (s *Store) RecordTransactions(ctx context.Context, txns []domain.Txn) (int,
 	inserted := 0
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		for _, t := range txns {
-			var base any
+			var base, recoverable any
 			if t.Base != nil {
 				base = t.Base.Decimal
 			}
+			if t.Recoverable != nil {
+				recoverable = t.Recoverable.Decimal
+			}
 			tag, err := tx.Exec(ctx, `insert into tax_transaction (tenant_id, id, legal_entity_id, code, direction, tax_date, amount,
-					base_amount, counterparty_country, counterparty_vat_id, supply_kind)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9, ''), nullif($10, ''), nullif($11, ''))
+					base_amount, counterparty_country, counterparty_vat_id, supply_kind, recoverable_amount)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9, ''), nullif($10, ''), nullif($11, ''), $12)
 				on conflict (tenant_id, legal_entity_id, id) do nothing`,
 				p.TenantID, t.ID, p.LegalEntityID, t.Code, t.Direction, t.TaxDate.Time, t.Amount.Decimal,
-				base, t.CounterpartyCountry, t.CounterpartyVATID, t.SupplyKind)
+				base, t.CounterpartyCountry, t.CounterpartyVATID, t.SupplyKind, recoverable)
 			if err != nil {
 				return fmt.Errorf("record tax transaction %s: %w", t.ID, err)
 			}
@@ -86,9 +89,10 @@ func (s *Store) RecordTransactions(ctx context.Context, txns []domain.Txn) (int,
 			if err := tx.QueryRow(ctx, `select exists (select 1 from tax_transaction where tenant_id = $1 and legal_entity_id = $2 and id = $3
 				and code = $4 and direction = $5 and tax_date = $6 and amount = $7
 				and base_amount is not distinct from $8 and counterparty_country is not distinct from nullif($9, '')
-				and counterparty_vat_id is not distinct from nullif($10, '') and supply_kind is not distinct from nullif($11, ''))`,
+				and counterparty_vat_id is not distinct from nullif($10, '') and supply_kind is not distinct from nullif($11, '')
+				and recoverable_amount is not distinct from $12)`,
 				p.TenantID, p.LegalEntityID, t.ID, t.Code, t.Direction, t.TaxDate.Time, t.Amount.Decimal,
-				base, t.CounterpartyCountry, t.CounterpartyVATID, t.SupplyKind).Scan(&identical); err != nil {
+				base, t.CounterpartyCountry, t.CounterpartyVATID, t.SupplyKind, recoverable).Scan(&identical); err != nil {
 				return fmt.Errorf("compare tax transaction %s: %w", t.ID, err)
 			}
 			if !identical {
@@ -343,4 +347,39 @@ func lockPending(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int) 
 		items = append(items, r)
 	}
 	return items, rows.Err()
+}
+
+// LedgerConfigEntities lists the legal entities of the caller's tenant that have a ledger configuration, so a scheduled settlement can
+// run once for each under a principal scoped to it.
+func (s *Store) LedgerConfigEntities(ctx context.Context) ([]string, error) {
+	return s.entityList(ctx, `select distinct legal_entity_id::text from tax_ledger_config where tenant_id = $1`)
+}
+
+// RecommitEntities lists the legal entities of the caller's tenant with a recommit queued and waiting.
+func (s *Store) RecommitEntities(ctx context.Context) ([]string, error) {
+	return s.entityList(ctx, `select distinct legal_entity_id::text from tax_recommit_queue where tenant_id = $1 and status = 'pending'`)
+}
+
+func (s *Store) entityList(ctx context.Context, query string) ([]string, error) {
+	p, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("tax: no principal in context")
+	}
+	var out []string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, p.TenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			out = append(out, id)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

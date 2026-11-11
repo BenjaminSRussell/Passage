@@ -10,3 +10,4 @@ import "./outbound";
 import "./promotions";
 import "./salesops";
 import "./servicecases";
+import "./receivables-journals";

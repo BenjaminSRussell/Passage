@@ -31,9 +31,9 @@ spec:
       containers:
         - name: revrec-consumer
           {{- if .Values.image.digest }}
-          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          image: "{{ (include "passage.imageRepository" $) }}@{{ .Values.image.digest }}"
           {{- else }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ (include "passage.imageRepository" $) }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: [consume]
@@ -43,6 +43,7 @@ spec:
             - name: admin
               containerPort: {{ .Values.service.adminPort }}
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: SERVICE_NAME
               value: revrec
             - name: ADMIN_ADDR

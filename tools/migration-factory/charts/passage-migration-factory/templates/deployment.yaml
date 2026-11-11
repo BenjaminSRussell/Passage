@@ -20,9 +20,9 @@ spec:
       containers:
         - name: migration-factory
           {{- if .Values.image.digest }}
-          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          image: "{{ (include "passage.imageRepository" $) }}@{{ .Values.image.digest }}"
           {{- else }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ (include "passage.imageRepository" $) }}:{{ .Values.image.tag }}"
           {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
@@ -47,6 +47,10 @@ spec:
             {{- if .Values.receivables.url }}
             - name: RECEIVABLES_URL
               value: {{ .Values.receivables.url | quote }}
+            {{- end }}
+            {{- if .Values.payables.url }}
+            - name: PAYABLES_URL
+              value: {{ .Values.payables.url | quote }}
             {{- end }}
             {{- if .Values.signing.secretName }}
             - name: PASSAGE_SERVICE_NAME

@@ -23,7 +23,9 @@ data:
               severity: {{ .Values.pagerDuty.severity | quote }}
             annotations:
               summary: p95 latency exceeds the Passage SLO
-{{- if .Values.pagerDuty.enabled }}
+{{- /* global.pagerDutyAllowed comes from the cloud profile (#599): a profile whose egress allowlist has no PagerDuty
+       (gcc, gcc-high, dod, china) renders no paging receiver; route alerts to an in-boundary receiver instead. */}}
+{{- if and .Values.pagerDuty.enabled (ne (toString ((.Values.global | default dict).pagerDutyAllowed)) "false") }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -39,7 +41,8 @@ data:
     receivers:
       - name: pagerduty
         pagerduty_configs:
-          - routing_key_file: /etc/alertmanager/secrets/{{ .Values.pagerDuty.routingKeyKey }}
+          - url: {{ .Values.pagerDuty.url | quote }}
+            routing_key_file: /etc/alertmanager/secrets/{{ .Values.pagerDuty.routingKeyKey }}
             severity: {{ .Values.pagerDuty.severity | quote }}
             description: '{{ "{{" }} .CommonAnnotations.summary {{ "}}" }}'
 {{- end }}

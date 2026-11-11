@@ -1,0 +1,6 @@
+image: { repository: ghcr.io/benjaminsrussell/prediction, digest: "", tag: "", pullPolicy: IfNotPresent }
+replicaCount: 2
+resources:
+  requests: { cpu: 250m, memory: 256Mi }
+  limits: { cpu: "1", memory: 1Gi }
+serviceMonitor: { enabled: false }

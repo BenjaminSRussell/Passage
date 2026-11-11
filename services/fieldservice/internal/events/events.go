@@ -246,16 +246,30 @@ type DispatchPublishedData struct {
 // technician's truck; DurationMinutes is the time IN_PROGRESS by device time (0 when
 // the work order was completed by hand without an action log).
 type WorkOrderCompletedData struct {
-	WorkOrderID     string          `json:"workOrderId"`
-	Number          string          `json:"number"`
-	CustomerPartyID string          `json:"customerId"`
-	LegalEntityID   string          `json:"legalEntityId"`
-	CaseID          *string         `json:"caseId"`
-	TechnicianID    *string         `json:"technicianId"`
-	FirstTimeFix    bool            `json:"firstTimeFix"`
-	DurationMinutes int             `json:"durationMinutes"`
-	CompletedAt     string          `json:"completedAt"`
-	Lines           []CompletedLine `json:"lines"`
+	WorkOrderID     string  `json:"workOrderId"`
+	Number          string  `json:"number"`
+	CustomerPartyID string  `json:"customerId"`
+	LegalEntityID   string  `json:"legalEntityId"`
+	CaseID          *string `json:"caseId"`
+	TechnicianID    *string `json:"technicianId"`
+	FirstTimeFix    bool    `json:"firstTimeFix"`
+	DurationMinutes int     `json:"durationMinutes"`
+	CompletedAt     string  `json:"completedAt"`
+	// Currency is the work order's currency, the one a truck issue is valued in when the
+	// truck holds no stock to take a value from.
+	Currency string `json:"currency"`
+	// Truck is where the technician's truck stock sits in inventory; absent when the work
+	// order has no technician or the technician has no truck (BR-45.7).
+	Truck *CompletedTruck `json:"truck"`
+	Lines []CompletedLine `json:"lines"`
+}
+
+// CompletedTruck addresses the truck's stock by the inventory dimensions site, warehouse
+// and (optionally) location.
+type CompletedTruck struct {
+	SiteID      string  `json:"siteId"`
+	WarehouseID string  `json:"warehouseId"`
+	LocationID  *string `json:"locationId"`
 }
 
 // CompletedLine is one work-order line at completion; ConsumedQty is what the technician
@@ -265,4 +279,8 @@ type CompletedLine struct {
 	Kind        string `json:"kind"`
 	Qty         string `json:"qty"`
 	ConsumedQty string `json:"consumedQty"`
+	// ProductID and Unit name the stock item of a PART line and the unit ConsumedQty is in;
+	// empty for a line that moves no stock.
+	ProductID string `json:"productId"`
+	Unit      string `json:"unit"`
 }

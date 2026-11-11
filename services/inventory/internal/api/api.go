@@ -62,6 +62,8 @@ type API struct {
 	gl       store.GLBooks
 	ledger   ledgerclient.Ledger
 	glBooked atomic.Int64
+	// truck serves the truck stock routes (WithTruckStock); nil answers 503.
+	truck TruckStock
 }
 
 // New builds the API with the posting parameters from configuration.
@@ -95,6 +97,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerReconciliation(r)
 	a.registerReturnReceipts(r)
 	a.registerGL(r)
+	a.registerTruck(r)
 }
 
 // Metrics serves the counters for the admin port.

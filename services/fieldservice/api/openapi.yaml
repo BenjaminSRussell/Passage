@@ -756,6 +756,130 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/technicians/{id}/day:
+    get:
+      operationId: getTechnicianDay
+      summary: The technician's route for one local day, with what the device needs to work it offline (FR-45.8)
+      description: |
+        `{id}` is a technician id, or `me` for the technician whose workerId is the caller's user id (404
+        SVC-TECH-006 when there is none). The visits are the work orders assigned to the technician that start on
+        the local `date` (default today in the technician's time zone) and have been published (DISPATCHED up to
+        POSTED), in start order, plus orders still being worked from an earlier day (`carryOver`). Each visit
+        carries the customer and case, address and position, the promised window, the lines with the quantity
+        consumed so far, the checklist with its ticks, the photos attached and the signature state. Only the
+        technician's own worker, or office staff holding fieldservice.work-order.maintain or
+        fieldservice.technician.dispatch, may read a technician's day (403 SVC-SYNC-003).
+      x-passage-duty: fieldservice.work-order.execute
+      parameters:
+        - $ref: "#/components/parameters/TechnicianOrMe"
+        - { name: date, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: The route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TechnicianDay" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}/captures/{captureId}:
+    put:
+      operationId: putWorkOrderCapture
+      summary: Upload a photo or the customer's signature image (FR-45.8)
+      description: |
+        The body is the image (image/png or image/jpeg; the type is read from the bytes). A photo is at most
+        1,600 px on its long edge, a signature must be a PNG of at most 2,000 px; either is at most 2 MB
+        (422 SVC-CAP-001). `captureId` is chosen by the device: the same id with the same bytes returns the
+        stored capture with `duplicate: true` and stores nothing twice, and any other use of the id is 422
+        SVC-SYNC-005. The work order must be assigned to `technicianId` and dispatched up to completed (422
+        SVC-CAP-003), and the caller must be that technician's worker or office staff with
+        fieldservice.work-order.maintain (403 SVC-SYNC-003). The returned `ref` is what a PHOTO or SIGNATURE
+        action names the capture by.
+      x-passage-duty: fieldservice.work-order.execute
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - { name: captureId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: technicianId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [PHOTO, SIGNATURE] } }
+        - { name: capturedAt, in: query, required: true, schema: { type: string, format: date-time }, description: The device clock; not more than 5 minutes ahead of the server. }
+        - { name: lat, in: query, required: false, schema: { type: number }, description: With lon. }
+        - { name: lon, in: query, required: false, schema: { type: number } }
+      requestBody:
+        required: true
+        content:
+          image/png: { schema: { type: string, format: binary } }
+          image/jpeg: { schema: { type: string, format: binary } }
+      responses:
+        "200":
+          description: The capture was stored before
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: getWorkOrderCapture
+      summary: Read a stored photo or signature image
+      x-passage-duty: fieldservice.inquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - { name: captureId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The image
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}/checklist:
+    put:
+      operationId: setWorkOrderChecklist
+      summary: Replace the checklist of a work order that is not completed (FR-45.8)
+      description: |
+        Up to 40 items; an item without an id gets one. A technician ticks items with CHECKLIST actions (the
+        latest device time per item wins); a COMPLETE action is REJECTED with SVC-WO-003 while a required item is
+        open. Items that keep their id keep their tick.
+      x-passage-duty: fieldservice.work-order.maintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              additionalProperties: false
+              properties:
+                items: { type: array, maxItems: 40, items: { $ref: "#/components/schemas/ChecklistItemInput" } }
+      responses:
+        "200":
+          description: The work order with its new checklist
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
   /v1/service/technicians:
     post:
       operationId: createTechnician
@@ -2230,6 +2354,12 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    TechnicianOrMe:
+      name: id
+      in: path
+      required: true
+      description: A technician id, or `me` for the technician linked to the caller.
+      schema: { type: string }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -2463,6 +2593,23 @@ components:
         qty: { type: string, description: decimal quantity, must be positive }
         unitPrice: { type: string, description: decimal, non-negative; defaults to 0 }
         unitCost: { type: string, description: decimal, non-negative; defaults to 0; recorded as warranty cost on WARRANTY lines }
+        description: { type: string, maxLength: 200, description: The line as the technician sees it, such as a part name. }
+        productId: { type: string, format: uuid, description: "The stock item of a PART line; its consumed quantity is issued from the technician's truck at completion (BR-45.7)." }
+        unit: { type: string, pattern: "^[A-Z0-9]{1,10}$", description: The unit of the quantity; required with productId. }
+    ChecklistItemInput:
+      type: object
+      required: [text]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid, description: Server-generated when absent. }
+        text: { type: string, minLength: 1, maxLength: 200 }
+        required: { type: boolean, description: A COMPLETE action is REJECTED (SVC-WO-003) while a required item is open. }
+    ChecklistItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        text: { type: string }
+        required: { type: boolean }
     WorkOrderRequest:
       type: object
       required: [customerPartyId, legalEntityId, territoryId, estDurationMinutes, currency]
@@ -2487,6 +2634,7 @@ components:
         latitude: { type: [number, "null"] }
         longitude: { type: [number, "null"] }
         signatureExempt: { type: boolean, description: "The incident type's rule waives the customer signature at completion (SVC-WO-001)." }
+        checklist: { type: array, maxItems: 40, items: { $ref: "#/components/schemas/ChecklistItemInput" } }
     WorkOrder:
       type: object
       properties:
@@ -2525,6 +2673,9 @@ components:
         signedAt: { type: [string, "null"], format: date-time }
         signatureRef: { type: [string, "null"], description: Object-store reference of the signature PNG. }
         technicianNote: { type: string, description: Free text from the device; the latest device time wins. }
+        signedLatitude: { type: [number, "null"], description: Where the customer signed. }
+        signedLongitude: { type: [number, "null"] }
+        checklist: { type: array, items: { $ref: "#/components/schemas/ChecklistItem" } }
         version: { type: integer }
     ActionBatch:
       type: object
@@ -2543,13 +2694,18 @@ components:
       additionalProperties: false
       properties:
         id: { type: string, format: uuid, description: Client-generated; makes the action idempotent. }
-        kind: { type: string, enum: [TRAVEL_START, WORK_START, HOLD, RESUME, PART_USED, SIGNATURE, NOTE, COMPLETE] }
+        kind: { type: string, enum: [TRAVEL_START, WORK_START, HOLD, RESUME, PART_USED, SIGNATURE, NOTE, COMPLETE, PHOTO, CHECKLIST] }
         deviceTime: { type: string, format: date-time, description: The device clock; not more than 5 minutes ahead of the server. }
         lineId: { type: string, format: uuid, description: PART_USED, a PART line of the work order. }
         qty: { type: string, description: "PART_USED, a positive decimal string with at most 6 decimals." }
         signedBy: { type: string, maxLength: 120, description: SIGNATURE. }
         signatureRef: { type: string, maxLength: 500, description: SIGNATURE, the object-store reference of the signature PNG. }
         text: { type: string, maxLength: 4000, description: NOTE. }
+        latitude: { type: number, description: SIGNATURE, where the customer signed; with longitude. }
+        longitude: { type: number }
+        captureIds: { type: array, minItems: 1, maxItems: 5, items: { type: string, format: uuid }, description: "PHOTO, up to five uploaded photos (REJECTED SVC-CAP-002 when one was not uploaded for this work order)." }
+        itemId: { type: string, format: uuid, description: "CHECKLIST, an item of the work order's checklist (REJECTED SVC-SYNC-007 otherwise); the later device time wins." }
+        done: { type: boolean, description: CHECKLIST. }
     ActionResult:
       type: object
       properties:
@@ -2577,13 +2733,122 @@ components:
         id: { type: string, format: uuid }
         workOrderId: { type: string, format: uuid }
         technicianId: { type: string, format: uuid }
-        kind: { type: string, enum: [TRAVEL_START, WORK_START, HOLD, RESUME, PART_USED, SIGNATURE, NOTE, COMPLETE] }
+        kind: { type: string, enum: [TRAVEL_START, WORK_START, HOLD, RESUME, PART_USED, SIGNATURE, NOTE, COMPLETE, PHOTO, CHECKLIST] }
         deviceTime: { type: string, format: date-time }
         receivedAt: { type: string, format: date-time }
         payload: { type: object, additionalProperties: true }
         outcome: { type: string, enum: [APPLIED, SUPERSEDED, REJECTED] }
         reasonCode: { type: string }
         reason: { type: string }
+    Capture:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        ref: { type: string, example: "capture:3f2c0a56-0b3e-4f7b-9d33-2a1f6f7a9c11", description: What a PHOTO or SIGNATURE action names the capture by. }
+        workOrderId: { type: string, format: uuid }
+        technicianId: { type: string, format: uuid }
+        kind: { type: string, enum: [PHOTO, SIGNATURE] }
+        contentType: { type: string, enum: [image/png, image/jpeg] }
+        widthPx: { type: integer }
+        heightPx: { type: integer }
+        byteSize: { type: integer }
+        sha256: { type: string }
+        capturedAt: { type: string, format: date-time }
+        latitude: { type: number }
+        longitude: { type: number }
+        duplicate: { type: boolean }
+    TechnicianDay:
+      type: object
+      properties:
+        technician:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            name: { type: string }
+            timeZone: { type: string }
+            legalEntityId: { type: string, format: uuid }
+            truck:
+              type: object
+              properties:
+                siteId: { type: string, format: uuid }
+                warehouseId: { type: string, format: uuid }
+                locationId: { type: [string, "null"], format: uuid }
+        date: { type: string, format: date }
+        generatedAt: { type: string, format: date-time }
+        visits: { type: array, items: { $ref: "#/components/schemas/DayVisit" } }
+        totals:
+          type: object
+          properties:
+            visits: { type: integer }
+            completed: { type: integer }
+            open: { type: integer }
+            bookedMinutes: { type: integer }
+    DayVisit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        status: { type: string }
+        version: { type: integer }
+        sequence: { type: integer, description: Position on the route, from 1. }
+        carryOver: { type: boolean, description: Started on an earlier day and still being worked. }
+        customerPartyId: { type: string, format: uuid }
+        caseId: { type: [string, "null"], format: uuid }
+        caseNumber: { type: [string, "null"] }
+        caseDescription: { type: string }
+        priority: { type: [integer, "null"] }
+        serviceObjectId: { type: [string, "null"], format: uuid }
+        serviceObjectLabel: { type: string }
+        address: { type: string }
+        latitude: { type: [number, "null"] }
+        longitude: { type: [number, "null"] }
+        assignedStart: { type: string, format: date-time }
+        assignedEnd: { type: string, format: date-time }
+        windowStart: { type: [string, "null"], format: date-time }
+        windowEnd: { type: [string, "null"], format: date-time }
+        resolutionDue: { type: [string, "null"], format: date-time }
+        estDurationMinutes: { type: integer }
+        requiredSkills: { type: array, items: { type: string } }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              kind: { type: string, enum: [LABOR, PART, TRAVEL, FEE] }
+              description: { type: string }
+              productId: { type: string, format: uuid }
+              unit: { type: string }
+              qty: { type: string }
+              consumedQty: { type: string }
+        checklist:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              text: { type: string }
+              required: { type: boolean }
+              done: { type: boolean }
+        photos:
+          type: array
+          items:
+            type: object
+            properties:
+              captureId: { type: string, format: uuid }
+              ref: { type: string }
+              capturedAt: { type: string, format: date-time }
+        signature:
+          type: object
+          properties:
+            signed: { type: boolean }
+            exempt: { type: boolean }
+            signedBy: { type: [string, "null"] }
+            signedAt: { type: [string, "null"], format: date-time }
+            ref: { type: [string, "null"] }
+        technicianNote: { type: string }
+        completedAt: { type: [string, "null"], format: date-time }
     Kpis:
       type: object
       description: |
@@ -3111,7 +3376,9 @@ components:
         shiftEndMinute: { type: integer, minimum: 1, maximum: 1440, default: 1020 }
         homeLatitude: { type: [number, "null"], minimum: -90, maximum: 90 }
         homeLongitude: { type: [number, "null"], minimum: -180, maximum: 180 }
-        truckLocationId: { type: [string, "null"], format: uuid, description: The wave-16 TRUCK location; not checked yet. }
+        truckLocationId: { type: [string, "null"], format: uuid, description: The truck's location inside its warehouse; not checked against inventory. }
+        truckSiteId: { type: [string, "null"], format: uuid, description: The truck's site in inventory; with truckWarehouseId (both or neither), before a truckLocationId. }
+        truckWarehouseId: { type: [string, "null"], format: uuid, description: The truck's warehouse in inventory (BR-45.7). }
         maxDailyMinutes: { type: integer, minimum: 60, maximum: 1440, default: 480 }
         overtimeAllowed: { type: boolean, default: false, description: Adds up to 120 minutes to the shift end and the daily maximum (BR-45.3). }
         active: { type: boolean, default: true }
@@ -3139,6 +3406,8 @@ components:
         homeLatitude: { type: [number, "null"] }
         homeLongitude: { type: [number, "null"] }
         truckLocationId: { type: [string, "null"], format: uuid }
+        truckSiteId: { type: [string, "null"], format: uuid }
+        truckWarehouseId: { type: [string, "null"], format: uuid }
         maxDailyMinutes: { type: integer }
         overtimeAllowed: { type: boolean }
         active: { type: boolean }

@@ -84,7 +84,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", a.Metrics())
+	admin.Handle("/metrics", httpx.WithMetrics(a.Metrics()))
 
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()

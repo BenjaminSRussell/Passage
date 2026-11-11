@@ -33,6 +33,26 @@ For accounts receivable clerks. You record money from a customer and settle it a
 - **Open items** lists unpaid invoices. Filter by **Customer** or **Show**.
 - **Payments** lists every payment. Filter by status.
 
+## Import a remittance advice
+
+A remittance advice is the customer's own list of the invoices a payment covers. Importing it puts those invoice numbers on the payment, so the matcher can settle it without you.
+
+1. Open **Remittance advice**.
+2. Choose the **Legal entity** and the **Format** (CSV, JSON or EDI 820), then choose the file or paste its content.
+3. Tick **Apply the payments the matcher is sure of** if you want the clear matches settled at once.
+4. Tick **Record lines with no bank credit yet as advised payments** when the advice arrives before the money does. Enter the **Currency** of those payments.
+5. Select **Import advice**. The result lists each payment reference and what happened to it.
+
+An advised payment books no cash and cannot be applied. When the bank credit arrives with the same reference, currency and amount, it takes the advice's invoice numbers and the advised payment is marked Confirmed.
+
+## Check the journals posted to the ledger
+
+**Ledger journals** lists what receivables owes the general ledger: cash received, payments applied, fees, interest and write-offs.
+
+- **Posted** journals are in the ledger.
+- **Waiting** journals are posted automatically at the next pass. Select **Post due journals** to post them now.
+- **Parked** journals were refused by the ledger, usually because the period is closed. Open the journal, read the last problem, and select **Retry posting**. Enter a **New posting date** if the original period is closed.
+
 ## What the statuses mean
 
 | Status | Meaning |
@@ -42,6 +62,8 @@ For accounts receivable clerks. You record money from a customer and settle it a
 | Applied | Fully settled against invoices. |
 | On account | Money held for the customer, not tied to an invoice. |
 | Reversed | Undone. |
+| Advised | Listed on a customer's remittance advice, but the bank credit has not arrived. It books no cash and cannot be applied. |
+| Confirmed | An advised payment whose bank credit has arrived. The bank payment is the one to apply. |
 
 Only Received, Suggested and On account payments can be applied.
 

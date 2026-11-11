@@ -34,6 +34,15 @@ const common: Record<string, ProblemCatalogEntry> = {
   "COM-0409": { message: "This request was already sent once with different details.", action: "Reload the page and start the action again." },
   "COM-0410": { message: "The same request is still being processed.", action: "Wait a moment, then reload the page to see the result." },
   "COM-0412": { message: "Someone else changed this record after you opened it.", action: RELOAD_AND_REDO },
+  "OPS-1701": { message: "The target region is too far behind to take over without losing data.", action: "Wait for it to catch up, or ask a second platform administrator to approve accepting the data loss." },
+  "OPS-1702": { message: "A failover that accepts data loss needs a second operator, and you can't approve your own request.", action: "Ask a different platform operator to approve the failover request." },
+  "OPS-1709": { message: "That region cannot change to the requested role right now.", action: "Check the regions list for each region's current role, then choose a passive region." },
+  "OPS-1710": { message: "That region is not part of this platform.", action: "Pick one of the regions in the regions list." },
+  "OPS-1711": { message: "The region has not been verified as fully re-synced.", action: "Finish and verify the re-sync, then bring the region back as passive." },
+  "OPS-1712": { message: "No region is currently primary, so there is nothing to fail over from.", action: "Check the regions list and the failover runbook before going further." },
+  "OPS-1713": { message: "That failover request doesn't exist.", action: "Check the request link, or start the failover again." },
+  "OPS-1714": { message: "The failover request expired before a second operator approved it.", action: "Start the failover again and have it approved within 5 minutes." },
+  "OPS-1715": { message: "Region operations are open to the platform operator only.", action: "Sign in with a platform operator account." },
   "COM-0413": { message: "The request is too large for the service to accept.", action: "Send fewer lines or a smaller file, then try again." },
   "COM-0428": { message: "This page is out of date, so your change can't be saved safely.", action: RELOAD_AND_REDO },
   "COM-0500": { message: "Something went wrong on our side.", action: TRY_LATER },
@@ -707,6 +716,7 @@ const tax: Record<string, ProblemCatalogEntry> = {
   "TAX-0011": { message: "The currency doesn't match the ledger's accounting currency.", action: "Use the ledger's accounting currency." },
   "TAX-0012": { message: "The ledger data can't be turned into a valid tax audit file.", action: TRY_LATER },
   "TAX-0013": { message: "This tax setup item is still used by something else, so it can't be deleted.", action: "Remove it from the jurisdictions, tax groups or return boxes that use it, then try again." },
+  "TAX-0014": { message: "No withholding is waiting to be remitted in this period.", action: "Check the dates, or record the payments that withheld tax first." },
 };
 
 const product: Record<string, ProblemCatalogEntry> = {
@@ -869,6 +879,7 @@ const p2pMore: Record<string, ProblemCatalogEntry> = {
   "AR-PROMISE-EXISTS": { message: "This open item already has a promise to pay that hasn't been broken.", action: "Update the existing promise, or wait until it is broken." },
   "AR-PROMISE-STATE": { message: "This promise to pay can't be changed in its current status.", action: "Reload the open item to see the promise as it is now." },
   "AR-ADVICE-MALFORMED": { message: "The remittance advice file couldn't be read.", action: "Check the row or segment named in the details, or upload the original file from the customer." },
+  "AR-BANK-NOT-FOUND": { message: "We couldn't find that bank account mapping. It may have been removed, or the link is out of date.", action: "Reload the list of bank accounts and try again." },
   "AR-GL-UNAVAILABLE": { message: "The general ledger isn't available or isn't set up for this legal entity.", action: "Try again in a few minutes. If it keeps happening, contact support with the details below." },
   "AR-JOURNAL-NOT-FOUND": { message: "We couldn't find that ledger journal. It may have been deleted, or the link is out of date.", action: "Go back to the list and open it again." },
   "AR-JOURNAL-STATE": { message: "This ledger journal is already posted.", action: "Reload the list to see its current status." },
@@ -994,6 +1005,19 @@ const groupFinance: Record<string, ProblemCatalogEntry> = {
   "IC-0852": { message: "This pair has nothing left to resolve.", action: "Reload the run to see its current state." },
 };
 
+/** Field service: the technician's day, captures, checklist and truck stock (#45). */
+const fieldService: Record<string, ProblemCatalogEntry> = {
+  "SVC-WO-003": { message: "A required checklist item is still open, so the job can't be completed.", action: "Tick the open items, then complete the job again." },
+  "SVC-CAP-001": { message: "That photo or signature can't be used: it isn't a PNG or JPEG, or it is too large.", action: "Take the photo again, or clear the signature and sign again." },
+  "SVC-CAP-002": { message: "A photo or signature this entry refers to hasn't been uploaded yet.", action: "Wait for the upload to finish, then sync again." },
+  "SVC-CAP-003": { message: "This job is no longer open for photos or signatures.", action: "Ask the dispatcher to check the job's status." },
+  "SVC-SYNC-007": { message: "That checklist item isn't on this job any more.", action: "Reload the job to see its current checklist." },
+  "SVC-TECH-006": { message: "Your sign-in isn't linked to a technician.", action: "Ask your dispatcher to link your worker record to a technician." },
+  "INV-TRK-001": { message: "That truck stock level can't be saved: the maximum must be above zero and not below the minimum.", action: "Correct the minimum and maximum and save again." },
+  "INV-TRK-003": { message: "This technician has no truck to take the parts from.", action: "Set the technician's truck site and warehouse, then replay the completion." },
+  "INV-TRK-004": { message: "Truck stock isn't switched on for this service.", action: "Ask your administrator to enable it." },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -1020,6 +1044,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...companySetup,
   ...groupFinance,
   ...shared,
+  ...fieldService,
 });
 
 /** The catalog entry for a problem code, if there is one. */

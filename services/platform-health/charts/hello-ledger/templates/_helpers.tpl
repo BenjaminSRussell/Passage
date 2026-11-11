@@ -1,7 +1,7 @@
 {{- define "hello-ledger.image" -}}
 {{- if .Values.image.digest -}}
-{{ .Values.image.repository }}@{{ .Values.image.digest }}
+{{ (include "passage.imageRepository" $) }}@{{ .Values.image.digest }}
 {{- else -}}
-{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+{{ (include "passage.imageRepository" $) }}:{{ .Values.image.tag | default .Chart.AppVersion }}
 {{- end -}}
 {{- end -}}

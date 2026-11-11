@@ -25,6 +25,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/replay"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -99,6 +100,11 @@ type Store interface {
 	ClaimTargetLoad(ctx context.Context, runID, startedBy string, lease time.Duration) (domain.TargetLoad, []store.PendingRow, error)
 	RecordTargetChunk(ctx context.Context, runID string, lease time.Duration, outs []store.RowOutcome) error
 	FinishTargetLoad(ctx context.Context, runID string, fin store.TargetFinish) (domain.TargetLoad, []domain.ControlTotal, error)
+	GetPayablesLoad(ctx context.Context, runID string) (domain.PayablesLoad, error)
+	ClaimPayablesLoad(ctx context.Context, runID, startedBy string, lease time.Duration) (domain.PayablesLoad, []store.PendingPayable, error)
+	RecordPayablesBatch(ctx context.Context, runID string, lease time.Duration, b store.PayablesBatchSent) error
+	RejectPayablesRows(ctx context.Context, runID string, lease time.Duration, rejects []store.PayablesReject) error
+	FinishPayablesLoad(ctx context.Context, runID string, fin store.PayablesFinish) (domain.PayablesLoad, []domain.ControlTotal, error)
 }
 
 // Server serves the API over a Store.
@@ -106,7 +112,11 @@ type Server struct {
 	store  Store
 	now    func() time.Time
 	target Target
-	ledger ledgerclient.Ledger
+	// payables is the target of the AP lines of an open_items run (49-3).
+	payables PayablesTarget
+	ledger   ledgerclient.Ledger
+	// subledgers post the subledger documents of a parallel-run replay (49-4).
+	subledgers replay.Ports
 }
 
 // New returns a server over st.
@@ -134,6 +144,8 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/control-totals", s.controlTotals)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/quarantine/{rec}/release", s.releaseQuarantined)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/load", s.runTargetLoad)
+		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/load-payables", s.runPayablesLoad)
+		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/payables-load", s.getPayablesLoad)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/runs/{id}/opening-journal", s.postOpeningJournal)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/opening-journal", s.getOpeningJournal)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}/target-load", s.getTargetLoad)

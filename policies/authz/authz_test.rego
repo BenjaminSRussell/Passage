@@ -11,7 +11,56 @@ allowed(duty, method, resource) if {
 		"resource": resource,
 	}
 		with data.assignments as {"tenant-a": {"user-a": [duty]}}
+		with data.operator_tenant_id as "tenant-a"
 	result.allow
+}
+
+allowed_in(tenant, operator, duty, method, resource) if {
+	result := decision with input as {
+		"subject": {"tenant_id": tenant, "user_id": "user-a"},
+		"action": method,
+		"resource": resource,
+	}
+		with data.assignments as {tenant: {"user-a": [duty]}}
+		with data.operator_tenant_id as operator
+	result.allow
+}
+
+ops_operator_routes := [
+	["ops.region.view", "GET", "/v1/ops/regions"],
+	["ops.region.view", "GET", "/v1/ops/capacity/estimate"],
+	["ops.region.view", "GET", "/v1/ops/failover-requests/r1"],
+	["ops.region.report", "PUT", "/v1/ops/regions/eu-west/lag"],
+	["ops.failover.execute", "POST", "/v1/ops/failover"],
+	["ops.failover.execute", "POST", "/v1/ops/regions/us-east:rejoin"],
+	["ops.failover.execute", "POST", "/v1/ops/failover-requests/r1:approve"],
+]
+
+test_operator_only_duties_are_the_ops_duties if {
+	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute"}
+}
+
+test_operator_only_duties_grant_in_the_operator_tenant if {
+	every r in ops_operator_routes {
+		allowed_in("operator", "operator", r[0], r[1], r[2])
+	}
+}
+
+test_operator_only_duties_grant_nothing_in_another_tenant if {
+	every r in ops_operator_routes {
+		not allowed_in("tenant-b", "operator", r[0], r[1], r[2])
+	}
+}
+
+test_operator_only_duties_grant_nothing_without_an_operator_tenant if {
+	every r in ops_operator_routes {
+		not decision.allow with input as {"subject": {"tenant_id": "tenant-b", "user_id": "user-a"}, "action": r[1], "resource": r[2]}
+			with data.assignments as {"tenant-b": {"user-a": [r[0]]}}
+	}
+}
+
+test_ordinary_duties_ignore_the_operator_tenant if {
+	allowed_in("tenant-b", "operator", "platform.release.view", "GET", "/v1/platform/releases")
 }
 
 has_route_permissions(spec) if count(spec.permissions) > 0
@@ -105,6 +154,15 @@ segregation_denials := [
 	["reporting.statement.view", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
 	["reporting.statement.view", "GET", "/v1/reporting/definitions/d1/export"],
 	["platform.release.view", "POST", "/v1/platform/releases"],
+	["ops.region.view", "POST", "/v1/ops/failover"],
+	["ops.region.view", "PUT", "/v1/ops/regions/eu-west/lag"],
+	["ops.region.report", "GET", "/v1/ops/regions"],
+	["ops.region.report", "POST", "/v1/ops/failover"],
+	["ops.failover.execute", "GET", "/v1/ops/regions"],
+	["ops.failover.execute", "PUT", "/v1/ops/regions/eu-west/lag"],
+	["ops.region.view", "POST", "/v1/ops/failover-requests/r1:approve"],
+	["ops.region.report", "POST", "/v1/ops/failover-requests/r1:approve"],
+	["ops.region.report", "GET", "/v1/ops/failover-requests/r1"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
 	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],
@@ -1472,6 +1530,14 @@ test_migration_factory_grant_reaches_only_the_receivables_import if {
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
 }
 
+test_migration_payables_load_routes_need_run_and_view_duties if {
+	allowed("migration.factory.run", "POST", "/api/v1/migration/runs/r1/load-payables")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/load-payables")
+	allowed("migration.factory.view", "GET", "/api/v1/migration/runs/r1/payables-load")
+	not allowed("migration.factory.view", "POST", "/api/v1/migration/runs/r1/load-payables")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/payables-load")
+}
+
 test_opening_item_duties_are_service_only_and_cover_only_their_route if {
 	allowed("opening-item.import", "POST", "/v1/payables/opening-batches")
 	not allowed("opening-item.import", "GET", "/v1/payables/opening-batches")
@@ -1681,6 +1747,56 @@ test_tax_configuration_vat_and_intrastat_duties_reach_only_their_routes if {
 	not allowed("tax.intrastat.manage", "GET", "/v1/tax/intrastat/journals/j-1/export")
 	allowed("tax.intrastat.export", "GET", "/v1/tax/intrastat/journals/j-1/export")
 	not allowed("tax.intrastat.export", "POST", "/v1/tax/intrastat/journals/j-1/validate")
+}
+
+test_tax_certificates_recovery_layouts_reclaim_and_master_seed_reach_only_their_routes if {
+	allowed("tax.config.read", "GET", "/v1/tax/exemption-certificates")
+	allowed("tax.config.read", "GET", "/v1/tax/recovery-policies")
+	allowed("tax.config.read", "GET", "/v1/tax/vat-layouts")
+	not allowed("tax.config.read", "PUT", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "PUT", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "DELETE", "/v1/tax/exemption-certificates/C-1")
+	allowed("tax.config.manage", "PUT", "/v1/tax/recovery-policies/VAT19")
+	allowed("tax.config.manage", "DELETE", "/v1/tax/recovery-policies/VAT19")
+	allowed("tax.config.manage", "POST", "/v1/tax/vat-layouts/GB/apply")
+	not allowed("tax.config.read", "POST", "/v1/tax/vat-layouts/GB/apply")
+	allowed("tax.vatreturn.read", "GET", "/v1/tax/vat-reclaim")
+	not allowed("tax.config.manage", "GET", "/v1/tax/vat-reclaim")
+	allowed("tax.intrastatmaster.manage", "POST", "/v1/tax/intrastat/master:seed")
+	allowed("tax.intrastatmaster.manage", "POST", "/v1/tax/intrastat/master:import")
+	not allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/master:seed")
+	not allowed("tax.intrastat.read", "POST", "/v1/tax/intrastat/master:import")
+}
+
+test_intrastat_feed_products_and_movement_transfer_reach_only_their_routes if {
+	allowed("tax.intrastat.feed", "POST", "/v1/tax/intrastat/movements")
+	not allowed("tax.intrastat.feed", "GET", "/v1/tax/intrastat/movements")
+	not allowed("tax.intrastat.feed", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/movements")
+	allowed("tax.intrastat.read", "GET", "/v1/tax/intrastat/products")
+	allowed("tax.intrastatmaster.manage", "PUT", "/v1/tax/intrastat/products/p-1")
+	allowed("tax.intrastatmaster.manage", "DELETE", "/v1/tax/intrastat/products/p-1")
+	not allowed("tax.intrastat.read", "PUT", "/v1/tax/intrastat/products/p-1")
+	allowed("tax.intrastat.manage", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+	not allowed("tax.intrastat.read", "POST", "/v1/tax/intrastat/journals/j-1/transfer-movements")
+}
+
+test_withholding_remittance_duties_reach_only_their_routes if {
+	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
+	allowed("tax.withholding.remit", "POST", "/v1/tax/withholding/remittance-runs")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/remittance-runs")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/remittance-runs/r1")
+	allowed("tax.withholding.read", "GET", "/v1/tax/withholding/certificates")
+	not allowed("tax.withholding.read", "POST", "/v1/tax/withholding/remittance-runs")
+	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/remittance-runs")
+	not allowed("tax.withholding.remit", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.calculate", "POST", "/v1/tax/withholding/entries")
+}
+
+test_revrec_allocate_belongs_to_maintain_only if {
+	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:allocate")
+	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:allocate")
+	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:allocate")
 }
 
 test_tax_duties_reach_only_their_routes if {
@@ -2491,10 +2607,21 @@ test_subscription_usage_and_due_job_belong_to_invoice_maintain if {
 test_gl_journal_routes_split_between_view_and_payment_duties if {
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals/j1:retry")
 	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:sweep")
+	allowed("receivables.payment.post", "POST", "/v1/receivables/gl-journals:backfill")
+	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:backfill")
 	allowed("receivables.view", "GET", "/v1/receivables/gl-journals")
 	allowed("receivables.view", "GET", "/v1/receivables/gl-reconciliation")
 	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals:sweep")
 	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals/j1:retry")
+}
+
+test_bank_account_mappings_are_read_by_view_and_written_by_their_own_duty if {
+	allowed("receivables.view", "GET", "/v1/receivables/bank-accounts")
+	allowed("receivables.bankaccount.manage", "PUT", "/v1/receivables/bank-accounts")
+	allowed("receivables.bankaccount.manage", "DELETE", "/v1/receivables/bank-accounts")
+	not allowed("receivables.view", "PUT", "/v1/receivables/bank-accounts")
+	not allowed("receivables.payment.post", "DELETE", "/v1/receivables/bank-accounts")
+	not allowed("receivables.bankaccount.manage", "GET", "/v1/receivables/bank-accounts")
 }
 
 test_asn_duties_do_not_cross if {
@@ -2605,4 +2732,43 @@ test_warehouse_rfid_and_automation_duties if {
 	allowed("warehouse.setup.maintain", "PUT", "/v1/warehouse/gs1-settings")
 	allowed("warehouse.setup.view", "GET", "/v1/warehouse/gs1-settings")
 	not allowed("warehouse.setup.view", "PUT", "/v1/warehouse/gs1-settings")
+}
+
+# #45: the technician's day and capture routes belong to the technician duty; reading a capture
+# back is an inquiry; the checklist is set by office staff who maintain work orders.
+test_fieldservice_technician_day_and_captures if {
+	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/me/day")
+	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/t1/day")
+	allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.work-order.execute", "GET", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/checklist")
+	allowed("fieldservice.inquire", "GET", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.inquire", "PUT", "/v1/service/work-orders/w1/captures/c1")
+	not allowed("fieldservice.inquire", "GET", "/v1/service/technicians/me/day")
+	allowed("fieldservice.work-order.maintain", "PUT", "/v1/service/work-orders/w1/checklist")
+	not allowed("fieldservice.work-order.maintain", "PUT", "/v1/service/work-orders/w1/captures/c1")
+}
+
+# #45: truck stock levels are set with their own duty, read with inventory.read, and replenishment
+# creates transfer orders, so it needs the transfer duty.
+test_inventory_truck_stock if {
+	allowed("inventory.truck-stock.write", "PUT", "/v1/inventory/truck-stock-levels")
+	not allowed("inventory.read", "PUT", "/v1/inventory/truck-stock-levels")
+	allowed("inventory.read", "GET", "/v1/inventory/truck-stock-levels")
+	allowed("inventory.transfer.write", "POST", "/v1/inventory/truck-stock:replenish")
+	not allowed("inventory.truck-stock.write", "POST", "/v1/inventory/truck-stock:replenish")
+	not allowed("inventory.transfer.post", "POST", "/v1/inventory/truck-stock:replenish")
+}
+
+# Agent runtime surface (#47): starting a run, reading runs and the copilot chat are separate duties.
+test_agent_run_duties_open_only_their_routes if {
+	allowed("agents.invoke", "POST", "/api/v1/agents/ap_coding/runs")
+	not allowed("agents.invoke", "GET", "/api/v1/agents/runs/r1")
+	allowed("agents.run.read", "GET", "/api/v1/agents/runs/r1")
+	allowed("agents.run.read", "GET", "/api/v1/agents/runs/r1/actions")
+	not allowed("agents.run.read", "POST", "/api/v1/agents/ap_coding/runs")
+	not allowed("agents.run.read", "POST", "/api/v1/agents/runs/r1/actions/a1/decision")
+	allowed("mcp.copilot.use", "POST", "/api/v1/copilot/chat")
+	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
+	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
 }
