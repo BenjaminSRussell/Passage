@@ -117,6 +117,21 @@ describe("document virus scan", () => {
     expect(rig.calls).toHaveLength(0);
   });
 
+  it("refuses an upload that is not a base64 string instead of forwarding it unscanned", async () => {
+    const scanner = new FakeScanner();
+    rig = await startRig({ scan: { scanner, allowUnscanned: true } });
+    const s = await signIn(rig);
+    const bytes = [...Buffer.from("X5O!P%@AP EICAR")];
+    for (const content of [bytes, { 0: 88 }, 42, null]) {
+      const res = await api(rig, s, "POST", "/api/v1/invoice-documents", { format: "OCR", mediaType: "application/pdf", content });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe("SUP-BFF-400");
+    }
+    expect((await api(rig, s, "POST", "/api/v1/documents", { ...upload("%PDF"), contentBase64: bytes })).status).toBe(400);
+    expect(scanner.seen).toHaveLength(0);
+    expect(rig.calls).toHaveLength(0);
+  });
+
   it("does not scan routes that carry no upload", async () => {
     const scanner = new FakeScanner();
     rig = await startRig({ scan: { scanner, allowUnscanned: false } });

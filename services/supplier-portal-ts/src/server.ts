@@ -153,6 +153,9 @@ export function createHttpServer(deps: ServerDeps): Server {
       if (route.scan) {
         const upload = obj[route.scan];
         // A body with no upload in it is the owning service's to refuse; an upload is never forwarded before it is screened.
+        // The upload must be a base64 string: anything else (a JSON byte array, an object) could still decode upstream and
+        // reach a parser without having been scanned, so it is refused here.
+        if (upload !== undefined && typeof upload !== "string") return problem(res, 400, "SUP-BFF-400", `${route.scan} must be a base64 string`);
         if (typeof upload === "string" && upload !== "") {
           const outcome = await screenUpload(scanPolicy, Buffer.from(upload, "base64"), log);
           if (!outcome.accept && outcome.reason === "infected") return problem(res, 422, "SUP-BFF-422", "the file was refused because it contains a virus");
@@ -367,7 +370,7 @@ export function createHttpServer(deps: ServerDeps): Server {
 function withAcceptLink(text: string, appOrigin: string): string {
   try {
     const body = JSON.parse(text) as { token?: unknown };
-    if (typeof body.token === "string") return JSON.stringify({ ...body, acceptUrl: `${appOrigin}/accept-invite?token=${encodeURIComponent(body.token)}` });
+    if (typeof body.token === "string") return JSON.stringify({ ...body, acceptUrl: `${appOrigin}/accept-invite#token=${encodeURIComponent(body.token)}` });
   } catch {
     // not JSON: forwarded as it came
   }
