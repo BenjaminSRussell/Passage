@@ -125,3 +125,51 @@ func TestRejectProspect_NeedsANoteAndCreatesNothing(t *testing.T) {
 		t.Errorf("reject: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestAcceptProspect_ARepeatAfterAStopFinishesWithTheSameOnboardingAndASecondBuyerIsRefused(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)}), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	pg := store.New(app)
+	r := httpx.NewRouter()
+	api.New(&stubChecker{}, stubPinger{}, pg, &fakeSequencer{}).WithVendors(pg).WithSuppliers(pg).WithPortal(pg).Register(r)
+	asBuyer := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: portalLE, UserID: "buyer", Duties: testkit.ScopeDuties(portalLE)})
+	q, err := pg.CreateQuestionnaire(asBuyer, "Basics", []domain.Question{{ID: "iso", Label: "ISO 9001?", Type: domain.QuestionYesNo, Required: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrar := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: portalLE, UserID: "portal-prospect", Service: tenant.VendorPortalIssuer, Duties: map[string]struct{}{tenant.DutyPortalRegister: {}}})
+	if _, err := pg.RegisterProspect(registrar, domain.NewProspect{CompanyName: "Birch Valve Co", ContactName: "Sam", Email: "sam@birch.example", Country: "US"}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := pg.ListProspects(asBuyer, "", 10)
+	path := "/v1/party/vendor-prospects/" + list[0].ID + ":accept"
+	body := `{"accountNumber":"V-100","vendorGroupId":"` + ids.New() + `","currencyCode":"USD","questionnaireId":"` + q.ID + `"}`
+
+	// A wrong questionnaire stops the accept after the party and the vendor role exist: the registration stays claimed.
+	if rec := buyer(r, "buyer", "party.write", http.MethodPost, path, strings.Replace(body, q.ID, ids.New(), 1)); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("accept with a wrong questionnaire: %d %s", rec.Code, rec.Body)
+	}
+	if rec := buyer(r, "buyer2", "party.write", http.MethodPost, path, body); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "PTY-PROSPECT-STATE") {
+		t.Errorf("a second buyer while the first is accepting: %d %s", rec.Code, rec.Body)
+	}
+	first := buyer(r, "buyer", "party.write", http.MethodPost, path, body)
+	var accepted store.Prospect
+	if first.Code != http.StatusOK || json.Unmarshal(first.Body.Bytes(), &accepted) != nil || accepted.RequestID == "" {
+		t.Fatalf("the buyer's repeat: %d %s", first.Code, first.Body)
+	}
+
+	// Stopping after the onboarding was opened but before the registration was linked: the repeat links the same onboarding.
+	if _, err := admin.Exec(context.Background(), `update vendor_prospect set party_id = null, vendor_id = null, request_id = null where id = $1`, accepted.ID); err != nil {
+		t.Fatal(err)
+	}
+	again := buyer(r, "buyer", "party.write", http.MethodPost, path, body)
+	var resumed store.Prospect
+	if again.Code != http.StatusOK || json.Unmarshal(again.Body.Bytes(), &resumed) != nil {
+		t.Fatalf("repeat after the onboarding opened: %d %s", again.Code, again.Body)
+	}
+	if resumed.RequestID != accepted.RequestID || resumed.VendorID != accepted.VendorID || resumed.PartyID != accepted.PartyID {
+		t.Errorf("repeat linked %+v, want %+v", resumed, accepted)
+	}
+}

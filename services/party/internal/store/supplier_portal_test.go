@@ -61,12 +61,77 @@ func TestProspect_AcceptLinksThePartyVendorAndOnboarding(t *testing.T) {
 	r := newSupplierRig(t)
 	_, _ = r.s.RegisterProspect(registrar(), prospect("sam@birch.example"))
 	list, _ := r.s.ListProspects(r.buyer, "", 50)
-	acc, err := r.s.AcceptProspect(r.buyer, list[0].ID, r.vendorA, r.vendorB, ids.New())
-	if err != nil || acc.Status != domain.ProspectAccepted || acc.VendorID != r.vendorB {
+	id := list[0].ID
+	// Finishing an accept nobody claimed is refused.
+	if _, err := r.s.AcceptProspect(r.buyer, id, r.vendorA, r.vendorB, ids.New()); problemCode(t, err) != store.CodeProspectState {
+		t.Fatalf("accept without a claim: %v", err)
+	}
+	claimed, err := r.s.ClaimProspect(r.buyer, id)
+	if err != nil || claimed.Status != domain.ProspectAccepted || claimed.RequestID != "" {
+		t.Fatalf("claim %+v %v", claimed, err)
+	}
+	// A second buyer accepting at the same time is refused, and so is a rejection; the first buyer's repeat resumes.
+	if _, err := r.s.ClaimProspect(r.approve, id); problemCode(t, err) != store.CodeProspectState {
+		t.Errorf("a second buyer's claim: %v", err)
+	}
+	if _, err := r.s.RejectProspect(r.approve, id, "no"); problemCode(t, err) != store.CodeProspectState {
+		t.Errorf("reject while accepting: %v", err)
+	}
+	if _, err := r.s.AcceptProspect(r.approve, id, r.vendorA, r.vendorB, ids.New()); problemCode(t, err) != store.CodeProspectState {
+		t.Errorf("another buyer finishing the accept: %v", err)
+	}
+	if _, err := r.s.ClaimProspect(r.buyer, id); err != nil {
+		t.Errorf("the same buyer's repeat: %v", err)
+	}
+	acc, err := r.s.AcceptProspect(r.buyer, id, r.vendorA, r.vendorB, ids.New())
+	if err != nil || acc.Status != domain.ProspectAccepted || acc.VendorID != r.vendorB || acc.RequestID == "" {
 		t.Fatalf("accept %+v %v", acc, err)
 	}
-	if _, err := r.s.AcceptProspect(r.buyer, list[0].ID, "", "", ""); problemCode(t, err) != store.CodeProspectState {
+	if _, err := r.s.ClaimProspect(r.buyer, id); problemCode(t, err) != store.CodeProspectState {
+		t.Errorf("claiming an accepted registration: %v", err)
+	}
+	if _, err := r.s.AcceptProspect(r.buyer, id, "", "", ""); problemCode(t, err) != store.CodeProspectState {
 		t.Errorf("accepting twice: %v", err)
+	}
+}
+
+func TestProspect_ARepeatedAcceptLinksTheOpenOnboardingAndAStaleClaimCanBeTakenOver(t *testing.T) {
+	r := newSupplierRig(t)
+	_, _ = r.s.RegisterProspect(registrar(), prospect("sam@birch.example"))
+	list, _ := r.s.ListProspects(r.buyer, "", 50)
+	id := list[0].ID
+	if _, err := r.s.ClaimProspect(r.buyer, id); err != nil {
+		t.Fatal(err)
+	}
+	// The buyer who started stopped part-way; after the timeout another buyer may finish.
+	if _, err := r.s.ClaimProspect(r.approve, id); problemCode(t, err) != store.CodeProspectState {
+		t.Fatalf("taking over a fresh claim: %v", err)
+	}
+	if err := dbx.WithTenantTx(principalContext(1, ""), r.app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `update vendor_prospect set decided_at = now() - interval '1 hour' where id = $1`, id)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.s.ClaimProspect(r.approve, id); err != nil {
+		t.Fatalf("taking over a stale claim: %v", err)
+	}
+	// A vendor with no onboarding cannot be linked: the accept stays open.
+	if _, err := r.s.AcceptProspect(r.approve, id, r.vendorA, r.vendorB, ""); problemCode(t, err) != store.CodeSupplierState {
+		t.Fatalf("linking a vendor with no onboarding: %v", err)
+	}
+	q, err := r.s.CreateQuestionnaire(r.buyer, "Basics", []domain.Question{{ID: "iso", Label: "ISO 9001?", Type: domain.QuestionYesNo, Required: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	onboarding, err := r.s.InviteOnboarding(r.buyer, r.vendorB, q.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The repeat found the onboarding already open and has no request id: the vendor's onboarding is linked, never NULL.
+	acc, err := r.s.AcceptProspect(r.approve, id, r.vendorA, r.vendorB, "")
+	if err != nil || acc.RequestID != onboarding.ID {
+		t.Fatalf("accept %+v %v, want request %s", acc, err, onboarding.ID)
 	}
 }
 

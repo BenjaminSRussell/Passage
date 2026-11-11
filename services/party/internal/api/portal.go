@@ -131,8 +131,9 @@ type acceptProspectBody struct {
 }
 
 // acceptProspect turns a reviewed registration into master data and the existing onboarding: the party, a vendor role (blocked
-// until the onboarding is approved by someone other than the buyer who accepted), and the questionnaire request. Every step is
-// idempotent on the registration id, so a failure part-way is finished by repeating the call.
+// until the onboarding is approved by someone other than the buyer who accepted), and the questionnaire request. The registration
+// is claimed first (ClaimProspect), and every step is idempotent on the registration id, so a failure part-way is finished by
+// repeating the call.
 func (a *API) acceptProspect(w http.ResponseWriter, r *http.Request) {
 	var req acceptProspectBody
 	if err := httpx.Decode(r, &req); err != nil {
@@ -153,10 +154,6 @@ func (a *API) acceptProspect(w http.ResponseWriter, r *http.Request) {
 		failParty(w, r, err)
 		return
 	}
-	if prospect.Status != domain.ProspectNew {
-		failParty(w, r, httpx.NewProblem(http.StatusConflict, store.CodeProspectState, "the registration is already "+prospect.Status))
-		return
-	}
 	key := "prospect-" + prospect.ID
 	fields := domain.PartyFields{LegalName: &prospect.CompanyName}
 	if prospect.TaxID != "" {
@@ -164,6 +161,12 @@ func (a *API) acceptProspect(w http.ResponseWriter, r *http.Request) {
 	}
 	if errs := domain.ValidateParty(domain.TypeOrganization, fields, true); len(errs) > 0 {
 		invalid(w, r, errs)
+		return
+	}
+	// Claim the registration before creating anything: a second buyer accepting at the same time is refused here, and a repeat
+	// of an accept that stopped part-way resumes it.
+	if _, err := a.portal.ClaimProspect(r.Context(), prospect.ID); err != nil {
+		failParty(w, r, err)
 		return
 	}
 	party, _, err := a.parties.CreateParty(r.Context(), store.NewParty{PartyType: domain.TypeOrganization, Fields: fields, Key: key, Hash: domain.RequestHash(fields)},
@@ -177,6 +180,7 @@ func (a *API) acceptProspect(w http.ResponseWriter, r *http.Request) {
 		failParty(w, r, err)
 		return
 	}
+	// A repeated accept finds the onboarding already open; AcceptProspect then links that one.
 	onboarding, err := a.suppliers.InviteOnboarding(r.Context(), vendor.ID, req.QuestionnaireID)
 	var problem *httpx.Problem
 	if err != nil && !(errors.As(err, &problem) && problem.Code == store.CodeSupplierState) {

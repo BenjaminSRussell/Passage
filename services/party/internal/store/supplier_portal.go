@@ -75,6 +75,7 @@ type PortalStore interface {
 	ListProspects(ctx context.Context, status string, limit int) ([]Prospect, error)
 	GetProspect(ctx context.Context, id string) (Prospect, error)
 	RejectProspect(ctx context.Context, id, note string) (Prospect, error)
+	ClaimProspect(ctx context.Context, id string) (Prospect, error)
 	AcceptProspect(ctx context.Context, id, partyID, vendorID, requestID string) (Prospect, error)
 
 	CreateInvite(ctx context.Context, vendorID, email, displayName string) (Invite, string, error)
@@ -165,7 +166,8 @@ func noProspect(err error) error {
 	return err
 }
 
-func (s *Postgres) decideProspect(ctx context.Context, id, status, note, partyID, vendorID, requestID string) (Prospect, error) {
+// RejectProspect closes a NEW registration; nothing in the master data was created for it.
+func (s *Postgres) RejectProspect(ctx context.Context, id, note string) (Prospect, error) {
 	pid, err := canonicalID(id)
 	if err != nil {
 		return Prospect{}, prospectNotFound()
@@ -179,21 +181,75 @@ func (s *Postgres) decideProspect(ctx context.Context, id, status, note, partyID
 		if cur.Status != domain.ProspectNew {
 			return httpx.NewProblem(http.StatusConflict, CodeProspectState, "the registration is already "+cur.Status)
 		}
-		out, err = scanProspect(tx.QueryRow(ctx, `update vendor_prospect set status = $3, decided_by = $4, decided_at = now(), decision_note = $5,
-			party_id = nullif($6, '')::uuid, vendor_id = nullif($7, '')::uuid, request_id = nullif($8, '')::uuid where tenant_id = $1 and id = $2 returning `+prospectColumns,
-			tenantOf(ctx), pid, status, actorOf(ctx), note, partyID, vendorID, requestID))
+		out, err = scanProspect(tx.QueryRow(ctx, `update vendor_prospect set status = $3, decided_by = $4, decided_at = now(), decision_note = $5
+			where tenant_id = $1 and id = $2 returning `+prospectColumns, tenantOf(ctx), pid, domain.ProspectRejected, actorOf(ctx), note))
 		return err
 	})
 	return out, err
 }
 
-func (s *Postgres) RejectProspect(ctx context.Context, id, note string) (Prospect, error) {
-	return s.decideProspect(ctx, id, domain.ProspectRejected, note, "", "", "")
+// prospectClaimTimeout is how long an accept that stopped part-way stays with the buyer who started it; after that another buyer
+// may finish it.
+const prospectClaimTimeout = "10 minutes"
+
+// ClaimProspect starts a buyer's accept: a NEW registration becomes ACCEPTED, decided by the caller, before any master data is
+// created, so two buyers accepting at once cannot both go on (the second is refused). An accept that stopped part-way (ACCEPTED,
+// no onboarding linked yet) is claimed again by the buyer who started it, or by anyone once prospectClaimTimeout has passed, so a
+// repeated call finishes it.
+func (s *Postgres) ClaimProspect(ctx context.Context, id string) (Prospect, error) {
+	pid, err := canonicalID(id)
+	if err != nil {
+		return Prospect{}, prospectNotFound()
+	}
+	var out Prospect
+	err = run(ctx, s, func(tx pgx.Tx) error {
+		var err error
+		out, err = scanProspect(tx.QueryRow(ctx, `update vendor_prospect set status = $3, decided_by = $4, decided_at = now()
+			where tenant_id = $1 and id = $2 and (status = 'NEW'
+				or (status = $3 and request_id is null and (decided_by = $4 or decided_at < now() - $5::interval)))
+			returning `+prospectColumns, tenantOf(ctx), pid, domain.ProspectAccepted, actorOf(ctx), prospectClaimTimeout))
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		cur, err := scanProspect(tx.QueryRow(ctx, `select `+prospectColumns+` from vendor_prospect where tenant_id = $1 and id = $2`, tenantOf(ctx), pid))
+		if err != nil {
+			return noProspect(err)
+		}
+		if cur.Status == domain.ProspectAccepted && cur.RequestID == "" {
+			return httpx.NewProblem(http.StatusConflict, CodeProspectState, "another buyer is accepting the registration")
+		}
+		return httpx.NewProblem(http.StatusConflict, CodeProspectState, "the registration is already "+cur.Status)
+	})
+	return out, err
 }
 
-// AcceptProspect closes a registration after the buyer's accept created the party, the blocked vendor role and the onboarding.
+// AcceptProspect finishes the accept the caller claimed, after it created the party, the blocked vendor role and the onboarding,
+// by linking them to the registration. With no request id (a repeated accept found the onboarding already open) it links the
+// vendor's latest onboarding request.
 func (s *Postgres) AcceptProspect(ctx context.Context, id, partyID, vendorID, requestID string) (Prospect, error) {
-	return s.decideProspect(ctx, id, domain.ProspectAccepted, "", partyID, vendorID, requestID)
+	pid, err := canonicalID(id)
+	if err != nil {
+		return Prospect{}, prospectNotFound()
+	}
+	var out Prospect
+	err = run(ctx, s, func(tx pgx.Tx) error {
+		var err error
+		out, err = scanProspect(tx.QueryRow(ctx, `update vendor_prospect set party_id = nullif($5, '')::uuid, vendor_id = nullif($6, '')::uuid,
+				request_id = coalesce(nullif($7, '')::uuid, (select r.id from vendor_request r where r.tenant_id = $1 and r.vendor_id = nullif($6, '')::uuid and r.kind = 'ONBOARDING' order by r.created_at desc limit 1))
+			where tenant_id = $1 and id = $2 and status = $3 and request_id is null and decided_by = $4
+			returning `+prospectColumns, tenantOf(ctx), pid, domain.ProspectAccepted, actorOf(ctx), partyID, vendorID, requestID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusConflict, CodeProspectState, "the registration is not being accepted by the caller")
+		}
+		if err != nil {
+			return err
+		}
+		if out.RequestID == "" {
+			return supplierState("the vendor has no onboarding request")
+		}
+		return nil
+	})
+	return out, err
 }
 
 const inviteColumns = `id::text, vendor_id::text, email, display_name, role, status, expires_at, invited_by, created_at, accepted_at`
