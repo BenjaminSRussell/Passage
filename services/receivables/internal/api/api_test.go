@@ -29,6 +29,8 @@ type fakeStore struct {
 	payment       store.Payment
 	lockbox       store.LockboxImport
 	adviceOptions store.AdviceOptions
+	banks         []store.BankAccount
+	deletedBank   string
 	seenFiles     map[string]bool
 	statement     statementCall
 	snapshots     store.SnapshotFilter
@@ -99,6 +101,18 @@ func (f *fakeStore) ListRMACredits(_ context.Context, rf store.RMACreditFilter) 
 }
 func (f *fakeStore) SweepRMACredits(context.Context, time.Time, int) (store.RMASweepResult, error) {
 	return store.RMASweepResult{Posted: 1}, nil
+}
+
+func (f *fakeStore) ListBankAccounts(context.Context, string) ([]store.BankAccount, error) {
+	return f.banks, nil
+}
+func (f *fakeStore) PutBankAccount(_ context.Context, b store.BankAccount) error {
+	f.banks = append(f.banks, b)
+	return nil
+}
+func (f *fakeStore) DeleteBankAccount(_ context.Context, le, currency, ref string) error {
+	f.deletedBank = le + "|" + currency + "|" + ref
+	return nil
 }
 
 func (f *fakeStore) ApplyRemittanceAdviceWith(_ context.Context, le string, lines []domain.AdviceLine, opts store.AdviceOptions) (store.AdviceResult, error) {

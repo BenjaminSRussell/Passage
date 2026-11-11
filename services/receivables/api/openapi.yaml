@@ -1596,6 +1596,62 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/bank-accounts:
+    get:
+      operationId: listBankAccounts
+      summary: List the legal entity's bank account mappings (30-2)
+      description: |
+        Each mapping names the ledger account the cash of one bank account is booked to, by currency and the
+        statement's own account id (a camt.053 Stmt/Acct/Id, upper case without spaces). A mapping with an empty
+        `accountRef` is the entity's default account for the currency. Receipts and down payments with no mapping
+        book 1000.
+      x-passage-duty: receivables.view
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Mappings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/BankAccount" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: putBankAccount
+      summary: Create or replace a bank account mapping
+      x-passage-duty: receivables.bankaccount.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BankAccount" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BankAccount" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteBankAccount
+      summary: Remove a bank account mapping; its cash books to 1000 again
+      x-passage-duty: receivables.bankaccount.manage
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
+        - { name: accountRef, in: query, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/receivables/gl-journals:
     get:
       operationId: listGLJournals
@@ -2167,6 +2223,16 @@ components:
         dunningLevel: { type: integer, minimum: 0, maximum: 4 }
         riskScore: { type: integer, minimum: 0, maximum: 100 }
         takenAt: { type: string, format: date-time }
+    BankAccount:
+      type: object
+      required: [legalEntityId, currency, glAccount]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        accountRef: { type: string, maxLength: 40, description: "The statement's account id, normalized to upper case letters and digits; empty is the entity's default for the currency." }
+        glAccount: { type: string, maxLength: 20 }
+        name: { type: string, maxLength: 100 }
     CreatePaymentRequest:
       type: object
       additionalProperties: false
@@ -2189,6 +2255,7 @@ components:
             The payer's IBAN or MICR routing and account as on the advice, 8 or more letters and digits (R4). Only its
             SHA-256 hash is stored; the account is never echoed.
         shortPayReason: { type: [string, "null"], minLength: 1, maxLength: 120, description: explains a short payment (R7) }
+        bankAccount: { type: [string, "null"], maxLength: 64, description: "The bank account the money came to (its IBAN or other id); the legal entity's mapping of it picks the ledger account of the cash." }
         remittance:
           type: array
           items: { $ref: "#/components/schemas/RemittanceLine" }
@@ -2209,6 +2276,7 @@ components:
         payerName: { type: [string, "null"] }
         payerAccountHash: { type: string, pattern: "^[0-9a-f]{64}$", description: "SHA-256 of the payer's normalized account (R4); absent when none was given" }
         shortPayReason: { type: string, description: absent when none was given (R7) }
+        bankAccountRef: { type: string, description: "The bank account the money came to, normalized; absent when unknown" }
         remittance:
           type: array
           items: { $ref: "#/components/schemas/RemittanceLine" }

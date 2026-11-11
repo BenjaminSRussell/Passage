@@ -941,6 +941,7 @@
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
     ]},
     "receivables.aging.run": {"permissions": [{"resource": "/v1/receivables/aging-snapshots", "methods": ["POST"]}]},
+    "receivables.bankaccount.manage": {"permissions": [{"resource": "/v1/receivables/bank-accounts", "methods": ["PUT", "DELETE"]}]},
     "receivables.payment-file.import": {"permissions": [
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["POST"]},
       {"resource": "/v1/receivables/lockbox/imports", "methods": ["POST"]}
@@ -971,6 +972,7 @@
       {"resource": "/v1/receivables/balance-confirmations", "methods": ["GET"]},
       {"resource": "/v1/receivables/balance-confirmations/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/balance-confirmations/*/differences", "methods": ["GET"]},
+      {"resource": "/v1/receivables/bank-accounts", "methods": ["GET"]},
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["GET"]},
       {"resource": "/v1/receivables/cases", "methods": ["GET"]},
       {"resource": "/v1/receivables/cases/*", "methods": ["GET"]},

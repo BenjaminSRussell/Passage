@@ -2407,6 +2407,15 @@ test_gl_journal_routes_split_between_view_and_payment_duties if {
 	not allowed("receivables.view", "POST", "/v1/receivables/gl-journals/j1:retry")
 }
 
+test_bank_account_mappings_are_read_by_view_and_written_by_their_own_duty if {
+	allowed("receivables.view", "GET", "/v1/receivables/bank-accounts")
+	allowed("receivables.bankaccount.manage", "PUT", "/v1/receivables/bank-accounts")
+	allowed("receivables.bankaccount.manage", "DELETE", "/v1/receivables/bank-accounts")
+	not allowed("receivables.view", "PUT", "/v1/receivables/bank-accounts")
+	not allowed("receivables.payment.post", "DELETE", "/v1/receivables/bank-accounts")
+	not allowed("receivables.bankaccount.manage", "GET", "/v1/receivables/bank-accounts")
+}
+
 test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
