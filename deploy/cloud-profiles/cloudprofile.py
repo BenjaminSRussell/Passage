@@ -196,7 +196,7 @@ def egress_allowlist(r: dict[str, Any]) -> list[str]:
     """Hosts a deployment of this profile may call: derived from the endpoint table plus the SaaS the profile keeps."""
     ep = r["endpoints"]
     hosts = [host_of(ep["entraAuthority"]), *map(host_of, r["entraAuthorityAliases"]), host_of(ep["graphRoot"]), host_of(ep["armEndpoint"])]
-    hosts += [f"*.{ep['keyVaultSuffix']}", f"*.{ep['blobSuffix']}", f"*.{ep['containerRegistrySuffix']}", f"*.{ep['postgresSuffix']}"]
+    hosts += [f"*.{ep['keyVaultSuffix']}", f"*.{ep['managedHsmSuffix']}", f"*.{ep['blobSuffix']}", f"*.{ep['containerRegistrySuffix']}", f"*.{ep['postgresSuffix']}"]
     for name in r["llmProviders"]:
         hosts.append(f"*.{ep['azureOpenAISuffix']}" if name == "azure-openai" else LLM_HOSTS[name])
     if r["pagerDutyAllowed"]:

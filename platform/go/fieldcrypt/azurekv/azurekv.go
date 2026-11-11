@@ -70,9 +70,14 @@ func New(cfg Config) (*Client, error) {
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
 		return nil, fmt.Errorf("azurekv: %s must be an https Key Vault key URL, got %q", EnvKeyID, cfg.KeyID)
 	}
+	// A Key Vault key, or a Managed HSM key (#602: the wrapping key may sit in a Managed HSM). Each has its own
+	// host suffix and its own token audience.
 	suffix := cfg.Profile.Endpoint("keyVaultSuffix")
-	if !strings.HasSuffix(strings.ToLower(u.Hostname()), "."+suffix) {
-		return nil, fmt.Errorf("azurekv: vault host %s is not a *.%s host of the %s cloud profile", u.Hostname(), suffix, cfg.Profile.Selector())
+	host := strings.ToLower(u.Hostname())
+	if hsm := cfg.Profile.Endpoint("managedHsmSuffix"); hsm != "" && strings.HasSuffix(host, "."+hsm) {
+		suffix = hsm
+	} else if !strings.HasSuffix(host, "."+suffix) {
+		return nil, fmt.Errorf("azurekv: vault host %s is not a *.%s or *.%s host of the %s cloud profile", u.Hostname(), suffix, hsm, cfg.Profile.Selector())
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) < 2 || len(parts) > 3 || parts[0] != "keys" || parts[1] == "" {

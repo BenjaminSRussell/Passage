@@ -16,7 +16,7 @@ import cloudprofile as cp  # noqa: E402
 
 REPO = cp.REPO
 AZURE_HOST = re.compile(
-    r"microsoftonline\.|graph\.microsoft\.|microsoftgraph\.|usgovcloudapi\.net|chinacloudapi\.cn|vault\.azure\.|"
+    r"managedhsm\.|microsoftonline\.|graph\.microsoft\.|microsoftgraph\.|usgovcloudapi\.net|chinacloudapi\.cn|vault\.azure\.|"
     r"azurecr\.|blob\.core\.windows\.net|openai\.azure\.|postgres\.database\.azure\.com|management\.azure\.com"
 )
 
@@ -60,7 +60,12 @@ class ParityTests(unittest.TestCase):
             for key, ep in p["endpoints"].items()
             if ep.get("status") == "unverified"
         }
-        self.assertTrue(all(name == "china" for name, _ in unverified), unverified)
+        # China's registry and OpenAI suffixes, and Managed HSM outside the commercial cloud (#599 #602 #605).
+        self.assertEqual(
+            unverified,
+            {("china", "containerRegistrySuffix"), ("china", "azureOpenAISuffix"), ("china", "managedHsmSuffix"),
+             ("gcc-high", "managedHsmSuffix"), ("dod", "managedHsmSuffix")},
+        )
 
 
 class ResolveTests(unittest.TestCase):

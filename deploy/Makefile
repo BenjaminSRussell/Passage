@@ -90,8 +90,10 @@ test-cloud-profiles:
 	$(PYTHON) multi-region/tools/check_region_pair.py
 	$(PYTHON) multi-region/tools/check_region_pair.py --values-dir multi-region/values/us --cloud-profile gcc
 	$(PYTHON) multi-region/tools/check_region_pair.py --values-dir multi-region/values/us --cloud-profile commercial
+	$(PYTHON) multi-region/tools/check_region_pair.py --values-dir multi-region/values/eu-azure --cloud-profile commercial+eu-data-boundary
 	$(PYTHON) -m unittest discover -s multi-region -p 'test_chart.py' -v
 	$(PYTHON) -m unittest discover -s multi-region/tools -p 'test_check_region_pair.py' -v
+	$(PYTHON) -m unittest discover -s multi-region/tools -p 'test_residency_report.py' -v
 	$(PYTHON) -m unittest discover -s secret-store -v
 
 # AKS (#600): offline OpenTofu tests (providers mocked, no subscription needed) plus validate.

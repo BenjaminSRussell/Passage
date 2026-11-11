@@ -23,4 +23,5 @@ global:
     postgresSuffix: "postgres.database.azure.com"
     azureOpenAISuffix: "openai.azure.com"
     keyVaultPrivateLinkZone: "privatelink.vaultcore.azure.net"
-  egressAllowlist: ["login.microsoftonline.com", "graph.microsoft.com", "management.azure.com", "*.vault.azure.net", "*.blob.core.windows.net", "*.azurecr.io", "*.postgres.database.azure.com", "*.openai.azure.com"]
+    managedHsmSuffix: "managedhsm.azure.net"
+  egressAllowlist: ["login.microsoftonline.com", "graph.microsoft.com", "management.azure.com", "*.vault.azure.net", "*.managedhsm.azure.net", "*.blob.core.windows.net", "*.azurecr.io", "*.postgres.database.azure.com", "*.openai.azure.com"]

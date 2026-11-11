@@ -180,6 +180,22 @@ func TestGovCloudUsesTheGovAuthorityAndScope(t *testing.T) {
 	}
 }
 
+// A wrapping key held in a Managed HSM (#602): its own host suffix and its own token audience.
+func TestManagedHSMKeyUsesTheHSMHostAndScope(t *testing.T) {
+	f := newFakeAzure(t)
+	c := newClient(t, f, "gcc-high", "https://hsm1.managedhsm.usgovcloudapi.net/keys/fieldcrypt-kek")
+	if _, err := c.Wrap(context.Background(), make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	if f.wantScope != "https://managedhsm.usgovcloudapi.net/.default" {
+		t.Errorf("scope = %q", f.wantScope)
+	}
+	p, _ := cloudprofile.Resolve("gcc-high")
+	if _, err := New(Config{KeyID: "https://hsm1.managedhsm.azure.net/keys/k", Profile: p}); err == nil {
+		t.Error("a commercial Managed HSM host under a gov profile must be refused")
+	}
+}
+
 func TestVaultFromAnotherCloudOrANonVaultHostIsRefused(t *testing.T) {
 	p, _ := cloudprofile.Resolve("gcc-high")
 	for _, id := range []string{

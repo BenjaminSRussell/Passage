@@ -23,4 +23,5 @@ global:
     postgresSuffix: "postgres.database.usgovcloudapi.net"
     azureOpenAISuffix: "openai.azure.us"
     keyVaultPrivateLinkZone: "privatelink.vaultcore.usgovcloudapi.net"
-  egressAllowlist: ["login.microsoftonline.us", "graph.microsoft.us", "management.usgovcloudapi.net", "*.vault.usgovcloudapi.net", "*.blob.core.usgovcloudapi.net", "*.azurecr.us", "*.postgres.database.usgovcloudapi.net", "*.openai.azure.us"]
+    managedHsmSuffix: "managedhsm.usgovcloudapi.net"
+  egressAllowlist: ["login.microsoftonline.us", "graph.microsoft.us", "management.usgovcloudapi.net", "*.vault.usgovcloudapi.net", "*.managedhsm.usgovcloudapi.net", "*.blob.core.usgovcloudapi.net", "*.azurecr.us", "*.postgres.database.usgovcloudapi.net", "*.openai.azure.us"]

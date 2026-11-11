@@ -261,7 +261,7 @@ func buildAllowlist(r *Profile, extra []string) []string {
 		hosts = append(hosts, HostOf(a))
 	}
 	hosts = append(hosts, HostOf(ep["graphRoot"]), HostOf(ep["armEndpoint"]),
-		"*."+ep["keyVaultSuffix"], "*."+ep["blobSuffix"], "*."+ep["containerRegistrySuffix"], "*."+ep["postgresSuffix"])
+		"*."+ep["keyVaultSuffix"], "*."+ep["managedHsmSuffix"], "*."+ep["blobSuffix"], "*."+ep["containerRegistrySuffix"], "*."+ep["postgresSuffix"])
 	for _, name := range r.LLMProviders {
 		if name == "azure-openai" {
 			hosts = append(hosts, "*."+ep["azureOpenAISuffix"])
