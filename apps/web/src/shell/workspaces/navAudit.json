@@ -598,6 +598,7 @@
     {"to": "/shopfloor/andon", "module": "shopfloor", "label": "Andon board", "area": "manufacturing", "decision": "keep", "taskLabel": "Andon board"},
     {"to": "/shopfloor/oee", "module": "shopfloor", "label": "OEE", "area": "manufacturing", "decision": "keep", "taskLabel": "Equipment effectiveness (OEE)"},
     {"to": "/shopfloor/edge-nodes", "module": "shopfloor", "label": "Edge fleet", "area": "manufacturing", "decision": "advanced"},
+    {"to": "/shopfloor/pi-sheets", "module": "shopfloor", "label": "PI sheets", "area": "manufacturing", "decision": "advanced"},
     {"to": "/shopfloor/process-messages", "module": "shopfloor", "label": "Process messages", "area": "manufacturing", "decision": "advanced"},
     {"to": "/shopfloor/control-recipes", "module": "shopfloor", "label": "Control recipes", "area": "manufacturing", "decision": "advanced"},
     {"to": "/shopfloor/process-categories", "module": "shopfloor", "label": "Process categories", "area": "manufacturing", "decision": "advanced"},

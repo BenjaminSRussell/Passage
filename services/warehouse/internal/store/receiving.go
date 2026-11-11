@@ -38,9 +38,13 @@ func (s *Store) RegisterASN(ctx context.Context, idem Idem, r domain.Receipt) (d
 				l := &r.Lines[i]
 				l.Status = domain.PalletExpected
 				l.ReceivedQty, l.VarianceQty, l.VariancePct = decimal.Zero, decimal.Zero, decimal.Zero
+				if domain.ValidSSCC(l.LPID) && l.SSCC == "" {
+					l.SSCC = l.LPID // an ASN that names an SSCC as the license plate: that is the pallet's SSCC
+				}
 				if _, err := tx.Exec(ctx, `insert into receipt_line (tenant_id, receipt_id, line_no, item_id, lp_id, po_line_ref,
-					expected_qty, weight, volume, status) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-					tenantID(ctx), r.ID, l.LineNo, l.ItemID, l.LPID, l.POLineRef, l.ExpectedQty, l.Weight, l.Volume, string(l.Status)); err != nil {
+					expected_qty, weight, volume, status, sscc, lot, expiry_date) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+					tenantID(ctx), r.ID, l.LineNo, l.ItemID, l.LPID, l.POLineRef, l.ExpectedQty, l.Weight, l.Volume, string(l.Status),
+					l.SSCC, l.Lot, nullable(l.ExpiryDate)); err != nil {
 					return r, err
 				}
 			}
@@ -57,9 +61,12 @@ type ReceiveInput struct {
 	ReceiptID string
 	LineNo    int
 	Qty       decimal.Decimal
-	User      string
-	IfMatch   int
-	Now       time.Time
+	// Lot and ExpiryDate (YYYY-MM-DD), when given, replace what the ASN said: the label shows what was counted.
+	Lot        string
+	ExpiryDate string
+	User       string
+	IfMatch    int
+	Now        time.Time
 }
 
 // Received is the receipt after a pallet arrived, the put-away work created
@@ -103,6 +110,20 @@ func (s *Store) ReceiveLine(ctx context.Context, idem Idem, in ReceiveInput) (Re
 			if err != nil {
 				return Received{}, err
 			}
+			if in.Lot != "" {
+				line.Lot = in.Lot
+			}
+			if in.ExpiryDate != "" {
+				line.ExpiryDate = in.ExpiryDate
+			}
+			if err := identifyPallet(ctx, tx, &line); err != nil {
+				return Received{}, err
+			}
+			for i := range r.Lines {
+				if r.Lines[i].LineNo == line.LineNo {
+					r.Lines[i].LPID, r.Lines[i].SSCC, r.Lines[i].Lot, r.Lines[i].ExpiryDate = line.LPID, line.SSCC, line.Lot, line.ExpiryDate
+				}
+			}
 			planned, err := planWork(ctx, tx, PlanInput{WarehouseID: r.WarehouseID, WorkType: putAwayWorkType,
 				Lines: []domain.NewLine{line.PutAwayLine(r.ID)}})
 			if err != nil {
@@ -115,10 +136,12 @@ func (s *Store) ReceiveLine(ctx context.Context, idem Idem, in ReceiveInput) (Re
 				}
 			}
 			if _, err := tx.Exec(ctx, `update receipt_line set status = $3, received_qty = $4, variance_qty = $5, variance_pct = $6,
-				discrepancy = $7, reason = $8, work_id = $9, received_by = $10, received_at = $11
+				discrepancy = $7, reason = $8, work_id = $9, received_by = $10, received_at = $11,
+				lp_id = $12, sscc = $13, lot = $14, expiry_date = $15
 				where receipt_id = $1 and line_no = $2`,
 				r.ID, line.LineNo, string(line.Status), line.ReceivedQty, line.VarianceQty, line.VariancePct,
-				line.Discrepancy, line.Reason, line.WorkID, line.ReceivedBy, line.ReceivedAt); err != nil {
+				line.Discrepancy, line.Reason, line.WorkID, line.ReceivedBy, line.ReceivedAt,
+				line.LPID, line.SSCC, line.Lot, nullable(line.ExpiryDate)); err != nil {
 				return Received{}, err
 			}
 			if err := tx.QueryRow(ctx, `update receipt set status = $2, version = version + 1, updated_at = now()
@@ -211,7 +234,7 @@ func readReceipt(ctx context.Context, tx pgx.Tx, id string, lock bool) (domain.R
 	}
 	rows, err := tx.Query(ctx, `select line_no, item_id, lp_id, po_line_ref, expected_qty::text, weight::text, volume::text, status,
 		received_qty::text, variance_qty::text, variance_pct::text, discrepancy, reason, coalesce(work_id::text, ''),
-		received_by, received_at
+		received_by, received_at, sscc, lot, coalesce(expiry_date::text, '')
 		from receipt_line where receipt_id = $1 order by line_no`, r.ID)
 	if err != nil {
 		return r, err
@@ -221,7 +244,7 @@ func readReceipt(ctx context.Context, tx pgx.Tx, id string, lock bool) (domain.R
 		var l domain.ReceiptLine
 		var lstatus, exp, weight, volume, recv, vqty, vpct string
 		if err := rows.Scan(&l.LineNo, &l.ItemID, &l.LPID, &l.POLineRef, &exp, &weight, &volume, &lstatus, &recv, &vqty, &vpct,
-			&l.Discrepancy, &l.Reason, &l.WorkID, &l.ReceivedBy, &l.ReceivedAt); err != nil {
+			&l.Discrepancy, &l.Reason, &l.WorkID, &l.ReceivedBy, &l.ReceivedAt, &l.SSCC, &l.Lot, &l.ExpiryDate); err != nil {
 			return r, err
 		}
 		l.Status = domain.ReceiptLineStatus(lstatus)

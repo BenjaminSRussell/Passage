@@ -108,7 +108,13 @@ func (l *Link) take() int {
 // unanswered telegram is sent again with the same sequence (the PLC drops a repeat it already
 // has), up to Attempts times. It returns the sequence used.
 func (l *Link) Send(ctx context.Context, t Telegram) (int, error) {
-	t.Seq, t.Sender, t.Receiver = l.take(), l.cfg.Sender, l.cfg.Receiver
+	return l.SendSeq(ctx, t, l.take())
+}
+
+// SendSeq is Send with a sequence number the caller chose: a sender that was answered NACK busy sends the
+// same telegram again under the same number, and the receiver delivers it once.
+func (l *Link) SendSeq(ctx context.Context, t Telegram, seq int) (int, error) {
+	t.Seq, t.Sender, t.Receiver = seq, l.cfg.Sender, l.cfg.Receiver
 	if _, err := t.Encode(); err != nil {
 		return 0, err
 	}

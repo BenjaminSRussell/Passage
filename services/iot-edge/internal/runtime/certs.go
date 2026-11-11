@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,14 +45,20 @@ type CertStore struct {
 	serverCA *x509.CertPool
 }
 
-// NewKeyAndCSR makes an ECDSA P-256 key and a certificate request for it. The request names no identity:
-// the server writes the subject.
-func NewKeyAndCSR() (keyPEM []byte, csrPEM string, err error) {
+// NewKeyAndCSR makes an ECDSA P-256 key and a certificate request for it. The server decides the identity and
+// writes it itself when it signs with its own CA; the platform issuer (cert-manager) signs the subject the
+// request carries, so the request names the identity the server binds to this node, edge:<node id>. A request
+// whose name is not that one is refused by that issuer. edgeID empty names the generic "iot-edge".
+func NewKeyAndCSR(edgeID string) (keyPEM []byte, csrPEM string, err error) {
+	cn := "iot-edge"
+	if edgeID != "" {
+		cn = "edge:" + strings.ToLower(edgeID)
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, "", err
 	}
-	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "iot-edge"}}, key)
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: cn}}, key)
 	if err != nil {
 		return nil, "", err
 	}
@@ -197,7 +204,7 @@ type CertResponse struct {
 // Enroll redeems an enrollment token (POST edge-nodes/{id}:enroll, no session) and installs the
 // certificate it receives. hc is a plain client: the connector has no certificate yet.
 func Enroll(ctx context.Context, hc *http.Client, baseURL, edgeID, token string, store *CertStore) (CertResponse, error) {
-	keyPEM, csr, err := NewKeyAndCSR()
+	keyPEM, csr, err := NewKeyAndCSR(edgeID)
 	if err != nil {
 		return CertResponse{}, err
 	}
@@ -227,7 +234,7 @@ func Enroll(ctx context.Context, hc *http.Client, baseURL, edgeID, token string,
 // Renew asks the server for a fresh certificate over the mTLS client and installs it. It makes a new
 // key each time, so a leaked old key stops mattering when the old certificate expires.
 func (c *Client) Renew(ctx context.Context, store *CertStore) error {
-	keyPEM, csr, err := NewKeyAndCSR()
+	keyPEM, csr, err := NewKeyAndCSR(c.EdgeID)
 	if err != nil {
 		return err
 	}
