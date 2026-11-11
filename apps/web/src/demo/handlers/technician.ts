@@ -91,6 +91,8 @@ function day(date: string): TechnicianDay {
 }
 
 route("GET", `${SERVICE}/technicians/me/day`, ({ query }) => day(query.get("date") || today()));
+// The route stream (#45): the demo opens it and says ready; no route changes come from outside, so no route events follow.
+route("GET", `${SERVICE}/technicians/me/day/events`, () => reply.events([{ event: "ready", data: { technicianId: TECH_ID } }]));
 
 function apply(v: DayVisit, a: ActionBody): ActionOutcome {
   const base = { id: a.id, kind: a.kind };

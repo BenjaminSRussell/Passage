@@ -43,6 +43,57 @@ export async function fetchDay(date?: string): Promise<TechnicianDay> {
   return (await res.json()) as TechnicianDay;
 }
 
+export const ROUTE_EVENTS_URL = `${BASE}/technicians/me/day/events`;
+
+/** The part of EventSource the route subscription needs, so tests can supply one. */
+export interface RouteEventSource {
+  addEventListener(type: string, listener: () => void): void;
+  close(): void;
+  onopen: (() => void) | null;
+  onerror: (() => void) | null;
+}
+export type RouteEventSourceCtor = new (url: string) => RouteEventSource;
+
+export interface RouteSubscription {
+  /** True while the stream is open: the device then polls only as a slow safety net. */
+  readonly open: boolean;
+  close(): void;
+}
+
+/**
+ * Listens for "route" events (#45): the service says the technician's route changed (an assignment, a published day, a new
+ * checklist), and the device reads its day again at once instead of waiting for the next poll. EventSource reconnects by itself
+ * and the device reads its day on every reconnect. Without EventSource, or when it cannot be created, nothing is open and the
+ * device keeps its one-minute poll.
+ */
+export function subscribeRoute(onRoute: () => void, Ctor: RouteEventSourceCtor | undefined = typeof EventSource === "undefined" ? undefined : (EventSource as unknown as RouteEventSourceCtor)): RouteSubscription {
+  let open = false;
+  if (!Ctor) return { open: false, close: () => undefined };
+  let source: RouteEventSource;
+  try {
+    source = new Ctor(ROUTE_EVENTS_URL);
+  } catch {
+    return { open: false, close: () => undefined };
+  }
+  source.addEventListener("route", onRoute);
+  let connected = false;
+  source.onopen = () => {
+    open = true;
+    // The first open comes right after the day was read; a later one is a reconnect that may follow missed events.
+    if (connected) onRoute();
+    connected = true;
+  };
+  source.onerror = () => {
+    open = false;
+  };
+  return {
+    get open() {
+      return open;
+    },
+    close: () => source.close(),
+  };
+}
+
 /** The truck's stock levels with what it holds; an empty list when inventory has none or cannot be reached. */
 export async function fetchTruckStock(legalEntityId: string, siteId: string, warehouseId: string): Promise<TruckStockItem[]> {
   const q = new URLSearchParams({ legalEntityId, siteId, warehouseId });
