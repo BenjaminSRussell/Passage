@@ -59,18 +59,36 @@ func (a *API) portalHistory(r *http.Request, customer string, productIDs []strin
 	if !ids.Valid(p.LegalEntityID) {
 		return nil, false, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "the portal token names no legal entity")
 	}
-	rows, err := a.store.PortalProducts(r.Context(), store.PortalProductFilter{LegalEntityID: p.LegalEntityID, CustomerID: customer, ProductIDs: productIDs, Limit: portalHistoryMax})
+	rows, err := a.store.PortalProducts(r.Context(), store.PortalProductFilter{LegalEntityID: p.LegalEntityID, CustomerID: customer, ProductIDs: productIDs, Limit: portalHistoryMax, Since: a.now().AddDate(0, 0, -a.priceWindowDays())})
 	return rows, len(rows) >= portalHistoryMax, err
 }
 
-// pickHistory is the history row a line reorders: the named unit's, or the most recent one of the product (rows arrive newest first).
-func pickHistory(rows []store.PortalProduct, productID, unit string) (store.PortalProduct, bool) {
+// priceWindowDays is how far back a price may be reordered (default 365 days, SALES_PORTAL_PRICE_WINDOW_DAYS).
+func (a *API) priceWindowDays() int {
+	if a.portalWindowDays > 0 {
+		return a.portalWindowDays
+	}
+	return defaultPortalWindowDays
+}
+
+// WithPortalPriceWindow sets how many days back a portal order may reuse a price.
+func (a *API) WithPortalPriceWindow(days int) *API {
+	a.portalWindowDays = days
+	return a
+}
+
+// pickHistory is the history row a line reorders: the product's newest approved line. A unit the customer names that differs from
+// that line's unit is not matched (unitMismatch tells the caller why).
+func pickHistory(rows []store.PortalProduct, productID, unit string) (h store.PortalProduct, found, unitMismatch bool) {
 	for _, h := range rows {
-		if strings.EqualFold(h.ProductID, productID) && (unit == "" || h.Unit == unit) {
-			return h, true
+		if strings.EqualFold(h.ProductID, productID) {
+			if unit != "" && h.Unit != unit {
+				return h, false, true
+			}
+			return h, true, false
 		}
 	}
-	return store.PortalProduct{}, false
+	return store.PortalProduct{}, false, false
 }
 
 type portalProduct struct {
@@ -142,9 +160,13 @@ func (a *API) portalPlaceOrder(w http.ResponseWriter, r *http.Request, customer 
 	in := createOrderRequest{LegalEntityID: p.LegalEntityID, CustomerID: customer, OrderType: "ORDER", RequestedShipDate: req.RequestedShipDate,
 		Channel: portalChannel + portalNamespace(customer), ExternalRef: req.ExternalRef}
 	for i, l := range req.Lines {
-		h, found := pickHistory(history, l.ProductID, l.Unit)
+		h, found, mismatch := pickHistory(history, l.ProductID, l.Unit)
+		if mismatch {
+			fields[fmt.Sprintf("lines[%d].unit", i)] = "is not the unit you last bought this product in (" + h.Unit + ")"
+			continue
+		}
 		if !found {
-			fields[fmt.Sprintf("lines[%d].productId", i)] = "is not a product you have ordered before; ask your sales contact to add it"
+			fields[fmt.Sprintf("lines[%d].productId", i)] = "is not a product you have had approved and ordered recently; ask your sales contact to add it"
 			continue
 		}
 		if in.Currency == "" {
@@ -213,47 +235,28 @@ func (a *API) portalRequestReturn(w http.ResponseWriter, r *http.Request, custom
 		return
 	}
 	p, _ := tenant.FromContext(r.Context())
-	wanted := make([]string, 0, len(req.Lines))
-	for _, l := range req.Lines {
-		if ids.Valid(l.ProductID) {
-			wanted = append(wanted, strings.ToLower(l.ProductID))
-		}
-	}
-	history, _, err := a.portalHistory(r, customer, wanted)
-	if err != nil {
-		a.fail(w, r, "read customer portal order history", err)
-		return
-	}
 	in := createReturnRequest{LegalEntityID: p.LegalEntityID, CustomerID: customer, OriginalInvoiceID: req.OriginalInvoiceID, ReturnReasonCode: req.ReturnReasonCode}
-	fields := map[string]string{}
 	for i, l := range req.Lines {
-		name := fmt.Sprintf("lines[%d].productId", i)
-		h, found := pickHistory(history, l.ProductID, "")
-		if !found {
-			fields[name] = "is not a product you have bought"
-			continue
-		}
-		// The goods go back to the site and warehouse they came from; the staff who authorize the return can change that on inspection.
-		in.Lines = append(in.Lines, returnLineRequest{LineNo: i + 1, ProductID: h.ProductID, SiteID: h.SiteID, WarehouseID: h.WarehouseID, Quantity: l.Quantity, Unit: h.Unit,
+		// Unit, site and warehouse come from the order line the invoice line was billed from (FromOrderLine below); the ids here only
+		// satisfy the shared validation and are replaced by the store.
+		in.Lines = append(in.Lines, returnLineRequest{LineNo: i + 1, ProductID: l.ProductID, SiteID: ids.New(), WarehouseID: ids.New(), Quantity: l.Quantity, Unit: "EA",
 			Disposition: domain.DispositionReturnToStock, ReturnCostMethod: domain.CostCurrent})
-	}
-	if len(fields) > 0 {
-		pb := httpx.NewProblem(http.StatusUnprocessableEntity, codePortalProduct, "some lines cannot be returned from the portal")
-		pb.Errors = fields
-		httpx.Fail(w, r, pb)
-		return
 	}
 	order, fieldsErr := buildReturnOrder(in, key)
 	if len(fieldsErr) > 0 {
 		validationFailed(w, r, fieldsErr)
 		return
 	}
-	hash, err := domain.RequestHash(in)
+	// The hash is of what the customer sent, not of the placeholder ids above, so a retry of the same body is the same request.
+	hash, err := domain.RequestHash(req)
 	if err != nil {
 		a.fail(w, r, "hash request", err)
 		return
 	}
 	order.RequestHash, order.Actor = hash, p.UserID
+	for i := range order.Lines {
+		order.Lines[i].FromOrderLine = true
+	}
 	saved, created, err := a.store.CreateReturnOrder(r.Context(), order)
 	if err != nil {
 		a.fail(w, r, "create customer portal return", portalReturnError(err))

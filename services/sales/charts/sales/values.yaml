@@ -61,6 +61,10 @@ upstream:
   receivablesUrl: "http://receivables:8080"
   returnOffsetAccount: ""
 
+# Customer portal orders reuse the price of the customer's last approved order of a product; older than this many days is not offered.
+portal:
+  priceWindowDays: 365
+
 # Field encryption (platform fieldcrypt) for the buyer of a one-time customer
 # order: keysSecret is a Secret with a "keys" entry of id=base64(32 bytes)
 # lines, mounted as FIELDCRYPT_KEYS_FILE; currentKeyId names the sealing key.

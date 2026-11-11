@@ -31,24 +31,32 @@ type PortalProductFilter struct {
 	CustomerID    string
 	ProductIDs    []string
 	Limit         int
+	// Since leaves out orders created before it: a price older than the window is not offered again. Zero means no limit.
+	Since time.Time
 }
 
-// PortalProducts reads, per product and unit, the most recent line of the customer's own committed orders (no draft, no cancelled
-// order or line, no journal or returned order). It is the only price source of a portal order: the sales service holds no price
+// PortalProducts reads, per product, the single newest line of the customer's own approved orders: confirmed or later (so no draft or
+// unconfirmed order), no cancelled order or line, no journal or returned order, and no order with an active hold (a held order's price
+// was not approved), created on or after Since. It is the only price source of a portal order: the sales service holds no price
 // list of its own.
 func (s *Postgres) PortalProducts(ctx context.Context, f PortalProductFilter) ([]PortalProduct, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := []PortalProduct{}
+	var since any
+	if !f.Since.IsZero() {
+		since = f.Since
+	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select product_id::text, unit, unit_price::text, disc_pct::text, site_id::text, warehouse_id::text, currency, invoice_account_id::text, created_at
-			from (select distinct on (l.product_id, l.unit) l.product_id, l.unit, l.unit_price, l.disc_pct, l.site_id, l.warehouse_id, o.currency, o.invoice_account_id, o.created_at
+			from (select distinct on (l.product_id) l.product_id, l.unit, l.unit_price, l.disc_pct, l.site_id, l.warehouse_id, o.currency, o.invoice_account_id, o.created_at
 				from sales_order_line l
 				join sales_order o on o.tenant_id = l.tenant_id and o.id = l.order_id
 				where o.tenant_id = $1 and o.legal_entity_id = $2::uuid and o.customer_id = $3::uuid
-					and o.status not in ('DRAFT', 'CANCELLED') and o.order_type in ('ORDER', 'SUBSCRIPTION') and l.line_status <> 'CANCELLED'
+					and o.status in ('CONFIRMED', 'PARTIALLY_SHIPPED', 'SHIPPED', 'INVOICED', 'CLOSED') and o.order_type in ('ORDER', 'SUBSCRIPTION') and l.line_status <> 'CANCELLED' and ($6::timestamptz is null or o.created_at >= $6)
+					and not exists (select 1 from order_hold h where h.tenant_id = o.tenant_id and h.order_id = o.id and h.status = 'ACTIVE')
 					and (cardinality($4::uuid[]) = 0 or l.product_id = any($4::uuid[]))
-				order by l.product_id, l.unit, o.created_at desc, o.id desc) latest
-			order by created_at desc, product_id limit $5`, p.TenantID, f.LegalEntityID, f.CustomerID, nonNil(f.ProductIDs), f.Limit)
+				order by l.product_id, o.created_at desc, o.id desc) latest
+			order by created_at desc, product_id limit $5`, p.TenantID, f.LegalEntityID, f.CustomerID, nonNil(f.ProductIDs), f.Limit, since)
 		if err != nil {
 			return err
 		}

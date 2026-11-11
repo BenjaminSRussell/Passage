@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
@@ -86,7 +88,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Warn("FIELDCRYPT_KEYS is unset: one-time customer orders are refused (SLS-0054)")
 	}
 	st := wireReturns(store.New(pool).WithFieldCrypt(keys), up, signer != nil, getenv)
-	a := api.New(st).WithConfigurations(up).WithProduction(up).WithCustomerGroups(up).WithProductNames(up)
+	a := api.New(st).WithConfigurations(up).WithProduction(up).WithCustomerGroups(up).WithProductNames(up).WithPortalPriceWindow(envInt(getenv("SALES_PORTAL_PRICE_WINDOW_DAYS")))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -131,4 +133,13 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// envInt reads a positive whole number from an environment value; anything else is 0 (the default applies).
+func envInt(v string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
 }

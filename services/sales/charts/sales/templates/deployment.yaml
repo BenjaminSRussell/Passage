@@ -92,6 +92,8 @@ spec:
               value: {{ .Values.upstream.receivablesUrl | quote }}
             - name: SALES_RETURN_OFFSET_ACCOUNT
               value: {{ .Values.upstream.returnOffsetAccount | quote }}
+            - name: SALES_PORTAL_PRICE_WINDOW_DAYS
+              value: {{ .Values.portal.priceWindowDays | quote }}
 {{- if .Values.fieldCrypt.keysSecret }}
             - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
             - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }

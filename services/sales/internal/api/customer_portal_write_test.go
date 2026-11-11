@@ -341,8 +341,8 @@ func TestCustomerPortal_RequestReturnIsForTheTokensCustomerOnly(t *testing.T) {
 		t.Fatalf("return stored as %+v", in)
 	}
 	l := in.Lines[0]
-	if l.SiteID != siteA || l.WarehouseID != whA || l.Disposition != domain.DispositionReturnToStock || l.ReturnCostMethod != domain.CostCurrent {
-		t.Errorf("line %+v", l)
+	if !l.FromOrderLine || l.Disposition != domain.DispositionReturnToStock || l.ReturnCostMethod != domain.CostCurrent {
+		t.Errorf("line %+v: unit, site and warehouse must come from the invoice line's order line, not the customer's latest order", l)
 	}
 	if strings.Contains(rec.Body.String(), "unitCost") || strings.Contains(rec.Body.String(), "warehouseId") {
 		t.Errorf("the return exposes internals: %s", rec.Body)
@@ -353,11 +353,10 @@ func TestCustomerPortal_RequestReturnIsForTheTokensCustomerOnly(t *testing.T) {
 		duties              []string
 		want                int
 	}{
-		"a body naming a customer":            {custA, "return-0002", `{"customerId":"` + custB + `","originalInvoiceId":"` + invA + `","returnReasonCode":"X","lines":[]}`, nil, 400},
-		"a product the customer never bought": {custA, "return-0002", portalReturnBody(invA, prodOnlyB, "1"), nil, 422},
-		"no key":                              {custA, "", portalReturnBody(invA, prodPump, "1"), nil, 400},
-		"the order duty":                      {custA, "return-0002", portalReturnBody(invA, prodPump, "1"), []string{dutyCustomerPortalOrder}, 403},
-		"the read duty":                       {custA, "return-0002", portalReturnBody(invA, prodPump, "1"), []string{dutyCustomerPortal}, 403},
+		"a body naming a customer": {custA, "return-0002", `{"customerId":"` + custB + `","originalInvoiceId":"` + invA + `","returnReasonCode":"X","lines":[]}`, nil, 400},
+		"no key":                   {custA, "", portalReturnBody(invA, prodPump, "1"), nil, 400},
+		"the order duty":           {custA, "return-0002", portalReturnBody(invA, prodPump, "1"), []string{dutyCustomerPortalOrder}, 403},
+		"the read duty":            {custA, "return-0002", portalReturnBody(invA, prodPump, "1"), []string{dutyCustomerPortal}, 403},
 	} {
 		s2 := newPortalWriteStore()
 		w2 := newWriteHarness(t, s2, nil)
@@ -379,5 +378,37 @@ func TestCustomerPortal_ReturnOfAnotherCustomersInvoiceIsOneAnswer(t *testing.T)
 		if rec.Code != http.StatusUnprocessableEntity || p.Code != codePortalInvoice || strings.Contains(p.Detail, "legal entity") || strings.Contains(p.Detail, "does not exist") {
 			t.Errorf("%q: %d %s", detail, rec.Code, rec.Body)
 		}
+	}
+}
+
+// The unit the customer names must be the unit of the newest line; a price outside the window is not offered (the store drops it,
+// so the product is refused as not recently ordered).
+func TestCustomerPortal_PlaceOrderRefusesAnotherUnitAndStalePrices(t *testing.T) {
+	s := newPortalWriteStore()
+	w := newWriteHarness(t, s, nil)
+	body := `{"requestedShipDate":"` + futureD + `","lines":[{"productId":"` + prodPump + `","quantity":"1","unit":"BOX"}]}`
+	rec := w.post(t, custA, customerPortal+"/orders", "submit-0009", body)
+	var p struct {
+		Code   string
+		Errors map[string]string
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &p)
+	if rec.Code != http.StatusUnprocessableEntity || p.Code != codePortalProduct || !strings.Contains(p.Errors["lines[0].unit"], "EA") || len(s.createdOrder) != 0 {
+		t.Fatalf("another unit: %d %s", rec.Code, rec.Body)
+	}
+	for _, f := range s.historyAsked {
+		if f.Since.IsZero() || time.Since(f.Since) < 360*24*time.Hour || time.Since(f.Since) > 370*24*time.Hour {
+			t.Errorf("history window %v, want about 365 days", f.Since)
+		}
+	}
+	s2 := newPortalWriteStore()
+	s2.history[custA] = nil // the store found nothing inside the window
+	w2 := newWriteHarness(t, s2, nil)
+	if rec := w2.post(t, custA, customerPortal+"/orders", "submit-0010", portalOrderBody(prodPump, "1")); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "recently") {
+		t.Fatalf("stale: %d %s", rec.Code, rec.Body)
+	}
+	api := New(s).WithPortalPriceWindow(30)
+	if api.priceWindowDays() != 30 || New(s).priceWindowDays() != 365 {
+		t.Fatal("price window")
 	}
 }

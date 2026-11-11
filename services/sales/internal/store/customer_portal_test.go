@@ -104,3 +104,61 @@ func TestPostgres_PortalProductsAreTheCustomersOwnLatestCommittedLines(t *testin
 		t.Fatalf("another legal entity: %+v %v", rows, err)
 	}
 }
+
+// A price is offered again only from an approved, recent order: not from a draft, a held order or one outside the window, and only the
+// newest eligible line of a product counts (with its unit).
+func TestPostgres_PortalProductsOnlyOfferApprovedRecentNewestLines(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := principalCtx("sales-rep")
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := New(appOf(t, pool))
+	le, cust := ids.New(), ids.New()
+	pump, valve, site, wh := ids.New(), ids.New(), ids.New(), ids.New()
+	create := func(hash, product, unit string, price int64) Order {
+		line := Line{LineNo: 1, ProductID: product, Quantity: d(1), Unit: unit, SiteID: site, WarehouseID: wh, UnitPrice: d(price), DiscPct: d(0), LineNet: d(price), RequestedShipDate: "2027-03-04"}
+		o, _, err := s.CreateOrder(ctx, NewOrder{LegalEntityID: le, CustomerID: cust, InvoiceAccountID: cust, OrderType: "ORDER", Currency: "USD", RequestedShipDate: "2027-03-04", Channel: "UI", RequestHash: hash, Lines: []Line{line}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	confirm := func(o Order) Order {
+		res, err := s.ConfirmOrder(ctx, o.ID, o.Version, "sales-rep", time.Now())
+		if err != nil || !res.Confirmed {
+			t.Fatalf("confirm: %v", err)
+		}
+		return res.Order
+	}
+	good := confirm(create("g1", pump, "EA", 100))
+	time.Sleep(10 * time.Millisecond)
+	held := confirm(create("g2", pump, "EA", 1)) // newer, but on hold: its price was not approved
+	if _, err := s.ApplyHold(ctx, held.ID, held.Version, HoldRequest{HoldType: "MANUAL", ReasonCode: "REVIEW"}, "sales-rep"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	_ = create("g3", pump, "BOX", 5) // draft: not confirmed
+	confirm(create("g4", valve, "EA", 7))
+	time.Sleep(10 * time.Millisecond)
+	confirm(create("g5", valve, "BOX", 70)) // newest valve line is in BOX
+
+	rows, err := s.PortalProducts(ctx, PortalProductFilter{LegalEntityID: le, CustomerID: cust, Limit: 50})
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("rows %+v err %v, want one row per product", rows, err)
+	}
+	by := map[string]PortalProduct{}
+	for _, r := range rows {
+		by[r.ProductID] = r
+	}
+	if p := by[pump]; !p.UnitPrice.Equal(d(100)) || p.Unit != "EA" {
+		t.Errorf("pump %+v: want the approved order's price, not the held or draft one", p)
+	}
+	if v := by[valve]; v.Unit != "BOX" || !v.UnitPrice.Equal(d(70)) {
+		t.Errorf("valve %+v: want only the newest line, in BOX", v)
+	}
+	_ = good
+	if rows, err := s.PortalProducts(ctx, PortalProductFilter{LegalEntityID: le, CustomerID: cust, Limit: 50, Since: time.Now().Add(time.Hour)}); err != nil || len(rows) != 0 {
+		t.Errorf("outside the window: %+v %v", rows, err)
+	}
+}

@@ -42,6 +42,8 @@ const (
 	portalChannel    = "PORTAL-"
 	maxPortalLines   = 100
 	portalHistoryMax = 2000
+
+	defaultPortalWindowDays = 365
 )
 
 // ProductNamer reads product display names from the product service, which owns them.
