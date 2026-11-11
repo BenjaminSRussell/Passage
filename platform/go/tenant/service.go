@@ -137,8 +137,14 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory":   {"inventory.read"},
 		"engineering": {"engineering.read"},
 	},
+	// budgeting reads the actuals a plan is generated from, and the drivers of a generated plan: the depreciation schedules of the
+	// fixed assets, HR's positions, project forecasts and the demand forecast (FR-38.14).
 	"budgeting": {
-		"ledger": {"ledger.balance.read"},
+		"ledger":   {"ledger.balance.read"},
+		"assets":   {"assets.asset.view"},
+		"hr":       {"hr.org.inquire"},
+		"projects": {"projects.inquire"},
+		"planning": {"planning.read"},
 	},
 	"costing": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
