@@ -2,24 +2,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import {
-  Alert,
-  Badge,
-  Button,
-  buttonClassName,
-  Card,
-  DataTable,
-  FormField,
-  Input,
-  PageHeader,
-  Select,
-  type FormFieldControlProps,
-  Skeleton,
-  StatGroup,
-  StatTile,
-  Textarea,
-  type DataTableColumn,
-} from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type FormFieldControlProps, Skeleton, StatGroup, StatTile, Textarea, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
 import {
   createConfirmationRun,
   describeProblem,
@@ -75,7 +58,8 @@ export function ConfirmationRunsPage() {
   const state = useLoad((signal) => listConfirmationRuns(signal), "runs");
   return (
     <div className={styles.stack}>
-      <PageHeader
+      <ListPage
+        id="receivables-confirmations"
         title="Balance confirmations"
         description="Customers confirm the balance we hold for them as of a key date. A disagreement opens a dispute case."
         actions={
@@ -83,20 +67,13 @@ export function ConfirmationRunsPage() {
             New run
           </Link>
         }
+        noun="balance confirmation runs"
+        columns={runColumns}
+        useRows={() => loadedRows(state)}
+        getRowKey={(row) => row.id}
+        onRowOpen={(row) => navigate(`/receivables/balance-confirmations/${row.id}`)}
+        empty={{ title: "No confirmation runs", description: "Start a run for the key date your auditor asked for." }}
       />
-      {state.error ? (
-        <LoadFailure title="Could not load the confirmation runs" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Balance confirmation runs"
-          columns={runColumns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No confirmation runs", description: "Start a run for the key date your auditor asked for." }}
-          onRowOpen={(row) => navigate(`/receivables/balance-confirmations/${row.id}`)}
-        />
-      )}
     </div>
   );
 }

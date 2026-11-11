@@ -48,7 +48,7 @@ describe("container types", () => {
     fireEvent.change(screen.getByLabelText("Tare weight (kg)"), { target: { value: "0.5" } });
     fireEvent.change(screen.getByLabelText("Packaging material"), { target: { value: "cardboard" } });
     fireEvent.click(screen.getByRole("button", { name: "Save container type" }));
-    expect((await findStatus()).textContent).toBe("Saved container type C12.");
+    expect(await screen.findByText("Saved container type C12.")).toBeInTheDocument();
     const call = posts("/container-types")[0];
     expect(idempotencyKey(call)).toBeTruthy();
     expect(call.body).toEqual({ code: "C12", tareKg: "0.5", returnable: false, packagingMaterial: "CARDBOARD" });

@@ -71,7 +71,7 @@ describe("Bank statements", () => {
   it("lists imported statements with their counts", async () => {
     server.handler = (url) => (url.pathname.endsWith("/bank-statements/imports") ? json(200, { items: [statement] }) : undefined);
     const { container } = renderAt("/receivables/bank-statements");
-    const table = await findTable({ name: "Bank statement imports" });
+    const table = await findTable({ name: "Bank statements" });
     await waitFor(() => expect(table).toHaveTextContent("bbbbbbbbbbbb"));
     const row = within(table).getAllByRole("row")[1];
     expect(row).toHaveTextContent("1");
@@ -88,7 +88,7 @@ describe("Bank statements", () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty receivables.view" });
     renderAt("/receivables/bank-statements");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("Could not load the bank statement imports");
+    expect(alert).toHaveTextContent("Could not load bank statement imports");
     expect(alert).toHaveTextContent("AUTH-0003");
   });
 

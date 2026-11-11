@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { Badge, Button, Card, FormField, Select, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
 import {
   describeProblem,
   listWarehouseSettings,
@@ -15,7 +15,6 @@ import { dash, formatDateTime, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { PlainName } from "../sales/OrderNumber";
 
 export const ACTION_LABELS: Record<ShortPickAction, string> = {
@@ -99,25 +98,17 @@ export function WarehouseSettingsPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader
+      <ListPage
+        id="fulfillment-warehouse-settings"
         title="Warehouse settings"
         description="What happens to the open remainder once a packing slip has shipped part of a shipment: keep it open for a re-pick, close it, or move it to a backorder shipment."
+        noun="warehouse settings"
+        columns={columns}
+        useRows={() => loadedRows(state)}
+        getRowKey={(row) => row.warehouseId}
+        onRowOpen={open}
+        empty={{ title: "No warehouses yet", description: "A warehouse appears here once an order is released to it. Until then you can enter its id below." }}
       />
-      {state.error ? (
-        <Alert tone="danger" title="Could not load the warehouse settings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Warehouse settings"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.warehouseId}
-          loading={state.loading}
-          onRowOpen={open}
-          empty={{ title: "No warehouses yet", description: "A warehouse appears here once an order is released to it. Until then you can enter its id below." }}
-        />
-      )}
       <Card title="Change the short pick action">
         <form className={styles.form} onSubmit={submit} noValidate>
           <p className={styles.note}>The action runs when a packing slip posts and leaves quantity still to ship. A shipment with packed stock waiting is left as it is.</p>

@@ -81,6 +81,31 @@ interface Start {
   activeId: string | null;
 }
 
+/** What a page that loads its whole list itself (one request, no paging) hands to ListPage. */
+export interface LoadedList<T> {
+  data: T[] | null | undefined;
+  loading: boolean;
+  error?: unknown;
+  reload(): void;
+}
+
+/**
+ * ListData for a list the page already loaded in full, such as a setup list it also reloads after a save. Pass it as
+ * `useRows={() => loadedRows(state)}`; filters and sort then work on the loaded rows.
+ */
+export function loadedRows<T>(state: LoadedList<T>, forbidden = false): ListData<T> {
+  return {
+    rows: state.error ? [] : (state.data ?? []),
+    loading: state.loading && !state.data,
+    loadingMore: false,
+    error: state.error ? state.error : undefined,
+    forbidden,
+    hasMore: false,
+    loadMore: () => undefined,
+    retry: state.reload,
+  };
+}
+
 export async function entityText(entity: LookupEntityKey, id: string): Promise<string> {
   const found = id === "" ? null : await resolveOption(entity, id);
   return found ? formatOption(found) : id;

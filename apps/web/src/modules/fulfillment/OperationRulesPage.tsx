@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { Badge, Button, Card, FormField, Input, Select, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
 import {
   describeProblem,
   listOperationRules,
@@ -18,7 +18,6 @@ import { dash, formatDateTime, GROUP_LABELS, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { PlainName } from "../sales/OrderNumber";
 
 /** Saving a rule needs this duty (the service enforces it); reading needs fulfillment.warehouse.view. */
@@ -148,25 +147,17 @@ export function OperationRulesPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader
+      <ListPage
+        id="fulfillment-operation-rules"
         title="Posting and packing rules"
         description="Per warehouse: whether a packing slip's posting date is entered, defaults to today or is always the day of the post (both in the warehouse time zone), whether auto-pack is allowed, and how the picking workbench groups when a call names no group."
+        noun="posting and packing rules"
+        columns={columns}
+        useRows={() => loadedRows(state)}
+        getRowKey={(row) => row.warehouseId}
+        onRowOpen={canSave ? open : undefined}
+        empty={{ title: "No warehouses yet", description: canSave ? "A warehouse appears here once an order is released to it. Until then you can enter its id below." : "A warehouse appears here once an order is released to it." }}
       />
-      {state.error ? (
-        <Alert tone="danger" title="Could not load the posting and packing rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Posting and packing rules"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.warehouseId}
-          loading={state.loading}
-          onRowOpen={canSave ? open : undefined}
-          empty={{ title: "No warehouses yet", description: canSave ? "A warehouse appears here once an order is released to it. Until then you can enter its id below." : "A warehouse appears here once an order is released to it." }}
-        />
-      )}
       {canSave ? (
         <Card title="Change the posting and packing rule">
           <form className={styles.form} onSubmit={submit} noValidate>
