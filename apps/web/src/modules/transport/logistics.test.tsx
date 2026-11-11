@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { PrincipalProvider } from "../../shell/principal";
+import { setLookupFetcher } from "../../shell/lookup/entities";
 import type { LoadDetail, LoadRelease, LoadTracking, Tender, TrackingEvent, Voyage, VoyageSummary } from "./api/client";
 import transport from "./module";
 
@@ -147,7 +148,7 @@ describe("Start tender", () => {
   it("sends the carriers in rank order with one Idempotency-Key and opens the tender", async () => {
     handler = (url, init) => (url.pathname === `/api/v1/transport/loads/${LOAD}:tender` && init.method === "POST" ? json(201, tender()) : json(200, tender()));
     const { container } = renderAt(`/transport/tenders/new?loadId=${LOAD}`);
-    expect(screen.getByLabelText("Load id")).toHaveValue(LOAD);
+    expect(screen.getByLabelText("Load")).toHaveAttribute("data-value", LOAD);
     fill("Carrier 1 carrier id", C1);
     fill("Carrier 1 rate quoted", "412.50");
     fireEvent.click(screen.getByRole("button", { name: "Add carrier" }));
@@ -173,7 +174,7 @@ describe("Start tender", () => {
   it("checks the form before calling the service", () => {
     renderAt("/transport/tenders/new");
     fireEvent.click(screen.getByRole("button", { name: "Start tender" }));
-    expect(screen.getByText("Enter the load id as a lower-case UUID.")).toBeInTheDocument();
+    expect(screen.getByText("Choose the load.")).toBeInTheDocument();
     expect(screen.getByText(/Carrier 1: Enter the carrier id/)).toBeInTheDocument();
     expect(calls).toHaveLength(0);
   });
@@ -237,7 +238,7 @@ describe("Release a load to the tender workflow", () => {
     expect(screen.getByText("Tendered")).toBeInTheDocument();
     expect(screen.getByText("version 4")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Release to the tender workflow" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Load id")).toHaveValue(LOAD);
+    expect(screen.getByLabelText("Load")).toHaveAttribute("data-value", LOAD);
   });
 
   it("offers no release without transport.load.tender, and does not read the load", () => {
@@ -373,6 +374,16 @@ const event = (extra: Partial<TrackingEvent> = {}): TrackingEvent => ({
 
 describe("Tracking", () => {
   it("lists the latest reports and opens a load timeline", async () => {
+    setLookupFetcher(async (url) =>
+      url === "/api/v1/transport/loads"
+        ? Response.json({
+            items: [
+              { id: LOAD, mode: "TL", status: "IN_TRANSIT", shipFromSiteId: LOAD, shipToRegion: "Dallas TX", pickupDate: "2026-11-02" },
+              { id: "0190f0a0-0000-7000-8000-00000000ffff", mode: "LTL", status: "PLANNED", shipFromSiteId: LOAD, shipToRegion: "Austin TX", pickupDate: "2026-11-03" },
+            ],
+          })
+        : Response.json({ items: [] }),
+    );
     handler = (url) => (url.pathname === "/api/v1/transport/tracking-events" ? json(200, { items: [event()] }) : undefined);
     const { container } = renderAt("/transport/tracking");
     const table = await findTable({ name: "Latest status reports" });
@@ -380,8 +391,10 @@ describe("Tracking", () => {
     expect(table).toHaveTextContent("Dallas TX");
     expect(violations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
-    expect(screen.getByText("Enter the load id as a lower-case UUID.")).toBeInTheDocument();
-    fill("Load id", LOAD);
+    expect(screen.getByText("Choose a load.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Load"), { target: { value: "dallas" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Dallas TX, pickup 2026-11-02/ }));
+    expect(screen.getByLabelText("Load")).toHaveAttribute("data-value", LOAD);
     fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
     expect(screen.getByTestId("location")).toHaveTextContent(`/transport/tracking/${LOAD}`);
     expect(await screen.findByText("Could not load the timeline")).toBeInTheDocument();

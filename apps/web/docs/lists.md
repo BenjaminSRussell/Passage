@@ -34,6 +34,19 @@
 - **Paging**: keyset "Load more {noun}" under the table.
 - **Density** is the shell's Compact view button; it is remembered per person (`passage.density.v1.{person}`) and every table follows it.
 
+## Text search
+
+A list's text search finds what the command palette finds: both follow the record search service (`services/search`, #506). The rules, on the trimmed, lower-cased query:
+
+1. Under three characters, or shaped like a number (it has a digit, no space and no run of more than three letters: `po-10`, `inv-2026`, `1042`): the record's number starts with it. Nothing else matches, so `1042` does not find `PO-1042`.
+2. Anything else is a name query. It matches when the number and name together hold it (`toso` finds Contoso), or when it is close enough to a stretch of them to forgive a typo (`contsoo` finds Contoso): trigram word similarity of 0.4 or more, as `pg_trgm`'s `word_similarity` counts it.
+3. When rows are ranked rather than kept in list order: the exact number first, then numbers that start with the query, then the most similar, then by number.
+
+- **Rows filtered in the browser** (a `text` filter the page applies to the rows it loaded, a picker over a short list): use `filterBySearch(rows, text, (row) => ({ number, name }))` from `src/shell/search/match.ts` inside `useRows`. It keeps the list's order; `rankBySearch` returns the best match first. Do not write a `toLowerCase().includes()` filter of your own.
+- **Rows filtered by the API** (`q` on a list route): the route should apply the same three rules to the record's number and name. In Postgres that is a range on the lower-cased number for rule 1 and `LIKE` plus `word_similarity` at 0.4 for rule 2; `plan` in `services/search/internal/store/store.go` is the reference. Until a route is brought in line, say in its OpenAPI description how it matches.
+
+`services/search/internal/store/testdata/matching.json` states what a query finds, case by case. The service's store test runs it against Postgres and `match.test.ts` runs it against the browser matcher, so the two cannot drift apart.
+
 ## Accessibility
 
 - The table keeps `DataTable` semantics: `th scope="col"`, sort state in `aria-sort`, a labelled region when it scrolls sideways.
@@ -46,10 +59,25 @@
 
 - `src/modules/ap-invoices/InvoicesPage.tsx` (react-query infinite query, server filters).
 - `src/modules/purchasing/PurchaseOrderPages.tsx` (`PurchaseOrdersPage`, `useResource` with an accumulating cursor).
+- `src/modules/receiving/ReceiptsPage.tsx` (react-query infinite query, entity and date-range filters mapped to `vendorId`, `from` and `to`).
+- `src/modules/sales/OrdersPage.tsx` and `src/modules/billing/InvoicesPage.tsx` (the module's `useLoad` / `usePaged` with a cursor; a failed Load more keeps the rows and retries the next page).
+- `src/modules/fulfillment/PackingSlipsPage.tsx` and `src/modules/receivables/PaymentsPage.tsx` (a single page, no Load more; `forbidden` is read from the module's API error in the loader, because the module's `Problem` carries no status).
 
 ## Rollout checklist (505-3)
 
-For each list (purchase orders, receipts, vendor invoices, sales orders, packing slips, billing invoices, AR payments):
+The procure-to-pay and order-to-cash lists are all converted:
+
+| List | Page | Status |
+| --- | --- | --- |
+| Purchase orders | `purchasing/PurchaseOrderPages.tsx` | Converted |
+| Receipts | `receiving/ReceiptsPage.tsx` | Converted |
+| Vendor invoices | `ap-invoices/InvoicesPage.tsx` | Converted |
+| Sales orders | `sales/OrdersPage.tsx` | Converted |
+| Packing slips | `fulfillment/PackingSlipsPage.tsx` | Converted |
+| Billing invoices | `billing/InvoicesPage.tsx` | Converted |
+| AR payments | `receivables/PaymentsPage.tsx` | Converted |
+
+For each further list:
 
 1. Move the fetch into a `use...Rows(query)` hook that returns `ListData<T>`. Do not change what is requested for the filters the page already had. Set `forbidden` from a 403 so the no-access state shows.
 2. Turn the page's filters into `ListFilterDef`s. Add a filter only when the API takes the parameter.

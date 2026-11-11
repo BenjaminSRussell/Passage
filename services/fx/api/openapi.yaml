@@ -9,6 +9,7 @@ paths:
   /v1/fx/rate-types:
     get:
       operationId: listRateTypes
+      summary: "List the exchange rate types"
       x-passage-duty: fx.rate.view
       responses:
         '200':
@@ -49,6 +50,7 @@ paths:
         schema: { type: string }
     get:
       operationId: getRateType
+      summary: "Get an exchange rate type"
       x-passage-duty: fx.rate.view
       responses:
         '200':

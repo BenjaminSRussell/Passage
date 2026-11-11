@@ -392,3 +392,171 @@ func TestIntrastatJournalsAreScopedToTheLegalEntity(t *testing.T) {
 		t.Errorf("another legal entity lists %d journals: %v", len(list), err)
 	}
 }
+
+func TestStoredCertificatesExemptACalculationAndProtectTheirCodes(t *testing.T) {
+	s, _, ctx := setup(t)
+	seedConfig(t, s, ctx)
+	cert := domain.Certificate{
+		Exemption: domain.Exemption{Number: "CERT/2026-1", Codes: []string{"VAT19"}, ValidFrom: domain.Day("2026-01-01"), ValidTo: domain.Day("2026-12-31")},
+		PartyRef:  "customer-7", Note: "Resale certificate",
+	}
+	if err := s.PutCertificate(ctx, cert); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListCertificates(ctx)
+	if err != nil || len(got) != 1 || got[0].Number != "CERT/2026-1" || got[0].PartyRef != "customer-7" || got[0].ValidTo.IsZero() {
+		t.Fatalf("certificates = %+v, %v", got, err)
+	}
+	cfg, err := s.LoadConfig(ctx)
+	if err != nil || len(cfg.Exemptions) != 1 {
+		t.Fatalf("stored config carries %d exemptions (%v)", len(cfg.Exemptions), err)
+	}
+	doc := domain.Document{
+		Currency: "EUR", Direction: domain.DirOutput, DocumentDate: domain.Day("2026-03-15"),
+		Party: domain.Party{TaxGroup: "DOMESTIC-DE", Certificate: "CERT/2026-1"},
+		Lines: []domain.Line{{LineRef: "L1", Amount: domain.D("200"), ItemTaxGroup: "STANDARD"}},
+	}
+	res, err := domain.Calculate(doc, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, total := range res.DocumentTaxesByCode {
+		if total.Code == "VAT19" && total.TaxAmount.String() != "0" {
+			t.Errorf("the certificate did not exempt VAT19: %+v", total)
+		}
+	}
+	// An open-ended certificate round trips with no end date.
+	open := cert
+	open.Number, open.ValidTo = "CERT-OPEN", domain.Date{}
+	if err := s.PutCertificate(ctx, open); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.PutCertificate(ctx, domain.Certificate{Exemption: domain.Exemption{Number: "BAD", Codes: []string{"GONE"}, ValidFrom: domain.Day("2026-01-01")}}); asDomainError(err) == nil {
+		t.Errorf("a certificate for a missing code was accepted: %v", err)
+	}
+	if err := s.PutCertificate(ctx, domain.Certificate{Exemption: domain.Exemption{Number: "BAD", Codes: []string{"VAT19"}, ValidFrom: domain.Day("2026-05-01"), ValidTo: domain.Day("2026-04-01")}}); asDomainError(err) == nil {
+		t.Errorf("a certificate that ends before it starts was accepted: %v", err)
+	}
+	if err := s.DeleteGroup(ctx, "item", "STANDARD"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteGroup(ctx, "party", "DOMESTIC-DE"); err != nil {
+		t.Fatal(err)
+	}
+	if de := asDomainError(s.DeleteCode(ctx, "VAT19")); de == nil || de.Code != domain.CodeConfigInUse {
+		t.Errorf("deleting a code a certificate names: %v, want TAX-0013", de)
+	}
+	if err := s.DeleteCertificate(ctx, "CERT/2026-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCertificate(ctx, "CERT/2026-1"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("deleting twice: %v", err)
+	}
+}
+
+func TestSeededMasterDataKeepsTenantEditsAndDrivesAJournal(t *testing.T) {
+	s, _, ctx := setup(t)
+	if err := s.PutMaster(ctx, domain.MasterEntry{Kind: "transport_mode", Code: "3", Description: "Lorry"}); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := domain.SeedEntries([]string{"transport_mode", "country", "delivery_terms"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.ImportMaster(ctx, seed, false)
+	if err != nil || res.Skipped != 1 || res.Added != len(seed)-1 {
+		t.Fatalf("seed = %+v, %v; want one entry skipped (the edited one)", res, err)
+	}
+	modes, _ := s.ListMaster(ctx, "transport_mode")
+	for _, m := range modes {
+		if m.Code == "3" && m.Description != "Lorry" {
+			t.Errorf("the seed overwrote the tenant's edit: %+v", m)
+		}
+	}
+	if again, err := s.ImportMaster(ctx, seed, false); err != nil || again.Added != 0 || again.Skipped != len(seed) {
+		t.Errorf("a repeated seed = %+v, %v", again, err)
+	}
+	if over, err := s.ImportMaster(ctx, seed, true); err != nil || over.Added != len(seed) {
+		t.Errorf("an overwriting import = %+v, %v", over, err)
+	}
+	modes, _ = s.ListMaster(ctx, "transport_mode")
+	for _, m := range modes {
+		if m.Code == "3" && m.Description != "Road transport" {
+			t.Errorf("overwrite kept the old text: %+v", m)
+		}
+	}
+}
+
+func TestRecoveryPoliciesDriveCalculationsAndTheReclaim(t *testing.T) {
+	s, _, ctx := setup(t)
+	seedConfig(t, s, ctx)
+	if err := s.PutGroup(ctx, domain.Group{Kind: "item", Code: "CARS", Name: "Company cars", TaxCodes: []string{"VAT19"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRecoveryPolicy(ctx, domain.RecoveryPolicy{Code: "VAT19", ItemGroup: "CARS", RecoverablePct: domain.D("50"), ValidFrom: domain.Day("2026-01-01"), Note: "Private use"}); err != nil {
+		t.Fatal(err)
+	}
+	for name, p := range map[string]domain.RecoveryPolicy{
+		"an overlapping policy": {Code: "VAT19", ItemGroup: "CARS", RecoverablePct: domain.D("40"), ValidFrom: domain.Day("2026-06-01")},
+		"an unknown code":       {Code: "NOPE", RecoverablePct: domain.D("40"), ValidFrom: domain.Day("2026-06-01")},
+		"an unknown item group": {Code: "VAT19", ItemGroup: "BOATS", RecoverablePct: domain.D("40"), ValidFrom: domain.Day("2026-06-01")},
+	} {
+		if err := s.PutRecoveryPolicy(ctx, p); asDomainError(err) == nil {
+			t.Errorf("%s was accepted: %v", name, err)
+		}
+	}
+	// A later policy of the same group is fine once the first one ends.
+	if err := s.PutRecoveryPolicy(ctx, domain.RecoveryPolicy{Code: "VAT19", ItemGroup: "CARS", RecoverablePct: domain.D("50"), ValidFrom: domain.Day("2026-01-01"), ValidTo: domain.Day("2026-12-31")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRecoveryPolicy(ctx, domain.RecoveryPolicy{Code: "VAT19", ItemGroup: "CARS", RecoverablePct: domain.D("60"), ValidFrom: domain.Day("2027-01-01")}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.LoadConfig(ctx)
+	if err != nil || len(cfg.Recovery) != 2 {
+		t.Fatalf("stored config carries %d policies (%v)", len(cfg.Recovery), err)
+	}
+	res, err := domain.Calculate(domain.Document{
+		Currency: "EUR", Direction: domain.DirInput, DocumentDate: domain.Day("2026-03-15"), Party: domain.Party{TaxGroup: "DOMESTIC-DE"},
+		Lines: []domain.Line{{LineRef: "L1", Amount: domain.D("100"), ItemTaxGroup: "CARS"}},
+	}, cfg)
+	if err != nil || res.Lines[0].Taxes[0].Recoverable.String() != "9.5" || res.Lines[0].Taxes[0].Nonrecoverable.String() != "9.5" {
+		t.Fatalf("calculate with the stored policy: %+v, %v", res, err)
+	}
+
+	// Reclaim: one transaction records its recoverable amount, one falls back on the code, an output tax is ignored.
+	rec := domain.D("30")
+	txns := []domain.Txn{
+		{ID: ids.New(), Code: "VAT19", Direction: domain.DirInput, TaxDate: domain.Day("2026-04-10"), Amount: domain.D("100"), Recoverable: &rec},
+		{ID: ids.New(), Code: "VAT19", Direction: domain.DirInput, TaxDate: domain.Day("2026-04-12"), Amount: domain.D("50")},
+		{ID: ids.New(), Code: "VAT19", Direction: domain.DirOutput, TaxDate: domain.Day("2026-04-13"), Amount: domain.D("400")},
+	}
+	if n, err := s.RecordTransactions(ctx, txns); err != nil || n != 3 {
+		t.Fatalf("record: %d %v", n, err)
+	}
+	if n, err := s.RecordTransactions(ctx, txns); err != nil || n != 0 {
+		t.Fatalf("a repeat with the recoverable amount: %d %v", n, err)
+	}
+	changed := txns[0]
+	other := domain.D("31")
+	changed.Recoverable = &other
+	if _, err := s.RecordTransactions(ctx, []domain.Txn{changed}); asDomainError(err) == nil {
+		t.Errorf("a changed recoverable amount was accepted: %v", err)
+	}
+	got, err := s.Reclaim(ctx, domain.Period{From: domain.Day("2026-04-01"), To: domain.Day("2026-04-30")})
+	if err != nil || len(got.Rows) != 1 || got.Rows[0].Transactions != 2 || got.Rows[0].Estimated != 1 ||
+		got.TotalInputTax.String() != "150" || got.TotalRecoverable.String() != "80" || got.TotalNonRecoverable.String() != "70" {
+		t.Fatalf("reclaim = %+v, %v", got, err)
+	}
+
+	if de := asDomainError(s.DeleteCode(ctx, "VAT19")); de == nil {
+		t.Error("deleting a code with recovery policies succeeded")
+	}
+	if err := s.DeleteRecoveryPolicy(ctx, "VAT19", "CARS", domain.Day("2027-01-01")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteRecoveryPolicy(ctx, "VAT19", "CARS", domain.Day("2027-01-01")); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("deleting twice: %v", err)
+	}
+}

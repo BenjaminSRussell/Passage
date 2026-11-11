@@ -8,9 +8,20 @@ allow if {
 	input.subject.tenant_id != ""
 	input.subject.user_id != ""
 	some duty in data.assignments[input.subject.tenant_id][input.subject.user_id]
+	tenant_may_hold(duty)
 	some permission in data.duties[duty].permissions
 	input.action in permission.methods
 	path_matches(permission.resource, input.resource)
+}
+
+# An operator_only duty acts on platform-wide state (the ops control plane): it grants nothing outside the platform
+# operator's tenant, whatever a tenant's role assignments say. identity adds operator_tenant_id to the compiled bundle;
+# without it no tenant may hold such a duty.
+tenant_may_hold(duty) if not data.duties[duty].operator_only
+
+tenant_may_hold(duty) if {
+	data.duties[duty].operator_only == true
+	input.subject.tenant_id == data.operator_tenant_id
 }
 
 decision := {"allow": true} if allow

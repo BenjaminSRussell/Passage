@@ -13,7 +13,7 @@ const stateTone: Record<ReceiptState, BadgeTone> = {
   CANCELLED: "neutral",
 };
 
-const stateLabel: Record<ReceiptState, string> = {
+export const stateLabel: Record<ReceiptState, string> = {
   ARRIVED: "Arrived",
   REGISTERED: "Registered",
   POSTED: "Posted",

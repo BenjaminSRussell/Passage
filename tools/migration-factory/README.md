@@ -30,7 +30,8 @@ Built and tested:
   ≤ 0.1 % of revenue (MIG-1509).
 - **Parallel-run replay** (`replay.go`, `internal/replay`, D4): a legacy period's journals posted in
   their original sequence through the ledger into a rehearsal ledger, and the trial balance read
-  back diffed with the legacy one (`POST /migration/parallel-runs/replay`).
+  back diffed with the legacy one (`POST /migration/parallel-runs/replay`). With `subledger` documents (AR, AP, INV, FA) the same call also posts them through a per-area `replay.Port`
+  and diffs each subledger's period movement per key as INV, AP, AR and FA tuples (49-4); no port is wired in `main` yet (503 `MIG-1534`).
 - **Cutover plan** (`cutover.go`): timed steps from T-14d to T+30d with pack load steps, rehearsal
   duration overrides, go/no-go sequencing (CUT-1601), the abort step at `abortOffsetHours`, the
   BR-49.9 abort state (CUT-1604), rollback once with two distinct approvers (CUT-1603), and a plan
@@ -100,13 +101,28 @@ Built and tested:
   /v1/receivables/open-item-imports` (item count, debit, credit, net per currency) with what the
   factory sent; a difference is MISMATCH and flags the pack. A rerun of an unchanged snapshot sends
   nothing (`target_loaded` remembers each accepted row's hash). Open AP rows are `NOT_AVAILABLE`
-  rejects until payables has an opening-item API. Both sides of the reconciliation cover the whole
+  rejects unless the run names `load.payables` (see the next item). Both sides of the reconciliation cover the whole
   import source in the legal entity across runs; one load runs at a time per import source and legal
   entity, an older run is not loaded over a newer one, and one import source belongs to one legacy
   company. The factory calls as the service `migration-factory` (its own key) acting as
   `migration-loader`, each token holding one duty; without `RECEIVABLES_URL` and a signing key the service starts and the
   load answers 503 `MIG-1520`. Tests run against `internal/target/targettest`, an httptest fake that
   mirrors the receivables handler.
+- **Open AP into payables** (49-3, `internal/target/payables.go`, `migrations/0027_payables_load.sql`): a run
+  started with `load.payables` (legacy vendor to Passage vendor id, or `vendorId` on the record) stages its AP
+  records for the payables opening batches. `POST /migration/runs/{id}/load-payables` sends them to
+  `POST /v1/payables/opening-batches` in batches of at most 1000 (all or nothing at payables, a control total per
+  currency in minor units, a batch key `mf-ap-<importSource>-<hash>` derived from the rows so a retry is a replay).
+  Rows payables refuses by name (`AP-OPB-001` unknown vendor or bad field, `AP-OPB-004` reference held by another
+  batch) are stored REJECTED with its reason and the rest of the batch is sent again; a 5xx, 429 or timeout leaves the
+  rows pending (PARTIAL); a refusal of the whole request fails the load (502 `MIG-1552`, token refused `MIG-1551`).
+  Rows equal to what payables already holds are skipped. When nothing is pending, the batches payables lists for the
+  legal entity under the factory's keys are compared with what was sent (item count, total per currency in minor
+  units; control totals `target.payables.*`, MISMATCH never passed silently). `GET /migration/runs/{id}/payables-load`
+  reads it. The run's `payables_staged` stays at every AP line until the load is RECONCILED, so the go/no-go keeps
+  open_items staged; rejected lines stay staged and need a waiver. An AP amount carries the ledger sign (owed to the
+  vendor is negative); a positive amount (vendor debit balance) is rejected `MIG-LOAD-AP-DEBIT-BALANCE`. Configure
+  `PAYABLES_URL` (chart `payables.url`) next to `RECEIVABLES_URL`; tests use `targettest.FakePayables`.
 - **Legacy cross-reference lookup**: `GET /api/v1/migration/xref` by legacy id or by Passage record.
 - **Store** (`internal/store`, `migrations/`): Postgres with forced row-level security on every
   table, the outbox written in the same transaction, `Idempotency-Key` replay, and an optimistic
@@ -188,6 +204,8 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 | `POST /api/v1/cutover/plans/{id}/rollback` | `migration.cutover.manage` (two different callers approve; the second runs it) |
 | `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `migration.cutover.manage` |
 | `POST`/`GET /api/v1/cutover/plans/{id}/rollback/compensations` | `migration.cutover.manage` |
+| `PUT /api/v1/cutover/plans/{id}/opening-targets/{system}/{company}`, `GET .../opening-targets` | `migration.cutover.manage` (the company-to-legal-entity and ledger mapping of the opening journal; a mapped company refuses any other target) |
+| `POST /api/v1/migration/opening-targets/{system}/{company}/release` | `migration.opening-target.release` plus `tenant.administer` and no legal-entity scope (frees a pin with no postings; reason, person and time are kept in `gl_opening_target_release`) |
 | `POST /api/v1/migration/parallel-runs/replay` | `migration.factory.run` |
 | `GET /api/v1/migration/coexistence` | `migration.factory.view` |
 | `PUT /api/v1/migration/coexistence/{system}/{company}/{entity}` | `migration.cutover.manage` |
@@ -225,6 +243,12 @@ Problem details use `type` `https://passage.dev/problems/<code>`. The stable `co
 | `MIG-1524` | 502 | Receivables refused the whole batch request (a 4xx that is not a row result); the load is FAILED and its rows stay pending. |
 | `MIG-1525` | 409 | A later run of the same import source and legal entity has already been loaded; load the latest run. |
 | `MIG-1526` | 409 | The run's import source is already used by another legacy (system, company). |
+| `MIG-1550` | 503 | The payables target is not configured (`PAYABLES_URL` and the service signing key). |
+| `MIG-1551` | 502 | Payables refused the factory's service token; the load is FAILED and its rows stay pending. |
+| `MIG-1552` | 502 | Payables refused the batch request as a whole (control totals, a changed batch under an old key); the rows stay pending. |
+| `MIG-1553` | 409 | The run was started without `load.payables`, so it has no AP load. |
+| `MIG-1534` | 503 | A replay has subledger documents of an area no subledger port posts. |
+| `MIG-1535` | 502 | A subledger failed during the replay; it can be repeated (every document is posted under a fixed key). |
 | `AUTH-0001` | 401 | No tenant or principal. (Kernel.) |
 | `AUTH-0003` | 403 | Missing duty. (Kernel.) |
 | `COM-0001` | 400 | Malformed JSON body. (Kernel.) |

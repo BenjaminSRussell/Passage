@@ -3052,6 +3052,119 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/customer-portal/orders:
+    get:
+      operationId: customerPortalListOrders
+      summary: The signed-in customer's own orders (customer portal).
+      description: For the customer portal only (#30). The customer is the signed `cus` claim of the customer-portal service token; a `customerId` query parameter is ignored. Draft orders are not listed.
+      x-passage-duty: sales.customer-portal.read
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortalOrder" }
+                  nextCursor: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sales/customer-portal/orders/{id}:
+    get:
+      operationId: customerPortalGetOrder
+      summary: One of the signed-in customer's orders with its lines (customer portal).
+      description: An order of another customer, or a draft, is 404 SLS-0100, the same answer as an unknown id.
+      x-passage-duty: sales.customer-portal.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrder"
+        "404": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sales/customer-portal/returns:
+    get:
+      operationId: customerPortalListReturns
+      summary: The signed-in customer's own return orders (customer portal).
+      description: For the customer portal only (#30). The customer is the signed `cus` claim of the customer-portal service token; a `customerId` query parameter is ignored.
+      x-passage-duty: sales.customer-portal.read
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortalReturn" }
+                  nextCursor: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sales/customer-portal/returns/{id}:
+    get:
+      operationId: customerPortalGetReturn
+      summary: One of the signed-in customer's return orders (customer portal).
+      description: A return of another customer is 404 SLS-0125, the same answer as an unknown id.
+      x-passage-duty: sales.customer-portal.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalReturn"
+        "404": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sales/return-orders:backfill-reservations:
+    post:
+      summary: Give the RMA credits posted before billing reservations existed the reservation they never took (#557)
+      description: |
+        Works through the credited return orders of the legal entity that have not been backfilled: for each it
+        takes the credit's stored invoice lines (worked out first for a credit stored before migration 0048) and
+        asks receivables to reserve and commit them in billing, so billing's invoice limit counts the credit. An
+        order is marked once receivables holds the reservation (also when it already did); one that fails is
+        listed in `failed` and taken up by the next call. `more` is true while orders are left after `limit`.
+      operationId: backfillReturnReservations
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        "200":
+          description: What the run did
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backfilled: {type: integer}
+                  alreadyHeld: {type: integer}
+                  more: {type: boolean}
+                  skipped: {type: array, items: {type: object, properties: {rmaNumber: {type: string}, reason: {type: string}}}}
+                  failed: {type: array, items: {type: object, properties: {rmaNumber: {type: string}, reason: {type: string}}}}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "503": {$ref: "#/components/responses/Problem"}
   /v1/sales/return-orders:
     get:
       summary: List return orders (RMA), newest first (FR-30.11)
@@ -3263,6 +3376,16 @@ paths:
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - $ref: "#/components/parameters/IfMatch"
+        - name: recompute
+          in: query
+          required: false
+          description: |
+            `true` on a CREDITED return whose credit note receivables never confirmed: works the credit out again
+            (tax reversal, invoice lines, repricing, totals) from the invoice as billing holds it now, bumps the
+            version, and sends it under the same RMA key. Use it after an operator released the credit in
+            receivables with `:cancel`; while receivables still holds the old credit it refuses the new amounts. Not
+            for a lost answer that may have posted the credit: check receivables first.
+          schema: {type: boolean}
       responses:
         "200":
           description: credited and closed
@@ -3329,6 +3452,38 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
   schemas:
+    PortalOrder:
+      type: object
+      description: The customer's view of an order; no holds, credit check, channel, warehouse or versions.
+      properties:
+        id: { type: string, format: uuid }
+        orderNumber: { type: string }
+        orderType: { type: string }
+        status: { type: string }
+        currency: { type: string }
+        requestedShipDate: { type: string, format: date }
+        externalRef: { type: string }
+        netTotal: { type: string }
+        lineCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        lines: { type: array, items: { type: object } }
+    PortalReturn:
+      type: object
+      description: The customer's view of a return order; no costs, products' warehouses, journal or user ids.
+      properties:
+        id: { type: string, format: uuid }
+        rmaNumber: { type: string }
+        originalInvoiceNumber: { type: string }
+        returnReasonCode: { type: string }
+        status: { type: string }
+        currency: { type: string }
+        expiresAt: { type: string, format: date }
+        gross: { type: string }
+        restocking: { type: string }
+        net: { type: string }
+        tax: { type: string }
+        createdAt: { type: string, format: date-time }
+        lines: { type: array, items: { type: object } }
     ExpiredQuotation:
       type: object
       required: [id, quotationNumber, legalEntityId, customerId, validUntil, previousStatus, version]

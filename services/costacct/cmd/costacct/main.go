@@ -85,6 +85,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	admin.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = fmt.Fprint(w, "# HELP costacct_up Process is serving.\n# TYPE costacct_up gauge\ncostacct_up 1\n")
+		httpx.WriteMetrics(w)
 	})
 
 	ctx, cancel := context.WithCancel(ctx)

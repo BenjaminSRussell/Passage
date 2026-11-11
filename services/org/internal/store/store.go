@@ -132,6 +132,7 @@ type Store interface {
 	EndTeamMember(ctx context.Context, teamID, memberRowID string, validTo time.Time) (TeamMember, bool, error)
 	RemoveTeamMember(ctx context.Context, teamID, memberRowID string) error
 	ListTeamMembers(ctx context.Context, teamID string, f TeamMemberFilter, afterID string, limit int) (TeamMemberPage, error)
+	RemoveDemoCompany(ctx context.Context, keyPrefix, actor string) (DemoRemoval, error)
 	Ping(ctx context.Context) error
 }
 

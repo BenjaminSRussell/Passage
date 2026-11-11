@@ -79,7 +79,10 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true HTTP_ADDR=:8080 go run ./cmd/b
 Configuration: `DATABASE_URL` (required), `MIGRATE_ON_START` (dev only),
 `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, `/metrics`),
 `BILLING_MAX_LINES` (default 2000, 1 to 10000), `BILLING_TAX_RATES` (interim tax
-engine, for example `DE19=19,DE7=7,EXEMPT=0`).
+engine, for example `DE19=19,DE7=7,EXEMPT=0`), `BILLING_SUBSCRIPTION_JOB_TENANT_IDS` with
+`BILLING_SUBSCRIPTION_JOB_INTERVAL` (default 1h) or `BILLING_SUBSCRIPTION_JOB_AT` (`HH:MM`, UTC;
+runs once a day, for example `03:00`, and not at start; set one of the two) to run the
+due-period subscription billing job, which creates the proposals only.
 
 Until the wave-13 tax client is wired, the tax engine is the rate table in
 `BILLING_TAX_RATES`: line tax = rounded line net × the code's percent, rounded per

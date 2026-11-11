@@ -39,6 +39,8 @@ type extractRecordDTO struct {
 	OriginalAmount     string  `json:"originalAmount,omitempty"`
 	CashDiscountDate   *string `json:"cashDiscountDate,omitempty"`
 	CashDiscountAmount string  `json:"cashDiscountAmount,omitempty"`
+	// VendorID is the Passage vendor of an AP line when it is not named in load.payables.vendorIds.
+	VendorID string `json:"vendorId,omitempty"`
 }
 
 // loadRequestDTO asks a run to be staged for loading into a target service.
@@ -47,6 +49,13 @@ type loadRequestDTO struct {
 	LegalEntityID string            `json:"legalEntityId"`
 	ImportSource  string            `json:"importSource,omitempty"`
 	CustomerIDs   map[string]string `json:"customerIds,omitempty"`
+	// Payables stages the AP lines for the payables opening-batch load; without it they stay NOT_AVAILABLE.
+	Payables *payablesRequestDTO `json:"payables,omitempty"`
+}
+
+// payablesRequestDTO names the Passage vendor of each legacy vendor.
+type payablesRequestDTO struct {
+	VendorIDs map[string]string `json:"vendorIds,omitempty"`
 }
 
 type packRunRequest struct {
@@ -117,6 +126,8 @@ type runDetailDTO struct {
 	MismatchMessages []string        `json:"mismatchMessages,omitempty"`
 	// TargetLoad is set when the run was started with a load object (open_items into receivables).
 	TargetLoad *targetLoadDTO `json:"targetLoad,omitempty"`
+	// PayablesLoad is set when the run was started with load.payables (AP lines into payables).
+	PayablesLoad *payablesLoadDTO `json:"payablesLoad,omitempty"`
 }
 
 func toTotalDTO(t domain.ControlTotal) totalDTO {
@@ -317,7 +328,7 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 	}
 	in := store.OpenItemsRun{Run: run, Records: records, Accepted: accepted, StartedBy: p.UserID}
 	if loadCfg != nil {
-		in.Target = &store.TargetStage{LegalEntityID: loadCfg.LegalEntityID, ImportSource: loadCfg.ImportSource, Rows: domain.StageRows(accepted, extras, *loadCfg)}
+		in.Target = &store.TargetStage{LegalEntityID: loadCfg.LegalEntityID, ImportSource: loadCfg.ImportSource, Rows: domain.StageRows(accepted, extras, *loadCfg), Payables: loadCfg.Payables != nil}
 	}
 	out, replayed, err := s.store.RunOpenItems(r.Context(), idem, in)
 	if err != nil {
@@ -329,6 +340,12 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		if l, err := s.store.GetTargetLoad(r.Context(), out.RunID); err == nil {
 			ld := toTargetLoadDTO(l)
 			dto.TargetLoad = &ld
+		}
+		if in.Target.Payables {
+			if l, err := s.store.GetPayablesLoad(r.Context(), out.RunID); err == nil {
+				pl := toPayablesLoadDTO(l)
+				dto.PayablesLoad = &pl
+			}
 		}
 	}
 	respond(w, http.StatusCreated, replayed, dto)
@@ -391,6 +408,10 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	if l, err := s.store.GetTargetLoad(r.Context(), id); err == nil {
 		dto := toTargetLoadDTO(l)
 		out.TargetLoad = &dto
+		if pl, err := s.store.GetPayablesLoad(r.Context(), id); err == nil {
+			pd := toPayablesLoadDTO(pl)
+			out.PayablesLoad = &pd
+		}
 	} else if !errors.Is(err, store.ErrNoTarget) {
 		fail(w, r, err)
 		return

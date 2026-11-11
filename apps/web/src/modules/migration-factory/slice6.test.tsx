@@ -201,7 +201,7 @@ describe("Start pack run with a load", () => {
       return undefined;
     };
     const { container } = renderAt("/migration-factory/runs/new");
-    expect(screen.queryByLabelText("Legal entity id")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Legal entity")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText(/Load the accepted open items into receivables/));
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Legacy company"), { target: { value: "USMF" } });
@@ -210,9 +210,9 @@ describe("Start pack run with a load", () => {
     fireEvent.change(screen.getByLabelText("Parties in master data"), { target: { value: "C001" } });
     fireEvent.change(screen.getByLabelText("Open items"), { target: { value: "INV-1,C001,1100,USD,125.50,2026-01-05,2026-02-04" } });
     fireEvent.click(screen.getByRole("button", { name: "Run open_items" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID) the open items belong to.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the legal entity the open items belong to.")).toBeInTheDocument();
     expect(posts("/runs")).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText(/^Customers/), { target: { value: `C001=${CUSTOMER}` } });
     fireEvent.click(screen.getByRole("button", { name: "Run open_items" }));
     expect(await screen.findByRole("heading", { name: "Pack run open_items" })).toBeInTheDocument();

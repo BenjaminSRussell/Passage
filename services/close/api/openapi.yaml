@@ -83,7 +83,7 @@ paths:
     post:
       operationId: runYearEnd
       x-passage-duty: close.yearend.run
-      description: Closes one fiscal year of a ledger and the caller's single legal entity. The request names only the ledger, year and retained-earnings account. Close verifies the ledger belongs to the caller's legal entity, requires the fiscal periods of the year to be contiguous, non-overlapping and to cover 1 January to 31 December, every module closed (general ledger may be on hold) and the last period not permanently closed, reads the balances per account and dimension from the ledger trial balance, takes account classes from the ledger's chart, derives the closing date (last period end) and the proposed opening date (the next day) from its periods, computes the closing and opening proposals, records the run, posts only the closing entry (profit and loss to retained earnings) with service credentials under a key derived from the run, then marks the run completed and queues dev.passage.close.yearend.completed.v1. No opening journal is posted: the ledger's balances are cumulative, so the opening proposal is kept on the run as a verification artifact. Proposals are derived again on a retry until the closing entry has posted. Repeating the same request, including a completed re-run, returns the stored run (200) and resumes an unfinished posting without duplicating entries. A ledger refusal while nothing has posted marks the run abandoned and frees the year. A completed year is redone only by naming that run in supersedesRunId, which reverses its closing entry and posts again from the ledger's current balances. A different request for the same ledger and year is 409 COM-0409; a posting the ledger is still processing is 409 CLOSE-0002 with Retry-After.
+      description: "Closes one fiscal year of a ledger and the caller's single legal entity. The request names only the ledger, year and retained-earnings account. Close verifies the ledger belongs to the caller's legal entity, requires the fiscal periods of the year to be contiguous, non-overlapping and to cover 1 January to 31 December, every module closed (general ledger may be on hold) and the last period not permanently closed, reads the balances per account and dimension from the ledger trial balance, takes account classes from the ledger's chart, derives the closing date (last period end) and the proposed opening date (the next day) from its periods, computes the closing and opening proposals, records the run, posts only the closing entry (profit and loss to retained earnings) with service credentials under a key derived from the run, then marks the run completed and queues dev.passage.close.yearend.completed.v1. No opening journal is posted: the ledger's balances are cumulative, so the opening proposal is kept on the run as a verification artifact. Proposals are derived again on a retry until the closing entry has posted. Repeating the same request, including a completed re-run, returns the stored run (200) and resumes an unfinished posting without duplicating entries. A ledger refusal while nothing has posted marks the run abandoned and frees the year. A completed year is redone only by naming that run in supersedesRunId, which reverses its closing entry and posts again from the ledger's current balances. A different request for the same ledger and year is 409 COM-0409; a posting the ledger is still processing is 409 CLOSE-0002 with Retry-After."
       requestBody:
         required: true
         content:
@@ -214,6 +214,7 @@ paths:
   /v1/close/reopen-requests/{requestId}:reject:
     post:
       operationId: rejectReopen
+      summary: "Reject a request to reopen a closed period"
       x-passage-duty: period.reopen
       parameters:
         - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -226,6 +227,7 @@ paths:
   /v1/close/templates/{templateId}:
     put:
       operationId: putCloseTemplate
+      summary: "Create or replace a close checklist template"
       x-passage-duty: close.checklist.write
       parameters:
         - { name: templateId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -241,6 +243,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
     get:
       operationId: getCloseTemplate
+      summary: "Get a close checklist template"
       x-passage-duty: close.checklist.read
       parameters:
         - { name: templateId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -277,6 +280,7 @@ paths:
   /v1/close/runs/{runId}/tasks:
     get:
       operationId: listCloseTasks
+      summary: "List the tasks of a close run"
       x-passage-duty: close.checklist.read
       parameters:
         - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -290,6 +294,7 @@ paths:
   /v1/close/tasks/{taskId}:start:
     post:
       operationId: startCloseTask
+      summary: "Start a close task"
       x-passage-duty: close.checklist.write
       parameters:
         - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -302,6 +307,7 @@ paths:
   /v1/close/tasks/{taskId}:complete:
     post:
       operationId: completeCloseTask
+      summary: "Complete a close task"
       x-passage-duty: close.checklist.write
       parameters:
         - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -314,6 +320,7 @@ paths:
   /v1/close/tasks/{taskId}:skip:
     post:
       operationId: skipCloseTask
+      summary: "Skip a close task with a reason"
       x-passage-duty: close.checklist.write
       parameters:
         - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -331,6 +338,7 @@ paths:
   /v1/close/tasks/{taskId}:reassign:
     post:
       operationId: reassignCloseTask
+      summary: "Reassign a close task to another user"
       x-passage-duty: close.checklist.write
       parameters:
         - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -347,6 +355,7 @@ paths:
   /v1/close/allocation-rules/{ruleId}:
     put:
       operationId: putAllocationRule
+      summary: "Create or replace an allocation rule"
       x-passage-duty: close.allocation.write
       parameters:
         - { name: ruleId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -358,6 +367,7 @@ paths:
         '503': { $ref: '#/components/responses/Problem' }
     get:
       operationId: getAllocationRule
+      summary: "Get an allocation rule"
       x-passage-duty: close.allocation.write
       parameters:
         - { name: ruleId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -384,6 +394,7 @@ paths:
   /v1/close/allocation-runs/{runId}:post:
     post:
       operationId: postAllocation
+      summary: "Post a proposed allocation run to the ledger"
       x-passage-duty: close.allocation.run
       parameters:
         - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -396,6 +407,7 @@ paths:
   /v1/close/allocation-runs/{runId}:reverse:
     post:
       operationId: reverseAllocation
+      summary: "Reverse a posted allocation run"
       x-passage-duty: close.allocation.run
       parameters:
         - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -408,6 +420,7 @@ paths:
   /v1/close/accrual-schemes/{code}:
     put:
       operationId: putAccrualScheme
+      summary: "Create or replace an accrual scheme"
       x-passage-duty: close.accrual.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -419,6 +432,7 @@ paths:
         '503': { $ref: '#/components/responses/Problem' }
     get:
       operationId: getAccrualScheme
+      summary: "Get an accrual scheme"
       x-passage-duty: close.accrual.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -459,6 +473,7 @@ paths:
   /v1/close/regrouping-rules/{code}:
     put:
       operationId: putRegroupingRule
+      summary: "Create or replace a regrouping rule"
       x-passage-duty: close.regrouping.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -470,6 +485,7 @@ paths:
         '503': { $ref: '#/components/responses/Problem' }
     get:
       operationId: getRegroupingRule
+      summary: "Get a regrouping rule"
       x-passage-duty: close.regrouping.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -497,6 +513,7 @@ paths:
   /v1/close/regroupings/{runId}:post:
     post:
       operationId: postRegrouping
+      summary: "Post a proposed regrouping run to the ledger"
       x-passage-duty: close.regrouping.run
       parameters:
         - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -509,6 +526,7 @@ paths:
   /v1/close/regroupings/{runId}:reverse:
     post:
       operationId: reverseRegrouping
+      summary: "Reverse a posted regrouping run"
       x-passage-duty: close.regrouping.run
       parameters:
         - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }

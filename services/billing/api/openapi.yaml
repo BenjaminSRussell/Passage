@@ -230,6 +230,54 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/billing/customer-portal/invoices:
+    get:
+      operationId: customerPortalListInvoices
+      summary: The signed-in customer's own posted invoices and credit notes (customer portal).
+      description: >
+        For the customer portal only (#30). The customer is the signed `cus` claim of the customer-portal
+        service token; a `customerId` query parameter is ignored. Proposals are not listed.
+      x-passage-duty: billing.customer-portal.read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [POSTED, PARTIALLY_SETTLED, SETTLED, REVERSED] } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        "200":
+          description: One page of the customer's invoices, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PortalInvoice" }
+                  nextCursor: { type: string }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/customer-portal/invoices/{id}:
+    get:
+      operationId: customerPortalGetInvoice
+      summary: One of the signed-in customer's invoices with its lines (customer portal).
+      description: An invoice of another customer, or a proposal, is 404 BIL-0100, the same answer as an unknown id.
+      x-passage-duty: billing.customer-portal.read
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+      responses:
+        "200":
+          description: The invoice.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalInvoice"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /v1/billing/invoices/{id}/trace:
     get:
       operationId: getInvoiceTrace
@@ -311,11 +359,19 @@ paths:
       description: >
         One report per (invoice, order) tells sales' `:record-progress` what an invoice billed (kind INVOICED). A PARKED report
         carries the reason in `lastError` (sales refused it, or the attempts ran out); a report sales answers "not yet" (SLS-0058,
-        SLS-0059: the order is not shipped or the delivery has not been reported) is retried with backoff first. At most 200 items.
+        SLS-0059: the order is not shipped or the delivery has not been reported) is retried with backoff first. A page holds at
+        most `limit` items (default and maximum 200); `nextCursor`, when present, is passed back as `cursor` for the next page.
       parameters:
         - name: status
           in: query
           schema: { type: string, enum: [PENDING, REPORTED, PARKED] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: cursor
+          in: query
+          description: The nextCursor of the previous page.
+          schema: { type: string }
       responses:
         "200":
           description: The reports.
@@ -328,6 +384,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/SalesReport"
+                  nextCursor: { type: string }
         "400":
           $ref: "#/components/responses/Problem"
         "503":
@@ -342,7 +399,7 @@ paths:
         The body and the Idempotency-Key sent to sales do not change, so sales answers a report it already holds from its copy.
         A REPORTED report is refused with 409 BIL-0111; an unknown one is 404 BIL-0110.
       parameters:
-        - $ref: "#/components/parameters/InvoiceId"
+        - $ref: "#/components/parameters/SalesReportId"
       responses:
         "200":
           description: The report.
@@ -1033,6 +1090,14 @@ components:
       schema:
         type: string
         format: uuid
+    SalesReportId:
+      name: id
+      in: path
+      required: true
+      description: The id of the sales report (not an invoice id).
+      schema:
+        type: string
+        format: uuid
   responses:
     Problem:
       description: RFC 9457 problem document.
@@ -1162,6 +1227,18 @@ components:
         invoiceDate: { type: string, format: date }
         paymentTermDays: { type: integer, minimum: 0, maximum: 365 }
         chargeAmount: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Header charge, non-negative decimal." }
+        counterparty:
+          type: object
+          required: [country]
+          additionalProperties: false
+          description: >
+            The customer's tax registration, for the EU sales list: the tax report sends it to the tax
+            service with the base amount of each tax code. Optional; an invoice without it reports its
+            base amount only, and a credit note carries its original's.
+          properties:
+            country: { type: string, pattern: "^[A-Z]{2}$" }
+            vatId: { type: string, maxLength: 20 }
+            supplyKind: { type: string, enum: [goods, services, triangular] }
         installmentTerms:
           type: array
           maxItems: 24
@@ -1359,6 +1436,23 @@ components:
       type: string
       pattern: "^-?[0-9]+\\.[0-9]+$"
       description: Decimal string rounded to the currency minor unit.
+    PortalInvoice:
+      type: object
+      description: The customer's view of an invoice; no ledger accounts, tax codes, source documents or versions.
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        status: { type: string }
+        number: { type: string }
+        currency: { type: string }
+        invoiceDate: { type: string, format: date }
+        dueDate: { type: string, format: date }
+        paymentTermDays: { type: integer }
+        totals: { type: object }
+        originalNumber: { type: string }
+        lines:
+          type: array
+          items: { type: object }
     Invoice:
       allOf:
         - $ref: "#/components/schemas/InvoiceSummary"

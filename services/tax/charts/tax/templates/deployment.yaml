@@ -60,6 +60,34 @@ spec:
 {{- end }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
             - { name: TAX_PROVIDER_TIMEOUT_MS, value: {{ .Values.providerTimeoutMs | quote }} }
+{{- with .Values.providers.avalara }}
+{{- if .url }}
+            - { name: AVALARA_URL, value: {{ .url | quote }} }
+            - { name: AVALARA_COMPANY_CODE, value: {{ .companyCode | quote }} }
+            - { name: AVALARA_ACCOUNT_ID, valueFrom: { secretKeyRef: { name: {{ .secret | quote }}, key: account-id } } }
+            - { name: AVALARA_LICENSE_KEY, valueFrom: { secretKeyRef: { name: {{ .secret | quote }}, key: license-key } } }
+{{- end }}
+{{- end }}
+{{- with .Values.providers.vertex }}
+{{- if .url }}
+            - { name: VERTEX_URL, value: {{ .url | quote }} }
+            - { name: VERTEX_TOKEN_URL, value: {{ .tokenUrl | quote }} }
+            - { name: VERTEX_COMPANY, value: {{ .company | quote }} }
+            - { name: VERTEX_CLIENT_ID, valueFrom: { secretKeyRef: { name: {{ .secret | quote }}, key: client-id } } }
+            - { name: VERTEX_CLIENT_SECRET, valueFrom: { secretKeyRef: { name: {{ .secret | quote }}, key: client-secret } } }
+            - { name: VERTEX_USERNAME, valueFrom: { secretKeyRef: { name: {{ .secret | quote }}, key: username } } }
+            - { name: VERTEX_PASSWORD, valueFrom: { secretKeyRef: { name: {{ .secret | quote }}, key: password } } }
+{{- end }}
+{{- end }}
+{{- if .Values.settlement.tenantIds }}
+            - { name: TAX_SETTLEMENT_TENANT_IDS, value: {{ join "," .Values.settlement.tenantIds | quote }} }
+            - { name: TAX_SETTLEMENT_DAY, value: {{ .Values.settlement.day | quote }} }
+            - { name: TAX_SETTLEMENT_AT, value: {{ .Values.settlement.at | quote }} }
+{{- end }}
+{{- if .Values.recommit.tenantIds }}
+            - { name: TAX_RECOMMIT_TENANT_IDS, value: {{ join "," .Values.recommit.tenantIds | quote }} }
+            - { name: TAX_RECOMMIT_INTERVAL, value: {{ .Values.recommit.interval | quote }} }
+{{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
           volumeMounts:
             - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }

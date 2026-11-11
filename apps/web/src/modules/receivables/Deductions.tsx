@@ -433,7 +433,7 @@ export function DeductionDetailPage() {
           <Detail term="Amount" mono>{money(d.amount, d.currency)}</Detail>
           <Detail term="Open item" mono>{d.documentNumber}</Detail>
           <Detail term="Customer's reason">{d.reasonCode}</Detail>
-          <Detail term="Customer" mono>{d.customerId}</Detail>
+          <Detail term="Customer"><EntityName entity="customer" id={d.customerId} /></Detail>
           <Detail term="Payment" mono>{d.paymentId ?? "None"}</Detail>
           <Detail term="Recorded" mono>{dateTime(d.createdAt)}</Detail>
           {worked(d) ? <Detail term="Age" mono>{`${ageDays(d.createdAt)} days`}</Detail> : <Detail term="Resolved" mono>{dateTime(d.resolvedAt)}</Detail>}

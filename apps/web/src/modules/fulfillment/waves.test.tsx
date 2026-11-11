@@ -62,7 +62,7 @@ describe("picking workbench (FR-28.13, AC-28.10)", () => {
   it("validates like the service before sending", () => {
     const { errors, input } = validateWorkbench({ ...blank(), warehouseId: "w1", carrier: "U P S", shipFrom: "2026-10-31", shipTo: "2026-10-01", maxLines: "5000", maxOrders: "0" });
     expect(input).toBeUndefined();
-    expect(errors).toMatchObject({ warehouseId: expect.stringMatching(/UUID/), carrier: expect.any(String), shipTo: expect.stringMatching(/before/), maxLines: expect.stringMatching(/2000/), maxOrders: expect.stringMatching(/500/) });
+    expect(errors).toMatchObject({ warehouseId: "Choose a warehouse.", carrier: expect.any(String), shipTo: expect.stringMatching(/before/), maxLines: expect.stringMatching(/2000/), maxOrders: expect.stringMatching(/500/) });
     expect(validateWorkbench({ ...blank(), carrier: " UPS ", maxLines: "20" }).input).toEqual({ warehouseId: WH, carrier: "UPS", groupBy: "CUSTOMER", maxLines: 20 });
   });
 
@@ -75,7 +75,7 @@ describe("picking workbench (FR-28.13, AC-28.10)", () => {
       return undefined;
     };
     const { container } = renderAt("/fulfillment/workbench");
-    fireEvent.change(screen.getByLabelText("Warehouse id"), { target: { value: WH } });
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: WH } });
     fireEvent.change(screen.getByLabelText("Carrier"), { target: { value: "UPS" } });
     fireEvent.change(screen.getByLabelText("Group by"), { target: { value: "CARRIER" } });
     fireEvent.change(screen.getByLabelText("Max lines per wave"), { target: { value: "20" } });
@@ -102,7 +102,7 @@ describe("picking workbench (FR-28.13, AC-28.10)", () => {
   it("shows the empty preview without a create button", async () => {
     server.handler = () => json(200, { warehouseId: WH, groupBy: "CUSTOMER", waveCount: 0, lineCount: 0, message: "Preview: 0 waves from 0 lines", waves: [] });
     renderAt("/fulfillment/workbench");
-    fireEvent.change(screen.getByLabelText("Warehouse id"), { target: { value: WH } });
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: WH } });
     fireEvent.click(screen.getByRole("button", { name: "Preview waves" }));
     expect(await screen.findByText("No released shipments match")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull();
@@ -114,7 +114,7 @@ describe("picking workbench (FR-28.13, AC-28.10)", () => {
         ? json(200, { warehouseId: WH, groupBy: "CUSTOMER", waveCount: 1, lineCount: 4, message: "", waves: [plans[1]] })
         : json(409, { code: "FUL-0053", detail: "a shipment left RELEASED while the waves were planned; preview again" });
     renderAt("/fulfillment/workbench");
-    fireEvent.change(screen.getByLabelText("Warehouse id"), { target: { value: WH } });
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: WH } });
     fireEvent.click(screen.getByRole("button", { name: "Preview waves" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create 1 wave" }));
     const alert = await findAlert();
@@ -126,7 +126,7 @@ describe("picking workbench (FR-28.13, AC-28.10)", () => {
   it("does not call the service when the filter is invalid", () => {
     renderAt("/fulfillment/workbench");
     fireEvent.click(screen.getByRole("button", { name: "Preview waves" }));
-    expect(screen.getByText("Enter the warehouse id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByText("Choose a warehouse.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
 });

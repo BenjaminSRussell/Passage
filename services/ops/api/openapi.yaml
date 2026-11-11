@@ -1,0 +1,272 @@
+openapi: 3.1.0
+info:
+  title: ops
+  version: 0.1.0
+  description: >
+    Ops control plane, part 1 (PSG-50, FR-50.5): the active/passive region topology, a guarded failover that fences the old
+    primary and promotes the target, the capacity model, and the region health check DNS reads. The failover records the plan
+    and the state change; the infrastructure steps are carried out by runners that read the plan.
+servers:
+  - url: https://app.local.passage.dev
+paths:
+  /v1/ops/regions:
+    get:
+      operationId: listRegions
+      summary: List the regions with their role and replication lag
+      x-passage-duty: ops.region.view
+      responses:
+        '200':
+          description: Regions by name, and the lag limit a failover enforces.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RegionList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/regions/{name}/lag:
+    put:
+      operationId: reportRegionLag
+      summary: Record a region's replication lag
+      x-passage-duty: ops.region.report
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LagReport' } } }
+      responses:
+        '200':
+          description: The region with its new lag.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Region' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failover:
+    post:
+      operationId: startFailover
+      summary: Fail over to a passive region
+      description: >
+        Fences the current primary and promotes the target in one transaction (BR-50.1: never two PRIMARY). A target whose lag
+        exceeds the limit is refused (OPS-1701) unless acceptDataLoss is set. Then nothing is applied: the call answers 202 with a
+        failover request that a second operator, other than the caller, approves with their own call
+        (POST /v1/ops/failover-requests/{id}:approve, OPS-1702). The body names no approver.
+        The Idempotency-Key is the failover event id: a retry returns the first outcome (200, or 202 with the same request) and
+        changes nothing. Every ops route serves the platform operator tenant only (OPS-1715).
+      x-passage-duty: ops.failover.execute
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 128 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/FailoverRequest' } } }
+      responses:
+        '201':
+          description: Failover applied; the plan lists the ordered infrastructure steps.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Failover' } } }
+        '200':
+          description: The event id was already recorded; the first outcome.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Failover' } } }
+        '202':
+          description: The failover accepts data loss and waits for a second operator's approval; nothing changed yet.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FailoverRequestAccepted' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failover-requests/{id}:
+    get:
+      operationId: getFailoverRequest
+      summary: Read a failover request that waits for, or received, its second approval
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The request.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FailoverApproval' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failover-requests/{id}:approve:
+    post:
+      operationId: approveFailoverRequest
+      summary: Approve a failover request as the second operator
+      description: >
+        The approver is the verified caller and must not be the requester (403 OPS-1702). The plan is made again under the region
+        locks, so it reflects the topology and lag at approval time. A request older than 5 minutes (the two-person window) is refused (OPS-1714).
+        Approving an approved request returns the applied failover with 200 and changes nothing.
+      x-passage-duty: ops.failover.execute
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201':
+          description: Failover applied with the caller as approver.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Failover' } } }
+        '200':
+          description: The request was already approved; the applied failover.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Failover' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/regions/{name}:rejoin:
+    post:
+      operationId: rejoinRegion
+      summary: Return a fenced region to passive
+      description: A FENCED region becomes PASSIVE only after its re-sync was verified (BR-50.1, OPS-1711).
+      x-passage-duty: ops.failover.execute
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RejoinRequest' } } }
+      responses:
+        '200':
+          description: The region, now PASSIVE.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Region' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/capacity/estimate:
+    get:
+      operationId: estimateCapacity
+      summary: Capacity estimate for workload inputs
+      description: >
+        The model of docs/ops/capacity-model.md. Every parameter defaults to the 10k-user reference tenant. A rate parameter
+        prices the matching part in both regions plus 12% overhead; costPriced names the parts priced.
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: users, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: thinkTimeS, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: journalLinesPerHour, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: journalTargetLinesPerS, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: orderLinesPerHour, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: scanners, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: scanIntervalS, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: ledgerGbPerYear, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: ordersGbPerYear, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: scansGbPerYear, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: years, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: peakKafkaMsgsPerS, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: consumerParallelism, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: nodeUsdMonth, in: query, schema: { type: string }, description: Provider rate per node per month, USD. }
+        - { name: pgGibUsdMonth, in: query, schema: { type: string }, description: Provider rate per GiB-month of Postgres volume, USD. }
+        - { name: brokerUsdMonth, in: query, schema: { type: string }, description: Provider rate per Kafka broker per month, USD. }
+      responses:
+        '200':
+          description: Pods, nodes, Postgres storage, Kafka brokers and, with rates, the monthly cost.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CapacityEstimate' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /healthz/region:
+    get:
+      operationId: regionHealth
+      summary: Region health for DNS checks
+      description: 200 only while the region this replica runs in is PRIMARY; 503 with Retry-After 30 otherwise, and when the role cannot be read.
+      x-passage-duty: public
+      responses:
+        '200':
+          description: This region is PRIMARY.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RegionHealth' } } }
+        '503':
+          description: This region is not PRIMARY.
+          headers: { Retry-After: { schema: { type: integer } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/RegionHealth' } } }
+  /healthz:
+    get:
+      operationId: liveness
+      x-passage-duty: public
+      responses:
+        '200': { description: Process is alive. }
+  /readyz:
+    get:
+      operationId: readiness
+      x-passage-duty: public
+      responses:
+        '200': { description: Database reachable. }
+        '503': { description: Database unreachable. }
+components:
+  schemas:
+    Region:
+      type: object
+      required: [name, role, lagSeconds, version]
+      properties:
+        name: { type: string }
+        role: { type: string, enum: [PRIMARY, PASSIVE, FENCED] }
+        lagSeconds: { type: integer, minimum: 0 }
+        version: { type: integer }
+    RegionList:
+      type: object
+      required: [items, maxLagSeconds]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Region' } }
+        maxLagSeconds: { type: integer }
+    LagReport:
+      type: object
+      additionalProperties: false
+      required: [lagSeconds]
+      properties:
+        lagSeconds: { type: integer, minimum: 0 }
+    FailoverRequest:
+      type: object
+      additionalProperties: false
+      required: [to]
+      properties:
+        to: { type: string, description: The PASSIVE region to promote. }
+        acceptDataLoss: { type: boolean, default: false }
+    FailoverApproval:
+      type: object
+      required: [id, eventId, to, lagSeconds, requestedBy, status, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        eventId: { type: string }
+        to: { type: string }
+        lagSeconds: { type: integer }
+        requestedBy: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED] }
+        approvedBy: { type: string }
+        approvedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    FailoverRequestAccepted:
+      type: object
+      required: [request]
+      properties:
+        request: { $ref: '#/components/schemas/FailoverApproval' }
+    RejoinRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        resyncVerified: { type: boolean, default: false }
+    FailoverStep:
+      type: object
+      required: [order, action, region]
+      properties:
+        order: { type: integer }
+        action: { type: string, enum: [fence-old-primary, promote-cnpg, switch-mirrormaker, activate-temporal, flip-dns, verify-ledger-hash-chain] }
+        region: { type: string }
+    FailoverPlan:
+      type: object
+      required: [from, to, acceptDataLoss, lagSeconds, steps]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        acceptDataLoss: { type: boolean }
+        lagSeconds: { type: integer }
+        steps: { type: array, items: { $ref: '#/components/schemas/FailoverStep' } }
+    Failover:
+      type: object
+      required: [eventId, plan, requestedBy, createdAt]
+      properties:
+        eventId: { type: string }
+        plan: { $ref: '#/components/schemas/FailoverPlan' }
+        requestedBy: { type: string }
+        approvedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    RegionHealth:
+      type: object
+      required: [region, role]
+      properties:
+        region: { type: string }
+        role: { type: string, enum: [PRIMARY, PASSIVE, FENCED, UNKNOWN] }
+    CapacityEstimate:
+      type: object
+      required: [modelVersion, derived, pods, nodes, postgres, kafka]
+      properties:
+        modelVersion: { type: string }
+        derived: { type: object, additionalProperties: { type: number } }
+        pods: { type: object, additionalProperties: { type: integer } }
+        nodes: { type: object, additionalProperties: { type: integer } }
+        postgres: { type: object, additionalProperties: { type: integer } }
+        kafka: { type: object, additionalProperties: { type: integer } }
+        costUsdMonth: { type: string, description: Rounded half up to the cent (BR-50.10). }
+        costPriced: { type: array, items: { type: string, enum: [kafka, nodes, postgres] } }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string }, instance: { type: string }, code: { type: string }, traceId: { type: string }, errors: { type: object, additionalProperties: { type: string } } }
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }

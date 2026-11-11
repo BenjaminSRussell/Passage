@@ -158,7 +158,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", a.Metrics())
+	admin.Handle("/metrics", httpx.WithMetrics(a.Metrics()))
 	// The kernel router's /readyz is static; this one checks Postgres. The chart
 	// probes it on the admin port.
 	admin.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {

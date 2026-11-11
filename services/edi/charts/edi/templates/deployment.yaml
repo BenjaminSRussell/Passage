@@ -63,6 +63,10 @@ spec:
               value: {{ required "sources.billingUrl is required with serviceIdentity.signingKeySecret" .Values.sources.billingUrl | quote }}
             - name: EDI_SALES_URL
               value: {{ required "sources.salesUrl is required with serviceIdentity.signingKeySecret" .Values.sources.salesUrl | quote }}
+            {{- if .Values.sources.purchasingUrl }}
+            - name: EDI_PURCHASING_URL
+              value: {{ .Values.sources.purchasingUrl | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.allowBodyOutbound }}
             - name: EDI_ALLOW_BODY_OUTBOUND

@@ -97,7 +97,7 @@ describe("new bank account", () => {
       return undefined;
     };
     const { container } = renderAt(`/treasury/bank-accounts/new?legalEntityId=${LE}`);
-    expect(screen.getByLabelText("Legal entity id")).toHaveValue(LE);
+    expect(screen.getByLabelText("Legal entity")).toHaveAttribute("data-value", LE);
     fireEvent.click(screen.getByRole("button", { name: "Create bank account" }));
     expect(await screen.findByText("Enter a valid IBAN; the check digits do not match.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);

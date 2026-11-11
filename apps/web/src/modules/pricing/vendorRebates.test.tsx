@@ -74,12 +74,12 @@ describe("Vendor rebate agreements", () => {
     expect(screen.getByLabelText("Receivable account")).toHaveValue("2160");
     expect(screen.getByLabelText("Income account")).toHaveValue("5100");
     fireEvent.click(screen.getByRole("button", { name: "Save agreement" }));
-    expect(await screen.findByText("Enter the vendor id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a vendor.")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
 
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Agreement name", "Supplier bill-back");
-    fill("Vendor id", V1);
+    fill("Vendor", V1);
     fill("Valid from", "2027-01-01");
     fill("Valid to", "2027-12-31");
     fill("Rate %", "3");

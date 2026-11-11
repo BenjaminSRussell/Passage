@@ -9,6 +9,7 @@ paths:
   /v1/numbering/sequences:
     post:
       operationId: createSequence
+      summary: "Create a number sequence for a legal entity"
       x-passage-duty: numbering.write
       parameters:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
@@ -23,6 +24,7 @@ paths:
   /v1/numbering/sequences/{code}:
     get:
       operationId: getSequence
+      summary: "Get a number sequence"
       x-passage-duty: numbering.read
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
@@ -34,6 +36,7 @@ paths:
   /v1/numbering/sequences/{code}/next:
     post:
       operationId: allocateNext
+      summary: "Allocate the next number of a sequence"
       x-passage-duty: numbering.write
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }

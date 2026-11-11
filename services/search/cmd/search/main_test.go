@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -20,6 +22,25 @@ func TestRunAndConsumeRefuseWithoutDatabaseURL(t *testing.T) {
 	env := map[string]string{"KAFKA_BROKERS": "localhost:9092"}
 	if err := consume(context.Background(), func(k string) string { return env[k] }); err == nil {
 		t.Error("consume must require DATABASE_URL")
+	}
+}
+
+// The consumer's Kafka user holds literal ACLs: a subscribed topic without a
+// read entry fails authorization when the consumer starts.
+func TestEverySubscribedTopicHasAReadACL(t *testing.T) {
+	cfg, err := kafkaConfig(func(k string) string { return map[string]string{"KAFKA_BROKERS": "localhost:9092"}[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile("../../../../deploy/kafka/search-consumer.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, topic := range cfg.Topics {
+		entry := "- resource: {type: topic, name: " + topic + ", patternType: literal}\n        operations: [Read, Describe]"
+		if !strings.Contains(string(manifest), entry) {
+			t.Errorf("deploy/kafka/search-consumer.yaml grants no read on %s", topic)
+		}
 	}
 }
 

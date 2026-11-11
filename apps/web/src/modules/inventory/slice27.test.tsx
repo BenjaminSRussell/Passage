@@ -104,14 +104,13 @@ describe("Transaction inquiry by dimension", () => {
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("serial")).toBeNull());
   });
 
-  it("ignores a malformed legal entity in the link and rejects one typed in the form", async () => {
+  it("ignores a malformed legal entity in the link and does not take typed text as one", async () => {
     handler = () => json(200, { items: [] });
     renderAt("/inventory/transactions?legalEntity=oops");
     await screen.findByLabelText("Legal entity");
     expect(calls[0].url.searchParams.get("legalEntity")).toBeNull();
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: "nope" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByLabelText("Legal entity")).toHaveAttribute("data-value", "");
   });
 
   it("shows the service problem and lets the user retry", async () => {

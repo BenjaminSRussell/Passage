@@ -51,7 +51,7 @@ function fill(label: string, value: string) {
 }
 
 function ask(rep = "R1", month = "2027-03") {
-  fill("Legal entity id", LE);
+  fill("Legal entity", LE);
   fill("Rep id", rep);
   fill("Invoice month", month);
   fireEvent.click(screen.getByRole("button", { name: "Show statement" }));
@@ -60,7 +60,7 @@ function ask(rep = "R1", month = "2027-03") {
 describe("Commission statement", () => {
   it("checks the form before calling the service", () => {
     expect(validateStatement({ legalEntityId: "x", repId: "", period: "2027-13" })).toEqual({
-      legalEntityId: "Enter the legal entity id (a UUID).",
+      legalEntityId: "Choose a legal entity.",
       repId: "Enter the rep id (up to 64 characters).",
       period: "Use a month such as 2027-03.",
     });

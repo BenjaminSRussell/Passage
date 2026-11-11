@@ -51,8 +51,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 	if f.Status != "" && !messageStatuses[f.Status] {
 		fields["status"] = "must be RECEIVED, MAPPED, POSTED, FAILED, SENT or ACKED"
 	}
-	if f.TransactionSet != "" && !digits(f.TransactionSet, 3, 3) {
-		fields["transactionSet"] = "must be a three-digit transaction set id"
+	// An X12 set (three digits), an EDIFACT message type (ORDERS, INVOIC) or a cXML document (InvoiceDetailRequest).
+	if f.TransactionSet != "" && !digits(f.TransactionSet, 3, 3) && !letters(f.TransactionSet) {
+		fields["transactionSet"] = "must be a three-digit transaction set id, an EDIFACT message type or a cXML document name"
 	}
 	if v := q.Get("controlNumber"); v != "" {
 		if !digits(v, 1, 9) {
@@ -123,6 +124,19 @@ func (a *API) getMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // digits reports whether s is between min and max ASCII digits long.
+// letters reports whether s is 3 to 40 ASCII letters.
+func letters(s string) bool {
+	if len(s) < 3 || len(s) > 40 {
+		return false
+	}
+	for _, c := range s {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+			return false
+		}
+	}
+	return true
+}
+
 func digits(s string, min, max int) bool {
 	if len(s) < min || len(s) > max {
 		return false

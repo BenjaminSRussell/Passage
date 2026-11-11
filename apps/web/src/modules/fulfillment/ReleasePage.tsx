@@ -6,6 +6,7 @@ import { ShipmentStatusBadge } from "./badges";
 import { DECIMAL, formatDate, LOGISTICS_CODE, SKIP_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 interface LineValues {
   orderId: string;
@@ -40,9 +41,11 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ID_FIELDS = [
   ["orderId", "Order id"],
   ["orderLineId", "Order line id"],
-  ["customerId", "Customer id"],
-  ["legalEntityId", "Legal entity id"],
-  ["productId", "Product id"],
+] as const;
+const LOOKUP_FIELDS = [
+  ["customerId", "Customer", "customer"],
+  ["legalEntityId", "Legal entity", "legalEntity"],
+  ["productId", "Product", "product"],
 ] as const;
 
 export function emptyLine(): LineValues {
@@ -52,13 +55,16 @@ export function emptyLine(): LineValues {
 /** Checks that mirror the service (FUL-0050), keyed like its field names, and the request to send. */
 export function validateRelease(values: Values): { errors: Errors; input?: ReleaseInput } {
   const errors: Errors = {};
-  if (!UUID.test(values.warehouseId.trim())) errors.warehouseId = "Enter the warehouse id (a UUID).";
+  if (!UUID.test(values.warehouseId.trim())) errors.warehouseId = "Choose a warehouse.";
   const horizon = values.horizonDays.trim();
   if (horizon !== "" && (!/^\d{1,2}$/.test(horizon) || Number(horizon) > 30)) errors.horizonDays = "Enter 0 to 30 days, or leave it empty for the warehouse default.";
   const seen = new Set<string>();
   values.lines.forEach((l, i) => {
     for (const [name, label] of ID_FIELDS) {
       if (!UUID.test(l[name].trim())) errors[`lines[${i}].${name}`] = `Enter the ${label.toLowerCase()} (a UUID).`;
+    }
+    for (const [name, label] of LOOKUP_FIELDS) {
+      if (!UUID.test(l[name].trim())) errors[`lines[${i}].${name}`] = `Choose a ${label.toLowerCase()}.`;
     }
     if (!UNIT.test(l.unit.trim())) errors[`lines[${i}].unit`] = "Enter 1 to 8 letters or digits, such as EA.";
     if (!DECIMAL.test(l.qty.trim()) || /^0+(\.0+)?$/.test(l.qty.trim())) errors[`lines[${i}].qty`] = "Enter a quantity above 0 with at most 6 decimals.";
@@ -122,12 +128,13 @@ export function ReleasePage() {
   const key = useRef(newKey());
 
   function update(patch: Partial<Values>) {
-    setValues({ ...values, ...patch });
+    setValues((prev) => ({ ...prev, ...patch }));
     key.current = newKey();
   }
 
   function updateLine(i: number, patch: Partial<LineValues>) {
-    update({ lines: values.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
+    setValues((prev) => ({ ...prev, lines: prev.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
+    key.current = newKey();
   }
 
   async function submit(event: FormEvent) {
@@ -169,7 +176,15 @@ export function ReleasePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("warehouseId", "Warehouse id", values.warehouseId, (v) => update({ warehouseId: v }), "The warehouse the shipments leave from.")}
+          <LookupFormField
+            id="release-warehouseId"
+            label="Warehouse"
+            entity="warehouse"
+            hint="The warehouse the shipments leave from."
+            value={values.warehouseId}
+            error={errors.warehouseId}
+            onChange={(warehouseId) => update({ warehouseId })}
+          />
           {text("horizonDays", "Horizon (days)", values.horizonDays, (v) => update({ horizonDays: v }), "Empty uses the warehouse default (2 days).", { inputMode: "numeric" })}
           <FormField id="release-requireFullAtp" label="Require full availability">
             {(control) => <Input {...control} type="checkbox" checked={values.requireFullAtp} onChange={(event) => update({ requireFullAtp: event.target.checked })} />}
@@ -178,6 +193,18 @@ export function ReleasePage() {
             <fieldset key={i} className={styles.valueGroup}>
               <legend className={styles.legend}>Line {i + 1}</legend>
               {ID_FIELDS.map(([name, label]) => text(`lines[${i}].${name}`, label, line[name], (v) => updateLine(i, { [name]: v } as Partial<LineValues>)))}
+              {LOOKUP_FIELDS.map(([name, label, entity]) => (
+                <LookupFormField
+                  key={name}
+                  id={`release-lines-${i}-${name}`}
+                  label={label}
+                  entity={entity}
+                  scope={entity === "customer" ? { legalEntityId: line.legalEntityId || undefined } : undefined}
+                  value={line[name]}
+                  error={errors[`lines[${i}].${name}`]}
+                  onChange={(v) => updateLine(i, { [name]: v } as Partial<LineValues>)}
+                />
+              ))}
               {text(`lines[${i}].unit`, "Unit", line.unit, (v) => updateLine(i, { unit: v }), undefined, { maxLength: 8 })}
               {text(`lines[${i}].qty`, "Quantity", line.qty, (v) => updateLine(i, { qty: v }), undefined, { inputMode: "decimal" })}
               {text(`lines[${i}].confirmedShipDate`, "Confirmed ship date", line.confirmedShipDate, (v) => updateLine(i, { confirmedShipDate: v }), undefined, { type: "date" })}

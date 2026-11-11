@@ -1,9 +1,11 @@
 // Master data lookups other screens use: parties (customers and vendors) and products. Ids come from company.ts.
 import type { Party as PartyRecord, Vendor } from "../../../modules/party/api/client";
 import type { Product } from "../../../modules/product/api/client";
-import { CUSTOMERS, ITEMS, LEGAL_ENTITY, USER, VENDORS, WORKERS, type Item, type Party } from "../../company";
+import { CUSTOMERS, ITEMS, LEGAL_ENTITY, USER, VENDORS, type Item, type Party } from "../../company";
 import { reply, route } from "../../backend";
 import { at, uid } from "../../store";
+import { JORDAN, personById } from "../hr/people";
+import { workerDetail } from "../hr/self";
 
 const PARTY = "/api/v1/party";
 const PRODUCT = "/api/v1/product";
@@ -99,7 +101,6 @@ route("GET", `${PRODUCT}/products:search`, ({ query }) => ({ items: findItems(qu
 
 // The signed-in user can appear as an actor on documents the demo changes; resolve that id to their name.
 route("GET", "/api/v1/hr/workers/{id}", ({ params }) => {
-  if (params.id === USER.id) return { id: USER.id, personnelNumber: "W-0100", legalName: USER.name, preferredName: USER.name, status: "active" };
-  const w = WORKERS.find((x) => x.id === params.id);
-  return w ? { id: w.id, personnelNumber: w.number, legalName: w.name, preferredName: w.name, status: "active" } : reply.problem(404, "HR-0404", "No worker with that id");
+  const p = personById(params.id === USER.id ? JORDAN : params.id);
+  return p ? workerDetail(p) : reply.problem(404, "HR-0404", "No worker with that id");
 });

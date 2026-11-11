@@ -1009,8 +1009,8 @@ func TestPaymentRun_OpenAPIDocumentsEveryRunRoute(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || seen != 8 {
-		t.Fatalf("walked %d run routes, err=%v, want 8", seen, err)
+	if err != nil || seen != 9 {
+		t.Fatalf("walked %d run routes, err=%v, want 9", seen, err)
 	}
 }
 
@@ -1199,4 +1199,77 @@ func TestPaymentRun_ClosedLedgerPeriodRejectsTheJournalAndRecordsNothingAsPosted
 	if got := decode(t, failed); failed.Code != http.StatusOK || got["status"] != "FAILED" {
 		t.Fatalf("fail: %d %s", failed.Code, failed.Body)
 	}
+	if got := decode(t, f.bob.send(f.router, http.MethodGet, "/v1/payables/payment-proposals/"+f.proposal, "")); got["status"] != "FAILED" || got["paymentRunId"] != runID {
+		t.Fatalf("a failed proposal links back to its run: %v", got)
+	}
+}
+
+func TestPaymentRun_ProposalLinksToItsRunAndCompletedRunGivesRemittanceAdvice(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	proposalPath := "/v1/payables/payment-proposals/" + f.proposal
+	if got := decode(t, f.bob.send(f.router, http.MethodGet, proposalPath, "")); got["paymentRunId"] != nil {
+		t.Fatalf("an approved proposal with no run has no run id: %v", got)
+	}
+	runID := f.start()["id"].(string)
+	if got := decode(t, f.bob.send(f.router, http.MethodGet, proposalPath, "")); got["status"] != "EXECUTING" || got["paymentRunId"] != runID {
+		t.Fatalf("an executing proposal links to its run: %v", got)
+	}
+	reader := caller{duties: "payment-run.read", user: "rita", entity: entityA}
+	remittance := func(c caller, vendor, query string) *httptest.ResponseRecorder {
+		return c.send(f.router, http.MethodGet, runsPath+"/"+runID+"/remittances/"+vendor+query, "")
+	}
+	wantProblem(t, remittance(reader, vendorOne, ""), http.StatusConflict, "AP-RUN-018")
+	for _, action := range []string{"generate-file", "post-journal", "settle", "complete"} {
+		if rec := f.step(f.erin, runID, action); rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", action, rec.Code, rec.Body)
+		}
+	}
+	if got := decode(t, f.bob.send(f.router, http.MethodGet, proposalPath, "")); got["status"] != "EXECUTED" || got["paymentRunId"] != runID {
+		t.Fatalf("an executed proposal links to its run: %v", got)
+	}
+
+	rec := remittance(reader, vendorOne, "")
+	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("remittance: %d %s", rec.Code, rec.Body)
+	}
+	var advice store.Remittance
+	if err := json.Unmarshal(rec.Body.Bytes(), &advice); err != nil {
+		t.Fatal(err)
+	}
+	if advice.RunID != runID || advice.ProposalID != f.proposal || advice.VendorID != vendorOne || advice.PaymentDate != "2026-01-10" || advice.CompletedAt == nil || len(advice.Payments) != 1 {
+		t.Fatalf("remittance = %+v", advice)
+	}
+	pay := advice.Payments[0]
+	if pay.Currency != "USD" || pay.Method != "TRANSFER" || !pay.Amount.Equal(decimal.RequireFromString("148")) || pay.EndToEndID == "" || len(pay.Lines) != 2 {
+		t.Fatalf("payment = %+v", pay)
+	}
+	first, second := pay.Lines[0], pay.Lines[1]
+	if first.InvoiceNumber != "INV-f1" || first.InvoiceDate != "2025-12-01" || !first.OpenAmount.Equal(decimal.RequireFromString("100")) || !first.Discount.Equal(decimal.RequireFromString("2")) || !first.Paid.Equal(decimal.RequireFromString("98")) {
+		t.Fatalf("first line = %+v", first)
+	}
+	if second.InvoiceNumber != "INV-f2" || !second.Discount.IsZero() || !second.Paid.Equal(decimal.RequireFromString("50")) {
+		t.Fatalf("second line = %+v", second)
+	}
+	if strings.Contains(rec.Body.String(), "000111222333") {
+		t.Fatalf("the remittance advice must not carry bank details: %s", rec.Body)
+	}
+
+	csvRec := remittance(reader, vendorOne, "?format=csv")
+	body := strings.TrimPrefix(csvRec.Body.String(), "\xEF\xBB\xBF")
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if csvRec.Code != http.StatusOK || !strings.HasPrefix(csvRec.Header().Get("Content-Type"), "text/csv") || !strings.Contains(csvRec.Header().Get("Content-Disposition"), "remittance-advice-"+runID) || len(lines) != 4 ||
+		!strings.HasPrefix(lines[0], "Payment reference,Payment date,Currency,Invoice") || !strings.Contains(lines[1], ",INV-f1,2025-12-01,100,2,0,98") || !strings.HasSuffix(strings.TrimSpace(lines[3]), ",Total,,,,,148") {
+		t.Fatalf("csv: %d %q", csvRec.Code, body)
+	}
+
+	if rec := remittance(reader, vendorTwo, ""); rec.Code != http.StatusOK || len(decode(t, rec)["payments"].([]any)) != 1 {
+		t.Fatalf("vendor two: %d %s", rec.Code, rec.Body)
+	}
+	wantProblem(t, remittance(reader, "00000000-0000-0000-0000-0000000000c9", ""), http.StatusNotFound, "COM-0404")
+	wantProblem(t, remittance(reader, "nope", ""), http.StatusBadRequest, "COM-0001")
+	wantProblem(t, remittance(reader, vendorOne, "?format=pdf"), http.StatusBadRequest, "COM-0001")
+	wantProblem(t, remittance(caller{duties: "payment-run.execute", user: "erin", entity: entityA}, vendorOne, ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, remittance(caller{duties: "payment-run.read", user: "mallory", entity: entityB}, vendorOne, ""), http.StatusNotFound, "COM-0404")
+	wantProblem(t, reader.send(f.router, http.MethodGet, runsPath+"/00000000-0000-0000-0000-0000000000a9/remittances/"+vendorOne, ""), http.StatusNotFound, "COM-0404")
 }

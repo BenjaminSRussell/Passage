@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="20261105.0002@ariba.example" timestamp="2026-11-05T10:00:00-05:00">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>AN-DEMO-DISTRIBUTOR</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>AN-DEMO-MANUFACTURER</Identity></Credential></To>
+    <Sender>
+      <Credential domain="NetworkId"><Identity>AN-DEMO-DISTRIBUTOR</Identity><SharedSecret>correct-horse-battery</SharedSecret></Credential>
+      <UserAgent>Ariba Supplier Network</UserAgent>
+    </Sender>
+  </Header>
+  <Request>
+    <ShipNoticeRequest>
+      <ShipNoticeHeader shipmentID="DIST-ASN-55" noticeDate="2026-11-05T10:00:00-05:00" shipmentDate="2026-11-04T16:00:00-05:00" operation="new"/>
+      <ShipControl><CarrierIdentifier domain="SCAC">ODFL</CarrierIdentifier><ShipmentIdentifier>PRO-123</ShipmentIdentifier></ShipControl>
+      <ShipNoticePortion>
+        <OrderReference orderID="PO-1001"/>
+        <ShipNoticeItem lineNumber="1" quantity="10">
+          <ItemID><SupplierPartID>prod-a</SupplierPartID></ItemID>
+          <UnitOfMeasure>EA</UnitOfMeasure>
+        </ShipNoticeItem>
+      </ShipNoticePortion>
+    </ShipNoticeRequest>
+  </Request>
+</cXML>

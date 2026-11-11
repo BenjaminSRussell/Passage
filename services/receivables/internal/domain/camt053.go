@@ -30,6 +30,40 @@ type CAMTCredit struct {
 	// DebtorAccountHash is AccountHash of the debtor's IBAN or other account id
 	// (RltdPties/DbtrAcct), for matcher rule R4; "" when the bank gave none.
 	DebtorAccountHash string
+	// BankAccount is the account the statement is for (Stmt/Acct/Id: its IBAN or other id) as NormalizeBankAccount writes it,
+	// "" when the file names none; the ledger account of the cash comes from it.
+	BankAccount string
+}
+
+// NormalizeBankAccount upper-cases an account id and drops spaces and dashes, so "de89 3704-0044" and "DE8937040044" are one account.
+func NormalizeBankAccount(id string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(id) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+type camtStmtAcct struct {
+	ID struct {
+		IBAN string `xml:"IBAN"`
+		Othr struct {
+			ID string `xml:"Id"`
+		} `xml:"Othr"`
+	} `xml:"Id"`
+}
+
+func (a camtStmtAcct) account() string {
+	id := a.ID.IBAN
+	if strings.TrimSpace(id) == "" {
+		id = a.ID.Othr.ID
+	}
+	if acct := NormalizeBankAccount(id); len(acct) <= 40 {
+		return acct
+	}
+	return ""
 }
 
 // CAMTStatement is a parsed statement file. Skipped counts the entries that are
@@ -141,7 +175,7 @@ func ParseCAMT053(content []byte) (CAMTStatement, error) {
 	var res CAMTStatement
 	dec := xml.NewDecoder(bytes.NewReader(content))
 	var stack []string
-	stmtID := ""
+	stmtID, stmtAcct := "", ""
 	for {
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
@@ -160,8 +194,14 @@ func ParseCAMT053(content []byte) (CAMTStatement, error) {
 			switch {
 			case t.Name.Local == "Stmt":
 				res.Statements++
-				stmtID = ""
+				stmtID, stmtAcct = "", ""
 				stack = append(stack, t.Name.Local)
+			case t.Name.Local == "Acct" && parent == "Stmt":
+				var a camtStmtAcct
+				if err := dec.DecodeElement(&a, &t); err != nil {
+					return CAMTStatement{}, &CAMTError{Line: line, Message: "malformed statement account"}
+				}
+				stmtAcct = a.account()
 			case t.Name.Local == "Id" && parent == "Stmt":
 				var v string
 				if err := dec.DecodeElement(&v, &t); err != nil {
@@ -182,6 +222,7 @@ func ParseCAMT053(content []byte) (CAMTStatement, error) {
 				if err != nil {
 					return CAMTStatement{}, err
 				}
+				credit.BankAccount = stmtAcct
 				if isCredit {
 					res.Credits = append(res.Credits, credit)
 				} else {

@@ -205,7 +205,7 @@ describe("new worker", () => {
     };
     renderAt("/hr/workers/new");
     fireEvent.change(screen.getByLabelText("Personnel number"), { target: { value: "wrk-1001" } });
-    fireEvent.change(screen.getByLabelText("Party id"), { target: { value: PARTY } });
+    fireEvent.change(screen.getByLabelText("Party"), { target: { value: PARTY } });
     fireEvent.change(screen.getByLabelText("Legal name"), { target: { value: "Ada Lovelace" } });
     fireEvent.change(screen.getByLabelText("National ID"), { target: { value: "123-45-6789" } });
     fireEvent.click(screen.getByRole("button", { name: "Create worker" }));
@@ -281,7 +281,7 @@ describe("worker detail", () => {
     renderAt(`/hr/workers/${ADA}`);
     fireEvent.click(await screen.findByRole("button", { name: "Start employment" }));
     const form = screen.getByRole("form", { name: "Start employment" });
-    fireEvent.change(within(form).getByLabelText("Legal entity id"), { target: { value: LE2 } });
+    fireEvent.change(within(form).getByLabelText("Legal entity"), { target: { value: LE2 } });
     fireEvent.change(within(form).getByLabelText("Hire date"), { target: { value: "2026-05-01" } });
     fireEvent.click(within(form).getByRole("button", { name: "Start employment" }));
     await waitFor(() => expect(screen.getAllByRole("status").map((el) => el.textContent)).toContain("Employment from 2026-05-01 started."));
@@ -344,8 +344,8 @@ describe("positions", () => {
     renderAt("/hr/positions/new");
     fireEvent.change(screen.getByLabelText("Position number"), { target: { value: "pos-100" } });
     fireEvent.change(screen.getByLabelText("Job code"), { target: { value: "eng" } });
-    fireEvent.change(screen.getByLabelText("Department id"), { target: { value: DEPT } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: LE } });
+    fireEvent.change(screen.getByLabelText("Department"), { target: { value: DEPT } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Starts"), { target: { value: "2026-01-01" } });
     await screen.findByRole("option", { name: "POS-TOP (CEO)" });
     fireEvent.change(screen.getByLabelText("Reports to"), { target: { value: TOP } });

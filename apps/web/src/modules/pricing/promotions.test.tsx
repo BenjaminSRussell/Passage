@@ -94,11 +94,11 @@ describe("New promotion", () => {
       return undefined;
     };
     renderAt("/pricing/promotions/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Promotion name", "Spring push");
     fill("Event category", "FEATURE");
     fill("Event type", "TPR");
-    fill("Fund id", FUND);
+    fill("Fund", FUND);
     fill("Product id", "P-1");
     fill("First day", "2027-03-01");
     fill("Last day", "2027-03-28");
@@ -133,8 +133,8 @@ describe("New promotion", () => {
       return undefined;
     };
     renderAt(`/pricing/promotions/new?campaign=${CMP}&legalEntity=${LE}&currency=EUR`);
-    expect(screen.getByLabelText(/^Campaign id/)).toHaveValue(CMP);
-    expect(screen.getByLabelText("Legal entity id")).toHaveValue(LE);
+    expect(screen.getByLabelText(/^Campaign/)).toHaveAttribute("data-value", CMP);
+    expect(screen.getByLabelText("Legal entity")).toHaveAttribute("data-value", LE);
     expect(screen.getByLabelText("Currency")).toHaveValue("EUR");
     fill("Promotion name", "Spring push");
     fill("Product id", "P-1");
@@ -150,14 +150,14 @@ describe("New promotion", () => {
   it("refuses a malformed campaign id before calling the service", async () => {
     renderAt("/pricing/promotions/new?campaign=not-a-uuid");
     fireEvent.click(screen.getByRole("button", { name: "Save promotion" }));
-    expect(await screen.findByText("Enter the campaign id (a UUID) or leave it empty.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose a campaign, or clear it.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
 
   it("explains a killed campaign", async () => {
     server.handler = () => json(409, { code: "PRC-0069", detail: "campaign Spring is killed" });
     renderAt(`/pricing/promotions/new?campaign=${CMP}`);
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Promotion name", "x");
     fill("Product id", "P-1");
     fill("First day", "2027-03-01");
@@ -172,9 +172,9 @@ describe("New promotion", () => {
   it("explains a closed fund", async () => {
     server.handler = () => json(409, { code: "PRC-0011", detail: "fund Spring TPM is closed" });
     renderAt("/pricing/promotions/new");
-    fill("Legal entity id", LE);
+    fill("Legal entity", LE);
     fill("Promotion name", "x");
-    fill("Fund id", FUND);
+    fill("Fund", FUND);
     fill("Product id", "P-1");
     fill("First day", "2027-03-01");
     fill("Last day", "2027-03-01");

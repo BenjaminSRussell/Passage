@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { findAlert, findStatus } from "../../test-utils";
+import { setLookupFetcher } from "../../shell/lookup/entities";
 import hr from "./module";
 import { compareDecimal } from "./format";
 import { json, id, pageViolations, problem, renderAt, routes, useFakeApi, type Reply } from "./hrTestKit";
@@ -150,9 +151,9 @@ describe("personnel actions, jobs and compensation plans", () => {
   it("submits a hire with one idempotency key and opens the new action", async () => {
     api.handler = routes({ "POST /api/v1/hr/actions": json(201, action({ actionType: "HIRE", id: id(11) })), [`GET /api/v1/hr/actions/${id(11)}`]: json(200, action({ id: id(11), actionType: "HIRE" })) });
     renderAt("/hr/actions/new");
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.change(screen.getByLabelText("Effective date"), { target: { value: "2026-11-02" } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: id(5) } });
     fireEvent.click(screen.getByRole("button", { name: "Submit action" }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(`/hr/actions/${id(11)}`));
     const [post] = api.posts("/actions");
@@ -163,21 +164,28 @@ describe("personnel actions, jobs and compensation plans", () => {
   it("refuses an incomplete form without calling the service", async () => {
     renderAt("/hr/actions/new");
     fireEvent.click(screen.getByRole("button", { name: "Submit action" }));
-    expect(await screen.findByText("Enter the worker's id.")).toBeTruthy();
+    expect(await screen.findByText("Choose the worker.")).toBeTruthy();
     expect(screen.getByText("Choose the effective date.")).toBeTruthy();
     expect(api.calls).toHaveLength(0);
   });
 
   it("says pay needs the compensation duty when the service answers 403", async () => {
+    setLookupFetcher(async (url) =>
+      url.startsWith("/api/v1/hr/compensation/plans")
+        ? Response.json({ items: [{ id: PLAN, code: "SAL-1", name: "Salaried", payBasis: "ANNUAL", currency: "USD" }] })
+        : Response.json({ items: [] }),
+    );
     api.handler = routes({ "POST /api/v1/hr/actions": problem(403, "AUTH-0003", "setting compensation needs the hr.compensation.admin duty") });
     renderAt("/hr/actions/new");
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: "COMP_CHANGE" } });
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.change(screen.getByLabelText("Employment id"), { target: { value: EMPLOYMENT } });
     fireEvent.change(screen.getByLabelText("Effective date"), { target: { value: "2026-11-02" } });
-    fireEvent.change(screen.getByLabelText("Compensation plan id"), { target: { value: PLAN } });
+    fireEvent.change(screen.getByLabelText("Compensation plan"), { target: { value: "salar" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Salaried/ }));
+    expect(screen.getByLabelText("Compensation plan")).toHaveAttribute("data-value", PLAN);
+    expect(screen.getByLabelText("Currency")).toHaveValue("USD");
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "95000" } });
-    fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "usd" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit action" }));
     const alert = await findAlert();
     expect(alert.textContent).toContain("You don't have the duty or the legal-entity access this action needs.");
@@ -188,9 +196,9 @@ describe("personnel actions, jobs and compensation plans", () => {
   it("puts a date the service refuses on the date field", async () => {
     api.handler = routes({ "POST /api/v1/hr/actions": problem(422, "HCM-ACT-001", "an action can be at most 365 days ahead") });
     renderAt("/hr/actions/new");
-    fireEvent.change(screen.getByLabelText("Worker id"), { target: { value: WORKER } });
+    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
     fireEvent.change(screen.getByLabelText("Effective date"), { target: { value: "2028-01-01" } });
-    fireEvent.change(screen.getByLabelText("Legal entity id"), { target: { value: id(5) } });
+    fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: id(5) } });
     fireEvent.click(screen.getByRole("button", { name: "Submit action" }));
     expect(await screen.findByText(/at most 365 days ahead/)).toBeTruthy();
   });

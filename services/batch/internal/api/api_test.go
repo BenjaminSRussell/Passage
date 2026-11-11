@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -247,6 +248,46 @@ func TestInbox(t *testing.T) {
 		if rec := inboxRequest(r, c.target, c.entities, c.duties); rec.Code != c.want {
 			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// flakySource answers with its items until fail is set, as a source that goes down between two pages.
+type flakySource struct {
+	items []inbox.Item
+	fail  *bool
+}
+
+func (flakySource) Name() string { return "ledger" }
+func (flakySource) Duty() string { return "ledger.journal.approve" }
+func (s flakySource) Fetch(context.Context, tenant.Principal, string) (inbox.Fetched, error) {
+	if *s.fail {
+		return inbox.Fetched{}, errors.New("down")
+	}
+	return inbox.Fetched{Items: s.items}, nil
+}
+
+// #547: a cursor from a page whose sources answered differently is a 409 with its own code, not the invalid-input one.
+func TestInboxCursorFromDifferentSourcesIs409WithItsOwnCode(t *testing.T) {
+	fail := false
+	now := time.Now()
+	agg := &inbox.Aggregator{Sources: []inbox.Source{flakySource{fail: &fail, items: []inbox.Item{
+		{ID: "b1", Source: "ledger", CreatedAt: now}, {ID: "b2", Source: "ledger", CreatedAt: now.Add(-time.Hour)}}}}}
+	r := httpx.NewRouter()
+	api.New(&fakeStore{}).WithInbox(agg).Register(r)
+	duties, entity := "inbox.read,ledger.journal.approve", testkit.TenantID(9)
+
+	first := inboxRequest(r, "/v1/inbox?limit=1", entity, duties)
+	var page inbox.Page
+	if first.Code != http.StatusOK || json.Unmarshal(first.Body.Bytes(), &page) != nil || page.NextCursor == "" {
+		t.Fatalf("first page %d %s", first.Code, first.Body.String())
+	}
+	fail = true
+	rec := inboxRequest(r, "/v1/inbox?limit=1&cursor="+url.QueryEscape(page.NextCursor), entity, duties)
+	var problem struct {
+		Code string `json:"code"`
+	}
+	if rec.Code != http.StatusConflict || json.Unmarshal(rec.Body.Bytes(), &problem) != nil || problem.Code != "WFL-0412" {
+		t.Fatalf("second page %d %s, want 409 WFL-0412", rec.Code, rec.Body.String())
 	}
 }
 

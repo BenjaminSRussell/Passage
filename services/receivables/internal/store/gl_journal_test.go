@@ -1,12 +1,16 @@
 package store
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/receivables/internal/domain"
 )
@@ -197,5 +201,109 @@ func TestGLJournal_OutageBacksOffWithoutParking(t *testing.T) {
 	gl.err = nil
 	if res, _ := s.PostDueJournals(ctx, now.Add(2*time.Hour), 50); res.Posted != 1 {
 		t.Fatalf("after backoff: %+v", res)
+	}
+}
+
+// 30-2: a legal entity's bank account mapping picks the ledger account of the cash: the account the money came to, else the
+// entity's default for the currency, else 1000; a mapping is per currency and per legal entity.
+func TestBankAccountMapping_PicksTheLedgerAccountOfTheCash(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	pay := func(key, bank, currency string) Payment {
+		in := Payment{LegalEntityID: legalEntity, PaymentMode: "WIRE", Source: "MANUAL", Amount: amt("100.00"), UnappliedAmount: amt("100.00"),
+			Currency: currency, ReceivedDate: "2027-03-08", ValueDate: "2027-03-08"}
+		if bank != "" {
+			in.BankAccountRef = &bank
+		}
+		p, err := s.CreatePayment(ctx, in, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	debitAccount := func(p Payment) string {
+		var accounts []string
+		if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+			var raw []byte
+			if err := tx.QueryRow(ctx, `select lines from gl_journal where source_type = 'payment_receipt' and source_id = $1`, p.ID).Scan(&raw); err != nil {
+				return err
+			}
+			var lines []journalLine
+			if err := json.Unmarshal(raw, &lines); err != nil {
+				return err
+			}
+			for _, l := range lines {
+				if !l.Credit {
+					accounts = append(accounts, l.Account)
+				}
+			}
+			return nil
+		}); err != nil || len(accounts) != 1 {
+			t.Fatalf("receipt journal debit accounts = %v (%v)", accounts, err)
+		}
+		return accounts[0]
+	}
+	if got := debitAccount(pay("bank-1", "", "USD")); got != "1000" {
+		t.Errorf("no mapping books %s, want 1000", got)
+	}
+	for _, b := range []BankAccount{
+		{LegalEntityID: legalEntity, Currency: "USD", GLAccount: "1010", Name: "Operating USD"},
+		{LegalEntityID: legalEntity, Currency: "USD", AccountRef: "us 0000 1234", GLAccount: "1020", Name: "Lockbox USD"},
+		{LegalEntityID: legalEntity, Currency: "EUR", GLAccount: "1030"},
+	} {
+		if err := s.PutBankAccount(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := debitAccount(pay("bank-2", "US00001234", "USD")); got != "1020" {
+		t.Errorf("the lockbox account books %s, want 1020", got)
+	}
+	if got := debitAccount(pay("bank-3", "ELSEWHERE", "USD")); got != "1010" {
+		t.Errorf("an unmapped account books %s, want the USD default 1010", got)
+	}
+	if got := debitAccount(pay("bank-4", "", "EUR")); got != "1030" {
+		t.Errorf("the EUR default books %s, want 1030", got)
+	}
+	if got := debitAccount(pay("bank-5", "", "GBP")); got != "1000" {
+		t.Errorf("a currency with no mapping books %s, want 1000", got)
+	}
+	list, err := s.ListBankAccounts(ctx, legalEntity)
+	if err != nil || len(list) != 3 || list[0].Currency != "EUR" || list[2].AccountRef != "US00001234" {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	if err := s.PutBankAccount(ctx, BankAccount{LegalEntityID: legalEntity, Currency: "usd", GLAccount: "1010"}); err == nil {
+		t.Error("a lower case currency was accepted")
+	}
+	if err := s.PutBankAccount(ctx, BankAccount{LegalEntityID: legalEntity, Currency: "USD", GLAccount: "10 10"}); err == nil {
+		t.Error("an account with a space was accepted")
+	}
+	if err := s.DeleteBankAccount(ctx, legalEntity, "USD", "US 0000 1234"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteBankAccount(ctx, legalEntity, "USD", "US 0000 1234"); err == nil {
+		t.Error("deleting twice succeeded")
+	}
+	if got := debitAccount(pay("bank-6", "US00001234", "USD")); got != "1010" {
+		t.Errorf("after the mapping is gone: %s, want the default 1010", got)
+	}
+}
+
+// 30-2: a camt.053 statement's own account id reaches the payment, so its cash books to the mapped account.
+func TestBankAccountMapping_CamtStatementAccountBooksToItsLedgerAccount(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	if err := s.PutBankAccount(ctx, BankAccount{LegalEntityID: legalEntity, Currency: "EUR", AccountRef: "DE89370400440532013000", GLAccount: "1015"}); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := s.ImportBankStatement(ctx, BankStatementImport{LegalEntityID: legalEntity, FileSHA256: strings.Repeat("a", 64), StatementCount: 1,
+		Credits: []domain.CAMTCredit{{StatementID: "S1", Reference: "E1", Currency: "EUR", Amount: amt("50.00"), ValueDate: "2027-03-20", BankAccount: "DE89370400440532013000"}}})
+	if err != nil || len(batch.Payments) != 1 || batch.Payments[0].BankAccountRef == nil || *batch.Payments[0].BankAccountRef != "DE89370400440532013000" {
+		t.Fatalf("import: %+v %v", batch, err)
+	}
+	var raw []byte
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select lines from gl_journal where source_id = $1`, batch.Payments[0].ID).Scan(&raw)
+	}); err != nil || !strings.Contains(string(raw), `"account": "1015"`) || strings.Contains(string(raw), `"account": "1000"`) {
+		t.Fatalf("journal lines = %s (%v)", raw, err)
 	}
 }

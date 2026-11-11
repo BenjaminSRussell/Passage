@@ -31,6 +31,7 @@ const (
 	dutyForecastRead = "receivables.forecast.read"
 	dutyPayment      = "receivables.payment.post"
 	dutyRMACredit    = "ar.rmacredit.post"
+	dutyRMABackfill  = "ar.rmacredit.backfill"
 	dutyImport       = "receivables.payment-file.import"
 	maxLockboxBytes  = 3 << 20 // below httpx.Decode's 4 MiB body cap, leaving room for JSON escaping
 	validationDetail = "request failed validation"
@@ -86,14 +87,17 @@ func (a *API) Register(r chi.Router) {
 		a.deductionRoutes(r)
 		a.statementRoutes(r)
 		a.glJournalRoutes(r)
+		a.bankAccountRoutes(r)
 		a.creditSettlementRoutes(r)
 		a.adviceRoutes(r)
+		a.customerPortalRoutes(r)
 		r.With(authz.RequireDuty(dutyImport)).Post("/lockbox/imports", a.importLockbox)
 		r.With(authz.RequireDuty(dutyView)).Get("/lockbox/imports", a.listLockboxBatches)
 		r.With(authz.RequireDuty(dutyView)).Get("/worklist", a.worklist)
 		r.With(authz.RequireDuty(dutyRMACredit)).Post("/rma-credits", a.postRMACredit)
 		r.With(authz.RequireDuty(dutyView)).Get("/rma-credits", a.listRMACredits)
 		r.With(authz.RequireDuty(dutyPayment)).Post("/rma-credits:sweep", a.sweepRMACredits)
+		r.With(authz.RequireDuty(dutyRMABackfill)).Post("/rma-credits:backfill-reservation", a.backfillRMAReservationFor)
 		r.Post("/rma-credits/{ref}", a.rmaCreditAction)
 	})
 }
@@ -139,6 +143,9 @@ type createPaymentRequest struct {
 	PayerAccount *string `json:"payerAccount"`
 	// ShortPayReason explains a short payment (R7).
 	ShortPayReason *string `json:"shortPayReason"`
+	// BankAccount is the account the money came to (its IBAN or other id); the legal entity's mapping of it picks the ledger
+	// account of the cash.
+	BankAccount *string `json:"bankAccount"`
 }
 
 func (a *API) createPayment(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +178,11 @@ func (a *API) createPayment(w http.ResponseWriter, r *http.Request) {
 		h := domain.AccountHash(*req.PayerAccount)
 		in.PayerAccountHash = &h
 	}
+	if req.BankAccount != nil {
+		if ref := domain.NormalizeBankAccount(*req.BankAccount); ref != "" {
+			in.BankAccountRef = &ref
+		}
+	}
 	out, err := a.store.CreatePayment(r.Context(), in, key)
 	if err != nil {
 		a.fail("create payment", w, r, err)
@@ -188,6 +200,9 @@ func validatePayment(req createPaymentRequest, key string) map[string]string {
 	}
 	if req.CustomerID != nil && !ids.Valid(*req.CustomerID) {
 		fields["customerId"] = "must be a UUID"
+	}
+	if req.BankAccount != nil && len(domain.NormalizeBankAccount(*req.BankAccount)) > 40 {
+		fields["bankAccount"] = "must be at most 40 letters and digits"
 	}
 	if !paymentModes[req.PaymentMode] {
 		fields["paymentMode"] = "must be CHECK, ACH, WIRE, CARD or CASH"

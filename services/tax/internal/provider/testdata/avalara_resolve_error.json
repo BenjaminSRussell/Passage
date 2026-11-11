@@ -1,0 +1,1 @@
+{"address": {"line1": "1 Nowhere", "country": "US"}, "messages": [{"summary": "The address is not deliverable.", "details": "The physical location exists but there are no homes on this street.", "severity": "Error", "source": "Avalara.AvaTax.Common"}]}

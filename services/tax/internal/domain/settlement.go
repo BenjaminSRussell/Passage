@@ -22,6 +22,9 @@ type Txn struct {
 	CounterpartyCountry string `json:"counterparty_country,omitempty"`
 	CounterpartyVATID   string `json:"counterparty_vat_id,omitempty"`
 	SupplyKind          string `json:"supply_kind,omitempty"`
+	// Recoverable is the part of an input tax the caller found recoverable under the recovery policies (the calculate result's
+	// recoverable); the VAT reclaim uses it, and falls back to the code's recoverable_pct without it.
+	Recoverable *Dec `json:"recoverable_amount,omitempty"`
 }
 
 type Period struct{ From, To Date }

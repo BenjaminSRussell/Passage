@@ -8,7 +8,19 @@ export type LookupEntityKey =
   | "party"
   | "product"
   | "worker"
-  | "currency";
+  | "currency"
+  | "operatingUnit"
+  | "itemGroup"
+  | "vendorGroup"
+  | "bankAccount"
+  | "position"
+  | "compensationPlan"
+  | "calendar"
+  | "resourceGroup"
+  | "campaign"
+  | "fund"
+  | "user"
+  | "load";
 
 export interface LookupOption {
   id: string;
@@ -19,6 +31,7 @@ export interface LookupOption {
   batchTracked?: boolean;
   serialTracked?: boolean;
   catchWeight?: boolean;
+  currency?: string;
 }
 
 export interface LookupScope {
@@ -113,6 +126,49 @@ function option(
 
 function present(list: (LookupOption | null)[]): LookupOption[] {
   return list.filter((entry): entry is LookupOption => entry !== null);
+}
+
+const MAX_LIST_PAGES = 5;
+
+/** Every row of a list route that has no text search, following nextCursor for a bounded number of pages. */
+async function listRows(
+  path: string,
+  params: Record<string, string | undefined>,
+  signal?: AbortSignal,
+): Promise<Raw[]> {
+  const rows: Raw[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const body = await getJson(`${path}${query({ ...params, cursor })}`, signal);
+    rows.push(...items(body));
+    cursor = text((body ?? {}) as Raw, "nextCursor");
+    if (!cursor) {
+      break;
+    }
+  }
+  return rows;
+}
+
+/** The options whose name or number contains the typed text, for lists the service cannot search. */
+function narrow(all: LookupOption[], q: string): LookupOption[] {
+  const needle = q.trim().toLowerCase();
+  return all
+    .filter(
+      (entry) =>
+        needle === "" ||
+        entry.name.toLowerCase().includes(needle) ||
+        (entry.number ?? "").toLowerCase().includes(needle),
+    )
+    .slice(0, PAGE_SIZE);
+}
+
+/** An operating unit reads "Assembly (ASM · cost center)": departments, cost centers and the rest share one list. */
+function operatingUnitOption(row: Raw): LookupOption | null {
+  const hit = option(row, ["name"], ["code"]);
+  const type = text(row, "type")?.replace(/_/g, " ");
+  return hit && type
+    ? { ...hit, number: hit.number ? `${hit.number} · ${type}` : type }
+    : hit;
 }
 
 function orgEntity(
@@ -267,7 +323,209 @@ export function pickProductPatch(line: PickedLine, entry: LookupOption | null, k
   return { productHint: productHint(entry), ...(fillUnit ? { unit: entry?.unit ?? "", autoUnit: entry?.unit } : {}) };
 }
 
+const operatingUnitDef: LookupDef = {
+  noun: "operating unit",
+  search: async (q, _scope, signal) =>
+    narrow(
+      present(
+        (
+          await listRows(
+            "/api/v1/org/operating-units",
+            { status: "active", limit: "100" },
+            signal,
+          )
+        ).map(operatingUnitOption),
+      ),
+      q,
+    ),
+  resolve: async (id, signal) =>
+    operatingUnitOption(
+      (await getJson(
+        `/api/v1/org/operating-units/${encodeURIComponent(id)}`,
+        signal,
+      )) as Raw,
+    ),
+};
+
+async function itemGroupOptions(signal?: AbortSignal): Promise<LookupOption[]> {
+  return present(
+    items(await getJson("/api/v1/product/setup/item-groups", signal)).map(
+      (row) => option(row, ["name"], ["code"]),
+    ),
+  );
+}
+
+const itemGroupDef: LookupDef = {
+  noun: "item group",
+  createHref: "/product/setup/item-groups",
+  search: async (q, _scope, signal) => narrow(await itemGroupOptions(signal), q),
+  resolve: async (id, signal) =>
+    (await itemGroupOptions(signal)).find((entry) => entry.id === id) ?? null,
+};
+
+/** The party service lists vendor groups under `vendorGroups`. */
+function vendorGroupRows(body: unknown): Raw[] {
+  return items({ items: (body as { vendorGroups?: unknown } | null)?.vendorGroups });
+}
+
+const vendorGroupDef: LookupDef = {
+  noun: "vendor group",
+  search: async (q, _scope, signal) =>
+    narrow(
+      present(
+        vendorGroupRows(await getJson("/api/v1/party/vendor-groups", signal)).map(
+          (row) => option(row, ["name"], ["code"]),
+        ),
+      ),
+      q,
+    ),
+  resolve: async (id, signal) =>
+    option(
+      (await getJson(
+        `/api/v1/party/vendor-groups/${encodeURIComponent(id)}`,
+        signal,
+      )) as Raw,
+      ["name"],
+      ["code"],
+    ),
+};
+
+/** One record of a service that answers GET {path}/{id} with the record itself. */
+async function getOne(path: string, id: string, signal?: AbortSignal): Promise<Raw> {
+  return (await getJson(`${path}/${encodeURIComponent(id)}`, signal)) as Raw;
+}
+
+/** A lookup over a list route with no text search: every page is read (bounded) and filtered in the browser. */
+function listedEntity(
+  noun: string,
+  path: string,
+  map: (row: Raw) => LookupOption | null,
+  params: (scope: LookupScope) => Record<string, string | undefined> = () => ({}),
+  keep: (row: Raw, scope: LookupScope) => boolean = () => true,
+): LookupDef {
+  return {
+    noun,
+    search: async (q, scope, signal) =>
+      narrow(present((await listRows(path, params(scope), signal)).filter((row) => keep(row, scope)).map(map)), q),
+    resolve: async (id, signal) => map(await getOne(path, id, signal)),
+  };
+}
+
+/** A bank account reads "OPS-EUR (DE89 **** 3000 · EUR · DE01)": accounts carry a code, not a name. */
+function bankAccountOption(row: Raw, entityCode?: string): LookupOption | null {
+  const hit = option(row, ["accountCode"], []);
+  if (!hit) {
+    return null;
+  }
+  const currency = text(row, "currency");
+  const number = [text(row, "ibanMasked"), currency, entityCode].filter(Boolean).join(" · ");
+  return { ...hit, number: number || undefined, currency };
+}
+
+/** Bank accounts are listed per legal entity; with no legal entity in scope every entity's accounts are read. */
+const bankAccountDef: LookupDef = {
+  noun: "bank account",
+  createHref: "/treasury/bank-accounts/new",
+  search: async (q, scope, signal) => {
+    const entities = scope.legalEntityId
+      ? [{ id: scope.legalEntityId, code: undefined as string | undefined }]
+      : present(items(await getJson(`/api/v1/org/legal-entities${query({ limit: String(PAGE_SIZE) })}`, signal)).map((row) => option(row, ["name"], ["code"]))).map(
+          (entry) => ({ id: entry.id, code: entry.number }),
+        );
+    const lists = await Promise.all(
+      entities.map(async (entity) =>
+        items(await getJson(`/api/v1/treasury/bank-accounts${query({ legalEntityId: entity.id })}`, signal)).map((row) => bankAccountOption(row, entity.code)),
+      ),
+    );
+    return narrow(present(lists.flat()), q);
+  },
+  resolve: async (id, signal) => bankAccountOption(await getOne("/api/v1/treasury/bank-accounts", id, signal)),
+};
+
+/** A position has a number and a job code but no name of its own. */
+const positionDef = listedEntity(
+  "position",
+  "/api/v1/hr/positions",
+  (row) => option(row, ["positionNumber"], ["jobCode"]),
+  () => ({ limit: "100" }),
+  (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+);
+
+async function compensationPlanOptions(signal?: AbortSignal): Promise<LookupOption[]> {
+  return present(
+    (await listRows("/api/v1/hr/compensation/plans", { limit: "100" }, signal)).map((row) => {
+      const hit = option(row, ["name"], ["code"]);
+      return hit ? { ...hit, currency: text(row, "currency") } : null;
+    }),
+  );
+}
+
+/** Compensation plans have no single-plan route, so a plan's name is found in the list. */
+const compensationPlanDef: LookupDef = {
+  noun: "compensation plan",
+  createHref: "/hr/compensation/plans/new",
+  search: async (q, _scope, signal) => narrow(await compensationPlanOptions(signal), q),
+  resolve: async (id, signal) => (await compensationPlanOptions(signal)).find((entry) => entry.id === id) ?? null,
+};
+
+const codeAndName = (row: Raw) => option(row, ["name"], ["code"]);
+
+/** A load has no name: it reads by where it goes and when it is picked up, with its mode and status. */
+function loadOption(row: Raw): LookupOption | null {
+  const id = text(row, "id");
+  const region = text(row, "shipToRegion");
+  const pickup = text(row, "pickupDate");
+  if (!id || !region) {
+    return null;
+  }
+  const number = [text(row, "mode"), text(row, "status")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
+  return { id, name: pickup ? `${region}, pickup ${pickup}` : region, number: number || undefined };
+}
+
+function userOption(row: Raw): LookupOption | null {
+  return option(row, ["displayName", "email"], ["email"], ["userId", "id"]);
+}
+
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  bankAccount: bankAccountDef,
+  position: positionDef,
+  compensationPlan: compensationPlanDef,
+  calendar: listedEntity("work calendar", "/api/v1/engineering/calendars", codeAndName, () => ({ limit: "100" })),
+  resourceGroup: listedEntity("resource group", "/api/v1/engineering/resource-groups", codeAndName, (scope) => ({ limit: "100", siteId: scope.siteId })),
+  campaign: listedEntity(
+    "campaign",
+    "/api/v1/pricing/campaigns",
+    (row) => {
+      const hit = option(row, ["name"], []);
+      const from = text(row, "validFrom");
+      const to = text(row, "validTo");
+      return hit && from && to ? { ...hit, number: `${from} to ${to}` } : hit;
+    },
+    (scope) => ({ legalEntityId: scope.legalEntityId }),
+  ),
+  fund: listedEntity(
+    "fund",
+    "/api/v1/pricing/funds",
+    (row) => {
+      const hit = option(row, ["name"], ["type"]);
+      return hit ? { ...hit, currency: text(row, "currency") } : null;
+    },
+    (scope) => ({ legalEntityId: scope.legalEntityId }),
+  ),
+  load: listedEntity("load", "/api/v1/transport/loads", loadOption, () => ({}), (row, scope) => !scope.siteId || text(row, "shipFromSiteId") === scope.siteId),
+  user: {
+    noun: "user",
+    search: async (q, scope, signal) =>
+      present(
+        items(
+          await getJson(`/api/v1/identity/users${query({ q, status: "active", legalEntityId: scope.legalEntityId, limit: String(PAGE_SIZE) })}`, signal),
+        ).map(userOption),
+      ),
+    resolve: async (id, signal) => userOption(await getOne("/api/v1/identity/users", id, signal)),
+  },
+  operatingUnit: operatingUnitDef,
+  itemGroup: itemGroupDef,
+  vendorGroup: vendorGroupDef,
   legalEntity: orgEntity("legal entity", "legal-entities", () => ({})),
   site: orgEntity("site", "sites", (scope) => ({
     legalEntityId: scope.legalEntityId,
@@ -379,6 +637,10 @@ export function formatOption(entry: LookupOption): string {
 }
 
 const resolved = new Map<string, Promise<LookupOption | null>>();
+/** Lookups the server answered with 403: the caller may not read them, so asking again can only fail again. */
+const denied = new Set<string>();
+/** Keys whose lookup failed for a reason other than "missing" (an outage); the caller must not treat them as gone. */
+const unreachable = new Set<string>();
 
 export function resolveOption(
   entity: LookupEntityKey,
@@ -387,15 +649,43 @@ export function resolveOption(
   const key = `${entity}:${id}`;
   let pending = resolved.get(key);
   if (!pending) {
-    pending = lookupDefs[entity].resolve(id).catch(() => null);
+    pending = lookupDefs[entity].resolve(id).then(
+      (entry) => {
+        unreachable.delete(key);
+        return entry;
+      },
+      (error: unknown) => {
+        if (error instanceof LookupError && error.status === 403) {
+          denied.add(key);
+        }
+        if (!(error instanceof LookupError && (error.status === 404 || error.status === 410))) {
+          unreachable.add(key);
+        }
+        return null;
+      },
+    );
     resolved.set(key, pending);
     void pending.then((entry) => {
-      if (entry === null) {
+      // A denied lookup stays cached, so a list of hits does not ask again for every row of a legal entity it cannot read.
+      if (entry === null && !denied.has(key)) {
         resolved.delete(key);
       }
     });
   }
   return pending;
+}
+
+/**
+ * Whether a record is gone: true only when the server said it does not exist (404, 410, or an answer with no usable name).
+ * A 500, a network failure or a denied read says nothing about the record, so callers that would drop a stored choice
+ * (the working context) keep it.
+ */
+export async function isOptionMissing(
+  entity: LookupEntityKey,
+  id: string,
+): Promise<boolean> {
+  const entry = await resolveOption(entity, id);
+  return entry === null && !unreachable.has(`${entity}:${id}`);
 }
 
 export function rememberOption(
@@ -407,5 +697,7 @@ export function rememberOption(
 
 export function clearResolvedOptions(): void {
   resolved.clear();
+  denied.clear();
+  unreachable.clear();
   itemGroupNames = null;
 }
