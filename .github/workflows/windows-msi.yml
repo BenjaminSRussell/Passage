@@ -119,7 +119,7 @@ jobs:
           if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "version $v is not x.y.z (MSI versions are numeric)" }
           $fips = if ('${{ matrix.fips }}' -eq 'true') { 'fips-' } else { '' }
           "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "VARIANT=$fips${{ matrix.wixarch }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VARIANT=${fips}${{ matrix.wixarch }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # The web build is embedded into passage-server with go:embed (-tags webdist). It is not committed.
       - name: Build the web app
@@ -220,7 +220,7 @@ jobs:
         shell: pwsh
         run: |
           $fips = if ('${{ matrix.fips }}' -eq 'true') { 'fips-' } else { '' }
-          "VARIANT=$fips${{ matrix.wixarch }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VARIANT=${fips}${{ matrix.wixarch }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       # actions/download-artifact v4.3.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
