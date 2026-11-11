@@ -7,7 +7,7 @@
   Keycloak and Kafka are not bundled (ADR-0004). Everything the Passage MSI accepts can be passed to the bundle and is forwarded.
     wix build -arch x64 -d Version=1.2.3 -d PassageMsi=out\Passage-1.2.3-x64.msi
       [-d TemporalMsi=out\PassageTemporal-1.2.3-x64.msi] [-d PostgresInstaller=out\postgresql-17.x-windows-x64.exe]
-      -ext WixToolset.Util.wixext -ext WixToolset.BootstrapperApplication.wixext Bundle.wxs -o PassageSetup.exe
+      -ext WixToolset.Util.wixext -ext WixToolset.BootstrapperApplications.wixext Bundle.wxs -o PassageSetup.exe
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"

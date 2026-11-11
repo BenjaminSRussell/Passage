@@ -144,11 +144,18 @@ jobs:
         shell: pwsh
         run: |
           dotnet tool install --global wix --version $env:WIX_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "dotnet tool install wix $env:WIX_VERSION failed with exit code $LASTEXITCODE" }
           if ($env:WIX_VERSION -match '^(\d+)' -and [int]$Matches[1] -ge 7) {
             if ('${{ vars.WIX_OSMF_ACCEPTED }}' -ne 'true') { throw 'WiX 7+ needs the Open Source Maintenance Fee terms accepted: set the WIX_OSMF_ACCEPTED variable (docs/adr/0004-windows-packaging.md).' }
             wix eula accept wix7
+            if ($LASTEXITCODE -ne 0) { throw "wix eula accept wix7 failed with exit code $LASTEXITCODE" }
           }
-          foreach ($e in 'Util', 'Firewall', 'BootstrapperApplication') { wix extension add -g "WixToolset.$e.wixext/$env:WIX_VERSION" }
+          # Since WiX v5 the standard bootstrapper application lives in WixToolset.BootstrapperApplications.wixext (plural).
+          foreach ($e in 'Util', 'Firewall', 'BootstrapperApplications') {
+            wix extension add -g "WixToolset.$e.wixext/$env:WIX_VERSION"
+            if ($LASTEXITCODE -ne 0) { throw "wix extension add WixToolset.$e.wixext/$env:WIX_VERSION failed with exit code $LASTEXITCODE" }
+          }
+          wix extension list -g
 
       - name: Optional runtimes and prerequisites (pinned, hash-verified)
         shell: pwsh
@@ -201,7 +208,7 @@ jobs:
           $d = @('-d', "Version=$env:VERSION", '-d', "PassageMsi=$env:OUT\Passage-$env:VERSION-$env:VARIANT.msi")
           if ($env:TEMPORAL_DIR) { $d += @('-d', "TemporalMsi=$env:OUT\PassageTemporal-$env:VERSION-$env:VARIANT.msi") }
           if ($env:POSTGRES_INSTALLER) { $d += @('-d', "PostgresInstaller=$env:POSTGRES_INSTALLER") }
-          wix build -arch x64 @d -ext WixToolset.Util.wixext -ext WixToolset.BootstrapperApplication.wixext Bundle.wxs -o "$env:OUT\PassageSetup-$env:VERSION-$env:VARIANT.exe"
+          wix build -arch x64 @d -ext WixToolset.Util.wixext -ext WixToolset.BootstrapperApplications.wixext Bundle.wxs -o "$env:OUT\PassageSetup-$env:VERSION-$env:VARIANT.exe"
           if ($LASTEXITCODE -ne 0) { throw 'bundle build failed' }
 
       # A Burn bundle is signed in three steps: detach the engine, sign it, reattach, then sign the bundle itself.
