@@ -3474,7 +3474,8 @@
     ]},
     "shopfloor.controlrecipe.create": {"permissions": [
       {"resource": "/v1/shopfloor/control-recipes", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/control-recipes/*:resend", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/control-recipes/*:resend", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/control-recipes:from-pi-sheet", "methods": ["POST"]}
     ]},
     "shopfloor.controlrecipe.execute": {"permissions": [{"resource": "/v1/shopfloor/control-recipes/*:report", "methods": ["POST"]}]},
     "shopfloor.job.sync": {"flag": true, "permissions": []},
@@ -3529,7 +3530,16 @@
       {"resource": "/v1/shopfloor/jobs/*:feedback", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/registrations", "methods": ["POST"]}
     ]},
+    "shopfloor.pisheet.maintain": {"permissions": [
+      {"resource": "/v1/shopfloor/pi-sheets", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*", "methods": ["PUT"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*:release", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*:new-version", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*:obsolete", "methods": ["POST"]}
+    ]},
     "shopfloor.view": {"permissions": [
+      {"resource": "/v1/shopfloor/pi-sheets", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/control-recipes", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/control-recipes/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/absence-codes", "methods": ["GET"]},

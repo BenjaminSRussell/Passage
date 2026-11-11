@@ -2570,3 +2570,20 @@ test_recipe_target_duties if {
 	allowed("production.batch-order.write", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
 	not allowed("production.batch-order.read", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
 }
+
+# The PI sheet designer (#25, FR-25.16): designing and releasing needs the maintain duty, reading the view duty, and a
+# control recipe made from a released sheet the control recipe create duty.
+test_pi_sheet_duties if {
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.pisheet.maintain", "PUT", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:release")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:new-version")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:obsolete")
+	not allowed("shopfloor.pisheet.maintain", "GET", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/pi-sheets")
+	not allowed("shopfloor.view", "PUT", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
+	not allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
+}

@@ -3490,6 +3490,185 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/pi-sheets:
+    post:
+      operationId: createPISheet
+      summary: Design a PI sheet (a draft, version 1)
+      description: |
+        A PI sheet is a versioned template of the ISA-88 structure a control recipe has (FR-25.16). The document is
+        validated as a kiosk recipe: names unique per level, instructions numbered from 1 in each phase, a setpoint
+        with a numeric characteristic and a value inside its limits, a material list with product UUIDs and decimal
+        quantities. SF-0183 (409) when the code exists: make a new version of it instead.
+      x-passage-duty: shopfloor.pisheet.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PISheetInput" }
+      responses:
+        "201":
+          description: The draft.
+          content: { application/json: { schema: { $ref: "#/components/schemas/PISheet" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listPISheets
+      summary: List PI sheets
+      description: By code, newest version first. Filter by status or code.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [draft, released, obsolete] } }
+        - { name: code, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000 } }
+      responses:
+        "200":
+          description: The sheets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/PISheet" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
+  /v1/shopfloor/pi-sheets/{id}:
+    get:
+      operationId: getPISheet
+      summary: One PI sheet
+      x-passage-duty: shopfloor.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The sheet with its document.
+          content: { application/json: { schema: { $ref: "#/components/schemas/PISheet" } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: updatePISheet
+      summary: Edit a draft
+      description: Only a draft can be edited (SF-0181, 409). `rev` is the rev read; a stale one is SF-0182 (409).
+      x-passage-duty: shopfloor.pisheet.maintain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PISheetInput" } } }
+      responses:
+        "200":
+          description: The saved draft with rev + 1.
+          content: { application/json: { schema: { $ref: "#/components/schemas/PISheet" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
+  /v1/shopfloor/pi-sheets/{id}:release:
+    post:
+      operationId: releasePISheet
+      summary: Release a draft
+      description: |
+        The document is checked once more and becomes immutable. Releasing a version makes the earlier released
+        version of the code obsolete, so one version is released at a time.
+      x-passage-duty: shopfloor.pisheet.maintain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [rev], properties: { rev: { type: integer, minimum: 1 } } } } }
+      responses:
+        "200":
+          description: The released sheet.
+          content: { application/json: { schema: { $ref: "#/components/schemas/PISheet" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
+  /v1/shopfloor/pi-sheets/{id}:new-version:
+    post:
+      operationId: newPISheetVersion
+      summary: Copy a released sheet into the next version, a draft
+      description: SF-0181 (409) unless the sheet is released; SF-0183 (409) when the code has a draft already.
+      x-passage-duty: shopfloor.pisheet.maintain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The new draft.
+          content: { application/json: { schema: { $ref: "#/components/schemas/PISheet" } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
+  /v1/shopfloor/pi-sheets/{id}:obsolete:
+    post:
+      operationId: obsoletePISheet
+      summary: Retire a released sheet
+      description: Recipes cannot be made from it any more; those already made are unchanged.
+      x-passage-duty: shopfloor.pisheet.maintain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [rev], properties: { rev: { type: integer, minimum: 1 } } } } }
+      responses:
+        "200":
+          description: The obsolete sheet.
+          content: { application/json: { schema: { $ref: "#/components/schemas/PISheet" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
+  /v1/shopfloor/control-recipes:from-pi-sheet:
+    post:
+      operationId: createControlRecipeFromPISheet
+      summary: Generate a control recipe from a released PI sheet
+      description: |
+        Copies the sheet's document into a new control recipe for an order and resource (destination `kiosk` unless
+        given), and keeps the sheet's id on the recipe. Only a released sheet is usable (SF-0184, 422), and its
+        document must fit the destination: a process control destination needs a node on every setpoint.
+      x-passage-duty: shopfloor.controlrecipe.create
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [piSheetId, orderId, resourceId]
+              properties:
+                piSheetId: { type: string, format: uuid }
+                orderId: { type: string, format: uuid }
+                resourceId: { type: string, format: uuid }
+                destination: { type: string, enum: [kiosk, pcs-opcua, pcs-mqtt] }
+                edgeId: { type: string, format: uuid }
+                topic: { type: string }
+      responses:
+        "201":
+          description: Generated and sent.
+          content: { application/json: { schema: { $ref: "#/components/schemas/ControlRecipe" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     IfMatch:
@@ -3551,6 +3730,31 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    PISheetInput:
+      type: object
+      required: [name, recipe]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_.-]{0,39}$", description: Required to create; the code of a version is never changed. }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        rev: { type: integer, minimum: 1, description: Required to edit; the rev you read. }
+        recipe: { type: object, description: The ISA-88 document, as in a control recipe., additionalProperties: true }
+    PISheet:
+      type: object
+      required: [id, code, version, name, status, recipe, rev, createdBy, createdAt, updatedBy, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        version: { type: integer }
+        name: { type: string }
+        status: { type: string, enum: [draft, released, obsolete] }
+        recipe: { type: object, additionalProperties: true }
+        rev: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+        releasedBy: { type: [string, "null"] }
+        releasedAt: { type: [string, "null"], format: date-time }
     NewWorker:
       type: object
       required: [partyId, name, costRate, currency]
