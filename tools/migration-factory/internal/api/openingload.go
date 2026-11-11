@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -147,10 +148,48 @@ type openingChunk struct {
 	bank     []domain.BankItem
 	hashes   []string
 	currency string
+	// planned chunks come from opening_load_batch: they keep their key and date, and are not planned again.
+	planned bool
+	fixedKey string
+	date     string
 }
 
 func (c openingChunk) key(run store.OpeningRun) string {
+	if c.fixedKey != "" {
+		return c.fixedKey
+	}
 	return domain.OpeningBatchKey(run.Pack, run.System, run.Company, c.currency, c.hashes)
+}
+
+// plannedChunks rebuilds the chunks of planned batches from the items stored with the plan.
+func plannedChunks(planned []store.PlannedOpening) ([]openingChunk, error) {
+	var out []openingChunk
+	for _, p := range planned {
+		c := openingChunk{currency: p.Currency, planned: true, fixedKey: p.Key, date: p.PostingDate}
+		var err error
+		if p.Currency != "" {
+			err = json.Unmarshal(p.Payload, &c.stock)
+		} else {
+			err = json.Unmarshal(p.Payload, &c.bank)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("planned batch %s: %w", p.Key, err)
+		}
+		for i := range c.stock {
+			c.stock[i].Currency = p.Currency
+		}
+		for _, id := range p.BalanceIDs {
+			c.pending = append(c.pending, store.PendingOpening{BalanceID: id})
+		}
+		if len(c.pending) != len(c.stock)+len(c.bank) {
+			return nil, fmt.Errorf("planned batch %s holds %d rows for %d items", p.Key, len(c.pending), len(c.stock)+len(c.bank))
+		}
+		for range c.pending {
+			c.hashes = append(c.hashes, "")
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 func (c openingChunk) without(drop map[int]bool) openingChunk {
@@ -160,12 +199,13 @@ func (c openingChunk) without(drop map[int]bool) openingChunk {
 			continue
 		}
 		out.pending = append(out.pending, p)
-		out.hashes = append(out.hashes, c.hashes[i])
 		if len(c.stock) > 0 {
 			out.stock = append(out.stock, c.stock[i])
+			out.hashes = append(out.hashes, c.stock[i].Hash())
 		}
 		if len(c.bank) > 0 {
 			out.bank = append(out.bank, c.bank[i])
+			out.hashes = append(out.hashes, c.bank[i].Hash())
 		}
 	}
 	return out
@@ -219,12 +259,21 @@ func (s *Server) runOpeningLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	load, opened, pending, err := s.store.ClaimOpeningLoad(ctx, id, req.LegalEntityID, p.UserID, loadLease)
+	load, opened, planned, pending, err := s.store.ClaimOpeningLoad(ctx, id, req.LegalEntityID, p.UserID, loadLease)
 	if err != nil {
 		failOpeningLoad(w, r, err)
 		return
 	}
 	chunks, unmapped := buildOpeningChunks(opened, pending, req)
+	// A batch planned by an earlier call whose outcome is unknown goes first, unchanged (same key, same items, same date): the target
+	// answers it as a replay if it took it, so rows it already holds are never sent under a new key.
+	resend, err := plannedChunks(planned)
+	if err != nil {
+		s.abandonOpening(ctx, id, err)
+		httpx.Fail(w, r, err)
+		return
+	}
+	chunks = append(resend, chunks...)
 	var fin store.OpeningFinish
 	fatalCode := CodeOpeningDenied
 	if len(unmapped) > 0 {
@@ -348,12 +397,34 @@ func (s *Server) sendOpeningChunk(ctx context.Context, tenantID string, load dom
 			return CodeOpeningRefusedBatch, nil
 		}
 		key := c.key(run)
+		sendDate := date
+		if c.date != "" {
+			sendDate = c.date
+		}
+		if !c.planned {
+			payload := any(c.bank)
+			if run.Pack == domain.PackOnhand {
+				payload = c.stock
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				return "", err
+			}
+			plan := store.PlannedOpening{Key: key, Currency: c.currency, PostingDate: sendDate, Payload: raw}
+			for _, p := range c.pending {
+				plan.BalanceIDs = append(plan.BalanceIDs, p.BalanceID)
+			}
+			if err := s.store.PlanOpeningBatch(ctx, load.RunID, load.LegalEntityID, loadLease, plan); err != nil {
+				return "", err
+			}
+			c.planned = true
+		}
 		var res target.OpeningBatchResult
 		var err error
 		if run.Pack == domain.PackOnhand {
-			res, err = s.inventory.LoadBatch(ctx, tenantID, load.LegalEntityID, key, date, c.currency, c.stock)
+			res, err = s.inventory.LoadBatch(ctx, tenantID, load.LegalEntityID, key, sendDate, c.currency, c.stock)
 		} else {
-			res, err = s.treasury.LoadBatch(ctx, tenantID, load.LegalEntityID, key, date, c.bank)
+			res, err = s.treasury.LoadBatch(ctx, tenantID, load.LegalEntityID, key, sendDate, c.bank)
 		}
 		var terr *target.Error
 		var refused *target.RowsRefused
@@ -375,7 +446,12 @@ func (s *Server) sendOpeningChunk(ctx context.Context, tenantID string, load dom
 			if err := s.store.RejectOpeningRows(ctx, load.RunID, load.LegalEntityID, loadLease, bad); err != nil {
 				return "", err
 			}
+			// The target stored nothing (all or nothing): the plan is dropped and the rest is planned again under its own key.
+			if err := s.store.DropOpeningPlan(ctx, load.RunID, key); err != nil {
+				return "", err
+			}
 			c = c.without(drop)
+			c.planned, c.fixedKey = false, ""
 		case errors.As(err, &terr) && (errors.Is(terr.Kind, target.ErrUnavailable) || errors.Is(terr.Kind, target.ErrBadAnswer)):
 			fin.Unavailable = err.Error()
 			return "", nil

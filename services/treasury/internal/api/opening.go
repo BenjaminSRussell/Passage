@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -97,6 +98,7 @@ func (a *API) importOpening(w http.ResponseWriter, r *http.Request) {
 	}
 	rowErrs := map[string]string{}
 	seen := map[string]int{}
+	seenAccount := map[string]int{}
 	for i, it := range req.Items {
 		prefix := fmt.Sprintf("items[%d].", i+1)
 		switch {
@@ -109,6 +111,10 @@ func (a *API) importOpening(w http.ResponseWriter, r *http.Request) {
 		}
 		if !ids.Valid(it.BankAccountID) {
 			rowErrs[prefix+"bankAccountId"] = "must be a UUID"
+		} else if first, dup := seenAccount[strings.ToLower(it.BankAccountID)]; dup {
+			rowErrs[prefix+"bankAccountId"] = fmt.Sprintf("appears twice in the batch (first at items[%d]); an account is opened once", first)
+		} else {
+			seenAccount[strings.ToLower(it.BankAccountID)] = i + 1
 		}
 		if !currencyPattern.MatchString(it.Currency) {
 			rowErrs[prefix+"currency"] = "must be an ISO 4217 alpha-3 code"

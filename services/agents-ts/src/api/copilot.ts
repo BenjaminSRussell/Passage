@@ -47,6 +47,11 @@ export async function handleChat(input: {
     res.end(payload);
     return;
   }
+  // The model call stops when the client goes away: nobody is left to read the answer and the tokens would still be paid for.
+  const gone = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) gone.abort();
+  });
   let open = false;
   let streamed = false;
   const begin = (): void => {
@@ -56,6 +61,7 @@ export async function handleChat(input: {
   };
   try {
     const reply = await input.copilot.chat(input.principal, input.token, request, {
+      signal: gone.signal,
       onToken: (text) => {
         begin();
         streamed = true;
@@ -68,6 +74,7 @@ export async function handleChat(input: {
   } catch (err) {
     if (!open) throw err;
     const code = err instanceof AgentError ? err.code : "AGT-0206";
-    res.end(frame("error", { code, message: err instanceof Error ? err.message : "The answer could not be completed." }));
+    // Only a message this service wrote is shown; anything else (a socket error, a bug) stays in the logs.
+    res.end(frame("error", { code, message: err instanceof AgentError ? err.message : "The answer could not be completed." }));
   }
 }

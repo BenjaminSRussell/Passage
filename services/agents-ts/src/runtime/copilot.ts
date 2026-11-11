@@ -63,6 +63,8 @@ export interface ChatHooks {
    * Nothing is sent for a chat whose knowledge results fail the citation gate (AGT-0212): that answer is refused.
    */
   onToken?: (text: string) => void;
+  /** Aborts the model call when the caller is gone. */
+  signal?: AbortSignal;
 }
 
 export interface CopilotStore extends AuditPort, BudgetPort {}
@@ -216,7 +218,7 @@ export function createCopilotService(deps: CopilotDeps) {
           );
           let response;
           try {
-            const call = { system, user: context, allowedTools: gate.allowed, maxOutputTokens };
+            const call = { system, user: context, allowedTools: gate.allowed, maxOutputTokens, ...(hooks.signal !== undefined ? { signal: hooks.signal } : {}) };
             response = sink !== undefined && provider.stream !== undefined ? await provider.stream(call, onText) : await provider.complete(call);
             if (sink !== undefined && streamable()) {
               const tail = restorer.flush();

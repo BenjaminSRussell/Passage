@@ -66,6 +66,14 @@ export class TextFieldExtractor {
   private lastKey = "";
   private afterColon = false;
   private streaming = false;
+  private capturing = false;
+  private toolText = "";
+  private toolSeen = false;
+
+  /** The value of the top-level `tool` key once its value has started: "" when it is empty or null, undefined before it is known. */
+  get tool(): string | undefined {
+    return this.toolSeen && !this.capturing ? this.toolText : undefined;
+  }
 
   push(piece: string): string {
     let out = "";
@@ -78,8 +86,10 @@ export class TextFieldExtractor {
           if (this.readingKey) this.lastKey = this.current;
           this.readingKey = false;
           this.streaming = false;
+          this.capturing = false;
           this.current = "";
         } else if (this.streaming) out += decoded;
+        else if (this.capturing) this.toolText += decoded;
         else this.current += decoded;
         continue;
       }
@@ -92,6 +102,9 @@ export class TextFieldExtractor {
             this.expectKey = false;
           } else if (this.depth === 1 && this.afterColon && this.lastKey === "text") {
             this.streaming = true;
+          } else if (this.depth === 1 && this.afterColon && this.lastKey === "tool") {
+            this.capturing = true;
+            this.toolSeen = true;
           }
           this.afterColon = false;
           break;
@@ -113,6 +126,11 @@ export class TextFieldExtractor {
           if (this.depth === 1) this.afterColon = true;
           break;
         default:
+          // a bare value (null) of `tool` is no tool
+          if (this.depth === 1 && this.afterColon && this.lastKey === "tool" && ch !== " " && ch !== "\n" && ch !== "\t") {
+            this.toolSeen = true;
+            this.afterColon = false;
+          }
       }
     }
     return out;
@@ -147,6 +165,8 @@ export class TextFieldExtractor {
  * Turns pseudonyms back into real values in streamed text. A pseudonym looks like `[IBAN-1]` and may arrive split
  * across pieces, so a piece is held back from an unclosed `[` until the pseudonym is complete or the text ends.
  */
+const MAX_PSEUDONYM = 24;
+
 export class StreamRestorer {
   private held = "";
   constructor(private readonly restore: (text: string) => string) {}
@@ -154,7 +174,8 @@ export class StreamRestorer {
   push(piece: string): string {
     const text = this.held + piece;
     const open = text.lastIndexOf("[");
-    if (open !== -1 && text.indexOf("]", open) === -1) {
+    // A real pseudonym is short; a stray "[" is not held past the longest one.
+    if (open !== -1 && text.indexOf("]", open) === -1 && text.length - open <= MAX_PSEUDONYM) {
       this.held = text.slice(open);
       return this.restore(text.slice(0, open));
     }

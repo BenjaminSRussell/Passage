@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/go-chi/chi/v5"
 
@@ -13,11 +16,17 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/api"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 	"github.com/BenjaminSRussell/passage/services/inventory/migrations"
 )
 
 func openingServer(t *testing.T) http.Handler {
+	h, _ := openingServerStore(t)
+	return h
+}
+
+func openingServerStore(t *testing.T) (http.Handler, *store.Postgres) {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
@@ -26,7 +35,7 @@ func openingServer(t *testing.T) http.Handler {
 	s := store.New(app)
 	r := chi.NewRouter()
 	api.New(s, store.PostParams{InventoryAccount: "1300", AdjustmentAccount: "5100", OpeningAccount: "3900"}).WithOpeningBatches(s).Register(r)
-	return r
+	return r, s
 }
 
 func openingBody(key string, items ...string) string {
@@ -100,5 +109,32 @@ func TestOpeningBatchNamesTheRowsItRefuses(t *testing.T) {
 	other := strings.Replace(openingBody("b3", openingItem("L1", p, "1", "1")), glEntity, ids.New(), 1)
 	if rec := do(t, h, http.MethodPost, "/v1/inventory/opening-batches", other, imp, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("other legal entity: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A journal that already sits under the batch key with other lines is not the batch: it is neither posted nor recorded as it.
+func TestOpeningBatchRefusesAForeignJournalUnderItsKey(t *testing.T) {
+	h, s := openingServerStore(t)
+	ctx := testkit.Ctx(testkit.TenantID(1), "inventory.import.write")
+	p2 := ids.New()
+	j, _, err := s.CreateJournal(ctx, domain.Journal{LegalEntityID: glEntity, Type: domain.JournalOpeningBalance, PostingDate: time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), Currency: "USD"}, "opening-batch:b9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddJournalLines(ctx, j.ID, []domain.JournalLine{{ClientKey: "X", ProductID: p2, Dims: domain.Dimensions{"site": "S1", "warehouse": "W1"}, Qty: decimal.NewFromInt(500),
+		EnteredQty: decimal.NewFromInt(500), EnteredUnit: "EA", CostPrice: decimal.NewFromInt(1), LineNo: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	rec := do(t, h, http.MethodPost, "/v1/inventory/opening-batches", openingBody("b9", openingItem("L1", p2, "10", "1")), []string{"inventory.import.write"}, nil)
+	if rec.Code != http.StatusUnprocessableEntity || decodeProblem(t, rec).Code != store.CodeOpeningKeyConflict {
+		t.Fatalf("foreign journal: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(t, h, http.MethodGet, "/v1/inventory/onhand?product="+p2, "", []string{"inventory.read"}, nil); strings.Contains(rec.Body.String(), "500") {
+		t.Fatalf("the foreign journal was posted: %s", rec.Body)
+	}
+	// The prefix is reserved: nobody can create a journal under it through the journal API.
+	create := `{"legalEntityId":"` + glEntity + `","journalType":"OPENING_BALANCE","postingDate":"2026-12-31","currency":"USD"}`
+	if rec := do(t, h, http.MethodPost, "/v1/inventory/journals", create, []string{"inventory.journal.write"}, map[string]string{"Idempotency-Key": "opening-batch:b10"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("reserved key: %d %s", rec.Code, rec.Body)
 	}
 }

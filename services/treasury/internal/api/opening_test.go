@@ -45,6 +45,11 @@ func TestOpeningBalances_RoutesValidateRowsAndNeedTheStore(t *testing.T) {
 	if rec := call(h, http.MethodPost, path, rawBody(dup), "application/json", nil); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "items[2].reference") {
 		t.Fatalf("duplicate reference: %d %s", rec.Code, rec.Body)
 	}
+	same := strings.Replace(dup, `"reference":"B-1","bankAccountId"`, `"reference":"B-2","bankAccountId"`, -1)
+	same = strings.Replace(same, `"reference":"B-2","bankAccountId"`, `"reference":"B-1","bankAccountId"`, 1)
+	if rec := call(h, http.MethodPost, path, rawBody(same), "application/json", nil); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "items[2].bankAccountId") {
+		t.Fatalf("one account twice: %d %s", rec.Code, rec.Body)
+	}
 	if rec := call(h, http.MethodPost, path, rawBody(strings.Replace(good, "2026-12-31", "31.12.2026", 1)), "application/json", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad date: %d", rec.Code)
 	}

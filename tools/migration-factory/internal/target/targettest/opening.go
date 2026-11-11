@@ -30,6 +30,7 @@ type FakeOpening struct {
 	// reconciliation catches a target that holds something else than was sent.
 	Drift    int64
 	failNext []int
+	loseNext int
 }
 
 type openingBatch struct {
@@ -64,6 +65,13 @@ func (f *FakeOpening) FailNext(statuses ...int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failNext = append(f.failNext, statuses...)
+}
+
+// LoseNext makes the next n batch POSTs store the batch and then answer 503: the outcome the caller cannot know (a timeout after the work was done).
+func (f *FakeOpening) LoseNext(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loseNext = n
 }
 
 // Calls returns the requests received so far.
@@ -227,7 +235,16 @@ func (f *FakeOpening) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.batches[req.BatchKey] = b
+	lose := f.loseNext > 0
+	if lose {
+		f.loseNext--
+	}
 	f.mu.Unlock()
+	if lose {
+		f.finish(call, http.StatusServiceUnavailable)
+		problem(w, http.StatusServiceUnavailable, "COM-0500", "response lost")
+		return
+	}
 	f.finish(call, http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

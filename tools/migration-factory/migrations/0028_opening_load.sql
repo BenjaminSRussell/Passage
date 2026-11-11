@@ -49,10 +49,27 @@ create table opening_load_batch (
   legal_entity_id uuid not null,
   item_count int not null check (item_count between 1 and 1000),
   replayed boolean not null default false,
+  -- PLANNED is written before the batch is sent, with the items exactly as sent: an ambiguous outcome (a timeout) is resolved
+  -- by sending the same key and items again, never by forming a new batch from rows the target may already hold.
+  status text not null default 'ACCEPTED' check (status in ('PLANNED', 'ACCEPTED', 'DROPPED')),
+  currency text not null default '',
+  posting_date text not null default '',
+  payload jsonb,
   sent_at timestamptz not null default now(),
   primary key (tenant_id, run_id, batch_key),
   foreign key (tenant_id, run_id) references pack_run (tenant_id, run_id)
 );
+
+create table opening_load_batch_row (
+  tenant_id uuid not null,
+  run_id uuid not null,
+  batch_key text not null,
+  seq int not null check (seq >= 1),
+  balance_id uuid not null,
+  primary key (tenant_id, run_id, batch_key, seq),
+  foreign key (tenant_id, run_id, batch_key) references opening_load_batch (tenant_id, run_id, batch_key)
+);
+create index opening_load_batch_row_balance on opening_load_batch_row (tenant_id, balance_id);
 
 alter table opening_load enable row level security;
 alter table opening_load force row level security;
@@ -72,6 +89,12 @@ create policy opening_load_row_legal_entity_scope on opening_load_row as restric
   using (current_setting('passage.legal_entity_scopes', true) = '*'
          or legal_entity_id::text = any(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
+alter table opening_load_batch_row enable row level security;
+alter table opening_load_batch_row force row level security;
+create policy opening_load_batch_row_tenant_access on opening_load_batch_row as permissive
+  using (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  with check (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+
 alter table opening_load_batch enable row level security;
 alter table opening_load_batch force row level security;
 create policy opening_load_batch_tenant_access on opening_load_batch as permissive
@@ -86,7 +109,8 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO passage_app', current_schema());
     EXECUTE 'GRANT SELECT, INSERT, UPDATE ON opening_load, opening_load_row TO passage_app';
-    EXECUTE 'GRANT SELECT, INSERT ON opening_load_batch TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON opening_load_batch TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, DELETE ON opening_load_batch_row TO passage_app';
   END IF;
 END
 $$;

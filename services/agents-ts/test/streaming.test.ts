@@ -5,6 +5,7 @@ import { createFailoverProvider } from "../src/providers/failover.js";
 import { sseEvents, StreamRestorer, TextFieldExtractor } from "../src/providers/stream.js";
 import { providerUnavailable } from "../src/providers/wire.js";
 import { createCopilotService } from "../src/runtime/copilot.js";
+import { createKnowledgeService } from "../src/runtime/knowledge.js";
 import type { ModelProvider, ModelRequest, ModelResponse } from "../src/runtime/engine.js";
 import { REAL_IBAN } from "./fakes.js";
 import { FakeMcp, headers, MemoryStore, serve, tool } from "./surface-fakes.js";
@@ -77,6 +78,11 @@ describe("StreamRestorer", () => {
     const r = new StreamRestorer((t) => t.replaceAll("[IBAN-1]", REAL_IBAN));
     expect([r.push("Pay to [IB"), r.push("AN-1] now"), r.push(" [open"), r.flush()]).toEqual(["Pay to ", `${REAL_IBAN} now`, " ", "[open"]);
   });
+
+  it("does not hold text behind a stray [ longer than any pseudonym", () => {
+    const r = new StreamRestorer((t) => t);
+    expect(r.push("see [1] and [not closed and then a long stretch of text")).toBe("see [1] and [not closed and then a long stretch of text");
+  });
 });
 
 describe("Anthropic streaming adapter", () => {
@@ -89,7 +95,8 @@ describe("Anthropic streaming adapter", () => {
         return new Response(status === 200 ? bodyOf(chunks) : "", { status });
       }) as typeof fetch,
     });
-  const input = JSON.stringify({ text: "Invoice INV-7 is due.", tool: GET, args: { invoiceId: "INV-7" }, confidence: 0.9, amount: { amount: "0", currency: "USD" } });
+  const input = JSON.stringify({ tool: "", text: "Invoice INV-7 is due." });
+  const proposing = JSON.stringify({ tool: GET, text: "Let me look that up.", args: { invoiceId: "INV-7" }, confidence: 0.9, amount: { amount: "0", currency: "USD" } });
 
   it("sends stream:true, calls onText with the answer before the stream ends and returns the parsed proposal with its usage", async () => {
     const seen: Array<Record<string, unknown>> = [];
@@ -101,7 +108,39 @@ describe("Anthropic streaming adapter", () => {
     expect(seen[0]).toMatchObject({ stream: true, model: "claude-sonnet-5-5", tool_choice: { type: "tool", name: "propose_action" } });
     expect(texts.join("")).toBe("Invoice INV-7 is due.");
     expect(texts.length).toBeGreaterThan(1);
-    expect(res).toMatchObject({ text: "Invoice INV-7 is due.", proposal: { tool: GET, args: { invoiceId: "INV-7" } }, usage: { tokensIn: 120, tokensOut: 33 } });
+    expect(res).toMatchObject({ text: "Invoice INV-7 is due.", usage: { tokensIn: 120, tokensOut: 33 } });
+  });
+
+  it("passes on no text of a turn that proposes a tool, and holds text written before the tool key until the call is read", async () => {
+    const dropped: string[] = [];
+    const res = await provider(messageStream([proposing.slice(0, 30), proposing.slice(30)])).stream!({ system: "s", user: "u", allowedTools: [GET] }, (t) => dropped.push(t));
+    expect(dropped).toEqual([]);
+    expect(res.proposal?.tool).toBe(GET);
+    const late: string[] = [];
+    const textFirst = JSON.stringify({ text: "Answer written first.", tool: "" });
+    await provider(messageStream([textFirst.slice(0, 12), textFirst.slice(12)])).stream!({ system: "s", user: "u", allowedTools: [GET] }, (t) => late.push(t));
+    expect(late.join("")).toBe("Answer written first.");
+    const textFirstTool: string[] = [];
+    const tf = JSON.stringify({ text: "Preamble.", tool: GET, args: {}, confidence: 1, amount: { amount: "0", currency: "USD" } });
+    await provider(messageStream([tf])).stream!({ system: "s", user: "u", allowedTools: [GET] }, (t) => textFirstTool.push(t));
+    expect(textFirstTool).toEqual([]);
+  });
+
+  it("aborts the request when the caller's signal fires", async () => {
+    const ctl = new AbortController();
+    let seen: AbortSignal | undefined;
+    const p = createAnthropicProvider({
+      apiKey: "k",
+      model: "m",
+      fetchFn: (async (_u: unknown, init?: RequestInit) => {
+        seen = init?.signal ?? undefined;
+        return new Promise<Response>((_res, rej) => init?.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError"))));
+      }) as typeof fetch,
+    });
+    const pending = p.stream!({ system: "s", user: "u", allowedTools: [GET], signal: ctl.signal }, () => undefined);
+    ctl.abort();
+    await expect(pending).rejects.toMatchObject({ code: "AGT-0206" });
+    expect(seen?.aborted).toBe(true);
   });
 
   it("treats a stream cut off before message_stop as an outage that keeps the budget hold, and an HTTP error as unbilled", async () => {
@@ -157,7 +196,9 @@ class StreamingProvider implements ModelProvider {
     this.completeCalls += 1;
     return { text: this.pieces.join(""), usage: { tokensIn: 10, tokensOut: 5 } };
   }
-  async stream(_req: ModelRequest, onText: (d: string) => void): Promise<ModelResponse> {
+  seenSignal: AbortSignal | undefined;
+  async stream(req: ModelRequest, onText: (d: string) => void): Promise<ModelResponse> {
+    this.seenSignal = req.signal;
     onText(this.pieces[0] ?? "");
     this.streamed.push(this.pieces[0] ?? "");
     this.firstPieceSent();
@@ -261,5 +302,60 @@ describe("copilot token streaming (FR-47.3)", () => {
     const res = await fetch(`${srv.base}/api/v1/copilot/chat`, { method: "POST", headers: { ...headers(DUTIES), accept: "text/event-stream" }, body: JSON.stringify({ mode: "nope", message: "hi" }) });
     expect(res.status).toBe(400);
     expect(res.headers.get("content-type")).not.toContain("text/event-stream");
+  });
+});
+
+describe("copilot streaming: refused answers and gone clients", () => {
+  it("shows no text of a tool-calling turn and nothing of an answer the citation gate refuses (AGT-0212)", async () => {
+    const streamOf = (input: unknown) => messageStream([JSON.stringify(input)]);
+    let n = 0;
+    const turns = [
+      streamOf({ tool: "passage.knowledge.search", text: "Let me check the policy first.", args: { query: "meals" }, confidence: 1, amount: { amount: "0", currency: "USD" } }),
+      streamOf({ tool: "", text: "Meals are fully covered." }),
+    ];
+    const provider = createAnthropicProvider({
+      apiKey: "k",
+      model: "claude-sonnet-5-5",
+      fetchFn: (async () => new Response(bodyOf(turns[n++] ?? []), { status: 200 })) as typeof fetch,
+    });
+    const knowledge = createKnowledgeService({
+      keywords: { upsert: async () => [], keyword: async () => [{ chunkId: "c1", sourceType: "POLICY", sourceRef: "p", section: "Meals", score: 1 }], byIds: async () => [] },
+    });
+    const store = new MemoryStore();
+    const copilot = createCopilotService({
+      providerFor: () => provider,
+      mcp: new FakeMcp([]),
+      store,
+      killSwitch: { isHalted: () => false },
+      cache: new CopilotAnswerCache(),
+      config: { tokenCap: 20_000, maxTurns: 3, pseudonymTtlMs: 60_000 },
+      modelId: "claude-sonnet-5-5",
+      knowledge,
+    });
+    const srv = await serve({ approvals: store, copilot });
+    close = srv.close;
+    const all = frames(await (await askStream(srv.base, "meal policy?")).text());
+    const tokens = all.filter((f) => f.event === "token").map((f) => f.data.text).join("");
+    expect(tokens).not.toContain("Let me check");
+    expect(tokens).not.toContain("fully covered");
+    const done = all.at(-1);
+    expect(done).toMatchObject({ event: "done", data: { refusal: { code: "AGT-0212" } } });
+    // what the stream carried is what the refusal says, not the refused answer
+    expect(tokens).toBe((done?.data as unknown as { answer: string }).answer);
+  });
+
+  it("aborts the model call when the client disconnects", async () => {
+    const provider = new StreamingProvider(["Part", "ial"]);
+    const srv = await setup(provider);
+    const ctl = new AbortController();
+    const res = await fetch(`${srv.base}/api/v1/copilot/chat`, { method: "POST", headers: { ...headers(DUTIES), accept: "text/event-stream" }, body: JSON.stringify({ mode: "ask", message: "hi" }), signal: ctl.signal });
+    const reader = res.body!.getReader();
+    await provider.firstPiece;
+    await reader.read();
+    ctl.abort();
+    const t0 = Date.now();
+    while (provider.seenSignal?.aborted !== true && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 20));
+    expect(provider.seenSignal?.aborted).toBe(true);
+    provider.release();
   });
 });

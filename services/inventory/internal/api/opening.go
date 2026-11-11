@@ -221,32 +221,37 @@ func (a *API) importOpeningBatch(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, openingResponse(held))
 		return
 	}
-	j, _, err := a.store.CreateJournal(ctx, domain.Journal{LegalEntityID: req.LegalEntityID, Type: domain.JournalOpeningBalance, PostingDate: date, Currency: req.Currency},
+	j, inserted, err := a.store.CreateJournal(ctx, domain.Journal{LegalEntityID: req.LegalEntityID, Type: domain.JournalOpeningBalance, PostingDate: date, Currency: req.Currency},
 		openingKeyPrefix+req.BatchKey)
 	if err != nil {
 		a.failed(w, r, "create opening journal", err)
 		return
 	}
+	// A journal that was there before must hold exactly the lines of this request (or none yet): whatever else sits under the key
+	// is not this batch and is never posted or recorded as it.
+	if !inserted && !sameOpeningLines(j.Lines, lines) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeOpeningKeyConflict, "the batch key was already used with other content"))
+		return
+	}
 	// Each step is skipped when the journal is already past it, so a call that stopped half way is finished by the resend.
 	if j.Status == domain.JournalDraft {
-		if j, err = a.store.AddJournalLines(ctx, j.ID, lines); err != nil {
-			a.failed(w, r, "add opening lines", err)
-			return
+		if j, err = a.store.AddJournalLines(ctx, j.ID, lines); err == nil {
+			j, err = a.store.TransitionJournal(ctx, j.ID, j.Version, domain.JournalSubmitted)
 		}
-		if j, err = a.store.TransitionJournal(ctx, j.ID, j.Version, domain.JournalSubmitted); err != nil {
-			a.failed(w, r, "submit opening journal", err)
+		if err != nil {
+			a.openingLost(w, r, req.BatchKey, hash, err)
 			return
 		}
 	}
 	if j.Status == domain.JournalSubmitted {
 		if j, err = a.store.TransitionJournal(ctx, j.ID, j.Version, domain.JournalApproved); err != nil {
-			a.failed(w, r, "approve opening journal", err)
+			a.openingLost(w, r, req.BatchKey, hash, err)
 			return
 		}
 	}
 	if j.Status == domain.JournalApproved {
 		if j, err = a.store.PostJournal(ctx, j.ID, j.Version, a.post); err != nil {
-			a.failed(w, r, "post opening journal", err)
+			a.openingLost(w, r, req.BatchKey, hash, err)
 			return
 		}
 		a.posted.Add(1)
@@ -255,8 +260,9 @@ func (a *API) importOpeningBatch(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, "INV-OPB-004", "the opening journal of this batch is "+string(j.Status)+" and cannot be posted"))
 		return
 	}
-	b := store.OpeningBatch{LegalEntityID: req.LegalEntityID, BatchKey: req.BatchKey, ContentHash: hash, JournalID: j.ID, Currency: req.Currency, ItemCount: len(lines)}
-	for _, l := range lines {
+	// The totals are those of the posted journal, not of the request.
+	b := store.OpeningBatch{LegalEntityID: req.LegalEntityID, BatchKey: req.BatchKey, ContentHash: hash, JournalID: j.ID, Currency: j.Currency, ItemCount: len(j.Lines)}
+	for _, l := range j.Lines {
 		b.Qty = b.Qty.Add(l.Qty)
 		b.Value = b.Value.Add(l.Qty.Mul(l.CostPrice))
 	}
@@ -265,6 +271,38 @@ func (a *API) importOpeningBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, openingResponse(b))
+}
+
+// sameOpeningLines reports whether a stored journal holds exactly the request's lines: the same count, client keys and content.
+func sameOpeningLines(held, want []domain.JournalLine) bool {
+	if len(held) == 0 {
+		return true
+	}
+	if len(held) != len(want) {
+		return false
+	}
+	byKey := make(map[string]domain.JournalLine, len(held))
+	for _, l := range held {
+		byKey[l.ClientKey] = l
+	}
+	for _, w := range want {
+		h, ok := byKey[w.ClientKey]
+		if !ok || !h.SameContent(w) {
+			return false
+		}
+	}
+	return true
+}
+
+// openingLost answers a step that failed: when a concurrent call with the same content has recorded the batch meanwhile, this call
+// is a replay of it; otherwise the failure stands.
+func (a *API) openingLost(w http.ResponseWriter, r *http.Request, key, hash string, cause error) {
+	if held, ok, err := a.opening.FindOpeningBatch(r.Context(), key); err == nil && ok && held.ContentHash == hash {
+		w.Header().Set("Idempotent-Replayed", "true")
+		httpx.JSON(w, http.StatusOK, openingResponse(held))
+		return
+	}
+	a.failed(w, r, "import opening batch", cause)
 }
 
 // listOpeningBatches handles GET /v1/inventory/opening-batches?legal_entity=&cursor=&limit=: the batches the import

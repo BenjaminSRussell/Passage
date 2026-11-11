@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -180,6 +181,11 @@ func references(items []OpeningItem) []string {
 }
 
 func scopeError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		// A concurrent batch opened the same account (or reference) between the check and the insert.
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeOpeningAccountHeld, "a bank account in this batch already has an opening balance; it is opened once")
+	}
 	if err != nil && strings.Contains(err.Error(), "row-level security") {
 		return httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside your scope")
 	}

@@ -89,7 +89,7 @@ export class PgApprovalStore implements ApprovalStore {
           toolName: a.tool,
           proposalRedacted: a.proposalJson,
           confidence: a.confidence,
-          riskScore: a.riskScore ?? 0,
+          ...(a.riskScore !== undefined ? { riskScore: a.riskScore } : {}),
         });
         await c.query(
           "insert into outbox (id, tenant_id, aggregate_type, aggregate_id, type, payload) values ($1, $2, 'approval_request', $3, $4, $5::jsonb)",

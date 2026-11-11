@@ -106,7 +106,9 @@ type Store interface {
 	RejectPayablesRows(ctx context.Context, runID string, lease time.Duration, rejects []store.PayablesReject) error
 	FinishPayablesLoad(ctx context.Context, runID string, fin store.PayablesFinish) (domain.PayablesLoad, []domain.ControlTotal, error)
 	GetOpeningLoad(ctx context.Context, runID string) (domain.OpeningLoad, error)
-	ClaimOpeningLoad(ctx context.Context, runID, legalEntityID, startedBy string, lease time.Duration) (domain.OpeningLoad, store.OpeningRun, []store.PendingOpening, error)
+	ClaimOpeningLoad(ctx context.Context, runID, legalEntityID, startedBy string, lease time.Duration) (domain.OpeningLoad, store.OpeningRun, []store.PlannedOpening, []store.PendingOpening, error)
+	PlanOpeningBatch(ctx context.Context, runID, legalEntityID string, lease time.Duration, p store.PlannedOpening) error
+	DropOpeningPlan(ctx context.Context, runID, key string) error
 	RecordOpeningBatch(ctx context.Context, runID, legalEntityID string, lease time.Duration, b store.OpeningBatchSent) error
 	RejectOpeningRows(ctx context.Context, runID, legalEntityID string, lease time.Duration, rejects []store.OpeningReject) error
 	ListOpeningRejects(ctx context.Context, runID string, limit int) ([]store.OpeningRejectRow, error)

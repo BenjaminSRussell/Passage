@@ -40,6 +40,11 @@ describe.runIf(ownerUrl)("approval.requested reaches the shared inbox through th
     expect(row?.payload).toMatchObject({ run_id: "run-outbox-1", action_id: actionId, tool_name: "passage.ap.invoice.propose_coding", confidence: 0.82, risk_score: 0.18 });
   });
 
+  it("leaves risk_score out when the run gave none", async () => {
+    const [row] = await rows(await open("run-outbox-3", { confidence: 0.5 }));
+    expect(row?.payload).not.toHaveProperty("risk_score");
+  });
+
   it("announces nothing for a request opened without a confidence (older callers)", async () => {
     expect(await rows(await open("run-outbox-2", {}))).toHaveLength(0);
   });

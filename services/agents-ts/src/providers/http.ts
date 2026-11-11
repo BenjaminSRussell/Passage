@@ -3,6 +3,8 @@ import { parseJsonBody, providerRejected, providerUnavailable } from "./wire.js"
 export interface PostOptions {
   fetchFn: typeof fetch;
   timeoutMs: number;
+  /** Aborts the request when the caller is gone (a client that disconnected), alongside the timeout. */
+  signal?: AbortSignal;
 }
 
 /** Connection errors that mean the request never reached the provider, so nothing was billed. */
@@ -47,7 +49,12 @@ export async function postJson(url: string, headers: Record<string, string>, bod
  */
 export async function postStream(url: string, headers: Record<string, string>, body: unknown, opts: PostOptions): Promise<ReadableStream<Uint8Array>> {
   const res = await send(url, headers, body, opts);
-  checkStatus(res.status);
+  try {
+    checkStatus(res.status);
+  } catch (err) {
+    await res.body?.cancel().catch(() => undefined);
+    throw err;
+  }
   if (res.body === null) throw providerRejected("provider answered without a body", true);
   return res.body;
 }
@@ -58,7 +65,7 @@ async function send(url: string, headers: Record<string, string>, body: unknown,
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(opts.timeoutMs),
+      signal: opts.signal === undefined ? AbortSignal.timeout(opts.timeoutMs) : AbortSignal.any([AbortSignal.timeout(opts.timeoutMs), opts.signal]),
     });
   } catch (err) {
     const marks = errorMarks(err);

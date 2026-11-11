@@ -425,9 +425,17 @@ func (u unreachableStore) GetOpeningLoad(context.Context, string) (domain.Openin
 	u.fail()
 	return domain.OpeningLoad{}, nil
 }
-func (u unreachableStore) ClaimOpeningLoad(context.Context, string, string, string, time.Duration) (domain.OpeningLoad, store.OpeningRun, []store.PendingOpening, error) {
+func (u unreachableStore) ClaimOpeningLoad(context.Context, string, string, string, time.Duration) (domain.OpeningLoad, store.OpeningRun, []store.PlannedOpening, []store.PendingOpening, error) {
 	u.fail()
-	return domain.OpeningLoad{}, store.OpeningRun{}, nil, nil
+	return domain.OpeningLoad{}, store.OpeningRun{}, nil, nil, nil
+}
+func (u unreachableStore) PlanOpeningBatch(context.Context, string, string, time.Duration, store.PlannedOpening) error {
+	u.fail()
+	return nil
+}
+func (u unreachableStore) DropOpeningPlan(context.Context, string, string) error {
+	u.fail()
+	return nil
 }
 func (u unreachableStore) RecordOpeningBatch(context.Context, string, string, time.Duration, store.OpeningBatchSent) error {
 	u.fail()

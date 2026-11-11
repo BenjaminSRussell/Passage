@@ -193,3 +193,40 @@ func TestOpeningLoad_RefusalsAreExplained(t *testing.T) {
 		t.Fatalf("no inventory target: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A timeout after the target stored the batch, then a mapping change, then a rerun: the first batch is sent again unchanged and
+// answered as a replay, and the rest forms new batches; nothing is opened twice.
+func TestOpeningLoad_AnAmbiguousOutcomeThenAMappingChangeNeverDoubleLoads(t *testing.T) {
+	e := newOpenEnv(t, 1)
+	run := e.startPack(t, onhandPath, onhandBody("USMF", "", cleanOnhand...))
+	e.inv.LoseNext(1)
+	if got := e.openingLoad(t, run.RunID, stockLoadBody(""), http.StatusOK); got.Status != "PARTIAL" || got.Pending != 3 {
+		t.Fatalf("lost response: %+v", got)
+	}
+	// PUMP-1 now maps to another product, which would change the rows (and the batch key) if the batch were formed again.
+	body := fmt.Sprintf(`{"legalEntityId":%q,"postingDate":"2026-12-31","products":{"BOLT-10":%q,"PUMP-1":%q}}`, leA, prodBolt, "12121212-1212-4212-8212-121212121212")
+	got := e.openingLoad(t, run.RunID, body, http.StatusOK)
+	if got.Status != "RECONCILED" || got.Loaded != 3 || !got.Clean {
+		t.Fatalf("rerun: %+v", got)
+	}
+	if keys := e.inv.Batches(); len(keys) != 1 {
+		t.Fatalf("the target holds %d batches, want the one that was sent: %v", len(keys), keys)
+	}
+}
+
+func TestOpeningLoad_TreasuryAmbiguousOutcomeThenAMappingChangeRecovers(t *testing.T) {
+	e := newOpenEnv(t, 1)
+	run := e.startPack(t, bankPath, bankBody("1000", "", cleanBank...))
+	a3 := "99999999-9999-4999-8999-999999999993"
+	body := func(sav string) string {
+		return fmt.Sprintf(`{"legalEntityId":%q,"asOf":"2026-12-31","bankAccounts":{"OPER-USD":%q,"PAY-EUR":%q,"SAV-USD":%q}}`, leA, acctUSD, acctEUR, sav)
+	}
+	e.trs.LoseNext(1)
+	if got := e.openingLoad(t, run.RunID, body(a3), http.StatusOK); got.Status != "PARTIAL" {
+		t.Fatalf("lost response: %+v", got)
+	}
+	got := e.openingLoad(t, run.RunID, body("99999999-9999-4999-8999-999999999994"), http.StatusOK)
+	if got.Status != "RECONCILED" || got.Loaded != 3 || !got.Clean || len(e.trs.Batches()) != 1 {
+		t.Fatalf("rerun: %+v batches %v", got, e.trs.Batches())
+	}
+}

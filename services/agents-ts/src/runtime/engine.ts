@@ -50,12 +50,15 @@ export interface ModelRequest {
   allowedTools: readonly string[];
   /** Hard ceiling on generated tokens, so one call cannot spend past the run's hold. */
   maxOutputTokens?: number;
+  /** Aborts the call when the caller is gone; a provider that streams passes it to the request. */
+  signal?: AbortSignal;
 }
 
 export interface ModelProvider {
   complete(req: ModelRequest): Promise<ModelResponse>;
   /**
-   * Same answer as `complete`, but `onText` gets the answer text as the model writes it (FR-47.3: first-token
+   * Same answer as `complete`, but `onText` gets the answer text as the model writes it, only for a turn that proposes no tool (the
+   * text of a turn that calls a tool is never passed on: it is not the answer) (FR-47.3: first-token
    * latency is the model's, not the whole answer's). The text is pseudonymized like every other text at this port.
    * Optional: a provider without it is called with `complete` and the caller shows the answer when it is whole.
    */

@@ -52,4 +52,20 @@ func TestOpeningBalances_BatchIsAllOrNothingAndReplays(t *testing.T) {
 	if list, _ := s.ListOpeningBatches(ctx, ids.New(), "", 10); len(list) != 0 {
 		t.Fatalf("another entity sees %+v", list)
 	}
+	// The store alone (no API check in front): an account twice in one batch, and a concurrent batch, are TRS-0604, never a raw 23505.
+	twice := OpeningImport{LegalEntityID: le, BatchKey: "b5", AsOf: "2026-12-31", Items: []OpeningItem{
+		{Reference: "T-1", BankAccountID: eur.ID, Currency: "EUR", BalanceMinor: 1}}}
+	if _, _, err := s.ImportOpeningBalances(ctx, twice); err == nil || problemCode(t, err) != CodeOpeningAccountHeld {
+		t.Fatalf("held account: %v", err)
+	}
+	dup := OpeningImport{LegalEntityID: le, BatchKey: "b6", AsOf: "2026-12-31", Items: []OpeningItem{
+		{Reference: "D-1", BankAccountID: ids.New(), Currency: "EUR", BalanceMinor: 1}}}
+	acct3, err := s.CreateBankAccount(ctx, NewBankAccount{LegalEntityID: le, AccountCode: "OPS-GBP", IBAN: "GB29NWBK60161331926819", Currency: "GBP", MainAccountID: ids.New()}, ids.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dup.Items = []OpeningItem{{Reference: "D-1", BankAccountID: acct3.ID, Currency: "GBP", BalanceMinor: 1}, {Reference: "D-2", BankAccountID: acct3.ID, Currency: "GBP", BalanceMinor: 2}}
+	if _, _, err := s.ImportOpeningBalances(ctx, dup); problemCode(t, err) != CodeOpeningAccountHeld {
+		t.Fatalf("an account twice in one batch: %v", err)
+	}
 }

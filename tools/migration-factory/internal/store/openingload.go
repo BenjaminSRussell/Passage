@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -70,10 +71,11 @@ func stagedQuery(pack domain.Pack) (string, error) {
 // ClaimOpeningLoad starts a pass over the run's staged balances: it creates or reopens the run's opening_load, refuses it
 // while another pass holds the lease or a run of another legal entity owns it, and returns the staged balances of the
 // run that the target does not hold yet, in legacy id order.
-func (s *Postgres) ClaimOpeningLoad(ctx context.Context, runID, legalEntityID, startedBy string, lease time.Duration) (domain.OpeningLoad, OpeningRun, []PendingOpening, error) {
+func (s *Postgres) ClaimOpeningLoad(ctx context.Context, runID, legalEntityID, startedBy string, lease time.Duration) (domain.OpeningLoad, OpeningRun, []PlannedOpening, []PendingOpening, error) {
 	var load domain.OpeningLoad
 	var run OpeningRun
 	var pending []PendingOpening
+	var planned []PlannedOpening
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var pack, status string
 		err := tx.QueryRow(ctx, `select pack, source_system, source_company, status from pack_run where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1 for update`, runID).
@@ -132,7 +134,9 @@ func (s *Postgres) ClaimOpeningLoad(ctx context.Context, runID, legalEntityID, s
 			return ErrLoadBusy
 		}
 		rows, err := tx.Query(ctx, query+` where o.tenant_id = current_setting('passage.tenant_id', true)::uuid and o.run_id = $1
-			and not exists (select 1 from opening_load_row l where l.tenant_id = o.tenant_id and l.balance_id = o.balance_id and l.status = 'LOADED') order by o.legacy_id`, runID)
+			and not exists (select 1 from opening_load_row l where l.tenant_id = o.tenant_id and l.balance_id = o.balance_id and l.status = 'LOADED')
+			and not exists (select 1 from opening_load_batch_row br join opening_load_batch b on b.tenant_id = br.tenant_id and b.run_id = br.run_id and b.batch_key = br.batch_key
+				where br.tenant_id = o.tenant_id and br.balance_id = o.balance_id and b.status = 'PLANNED') order by o.legacy_id`, runID)
 		if err != nil {
 			return err
 		}
@@ -148,6 +152,10 @@ func (s *Postgres) ClaimOpeningLoad(ctx context.Context, runID, legalEntityID, s
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		planned, err = readPlanned(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `update opening_load set status = 'LOADING', staged = $2, lease_until = now() + $3::int * interval '1 second', started_by = $4, started_at = now(), finished_at = null,
 				attempts = attempts + 1, last_error = '', version = version + 1
 			where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1`, runID, staged, int32(lease.Seconds()), startedBy); err != nil {
@@ -156,7 +164,88 @@ func (s *Postgres) ClaimOpeningLoad(ctx context.Context, runID, legalEntityID, s
 		load, err = scanOpeningLoad(tx.QueryRow(ctx, `select `+openingColumns+` from opening_load where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1`, runID))
 		return err
 	})
-	return load, run, pending, err
+	return load, run, planned, pending, err
+}
+
+// PlannedOpening is a batch that was planned and not yet known to be taken: it is sent again exactly as it was.
+type PlannedOpening struct {
+	Key         string
+	Currency    string
+	PostingDate string
+	Payload     json.RawMessage
+	BalanceIDs  []string
+}
+
+func readPlanned(ctx context.Context, tx pgx.Tx, runID string) ([]PlannedOpening, error) {
+	rows, err := tx.Query(ctx, `select batch_key, currency, posting_date, payload from opening_load_batch
+		where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1 and status = 'PLANNED' order by batch_key`, runID)
+	if err != nil {
+		return nil, err
+	}
+	var out []PlannedOpening
+	for rows.Next() {
+		var p PlannedOpening
+		if err := rows.Scan(&p.Key, &p.Currency, &p.PostingDate, &p.Payload); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		ids, err := tx.Query(ctx, `select balance_id::text from opening_load_batch_row where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1 and batch_key = $2 order by seq`, runID, out[i].Key)
+		if err != nil {
+			return nil, err
+		}
+		for ids.Next() {
+			var id string
+			if err := ids.Scan(&id); err != nil {
+				ids.Close()
+				return nil, err
+			}
+			out[i].BalanceIDs = append(out[i].BalanceIDs, id)
+		}
+		ids.Close()
+		if err := ids.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// PlanOpeningBatch stores a batch as PLANNED before it is sent, with its items exactly as sent. Planning the same key again is a no-op.
+func (s *Postgres) PlanOpeningBatch(ctx context.Context, runID, legalEntityID string, lease time.Duration, p PlannedOpening) error {
+	return s.tx(ctx, func(tx pgx.Tx) error {
+		if err := extendOpeningLease(ctx, tx, runID, lease); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `insert into opening_load_batch (tenant_id, run_id, batch_key, legal_entity_id, item_count, status, currency, posting_date, payload)
+			values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, 'PLANNED', $5, $6, $7) on conflict do nothing`,
+			runID, p.Key, legalEntityID, len(p.BalanceIDs), p.Currency, p.PostingDate, []byte(p.Payload))
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
+		}
+		for i, id := range p.BalanceIDs {
+			if _, err := tx.Exec(ctx, `insert into opening_load_batch_row (tenant_id, run_id, batch_key, seq, balance_id) values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4)`, runID, p.Key, i+1, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// DropOpeningPlan marks a planned batch DROPPED: the target refused it whole and stored nothing, so its rows are formed into new batches.
+func (s *Postgres) DropOpeningPlan(ctx context.Context, runID, key string) error {
+	return s.tx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update opening_load_batch set status = 'DROPPED' where tenant_id = current_setting('passage.tenant_id', true)::uuid and run_id = $1 and batch_key = $2 and status = 'PLANNED'`, runID, key)
+		return err
+	})
 }
 
 func scanPendingOpening(rows pgx.Rows, pack domain.Pack) (PendingOpening, error) {
@@ -212,8 +301,9 @@ func (s *Postgres) RecordOpeningBatch(ctx context.Context, runID, legalEntityID 
 		if err := extendOpeningLease(ctx, tx, runID, lease); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into opening_load_batch (tenant_id, run_id, batch_key, legal_entity_id, item_count, replayed)
-			values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5) on conflict do nothing`, runID, b.BatchKey, legalEntityID, len(b.BalanceIDs), b.Replayed); err != nil {
+		if _, err := tx.Exec(ctx, `insert into opening_load_batch (tenant_id, run_id, batch_key, legal_entity_id, item_count, replayed, status)
+			values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, 'ACCEPTED')
+			on conflict (tenant_id, run_id, batch_key) do update set status = 'ACCEPTED', replayed = excluded.replayed`, runID, b.BatchKey, legalEntityID, len(b.BalanceIDs), b.Replayed); err != nil {
 			return err
 		}
 		for _, id := range b.BalanceIDs {

@@ -2714,6 +2714,10 @@ test_agent_run_duties_open_only_their_routes if {
 }
 
 test_opening_stock_and_bank_import_duties_are_service_only_and_cover_only_their_route if {
+	data.duties["inventory.import.write"].service_only
+	data.duties["inventory.import.read"].service_only
+	data.duties["treasury.import.write"].service_only
+	data.duties["treasury.import.read"].service_only
 	allowed("inventory.import.write", "POST", "/v1/inventory/opening-batches")
 	not allowed("inventory.import.write", "GET", "/v1/inventory/opening-batches")
 	allowed("inventory.import.read", "GET", "/v1/inventory/opening-batches")
