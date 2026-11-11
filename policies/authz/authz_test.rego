@@ -2662,6 +2662,24 @@ test_print_queue_management_is_admin_only if {
 	not allowed("print.job.submit", "POST", "/print/v1/jobs:sweep")
 }
 
+test_print_docgen_reads_and_admin_writes if {
+	allowed("print.job.submit", "GET", "/print/v1/document-templates")
+	allowed("print.job.submit", "GET", "/print/v1/document-templates/INV-STD")
+	allowed("print.job.submit", "GET", "/print/v1/text-blocks")
+	allowed("print.job.submit", "GET", "/print/v1/output-rules")
+	allowed("print.job.submit", "GET", "/print/v1/output-plan")
+	allowed("print.admin", "PUT", "/print/v1/document-templates/INV-STD")
+	allowed("print.admin", "PUT", "/print/v1/text-blocks/PAY-TERMS/de")
+	allowed("print.admin", "POST", "/print/v1/output-rules")
+	allowed("print.admin", "DELETE", "/print/v1/output-rules/r-1")
+	not allowed("print.job.submit", "PUT", "/print/v1/document-templates/INV-STD")
+	not allowed("print.job.submit", "PUT", "/print/v1/text-blocks/PAY-TERMS/de")
+	not allowed("print.job.submit", "POST", "/print/v1/output-rules")
+	not allowed("print.job.submit", "DELETE", "/print/v1/output-rules/r-1")
+	not allowed("print.document.render", "GET", "/print/v1/output-plan")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}
+
 test_receiving_document_flow_is_read_only_and_separate if {
 	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
