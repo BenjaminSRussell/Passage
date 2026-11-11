@@ -31,6 +31,8 @@ type fakeStore struct {
 	lockbox            store.LockboxImport
 	adviceOptions      store.AdviceOptions
 	banks              []store.BankAccount
+	fx                 store.FXSetting
+	reversed           string
 	backfill           store.BackfillRequest
 	deletedBank        string
 	seenFiles          map[string]bool

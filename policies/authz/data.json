@@ -1016,6 +1016,8 @@
     ]},
     "receivables.aging.run": {"permissions": [{"resource": "/v1/receivables/aging-snapshots", "methods": ["POST"]}]},
     "receivables.bankaccount.manage": {"permissions": [{"resource": "/v1/receivables/bank-accounts", "methods": ["PUT", "DELETE"]}]},
+    "receivables.fxsetting.manage": {"permissions": [{"resource": "/v1/receivables/fx-settings", "methods": ["PUT"]}]},
+    "receivables.payment.reverse": {"permissions": [{"resource": "/v1/receivables/payments/*:reverse", "methods": ["POST"]}]},
     "receivables.payment-file.import": {"permissions": [
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["POST"]},
       {"resource": "/v1/receivables/lockbox/imports", "methods": ["POST"]}
@@ -1048,6 +1050,7 @@
       {"resource": "/v1/receivables/balance-confirmations/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/balance-confirmations/*/differences", "methods": ["GET"]},
       {"resource": "/v1/receivables/bank-accounts", "methods": ["GET"]},
+      {"resource": "/v1/receivables/fx-settings", "methods": ["GET"]},
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["GET"]},
       {"resource": "/v1/receivables/cases", "methods": ["GET"]},
       {"resource": "/v1/receivables/cases/*", "methods": ["GET"]},
@@ -3295,6 +3298,7 @@
     "revrec.maintain": {"permissions": [
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
       {"resource": "/v1/revrec/contracts/*:allocate", "methods": ["POST"]},
+      {"resource": "/v1/revrec/contracts/*:modify", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]},
       {"resource": "/v1/revrec/recognition-templates/*", "methods": ["PUT"]}
     ]},
@@ -3921,7 +3925,8 @@
     "receivables": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
       "tax": ["tax.transaction.record"],
-      "billing": ["billing.invoice.read", "billing.credit-reservation.write"]
+      "billing": ["billing.invoice.read", "billing.credit-reservation.write"],
+      "fx": ["fx.rate.lookup"]
     },
     "ledger": {
       "close": ["period.check"],
@@ -3936,7 +3941,7 @@
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
       "fx": ["fx.rate.lookup"],
-      "tax": ["tax.withholding.calculate"],
+      "tax": ["tax.withholding.calculate", "tax.withholding.record"],
       "party": ["party.vendor-bank.reveal", "party.vendor.lookup"]
     },
     "workflow-ts": {

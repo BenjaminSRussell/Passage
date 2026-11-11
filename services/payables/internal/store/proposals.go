@@ -237,11 +237,11 @@ func insertGroups(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, i
 	for _, g := range in.Groups {
 		for _, l := range g.Lines {
 			lines++
-			batch.Queue(`insert into ap_payment_proposal_line (tenant_id, open_item_id, proposal_id, group_id, legal_entity_id, item_version, open_amount, discount_amount, pay_amount, rate, valued_amount, withheld_amount, withholding_code)
-				select i.tenant_id, i.id, $2::uuid, $3::uuid, i.legal_entity_id, i.version, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, nullif($11, '') from ap_open_item i
+			batch.Queue(`insert into ap_payment_proposal_line (tenant_id, open_item_id, proposal_id, group_id, legal_entity_id, item_version, open_amount, discount_amount, pay_amount, rate, valued_amount, withheld_amount, withholding_code, withheld_base)
+				select i.tenant_id, i.id, $2::uuid, $3::uuid, i.legal_entity_id, i.version, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, nullif($11, ''), nullif($12::numeric, 0) from ap_open_item i
 				where i.id = $1::uuid and i.version = $4 and i.open_amount = $5::numeric and not i.payment_hold
 				and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id and b.legal_entity_id = i.legal_entity_id)`,
-				l.OpenItemID, proposalID, g.ID, l.OpenItemVersion, l.OpenAmount.String(), l.Discount.String(), l.Pay.String(), l.Rate.String(), l.Valued.String(), l.Withheld.String(), l.WithholdingCode)
+				l.OpenItemID, proposalID, g.ID, l.OpenItemVersion, l.OpenAmount.String(), l.Discount.String(), l.Pay.String(), l.Rate.String(), l.Valued.String(), l.Withheld.String(), l.WithholdingCode, l.WithheldBase.String())
 		}
 	}
 	results := tx.SendBatch(ctx, batch)
@@ -326,7 +326,7 @@ func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.Pro
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	lines, err := tx.Query(ctx, `select l.group_id::text, l.open_item_id::text, l.open_amount::text, l.discount_amount::text, l.pay_amount::text, l.rate::text, l.valued_amount::text, l.withheld_amount::text, coalesce(l.withholding_code, '')
+	lines, err := tx.Query(ctx, `select l.group_id::text, l.open_item_id::text, l.open_amount::text, l.discount_amount::text, l.pay_amount::text, l.rate::text, l.valued_amount::text, l.withheld_amount::text, coalesce(l.withholding_code, ''), coalesce(l.withheld_base, 0)::text
 		from ap_payment_proposal_line l join ap_open_item i on i.tenant_id = l.tenant_id and i.id = l.open_item_id
 		where l.proposal_id = $1::uuid order by i.due_date, l.open_item_id`, proposalID)
 	if err != nil {
@@ -334,12 +334,12 @@ func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.Pro
 	}
 	defer lines.Close()
 	for lines.Next() {
-		var groupID, open, discount, pay, rate, valued, withheld string
+		var groupID, open, discount, pay, rate, valued, withheld, withheldBase string
 		var l domain.ProposalLine
-		if err := lines.Scan(&groupID, &l.OpenItemID, &open, &discount, &pay, &rate, &valued, &withheld, &l.WithholdingCode); err != nil {
+		if err := lines.Scan(&groupID, &l.OpenItemID, &open, &discount, &pay, &rate, &valued, &withheld, &l.WithholdingCode, &withheldBase); err != nil {
 			return nil, err
 		}
-		if err := parseDecimals([]*decimal.Decimal{&l.OpenAmount, &l.Discount, &l.Pay, &l.Rate, &l.Valued, &l.Withheld}, open, discount, pay, rate, valued, withheld); err != nil {
+		if err := parseDecimals([]*decimal.Decimal{&l.OpenAmount, &l.Discount, &l.Pay, &l.Rate, &l.Valued, &l.Withheld, &l.WithheldBase}, open, discount, pay, rate, valued, withheld, withheldBase); err != nil {
 			return nil, err
 		}
 		g := &groups[index[groupID]]

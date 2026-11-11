@@ -519,6 +519,8 @@ components:
               amount: { type: string }
               cash_discount: { type: string }
               write_off: { type: string }
+              item_currency: { type: string, pattern: "^[A-Z]{3}$", description: "Set for a cross-currency settlement: the open item's currency. amount is then the cash in the payment currency." }
+              item_amount: { type: string, description: "Set for a cross-currency settlement: what the settlement took off the open item, in item_currency." }
         residual: { type: string, description: "amount placed on account" }
         status: { type: string, enum: [APPLIED, ON_ACCOUNT] }
     DeductionOpenedData:

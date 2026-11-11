@@ -16,7 +16,12 @@ import (
 )
 
 type WithholdingCalculator interface {
-	Withholding(ctx context.Context, legalEntityID string, in tax.Request) (decimal.Decimal, error)
+	Calculate(ctx context.Context, legalEntityID string, in tax.Request) (tax.Result, error)
+}
+
+// WithholdingRecorder tells the tax service which withholding a payment run made (#13); *tax.Client implements it.
+type WithholdingRecorder interface {
+	RecordWithholding(ctx context.Context, legalEntityID string, entries []tax.Entry) error
 }
 
 type PaidSource interface {
@@ -29,6 +34,12 @@ type withholdingDeps struct {
 	profiles PostingProfiles
 	faults   atomic.Int64
 	rejected atomic.Int64
+}
+
+// WithWithholdingRecorder sets where a payment run records the tax it withheld; without it nothing is recorded.
+func (a *API) WithWithholdingRecorder(rec WithholdingRecorder) *API {
+	a.withholdingRecorder = rec
+	return a
 }
 
 func (a *API) WithWithholding(c WithholdingCalculator, paid PaidSource, profiles PostingProfiles) *API {
@@ -78,7 +89,7 @@ func (a *API) applyWithholding(w http.ResponseWriter, r *http.Request, le string
 		g.PaidBase = &tracked
 		for li := range g.Lines {
 			pay := g.Lines[li].Pay
-			amount, err := a.withholding.calc.Withholding(ctx, le, tax.Request{
+			res, err := a.withholding.calc.Calculate(ctx, le, tax.Request{
 				Currency: g.Currency, PaymentDate: runDate.Format(time.DateOnly), Code: defined[code], Gross: pay, PaidToDate: base,
 			})
 			if err != nil {
@@ -86,8 +97,9 @@ func (a *API) applyWithholding(w http.ResponseWriter, r *http.Request, le string
 				return false
 			}
 			base = base.Add(pay)
-			if amount.IsPositive() {
-				g.Withhold(li, code, amount, minor)
+			if res.Withheld.IsPositive() {
+				g.Withhold(li, code, res.Withheld, minor)
+				g.Lines[li].WithheldBase = res.TaxableBase
 			}
 		}
 		paidSoFar[key] = base
