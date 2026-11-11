@@ -9,6 +9,13 @@ Example pair: eu-west (PRIMARY) to eu-central (PASSIVE), `deploy/multi-region/va
    is rejected (OPS-1701) unless `--accept-data-loss` is given with a second approver.
 3. Target is in the same residency as the source (PRD 9.50.20: failover never crosses a residency boundary).
 
+## Running it
+`passage-ops failover --to eu-central --dry-run` prints the plan and what each step would do without changing anything. The real
+command records the failover (OPS-1701/1702 apply; a failover that accepts data loss waits for `passage-ops failover approve --request <id>`
+from a second operator), runs the steps below and reports each one; if it stops, fix the cause and `passage-ops failover resume --event <id>`.
+`GET /v1/ops/failovers/<id>/scorecard` gives the RTO and RPO. Without the `ops.failover.execute` duty, `passage-ops break-glass open` gives a
+logged, time-boxed window that another operator reviews. See `services/ops/README.md`.
+
 ## Steps (`passage-ops failover --to eu-central`)
 1. **Fence the old primary.** Record the fence time and the target's lag (this is the RPO).
    - Revoke writes: `ALTER ROLE passage_app NOLOGIN` and terminate its sessions, if the old region answers.

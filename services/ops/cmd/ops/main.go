@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -62,6 +64,25 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("FAILOVER_MAX_LAG_S must be a positive number of seconds, got %q", v)
 		}
 		cfg.MaxLagSeconds = n
+	}
+	for _, t := range []struct {
+		env string
+		dst *int
+	}{{"RTO_TARGET_MIN", &cfg.RTOTargetMinutes}, {"RPO_TARGET_S", &cfg.RPOTargetSeconds}} {
+		if v := getenv(t.env); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return fmt.Errorf("%s must be a positive number, got %q", t.env, v)
+			}
+			*t.dst = n
+		}
+	}
+	if v := getenv("OPS_LICENSE_PUBLIC_KEY"); v != "" {
+		key, err := base64.StdEncoding.DecodeString(v)
+		if err != nil || len(key) != ed25519.PublicKeySize {
+			return errors.New("OPS_LICENSE_PUBLIC_KEY must be the base64 of a 32-byte Ed25519 public key")
+		}
+		cfg.LicensePublicKey = key
 	}
 	seed, err := domain.ParseRegions(getenv("OPS_REGIONS"))
 	if err != nil {

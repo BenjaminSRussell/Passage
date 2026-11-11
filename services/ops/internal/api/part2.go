@@ -57,6 +57,7 @@ func (a *API) writeGauges(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, "# HELP passage_ops_failover_in_progress Failovers with steps not yet DONE.\n# TYPE passage_ops_failover_in_progress gauge\npassage_ops_failover_in_progress %d\n", g.FailoversInProgress)
 	_, _ = fmt.Fprintf(w, "# HELP ops_break_glass_active Break-glass windows open now.\n# TYPE ops_break_glass_active gauge\nops_break_glass_active %d\n", g.BreakGlassActive)
 	_, _ = fmt.Fprintf(w, "# HELP ops_break_glass_review_overdue Break-glass windows past their review date without a review.\n# TYPE ops_break_glass_review_overdue gauge\nops_break_glass_review_overdue %d\n", g.BreakGlassOverdue)
+	a.writeLicenseMetrics(w, r)
 	_, _ = fmt.Fprintf(w, "# HELP ops_break_glass_opened_total Break-glass windows opened.\n# TYPE ops_break_glass_opened_total counter\nops_break_glass_opened_total %d\n", a.breakGlassOpened.Load())
 	_, _ = fmt.Fprintf(w, "# HELP ops_break_glass_uses_total Requests authorised by a break-glass window.\n# TYPE ops_break_glass_uses_total counter\nops_break_glass_uses_total %d\n", a.breakGlassUses.Load())
 }

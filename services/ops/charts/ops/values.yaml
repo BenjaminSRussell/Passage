@@ -5,6 +5,11 @@ migrateOnStart: false
 region: { name: "", registered: "" }
 # PRD 9.50.5: a failover to a passive region lagging more than this needs acceptDataLoss and a second approver.
 failoverMaxLagSeconds: 300
+# Game-day targets (PRD 9.50.5): the scorecard of a failover is measured against them.
+rtoTargetMinutes: 60
+rpoTargetSeconds: 300
+# Base64 Ed25519 public key of Passage commercial operations; tenant licences are installed only when signed with its key (LIC-1804).
+licensePublicKey: ""
 # The platform operator's tenant (identity's IDENTITY_OPERATOR_TENANT_ID). The ops routes serve this tenant only; the
 # service refuses to start without it.
 operatorTenantId: ""

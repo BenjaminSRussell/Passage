@@ -28,6 +28,8 @@ var allowlist = map[string]string{
 	"ops.ops_break_glass:" + problemNoTenantID:      "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
 	"ops.ops_break_glass_use:" + problemNotForced:   "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
 	"ops.ops_break_glass_use:" + problemNoTenantID:  "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_tenant_license:" + problemNotForced: "permanent: platform control-plane state, not tenant data; keyed by licensee_id, reached only by the ops.* operator duties (0005_license, #50)",
+	"ops.ops_tenant_license:" + problemNoTenantID: "permanent: platform control-plane state, not tenant data; keyed by licensee_id, reached only by the ops.* operator duties (0005_license, #50)",
 	// A consolidation group spans legal entities by design: the group's units, ownership chain and consolidated trial balance are read
 	// whole by the consolidation duties, and hiding a unit outside the caller's scope would give a wrong consolidated result, not a smaller one.
 	"consolidation.consolidation_unit:" + problemNoEntityPol: "permanent: group-level master data; a consolidation group spans legal entities and is read whole by the consolidation duties (0003_groups, #40)",

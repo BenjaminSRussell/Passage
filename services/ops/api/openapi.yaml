@@ -231,6 +231,57 @@ paths:
           description: The reviewed window.
           content: { application/json: { schema: { $ref: '#/components/schemas/BreakGlass' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failovers/{eventId}/scorecard:
+    get:
+      operationId: getFailoverScorecard
+      summary: Measure a failover against the RTO and RPO targets
+      description: >
+        RTO runs from the start of the fence step to the end of the DNS flip; RPO is the replication lag at the fence (AC-50.3, the
+        same measures as deploy/multi-region/gameday/score.py). The targets are RTO_TARGET_MIN (60) and RPO_TARGET_S (300). passed needs
+        every step DONE, both targets met, the ledger hash chain verified and no data loss accepted.
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: eventId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The scorecard.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Scorecard' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/tenants/{id}/license:
+    put:
+      operationId: installTenantLicense
+      summary: Install a signed tenant licence
+      description: >
+        payload is the base64 of the licence JSON exactly as signed offline by Passage commercial operations; signature is the base64
+        Ed25519 signature over those bytes (LIC-1804 when it does not verify, or no key is configured). If-Match carries the installed version,
+        0 when none is installed (412 LIC-1806 when it changed). The licence must name this tenant (LIC-1805).
+      x-passage-duty: ops.license.install
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LicenseInstall' } } }
+      responses:
+        '200':
+          description: The installed licence with its state today. The ETag is the new version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LicenseView' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getTenantLicense
+      summary: Read a tenant licence and its state
+      description: >
+        VALID, GRACE or EXPIRED by the rules of BR-50.8 (grace 30 days by default, 0 to 60). The ops service does not hold the tenant's user counts:
+        activeFull is the caller's count of active full users; without it only the date rules apply. Admin sign-in and data export are never blocked.
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: activeFull, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: The licence, its version, state and catalogue messages.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LicenseView' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /healthz/region:
     get:
       operationId: regionHealth
@@ -399,6 +450,59 @@ components:
         reviewOutcome: { type: string, enum: [APPROVED, FLAGGED] }
         reviewNote: { type: string }
         uses: { type: integer }
+    Scorecard:
+      type: object
+      required: [complete, rtoTargetSeconds, rtoMet, rpoSeconds, rpoTargetSeconds, rpoMet, dataLossAccepted, ledgerHashChainVerified, passed, failures]
+      properties:
+        complete: { type: boolean }
+        rtoSeconds: { type: number }
+        rtoTargetSeconds: { type: integer }
+        rtoMet: { type: boolean }
+        rpoSeconds: { type: integer }
+        rpoTargetSeconds: { type: integer }
+        rpoMet: { type: boolean }
+        dataLossAccepted: { type: boolean }
+        ledgerHashChainVerified: { type: boolean }
+        passed: { type: boolean }
+        failures: { type: array, items: { type: string } }
+    LicenseInstall:
+      type: object
+      additionalProperties: false
+      required: [payload, signature]
+      properties:
+        payload: { type: string, format: byte, description: Base64 of the licence JSON exactly as signed. }
+        signature: { type: string, format: byte, description: Base64 Ed25519 signature over the payload bytes. }
+    LicenseTerms:
+      type: object
+      required: [tenantId, issuedAt, expiresAt, fullUsers, operationalUsers, selfserviceUsers]
+      properties:
+        tenantId: { type: string, format: uuid }
+        issuedAt: { type: string, format: date }
+        expiresAt: { type: string, format: date }
+        fullUsers: { type: integer, minimum: 0 }
+        operationalUsers: { type: integer, minimum: 0 }
+        selfserviceUsers: { type: integer, minimum: 0 }
+        graceDays: { type: integer, minimum: 0, maximum: 60 }
+    LicenseView:
+      type: object
+      required: [license, version, installedBy, installedAt, status, messages]
+      properties:
+        license: { $ref: '#/components/schemas/LicenseTerms' }
+        version: { type: integer }
+        installedBy: { type: string }
+        installedAt: { type: string, format: date-time }
+        status:
+          type: object
+          required: [state, daysToExpiry, loginAllowed, adminLoginAllowed, exportAllowed, banner, codes]
+          properties:
+            state: { type: string, enum: [VALID, GRACE, EXPIRED] }
+            daysToExpiry: { type: integer }
+            loginAllowed: { type: boolean }
+            adminLoginAllowed: { type: boolean }
+            exportAllowed: { type: boolean }
+            banner: { type: boolean }
+            codes: { type: array, items: { type: string } }
+        messages: { type: array, items: { type: string } }
     RegionHealth:
       type: object
       required: [region, role]

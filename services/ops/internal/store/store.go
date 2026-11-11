@@ -78,6 +78,10 @@ type Store interface {
 	ReviewBreakGlass(ctx context.Context, id, reviewer, outcome, note string) (BreakGlass, error)
 	AuthoriseBreakGlass(ctx context.Context, user, method, path string) (bool, error)
 	Gauges(ctx context.Context) (Gauges, error)
+	// Tenant licences (FR-50.12): a verified licence is installed under an If-Match version, read back and listed for metrics.
+	InstallLicense(ctx context.Context, l domain.License, payload, signature []byte, user string, ifMatch int64) (LicenseRecord, error)
+	License(ctx context.Context, tenantID string) (LicenseRecord, error)
+	Licenses(ctx context.Context) ([]LicenseRecord, error)
 }
 
 // Postgres implements Store.
@@ -97,10 +101,12 @@ func Problem(err error) error {
 	}
 	status := http.StatusConflict
 	switch rule.Code {
-	case domain.CodeRegionUnknown, domain.CodeRequestUnknown, domain.CodeBreakGlassUnknown:
+	case domain.CodeRegionUnknown, domain.CodeRequestUnknown, domain.CodeBreakGlassUnknown, CodeLicenseNone:
 		status = http.StatusNotFound
-	case domain.CodeBreakGlassInvalid, domain.CodeBreakGlassReview:
+	case domain.CodeBreakGlassInvalid, domain.CodeBreakGlassReview, domain.CodeLicenseSignature, domain.CodeLicenseInvalid:
 		status = http.StatusUnprocessableEntity
+	case domain.CodeLicenseStale:
+		status = http.StatusPreconditionFailed
 	case domain.CodeLagExceeded, domain.CodeApprovalRequired:
 		status = http.StatusUnprocessableEntity
 	}

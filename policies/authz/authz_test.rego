@@ -40,10 +40,13 @@ ops_operator_routes := [
 	["ops.breakglass.request", "POST", "/v1/ops/break-glass"],
 	["ops.breakglass.request", "POST", "/v1/ops/break-glass/g1:revoke"],
 	["ops.breakglass.review", "POST", "/v1/ops/break-glass/g1:review"],
+	["ops.region.view", "GET", "/v1/ops/failovers/evt-1/scorecard"],
+	["ops.region.view", "GET", "/v1/ops/tenants/t1/license"],
+	["ops.license.install", "PUT", "/v1/ops/tenants/t1/license"],
 ]
 
 test_operator_only_duties_are_the_ops_duties if {
-	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute", "ops.breakglass.request", "ops.breakglass.review"}
+	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute", "ops.breakglass.request", "ops.breakglass.review", "ops.license.install"}
 }
 
 test_operator_only_duties_grant_in_the_operator_tenant if {
@@ -174,6 +177,9 @@ segregation_denials := [
 	["ops.failover.execute", "POST", "/v1/ops/break-glass"],
 	["ops.breakglass.request", "POST", "/v1/ops/break-glass/g1:review"],
 	["ops.breakglass.review", "POST", "/v1/ops/break-glass"],
+	["ops.region.view", "PUT", "/v1/ops/tenants/t1/license"],
+	["ops.license.install", "GET", "/v1/ops/tenants/t1/license"],
+	["ops.failover.execute", "PUT", "/v1/ops/tenants/t1/license"],
 	["ops.breakglass.review", "POST", "/v1/ops/failover"],
 	["ops.breakglass.request", "POST", "/v1/ops/failover"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],

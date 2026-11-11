@@ -211,3 +211,45 @@ func TestValidateReview(t *testing.T) {
 		}
 	}
 }
+
+func TestScoreFailover(t *testing.T) {
+	plan, err := PlanFailover(pair(2), FailoverRequest{To: "eu-west", MaxLagSeconds: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC)
+	steps := func(flipEnd time.Duration, status string) []StepTiming {
+		var out []StepTiming
+		for i, s := range plan.Steps {
+			end := t0.Add(time.Duration(i+1) * time.Minute)
+			if s.Action == "flip-dns" {
+				end = t0.Add(flipEnd)
+			}
+			out = append(out, StepTiming{Action: s.Action, Status: status, StartedAt: t0.Add(time.Duration(i) * time.Minute), FinishedAt: end})
+		}
+		return out
+	}
+	sc := ScoreFailover(plan, steps(20*time.Minute, "DONE"), 60, 300)
+	if !sc.Passed || sc.RTOSeconds == nil || *sc.RTOSeconds != 1200 || !sc.RTOMet || !sc.RPOMet || !sc.ChainVerified || !sc.Complete {
+		t.Fatalf("pass: %+v", sc)
+	}
+	if sc := ScoreFailover(plan, steps(90*time.Minute, "DONE"), 60, 300); sc.Passed || sc.RTOMet {
+		t.Fatalf("RTO over the target must fail: %+v", sc)
+	}
+	partial := steps(20*time.Minute, "DONE")[:4]
+	if sc := ScoreFailover(plan, partial, 60, 300); sc.Passed || sc.Complete || sc.RTOSeconds != nil || sc.ChainVerified {
+		t.Fatalf("an unfinished failover cannot pass: %+v", sc)
+	}
+	failed := steps(20*time.Minute, "DONE")
+	failed[5].Status = "FAILED"
+	if sc := ScoreFailover(plan, failed, 60, 300); sc.Passed || sc.ChainVerified {
+		t.Fatalf("a failed chain check cannot pass: %+v", sc)
+	}
+	lossy, err := PlanFailover(pair(900), FailoverRequest{To: "eu-west", AcceptDataLoss: true, Caller: "a", Approver: "b", MaxLagSeconds: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc := ScoreFailover(lossy, nil, 0, 0); sc.Passed || sc.RPOMet || !sc.DataLossAccepted || sc.RPOTargetSeconds != 300 || sc.RTOTargetSeconds != 3600 {
+		t.Fatalf("defaults and data loss: %+v", sc)
+	}
+}

@@ -50,6 +50,14 @@ spec:
               value: {{ .Values.failoverMaxLagSeconds | quote }}
             - name: OPS_OPERATOR_TENANT_ID
               value: {{ .Values.operatorTenantId | quote }}
+            - name: RTO_TARGET_MIN
+              value: {{ .Values.rtoTargetMinutes | quote }}
+            - name: RPO_TARGET_S
+              value: {{ .Values.rpoTargetSeconds | quote }}
+{{- if .Values.licensePublicKey }}
+            - name: OPS_LICENSE_PUBLIC_KEY
+              value: {{ .Values.licensePublicKey | quote }}
+{{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

@@ -58,6 +58,30 @@ func (e *env) do(method, path, user, duties, key, body string) *httptest.Respons
 	return rec
 }
 
+type httptestRecorder = httptest.ResponseRecorder
+
+// doWith is do with extra request headers.
+func (e *env) doWith(method, path, user, duties string, headers map[string]string, body string) *httptestRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("X-Passage-Tenant", e.tenant)
+	if user != "" {
+		req.Header.Set("X-Passage-User", user)
+	}
+	if duties != "" {
+		req.Header.Set("X-Passage-Duties", duties)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	e.router.ServeHTTP(rec, req)
+	return rec
+}
+
+func (e *env) get(path, user, duties string) *httptestRecorder {
+	return e.doWith("GET", path, user, duties, nil, "")
+}
+
 func code(t *testing.T, rec *httptest.ResponseRecorder) string {
 	t.Helper()
 	var p httpx.Problem

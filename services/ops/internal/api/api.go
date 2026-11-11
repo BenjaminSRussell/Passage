@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -33,8 +34,10 @@ const (
 	DutyReport   = "ops.region.report"
 	// DutyBreakGlassRequest opens a break-glass window for the caller; DutyBreakGlassReview reviews one after it ends.
 	DutyBreakGlassRequest = "ops.breakglass.request"
-	DutyBreakGlassReview  = "ops.breakglass.review"
-	maxLagS               = 1 << 30
+	// DutyLicenseInstall installs a signed tenant licence.
+	DutyLicenseInstall   = "ops.license.install"
+	DutyBreakGlassReview = "ops.breakglass.review"
+	maxLagS              = 1 << 30
 )
 
 // Config is the process's settings.
@@ -46,6 +49,13 @@ type Config struct {
 	// OperatorTenantID is the platform operator's tenant (OPS_OPERATOR_TENANT_ID). The ops routes act on platform-wide
 	// state, so they serve only principals of this tenant, whatever duties another tenant's role holds. Empty serves no one.
 	OperatorTenantID string
+	// LicensePublicKey verifies licence signatures (OPS_LICENSE_PUBLIC_KEY, base64 Ed25519); empty refuses every install (LIC-1804).
+	LicensePublicKey ed25519.PublicKey
+	// RTOTargetMinutes and RPOTargetSeconds are the game-day targets (RTO_TARGET_MIN 60, RPO_TARGET_S 300).
+	RTOTargetMinutes int
+	RPOTargetSeconds int
+	// Now is the clock for licence evaluation; nil means time.Now.
+	Now func() time.Time
 }
 
 // API is the ops HTTP surface.
@@ -84,6 +94,9 @@ func (a *API) Register(r chi.Router) {
 		g.With(a.requireFailover).Post("/v1/ops/failover-requests/{id}:approve", a.approve)
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/failovers/{eventId}", a.failoverDetail)
 		g.With(a.requireFailover).Put("/v1/ops/failovers/{eventId}/steps/{action}", a.recordStep)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/failovers/{eventId}/scorecard", a.scorecard)
+		g.With(authz.RequireDuty(DutyLicenseInstall)).Put("/v1/ops/tenants/{id}/license", a.installLicense)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/tenants/{id}/license", a.getLicense)
 		g.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/ops/break-glass", a.openBreakGlass)
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/break-glass", a.listBreakGlass)
 		g.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/ops/break-glass/{id}:revoke", a.revokeBreakGlass)
