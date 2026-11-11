@@ -45,6 +45,8 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	// The ops service must answer in a fenced region: it runs the rejoin and serves /healthz/region.
+	httpx.DisableFence()
 	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
 		return err
 	}

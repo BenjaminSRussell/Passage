@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func pair(lag int) []Region {
@@ -165,6 +166,48 @@ func TestRoundCentsHalfUp(t *testing.T) {
 		r, _ := parseRate("x", in)
 		if got := roundCents(r); got != want {
 			t.Errorf("%s -> %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestPlanBreakGlass(t *testing.T) {
+	start := time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC)
+	w, err := PlanBreakGlass(BreakGlassRequest{UserID: "u1", ReasonCode: "REGION_LOSS", TicketRef: "INC-1", Start: start})
+	if err != nil || w.Minutes != 60 || !w.EndsAt.Equal(start.Add(time.Hour)) || !w.ReviewDueAt.Equal(w.EndsAt.AddDate(0, 0, 3)) {
+		t.Fatalf("window %+v err %v", w, err)
+	}
+	for name, r := range map[string]BreakGlassRequest{
+		"no user":      {ReasonCode: "REGION_LOSS", TicketRef: "x", Start: start},
+		"bad reason":   {UserID: "u", ReasonCode: "CURIOSITY", TicketRef: "x", Start: start},
+		"no ticket":    {UserID: "u", ReasonCode: "REGION_LOSS", Start: start},
+		"too short":    {UserID: "u", ReasonCode: "REGION_LOSS", TicketRef: "x", Minutes: 5, Start: start},
+		"over the cap": {UserID: "u", ReasonCode: "REGION_LOSS", TicketRef: "x", Minutes: 121, Start: start},
+	} {
+		var e *Error
+		if _, err := PlanBreakGlass(r); !errors.As(err, &e) || e.Code != CodeBreakGlassInvalid {
+			t.Errorf("%s: want %s, got %v", name, CodeBreakGlassInvalid, err)
+		}
+	}
+	if w, err := PlanBreakGlass(BreakGlassRequest{UserID: "u", ReasonCode: "INCIDENT_RESPONSE", TicketRef: "x", Minutes: 120, Start: start}); err != nil || w.Minutes != 120 {
+		t.Fatalf("the cap itself is allowed: %+v %v", w, err)
+	}
+}
+
+func TestValidateReview(t *testing.T) {
+	if err := ValidateReview("u1", "u2", ReviewApproved, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateReview("u1", "u2", ReviewFlagged, "used for a routine change"); err != nil {
+		t.Fatal(err)
+	}
+	for name, args := range map[string][4]string{
+		"self review":      {"u1", "u1", ReviewApproved, ""},
+		"no reviewer":      {"u1", "", ReviewApproved, ""},
+		"bad outcome":      {"u1", "u2", "MAYBE", ""},
+		"flag without why": {"u1", "u2", ReviewFlagged, ""},
+	} {
+		if err := ValidateReview(args[0], args[1], args[2], args[3]); err == nil {
+			t.Errorf("%s must be refused", name)
 		}
 	}
 }

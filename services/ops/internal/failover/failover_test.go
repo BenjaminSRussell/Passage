@@ -42,7 +42,9 @@ func (f fakeMirror) StopInto(_ context.Context, r string) error { return f.c.hit
 
 type fakeTemporal struct{ c *calls }
 
-func (f fakeTemporal) ActivateIn(_ context.Context, r string) error { return f.c.hit(ActionTemporal, r) }
+func (f fakeTemporal) ActivateIn(_ context.Context, r string) error {
+	return f.c.hit(ActionTemporal, r)
+}
 
 type fakeDNS struct{ c *calls }
 
@@ -69,7 +71,10 @@ func plan(t *testing.T) domain.Plan {
 func TestRunExecutesEveryStepInOrderAndReportsEach(t *testing.T) {
 	c := &calls{}
 	var reported []string
-	r := Runner{Exec: fakes(c), Report: func(_ context.Context, res StepResult) error { reported = append(reported, res.Action+"="+res.Status); return nil }}
+	r := Runner{Exec: fakes(c), Report: func(_ context.Context, res StepResult) error {
+		reported = append(reported, res.Action+"="+res.Status)
+		return nil
+	}}
 	res, err := r.Run(t.Context(), plan(t), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +295,9 @@ func TestCommandVerifier(t *testing.T) {
 	if err := v.Verify(t.Context(), "eu-central"); err != nil || strings.Join(got, " ") != "python3 baseline.py verify --region eu-central" {
 		t.Fatalf("err=%v got=%v", err, got)
 	}
-	broken := CommandVerifier{Argv: []string{"x"}, Run: func(context.Context, string, ...string) ([]byte, error) { return []byte("break at journal 7"), errors.New("exit 2") }}
+	broken := CommandVerifier{Argv: []string{"x"}, Run: func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("break at journal 7"), errors.New("exit 2")
+	}}
 	if err := broken.Verify(t.Context(), "r"); err == nil || !strings.Contains(err.Error(), "OPS-1704") || !strings.Contains(err.Error(), "journal 7") {
 		t.Fatalf("err %v", err)
 	}

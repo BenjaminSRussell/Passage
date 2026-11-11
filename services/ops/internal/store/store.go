@@ -68,6 +68,16 @@ type Store interface {
 	Request(ctx context.Context, requestID string) (Request, error)
 	Rejoin(ctx context.Context, region string, resyncVerified bool) (domain.Region, error)
 	Ping(ctx context.Context) error
+	// RecordStep stores one executed step of a failover (part 2); FailoverByEvent reads a failover with its steps.
+	RecordStep(ctx context.Context, eventID string, st Step, reportedBy string) error
+	FailoverByEvent(ctx context.Context, eventID string) (FailoverDetail, error)
+	// Break-glass for ops.failover.execute: a time-boxed, logged window that someone else reviews.
+	OpenBreakGlass(ctx context.Context, w domain.BreakGlassWindow) (BreakGlass, error)
+	ListBreakGlass(ctx context.Context, unreviewedOnly bool) ([]BreakGlass, error)
+	RevokeBreakGlass(ctx context.Context, id, user string) (BreakGlass, error)
+	ReviewBreakGlass(ctx context.Context, id, reviewer, outcome, note string) (BreakGlass, error)
+	AuthoriseBreakGlass(ctx context.Context, user, method, path string) (bool, error)
+	Gauges(ctx context.Context) (Gauges, error)
 }
 
 // Postgres implements Store.
@@ -87,8 +97,10 @@ func Problem(err error) error {
 	}
 	status := http.StatusConflict
 	switch rule.Code {
-	case domain.CodeRegionUnknown, domain.CodeRequestUnknown:
+	case domain.CodeRegionUnknown, domain.CodeRequestUnknown, domain.CodeBreakGlassUnknown:
 		status = http.StatusNotFound
+	case domain.CodeBreakGlassInvalid, domain.CodeBreakGlassReview:
+		status = http.StatusUnprocessableEntity
 	case domain.CodeLagExceeded, domain.CodeApprovalRequired:
 		status = http.StatusUnprocessableEntity
 	}

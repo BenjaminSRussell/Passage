@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -20,6 +22,7 @@ import (
 type env struct {
 	router http.Handler
 	tenant string
+	pool   *pgxpool.Pool
 }
 
 func newEnv(t *testing.T, region string) *env {
@@ -35,7 +38,7 @@ func newEnv(t *testing.T, region string) *env {
 	r := httpx.NewRouterWithoutTenant()
 	operator := ids.New()
 	New(st, Config{Region: region, MaxLagSeconds: 300, OperatorTenantID: operator}).Register(r)
-	return &env{router: r, tenant: operator}
+	return &env{router: r, tenant: operator, pool: pool}
 }
 
 func (e *env) do(method, path, user, duties, key, body string) *httptest.ResponseRecorder {

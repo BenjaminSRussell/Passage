@@ -31,7 +31,10 @@ const (
 	DutyView     = "ops.region.view"
 	DutyFailover = "ops.failover.execute"
 	DutyReport   = "ops.region.report"
-	maxLagS      = 1 << 30
+	// DutyBreakGlassRequest opens a break-glass window for the caller; DutyBreakGlassReview reviews one after it ends.
+	DutyBreakGlassRequest = "ops.breakglass.request"
+	DutyBreakGlassReview  = "ops.breakglass.review"
+	maxLagS               = 1 << 30
 )
 
 // Config is the process's settings.
@@ -51,6 +54,9 @@ type API struct {
 	cfg       Config
 	failovers atomic.Int64
 	rejected  atomic.Int64
+
+	breakGlassOpened atomic.Int64
+	breakGlassUses   atomic.Int64
 }
 
 // New builds the API.
@@ -72,10 +78,16 @@ func (a *API) Register(r chi.Router) {
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/regions", a.regions)
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/capacity/estimate", a.capacity)
 		g.With(authz.RequireDuty(DutyReport)).Put("/v1/ops/regions/{name}/lag", a.reportLag)
-		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/failover", a.failover)
-		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/regions/{name}:rejoin", a.rejoin)
+		g.With(a.requireFailover).Post("/v1/ops/failover", a.failover)
+		g.With(a.requireFailover).Post("/v1/ops/regions/{name}:rejoin", a.rejoin)
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/failover-requests/{id}", a.request)
-		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/failover-requests/{id}:approve", a.approve)
+		g.With(a.requireFailover).Post("/v1/ops/failover-requests/{id}:approve", a.approve)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/failovers/{eventId}", a.failoverDetail)
+		g.With(a.requireFailover).Put("/v1/ops/failovers/{eventId}/steps/{action}", a.recordStep)
+		g.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/ops/break-glass", a.openBreakGlass)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/break-glass", a.listBreakGlass)
+		g.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/ops/break-glass/{id}:revoke", a.revokeBreakGlass)
+		g.With(authz.RequireDuty(DutyBreakGlassReview)).Post("/v1/ops/break-glass/{id}:review", a.reviewBreakGlass)
 	})
 }
 
@@ -94,10 +106,11 @@ func (a *API) operatorOnly(next http.Handler) http.Handler {
 
 // Metrics renders Prometheus text.
 func (a *API) Metrics() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		tenant.WriteReplayMetrics(w)
 		_, _ = fmt.Fprintf(w, "# HELP ops_failovers_total Failovers applied.\n# TYPE ops_failovers_total counter\nops_failovers_total %d\n", a.failovers.Load())
+		a.writeGauges(w, r)
 		_, _ = fmt.Fprintf(w, "# HELP ops_failovers_rejected_total Failover requests refused by a rule.\n# TYPE ops_failovers_rejected_total counter\nops_failovers_rejected_total %d\n", a.rejected.Load())
 	})
 }

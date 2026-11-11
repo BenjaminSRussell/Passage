@@ -34,10 +34,16 @@ ops_operator_routes := [
 	["ops.failover.execute", "POST", "/v1/ops/failover"],
 	["ops.failover.execute", "POST", "/v1/ops/regions/us-east:rejoin"],
 	["ops.failover.execute", "POST", "/v1/ops/failover-requests/r1:approve"],
+	["ops.region.view", "GET", "/v1/ops/failovers/evt-1"],
+	["ops.region.view", "GET", "/v1/ops/break-glass"],
+	["ops.failover.execute", "PUT", "/v1/ops/failovers/evt-1/steps/flip-dns"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass/g1:revoke"],
+	["ops.breakglass.review", "POST", "/v1/ops/break-glass/g1:review"],
 ]
 
 test_operator_only_duties_are_the_ops_duties if {
-	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute"}
+	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute", "ops.breakglass.request", "ops.breakglass.review"}
 }
 
 test_operator_only_duties_grant_in_the_operator_tenant if {
@@ -163,6 +169,13 @@ segregation_denials := [
 	["ops.region.view", "POST", "/v1/ops/failover-requests/r1:approve"],
 	["ops.region.report", "POST", "/v1/ops/failover-requests/r1:approve"],
 	["ops.region.report", "GET", "/v1/ops/failover-requests/r1"],
+	["ops.region.view", "PUT", "/v1/ops/failovers/evt-1/steps/flip-dns"],
+	["ops.failover.execute", "GET", "/v1/ops/failovers/evt-1"],
+	["ops.failover.execute", "POST", "/v1/ops/break-glass"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass/g1:review"],
+	["ops.breakglass.review", "POST", "/v1/ops/break-glass"],
+	["ops.breakglass.review", "POST", "/v1/ops/failover"],
+	["ops.breakglass.request", "POST", "/v1/ops/failover"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
 	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],

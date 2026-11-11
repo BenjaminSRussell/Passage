@@ -22,6 +22,12 @@ var allowlist = map[string]string{
 	"ops.ops_failover:" + problemNoTenantID:         "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0001_init, #50)",
 	"ops.ops_failover_request:" + problemNotForced:  "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0003_failover_request, #50)",
 	"ops.ops_failover_request:" + problemNoTenantID: "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0003_failover_request, #50)",
+	"ops.ops_failover_step:" + problemNotForced:     "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_failover_step:" + problemNoTenantID:    "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_break_glass:" + problemNotForced:       "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_break_glass:" + problemNoTenantID:      "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_break_glass_use:" + problemNotForced:   "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_break_glass_use:" + problemNoTenantID:  "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
 	// A consolidation group spans legal entities by design: the group's units, ownership chain and consolidated trial balance are read
 	// whole by the consolidation duties, and hiding a unit outside the caller's scope would give a wrong consolidated result, not a smaller one.
 	"consolidation.consolidation_unit:" + problemNoEntityPol: "permanent: group-level master data; a consolidation group spans legal entities and is read whole by the consolidation duties (0003_groups, #40)",
