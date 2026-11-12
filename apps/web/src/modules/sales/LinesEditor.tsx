@@ -1,10 +1,13 @@
+import { useRef } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { pickProductPatch } from "../../shell/lookup/entities";
 import { Button, FormField, Input, Select } from "../../shell/ui";
-import { DELIVERY_DATE_CONTROLS, type DeliveryDateControl } from "./api/client";
+import { DELIVERY_DATE_CONTROLS, suggestUnitPrice, type DeliveryDateControl } from "./api/client";
 import { sentence } from "./format";
 import { emptyLine, lineFields, type LineValues } from "./lines";
 import styles from "./pages.module.css";
+
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface LinesEditorProps {
   lines: LineValues[];
@@ -23,11 +26,27 @@ export interface LinesEditorProps {
   addLabel?: string;
   /** The selling legal entity, which narrows the site and warehouse pickers. */
   legalEntityId?: string;
+  /** The customer and currency of the order: a product picked on a line with no price yet gets the customer's price. */
+  pricing?: { customerId: string; currency: string };
 }
 
 /** The line grid shared by the order and quotation forms: one fieldset per line. */
-export function LinesEditor({ lines, errors, newLineDate, onChange, withDeliveryControl, legend = "Line", idPrefix = "line", allowEmpty, addLabel = "Add line", legalEntityId }: LinesEditorProps) {
+export function LinesEditor({ lines, errors, newLineDate, onChange, withDeliveryControl, legend = "Line", idPrefix = "line", allowEmpty, addLabel = "Add line", legalEntityId, pricing }: LinesEditorProps) {
   const updateLine = (i: number, patch: Partial<LineValues>) => onChange(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  // The latest lines, so a price that arrives after the clerk typed on keeps what was typed.
+  const latest = useRef(lines);
+  latest.current = lines;
+  const prefillPrice = (i: number, line: LineValues) => {
+    if (!pricing || !legalEntityId || !UUID_TEXT.test(pricing.customerId) || !/^[A-Z]{3}$/.test(pricing.currency) || line.productId === "" || line.unitPrice !== "") return;
+    void suggestUnitPrice({ legalEntityId, customerId: pricing.customerId, currency: pricing.currency, productId: line.productId, unit: line.unit, quantity: line.quantity }).then(
+      (price) => {
+        const now = latest.current[i];
+        if (price === null || !now || now.productId !== line.productId || now.unitPrice !== "") return;
+        onChange(latest.current.map((l, idx) => (idx === i ? { ...l, unitPrice: price } : l)));
+      },
+      () => undefined,
+    );
+  };
   return (
     <div className={`${styles.formActions} ${styles.lines}`}>
       {lines.map((line, i) => (
@@ -38,14 +57,18 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
           {lineFields.map((f) => {
             const path = `lines[${i}].${f.name}`;
             return (
-              <FormField key={f.name} id={`${idPrefix}-${i}-${f.name}`} label={f.label} hint={f.name === "productId" ? line.productHint || undefined : undefined} error={errors[path]}>
+              <FormField key={f.name} id={`${idPrefix}-${i}-${f.name}`} label={f.label} hint={f.name === "productId" ? line.productHint || undefined : f.name === "unitPrice" && pricing ? "Filled in from the customer's prices when you pick a product; you can change it." : undefined} error={errors[path]}>
                 {(control) =>
                   f.name === "productId" ? (
                     <EntityLookup
                       entity="product"
                       {...control}
                       value={line.productId}
-                      onChange={(e) => updateLine(i, { productId: e.target.value, ...pickProductPatch(line, e.option) })}
+                      onChange={(e) => {
+                        const next = { ...line, productId: e.target.value, ...pickProductPatch(line, e.option) };
+                        updateLine(i, next);
+                        if (e.target.value !== line.productId) prefillPrice(i, next);
+                      }}
                       invalid={Boolean(errors[path])}
                     />
                   ) : f.name === "siteId" ? (

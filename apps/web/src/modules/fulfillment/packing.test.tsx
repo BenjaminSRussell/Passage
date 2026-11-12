@@ -337,7 +337,7 @@ describe("auto-pack on the shipment page (FR-28.15)", () => {
     };
     renderAt(`/fulfillment/shipments/${SH}`);
     for (const field of await screen.findAllByLabelText("Unit cost")) fireEvent.change(field, { target: { value: "1" } });
-    for (const field of screen.getAllByLabelText("Cost snapshot id")) fireEvent.change(field, { target: { value: "s" } });
+    for (const field of screen.getAllByLabelText("Cost version")) fireEvent.change(field, { target: { value: "0195d6a0-0000-7000-8000-00000000c057" } });
     fireEvent.change(screen.getByLabelText("Ship-to country"), { target: { value: "fra" } });
     fireEvent.click(screen.getByRole("button", { name: "Post packing slip" }));
     expect(await screen.findByText(/2-letter country code/)).toBeInTheDocument();

@@ -190,7 +190,7 @@ describe("post form presets from the legal entity setting", () => {
 
   async function post() {
     fireEvent.change(await screen.findByLabelText("Unit cost"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Cost snapshot id"), { target: { value: "snap-1" } });
+    fireEvent.change(screen.getByLabelText("Cost version"), { target: { value: "0195d6a0-0000-7000-8000-00000000c057" } });
     fireEvent.click(screen.getByRole("button", { name: "Post packing slip" }));
     await waitFor(() => expect(calls("POST", ":post-packing-slip")).toHaveLength(1));
     return calls("POST", ":post-packing-slip")[0].body as Record<string, unknown>;

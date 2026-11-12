@@ -2,9 +2,9 @@
   "entries": {
     "modules/analytics/SchedulesPage.tsx": {
       "labels": [
-        "Report id"
+        "Saved query id"
       ],
-      "reason": "Picks a saved report; there is no lookup entity for reports yet (follow-up to #500)."
+      "reason": "Free-text key: a saved explorer query has no store or list in the analytics service, so its id is typed. A dashboard target is a dashboard lookup."
     },
     "modules/billing/NewShipmentProposalPage.tsx": {
       "labels": [
@@ -30,61 +30,19 @@
       "labels": [
         "Policy id"
       ],
-      "reason": "Picks a retention or audit policy; no lookup entity for policies yet (follow-up to #500)."
+      "reason": "Free-text key the caller assigns: compliance stores no audit policies (the whole rule is entered on this page and evaluated statelessly), and the id only keys the findings across runs. A policy master would be a new subsystem."
     },
     "modules/compliance/ScreeningCheckPage.tsx": {
       "labels": [
-        "Subject id"
+        "Document id"
       ],
-      "reason": "The subject is a party, worker or order depending on the check kind; the id stays typed until the kind selects a lookup."
-    },
-    "modules/eam/WorkOrderCare.tsx": {
-      "labels": [
-        "Production resource id"
-      ],
-      "reason": "Picks a production resource through the module's own resource select elsewhere; a shell lookup entity for resources is not built yet."
-    },
-    "modules/fulfillment/ShipmentActions.tsx": {
-      "labels": [
-        "Cost snapshot id"
-      ],
-      "reason": "No shell lookup entity for this record yet; the field stays a typed id until one is built (follow-up to #500)."
-    },
-    "modules/hr/ChecklistsPage.tsx": {
-      "labels": [
-        "Template id"
-      ],
-      "reason": "The checklist template list needs the setup administrator duty, so a lookup would fail for the people who start checklists; the field stays a typed id."
-    },
-    "modules/hr/NewIncidentPage.tsx": {
-      "labels": [
-        "Corrects incident id"
-      ],
-      "reason": "Picks the closed incident being corrected; the incident list needs the safety administrator duty, so a lookup is not offered (follow-up to #500)."
-    },
-    "modules/hr/NewPersonnelActionPage.tsx": {
-      "labels": [
-        "Employment id"
-      ],
-      "reason": "An employment is found through its worker; no lookup entity for employments yet (worker and position are lookups)."
-    },
-    "modules/hr/QuestionnairesPage.tsx": {
-      "labels": [
-        "Schedule id"
-      ],
-      "reason": "Picks a questionnaire schedule; no lookup entity for schedules yet (follow-up to #500)."
+      "reason": "Structural: a DOCUMENT subject is a sales order, delivery, purchase order or payment owned by four services, and no single list spans them. A PARTY subject is a party lookup."
     },
     "modules/integration/NewClientPage.tsx": {
       "labels": [
         "Sandbox tenant id"
       ],
       "reason": "A sandbox tenant is another tenant; there is no tenant directory to look it up in."
-    },
-    "modules/integration/NewSyncSubscriptionPage.tsx": {
-      "labels": [
-        "Outbound mapping id"
-      ],
-      "reason": "Picks an outbound mapping; no lookup entity for integration mappings yet (follow-up to #500)."
     },
     "modules/inventory/StatusChangesPage.tsx": {
       "labels": [
@@ -98,35 +56,17 @@
       ],
       "reason": "Warehouse locations are listed per warehouse, and a flow activity names no warehouse to scope a location lookup to; the output location stays a typed id (the value stream is an operating unit lookup)."
     },
-    "modules/lean/WorkCellBoardPage.tsx": {
-      "labels": [
-        "Work cell id"
-      ],
-      "reason": "Work cells have no lookup entity yet (follow-up to #500)."
-    },
-    "modules/party/PendingChangesPage.tsx": {
-      "labels": [
-        "Pending change id"
-      ],
-      "reason": "A pending credit-limit change is opened by the id returned when it was requested; it has no number or name to search by."
-    },
-    "modules/pricing/NewCommodityCalculationPage.tsx": {
-      "labels": [
-        "Cost basis type id"
-      ],
-      "reason": "Cost basis types have no lookup entity yet (follow-up to #500)."
-    },
     "modules/pricing/NewPromotionPage.tsx": {
       "labels": [
         "Product id"
       ],
-      "reason": "The promotion's product is a key the pricing service keeps as free text (it does not validate it as a product record), so a product lookup would store a different value."
+      "reason": "Free-text key: the promotion's product is a key the pricing service keeps as text (it does not validate it as a product record), so a product lookup would store a different value."
     },
     "modules/productcost/AdHocEstimatePage.tsx": {
       "labels": [
         "Object id"
       ],
-      "reason": "The estimated object is a product, order or project depending on its type; the id stays typed until the type selects a lookup."
+      "reason": "Free-text key: the estimated object is a quote, internal order or project task reference (such as Q-1001) that the costing service stores as text and does not look up."
     },
     "modules/purchasing/PurchaseOrderPages.tsx": {
       "labels": [
@@ -140,42 +80,23 @@
       ],
       "reason": "An agreement line is picked from the contract's lines; no lookup entity lists them on their own."
     },
-    "modules/purchasing/TradeAgreementPages.tsx": {
-      "labels": [
-        "Product or group id",
-        "Vendor or group id"
-      ],
-      "reason": "The scope is a product or a product group, a vendor or a vendor group, depending on the type chosen; the id stays typed until the type selects a lookup."
-    },
     "modules/quality/CertificatesPanel.tsx": {
       "labels": [
         "Certificate outcome id"
       ],
-      "reason": "Inspection outcomes are rows of an order, with no number of their own; no lookup entity lists them."
+      "reason": "Structural: inspection outcomes are rows of one quality order with no master record or number of their own; there is nothing to list them from outside the order."
     },
     "modules/quality/ResultsEntry.tsx": {
       "labels": [
         "Outcome id"
       ],
-      "reason": "Inspection outcomes are rows of an order, with no number of their own; no lookup entity lists them."
-    },
-    "modules/quality/SpcPage.tsx": {
-      "labels": [
-        "Test id"
-      ],
-      "reason": "Quality tests have no lookup entity yet (follow-up to #500)."
+      "reason": "Structural: inspection outcomes are rows of one quality order with no master record or number of their own; there is nothing to list them from outside the order."
     },
     "modules/transport/BuildLoadsPage.tsx": {
       "labels": [
         "Shipment id"
       ],
-      "reason": "A load is built from sales, transfer and inbound shipments, which three services own; no single list spans them, so the field stays a typed id."
-    },
-    "modules/transport/CheckInPage.tsx": {
-      "labels": [
-        "Appointment id"
-      ],
-      "reason": "Dock appointments have no lookup entity yet (follow-up to #500)."
+      "reason": "Structural: a load is built from sales, transfer and inbound shipments, which fulfillment, inventory and receiving own; no single list spans the three, so the field stays a typed id."
     },
     "modules/transport/NewCarrierInvoicePage.tsx": {
       "labels": [
@@ -193,7 +114,7 @@
       "labels": [
         "Shipment id"
       ],
-      "reason": "The shipment to rate is a sales, transfer or inbound shipment of another service; no single list spans them, so the field stays a typed id."
+      "reason": "Structural: the shipment to rate is a sales, transfer or inbound shipment owned by fulfillment, inventory or receiving; no single list spans the three, so the field stays a typed id."
     }
   }
 }

@@ -3526,7 +3526,8 @@
       {"resource": "/v1/sales/return-orders/*:disposition", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders/*:credit", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders:backfill-reservations", "methods": ["POST"]},
-      {"resource": "/v1/sales/return-orders/*:reject", "methods": ["POST"]}
+      {"resource": "/v1/sales/return-orders/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/pricing/resolve", "methods": ["POST"]}
     ]},
     "sales.parameter.maintain": {"permissions": [
       {"resource": "/v1/sales/parameters", "methods": ["PUT"]},

@@ -322,3 +322,11 @@ export async function listQuestionnaires(signal?: AbortSignal): Promise<Question
   const body = await send<{ items?: Questionnaire[] }>("/vendor-questionnaires", {}, signal);
   return Array.isArray(body.items) ? body.items : [];
 }
+
+/** Credit-limit changes waiting for a decision, oldest request last, a page at a time. */
+export async function listPendingChanges(cursor?: string, signal?: AbortSignal): Promise<{ items: PendingChange[]; nextCursor?: string }> {
+  const query = new URLSearchParams({ limit: "100" });
+  if (cursor) query.set("cursor", cursor);
+  const body = await send<{ items?: PendingChange[]; nextCursor?: string }>(`/pending-changes?${query}`, {}, signal);
+  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor || undefined };
+}

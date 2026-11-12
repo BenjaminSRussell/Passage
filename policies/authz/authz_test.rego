@@ -3154,4 +3154,6 @@ test_lookup_reads_reach_the_form_fillers if {
 	not allowed("transport.gate.operate", "POST", "/v1/warehouse/dock-appointments")
 	not allowed("lean.kanban.work", "POST", "/v1/engineering/resources")
 	not allowed("fulfillment.packing-slip.post", "GET", "/v1/costing/valuation-ledgers")
+	allowed("sales.order.write", "POST", "/v1/pricing/resolve")
+	not allowed("sales.order.write", "GET", "/v1/pricing/condition-records")
 }

@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, PageHeader, Select, Skeleton, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { getSpc, listTestGroups, type SpcLimits, type SpcResult, type Violation } from "./api/client";
 import { shortId, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -181,7 +182,7 @@ export function SpcPage() {
     event.preventDefault();
     const found: { item?: string; test?: string } = {};
     if (!UUID.test(item.trim())) found.item = "Enter the item id (a UUID).";
-    if (!UUID.test(test.trim())) found.test = "Choose a test group and a test, or enter the test id.";
+    if (!UUID.test(test.trim())) found.test = "Choose the test.";
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     setParams(new URLSearchParams({ itemId: item.trim(), testId: test.trim() }));
@@ -220,9 +221,7 @@ export function SpcPage() {
               )}
             </FormField>
           ) : (
-            <FormField id="spc-test" label="Test id" error={errors.test}>
-              {(control) => <Input {...control} className={styles.mono} value={test} invalid={Boolean(errors.test)} onChange={(event) => setTest(event.target.value)} />}
-            </FormField>
+            <LookupFormField id="spc-test" label="Test" entity="qualityTest" hint="Any test of the newest test group versions; or choose a test group first." value={test} error={errors.test} onChange={(value) => setTest(value)} />
           )}
           <Button type="submit" variant="primary">
             Show chart

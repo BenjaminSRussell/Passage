@@ -187,7 +187,15 @@ export function NewOrderPage() {
             )}
           </FormField>
           {values.oneTime ? <OneTimeFields values={values.oneTime} errors={errors} onChange={(oneTime) => update({ oneTime })} /> : null}
-          <LinesEditor lines={values.lines} errors={errors} legalEntityId={values.legalEntityId} newLineDate={values.requestedShipDate} onChange={(lines) => update({ lines })} withDeliveryControl />
+          <LinesEditor
+            lines={values.lines}
+            errors={errors}
+            legalEntityId={values.legalEntityId}
+            pricing={{ customerId: values.customerId, currency: values.currency }}
+            newLineDate={values.requestedShipDate}
+            onChange={(lines) => update({ lines })}
+            withDeliveryControl
+          />
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0011" ? "A product is not listed for this customer" : failure.code === "SLS-0016" ? "The order is over the one-time order limit" : "Could not save the order"} live="alert">

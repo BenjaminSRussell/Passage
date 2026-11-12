@@ -2103,3 +2103,30 @@ export function recordOrderProgress(orderId: string, input: RecordProgressInput,
     headers: { "Idempotency-Key": key },
   });
 }
+
+/**
+ * The unit price the customer's active price conditions give one line (pricing's resolve, no trace), for prefilling
+ * order entry. Null when pricing finds no price for the line, or the caller may not ask (403): the clerk types it.
+ */
+export async function suggestUnitPrice(
+  input: { legalEntityId: string; customerId: string; currency: string; productId: string; unit: string; quantity: string },
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const res = await apiFetch("/api/v1/pricing/resolve?explain=false", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    credentials: "same-origin",
+    signal,
+    body: JSON.stringify({
+      legalEntityId: input.legalEntityId,
+      customerId: input.customerId,
+      currency: input.currency,
+      lines: [{ productId: input.productId, unit: input.unit, quantity: input.quantity || "1" }],
+    }),
+  });
+  if (!res.ok) return null;
+  const body = (await res.json()) as { lines?: { unitPrice?: string | number; errorCode?: string }[] };
+  const line = body.lines?.[0];
+  if (!line || line.errorCode || line.unitPrice === undefined || line.unitPrice === null) return null;
+  return String(line.unitPrice);
+}

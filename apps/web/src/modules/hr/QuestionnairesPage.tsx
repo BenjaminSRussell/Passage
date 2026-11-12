@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import { Badge, Button, buttonClassName, Card, DataTable, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { createSchedule, getQuestionnaire, listQuestionnaires, type NewSchedule, type Question, type Questionnaire } from "./api/questionnaires";
 import { UUID, utcFromLocalInput } from "./format";
@@ -27,13 +28,13 @@ function OpenResults() {
         onSubmit={(event) => {
           event.preventDefault();
           if (!UUID.test(scheduleId.trim())) {
-            setError("Enter the schedule's id.");
+            setError("Choose the schedule.");
             return;
           }
           navigate(`/hr/questionnaires/schedules/${scheduleId.trim()}/results`);
         }}
       >
-        <TextField id="results-schedule" label="Schedule id" value={scheduleId} error={error} onChange={setScheduleId} />
+        <LookupFormField id="results-schedule" label="Schedule" entity="questionnaireSchedule" hint="Every schedule, newest first, by its questionnaire and window." value={scheduleId} error={error} onChange={setScheduleId} />
         <Button type="submit">Open results</Button>
       </form>
     </Card>

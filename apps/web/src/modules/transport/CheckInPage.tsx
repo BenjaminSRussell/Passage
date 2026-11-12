@@ -69,8 +69,8 @@ export function validateCheckIn(v: CheckInValues): { errors: Record<string, stri
   if (license === "" || license.length > 32) errors.driverLicenseId = "Enter the driver's license id, up to 32 characters.";
   const appointmentId = v.appointmentId.trim();
   const scheduled = v.scheduledAt.trim() === "" ? undefined : instant(v.scheduledAt);
-  if (appointmentId !== "" && !UUID.test(appointmentId)) errors.appointmentId = "Enter the appointment id as a lower-case UUID.";
-  else if ((appointmentId === "") !== (scheduled === undefined)) errors.appointmentId = "Enter the appointment id and its time together, or neither for a walk-in.";
+  if (appointmentId !== "" && !UUID.test(appointmentId)) errors.appointmentId = "Choose the dock appointment.";
+  else if ((appointmentId === "") !== (scheduled === undefined)) errors.appointmentId = "Choose the appointment and its time together, or neither for a walk-in.";
   if (scheduled === null) errors.scheduledAt = "Enter the appointment date and time.";
   const arrived = v.arrivedAt.trim() === "" ? undefined : instant(v.arrivedAt);
   if (arrived === null) errors.arrivedAt = "Enter the arrival date and time, or leave it empty for now.";
@@ -97,6 +97,14 @@ export function validateCheckIn(v: CheckInValues): { errors: Record<string, stri
       toleranceMin: tolerance,
     },
   };
+}
+
+/** An ISO instant as the value of a datetime-local input, in the browser's time zone. */
+export function localInput(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
 /** Driver check-in at the gate or kiosk (FR-34.14): matched to the dock appointment, or a walk-in. */
@@ -175,8 +183,18 @@ export function CheckInPage() {
           <LookupFormField id="checkin-load" label="Load" entity="load" optional hint="The load being collected or delivered." value={values.loadId} error={errors.loadId} onChange={(loadId) => update({ loadId })} />
           {field("driverName", "checkin-driver", "Driver name")}
           {field("driverLicenseId", "checkin-license", "Driver licence number", undefined, { max: 32 })}
-          {field("appointmentId", "checkin-appointment", "Appointment id", "Leave empty for a walk-in.", { mono: true, optional: true })}
-          {field("scheduledAt", "checkin-scheduled", "Appointment time", "Required with the appointment id.", { type: "datetime-local", optional: true })}
+          <LookupFormField
+            id="checkin-appointment"
+            label="Dock appointment"
+            entity="dockAppointment"
+            optional
+            hint="Appointments at the site's warehouses from 12 hours ago to 36 hours ahead. Leave empty for a walk-in."
+            scope={{ siteId: values.siteId || undefined }}
+            value={values.appointmentId}
+            error={errors.appointmentId}
+            onChange={(appointmentId, option) => update({ appointmentId, ...(option?.at ? { scheduledAt: localInput(option.at) } : appointmentId === "" ? { scheduledAt: "" } : {}) })}
+          />
+          {field("scheduledAt", "checkin-scheduled", "Appointment time", "Filled in from the appointment; required with it.", { type: "datetime-local", optional: true })}
           {field("arrivedAt", "checkin-arrived", "Arrived", "Leave empty for now; set it when entering a paper log later.", { type: "datetime-local", optional: true })}
           {field("toleranceMin", "checkin-tolerance", "On-time window (minutes)", "Either side of the appointment; default 60.")}
           {field("freeTimeMin", "checkin-free", "Free time (minutes)", "Before the carrier's detention starts; default 120.")}

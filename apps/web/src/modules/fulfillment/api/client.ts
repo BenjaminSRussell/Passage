@@ -1207,3 +1207,28 @@ export function closeManifest(input: ManifestInput, key: string): Promise<Manife
 export function cancelManifest(id: string, version: number, key: string): Promise<Manifest> {
   return command<Manifest>(`/manifests/${encodeURIComponent(id)}:cancel`, undefined, key, version);
 }
+
+/** The active standard cost of a product at a warehouse's site, and the costing version it came from. */
+export interface StandardCost {
+  unitCost: string;
+  currency: string;
+  versionId: string;
+  versionCode: string;
+}
+
+/**
+ * Reads the product's standard cost at the site of the warehouse (org gives the site, costing the cost). Null when
+ * no standard cost is active for that product and site (costing answers 404).
+ */
+export async function getStandardCost(productId: string, warehouseId: string, signal?: AbortSignal): Promise<StandardCost | null> {
+  const headers = { Accept: "application/json" };
+  const warehouse = await apiFetch(`/api/v1/org/warehouses/${encodeURIComponent(warehouseId)}`, { headers, signal });
+  if (!warehouse.ok) throw await toError(warehouse);
+  const siteId = ((await warehouse.json()) as { siteId?: string }).siteId;
+  if (!siteId) return null;
+  const res = await apiFetch(`/api/v1/costing/products/${encodeURIComponent(productId)}/cost?site=${encodeURIComponent(siteId)}`, { headers, signal });
+  if (res.status === 404) return null;
+  if (!res.ok) throw await toError(res);
+  const body = (await res.json()) as Partial<StandardCost>;
+  return body.unitCost && body.versionId ? { unitCost: body.unitCost, currency: body.currency ?? "", versionId: body.versionId, versionCode: body.versionCode ?? "" } : null;
+}

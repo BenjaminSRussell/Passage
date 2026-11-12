@@ -363,8 +363,24 @@ describe("New sales order", () => {
     expect(await screen.findByText("Choose a product.")).toBeInTheDocument();
   });
 
+  it("fills the unit price from the customer's prices when a product is picked, and keeps a typed price", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/pricing/resolve" ? { status: 200, body: { lines: [{ lineNo: 1, unit: "EA", quantity: "1", unitPrice: "812.5", netUnitPrice: "812.5", lineNet: "812.5", applied: [], trace: [] }] } } : { status: 200, body: order(), etag: '"1"' };
+    renderAt("/sales/orders/new");
+    const set = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    set("Legal entity", LE);
+    set("Customer", CUSTOMER);
+    set("Product", PRODUCT);
+    await waitFor(() => expect(screen.getByLabelText("Unit price")).toHaveValue("812.5"));
+    const resolve = calls.find((c) => c.url.pathname === "/api/v1/pricing/resolve");
+    expect(resolve?.body).toMatchObject({ legalEntityId: LE, customerId: CUSTOMER, currency: "USD", lines: [{ productId: PRODUCT, quantity: "1" }] });
+    set("Unit price", "800");
+    expect(screen.getByLabelText("Unit price")).toHaveValue("800");
+  });
+
   it("creates the order with an Idempotency-Key and opens it", async () => {
-    handler = (_url, init) => (init.method === "POST" ? { status: 201, body: order(), etag: '"1"' } : { status: 200, body: order(), etag: '"1"' });
+    handler = (url, init) =>
+      url.pathname.startsWith("/api/v1/pricing/") ? { status: 403, body: { code: "AUTH-0003" } } : init.method === "POST" ? { status: 201, body: order(), etag: '"1"' } : { status: 200, body: order(), etag: '"1"' };
     const { container } = renderAt("/sales/orders/new");
     expect(pageViolations(container)).toEqual([]);
     const set = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -377,7 +393,7 @@ describe("New sales order", () => {
     set("Warehouse", WAREHOUSE);
     fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
     expect(await screen.findByRole("heading", { name: "Sales order SO-0000042" })).toBeInTheDocument();
-    const post = calls.find((c) => c.method === "POST");
+    const post = calls.find((c) => c.method === "POST" && c.url.pathname === "/api/v1/sales/orders");
     expect(post?.headers.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     expect(post?.body).toMatchObject({ legalEntityId: LE, customerId: CUSTOMER, invoiceAccountId: CUSTOMER, lines: [{ productId: PRODUCT, quantity: "3", unitPrice: "1000" }] });
   });
