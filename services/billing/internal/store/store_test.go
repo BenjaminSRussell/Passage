@@ -829,3 +829,36 @@ func TestCreditReservation_ConcurrentCommitAndReleaseEndInOneState(t *testing.T)
 		}
 	}
 }
+
+// The credit notes of one contract modification are stored together, all or none, and found again by their key prefix.
+func TestCreateCreditNotes_AllOrNoneAndFoundByPrefix(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	tctx := ctxAllEntities(testkit.TenantID(1))
+	s := New(pool)
+	orig := postedOriginal(t, s, tctx, ids.New())
+	note := func(key string, net string) Invoice {
+		day := time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC)
+		n := decimal.RequireFromString(net)
+		return Invoice{ID: ids.New(), LegalEntityID: orig.LegalEntityID, CustomerID: orig.CustomerID, InvoiceAccountID: orig.InvoiceAccountID,
+			Type: domain.TypeCreditNote, Currency: orig.Currency, InvoiceDate: day, DueDate: day, OriginalInvoiceID: orig.ID, Reason: "modification",
+			IdempotencyKey: key, RequestHash: "h", Totals: domain.Totals{Net: n, Charges: decimal.Zero, Tax: decimal.Zero, Gross: n},
+			Lines: []Line{{Line: domain.Line{No: 1, Description: "Service", Qty: decimal.RequireFromString("0.1"), UnitPrice: decimal.NewFromInt(100), RevenueAccount: "4000", TaxCode: "DE19"},
+				Net: n, Tax: decimal.Zero, OriginalLineNo: 1}}}
+	}
+	// The second note credits more than the line holds: neither is stored.
+	if _, err := s.CreateCreditNotes(tctx, []Invoice{note(ModificationKeyPrefix+"m1:credit:a", "10.00"), note(ModificationKeyPrefix+"m1:credit:b", "500.00")}); err == nil {
+		t.Fatal("an over-credit was stored")
+	}
+	if got, err := s.FindByIdempotencyPrefix(tctx, ModificationKeyPrefix+"m1:credit:"); err != nil || len(got) != 0 {
+		t.Fatalf("after the failed batch: %d (%v)", len(got), err)
+	}
+	if _, err := s.CreateCreditNotes(tctx, []Invoice{note(ModificationKeyPrefix+"m1:credit:a", "10.00")}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.FindByIdempotencyPrefix(tctx, ModificationKeyPrefix+"m1:credit:"); err != nil || len(got) != 1 || got[0].Totals.Net.String() != "10" {
+		t.Fatalf("found %+v (%v)", got, err)
+	}
+}

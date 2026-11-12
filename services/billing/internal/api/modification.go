@@ -69,7 +69,8 @@ type productLine struct {
 // billModification bills a contract modification's price change (#29): the products whose allocation rose are invoiced on one
 // invoice proposal (one line per product with the order and product of the order's invoice line, so the journal books it on the
 // order's revrec allocation like the first invoice), and the products whose allocation fell are credited by amount on the order's
-// latest posted invoice line of each, one credit note proposal per invoice. Both stay proposals for a person to post. Each document
+// invoice lines of each, newest first and each up to what it has left to credit, one credit note proposal per invoice, all made in one
+// transaction. Both stay proposals for a person to post. Each document
 // is keyed by the modification, so a retry of the request returns the documents already made and creates only the missing ones.
 func (a *API) billModification(w http.ResponseWriter, r *http.Request) {
 	var req modificationRequest
@@ -131,7 +132,7 @@ func (a *API) billModification(w http.ResponseWriter, r *http.Request) {
 	raw, _ := json.Marshal(req)
 	sum := sha256.Sum256(raw)
 	hash := hex.EncodeToString(sum[:])
-	where, err := a.lastBilled(r, req.OrderID, req.Currency)
+	billed, err := a.billedLines(r, req.OrderID, req.Currency)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -143,23 +144,22 @@ func (a *API) billModification(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Strings(products)
-	var up []string
-	down := map[string][]string{}
-	var downInvoices []string
+	var up, down []string
+	where := map[string]productLine{}
+	decreases := map[string]decimal.Decimal{}
 	for _, p := range products {
-		pl, ok := where[p]
-		if !ok {
+		lines := billed[p]
+		if len(lines) == 0 {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeModificationNoInvoice, "the order has no posted invoice line for product "+p+" to bill the change with"))
 			return
 		}
+		where[p] = lines[0]
 		if amounts[p].IsPositive() {
 			up = append(up, p)
 			continue
 		}
-		if _, seen := down[pl.invoice.ID]; !seen {
-			downInvoices = append(downInvoices, pl.invoice.ID)
-		}
-		down[pl.invoice.ID] = append(down[pl.invoice.ID], p)
+		down = append(down, p)
+		decreases[p] = amounts[p].Neg()
 	}
 	out := modificationOut{ModificationID: req.ModificationID, Documents: []invoiceDTO{}}
 	created := false
@@ -208,46 +208,70 @@ func (a *API) billModification(w http.ResponseWriter, r *http.Request) {
 		created = created || made
 		out.Documents = append(out.Documents, toDTO(doc))
 	}
-	for _, invoiceID := range downInvoices {
-		key := modificationKey(req.ModificationID, "credit:"+invoiceID)
-		doc, made, err := a.findOr(r, key, hash, func() (store.Invoice, error) {
-			orig, err := a.store.GetInvoice(r.Context(), invoiceID)
-			if err != nil {
-				return store.Invoice{}, err
-			}
-			original := make([]domain.PostedLine, len(orig.Lines))
-			for i, l := range orig.Lines {
-				original[i] = domain.PostedLine{Line: l.Line, Net: l.Net, Tax: l.Tax}
-			}
-			var credits []domain.AmountCredit
-			for _, p := range down[invoiceID] {
-				credits = append(credits, domain.AmountCredit{LineNo: where[p].line.No, Net: amounts[p].Neg()})
-			}
-			planned, totals, err := domain.PlanAmountCredit(orig.Currency, original, orig.Totals, orig.Credited, credits)
-			if err != nil {
-				return store.Invoice{}, problemFrom(err)
-			}
-			date := effective
-			if date.Before(orig.InvoiceDate) {
-				date = orig.InvoiceDate
-			}
-			cn := store.Invoice{ID: ids.New(), LegalEntityID: orig.LegalEntityID, CustomerID: orig.CustomerID, InvoiceAccountID: orig.InvoiceAccountID,
-				Type: domain.TypeCreditNote, Status: domain.StatusProposal, Currency: orig.Currency, InvoiceDate: date, DueDate: date,
-				Totals: totals, OriginalInvoiceID: orig.ID, OriginalNumber: orig.Number, Reason: truncateRunes(reason, 500), IdempotencyKey: key, RequestHash: hash}
-			for _, l := range planned {
-				cn.Lines = append(cn.Lines, store.Line{Line: l.Line, Net: l.Net, Tax: l.Tax, OriginalLineNo: l.OriginalLineNo})
-			}
-			return a.store.CreateCreditNote(r.Context(), cn)
-		})
+	if len(down) > 0 {
+		// The credit notes of a modification are made together, once: a retry finds them by the modification's key prefix and returns
+		// them, whatever invoices posted since, so the decrease is never credited twice.
+		prefix := modificationKey(req.ModificationID, "credit:")
+		existing, err := a.store.FindByIdempotencyPrefix(r.Context(), prefix)
 		if err != nil {
 			httpx.Fail(w, r, err)
 			return
 		}
-		if made {
-			a.creditNotesCreated.Add(1)
+		docs := existing
+		for _, d := range existing {
+			if d.RequestHash != hash {
+				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, "idempotency_key_reuse", "this modification was billed with a different request"))
+				return
+			}
 		}
-		created = created || made
-		out.Documents = append(out.Documents, toDTO(doc))
+		if len(existing) == 0 {
+			plan, invoiceOrder, err := creditPlan(billed, decreases, down)
+			if err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+			var cns []store.Invoice
+			for _, invoiceID := range invoiceOrder {
+				var orig store.Invoice
+				for _, p := range down {
+					for _, pl := range billed[p] {
+						if pl.invoice.ID == invoiceID {
+							orig = pl.invoice
+						}
+					}
+				}
+				original := make([]domain.PostedLine, len(orig.Lines))
+				for i, l := range orig.Lines {
+					original[i] = domain.PostedLine{Line: l.Line, Net: l.Net, Tax: l.Tax}
+				}
+				planned, totals, err := domain.PlanAmountCredit(orig.Currency, original, orig.Totals, orig.Credited, plan[invoiceID])
+				if err != nil {
+					httpx.Fail(w, r, problemFrom(err))
+					return
+				}
+				date := effective
+				if date.Before(orig.InvoiceDate) {
+					date = orig.InvoiceDate
+				}
+				cn := store.Invoice{ID: ids.New(), LegalEntityID: orig.LegalEntityID, CustomerID: orig.CustomerID, InvoiceAccountID: orig.InvoiceAccountID,
+					Type: domain.TypeCreditNote, Status: domain.StatusProposal, Currency: orig.Currency, InvoiceDate: date, DueDate: date,
+					Totals: totals, OriginalInvoiceID: orig.ID, OriginalNumber: orig.Number, Reason: truncateRunes(reason, 500),
+					IdempotencyKey: prefix + invoiceID, RequestHash: hash}
+				for _, l := range planned {
+					cn.Lines = append(cn.Lines, store.Line{Line: l.Line, Net: l.Net, Tax: l.Tax, OriginalLineNo: l.OriginalLineNo})
+				}
+				cns = append(cns, cn)
+			}
+			if docs, err = a.store.CreateCreditNotes(r.Context(), cns); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+			a.creditNotesCreated.Add(int64(len(docs)))
+			created = created || len(docs) > 0
+		}
+		for _, d := range docs {
+			out.Documents = append(out.Documents, toDTO(d))
+		}
 	}
 	status := http.StatusOK
 	if created {
@@ -275,9 +299,9 @@ func (a *API) findOr(r *http.Request, key, hash string, create func() (store.Inv
 	return doc, err == nil, err
 }
 
-// lastBilled finds, per product, the order's latest posted invoice line in the currency (newest invoice first).
-func (a *API) lastBilled(r *http.Request, orderID, currency string) (map[string]productLine, error) {
-	out := map[string]productLine{}
+// billedLines finds, per product, the order's posted invoice lines in the currency, newest invoice first.
+func (a *API) billedLines(r *http.Request, orderID, currency string) (map[string][]productLine, error) {
+	out := map[string][]productLine{}
 	after := ""
 	for range 20 {
 		page, err := a.store.ListInvoices(r.Context(), store.ListFilter{OrderID: strings.ToLower(orderID), PostedOnly: true, After: after, Limit: 200})
@@ -297,9 +321,7 @@ func (a *API) lastBilled(r *http.Request, orderID, currency string) (map[string]
 				if p == "" || !strings.EqualFold(l.Source.OrderID, orderID) {
 					continue
 				}
-				if _, seen := out[p]; !seen {
-					out[p] = productLine{invoice: inv, line: l}
-				}
+				out[p] = append(out[p], productLine{invoice: inv, line: l})
 			}
 		}
 		if page.NextAfter == "" {
@@ -308,6 +330,37 @@ func (a *API) lastBilled(r *http.Request, orderID, currency string) (map[string]
 		after = page.NextAfter
 	}
 	return out, nil
+}
+
+// creditPlan spreads the decreases of the products over the order's invoice lines, newest invoice first, each line up to what it
+// still has to credit (its net less what posted credit notes took), and groups them per original invoice (in the order first used).
+// A product whose lines together cannot take its decrease is BIL-0005.
+func creditPlan(lines map[string][]productLine, decreases map[string]decimal.Decimal, products []string) (map[string][]domain.AmountCredit, []string, error) {
+	plan := map[string][]domain.AmountCredit{}
+	var order []string
+	for _, p := range products {
+		left := decreases[p]
+		for _, pl := range lines[p] {
+			if !left.IsPositive() {
+				break
+			}
+			room := pl.line.Net.Sub(pl.invoice.Credited.Lines[pl.line.No].Net)
+			if !room.IsPositive() {
+				continue
+			}
+			take := decimal.Min(room, left)
+			if _, seen := plan[pl.invoice.ID]; !seen {
+				order = append(order, pl.invoice.ID)
+			}
+			plan[pl.invoice.ID] = append(plan[pl.invoice.ID], domain.AmountCredit{LineNo: pl.line.No, Net: take})
+			left = left.Sub(take)
+		}
+		if left.IsPositive() {
+			return nil, nil, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeCreditExceeded,
+				"the order's invoice lines for product "+p+" have less left to credit than its decrease of "+decreases[p].String())
+		}
+	}
+	return plan, order, nil
 }
 
 func truncateRunes(s string, n int) string {

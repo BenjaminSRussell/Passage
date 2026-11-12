@@ -608,8 +608,9 @@ paths:
         each product and must add up to `priceChange` (422 BIL-0141). Products whose allocation rose are invoiced on one FREE_TEXT
         invoice proposal, one line per product carrying the order and product of the order's latest posted invoice line for it
         (its tax code and revenue account; tax is quoted), so the journal books it on the order's revrec allocation. Products whose
-        allocation fell are credited by amount on that invoice line, one credit note proposal per original invoice (quantity and tax
-        in proportion). A product the order never invoiced is 422 BIL-0140. Documents stay proposals for a person to post. Each is
+        allocation fell are credited by amount on the order's invoice lines of the product, newest first and each up to what it has left
+        to credit (422 BIL-0005 when they cannot take it), one credit note proposal per original invoice (quantity and tax in
+        proportion), all made in one transaction; a retry finds them by the modification and never credits again. A product the order never invoiced is 422 BIL-0140. Documents stay proposals for a person to post. Each is
         keyed by the modification, so a retry returns what exists (200) and creates only what is missing (201). A booked credit note
         of a modification carries contract_modification_id on creditnote.booked, and revrec does not apply it again.
       x-passage-duty: billing.contract-modification.bill (service only)

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +29,92 @@ func postedOrderInvoice(f *fakeStore) store.Invoice {
 	}
 	f.invoices[inv.ID] = inv
 	return inv
+}
+
+func (f *fakeStore) CreateCreditNotes(ctx context.Context, cns []store.Invoice) ([]store.Invoice, error) {
+	out := make([]store.Invoice, 0, len(cns))
+	for _, cn := range cns {
+		made, err := f.CreateCreditNote(ctx, cn)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, made)
+	}
+	return out, nil
+}
+
+func (f *fakeStore) FindByIdempotencyPrefix(_ context.Context, prefix string) ([]store.Invoice, error) {
+	var out []store.Invoice
+	for _, inv := range f.invoices {
+		if strings.HasPrefix(inv.IdempotencyKey, prefix) {
+			out = append(out, inv)
+		}
+	}
+	return out, nil
+}
+
+// newerSupportInvoice is a later posted invoice of order uuid(70) that billed 200.00 more support (product uuid(81)).
+func newerSupportInvoice(f *fakeStore) {
+	d := decimal.RequireFromString
+	inv := store.Invoice{ID: uuid(61), LegalEntityID: leID, CustomerID: custID, InvoiceAccountID: acctID, Type: domain.TypeShipment, Status: domain.StatusPosted,
+		Currency: "EUR", Number: "INV-2027-0000002", InvoiceDate: time.Date(2027, 2, 5, 0, 0, 0, 0, time.UTC), PaymentTermDays: 30, IdempotencyKey: "orig-2",
+		Totals: domain.Totals{Net: d("200.00"), Charges: decimal.Zero, Tax: d("38.00"), Gross: d("238.00")}}
+	inv.Lines = []store.Line{{Line: domain.Line{No: 1, Description: "Support plan", Qty: d("2"), UnitPrice: d("100"), DiscountPct: decimal.Zero, RevenueAccount: "4000", TaxCode: "S19"},
+		Net: d("200.00"), Tax: d("38.00"), Source: domain.Source{OrderID: uuid(70), OrderLineID: uuid(71), ProductID: uuid(81)}}}
+	f.invoices[inv.ID] = inv
+}
+
+func creditNotesOf(f *fakeStore) []store.Invoice {
+	var out []store.Invoice
+	for _, d := range f.invoices {
+		if d.Type == domain.TypeCreditNote {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// A retry after a newer invoice of the order posted returns the credit note already made instead of crediting the decrease again on
+// the newer invoice.
+func TestBillModification_RetryAfterANewerInvoiceDoesNotCreditTwice(t *testing.T) {
+	f := newFakeStore()
+	postedOrderInvoice(f)
+	h := setup(t, f, &fakeTax{perLine: "19.00"})
+	body := modificationBody("-100.00", `[{"productId":"`+uuid(81)+`","amount":"-100.00"}]`)
+	if rec := doAs(h, http.MethodPost, "/v1/billing/contract-modifications", "", body, "billing.contract-modification.bill", nil); rec.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", rec.Code, rec.Body.String())
+	}
+	newerSupportInvoice(f)
+	if rec := doAs(h, http.MethodPost, "/v1/billing/contract-modifications", "", body, "billing.contract-modification.bill", nil); rec.Code != http.StatusOK {
+		t.Fatalf("retry: %d %s", rec.Code, rec.Body.String())
+	}
+	if cns := creditNotesOf(f); len(cns) != 1 || cns[0].OriginalInvoiceID != uuid(60) {
+		t.Fatalf("credit notes %+v", cns)
+	}
+}
+
+// A decrease above what the newest invoice line has left is spread over the order's lines, newest first: 200.00 on the newer invoice
+// and the other 100.00 on the first.
+func TestBillModification_SpreadsADecreaseOverTheOrdersLinesNewestFirst(t *testing.T) {
+	f := newFakeStore()
+	postedOrderInvoice(f)
+	newerSupportInvoice(f)
+	h := setup(t, f, &fakeTax{perLine: "19.00"})
+	body := modificationBody("-300.00", `[{"productId":"`+uuid(81)+`","amount":"-300.00"}]`)
+	if rec := doAs(h, http.MethodPost, "/v1/billing/contract-modifications", "", body, "billing.contract-modification.bill", nil); rec.Code != http.StatusCreated {
+		t.Fatalf("bill: %d %s", rec.Code, rec.Body.String())
+	}
+	got := map[string]string{}
+	for _, cn := range creditNotesOf(f) {
+		got[cn.OriginalInvoiceID] = cn.Totals.Net.StringFixed(2)
+	}
+	if len(got) != 2 || got[uuid(61)] != "200.00" || got[uuid(60)] != "100.00" {
+		t.Fatalf("credits %v", got)
+	}
+	tooMuch := modificationBody("-1500.00", `[{"productId":"`+uuid(81)+`","amount":"-1500.00"}]`)
+	if rec := doAs(h, http.MethodPost, "/v1/billing/contract-modifications", "", strings.Replace(tooMuch, uuid(90), uuid(92), 1), "billing.contract-modification.bill", nil); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a decrease above every line: %d", rec.Code)
+	}
 }
 
 func modificationBody(change string, lines string) string {

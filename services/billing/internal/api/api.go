@@ -80,6 +80,8 @@ type Store interface {
 	FindByIdempotencyKey(ctx context.Context, key string) (store.Invoice, bool, error)
 	CreateProposal(ctx context.Context, inv store.Invoice) (store.Invoice, error)
 	CreateCreditNote(ctx context.Context, cn store.Invoice) (store.Invoice, error)
+	CreateCreditNotes(ctx context.Context, cns []store.Invoice) ([]store.Invoice, error)
+	FindByIdempotencyPrefix(ctx context.Context, prefix string) ([]store.Invoice, error)
 	FindProposalBatch(ctx context.Context, key string) (store.ProposalBatch, []store.Invoice, bool, error)
 	CreateShipmentProposals(ctx context.Context, b store.ProposalBatch, invs []store.Invoice) ([]store.Invoice, error)
 	GetInvoice(ctx context.Context, id string) (store.Invoice, error)
