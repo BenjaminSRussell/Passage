@@ -1,4 +1,5 @@
--- #35 (35-4): vendor invoices received electronically (a cXML InvoiceDetailRequest of a procurement network) wait here for an AP
+-- #35 (35-4) and #40: vendor invoices received electronically (a cXML InvoiceDetailRequest of a procurement network, or the
+-- borrower's side of an intercompany charge in Invoice settlement mode) wait here for an AP
 -- clerk. An intake row posts nothing: the clerk matches it to receipt lines and posts the vendor invoice in receiving (GR/IR),
 -- whose invoice.posted opens the AP item. One row per sender document (source, source_ref); a vendor's invoice number is taken once
 -- per legal entity.
@@ -6,7 +7,7 @@ CREATE TABLE IF NOT EXISTS ap_vendor_invoice_intake (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
   legal_entity_id uuid NOT NULL,
-  source text NOT NULL CHECK (source IN ('CXML')),
+  source text NOT NULL CHECK (source IN ('CXML', 'INTERCOMPANY')),
   source_ref text NOT NULL CHECK (char_length(source_ref) BETWEEN 1 AND 200),
   content_hash text NOT NULL,
   vendor_id uuid NOT NULL,

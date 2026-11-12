@@ -846,7 +846,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        source: { type: string, enum: [CXML] }
+        source: { type: string, enum: [CXML, INTERCOMPANY], description: "CXML from the EDI engine; INTERCOMPANY from the intercompany charge consumer (#40)" }
         sourceRef: { type: string }
         vendorId: { type: string, format: uuid }
         invoiceNumber: { type: string }

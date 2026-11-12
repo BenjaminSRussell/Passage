@@ -3385,6 +3385,8 @@
     "revrec.creditnote.reverse": {"flag": true, "permissions": []},
     "revrec.contract.from-invoice": {"flag": true, "permissions": []},
     "receivables.openitem.from-billing": {"flag": true, "permissions": []},
+    "billing.iccharge.from-event": {"flag": true, "permissions": []},
+    "payables.iccharge.from-event": {"flag": true, "permissions": []},
     "revrec.post": {"permissions": [
       {"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]},
       {"resource": "/v1/revrec/journal-postings", "methods": ["POST"]},
@@ -4145,6 +4147,8 @@
     "edi-cxml": ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain", "payables.vendor-invoice.intake"],
     "edi-outbound": ["edi.outbound.from-event"],
     "edi-selfbill": ["tax.tax.calculate"],
+    "billing-iccharge": ["billing.iccharge.from-event"],
+    "payables-iccharge": ["payables.iccharge.from-event"],
     "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],
     "pricing-cache": ["pricing.cache.invalidate"],

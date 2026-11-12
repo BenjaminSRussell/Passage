@@ -350,7 +350,7 @@ func toDTO(inv store.Invoice) invoiceDTO {
 func fixed(v decimal.Decimal, exp int32) string { return v.StringFixed(exp) }
 
 func invalidIdempotencyKey(key string) bool {
-	return key == "" || len(key) > 255 || strings.HasPrefix(key, subscriptionKeyPrefix) || strings.HasPrefix(key, store.ModificationKeyPrefix)
+	return key == "" || len(key) > 255 || strings.HasPrefix(key, subscriptionKeyPrefix) || strings.HasPrefix(key, store.ModificationKeyPrefix) || strings.HasPrefix(key, store.ICChargeKeyPrefix)
 }
 
 func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {

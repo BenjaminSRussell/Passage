@@ -57,6 +57,12 @@ vendor (from the purchase order the invoice names), invoice number and date, pur
 whose `invoice.posted` opens the item. The same document again replays (200); changed content is 409 `AP-VII-001`; the vendor's
 invoice number received from another document is 409 `AP-VII-002`. Migration 0019.
 
+`payables consume` (chart `consumer.*`, off by default, #40) reads intercompany's `chargeinvoice.requested` (topic
+`passage.interco.chargeinvoice`, KafkaUser `deploy/kafka/payables-consumer.yaml`, dead-letter topic `passage.payables.iccharge.dlq`)
+and takes the borrower's vendor invoice into the same intake (source `INTERCOMPANY`): the borrower's legal entity, the pairing's
+vendor account, invoice number `IC-<source id>-v<version>`, the charge's price as net and price plus the cross-border tax as gross.
+It runs as the service principal `payables-iccharge` (flag duty `payables.iccharge.from-event`); a redelivery is a no-op.
+
 ## Error codes
 
 | Code | Status | Meaning |

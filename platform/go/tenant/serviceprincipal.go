@@ -34,6 +34,10 @@ var servicePrincipals = map[string][]string{
 	"billing-sales-report": {"sales.order.record-invoice"},
 	// The reporter of booked invoices and credit notes to the tax service (#29): it signs POST /v1/tax/transactions only.
 	"billing-tax-report": {"tax.transaction.record"},
+	// The consumers of intercompany's chargeinvoice.requested (#40): billing raises the lender's invoice proposal and payables takes
+	// the borrower's vendor invoice into its intake. Each holds one flag duty and reaches no route.
+	"billing-iccharge":   {"billing.iccharge.from-event"},
+	"payables-iccharge":  {"payables.iccharge.from-event"},
 	"finreport-ledger":   {"ledger.entry.lookup"},
 	"purchasing-inbound": {"purchasing.inbound.apply"},
 	"fulfillment-order":  {"fulfillment.order.sync"},
@@ -67,6 +71,8 @@ var servicePrincipals = map[string][]string{
 var servicePrincipalIssuers = map[string][]string{
 	"billing-sales-report":     {"billing"},
 	"billing-tax-report":       {"billing"},
+	"billing-iccharge":         {"billing"},
+	"payables-iccharge":        {"payables"},
 	"edi-cxml":                 {"edi"},
 	"edi-outbound":             {"edi"},
 	"edi-selfbill":             {"edi"},

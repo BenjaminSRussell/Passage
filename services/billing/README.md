@@ -236,3 +236,14 @@ of a legal entity is invoiced: `STANDARD`, or `SELF_BILLED` with the self-billin
 matched by the EDI engine, is the invoice. `GET` the same path with `legalEntityId` reads it (duty `billing.invoice.view`; STANDARD
 when none is set). A stale If-Match is 409 `BIL-0151`. Migration 0018. Not built: posting the matched self-billed document as the
 legal invoice with the customer's number.
+
+## Intercompany charges in Invoice mode (#40)
+
+`billing consume` (chart `consumer.*`, off by default) reads intercompany's `dev.passage.interco.chargeinvoice.requested.v1` (topic
+`passage.interco.chargeinvoice`, KafkaUser `deploy/kafka/billing-consumer.yaml`, dead-letter topic `passage.billing.iccharge.dlq`) and
+raises the lender's FREE_TEXT invoice proposal in the lender's legal entity for the pairing's customer account: one line at the
+charge's price on `BILLING_IC_REVENUE_ACCOUNT` (chart `consumer.icCharge.revenueAccount`, required), with the charge's tax code or
+`BILLING_IC_TAX_CODE`, quoted by the `BILLING_TAX_RATES` engine, due after `BILLING_IC_PAYMENT_TERM_DAYS` (default 30). It runs as the
+service principal `billing-iccharge` (flag duty `billing.iccharge.from-event`). The proposal is keyed `ic-charge:<charge>:<version>`,
+so a redelivery creates nothing; a person posts it. A charge whose lender has no legal entity in the registry or whose pairing names
+no customer id goes to the dead-letter topic.

@@ -33,7 +33,11 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
-	if err := run(context.Background(), os.Getenv); err != nil {
+	start := run
+	if len(os.Args) > 1 && os.Args[1] == "consume" {
+		start = consume
+	}
+	if err := start(context.Background(), os.Getenv); err != nil {
 		slog.Error("payables stopped", "err", err)
 		os.Exit(1)
 	}

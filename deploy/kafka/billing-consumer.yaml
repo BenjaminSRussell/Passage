@@ -1,0 +1,38 @@
+# The billing intercompany charge consumer (#40, `billing consume`, group billing-iccharge) raises the lender's invoice proposal of intercompany's
+# chargeinvoice.requested (Invoice settlement mode) and parks what it cannot apply on passage.billing.iccharge.dlq. The chart's
+# consumer.kafka.username names this user. Literal ACLs: the user reads only intercompany's chargeinvoice topic (outbox-intercompany
+# in connect.yaml creates it) and writes only its dead-letter topic. The consumer stays off in dev until it is enabled in the billing
+# chart.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: billing-consumer
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: passage.interco.chargeinvoice, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.billing.iccharge.dlq, patternType: literal}
+        operations: [Write, Describe]
+      - resource: {type: group, name: billing-iccharge, patternType: literal}
+        operations: [Read, Describe]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: passage-billing-iccharge-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage
+spec:
+  topicName: passage.billing.iccharge.dlq
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: 2592000000

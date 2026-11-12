@@ -3205,3 +3205,13 @@ test_edi_punchout_suppliers_for_requesters if {
 	allowed("edi.requisition.create", "GET", "/edi/v1/punchout/suppliers")
 	not allowed("edi.operate", "GET", "/edi/v1/punchout/suppliers")
 }
+
+# #40: the IC charge consumers of billing and payables hold one flag duty each, which opens no route.
+test_iccharge_consumers_hold_only_their_flag_duty if {
+	data.service_principals["billing-iccharge"] == ["billing.iccharge.from-event"]
+	data.service_principals["payables-iccharge"] == ["payables.iccharge.from-event"]
+	data.duties["billing.iccharge.from-event"].flag
+	data.duties["payables.iccharge.from-event"].flag
+	not allowed("billing.iccharge.from-event", "POST", "/v1/billing/free-text-invoices")
+	not allowed("payables.iccharge.from-event", "POST", "/v1/payables/vendor-invoice-intake")
+}
