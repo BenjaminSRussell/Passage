@@ -131,13 +131,13 @@ describe("questionnaires", () => {
     expect(await screen.findByText("We couldn't find this schedule")).toBeTruthy();
   });
 
-  it("opens the results of a schedule by its id", async () => {
+  it("opens the results of a schedule picked by its questionnaire", async () => {
     api.handler = routes({ "GET /api/v1/hr/questionnaires": json(200, { items: [] }), [`GET ${resultsUrl}`]: json(200, results()) });
     renderAt("/hr/questionnaires");
-    fireEvent.change(await screen.findByLabelText("Schedule id"), { target: { value: "nope" } });
+    await screen.findByLabelText("Schedule");
     fireEvent.click(screen.getByRole("button", { name: "Open results" }));
-    expect(await screen.findByText("Enter the schedule's id.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Schedule id"), { target: { value: SCHEDULE } });
+    expect(await screen.findByText("Choose the schedule.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Schedule"), { target: { value: SCHEDULE } });
     fireEvent.click(screen.getByRole("button", { name: "Open results" }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(`/hr/questionnaires/schedules/${SCHEDULE}/results`));
   });

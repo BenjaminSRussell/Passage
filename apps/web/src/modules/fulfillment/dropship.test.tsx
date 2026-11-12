@@ -30,6 +30,7 @@ describe("drop-ships list and create form", () => {
     expect(within(table).getByText("Confirmed")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "OPEN" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.pathname === LIST && c.url.searchParams.get("status") === "OPEN")).toBe(true));
   });
 
@@ -42,7 +43,7 @@ describe("drop-ships list and create form", () => {
   it("explains a load failure", async () => {
     server.handler = (url) => (url.pathname === LIST ? json(403, { code: "AUTH-0003", detail: "missing duty" }) : undefined);
     renderAt("/fulfillment/drop-ships");
-    expect(await findAlert()).toHaveTextContent(/Could not load the drop-ships/);
+    expect(await findAlert()).toHaveTextContent(/You can't view drop-ships/);
   });
 
   it("validates the form, then creates a drop-ship with one key", async () => {

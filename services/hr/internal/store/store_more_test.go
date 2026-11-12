@@ -86,6 +86,12 @@ func TestTerminationDateIsTheLastDayEmployed(t *testing.T) {
 	if err != nil || len(all) != 1 || all[0].ID != e.ID {
 		t.Fatalf("list employments = %+v err=%v", all, err)
 	}
+	one, err := s.GetEmployment(ctx, e.ID)
+	if err != nil || one.ID != e.ID || one.WorkerID != w.ID || one.Status != all[0].Status {
+		t.Fatalf("get employment = %+v err=%v", one, err)
+	}
+	_, err = s.GetEmployment(ctx, ids.New())
+	requireCode(t, err, CodeEmploymentMissing)
 }
 
 // TestAssignmentMustFitEmploymentAndPosition: the assignment range lies inside

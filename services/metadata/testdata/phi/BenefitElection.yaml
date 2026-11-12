@@ -1,0 +1,14 @@
+name: BenefitElection
+domain: hr
+table_group: main
+audit: true
+title_fields: [plan_code]
+fields:
+  - {name: plan_code, type: string, length: 20, required: true}
+  - {name: employee_ref, type: uuid, required: true}
+  - {name: coverage_tier, type: string, length: 40, pii: sensitive, phi: true, encrypted: true}
+  - {name: medical_leave_reason, type: text, pii: sensitive, phi: true, encrypted: true}
+  - {name: accommodation_note, type: bytes, phi: true, encrypted: true}
+  - {name: payroll_memo, type: text, encrypted: true}
+indexes:
+  - {fields: [employee_ref]}

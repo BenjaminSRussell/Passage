@@ -14,6 +14,15 @@ pagerDuty:
   routingKeySecret: pagerduty
   routingKeyKey: routing-key
   severity: error
+# Alert receiver inside the boundary (#602). Rendered instead of PagerDuty when the cloud profile has none in its egress
+# allowlist (gcc, gcc-high, dod, china, and the eu-data-boundary and hipaa overlays), or when enabled here. Point url at a
+# cluster-internal bridge or an in-boundary endpoint such as an Azure Monitor action group webhook; keep the bearer token
+# in the Secret named by tokenSecret (file credentials, never the ConfigMap).
+alertWebhook:
+  enabled: false
+  url: http://alert-bridge.observability.svc:8080/alerts
+  tokenSecret: alert-webhook
+  tokenKey: token
 slo:
   availability: "99.9"
   latencyP95Ms: 50

@@ -34,6 +34,14 @@ spec:
         {{- end }}
       ports:
         - { protocol: TCP, port: 8080 }
+    {{- if .Values.sessionStore.url }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.sessionStore.namespace | quote }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.sessionStore.port }} }
+    {{- end }}
     - to:
         - ipBlock: { cidr: {{ .Values.networkPolicy.identityProviderCidr | quote }} }
       ports:

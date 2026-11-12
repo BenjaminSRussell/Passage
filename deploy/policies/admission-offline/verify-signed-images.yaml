@@ -1,0 +1,101 @@
+# Offline variant of verify-signed-images for an enclave with no internet egress (IL6 readiness, #603). The release
+# workflow's keyless Sigstore signatures need Fulcio, Rekor and GitHub's OIDC issuer, none of which an air-gapped cluster can
+# reach. Here the bundle's images (deploy/offline) are signed with an offline cosign key, and this policy verifies them
+# against that public key, held in the policy itself, with the transparency log and certificate transparency checks off
+# (there is no log to ask). Install it instead of verify-signed-images, with `offline_bundle.py` filling in REGISTRY_HOST
+# (the in-enclave registry) and the public key; deploy/offline/README in docs/ops/dod-il5.md.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-signed-images-offline
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+    policies.kyverno.io/title: Require signed images with an SBOM attestation
+    pod-policies.kyverno.io/autogen-controllers: none
+spec:
+  failurePolicy: Fail
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: require-digest-pinned-images
+      match:
+        any:
+          - resources:
+              kinds: [Pod, Pod/ephemeralcontainers]
+              namespaces: [hello-ledger, passage-*]
+      validate:
+        failureAction: Enforce
+        message: Images under REGISTRY_HOST/ must be referenced by @sha256 digest, not a mutable tag.
+        foreach:
+          - list: request.object.spec.containers
+            preconditions:
+              any:
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: REGISTRY_HOST/*
+            deny:
+              conditions:
+                all:
+                  - key: "{{ regex_match('@sha256:[0-9a-f]{64}$', element.image) }}"
+                    operator: Equals
+                    value: false
+          - list: request.object.spec.initContainers || `[]`
+            preconditions:
+              any:
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: REGISTRY_HOST/*
+            deny:
+              conditions:
+                all:
+                  - key: "{{ regex_match('@sha256:[0-9a-f]{64}$', element.image) }}"
+                    operator: Equals
+                    value: false
+          - list: request.object.spec.ephemeralContainers || `[]`
+            preconditions:
+              any:
+                - key: "{{ element.image }}"
+                  operator: Equals
+                  value: REGISTRY_HOST/*
+            deny:
+              conditions:
+                all:
+                  - key: "{{ regex_match('@sha256:[0-9a-f]{64}$', element.image) }}"
+                    operator: Equals
+                    value: false
+    - name: verify-cosign-signature-and-sbom
+      match:
+        any:
+          - resources:
+              kinds: [Pod, Pod/ephemeralcontainers]
+              namespaces: [hello-ledger, passage-*]
+      verifyImages:
+        - type: Cosign
+          failureAction: Enforce
+          imageReferences:
+            - REGISTRY_HOST/*
+          required: true
+          mutateDigest: false
+          verifyDigest: true
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    publicKeys: |-
+                      REPLACE_WITH_COSIGN_PUBLIC_KEY
+                    rekor:
+                      ignoreTlog: true
+                    ctlog:
+                      ignoreSCT: true
+          attestations:
+            - type: https://spdx.dev/Document
+              attestors:
+                - count: 1
+                  entries:
+                    - keys:
+                        publicKeys: |-
+                          REPLACE_WITH_COSIGN_PUBLIC_KEY
+                        rekor:
+                          ignoreTlog: true
+                        ctlog:
+                          ignoreSCT: true

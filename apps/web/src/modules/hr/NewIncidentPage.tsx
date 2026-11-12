@@ -74,7 +74,7 @@ export function validateIncident(v: IncidentValues, now: Date = new Date()): { e
   }
   if (v.recordable !== "" && v.overrideReason.trim() === "") errors.overrideReason = "Say why you are overriding the recordable decision.";
   if (v.overrideReason.trim().length > 500) errors.overrideReason = "Use up to 500 characters.";
-  if (v.supersedesId.trim() !== "" && !UUID.test(v.supersedesId.trim())) errors.supersedesId = "Enter the corrected incident's id.";
+  if (v.supersedesId.trim() !== "" && !UUID.test(v.supersedesId.trim())) errors.supersedesId = "Choose the closed incident being corrected.";
   const witnesses = lines(v.witnesses);
   const treatments = lines(v.treatments);
   if (witnesses.length > 20 || witnesses.some((w) => w.length > 120)) errors.witnesses = "Up to 20 names of at most 120 characters, one per line.";
@@ -208,7 +208,17 @@ export function NewIncidentPage() {
             placeholder="Let the service decide"
           />
           {values.recordable !== "" ? text("overrideReason", "Reason for the override") : null}
-          {text("supersedesId", "Corrects incident id", { optional: true, hint: "Only for correcting a closed incident." })}
+          <LookupField
+            entity="incident"
+            prefill={false}
+            id="incident-supersedesId"
+            label="Corrects incident"
+            optional
+            hint="Only for correcting a closed incident; lists closed cases (safety administrators)."
+            value={values.supersedesId}
+            error={form.errors.supersedesId}
+            onChange={(supersedesId) => set({ supersedesId })}
+          />
           {area("description", "What happened", false)}
           {area("witnesses", "Witnesses", true, "One name per line.")}
           {area("treatments", "Treatments", true, "One per line.")}

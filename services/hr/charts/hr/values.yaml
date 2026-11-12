@@ -31,6 +31,11 @@ config:
   actionSweepInterval: "15m"
   # Kill switch for POST /v1/hr/candidates/purge and the retention-purge CronJob; "false" turns both off.
   retentionPurgeEnabled: "true"
+  # PASSAGE_PHI_READ_AUDIT: records every read of protected health information (benefits elections, life events) in the
+  # audit service before the data is returned (#606). "" or "auto" follows the cloud profile (on when global.cloudOverlays
+  # includes hipaa); "true" forces it on, "false" off. When on, the pod needs auditUrl and serviceIdentity.signingKeySecret,
+  # and audit must list this service's public key (audit chart serviceIdentity.publicKeys).
+  phiReadAudit: ""
 
 # CronJob running `hr reseal-pii <tenant-id>...` (#335). Idempotent: a tenant with nothing legacy logs rewritten=0.
 # Tenants are listed because the app role cannot enumerate them. Off by default.
@@ -57,6 +62,9 @@ retentionPurge:
 
 # Defaults to http://compliance-compliance.<namespace>.svc:8080.
 complianceUrl: ""
+
+# The audit service that receives PHI read records (AUDIT_URL). Defaults to http://audit-audit.<namespace>.svc:8080.
+auditUrl: ""
 
 # Requisitions without a requisitionNumber take the next number of the REQ sequence from numbering (#266).
 numberingUrl: ""

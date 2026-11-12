@@ -103,9 +103,20 @@ export async function download(path: string, fallbackName: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
-export async function signOut(): Promise<void> {
-  await request<void>("POST", "/bff/logout", undefined).catch(() => undefined);
-  window.location.assign("/");
+/**
+ * Ends the session here and sends the browser to Keycloak's end-session endpoint, so the single sign-on session ends too. When the
+ * portal could not end the session (its session store is down, or the request failed) the browser stays and the message to show is
+ * returned; the server has cleared the cookie on this device all the same.
+ */
+export async function signOut(go: (url: string) => void = (url) => window.location.assign(url)): Promise<string | null> {
+  try {
+    const out = await request<{ logoutUrl?: string } | undefined>("POST", "/bff/logout", undefined);
+    go(out && typeof out.logoutUrl === "string" ? out.logoutUrl : "/");
+    return null;
+  } catch (err) {
+    const detail = err instanceof Error && err.message ? ` (${err.message})` : "";
+    return `Sign-out did not finish${detail}. This device no longer holds your session; close the browser, or try again in a minute to sign out everywhere.`;
+  }
 }
 
 /** A file as base64, for the upload endpoints. */

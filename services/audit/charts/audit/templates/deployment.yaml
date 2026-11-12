@@ -36,6 +36,10 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+{{- if .Values.serviceIdentity.publicKeys }}
+            - { name: PASSAGE_SERVICE_NAME, value: audit }
+            - { name: PASSAGE_SERVICE_PUBLIC_KEYS, value: {{ .Values.serviceIdentity.publicKeys | quote }} }
+{{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

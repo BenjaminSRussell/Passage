@@ -148,6 +148,27 @@ func (a *API) createSchedule(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, status, out)
 }
 
+// listSchedules is GET /v1/hr/questionnaires/schedules (hr.questionnaire.admin):
+// every schedule with its questionnaire's name, newest first, for the results
+// lookup. questionnaireId narrows it to one questionnaire.
+func (a *API) listSchedules(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	questionnaireID := r.URL.Query().Get("questionnaireId")
+	if questionnaireID != "" && !ids.Valid(questionnaireID) {
+		validationFailed(w, r, map[string]string{"questionnaireId": "must be a UUID"})
+		return
+	}
+	items, err := a.store.ListSchedules(r.Context(), questionnaireID)
+	if err != nil {
+		logFailure(r, "list questionnaire schedules", err)
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, listResponse[store.ScheduleSummary]{Items: items})
+}
+
 // openSchedules is GET /v1/hr/questionnaires/schedules/open (hr.questionnaire.self).
 func (a *API) openSchedules(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {

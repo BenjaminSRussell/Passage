@@ -1,12 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Button, Card, FormField, Input, ListPage, loadedRows, type DataTableColumn, type ListFilterDef, type ListQuery } from "../../shell/ui";
 import { describeProblem, listProductPackaging, saveProductPackaging, type ProductPackaging, type Problem } from "./api/client";
 import { DECIMAL, MATERIAL_CODE, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { PlainName } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<ProductPackaging>[] = [
@@ -24,10 +23,15 @@ interface Values {
 const blank: Values = { productId: "", materialCode: "", weightPerUnitKg: "" };
 
 /** Packaging materials per product unit (FR-28.14): the weights the packaging fee is computed from. */
+const packagingFilters: ListFilterDef[] = [{ kind: "entity", key: "productId", label: "Product", entity: "product" }];
+
 export function ProductPackagingPage() {
-  const [product, setProduct] = useState("");
-  const filter = UUID.test(product.trim()) ? product.trim() : "";
-  const state = useLoad((signal) => listProductPackaging({ productId: filter }, signal), filter);
+  // Bumped after a save, so the list reads the saved packaging.
+  const [reloads, setReloads] = useState(0);
+  const usePackagingRows = (query: ListQuery) => {
+    const filter = query.filters.productId ?? "";
+    return loadedRows(useLoad((signal) => listProductPackaging({ productId: filter }, signal), `${filter}-${reloads}`));
+  };
   const [values, setValues] = useState<Values>(blank);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -59,7 +63,7 @@ export function ProductPackagingPage() {
       key.renew();
       setValues(blank);
       setNotice(`Saved ${saved.weightPerUnitKg} kg ${saved.materialCode} per unit of product ${shortId(saved.productId)}.`);
-      state.reload();
+      setReloads((n) => n + 1);
     } catch (error) {
       setFailure(describeProblem(error));
       key.renew();
@@ -69,34 +73,23 @@ export function ProductPackagingPage() {
   }
 
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Packaging materials"
-        description="The packaging each sold unit carries, per material. A packing slip posted with a ship-to country rates these weights as the statistical packaging fee."
-      />
-      <div className={styles.toolbar}>
-        <FormField id="packaging-product" label="Product" hint="Show the packaging of one product." optional>
-          {(control) => <EntityLookup entity="product" {...control} value={product} onChange={(event) => setProduct(event.target.value)} />}
-        </FormField>
-      </div>
-      {state.error ? (
-        <Alert tone="danger" title="Could not load packaging materials" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Packaging per product unit"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => `${row.productId}-${row.materialCode}`}
-          loading={state.loading}
-          onRowOpen={(row) => {
-            setValues({ productId: row.productId, materialCode: row.materialCode, weightPerUnitKg: row.weightPerUnitKg });
-            key.renew();
-          }}
-          empty={{ title: "No packaging recorded", description: "Add the packaging material weight per unit of each product you ship." }}
-        />
-      )}
+    <ListPage
+      id="fulfillment-product-packaging"
+      title="Packaging materials"
+      description="The packaging each sold unit carries, per material. A packing slip posted with a ship-to country rates these weights as the statistical packaging fee."
+      noun="packaging rows"
+      singular="packaging row"
+      columns={columns}
+      filters={packagingFilters}
+      useRows={usePackagingRows}
+      getRowKey={(row) => `${row.productId}-${row.materialCode}`}
+      onRowOpen={(row) => {
+        setValues({ productId: row.productId, materialCode: row.materialCode, weightPerUnitKg: row.weightPerUnitKg });
+        key.renew();
+      }}
+      empty={{ title: "No packaging recorded", description: "Add the packaging material weight per unit of each product you ship." }}
+      footer={
+        <>
       <Card title="Set the packaging of a product">
         <form className={styles.form} onSubmit={submit} noValidate>
           <p className={styles.note}>Saving the same product and material replaces the weight. A weight of 0 stops the material counting.</p>
@@ -122,6 +115,8 @@ export function ProductPackagingPage() {
           </div>
         </form>
       </Card>
-    </div>
+        </>
+      }
+    />
   );
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/phiaudit"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/numbering"
@@ -96,6 +97,11 @@ type API struct {
 	reviewsSignedOff     atomic.Int64
 	profileChanges       atomic.Int64
 	profileDecisions     atomic.Int64
+	// phiAudit records reads of protected health information (#606); nil means read auditing is off.
+	phiAudit phiaudit.Recorder
+	// listWorkerBenefits is the benefits read; tests replace it to run the handler without a database.
+	listWorkerBenefits func(ctx context.Context, workerID string, ownOnly bool) (store.WorkerBenefits, error)
+	phiReads           atomic.Int64
 }
 
 // Sequencer allocates the next formatted number of a numbering sequence.
@@ -105,7 +111,14 @@ type Sequencer interface {
 
 // New builds the API over a store.
 func New(s *store.Postgres) *API {
-	return &API{store: s, sequence: numbering.Unavailable{}, purgeEnabled: true}
+	return &API{store: s, sequence: numbering.Unavailable{}, purgeEnabled: true, listWorkerBenefits: s.ListWorkerBenefits}
+}
+
+// WithPHIReadAudit turns on read-access auditing: every read that returns protected health information is recorded
+// with rec (the audit service) before the data is returned, and is refused when it cannot be recorded.
+func (a *API) WithPHIReadAudit(rec phiaudit.Recorder) *API {
+	a.phiAudit = rec
+	return a
 }
 
 func (a *API) WithLegalHolds(h store.CandidateHolds) *API {
@@ -123,7 +136,8 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/workers", a.createWorker)
 	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/workers", a.listWorkers)
-	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/workers/{id}/employments", workerRoute(a.listEmployments))
+	r.With(authz.RequireAnyDuty(dutyWorkerInquire, dutyActionMaintain)).Get("/v1/hr/workers/{id}/employments", workerRoute(a.listEmployments))
+	r.With(authz.RequireAnyDuty(dutyWorkerInquire, dutyActionMaintain)).Get("/v1/hr/employments/{id}", idRoute(store.CodeEmploymentMissing, "employment not found", a.getEmployment))
 	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/positions", a.listPositions)
 	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/positions/{id}", positionRoute(a.getPosition))
 	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/workers/{id}", workerRoute(a.getWorker))
@@ -150,7 +164,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyEssBenefits)).Post("/v1/hr/benefits/life-events", a.createLifeEvent)
 	r.With(authz.RequireDuty(dutyEssBenefits)).Post("/v1/hr/benefits/enrollments", a.createBenefitEnrollment)
 	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/benefits/enrollments/{id}/end", enrollmentRoute(a.endBenefitEnrollment))
-	r.With(authz.RequireDuty(dutyEssBenefits)).Get("/v1/hr/workers/{id}/benefits", workerRoute(a.workerBenefits))
+	r.With(authz.RequireAnyDuty(dutyEssBenefits, dutyBenefitsBreakGlass)).Get("/v1/hr/workers/{id}/benefits", workerRoute(a.workerBenefits))
 	r.With(authz.RequireDuty(dutySetupAdmin)).Post("/v1/hr/skills", a.createSkill)
 	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/skills", a.listSkills)
 	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/skills/search", a.searchSkills)
@@ -192,7 +206,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/loaned-items/outstanding", a.outstandingLoans)
 	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/loaned-items/{id}/close", loanRoute(a.closeLoanedItem))
 	r.With(authz.RequireDuty(dutySetupAdmin)).Post("/v1/hr/checklist-templates", a.createChecklistTemplate)
-	r.With(authz.RequireDuty(dutySetupAdmin)).Get("/v1/hr/checklist-templates", a.listChecklistTemplates)
+	// Starting a checklist (hr.action.maintain) picks a template, so the starter reads the template list too.
+	r.With(authz.RequireAnyDuty(dutySetupAdmin, dutyActionMaintain)).Get("/v1/hr/checklist-templates", a.listChecklistTemplates)
 	r.With(authz.RequireDuty(dutyActionMaintain)).Post("/v1/hr/workers/{id}/checklists", workerRoute(a.startChecklist))
 	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/workers/{id}/checklists", workerRoute(a.listWorkerChecklists))
 	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/checklists/{id}", checklistRoute(a.getChecklist))
@@ -203,8 +218,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires", a.listQuestionnaires)
 	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/{id}", questionnaireRoute(a.getQuestionnaire))
 	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Post("/v1/hr/questionnaires/schedules", a.createSchedule)
+	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/schedules", a.listSchedules)
 	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Get("/v1/hr/questionnaires/schedules/open", a.openSchedules)
-	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Get("/v1/hr/questionnaires/schedules/{id}", scheduleRoute(a.getSchedule))
+	r.With(authz.RequireAnyDuty(dutyEssQuestionnaire, dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/schedules/{id}", scheduleRoute(a.getSchedule))
 	r.With(authz.RequireDuty(dutyEssQuestionnaire)).Post("/v1/hr/questionnaires/schedules/{id}/answers", scheduleRoute(a.submitAnswers))
 	r.With(authz.RequireDuty(dutyQuestionnaireAdmin)).Get("/v1/hr/questionnaires/schedules/{id}/results", scheduleRoute(a.scheduleResults))
 	a.registerSelfService(r)
@@ -250,6 +266,7 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_benefit_simulations_total", "Whole-workforce eligibility simulations run.", a.simulations.Load())
 		counter("hr_benefit_enrollments_total", "Benefit enrollments recorded; idempotent replays are not counted.", a.enrollments.Load())
 		counter("hr_benefit_enrollments_ended_total", "Benefit enrollments ended; repeated ends are not counted.", a.enrollmentsEnded.Load())
+		counter("hr_phi_reads_recorded_total", "Reads of protected health information recorded in the audit service.", a.phiReads.Load())
 		counter("hr_skills_created_total", "Catalog skills created; idempotent replays are not counted.", a.skillsCreated.Load())
 		counter("hr_worker_skill_ratings_total", "Worker skill ratings that changed a stored rating or date.", a.skillRatings.Load())
 		counter("hr_certifications_issued_total", "Certifications issued; idempotent replays are not counted.", a.certsIssued.Load())

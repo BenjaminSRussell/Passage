@@ -685,3 +685,23 @@ func TestPostgres_ResourceAPI_EndToEnd(t *testing.T) {
 		t.Fatalf("duplicate capability = %d %s", rec.Code, rec.Body)
 	}
 }
+
+// The resource lookup serves the lean work cell board and the EAM downtime form, so their duties read resources;
+// they still cannot write one or read anything else of engineering.
+func TestResourceReads_TakeTheLookupUsersDuties(t *testing.T) {
+	r, _ := newRouter(&fakeStore{}, approves)
+	calendarID, resourceID := seedResource(t, r)
+	for _, duty := range []string{"lean.kanban.work", "eam.work-order.execute", "eam.work.plan"} {
+		for _, path := range []string{resourcesPath, resourcesPath + "/" + resourceID} {
+			if rec := do(r, http.MethodGet, path, "", duty, true); rec.Code != http.StatusOK {
+				t.Fatalf("%s reading %s = %d %s; want 200", duty, path, rec.Code, rec.Body)
+			}
+		}
+		if rec := do(r, http.MethodPost, resourcesPath, `{"code":"M8","name":"Mill","type":"machine","siteId":"S1"}`, duty, true); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s creating a resource = %d; want 403", duty, rec.Code)
+		}
+		if rec := do(r, http.MethodGet, calendarsPath+"/"+calendarID+"/days?from=2026-01-01&to=2026-01-02", "", duty, true); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s reading calendar days = %d; want 403", duty, rec.Code)
+		}
+	}
+}

@@ -3,6 +3,8 @@
 // (FR-28.4). Each form keeps one
 // Idempotency-Key until its values change, and sends the shipment version as If-Match.
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { rememberOption } from "../../shell/lookup/entities";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import { Button, Card, DataTable, FormField, Input, Select, type DataTableColumn } from "../../shell/ui";
 import {
   confirmPick,
@@ -10,6 +12,7 @@ import {
   describeProblem,
   getLegalEntitySetting,
   getOperationRule,
+  getStandardCost,
   listDeliveryTolerances,
   packContainer,
   postPackingSlip,
@@ -404,8 +407,28 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
   const key = useCommandKey();
 
   function setCost(id: string, patch: Partial<CostValues>) {
-    setCosts({ ...costs, [id]: { ...costs[id], ...patch } });
+    setCosts((all) => ({ ...all, [id]: { ...all[id], ...patch } }));
     key.renew();
+  }
+
+  // Fills a line's unit cost and cost version from the product's active standard cost at the warehouse's site.
+  const [costing, setCosting] = useState<string | null>(null);
+  async function fillStandardCost(line: ShipmentLine) {
+    setCosting(line.id);
+    setErrors((all) => ({ ...all, [`${line.id}-cost`]: "" }));
+    try {
+      const found = await getStandardCost(line.productId, shipment.warehouseId);
+      if (!found) {
+        setErrors((all) => ({ ...all, [`${line.id}-cost`]: "No standard cost is active for this product at the warehouse's site; enter the unit cost and its cost version." }));
+        return;
+      }
+      rememberOption("costVersion", { id: found.versionId, name: found.versionCode || "Standard cost", currency: found.currency });
+      setCost(line.id, { unitCost: found.unitCost, costSnapshotId: found.versionId });
+    } catch {
+      setErrors((all) => ({ ...all, [`${line.id}-cost`]: "The standard cost could not be read; enter the unit cost and its cost version." }));
+    } finally {
+      setCosting(null);
+    }
   }
 
   const priced = open.filter((l) => DECIMAL.test((costs[l.id]?.unitCost ?? "").trim()));
@@ -431,7 +454,7 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
     for (const l of open) {
       const c = costs[l.id] ?? { unitCost: "", costSnapshotId: "" };
       if (!DECIMAL.test(c.unitCost.trim())) found[`${l.id}-cost`] = "Enter the unit cost, 0 or more, with at most 6 decimals.";
-      if (c.costSnapshotId.trim() === "" || c.costSnapshotId.trim().length > 128) found[`${l.id}-snapshot`] = "Enter the cost snapshot id.";
+      if (c.costSnapshotId.trim() === "" || c.costSnapshotId.trim().length > 128) found[`${l.id}-snapshot`] = "Choose the cost version the unit cost comes from.";
     }
     setErrors(found);
     setFailure(null);
@@ -506,9 +529,20 @@ export function PostForm({ shipment, onPosted }: { shipment: Shipment; onPosted(
             <FormField id={`post-${l.id}-cost`} label="Unit cost" error={errors[`${l.id}-cost`]}>
               {(control) => <Input {...control} inputMode="decimal" value={costs[l.id]?.unitCost ?? ""} invalid={Boolean(errors[`${l.id}-cost`])} onChange={(event) => setCost(l.id, { unitCost: event.target.value })} />}
             </FormField>
-            <FormField id={`post-${l.id}-snapshot`} label="Cost snapshot id" error={errors[`${l.id}-snapshot`]}>
-              {(control) => <Input {...control} maxLength={128} value={costs[l.id]?.costSnapshotId ?? ""} invalid={Boolean(errors[`${l.id}-snapshot`])} onChange={(event) => setCost(l.id, { costSnapshotId: event.target.value })} />}
-            </FormField>
+            <LookupFormField
+              id={`post-${l.id}-snapshot`}
+              label="Cost version"
+              entity="costVersion"
+              prefill={false}
+              hint="The costing version the unit cost comes from."
+              scope={{ legalEntityId: shipment.legalEntityId }}
+              value={costs[l.id]?.costSnapshotId ?? ""}
+              error={errors[`${l.id}-snapshot`]}
+              onChange={(costSnapshotId) => setCost(l.id, { costSnapshotId })}
+            />
+            <Button size="sm" onClick={() => void fillStandardCost(l)} disabled={costing === l.id}>
+              {costing === l.id ? "Reading the standard cost…" : "Use the standard cost"}
+            </Button>
           </fieldset>
         ))}
         <div className={styles.formActions}>

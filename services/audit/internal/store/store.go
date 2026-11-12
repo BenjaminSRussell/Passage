@@ -60,6 +60,14 @@ type Store interface {
 	CreateRule(ctx context.Context, rule AlertRule) (AlertRule, error)
 	ListAlerts(ctx context.Context) ([]Alert, error)
 	Ping(ctx context.Context) error
+	// The PHI read-access log (#606): an append-only, hash-chained record of reads of protected health information.
+	RecordRead(ctx context.Context, read domain.Read) (ReadRecord, error)
+	ListReads(ctx context.Context, f ReadFilter) ([]ReadRecord, error)
+	VerifyReads(ctx context.Context) (ReadChain, error)
+	ExportReads(ctx context.Context, f ReadFilter, begin func(ReadChain) error, each func(ReadRecord) error) error
+	// Break-glass reads and their review by a second person (#606).
+	ListBreakGlass(ctx context.Context, status string, limit int, afterSeq int64) ([]BreakGlassRead, error)
+	ReviewRead(ctx context.Context, readID, reviewerID, outcome, note string) (BreakGlassRead, error)
 }
 
 // Postgres implements Store.

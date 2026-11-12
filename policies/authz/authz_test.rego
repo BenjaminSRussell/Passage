@@ -3142,6 +3142,70 @@ test_consolidation_ic_layers_and_investments_register if {
 	not allowed("consolidation.configure", "GET", "/v1/consol/runs/r1/investments")
 }
 
+test_lookup_reads_reach_the_form_fillers if {
+	allowed("hr.action.maintain", "GET", "/v1/hr/checklist-templates")
+	allowed("hr.action.maintain", "GET", "/v1/hr/employments/e1")
+	allowed("hr.action.maintain", "GET", "/v1/hr/workers/w1/employments")
+	allowed("hr.worker.inquire", "GET", "/v1/hr/employments/e1")
+	allowed("hr.questionnaire.admin", "GET", "/v1/hr/questionnaires/schedules")
+	allowed("hr.questionnaire.admin", "GET", "/v1/hr/questionnaires/schedules/s1")
+	allowed("transport.gate.operate", "GET", "/v1/warehouse/dock-appointments")
+	allowed("transport.gate.operate", "GET", "/v1/warehouse/dock-appointments/a1")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/dock-appointments/a1")
+	allowed("lean.kanban.work", "GET", "/v1/engineering/resources")
+	allowed("eam.work-order.execute", "GET", "/v1/engineering/resources/r1")
+	allowed("eam.work.plan", "GET", "/v1/engineering/resources")
+	allowed("fulfillment.packing-slip.post", "GET", "/v1/costing/products/p1/cost")
+	allowed("fulfillment.packing-slip.post", "GET", "/v1/costing/versions/v1")
+	not allowed("hr.action.maintain", "POST", "/v1/hr/checklist-templates")
+	not allowed("transport.gate.operate", "POST", "/v1/warehouse/dock-appointments")
+	not allowed("lean.kanban.work", "POST", "/v1/engineering/resources")
+	not allowed("fulfillment.packing-slip.post", "GET", "/v1/costing/valuation-ledgers")
+	allowed("sales.order.write", "POST", "/v1/pricing/resolve")
+	not allowed("sales.order.write", "GET", "/v1/pricing/condition-records")
+}
+
+# HIPAA overlay (#606): reads of protected health information are recorded by the service that returned them (hr, under a
+# service-only duty), listed by an auditor, and exported with the chain verification under a separate export duty.
+test_audit_read_log_write_is_service_only_and_opens_only_the_record_route if {
+	data.duties["audit.read-log.write"].service_only
+	data.service_grants.hr.audit == ["audit.read-log.write"]
+	allowed("audit.read-log.write", "POST", "/v1/audit/reads")
+	not allowed("audit.read-log.write", "GET", "/v1/audit/reads")
+	not allowed("audit.read-log.write", "GET", "/v1/audit/reads:export")
+	not allowed("audit.read-log.write", "POST", "/v1/audit/changes")
+	not allowed("audit.write", "POST", "/v1/audit/reads")
+	not allowed("audit.read", "GET", "/v1/audit/reads")
+}
+
+test_audit_read_log_view_and_export_split if {
+	allowed("audit.read-log.view", "GET", "/v1/audit/reads")
+	not allowed("audit.read-log.view", "POST", "/v1/audit/reads")
+	not allowed("audit.read-log.view", "GET", "/v1/audit/reads:export")
+	not allowed("audit.read-log.view", "GET", "/v1/audit/reads:verify")
+	allowed("audit.read-log.export", "GET", "/v1/audit/reads:export")
+	allowed("audit.read-log.export", "GET", "/v1/audit/reads:verify")
+	not allowed("audit.read-log.export", "GET", "/v1/audit/reads")
+	not allowed("audit.read-log.export", "POST", "/v1/audit/reads")
+}
+
+# Break-glass reads of PHI are reviewed by a second person under their own duty; the viewer and exporter cannot review.
+test_hr_benefits_break_glass_opens_only_the_benefits_read if {
+	allowed("hr.benefits.break-glass", "GET", "/v1/hr/workers/w1/benefits")
+	not allowed("hr.benefits.break-glass", "POST", "/v1/hr/benefits/enrollments")
+	not allowed("hr.benefits.break-glass", "GET", "/v1/hr/workers/w1")
+}
+
+test_audit_read_log_review_opens_only_the_break_glass_queue if {
+	allowed("audit.read-log.review", "GET", "/v1/audit/reads:break-glass")
+	allowed("audit.read-log.review", "POST", "/v1/audit/reads/0b7f4c1e-1d2a-4c55-9a0e-5f3f1c2d9e10:review")
+	not allowed("audit.read-log.review", "GET", "/v1/audit/reads")
+	not allowed("audit.read-log.review", "GET", "/v1/audit/reads:export")
+	not allowed("audit.read-log.review", "POST", "/v1/audit/reads")
+	not allowed("audit.read-log.view", "GET", "/v1/audit/reads:break-glass")
+	not allowed("audit.read-log.export", "POST", "/v1/audit/reads/0b7f4c1e-1d2a-4c55-9a0e-5f3f1c2d9e10:review")
+}
+
 test_revrec_billing_holds_only_the_service_only_modification_duty if {
 	data.service_principals["revrec-billing"] == ["billing.contract-modification.bill"]
 	data.duties["billing.contract-modification.bill"].service_only

@@ -235,6 +235,8 @@ var serviceGrants = map[string]map[string][]string{
 		"warehouse": {"warehouse.work.execute", "warehouse.inquiry.view", "warehouse.receipt.register"},
 	},
 	"hr": {
+		// Records a read of protected health information on the caller's behalf (#606, HIPAA read-access log).
+		"audit":      {"audit.read-log.write"},
 		"compliance": {"compliance.legal-hold.check"},
 		"numbering":  {"numbering.sequence.allocate"},
 	},
@@ -321,11 +323,15 @@ func serviceGrant(iss, aud string) []string { return serviceGrants[iss][aud] }
 // (a party merge moves roles in every entity). A token carrying one names no
 // legal entity and carries no other duty, and every other token names one
 // entity, so a tenant-level duty never rides in an entity-scoped token (#450).
-var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}, "identity.tenant-registry.read": {}}
+//
+// audit.read-log.write records that the end user read protected health information (#606). The read log is
+// per tenant and the read may have been made with any scope, including ALL-scope and tenant-administrator callers
+// who have no legal-entity claim, so the token names no entity.
+var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}, "identity.tenant-registry.read": {}, "audit.read-log.write": {}}
 
-// tenantReadDuties are tenant-level duties that only read tenant settings, so any signed-in user's service call may
-// carry them; the rest of tenantLevelDuties need a tenant administrator.
-var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}, "identity.tenant-registry.read": {}}
+// tenantReadDuties are tenant-level duties any signed-in user's service call may carry: they read tenant settings, or
+// (audit.read-log.write) record the user's own access; the rest of tenantLevelDuties need a tenant administrator.
+var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}, "identity.tenant-registry.read": {}, "audit.read-log.write": {}}
 
 func tenantLevelToken(duties []string) (tenantLevel, mixed bool) {
 	n := 0

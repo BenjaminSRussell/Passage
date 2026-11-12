@@ -169,11 +169,31 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/hr/employments/{id}:
+    get:
+      operationId: getEmployment
+      summary: One employment with status as-of now (the employment lookup)
+      x-passage-duty: hr.worker.inquire
+      x-passage-also-duty: hr.action.maintain
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: The employment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employment"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /v1/hr/workers/{id}/employments:
     get:
       operationId: listEmployments
       summary: Every employment of a worker, oldest first, with status as-of now
       x-passage-duty: hr.worker.inquire
+      x-passage-also-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -961,9 +981,32 @@ paths:
       description: |
         A caller with only hr.benefits.self reads their own worker (HCM-BEN-NOT-OWN
         otherwise); hr.worker.inquire or hr.worker.maintain read anyone's.
+
+        Health-plan elections and life events are protected health information. With
+        PHI read auditing on (the hipaa cloud overlay or PASSAGE_PHI_READ_AUDIT=true) a
+        response that carries them is recorded in the audit service (POST
+        /v1/audit/reads: who, which record and fields, when, purpose) before it is
+        returned; the read needs `purpose` (an employee reading their own defaults to
+        self-service) and is refused with 503 HCM-PHI-AUDIT-UNAVAILABLE when the record
+        cannot be written.
+
+        Break-glass (emergency access): hr.benefits.break-glass also opens this route. A
+        caller without hr.worker.inquire who holds it reads anyone's benefits by giving a
+        purpose with the BREAK-GLASS reason code ("BREAK-GLASS: <reason>"); the read is
+        recorded and queued for review by a second person (GET
+        /v1/audit/reads:break-glass), even when the record holds no health-plan election.
+        With read auditing off such a read is refused with 403 HCM-BREAK-GLASS-UNAUDITED.
+        The reason code is reserved: a caller whose scope it would not widen gets 400.
       x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/WorkerId"
+        - name: purpose
+          in: query
+          required: false
+          description: Reason code or short reason for reading protected health information, at most 500 characters. Required when PHI read auditing is on, except for a worker reading their own record.
+          schema:
+            type: string
+            maxLength: 500
       responses:
         "200":
           description: The worker's benefits
@@ -971,11 +1014,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkerBenefits"
+        "400":
+          $ref: "#/components/responses/Problem"
         "401":
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
   /v1/hr/skills:
     get:
@@ -2832,6 +2879,7 @@ paths:
       operationId: listChecklistTemplates
       summary: Checklist templates, optionally of one kind
       x-passage-duty: hr.setup.admin
+      x-passage-also-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/TemplateKind"
       responses:
@@ -3091,6 +3139,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
   /v1/hr/questionnaires/schedules:
+    get:
+      operationId: listSchedules
+      summary: Every schedule with its questionnaire's code and name, newest opening first (at most 200)
+      x-passage-duty: hr.questionnaire.admin
+      parameters:
+        - name: questionnaireId
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleSummaryList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
     post:
       operationId: createSchedule
       summary: Schedule a questionnaire to a CEL population; the invited count is snapshotted
@@ -3151,6 +3221,7 @@ paths:
       operationId: getSchedule
       summary: A schedule with the questionnaire to fill in
       x-passage-duty: hr.questionnaire.self
+      x-passage-also-duty: hr.questionnaire.admin
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
@@ -7360,6 +7431,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/QuestionnaireSchedule"
+    ScheduleSummaryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/QuestionnaireSchedule"
+              - type: object
+                required: [questionnaireCode, questionnaireName]
+                properties:
+                  questionnaireCode: {type: string}
+                  questionnaireName: {type: string}
     ScheduleView:
       allOf:
         - $ref: "#/components/schemas/QuestionnaireSchedule"

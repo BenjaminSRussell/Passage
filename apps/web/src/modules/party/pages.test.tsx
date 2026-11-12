@@ -324,13 +324,16 @@ describe("duplicate candidates", () => {
 });
 
 describe("credit limit approvals", () => {
-  it("opens a pending change by id", async () => {
+  it("lists the held increases and opens one", async () => {
+    api.handler = (call) => (call.url.pathname === "/api/v1/party/pending-changes" ? json(200, { items: [change()] }) : undefined);
     renderAt("/party/pending-changes");
-    fireEvent.change(screen.getByLabelText("Pending change id"), {
-      target: { value: CHANGE },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Open change" }));
+    fireEvent.click(await screen.findByText(change().requestedValue));
     expect(screen.getByTestId("where")).toHaveTextContent(`/party/pending-changes/${CHANGE}`);
+  });
+
+  it("opens the change a link names", async () => {
+    renderAt(`/party/pending-changes?id=${CHANGE}`);
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/party/pending-changes/${CHANGE}`));
   });
 
   it("shows the held increase and approves it", async () => {

@@ -56,6 +56,10 @@ export interface ListPageProps<T> {
   title: string;
   description?: string;
   actions?: ReactNode;
+  /** A notice under the header that belongs to the data, such as "only the first 50,000 were measured". */
+  notice?: ReactNode;
+  /** What follows the list on the same page, such as the form that adds a row to it. */
+  footer?: ReactNode;
   noun: string;
   singular?: string;
   columns: ListColumn<T>[];
@@ -133,6 +137,8 @@ export function ListPage<T>({
   title,
   description,
   actions,
+  notice,
+  footer,
   noun,
   singular = noun,
   columns,
@@ -325,6 +331,7 @@ export function ListPage<T>({
   return (
     <div className={styles.page}>
       <PageHeader title={title} description={description} actions={actions} />
+      {notice}
       {blocked ? null : (
         <>
           {search ? (
@@ -444,6 +451,7 @@ export function ListPage<T>({
           </Button>
         </div>
       ) : null}
+      {footer}
     </div>
   );
 }

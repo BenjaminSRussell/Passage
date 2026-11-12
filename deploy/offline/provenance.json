@@ -1,0 +1,37 @@
+{
+  "comment": "Where each image and third-party chart in the offline bundle comes from, and how the build checks it (#603). An image or chart with no entry fails the build. Images: the first entry whose match (a glob over the repository, without tag or digest) fits is used; certificateIdentityRegexp and certificateOidcIssuer verify a keyless cosign signature, key verifies against a public key file, and unsignedUpstream (a reason) records that the publisher signs nothing the build can check. Every image is then re-signed and attested (SPDX SBOM) with the offline key whatever its upstream state. Charts: keyring runs helm pull --verify against that GPG keyring, sha256 pins the archive, and unverified (a reason) records why neither is possible. Run `offline_bundle.py pin-charts` on the connected build machine to pin the sha256 of every unverified chart.",
+  "images": [
+    {
+      "match": "ghcr.io/benjaminsrussell/*",
+      "certificateIdentityRegexp": "^https://github\\.com/BenjaminSRussell/Passage/\\.github/workflows/ci\\.yml@refs/(heads/main|tags/v.+)$",
+      "certificateOidcIssuer": "https://token.actions.githubusercontent.com",
+      "source": "the release job in .github/workflows/ci.yml signs keylessly; the same identity as deploy/policies/admission/verify-signed-images.yaml"
+    },
+    {
+      "match": "quay.io/keycloak/keycloak",
+      "unsignedUpstream": "no cosign identity for the Keycloak images has been confirmed; the image is pinned by digest, its SBOM generated here, and signed with the offline key"
+    }
+  ],
+  "charts": [
+    {
+      "chart": "strimzi-kafka-operator",
+      "unverified": "the publisher's chart provenance has not been confirmed (this repository's build environment cannot reach the chart repository); add the publisher's GPG keyring, or pin the archive with pin-charts on the connected build machine"
+    },
+    {
+      "chart": "kyverno",
+      "unverified": "the publisher's chart provenance has not been confirmed (this repository's build environment cannot reach the chart repository); add the publisher's GPG keyring, or pin the archive with pin-charts on the connected build machine"
+    },
+    {
+      "chart": "temporal",
+      "unverified": "the publisher's chart provenance has not been confirmed (this repository's build environment cannot reach the chart repository); add the publisher's GPG keyring, or pin the archive with pin-charts on the connected build machine"
+    },
+    {
+      "chart": "cert-manager",
+      "unverified": "the publisher's chart provenance has not been confirmed (this repository's build environment cannot reach the chart repository); add the publisher's GPG keyring, or pin the archive with pin-charts on the connected build machine"
+    },
+    {
+      "chart": "argo-cd",
+      "unverified": "the publisher's chart provenance has not been confirmed (this repository's build environment cannot reach the chart repository); add the publisher's GPG keyring, or pin the archive with pin-charts on the connected build machine"
+    }
+  ]
+}

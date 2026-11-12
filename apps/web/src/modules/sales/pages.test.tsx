@@ -363,8 +363,40 @@ describe("New sales order", () => {
     expect(await screen.findByText("Choose a product.")).toBeInTheDocument();
   });
 
+  it("fills the customer's net unit price with its group, refreshes it when the currency changes, and keeps a typed price", async () => {
+    const GROUP = "0195d6a0-0000-7000-8000-0000000000c9";
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/pricing/resolve") {
+        const body = JSON.parse(String(init.body)) as { currency: string };
+        // List price 900 less the customer's 10% line discount: the form takes the net price.
+        const [gross, net] = body.currency === "EUR" ? ["800", "720"] : ["900", "810"];
+        return { status: 200, body: { lines: [{ lineNo: 1, unit: "EA", quantity: "1", unitPrice: gross, netUnitPrice: net, lineNet: net, applied: [], trace: [] }] } };
+      }
+      if (url.pathname === `/api/v1/party/customers/${CUSTOMER}`) return { status: 200, body: { id: CUSTOMER, customerGroupId: GROUP } };
+      return { status: 200, body: order(), etag: '"1"' };
+    };
+    renderAt("/sales/orders/new");
+    const set = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    set("Legal entity", LE);
+    set("Customer", CUSTOMER);
+    await waitFor(() => expect(calls.some((c) => c.url.pathname === `/api/v1/party/customers/${CUSTOMER}`)).toBe(true));
+    set("Product", PRODUCT);
+    await waitFor(() => expect(screen.getByLabelText("Unit price")).toHaveValue("810"));
+    const resolve = calls.filter((c) => c.url.pathname === "/api/v1/pricing/resolve").at(-1);
+    expect(resolve?.body).toMatchObject({ legalEntityId: LE, customerId: CUSTOMER, customerGroupId: GROUP, currency: "USD", lines: [{ productId: PRODUCT, quantity: "1" }] });
+    // A prefilled price follows the currency.
+    set("Currency", "EUR");
+    await waitFor(() => expect(screen.getByLabelText("Unit price")).toHaveValue("720"));
+    // A typed price stays when the currency changes again.
+    set("Unit price", "700");
+    set("Currency", "USD");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByLabelText("Unit price")).toHaveValue("700");
+  });
+
   it("creates the order with an Idempotency-Key and opens it", async () => {
-    handler = (_url, init) => (init.method === "POST" ? { status: 201, body: order(), etag: '"1"' } : { status: 200, body: order(), etag: '"1"' });
+    handler = (url, init) =>
+      url.pathname.startsWith("/api/v1/pricing/") ? { status: 403, body: { code: "AUTH-0003" } } : init.method === "POST" ? { status: 201, body: order(), etag: '"1"' } : { status: 200, body: order(), etag: '"1"' };
     const { container } = renderAt("/sales/orders/new");
     expect(pageViolations(container)).toEqual([]);
     const set = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -377,7 +409,7 @@ describe("New sales order", () => {
     set("Warehouse", WAREHOUSE);
     fireEvent.click(screen.getByRole("button", { name: "Save draft order" }));
     expect(await screen.findByRole("heading", { name: "Sales order SO-0000042" })).toBeInTheDocument();
-    const post = calls.find((c) => c.method === "POST");
+    const post = calls.find((c) => c.method === "POST" && c.url.pathname === "/api/v1/sales/orders");
     expect(post?.headers.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     expect(post?.body).toMatchObject({ legalEntityId: LE, customerId: CUSTOMER, invoiceAccountId: CUSTOMER, lines: [{ productId: PRODUCT, quantity: "3", unitPrice: "1000" }] });
   });

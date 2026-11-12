@@ -45,8 +45,10 @@ describe("carrier manifests list", () => {
     expect(pageViolations(container)).toEqual([]);
     expect(screen.queryByRole("button", { name: "Close manifest" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "CLOSED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.pathname === LIST && c.url.searchParams.get("status") === "CLOSED")).toBe(true));
     fireEvent.change(screen.getByLabelText("Carrier"), { target: { value: "UPS" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.pathname === LIST && c.url.searchParams.get("carrier") === "ups")).toBe(true));
   });
 
@@ -60,7 +62,7 @@ describe("carrier manifests list", () => {
   it("explains a load failure", async () => {
     server.handler = (url) => (url.pathname === LIST ? json(403, { code: "AUTH-0003", detail: "missing duty" }) : url.pathname === CANDIDATES ? json(200, { items: [] }) : undefined);
     renderAt("/fulfillment/manifests");
-    expect(await findAlert()).toHaveTextContent(/Could not load the manifests/);
+    expect(await findAlert()).toHaveTextContent(/You can't view manifests/);
   });
 
   it("closes a manifest for the chosen group with one key and reloads", async () => {

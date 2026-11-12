@@ -148,3 +148,16 @@ func TestWithTenantTxReleasesTheConnectionWhenTheClosurePanics(t *testing.T) {
 		t.Fatalf("%d connections still acquired", n)
 	}
 }
+
+// Under a profile that requires verified TLS, Connect refuses a weaker sslmode before it dials (#602).
+func TestConnectRefusesWeakTLSUnderAGovernmentProfile(t *testing.T) {
+	t.Setenv("PASSAGE_CLOUD_PROFILE", "gcc-high")
+	_, err := dbx.Connect(context.Background(), "postgres://u:p@127.0.0.1:1/x?sslmode=disable")
+	if err == nil || !strings.Contains(err.Error(), "verify-full") {
+		t.Fatalf("Connect err = %v, want a verify-full refusal", err)
+	}
+	t.Setenv("PASSAGE_CLOUD_PROFILE", "no-such-profile")
+	if _, err := dbx.Connect(context.Background(), "postgres://u:p@127.0.0.1:1/x"); err == nil || !strings.Contains(err.Error(), "unknown cloud profile") {
+		t.Fatalf("a typo in the profile name must fail closed, got %v", err)
+	}
+}

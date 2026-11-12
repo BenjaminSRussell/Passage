@@ -47,3 +47,27 @@ func TestRun_MissingInputDir(t *testing.T) {
 		t.Error("failed run must not create the output directory")
 	}
 }
+
+func TestRun_PHIGoldenMatches(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"-in", "../../testdata/phi", "-out", "../../testdata/golden-phi", "-check"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRun_FailsWhenPHIFieldIsNotEncrypted(t *testing.T) {
+	in := t.TempDir()
+	def := "name: Foo\ndomain: test\ntable_group: main\nfields:\n  - {name: diagnosis, type: text, phi: true}\n"
+	if err := os.WriteFile(filepath.Join(in, "Foo.yaml"), []byte(def), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "out")
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"-in", in, "-out", out}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "MET-0010") {
+		t.Fatalf("entitygen must fail with MET-0010, got %v", err)
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Error("a failed run must not write artifacts")
+	}
+}

@@ -1,0 +1,8 @@
+# Images that no in-repo chart names, so `helm template` over this repository does not find them: the operators and
+# controllers of third-party charts the Argo CD Applications pull (deploy/envs/*/apps). One image reference per line,
+# by tag or digest; the build resolves a tag to a digest and records it in manifest.json.
+#
+# The build also pulls those third-party charts (offline_bundle.py plan lists them under thirdPartyCharts). Add the
+# images a chart's own values select here when you upgrade that chart: render it (`helm template`) and copy the image
+# lines. quay.io/keycloak and postgres are named by the in-repo charts and kustomize overlays and are found by the plan.
+quay.io/keycloak/keycloak:26.0.8

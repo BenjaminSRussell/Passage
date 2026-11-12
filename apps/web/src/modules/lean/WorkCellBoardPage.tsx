@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import { Link, useSearchParams } from "react-router-dom";
 import { Alert, Badge, Button, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatGroup, StatTile } from "../../shell/ui";
 import {
@@ -213,7 +214,7 @@ export function WorkCellBoardPage() {
     event.preventDefault();
     const value = cellDraft.trim();
     if (!UUID.test(value)) {
-      setCellError("Enter the work cell's resource id (a UUID).");
+      setCellError("Choose the work cell.");
       return;
     }
     setCellError(null);
@@ -302,9 +303,7 @@ export function WorkCellBoardPage() {
           </FormField>
         ) : null}
         <form className={styles.toolbar} onSubmit={chooseCell} noValidate>
-          <FormField id="cell-id" label="Work cell id" error={cellError ?? undefined}>
-            {(c) => <Input {...c} value={cellDraft} invalid={Boolean(cellError)} onChange={(e) => setCellDraft(e.target.value)} />}
-          </FormField>
+          <LookupFormField id="cell-id" label="Work cell" entity="resource" hint="Any work cell resource, also one no flow uses yet." value={cellDraft} error={cellError ?? undefined} onChange={(value) => setCellDraft(value)} />
           <Button type="submit">Show board</Button>
         </form>
         {chosen ? <Button onClick={reload}>Refresh</Button> : null}

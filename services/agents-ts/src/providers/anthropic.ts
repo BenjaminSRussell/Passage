@@ -1,4 +1,4 @@
-import { assertProviderEndpoint, type EgressOptions } from "../cloudprofile/index.js";
+import { assertProviderEndpoint, describeEndpoint, type EgressOptions } from "../cloudprofile/index.js";
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelRequest, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson, postStream } from "./http.js";
@@ -37,6 +37,7 @@ export function createAnthropicProvider(cfg: AnthropicConfig): ModelProvider {
   };
   const headers = { "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01" };
   return {
+    endpoint: describeEndpoint("anthropic", base, cfg.egress?.region),
     async stream(req, onText): Promise<ModelResponse> {
       assertNoPii(req.user);
       const events = await postStream(`${base}/v1/messages`, headers, body(req, true), { fetchFn: cfg.fetchFn ?? fetch, timeoutMs: cfg.streamTimeoutMs ?? 120_000, ...(req.signal !== undefined ? { signal: req.signal } : {}) });

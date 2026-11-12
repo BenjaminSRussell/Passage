@@ -39,6 +39,8 @@ func TestParse_RejectsInvalidFixtures(t *testing.T) {
 		"enum-without-enums.yaml":   {"MET-0007", "fields[0].enum"},
 		"title-not-string.yaml":     {"MET-0008", "title_fields[0]"},
 		"injection-field-name.yaml": {"MET-0003", "fields[0].name"},
+		"phi-not-encrypted.yaml":    {"MET-0010", "fields[0].encrypted"},
+		"encrypted-on-int.yaml":     {"MET-0010", "cannot hold a sealed envelope"},
 	}
 	files, _ := filepath.Glob("../../testdata/invalid/*.yaml")
 	if len(files) != len(cases) {
@@ -72,6 +74,14 @@ func TestValidate_InputDomain(t *testing.T) {
 		{"enum code in extension range", "name: Foo\ndomain: test\ntable_group: main\nenums:\n  - {name: E, values: [{name: a, code: 1000}]}\nfields:\n  - {name: a, type: enum, enum: E}\n", "MET-0007"},
 		{"entity name too long", strings.Replace(entityWith("{name: a, type: bool}"), "Foo", "F"+strings.Repeat("a", 48), 1), "MET-0003"},
 		{"set_null on required field", "name: Foo\ndomain: test\ntable_group: main\nfields:\n  - {name: a, type: uuid, required: true}\nrelations:\n  - {from_field: a, to_entity: Bar, to_field: id, on_delete: set_null}\n", "MET-0009"},
+		{"phi without encrypted", entityWith("{name: a, type: text, phi: true}"), "MET-0010"},
+		{"phi money cannot be sealed", entityWith("{name: a, type: money, phi: true, encrypted: true}"), "MET-0010"},
+		{"encrypted json cannot be sealed", entityWith("{name: a, type: json, encrypted: true}"), "MET-0010"},
+		{"encrypted unique", entityWith("{name: a, type: string, length: 9, encrypted: true, unique: true}"), "MET-0010"},
+		{"encrypted default", entityWith("{name: a, type: string, length: 9, encrypted: true, default: x}"), "MET-0010"},
+		{"phi as title", "name: Foo\ndomain: test\ntable_group: main\ntitle_fields: [a]\nfields:\n  - {name: a, type: string, length: 9, phi: true, encrypted: true}\n", "MET-0010"},
+		{"phi in index", "name: Foo\ndomain: test\ntable_group: main\nfields:\n  - {name: a, type: string, length: 9, phi: true, encrypted: true}\nindexes:\n  - {fields: [a]}\n", "MET-0010"},
+		{"phi not a bool", entityWith("{name: a, type: text, phi: \"maybe\"}"), "MET-0001"},
 		{"where with injection", "name: Foo\ndomain: test\ntable_group: main\nfields:\n  - {name: a, type: bool}\nindexes:\n  - {fields: [a], where: \"a is null; drop table x\"}\n", "MET-0009"},
 	}
 	for _, c := range cases {
@@ -95,5 +105,41 @@ func TestParse_ReferenceEntitiesValid(t *testing.T) {
 		if vs := domain.Validate(e); len(vs) > 0 {
 			t.Errorf("%s: %v", f, vs)
 		}
+	}
+}
+
+func TestValidate_PHIEncryptedAccepted(t *testing.T) {
+	for _, line := range []string{
+		"{name: a, type: string, length: 9, phi: true, encrypted: true}",
+		"{name: a, type: text, phi: true, encrypted: true}",
+		"{name: a, type: bytes, phi: true, encrypted: true}",
+		"{name: a, type: text, encrypted: true}",
+		"{name: a, type: text}",
+	} {
+		e, err := domain.Parse([]byte(entityWith(line)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if vs := domain.Validate(e); len(vs) > 0 {
+			t.Errorf("%s: %v", line, vs)
+		}
+	}
+	e, _ := domain.Parse([]byte(entityWith("{name: a, type: text, phi: true, encrypted: true}")))
+	if got := e.PHIFields(); len(got) != 1 || got[0] != "a" {
+		t.Errorf("PHIFields = %v", got)
+	}
+}
+
+func TestCompareVersions_EncryptionChangeIsBreaking(t *testing.T) {
+	load := func(line string) *domain.Entity {
+		e, err := domain.Parse([]byte(entityWith(line)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	err := domain.CompareVersions(load("{name: a, type: text}"), load("{name: a, type: text, encrypted: true}"))
+	if err == nil || !strings.Contains(err.Error(), "MET-0201") {
+		t.Fatalf("encrypting a published field must be breaking, got %v", err)
 	}
 }

@@ -754,6 +754,493 @@ paths:
         '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID with per-field errors.' }
         '429': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-LIMIT: too many registrations are waiting for review.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/requests:
+    get:
+      operationId: vendorListRequests
+      summary: "List the supplier's own requests (supplier portal)"
+      x-passage-duty: party.vendor-portal.read
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierRequest' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+    post:
+      operationId: vendorCreateRequest
+      summary: "Open a draft request: a profile change, a question or another kind"
+      x-passage-duty: party.vendor-portal.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewSupplierRequest' }
+      responses:
+        '201':
+          description: The draft request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierRequest' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the fields named in errors.' }
+  /v1/party/vendor-portal/requests/{id}:
+    get:
+      operationId: vendorGetRequest
+      summary: "Read one of the supplier's requests"
+      x-passage-duty: party.vendor-portal.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierRequest' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+  /v1/party/vendor-portal/requests/{id}:submit:
+    post:
+      operationId: vendorSubmitRequest
+      summary: "Submit a draft request, with questionnaire answers when it has questions"
+      x-passage-duty: party.vendor-portal.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { answers: { type: object, additionalProperties: { type: string } } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierRequest' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-STATE: the request is not in a state that allows this.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the fields named in errors.' }
+  /v1/party/vendor-portal/requests/{id}:withdraw:
+    post:
+      operationId: vendorWithdrawRequest
+      summary: "Withdraw a request that is not decided yet"
+      x-passage-duty: party.vendor-portal.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierRequest' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-STATE: the request is not in a state that allows this.' }
+  /v1/party/vendor-portal/documents:
+    get:
+      operationId: vendorListDocuments
+      summary: "List the documents the supplier and the buyer exchanged"
+      x-passage-duty: party.vendor-portal.read
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierDocument' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+    post:
+      operationId: vendorUploadDocument
+      summary: "Upload a document (base64, at most 5 MiB; scanned before it is stored)"
+      x-passage-duty: party.vendor-portal.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplierUpload' }
+      responses:
+        '201':
+          description: The stored document, without its content.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierDocument' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the fields named in errors.' }
+        '413': { $ref: '#/components/responses/Problem', description: 'COM-0413: the body is larger than 8 MiB.' }
+  /v1/party/vendor-portal/documents/{id}/content:
+    get:
+      operationId: vendorDocumentContent
+      summary: "Download one of the supplier's documents"
+      x-passage-duty: party.vendor-portal.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The file, with its own content type.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+  /v1/party/vendor-portal/distributions:
+    get:
+      operationId: vendorListDistributions
+      summary: "List the controlled documents sent to the supplier, with acknowledgement"
+      x-passage-duty: party.vendor-portal.read
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierDistribution' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/distributions/{id}/content:
+    get:
+      operationId: vendorDistributionContent
+      summary: "Download a controlled document sent to the supplier"
+      x-passage-duty: party.vendor-portal.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The file, with its own content type.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+  /v1/party/vendor-portal/distributions/{id}:acknowledge:
+    post:
+      operationId: vendorAcknowledgeDistribution
+      summary: "Acknowledge a controlled document that requires it"
+      x-passage-duty: party.vendor-portal.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierDistribution' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+  /v1/party/vendor-questionnaires:
+    post:
+      operationId: createVendorQuestionnaire
+      summary: "Create an onboarding questionnaire (a new version of a name keeps the old one)"
+      x-passage-duty: party.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [name, questions], properties: { name: { type: string }, questions: { type: array, items: { $ref: '#/components/schemas/SupplierQuestion' } } } }
+      responses:
+        '201':
+          description: The questionnaire.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierQuestionnaire' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the fields named in errors.' }
+    get:
+      operationId: listVendorQuestionnaires
+      summary: "List onboarding questionnaires"
+      x-passage-duty: party.read
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierQuestionnaire' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendors/{id}/onboarding:
+    post:
+      operationId: inviteVendorOnboarding
+      summary: "Send a vendor an onboarding questionnaire as a request to answer"
+      x-passage-duty: party.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [questionnaireId], properties: { questionnaireId: { type: string, format: uuid } } }
+      responses:
+        '201':
+          description: The onboarding request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierRequest' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the fields named in errors.' }
+  /v1/party/vendor-requests:
+    get:
+      operationId: listVendorRequests
+      summary: "List supplier requests for the buyer, optionally of one vendor or status"
+      x-passage-duty: party.read
+      parameters:
+        - { name: vendorId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierRequest' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-requests/{id}:
+    get:
+      operationId: getVendorRequest
+      summary: "Read one supplier request"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierRequest' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+  /v1/party/vendor-requests/{id}:approve:
+    post:
+      operationId: approveVendorRequest
+      summary: "Approve a submitted request; a PROFILE_CHANGE applies its changes to the party and also needs party.write"
+      x-passage-duty: party.vendor-request.decide
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { note: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierRequest' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-STATE: the request is not in a state that allows this.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-PARTY-WRITE: approving a profile change needs party.write.' }
+  /v1/party/vendor-requests/{id}:reject:
+    post:
+      operationId: rejectVendorRequest
+      summary: "Reject a submitted request with a note"
+      x-passage-duty: party.vendor-request.decide
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { note: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierRequest' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-STATE: the request is not in a state that allows this.' }
+  /v1/party/vendor-documents:
+    get:
+      operationId: listVendorDocuments
+      summary: "List documents exchanged with vendors, optionally of one vendor"
+      x-passage-duty: party.read
+      parameters:
+        - { name: vendorId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierDocument' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-documents/{id}/content:
+    get:
+      operationId: vendorDocumentContentForBuyer
+      summary: "Download a document exchanged with a vendor"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The file, with its own content type.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+  /v1/party/vendors/{id}/documents:
+    post:
+      operationId: sendVendorDocument
+      summary: "Send a vendor a document (base64, at most 5 MiB)"
+      x-passage-duty: party.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplierUpload' }
+      responses:
+        '201':
+          description: The stored document, without its content.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierDocument' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the fields named in errors.' }
+  /v1/party/controlled-documents:
+    post:
+      operationId: publishControlledDocument
+      summary: "Publish a controlled document revision (a new revision of a document number)"
+      x-passage-duty: party.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { allOf: [ { $ref: '#/components/schemas/SupplierUpload' }, { type: object, required: [docNo], properties: { docNo: { type: string }, requiresAck: { type: boolean } } } ] }
+      responses:
+        '201':
+          description: The published revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupplierDocument' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the fields named in errors.' }
+    get:
+      operationId: listControlledDocuments
+      summary: "List controlled document revisions"
+      x-passage-duty: party.read
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierDocument' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/controlled-documents/{id}:distribute:
+    post:
+      operationId: distributeControlledDocument
+      summary: "Send a controlled document revision to vendors"
+      x-passage-duty: party.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [vendorIds], properties: { vendorIds: { type: array, items: { type: string, format: uuid } } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierDistribution' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the fields named in errors.' }
+  /v1/party/controlled-documents/{id}/distributions:
+    get:
+      operationId: listControlledDocumentDistributions
+      summary: "List who a revision was sent to and who acknowledged it"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierDistribution' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND.' }
+  /v1/party/vendor-audit:
+    get:
+      operationId: listSupplierAudit
+      summary: "The supplier collaboration audit trail, optionally of one vendor"
+      x-passage-duty: party.read
+      parameters:
+        - { name: vendorId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierAuditEntry' } } } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 (a supplier token without a vendor id is PTY-SUP-SCOPE).' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
   /v1/party/vendor-portal/invites:
     get:
       operationId: listVendorInvites
@@ -1152,6 +1639,95 @@ paths:
               schema: { type: string }
 components:
   schemas:
+    SupplierQuestion:
+      type: object
+      required: [id, label, type]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        type: { type: string }
+        required: { type: boolean }
+        options: { type: array, items: { type: string } }
+    SupplierQuestionnaire:
+      type: object
+      required: [id, name, version, questions, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer }
+        questions: { type: array, items: { $ref: '#/components/schemas/SupplierQuestion' } }
+        createdAt: { type: string, format: date-time }
+    NewSupplierRequest:
+      type: object
+      required: [kind, subject]
+      properties:
+        kind: { type: string, description: "PROFILE_CHANGE, QUESTION or another kind the service accepts." }
+        subject: { type: string }
+        details: { type: string }
+        changes: { type: object, additionalProperties: { type: string }, description: "The party fields a PROFILE_CHANGE asks for; approving it applies them." }
+    SupplierRequest:
+      type: object
+      required: [id, vendorId, kind, status, subject, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        kind: { type: string }
+        status: { type: string }
+        subject: { type: string }
+        details: { type: string }
+        questionnaireId: { type: string, format: uuid }
+        questions: { type: array, items: { $ref: '#/components/schemas/SupplierQuestion' } }
+        answers: { type: object, additionalProperties: { type: string } }
+        changes: { type: object, additionalProperties: { type: string } }
+        createdAt: { type: string, format: date-time }
+        submittedAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+        decisionNote: { type: string }
+        appliedAt: { type: string, format: date-time }
+    SupplierUpload:
+      type: object
+      required: [title, fileName, contentType, contentBase64]
+      properties:
+        title: { type: string }
+        fileName: { type: string }
+        contentType: { type: string }
+        contentBase64: { type: string, description: "The file, base64; at most 5 MiB decoded." }
+    SupplierDocument:
+      type: object
+      required: [id, title, fileName, contentType, sizeBytes, sha256, at]
+      properties:
+        id: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        direction: { type: string }
+        docNo: { type: string }
+        revision: { type: integer }
+        title: { type: string }
+        fileName: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer }
+        sha256: { type: string }
+        requiresAck: { type: boolean }
+        at: { type: string, format: date-time }
+    SupplierDistribution:
+      allOf:
+        - { $ref: '#/components/schemas/SupplierDocument' }
+        - type: object
+          required: [vendorId, sentAt]
+          properties:
+            sentAt: { type: string, format: date-time }
+            acknowledgedBy: { type: string }
+            acknowledgedAt: { type: string, format: date-time }
+    SupplierAuditEntry:
+      type: object
+      required: [id, vendorId, actor, action, at]
+      properties:
+        id: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        actor: { type: string }
+        action: { type: string }
+        subjectId: { type: string }
+        detail: { type: string }
+        at: { type: string, format: date-time }
     NewVendorGroup:
       type: object
       additionalProperties: false
