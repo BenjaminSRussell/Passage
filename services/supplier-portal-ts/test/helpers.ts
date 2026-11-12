@@ -7,7 +7,7 @@ import { createHttpServer } from "../src/server.ts";
 import type { UserProvisioner } from "../src/provision.ts";
 import type { ScanPolicy } from "../src/scan.ts";
 import { createServiceTokenSigner } from "../src/serviceToken.ts";
-import { MemorySessionStore, RateLimiter } from "../src/session.ts";
+import { MemorySessionStore, RateLimiter, type SessionStore } from "../src/session.ts";
 
 export const TENANT = "11111111-1111-4111-8111-111111111111";
 export const VENDOR_A = "0b1c2d3e-0000-4000-8000-0000000000aa";
@@ -66,6 +66,8 @@ export interface RigOptions {
   publicLimit?: number;
   /** PASSAGE_TRUSTED_PROXIES; the rig's requests come from 127.0.0.1. Default none. */
   trustedProxies?: string;
+  /** The session store; default a fresh in-memory store. */
+  sessions?: SessionStore;
 }
 
 export async function startRig(opts: RigOptions = {}): Promise<Rig> {
@@ -94,7 +96,7 @@ export async function startRig(opts: RigOptions = {}): Promise<Rig> {
     calls.push({ url, method: init?.method ?? "GET", headers: new Headers(init?.headers), body: typeof init?.body === "string" ? init.body : "" });
     return queue.shift() ?? Response.json({});
   };
-  const sessions = new MemorySessionStore();
+  const sessions = opts.sessions ?? new MemorySessionStore();
   const server = createHttpServer({
     oidc,
     jwks: new Jwks(oidc.jwksUri, fetcher),

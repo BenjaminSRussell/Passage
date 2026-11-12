@@ -190,3 +190,17 @@ describe("onboarding questionnaire", () => {
     await accessible(container);
   });
 });
+
+describe("sign-out", () => {
+  it("goes to Keycloak's end-session on success, and reports a failure instead of pretending", async () => {
+    const { signOut } = await import("../src/api");
+    routes["POST /bff/logout"] = { logoutUrl: "https://id.example.invalid/logout?client_id=passage-portal-supplier" };
+    const went: string[] = [];
+    expect(await signOut((u) => went.push(u))).toBeNull();
+    expect(went).toEqual(["https://id.example.invalid/logout?client_id=passage-portal-supplier"]);
+    routes["POST /bff/logout"] = new Response(JSON.stringify({ code: "SUP-BFF-503", detail: "the portal cannot reach its session store" }), { status: 503 });
+    const message = await signOut((u) => went.push(u));
+    expect(message).toMatch(/Sign-out did not finish/);
+    expect(went).toHaveLength(1);
+  });
+});

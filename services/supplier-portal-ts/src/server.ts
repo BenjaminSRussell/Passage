@@ -63,8 +63,8 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
   res.end(payload);
 }
 
-function problem(res: ServerResponse, status: number, code: string, detail: string): void {
-  send(res, status, { type: `https://passage.dev/problems/${code}`, title: detail, status, code, detail });
+function problem(res: ServerResponse, status: number, code: string, detail: string, headers: Record<string, string> = {}): void {
+  send(res, status, { type: `https://passage.dev/problems/${code}`, title: detail, status, code, detail }, headers);
 }
 
 async function readBody(req: IncomingMessage, max: number): Promise<Buffer | "too-large"> {
@@ -340,6 +340,8 @@ export function createHttpServer(deps: ServerDeps): Server {
     if (method === "POST" && url.pathname === "/bff/invites/verify") return invitation(req, res, "verify");
     if (method === "POST" && url.pathname === "/bff/invites/accept") return invitation(req, res, "accept");
 
+    if (method === "POST" && url.pathname === "/bff/logout") return logout(req, res);
+
     const session = await deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
     if (!session) return problem(res, 401, "SUP-BFF-401", "sign in first");
     if (method !== "GET" && method !== "HEAD") {
@@ -352,13 +354,34 @@ export function createHttpServer(deps: ServerDeps): Server {
       const i = session.identity;
       return send(res, 200, { userId: i.userId, name: i.name, vendorId: i.vendorId, legalEntityIds: i.legalEntityIds, isAdmin: i.isAdmin, csrfToken: session.csrf });
     }
-    if (method === "POST" && url.pathname === "/bff/logout") {
-      // The portal session ends here; the browser then goes to Keycloak's end-session so the single sign-on session ends too.
-      await deps.sessions.delete(session.id);
-      return send(res, 200, { logoutUrl: endSessionUrl(deps.oidc, session.idToken) }, { "set-cookie": setSession("", 0) });
-    }
     if (url.pathname.startsWith("/api/v1/")) return api(req, res, url, session);
     problem(res, 404, "SUP-BFF-404", "no such route");
+  }
+
+  /**
+   * Sign-out. The cookie is cleared on every answer but a refused one, so a store outage cannot leave the browser signed in: the
+   * portal session ends here and the browser goes on to Keycloak's end-session (client_id and post_logout_redirect_uri only; the
+   * ID token never reaches the browser). A known session needs its CSRF token; a session the store no longer knows just clears
+   * the cookie. When the store cannot be reached the answer is 503 (the app says so), with the cookie cleared all the same.
+   */
+  async function logout(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const origin = req.headers.origin;
+    if (origin !== undefined && origin !== deps.appOrigin) return problem(res, 403, "SUP-BFF-403", "the request does not come from the portal");
+    const clear = { "set-cookie": setSession("", 0) };
+    const logoutUrl = endSessionUrl(deps.oidc);
+    try {
+      const session = await deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
+      if (session) {
+        const csrf = req.headers["x-csrf-token"];
+        if (!sameToken(typeof csrf === "string" ? csrf : undefined, session.csrf)) return problem(res, 403, "SUP-BFF-403", "the request has no valid CSRF token");
+        await deps.sessions.delete(session.id);
+      }
+    } catch (err) {
+      if (!(err instanceof StoreUnavailable)) throw err;
+      log({ msg: "logout: the session store is unreachable; the cookie is cleared", err: String(err) });
+      return problem(res, 503, "SUP-BFF-503", "the portal cannot reach its session store; you are signed out on this device, the session ends by itself", clear);
+    }
+    send(res, 200, { logoutUrl }, clear);
   }
 
   return createServer((req, res) => {

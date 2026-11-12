@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { LE_1, LE_2, VENDOR_A, oidc, signIn, startRig, type Rig } from "./helpers.ts";
+import { MemorySessionStore, StoreUnavailable } from "../src/session.ts";
 
 let rig: Rig;
 afterEach(() => rig.close());
@@ -96,15 +97,35 @@ describe("sign-in", () => {
     expect((await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie } })).status).toBe(403);
     const out = await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie, "x-csrf-token": s.csrf } });
     expect(out.status).toBe(200);
-    // The browser goes on to Keycloak's end-session with the sign-in's ID token as the hint.
+    // The browser goes on to Keycloak's end-session (RP-initiated logout); the ID token never reaches it.
+    expect(out.headers.get("set-cookie")).toMatch(/Max-Age=0/);
     const logoutUrl = new URL(((await out.json()) as { logoutUrl: string }).logoutUrl);
     expect(logoutUrl.origin + logoutUrl.pathname).toBe(oidc.endSessionEndpoint);
     expect(logoutUrl.searchParams.get("post_logout_redirect_uri")).toBe(oidc.postLogoutRedirectUri);
-    expect(logoutUrl.searchParams.get("id_token_hint")).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
+    expect(logoutUrl.searchParams.get("client_id")).toBe(oidc.clientId);
+    expect(logoutUrl.searchParams.has("id_token_hint")).toBe(false);
     expect((await fetch(`${rig.base}/bff/me`, { headers: { cookie: s.cookie } })).status).toBe(401);
 
     const again = await signIn(rig);
     rig.now.ms += 31 * 60 * 1000;
     expect((await fetch(`${rig.base}/bff/me`, { headers: { cookie: again.cookie } })).status).toBe(401);
+  });
+
+  it("clears the cookie and answers 503 when the session store is down, and clears it for a session it no longer knows", async () => {
+    const store = new MemorySessionStore();
+    rig = await startRig({ sessions: store });
+    const s = await signIn(rig);
+    const real = store.get.bind(store);
+    store.get = async () => {
+      throw new StoreUnavailable("down");
+    };
+    const down = await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie, "x-csrf-token": s.csrf } });
+    expect(down.status).toBe(503);
+    expect(down.headers.get("set-cookie")).toMatch(/Max-Age=0/);
+    store.get = real;
+    const gone = await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: "__Host-passage_supplier=unknown" } });
+    expect(gone.status).toBe(200);
+    expect(gone.headers.get("set-cookie")).toMatch(/Max-Age=0/);
+    expect((await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie, origin: "https://evil.example" } })).status).toBe(403);
   });
 });

@@ -61,13 +61,13 @@ export function authorizationUrl(cfg: OidcConfig, state: string, nonce: string, 
 
 export class LoginRefused extends Error {}
 
-/** The end-session URL the browser goes to on sign-out; the ID token of the sign-in is the hint, else the client id. */
-export function endSessionUrl(cfg: OidcConfig, idToken: string | undefined): string {
+/**
+ * The end-session URL the browser goes to on sign-out (OIDC RP-initiated logout): client_id and post_logout_redirect_uri, no
+ * id_token_hint, so the ID token never reaches the browser. Keycloak asks the user to confirm the sign-out without the hint.
+ */
+export function endSessionUrl(cfg: OidcConfig): string {
   const url = new URL(cfg.endSessionEndpoint);
-  const params = new URLSearchParams({ post_logout_redirect_uri: cfg.postLogoutRedirectUri });
-  if (idToken) params.set("id_token_hint", idToken);
-  else params.set("client_id", cfg.clientId);
-  url.search = params.toString();
+  url.search = new URLSearchParams({ client_id: cfg.clientId, post_logout_redirect_uri: cfg.postLogoutRedirectUri }).toString();
   return url.toString();
 }
 

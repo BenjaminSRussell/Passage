@@ -17,7 +17,7 @@ export class StoreUnavailable extends Error {}
 export interface Session {
   id: string;
   identity: SupplierIdentity;
-  /** The ID token of the sign-in, kept server side only: it is the id_token_hint of the end-session request at Keycloak. */
+  /** The ID token of the sign-in, kept server side only and never sent to the browser (the end-session request carries the client id instead). */
   idToken: string;
   /** Double-submit token: the app reads it from /bff/me and sends it back on every non-GET request. */
   csrf: string;
