@@ -14,6 +14,11 @@ import {
   Textarea,
   buttonClassName,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   actOnCatalogImport,
@@ -40,6 +45,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -56,7 +62,7 @@ const ROW_STATUSES: ImportRowStatus[] = [
   "REJECTED",
 ];
 
-const listColumns: DataTableColumn<CatalogImport>[] = [
+const listColumns: ListColumn<CatalogImport>[] = [
   {
     key: "createdAt",
     header: "Staged",
@@ -83,88 +89,36 @@ const listColumns: DataTableColumn<CatalogImport>[] = [
   },
 ];
 
+const listFilters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: IMPORT_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }];
+
+function useImportRows(query: ListQuery): ListData<CatalogImport> {
+  const status = (query.filters.status ?? "") as CatalogImportStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listCatalogImports({ status }, { cursor, signal }));
+}
+
 /** Staged vendor catalog files with a status filter and load-more paging (FR-17.18). */
 export function CatalogImportsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<CatalogImportStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<CatalogImport[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listCatalogImports({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Vendor catalog imports"
-        description="Vendor price files wait here until a buyer accepts their rows and adds them to a catalog."
-        actions={
-          <Link
-            className={buttonClassName("secondary")}
-            to="/purchasing/catalogs"
-          >
-            Catalogs
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="import-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as CatalogImportStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {IMPORT_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? (
-        <LoadError
-          what="vendor imports"
-          error={page.error}
-          onRetry={page.reload}
-        />
-      ) : null}
-      <DataTable
-        label="Vendor catalog imports"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(i) => i.id}
-        loading={page.loading && rows.length === 0}
-        empty={{
-          title: "No vendor imports yet",
-          description:
-            "Open a catalog and choose Import vendor file to stage a price list.",
-        }}
-        onRowOpen={(i) => navigate(`/purchasing/catalog-imports/${i.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button
-            loading={page.loading}
-            onClick={() => setCursor(page.data?.nextCursor)}
-          >
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-catalog-imports"
+      title="Vendor catalog imports"
+      description="Vendor price files wait here until a buyer accepts their rows and adds them to a catalog."
+      actions={
+        <Link className={buttonClassName("secondary")} to="/purchasing/catalogs">
+          Catalogs
+        </Link>
+      }
+      noun="vendor imports"
+      singular="vendor import"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useImportRows}
+      search={(i) => ({ number: "", name: i.fileName || "Pasted rows" })}
+      getRowKey={(i) => i.id}
+      onRowOpen={(i) => navigate(`/purchasing/catalog-imports/${i.id}`)}
+      empty={{ title: "No vendor imports yet", description: "Open a catalog and choose Import vendor file to stage a price list." }}
+    />
   );
 }
 

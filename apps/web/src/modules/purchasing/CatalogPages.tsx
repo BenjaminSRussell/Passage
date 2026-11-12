@@ -13,6 +13,11 @@ import {
   Select,
   buttonClassName,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   actOnCatalog,
@@ -48,6 +53,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -56,7 +62,7 @@ const STATUSES: CatalogStatus[] = ["DRAFT", "PUBLISHED", "RETIRED"];
 
 const validity = (c: { validFrom: string; validTo?: string }) => (c.validTo ? `${c.validFrom} to ${c.validTo}` : `From ${c.validFrom}, open-ended`);
 
-const listColumns: DataTableColumn<CatalogSummary>[] = [
+const listColumns: ListColumn<CatalogSummary>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "name", header: "Name" },
   { key: "status", header: "Status", render: (c) => <StatusBadge status={c.status} /> },
@@ -65,77 +71,41 @@ const listColumns: DataTableColumn<CatalogSummary>[] = [
   { key: "legalEntityId", header: "Legal entity", render: (c) => <Named entity="legalEntity" id={c.legalEntityId} /> },
 ];
 
+const listFilters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }];
+
+function useCatalogRows(query: ListQuery): ListData<CatalogSummary> {
+  const status = (query.filters.status ?? "") as CatalogStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listCatalogs({ status }, { cursor, signal }));
+}
+
 /** Procurement catalog list with a status filter and load-more paging (FR-17.18). */
 export function CatalogsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<CatalogStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<CatalogSummary[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listCatalogs({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Procurement catalogs"
-        description="Vendor products with agreed prices that requesters pick from when they raise a requisition."
-        actions={
-          <>
-            <Link className={buttonClassName("secondary")} to="/purchasing/catalog-imports">
-              Vendor imports
-            </Link>
-            <Link className={buttonClassName("primary")} to="/purchasing/catalogs/new">
-              New catalog
-            </Link>
-          </>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="catalog-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as CatalogStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="catalogs" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Procurement catalogs"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(c) => c.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No catalogs yet", description: "Create a catalog, add vendor items and publish it to your operating units." }}
-        onRowOpen={(c) => navigate(`/purchasing/catalogs/${c.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-catalogs"
+      title="Procurement catalogs"
+      description="Vendor products with agreed prices that requesters pick from when they raise a requisition."
+      actions={
+        <>
+          <Link className={buttonClassName("secondary")} to="/purchasing/catalog-imports">
+            Vendor imports
+          </Link>
+          <Link className={buttonClassName("primary")} to="/purchasing/catalogs/new">
+            New catalog
+          </Link>
+        </>
+      }
+      noun="catalogs"
+      singular="catalog"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useCatalogRows}
+      search={(c) => ({ number: c.number, name: c.name })}
+      getRowKey={(c) => c.id}
+      onRowOpen={(c) => navigate(`/purchasing/catalogs/${c.id}`)}
+      empty={{ title: "No catalogs yet", description: "Create a catalog, add vendor items and publish it to your operating units." }}
+    />
   );
 }
 

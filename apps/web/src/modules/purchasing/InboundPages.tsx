@@ -1,6 +1,22 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  buttonClassName,
+  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+} from "../../shell/ui";
 import {
   describeProblem,
   getInboundChange,
@@ -11,7 +27,18 @@ import {
   type InboundSource,
   type InboundStatus,
 } from "./api/client";
-import { Details, LoadError, StatusBadge, dash, statusLabel, useResource, uuidPattern, type Failure, Named } from "./parts";
+import {
+  Details,
+  LoadError,
+  StatusBadge,
+  dash,
+  statusLabel,
+  useResource,
+  uuidPattern,
+  type Failure,
+  Named,
+  useProcurementPages,
+} from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -67,7 +94,7 @@ function Target({ c }: { c: InboundChange }) {
   );
 }
 
-const columns: DataTableColumn<InboundChange>[] = [
+const columns: ListColumn<InboundChange>[] = [
   { key: "createdAt", header: "Received", mono: true, render: (c) => c.createdAt.slice(0, 16).replace("T", " ") },
   { key: "source", header: "From", render: (c) => sourceLabel(c.source) },
   { key: "action", header: "Action", render: (c) => actionLabel(c.action) },
@@ -83,128 +110,59 @@ const columns: DataTableColumn<InboundChange>[] = [
  * cancelled drop-ships, as the purchasing consumer handled them. A refused change is the buyer's to settle: it
  * is listed here with the rule that stopped it, and its page retries or acknowledges it.
  */
+const filters: ListFilterDef[] = [
+  { kind: "select", key: "source", label: "From", anyLabel: "All sources", options: SOURCES.map((s) => ({ value: s, label: sourceLabel(s) })) },
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+  {
+    kind: "select",
+    key: "resolution",
+    label: "Settled",
+    anyLabel: "Any",
+    options: [
+      { value: "NONE", label: "Waiting for a buyer" },
+      { value: "ACKNOWLEDGED", label: "Acknowledged" },
+      { value: "RETRIED", label: "Retried" },
+    ],
+  },
+];
+
 export function InboundChangesPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const purchaseOrderId = params.get("purchaseOrderId") ?? "";
-  const [source, setSource] = useState<InboundSource | "">("");
-  const [status, setStatus] = useState<InboundStatus | "">(params.get("status") === "REFUSED" ? "REFUSED" : "");
-  const [resolution, setResolution] = useState<ResolutionFilter>(params.get("resolution") === "NONE" ? "NONE" : "");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<InboundChange[]>([]);
   const validOrder = purchaseOrderId === "" || uuidPattern.test(purchaseOrderId);
-  const page = useResource(
-    async (signal) => {
-      if (!validOrder) return { items: [] as InboundChange[] };
-      const result = await listInboundChanges({ source, status, resolution, purchaseOrderId }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [source, status, resolution, purchaseOrderId, cursor, validOrder],
-  );
+  const [initialFilters] = useState(() => ({
+    status: params.get("status") === "REFUSED" ? "REFUSED" : "",
+    resolution: params.get("resolution") === "NONE" ? "NONE" : "",
+  }));
+  const useChangeRows = (query: ListQuery): ListData<InboundChange> => {
+    const source = (query.filters.source ?? "") as InboundSource | "";
+    const status = (query.filters.status ?? "") as InboundStatus | "";
+    const resolution = (query.filters.resolution ?? "") as ResolutionFilter;
+    return useProcurementPages(`${source}|${status}|${resolution}|${purchaseOrderId}`, async (cursor, signal) =>
+      validOrder ? listInboundChanges({ source, status, resolution, purchaseOrderId }, { cursor, signal }) : { items: [] },
+    );
+  };
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Changes from other services"
-        description="Planning messages a planner applied to a purchase order, and drop-ships that fulfillment closed or cancelled. Each moves the order through its change versions; a refused change waits for you to retry or acknowledge it."
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="inb-source" label="From">
-            {(control) => (
-              <Select
-                {...control}
-                value={source}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setSource(e.target.value as InboundSource | "");
-                }}
-              >
-                <option value="">All sources</option>
-                {SOURCES.map((s) => (
-                  <option key={s} value={s}>
-                    {sourceLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-        <div className={styles.filter}>
-          <FormField id="inb-status" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as InboundStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-        <div className={styles.filter}>
-          <FormField id="inb-resolution" label="Settled">
-            {(control) => (
-              <Select
-                {...control}
-                value={resolution}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setResolution(e.target.value as ResolutionFilter);
-                }}
-              >
-                <option value="">Any</option>
-                <option value="NONE">Waiting for a buyer</option>
-                <option value="ACKNOWLEDGED">Acknowledged</option>
-                <option value="RETRIED">Retried</option>
-              </Select>
-            )}
-          </FormField>
-        </div>
-        {purchaseOrderId !== "" ? (
-          <div className={styles.filter}>
-            <Button
-              onClick={() => {
-                setCursor(undefined);
-                setParams({});
-              }}
-            >
-              Show all orders
-            </Button>
-          </div>
-        ) : null}
-      </div>
-      {!validOrder ? <Alert tone="danger" live="alert" title="The purchase order id in the address is not a UUID." /> : null}
-      {page.error ? <LoadError what="the changes" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Changes from other services"
-        columns={columns}
-        rows={page.error || !validOrder ? [] : rows}
-        getRowKey={(c) => c.id}
-        loading={page.loading && rows.length === 0}
-        empty={{
-          title: "No changes from other services",
-          description: "When planning applies a message to a purchase order or fulfillment closes or cancels a drop-ship, the change is listed here.",
-        }}
-        onRowOpen={(c) => navigate(`/purchasing/inbound-changes/${c.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-inbound-changes"
+      title="Changes from other services"
+      description="Planning messages a planner applied to a purchase order, and drop-ships that fulfillment closed or cancelled. Each moves the order through its change versions; a refused change waits for you to retry or acknowledge it."
+      actions={purchaseOrderId !== "" ? <Button onClick={() => setParams({})}>Show all orders</Button> : undefined}
+      notice={!validOrder ? <Alert tone="danger" live="alert" title="The purchase order id in the address is not a UUID." /> : undefined}
+      noun="changes"
+      singular="change"
+      columns={columns}
+      filters={filters}
+      initialFilters={initialFilters}
+      useRows={useChangeRows}
+      getRowKey={(c) => c.id}
+      onRowOpen={(c) => navigate(`/purchasing/inbound-changes/${c.id}`)}
+      empty={{
+        title: "No changes from other services",
+        description: "When planning applies a message to a purchase order or fulfillment closes or cancels a drop-ship, the change is listed here.",
+      }}
+    />
   );
 }
 

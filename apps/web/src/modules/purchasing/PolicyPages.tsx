@@ -1,7 +1,24 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  buttonClassName,
+  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+} from "../../shell/ui";
 import {
   describeProblem,
   getPolicy,
@@ -11,7 +28,15 @@ import {
   type PurchasingPolicy,
   type PurchasingPolicyInput,
 } from "./api/client";
-import { Details, LoadError, uuidPattern, useResource, type Failure, Named } from "./parts";
+import {
+  Details,
+  LoadError,
+  uuidPattern,
+  useResource,
+  type Failure,
+  Named,
+  resourceRows,
+} from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -23,7 +48,7 @@ const accessModes: Record<CategoryAccessMode, { label: string; hint: string }> =
   OFF: { label: "Off", hint: "Category vendor assignments are not checked." },
 };
 
-const columns: DataTableColumn<PurchasingPolicy>[] = [
+const columns: ListColumn<PurchasingPolicy>[] = [
   { key: "legalEntityId", header: "Legal entity", render: (p) => <Named entity="legalEntity" id={p.legalEntityId} /> },
   { key: "changeManagementDefault", header: "Change management by default", render: (p) => yesNo(p.changeManagementDefault) },
   { key: "poFourEyes", header: "Purchase order four-eyes", render: (p) => yesNo(p.poFourEyes) },
@@ -49,12 +74,7 @@ export function PolicyListPage() {
     navigate(`/purchasing/policies/${id}`);
   }
 
-  return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Purchasing policies"
-        description="Settings per legal entity: change management by default, a second person for purchase order approval, and invoicing ahead of receipt. A legal entity with no saved policy uses the defaults."
-      />
+  const openCard = (
       <Card title="Open a legal entity">
         <form className={styles.form} onSubmit={open} noValidate>
           <FormField id="policy-entity" label="Legal entity" error={error}>
@@ -67,17 +87,22 @@ export function PolicyListPage() {
           </div>
         </form>
       </Card>
-      {policies.error ? <LoadError what="purchasing policies" error={policies.error} onRetry={policies.reload} /> : null}
-      <DataTable
-        label="Purchasing policies"
-        columns={columns}
-        rows={policies.error ? [] : (policies.data ?? [])}
-        getRowKey={(p) => p.legalEntityId}
-        loading={policies.loading && !policies.data}
-        empty={{ title: "No policies saved yet", description: "Every legal entity uses the defaults until you save a policy for it." }}
-        onRowOpen={(p) => navigate(`/purchasing/policies/${p.legalEntityId}`)}
-      />
-    </div>
+  );
+
+  return (
+    <ListPage
+      id="purchasing-policies"
+      title="Purchasing policies"
+      description="Settings per legal entity: change management by default, a second person for purchase order approval, and invoicing ahead of receipt. A legal entity with no saved policy uses the defaults."
+      notice={openCard}
+      noun="purchasing policies"
+      singular="purchasing policy"
+      columns={columns}
+      useRows={() => resourceRows(policies)}
+      getRowKey={(p) => p.legalEntityId}
+      onRowOpen={(p) => navigate(`/purchasing/policies/${p.legalEntityId}`)}
+      empty={{ title: "No policies saved yet", description: "Every legal entity uses the defaults until you save a policy for it." }}
+    />
   );
 }
 

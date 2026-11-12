@@ -75,6 +75,11 @@ export interface ListPageProps<T> {
    * searched by; a row without a name is searched by its number alone.
    */
   search?(row: T): SearchText;
+  /**
+   * Filters a link asked for, such as `?status=REFUSED` from a work queue. When any is set they replace the saved
+   * default view's filters for this visit; the default view's columns still apply.
+   */
+  initialFilters?: FilterValues;
   storage?: PreferenceStorage;
 }
 
@@ -149,6 +154,7 @@ export function ListPage<T>({
   empty,
   serverSort = NO_SORTS,
   search,
+  initialFilters,
   storage: preferred = localPreferenceStorage,
 }: ListPageProps<T>) {
   const { identity } = useWorkContext();
@@ -161,6 +167,11 @@ export function ListPage<T>({
   const [start] = useState<Start>(() => {
     const store = loadViewStore(storage, storeKey);
     const preset = store.views.find((v) => v.id === store.defaultId);
+    const asked = initialFilters ? cleanFilters(filters, initialFilters) : {};
+    if (Object.keys(asked).length > 0) {
+      const visible = preset ? reconcileView(preset, columns, filterKeys, filters).visible : defaultVisible(columns);
+      return { store, query: { ...emptyQuery(), filters: asked }, visible, activeId: null };
+    }
     if (preset) {
       return { store, ...reconcileView(preset, columns, filterKeys, filters), activeId: preset.id };
     }

@@ -12,8 +12,13 @@ import {
   Input,
   PageHeader,
   Select,
+  ListPage,
   buttonClassName,
   type DataTableColumn,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   changePurchaseAgreement,
@@ -42,6 +47,7 @@ import {
   money,
   statusLabel,
   todayIso,
+  useProcurementPages,
   useResource,
   uuidPattern,
   type Failure,
@@ -81,7 +87,7 @@ export function ReleaseLevel({ pct }: { pct: string }) {
   return <Badge tone={tone}>{pct} %</Badge>;
 }
 
-const listColumns: DataTableColumn<PurchaseAgreementSummary>[] = [
+const listColumns: ListColumn<PurchaseAgreementSummary>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "status", header: "Status", render: (a) => <StatusBadge status={a.status} /> },
   { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
@@ -90,72 +96,36 @@ const listColumns: DataTableColumn<PurchaseAgreementSummary>[] = [
   { key: "maxPctReleased", header: "Highest release", align: "end", render: (a) => <ReleaseLevel pct={a.maxPctReleased} /> },
 ];
 
+const listFilters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }];
+
+function useAgreementRows(query: ListQuery): ListData<PurchaseAgreementSummary> {
+  const status = (query.filters.status ?? "") as AgreementStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listPurchaseAgreements({ status }, { cursor, signal }));
+}
+
 /** Purchase agreement list with a status filter and load-more paging. */
 export function PurchaseAgreementsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<AgreementStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<PurchaseAgreementSummary[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listPurchaseAgreements({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Purchase agreements"
-        description="Blanket agreements with a vendor: what was committed, what purchase orders have released, and what remains."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/agreements/new">
-            New agreement
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="pa-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as AgreementStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="purchase agreements" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Purchase agreements"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(a) => a.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No purchase agreements yet", description: "Agree quantities or spend with a vendor, then release purchase orders against them." }}
-        onRowOpen={(a) => navigate(`/purchasing/agreements/${a.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-agreements"
+      title="Purchase agreements"
+      description="Blanket agreements with a vendor: what was committed, what purchase orders have released, and what remains."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/agreements/new">
+          New agreement
+        </Link>
+      }
+      noun="purchase agreements"
+      singular="purchase agreement"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useAgreementRows}
+      search={(a) => ({ number: a.number })}
+      getRowKey={(a) => a.id}
+      onRowOpen={(a) => navigate(`/purchasing/agreements/${a.id}`)}
+      empty={{ title: "No purchase agreements yet", description: "Agree quantities or spend with a vendor, then release purchase orders against them." }}
+    />
   );
 }
 

@@ -1,7 +1,24 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  buttonClassName,
+  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+} from "../../shell/ui";
 import {
   changeCategoryVendor,
   createCategoryManager,
@@ -16,7 +33,19 @@ import {
   type CategoryManager,
   type CategoryVendorAssignment,
 } from "./api/client";
-import { Details, LoadError, StatusBadge, datePattern, statusLabel, todayIso, useResource, uuidPattern, type Failure, Named } from "./parts";
+import {
+  Details,
+  LoadError,
+  StatusBadge,
+  datePattern,
+  statusLabel,
+  todayIso,
+  useResource,
+  uuidPattern,
+  type Failure,
+  Named,
+  useProcurementPages,
+} from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -26,7 +55,7 @@ type Errors = Record<string, string>;
 
 const window_ = (a: { validFrom: string; validTo?: string }) => (a.validTo ? `${a.validFrom} to ${a.validTo}` : `From ${a.validFrom}, open-ended`);
 
-const columns: DataTableColumn<CategoryVendorAssignment>[] = [
+const columns: ListColumn<CategoryVendorAssignment>[] = [
   { key: "category", header: "Category" },
   { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
   { key: "status", header: "Status", render: (a) => <StatusBadge status={a.status} /> },
@@ -34,92 +63,45 @@ const columns: DataTableColumn<CategoryVendorAssignment>[] = [
   { key: "legalEntityId", header: "Legal entity", render: (a) => <Named entity="legalEntity" id={a.legalEntityId} /> },
 ];
 
+const filters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+  { kind: "text", key: "category", label: "Category" },
+];
+
+function useAssignmentRows(query: ListQuery): ListData<CategoryVendorAssignment> {
+  const status = (query.filters.status ?? "") as AssignmentStatus | "";
+  const category = query.filters.category ?? "";
+  return useProcurementPages(`${status}|${category}`, (cursor, signal) => listCategoryVendors({ status, category }, { cursor, signal }));
+}
+
 /** Category vendor assignments with status and category filters and load-more paging (FR-17.20). */
 export function CategoryVendorsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<AssignmentStatus | "">("");
-  const [category, setCategory] = useState("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<CategoryVendorAssignment[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listCategoryVendors({ status, category }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, category, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Category vendors"
-        description="Which vendors may supply a procurement category. A category with an approved or provisional vendor is restricted, and a blocked vendor is refused while its block is in force: the purchasing policy decides whether a vendor outside the rule is refused, warned about or allowed."
-        actions={
-          <>
-            <Link className={buttonClassName("secondary")} to="/purchasing/category-managers">
-              Category managers
-            </Link>
-            <Link className={buttonClassName("primary")} to="/purchasing/category-vendors/new">
-              New assignment
-            </Link>
-          </>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="cv-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as AssignmentStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-        <div className={styles.filter}>
-          <FormField id="cv-category-filter" label="Category" optional>
-            {(control) => (
-              <Input
-                {...control}
-                value={category}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setCategory(e.target.value);
-                }}
-              />
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="category vendors" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Category vendor assignments"
-        columns={columns}
-        rows={page.error ? [] : rows}
-        getRowKey={(a) => a.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No assignments yet", description: "Assign vendors to a category to restrict who may supply it." }}
-        onRowOpen={(a) => navigate(`/purchasing/category-vendors/${a.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-category-vendors"
+      title="Category vendors"
+      description="Which vendors may supply a procurement category. A category with an approved or provisional vendor is restricted, and a blocked vendor is refused while its block is in force: the purchasing policy decides whether a vendor outside the rule is refused, warned about or allowed."
+      actions={
+        <>
+          <Link className={buttonClassName("secondary")} to="/purchasing/category-managers">
+            Category managers
+          </Link>
+          <Link className={buttonClassName("primary")} to="/purchasing/category-vendors/new">
+            New assignment
+          </Link>
+        </>
+      }
+      noun="category vendors"
+      singular="category vendor"
+      columns={columns}
+      filters={filters}
+      useRows={useAssignmentRows}
+      search={(a) => ({ number: "", name: a.category })}
+      getRowKey={(a) => a.id}
+      onRowOpen={(a) => navigate(`/purchasing/category-vendors/${a.id}`)}
+      empty={{ title: "No assignments yet", description: "Assign vendors to a category to restrict who may supply it." }}
+    />
   );
 }
 
