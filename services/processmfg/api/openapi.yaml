@@ -158,6 +158,55 @@ paths:
           description: PMF-0102
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}/potency-adjustments:
+    put:
+      operationId: setPotencyAdjustments
+      summary: Charge active ingredients from batches of another potency (BR-24.2)
+      description: >
+        Replaces the order's potency adjustments. Each names an active-ingredient line, the formula's standard potency,
+        the potency of the batch it is charged from and the ingredient (filler) line that compensates; the control
+        recipe made at release or by :send-recipe charges the active line at planned x standard / batch potency and
+        the filler with what is left, so the batch keeps its size, and names each adjustment in the material list.
+        Several active lines may share one filler. A filler driven below zero is PMF-0002 (422); a line of the wrong
+        type is COM-0001 (400). Once the control recipe is made, or the order is reported or ended, PMF-0507 (409).
+        An empty list removes them.
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adjustments]
+              properties:
+                adjustments:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [lineNumber, standardPotency, batchPotency, compensatingLine]
+                    properties:
+                      lineNumber: { type: integer, minimum: 1 }
+                      standardPotency: { $ref: '#/components/schemas/Quantity' }
+                      batchPotency: { $ref: '#/components/schemas/Quantity' }
+                      compensatingLine: { type: integer, minimum: 1 }
+                      batchRef: { type: string, maxLength: 100, description: The ingredient batch, for the operator. }
+      responses:
+        '200':
+          description: The order with its adjustments.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrder' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0507
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0002
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
   /v1/production/batch-orders/{id}:rescale:
     post:
       operationId: rescaleBatchOrder

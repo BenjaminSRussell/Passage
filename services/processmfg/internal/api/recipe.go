@@ -231,10 +231,14 @@ func (a *API) generateRecipe(ctx context.Context, o store.BatchOrder) (store.Con
 	}
 	var link store.ControlRecipeLink
 	if err == nil {
+		var doc map[string]any
+		doc, err = ReleaseRecipe(o, target.Destination)
 		req := shopfloor.RecipeRequest{OrderID: o.ID, ResourceID: target.ResourceID, Destination: target.Destination, EdgeID: target.EdgeID,
-			Topic: target.Topic, Recipe: ReleaseRecipe(o, target.Destination)}
+			Topic: target.Topic, Recipe: doc}
 		var key, recipeID string
-		key, err = RecipeKey(o.ID, req)
+		if err == nil {
+			key, err = RecipeKey(o.ID, req)
+		}
 		if err == nil {
 			recipeID, err = a.recipes.CreateRecipe(ctx, o.LegalEntityID, key, req)
 		}
@@ -273,7 +277,15 @@ func RecipeKey(orderID string, req shopfloor.RecipeRequest) (string, error) {
 // batch, one operation with a phase for the charge, and in it the instruction to make the batch and the
 // material list scaled to the batch size (BR-24.1). A process control system gets the same document; its own
 // setpoints are the plant engineer's to add to the master recipe, which this build does not hold.
-func ReleaseRecipe(o store.BatchOrder, destination string) map[string]any {
+//
+// An order with potency adjustments (BR-24.2) charges its active ingredients at planned × standard / batch potency
+// and its filler lines with what is left, so the batch keeps its size; each adjustment is named in the material
+// list's text. Adjustments that no longer fit the order (a rescale emptied the filler) are an error.
+func ReleaseRecipe(o store.BatchOrder, destination string) (map[string]any, error) {
+	adjusted, err := store.PotencyAdjusted(o)
+	if err != nil {
+		return nil, err
+	}
 	materials := make([]map[string]any, 0, len(o.Lines))
 	for _, l := range o.Lines {
 		role := "ingredient"
@@ -285,7 +297,11 @@ func ReleaseRecipe(o store.BatchOrder, destination string) map[string]any {
 		case domain.LinePhantom:
 			continue // a phantom explodes into its own components and is never charged
 		}
-		m := map[string]any{"itemId": l.ItemID, "qty": l.Qty.String(), "role": role}
+		qty := l.Qty
+		if v, ok := adjusted[l.LineNumber]; ok {
+			qty = v
+		}
+		m := map[string]any{"itemId": l.ItemID, "qty": qty.String(), "role": role}
 		// Formula lines carry no unit of their own. A percent-controlled line is the batch × percent / 100
 		// (BR-24.1), so it is in the batch's unit; the unit of any other line is not recorded and is left out.
 		if l.PercentControlled && o.Unit != "" {
@@ -296,7 +312,7 @@ func ReleaseRecipe(o store.BatchOrder, destination string) map[string]any {
 	instructions := []map[string]any{
 		{"seq": 1, "category": "instruction-text", "text": fmt.Sprintf("Make %s %s under batch order %s (formula %s, version %d).",
 			o.BatchSize.String(), o.Unit, o.OrderNumber, o.FormulaCode, o.FormulaVersion)},
-		{"seq": 2, "category": "material-list", "text": fmt.Sprintf("Charge the %d materials of the formula, scaled to the batch.", len(materials)), "materials": materials},
+		{"seq": 2, "category": "material-list", "text": materialText(len(materials), o.PotencyAdjustments), "materials": materials},
 	}
 	return map[string]any{"procedure": map[string]any{
 		"name": "Batch " + o.OrderNumber,
@@ -307,5 +323,68 @@ func ReleaseRecipe(o store.BatchOrder, destination string) map[string]any {
 				"phases": []map[string]any{{"name": "Charge materials", "instructions": instructions}},
 			}},
 		}},
-	}}
+	}}, nil
+}
+
+// materialText is the plain-language summary of the material list, naming each potency adjustment.
+func materialText(n int, adjs []domain.PotencyAdjustment) string {
+	text := fmt.Sprintf("Charge the %d materials of the formula, scaled to the batch.", n)
+	for _, a := range adjs {
+		batch := ""
+		if a.BatchRef != "" {
+			batch = " from batch " + a.BatchRef
+		}
+		text += fmt.Sprintf(" Line %d is potency-adjusted%s (%s against the standard %s); line %d compensates.", a.LineNumber, batch,
+			a.BatchPotency.String(), a.StandardPotency.String(), a.CompensatingLine)
+	}
+	return text
+}
+
+type potencyAdjustmentsRequest struct {
+	Adjustments []domain.PotencyAdjustment `json:"adjustments"`
+}
+
+// setPotencyAdjustments replaces the potency adjustments of an order (BR-24.2): the ingredient batches of another
+// potency its active lines are charged from, each with the filler line that compensates. Its control recipe, made
+// at release or by :send-recipe, carries the adjusted quantities; once it is made they can no longer change.
+func (a *API) setPotencyAdjustments(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req potencyAdjustmentsRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if len(req.Adjustments) > 50 {
+		fields["adjustments"] = "must hold at most 50 adjustments"
+	}
+	for i, adj := range req.Adjustments {
+		if !adj.StandardPotency.IsPositive() || !adj.BatchPotency.IsPositive() {
+			fields[fmt.Sprintf("adjustments[%d]", i)] = "standardPotency and batchPotency must be positive"
+		}
+		if len(adj.BatchRef) > 100 {
+			fields[fmt.Sprintf("adjustments[%d].batchRef", i)] = "must be at most 100 characters"
+		}
+	}
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	user := p.UserID
+	if user == "" {
+		user = "unknown"
+	}
+	o, err := a.store.SetPotencyAdjustments(r.Context(), id, req.Adjustments, user)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, o)
 }

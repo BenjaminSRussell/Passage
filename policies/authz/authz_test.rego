@@ -3156,3 +3156,9 @@ test_shopfloor_andon_settings_and_certificate_revocation if {
 	not allowed("shopfloor.view", "POST", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates/3f2a:revoke")
 	not allowed("shopfloor.edge.connect", "POST", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates/3f2a:revoke")
 }
+
+# #25: potency adjustments of a batch order are part of maintaining the order.
+test_processmfg_potency_adjustments_follow_batch_order_write if {
+	allowed("production.batch-order.write", "PUT", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/potency-adjustments")
+	not allowed("production.batch-order.read", "PUT", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/potency-adjustments")
+}

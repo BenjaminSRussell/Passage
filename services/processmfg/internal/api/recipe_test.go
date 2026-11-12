@@ -41,6 +41,14 @@ func (f *fakeStore) SetControlRecipe(_ context.Context, _ string, id, errText *s
 	return nil
 }
 
+func (f *fakeStore) SetPotencyAdjustments(_ context.Context, _ string, adjs []domain.PotencyAdjustment, _ string) (store.BatchOrder, error) {
+	if _, err := domain.ApplyPotency([]domain.PotencyLine{{LineNumber: 1, Type: domain.LineActiveIngredient, Qty: decimal.RequireFromString("100")}, {LineNumber: 4, Type: domain.LineIngredient, Qty: decimal.RequireFromString("900")}}, adjs); err != nil {
+		return store.BatchOrder{}, err
+	}
+	f.order.PotencyAdjustments = adjs
+	return f.order, f.err
+}
+
 func (f *fakeStore) GetControlRecipeLink(context.Context, string) (store.ControlRecipeLink, error) {
 	return f.link, f.err
 }
@@ -247,7 +255,11 @@ func TestRecipeKeyFollowsTheRequestAndARecipeIsMadeOnce(t *testing.T) {
 func TestReleaseRecipeMaterialUnits(t *testing.T) {
 	o := releasedOrder()
 	o.Lines[0].PercentControlled = true
-	ins := ReleaseRecipe(o, "kiosk")["procedure"].(map[string]any)["unitProcedures"].([]map[string]any)[0]["operations"].([]map[string]any)[0]["phases"].([]map[string]any)[0]["instructions"].([]map[string]any)
+	doc, err := ReleaseRecipe(o, "kiosk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ins := doc["procedure"].(map[string]any)["unitProcedures"].([]map[string]any)[0]["operations"].([]map[string]any)[0]["phases"].([]map[string]any)[0]["instructions"].([]map[string]any)
 	mats := ins[1]["materials"].([]map[string]any)
 	if mats[0]["unit"] != "kg" {
 		t.Fatalf("percent-controlled line unit %v, want kg", mats[0]["unit"])
@@ -261,4 +273,49 @@ func httpxRouter(a *API) http.Handler {
 	r := httpx.NewRouter()
 	a.Register(r)
 	return r
+}
+
+// Potency-adjusted quantities in the generated recipe: an active ingredient of standard potency 80 % charged from a
+// 100 % batch needs less, and the filler line takes the difference.
+func TestReleaseRecipePotencyAdjusted(t *testing.T) {
+	o := releasedOrder()
+	o.Lines = append(o.Lines,
+		store.OrderLine{LineNumber: 4, ItemID: itemA, Type: domain.LineActiveIngredient, Qty: decimal.RequireFromString("100")})
+	o.PotencyAdjustments = []domain.PotencyAdjustment{{LineNumber: 4, StandardPotency: decimal.RequireFromString("80"), BatchPotency: decimal.RequireFromString("100"), CompensatingLine: 1, BatchRef: "API-0042"}}
+	doc, err := ReleaseRecipe(o, "kiosk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ins := doc["procedure"].(map[string]any)["unitProcedures"].([]map[string]any)[0]["operations"].([]map[string]any)[0]["phases"].([]map[string]any)[0]["instructions"].([]map[string]any)
+	mats := ins[1]["materials"].([]map[string]any)
+	if mats[0]["qty"] != "1220" || mats[2]["qty"] != "80" {
+		t.Fatalf("adjusted materials %v", mats)
+	}
+	if text := ins[1]["text"].(string); !strings.Contains(text, "Line 4 is potency-adjusted from batch API-0042 (100 against the standard 80); line 1 compensates.") {
+		t.Fatalf("material text %q", text)
+	}
+	o.PotencyAdjustments[0].CompensatingLine = 3
+	if _, err := ReleaseRecipe(o, "kiosk"); err == nil {
+		t.Fatal("a by-product line cannot compensate")
+	}
+}
+
+func TestPotencyAdjustmentsRoute(t *testing.T) {
+	fs := &fakeStore{order: releasedOrder()}
+	h := httpxRouter(New(fs))
+	path := orderPath + "/potency-adjustments"
+	body := `{"adjustments":[{"lineNumber":1,"standardPotency":"80","batchPotency":"100","compensatingLine":4,"batchRef":"API-1"}]}`
+	if rec := (call{method: "PUT", path: path, body: body, duties: DutyRead}).do(h); rec.Code != http.StatusForbidden {
+		t.Fatalf("without the write duty: %d", rec.Code)
+	}
+	if rec := (call{method: "PUT", path: path, body: `{"adjustments":[{"lineNumber":1,"standardPotency":"0","batchPotency":"100","compensatingLine":4}]}`, duties: DutyBatchOrderWrite}).do(h); rec.Code != http.StatusBadRequest {
+		t.Fatalf("zero potency: %d %s", rec.Code, rec.Body)
+	}
+	if rec := (call{method: "PUT", path: path, body: `{"adjustments":[{"lineNumber":4,"standardPotency":"80","batchPotency":"100","compensatingLine":1}]}`, duties: DutyBatchOrderWrite}).do(h); rec.Code != http.StatusBadRequest {
+		t.Fatalf("the filler as the active line: %d %s", rec.Code, rec.Body)
+	}
+	rec := (call{method: "PUT", path: path, body: body, duties: DutyBatchOrderWrite}).do(h)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"batchRef":"API-1"`) {
+		t.Fatalf("set: %d %s", rec.Code, rec.Body)
+	}
 }

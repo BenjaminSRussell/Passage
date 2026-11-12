@@ -1140,6 +1140,10 @@ const processManufacturing: Record<string, ProblemCatalogEntry> = {
     message: "This batch order can't be rescaled: its control recipe is already on the shop floor with the current quantities, and a recipe can't be replaced once it is sent.",
     action: "Keep the current batch size. To make a different quantity, create another batch order for the difference.",
   },
+  "PMF-0507": {
+    message: "The potency of this batch order's ingredients can no longer change: its control recipe is already made, or the order is reported or ended.",
+    action: "Charge the batch as the recipe says, and record the actual consumption when you report the order.",
+  },
 };
 
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({

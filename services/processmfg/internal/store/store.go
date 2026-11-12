@@ -118,6 +118,9 @@ type BatchOrder struct {
 	ActualQty  *decimal.Decimal `json:"actualQty,omitempty"`
 	Lines      []OrderLine      `json:"lines,omitempty"`
 	Allocation *Allocation      `json:"allocation,omitempty"`
+	// PotencyAdjustments are the ingredient batches of another potency the order is charged from (BR-24.2); its
+	// control recipe carries the adjusted quantities. Read with the order; list results omit them.
+	PotencyAdjustments []domain.PotencyAdjustment `json:"potencyAdjustments,omitempty"`
 }
 
 // NewBatchOrder is the create command.
@@ -190,6 +193,7 @@ type Store interface {
 	ListRecipeTargets(ctx context.Context, limit int) ([]RecipeTarget, error)
 	DeleteRecipeTarget(ctx context.Context, legalEntityID, itemID string) (bool, error)
 	SetControlRecipe(ctx context.Context, orderID string, recipeID, errText *string) error
+	SetPotencyAdjustments(ctx context.Context, orderID string, adjs []domain.PotencyAdjustment, user string) (BatchOrder, error)
 	GetControlRecipeLink(ctx context.Context, orderID string) (ControlRecipeLink, error)
 	Ping(ctx context.Context) error
 }
@@ -539,6 +543,9 @@ func loadOrder(ctx context.Context, tx pgx.Tx, id, lock string) (BatchOrder, err
 		return o, err
 	}
 	rows.Close()
+	if o.PotencyAdjustments, err = loadPotency(ctx, tx, id); err != nil {
+		return o, err
+	}
 	if o.Status == domain.StatusEnded {
 		o.Allocation, err = loadAllocation(ctx, tx, id)
 	}

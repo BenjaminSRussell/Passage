@@ -3246,6 +3246,7 @@
       {"resource": "/v1/production/batch-orders/*:send-recipe", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:report-finished", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:rescale", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-orders/*/potency-adjustments", "methods": ["PUT"]},
       {"resource": "/v1/production/batch-orders/*:start", "methods": ["POST"]},
       {"resource": "/v1/production/bulk-consolidation:preview", "methods": ["POST"]},
       {"resource": "/v1/production/rework-orders:preview", "methods": ["POST"]},
