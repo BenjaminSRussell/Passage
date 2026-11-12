@@ -66,6 +66,12 @@ spec:
             - name: REVREC_LEDGER_IDS
               value: {{ include "revrec.ledgerIds" . | quote }}
             {{- end }}
+            {{- if .Values.billingUrl }}
+            - name: BILLING_URL
+              value: {{ .Values.billingUrl | quote }}
+            - name: REVREC_BILLING_INTERVAL
+              value: {{ .Values.billingInterval | quote }}
+            {{- end }}
             {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key

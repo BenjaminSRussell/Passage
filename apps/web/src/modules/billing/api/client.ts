@@ -543,3 +543,62 @@ export function periodEndOf(period: string): string {
   const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return `${period}-${String(last).padStart(2, "0")}`;
 }
+
+// Contract modifications (#29, POST /revrec/contracts/{id}:modify).
+
+export const MODIFICATION_TYPES = ["PROSPECTIVE", "CATCH_UP"] as const;
+export type ModificationType = (typeof MODIFICATION_TYPES)[number];
+
+export interface ModifyObligationInput {
+  obligationId: string;
+  /** A revised standalone selling price. */
+  ssp?: string;
+  /** The share of the remaining performance still promised: "0" removes the obligation, "1" leaves it as it is. */
+  remainingScope?: string;
+}
+
+export interface ModifyContractInput {
+  type: ModificationType;
+  effectiveDate: string;
+  /** Signed change of the transaction price; "0" when only SSPs or scope change. */
+  transactionPriceChange: string;
+  obligations?: ModifyObligationInput[];
+  reason?: string;
+}
+
+export interface ModificationLine {
+  obligationId: string;
+  allocatedBefore: string;
+  allocatedAfter: string;
+  sspBefore: string;
+  sspAfter: string;
+  progress?: string;
+  catchUp: string;
+  reversal: string;
+  removed?: boolean;
+}
+
+export interface Modification {
+  id: string;
+  type: ModificationType;
+  effectiveDate: string;
+  priceBefore: string;
+  priceAfter: string;
+  catchUp: string;
+  reversal: string;
+  billingStatus: "PENDING" | "NONE";
+  obligations: ModificationLine[];
+}
+
+export interface ModifyContractResult extends RevenueContract {
+  modification: Modification;
+}
+
+/** POST /revrec/contracts/{id}:modify with If-Match on the contract version the user reviewed. */
+export function modifyContract(id: string, input: ModifyContractInput, contractVersion: number): Promise<ModifyContractResult> {
+  return send<ModifyContractResult>(`${revrecBase}/contracts/${encodeURIComponent(id)}:modify`, {
+    method: "POST",
+    headers: { "If-Match": `"${contractVersion}"` },
+    body: JSON.stringify(input),
+  });
+}

@@ -829,7 +829,7 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "order-desk.md#invoice-it",
   },
   {
-    patterns: ["/billing/revenue-contracts", "/billing/revenue-contracts/:id"],
+    patterns: ["/billing/revenue-contracts", "/billing/revenue-contracts/:id", "/billing/revenue-contracts/:id/modify"],
     title: "Revenue contracts",
     purpose: "Contracts with their price allocation and how much revenue is recognized.",
     howTo: ["Select New revenue contract to add one.", "Open a contract and select Satisfy milestone when a milestone is met.", "Select Deferred revenue for the monthly roll-forward."],

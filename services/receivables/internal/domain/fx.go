@@ -44,3 +44,21 @@ func FXLines(fx RealizedFX, gainAccount, lossAccount string) []Posting {
 	}
 	return nil
 }
+
+// FXTolerance is how far a cross-currency item amount may be from what the cash or credit is worth in the item's currency: the
+// larger of amount (in the item's currency) and percent of the item amount, rounded to cents. Without an entity setting
+// (both nil) it is BR-30.4's write-off tolerance, the larger of 5.00 and 0.5%. A set value of zero is allowed: it demands
+// the exact market value.
+func FXTolerance(itemAmount decimal.Decimal, amount, percent *decimal.Decimal) decimal.Decimal {
+	if amount == nil && percent == nil {
+		return WriteOffTolerance(itemAmount)
+	}
+	floor, pct := decimal.Zero, decimal.Zero
+	if amount != nil {
+		floor = *amount
+	}
+	if percent != nil {
+		pct = itemAmount.Abs().Mul(*percent).Div(decimal.NewFromInt(100)).Round(2)
+	}
+	return decimal.Max(floor, pct)
+}

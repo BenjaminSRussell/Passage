@@ -71,6 +71,41 @@ func (a *API) putFXSetting(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
+type unapplyRequest struct {
+	Reason string `json:"reason"`
+}
+
+// unapplyPayment reverses every live application of a payment (#30): the items it settled are open again by what it took off them
+// and the cash is unapplied; If-Match carries the payment version the user reviewed.
+func (a *API) unapplyPayment(w http.ResponseWriter, r *http.Request, id string) {
+	if !require(w, r, dutyPaymentReverse) {
+		return
+	}
+	version, err := ifMatch(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	var in unapplyRequest
+	if r.ContentLength != 0 {
+		if err := httpx.Decode(r, &in); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+	if len(in.Reason) > 500 {
+		writeFields(w, r, map[string]string{"reason": "must be at most 500 characters"})
+		return
+	}
+	out, err := a.store.UnapplyPayment(r.Context(), id, version, in.Reason)
+	if err != nil {
+		a.fail("unapply payment", w, r, err)
+		return
+	}
+	w.Header().Set("ETag", etag(out.Payment.Version))
+	httpx.JSON(w, http.StatusOK, out)
+}
+
 // reversePayment undoes the cash receipt of a payment that was never applied; the journal it queues mirrors the receipt's own
 // journal, so the bank account the receipt was booked to is the one that is credited back.
 func (a *API) reversePayment(w http.ResponseWriter, r *http.Request, id string) {

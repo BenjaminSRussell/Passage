@@ -250,6 +250,8 @@ type Store interface {
 	GetFXSetting(ctx context.Context, legalEntityID string) (FXSetting, error)
 	PutFXSetting(ctx context.Context, f FXSetting) (FXSetting, error)
 	ReversePayment(ctx context.Context, id string, version int) (Payment, error)
+	// UnapplyPayment reverses every live application of a payment (#30).
+	UnapplyPayment(ctx context.Context, id string, version int, reason string) (UnapplyResult, error)
 	Ping(ctx context.Context) error
 }
 
@@ -616,17 +618,13 @@ func toDomainItem(o OpenItem) domain.Item {
 func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req ApplyRequest, idempotencyKey string) (ApplyResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ApplyResult
-	var book rateBook
-	for _, a := range req.Allocations {
-		if a.ItemCurrencyAmount.IsPositive() {
-			var err error
-			if book, err = s.prefetchRates(ctx, id, req); err != nil {
-				return out, err
-			}
-			break
-		}
+	// The rates of a cross-currency apply are read before any lock is taken (prefetchRates returns at once for an entity that does
+	// not settle across currencies).
+	book, err := s.prefetchRates(ctx, id, req)
+	if err != nil {
+		return out, err
 	}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		pay, err := scanPayment(tx.QueryRow(ctx, `select `+paymentColumns+` from payment where id = $1 for update`, id))
 		if err != nil {
 			return notFound(err, CodePaymentNotFound, "payment not found")
@@ -669,8 +667,16 @@ func (s *Postgres) ApplyPayment(ctx context.Context, id string, version int, req
 						"open item "+a.OpenItemID+" is in "+item.Currency+", the payment in "+pay.Currency+"; cross-currency settlement is not enabled")
 				}
 				if !a.ItemCurrencyAmount.IsPositive() {
-					return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,
-						"open item "+a.OpenItemID+" is in "+item.Currency+", the payment in "+pay.Currency+"; give itemAmount, what the settlement takes off the item in "+item.Currency)
+					// Auto-priced: what the cash is worth in the item's currency at the payment's value date.
+					cross, err := s.rateFor(ctx, book, pay.LegalEntityID, pay.Currency, item.Currency, parseDay(pay.ValueDate))
+					if err != nil {
+						return err
+					}
+					a.ItemCurrencyAmount = a.Amount.Mul(cross).Round(money.MinorUnits(item.Currency))
+					if !a.ItemCurrencyAmount.IsPositive() {
+						return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,
+							"the cash applied to open item "+a.OpenItemID+" is worth nothing in "+item.Currency+"; give itemAmount")
+					}
 				}
 				if !a.ItemCurrencyAmount.Equal(a.ItemCurrencyAmount.Round(money.MinorUnits(item.Currency))) {
 					return httpx.NewProblem(http.StatusBadRequest, domain.CodeApplyMismatch,

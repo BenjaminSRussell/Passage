@@ -947,3 +947,50 @@ func TestApproval_TakesTheVendorLockEvenForAProposalWithoutWithholding(t *testin
 		t.Fatalf("approval after the lock was released: %v", err)
 	}
 }
+
+// The withholding report is queued in the journal's transaction: a journal that cannot be recorded queues nothing, and a recorded
+// one always has its report.
+func TestRecordJournalWithWithholding_QueuesTheReportInTheSameTransaction(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-wht", threeItems(t, s))
+	run, _, err := s.StartRun(erin, runInput(proposal.ID, leA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`[{"ID":"e1"}]`)
+	count := func() int {
+		var n int
+		if err := dbx.WithTenantTx(erin, s.pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(erin, `select count(*) from ap_withholding_report where run_id = $1`, run.ID).Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := s.RecordJournalWithWithholding(erin, run.ID, "e", leA, body); !errors.Is(err, ErrRunOutOfOrder) {
+		t.Fatalf("journal before request = %v", err)
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("a refused journal queued %d reports", n)
+	}
+	payments := make([]domain.RunPayment, len(proposal.Groups))
+	for i, g := range proposal.Groups {
+		payments[i] = domain.RunPayment{GroupID: g.ID, VendorID: g.VendorID, Currency: g.Currency, Method: g.Method, EndToEndID: domain.PaymentNumber(g.ID), Amount: g.Net, Valued: g.Valued}
+	}
+	if _, err := s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>", PaymentCount: len(payments), Payments: payments}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BeginJournal(erin, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := s.RecordJournalWithWithholding(erin, run.ID, "entry-1", leA, body)
+	if err != nil || recorded.JournalPostedAt == nil {
+		t.Fatalf("record: %+v %v", recorded, err)
+	}
+	if _, err := s.RecordJournalWithWithholding(erin, run.ID, "entry-1", leA, body); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("reports = %d, want 1", n)
+	}
+}

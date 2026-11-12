@@ -27,6 +27,21 @@ func (f *fakeStore) ModifyContract(context.Context, string, store.ModificationRe
 	return store.Contract{}, store.Modification{}, nil
 }
 
+func (f *fakeStore) RetryBilling(_ context.Context, id string) (store.ModificationBilling, error) {
+	return store.ModificationBilling{ID: "b1", ModificationID: id, Status: store.BillingPending}, nil
+}
+
+func TestRetryBilling_NeedsThePostingDuty(t *testing.T) {
+	h := newHandler(newFakeStore())
+	path := "/v1/revrec/modifications/0190f0a0-0000-7000-8000-000000000009:retry-billing"
+	if rec := callAs(t, h, http.MethodPost, path, "", "revrec.maintain", entityID, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("maintain may not retry: %d", rec.Code)
+	}
+	if rec := callAs(t, h, http.MethodPost, path, "", "revrec.post", entityID, nil); rec.Code != http.StatusOK {
+		t.Errorf("post may retry: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestModifyContract_ValidatesAndForwards(t *testing.T) {
 	f := &modifyFake{fakeStore: newFakeStore()}
 	h := newHandler(f)
@@ -49,6 +64,8 @@ func TestModifyContract_ValidatesAndForwards(t *testing.T) {
 		"nothing changed": `{"type":"CATCH_UP","effectiveDate":"2027-06-30","transactionPriceChange":"0"}`,
 		"bad ssp":         `{"type":"CATCH_UP","effectiveDate":"2027-06-30","transactionPriceChange":"0","obligations":[{"obligationId":"` + support + `","ssp":"0"}]}`,
 		"bad obligation":  `{"type":"CATCH_UP","effectiveDate":"2027-06-30","transactionPriceChange":"0","obligations":[{"obligationId":"x","ssp":"5"}]}`,
+		"bad scope":       `{"type":"CATCH_UP","effectiveDate":"2027-06-30","transactionPriceChange":"0","obligations":[{"obligationId":"` + support + `","remainingScope":"1.5"}]}`,
+		"empty revision":  `{"type":"CATCH_UP","effectiveDate":"2027-06-30","transactionPriceChange":"0","obligations":[{"obligationId":"` + support + `"}]}`,
 	} {
 		if rec := callAs(t, h, http.MethodPost, path, body, allDuties, entityID, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400 (%s)", name, rec.Code, rec.Body.String())
@@ -70,6 +87,13 @@ func TestModifyContract_ValidatesAndForwards(t *testing.T) {
 	var out modifyResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Modification.ID != "m1" || out.Modification.PriceAfter != "10700.00" || out.Modification.EffectiveDate != "2027-06-30" {
 		t.Errorf("response %s (%v)", rec.Body.String(), err)
+	}
+	removal := `{"type":"PROSPECTIVE","effectiveDate":"2027-06-30","transactionPriceChange":"-500","obligations":[{"obligationId":"` + support + `","remainingScope":"0"}]}`
+	if rec := callAs(t, h, http.MethodPost, path, removal, allDuties, entityID, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK {
+		t.Fatalf("removal: %d %s", rec.Code, rec.Body.String())
+	}
+	if sc, ok := f.got.Scope[support]; !ok || !sc.IsZero() || len(f.got.NewSSP) != 0 {
+		t.Errorf("removal forwarded %+v", f.got)
 	}
 	if rec := callAs(t, h, http.MethodPost, "/v1/revrec/contracts/nope:modify", good, allDuties, entityID, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown contract: %d", rec.Code)

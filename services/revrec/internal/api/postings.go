@@ -90,6 +90,7 @@ type reversalOut struct {
 	ContractID       string `json:"contractId"`
 	CreditNoteID     string `json:"creditNoteId"`
 	CreditNoteNumber string `json:"creditNoteNumber"`
+	ModificationID   string `json:"modificationId,omitempty"`
 	Currency         string `json:"currency"`
 	PostingDate      string `json:"postingDate"`
 	Amount           string `json:"amount"`
@@ -100,7 +101,7 @@ type reversalOut struct {
 }
 
 func toReversalOut(rp store.ReversalPosting) reversalOut {
-	return reversalOut{ID: rp.ID, ContractID: rp.ContractID, CreditNoteID: rp.CreditNoteID, CreditNoteNumber: rp.CreditNoteNumber,
+	return reversalOut{ID: rp.ID, ContractID: rp.ContractID, CreditNoteID: rp.CreditNoteID, CreditNoteNumber: rp.CreditNoteNumber, ModificationID: rp.ModificationID,
 		Currency: rp.Currency, PostingDate: rp.PostingDate.Format(dateLayout), Amount: fixed(rp.Amount, rp.Currency)}
 }
 
@@ -277,10 +278,13 @@ func (a *API) postReversals(w http.ResponseWriter, r *http.Request, legalEntityI
 		out.elsewhere = append(out.elsewhere, o)
 	}
 	for _, rp := range due {
-		text := "Revenue reversed by credit note " + rp.CreditNoteNumber
+		text, key := "Revenue reversed by credit note "+rp.CreditNoteNumber, "revrec-reversal-"+rp.ID
+		if rp.ModificationID != "" {
+			text, key = "Revenue reduced by contract modification", "revrec-modrev-"+rp.ID
+		}
 		entryID, err := a.ledger.Post(ctx, ledgerclient.Entry{
 			LegalEntityID: rp.LegalEntityID, LedgerID: rp.LedgerID, DocumentID: rp.ID, PostingDate: rp.PostingDate.Format(dateLayout),
-			Currency: rp.Currency, IdempotencyKey: "revrec-reversal-" + rp.ID, SourceType: reversalSourceType,
+			Currency: rp.Currency, IdempotencyKey: key, SourceType: reversalSourceType,
 			Lines: []ledgerclient.Line{
 				{Account: store.RevenueAccount, Amount: rp.Amount, Text: text},
 				{Account: store.DeferredAccount, Credit: true, Amount: rp.Amount, Text: text},
@@ -331,12 +335,14 @@ type glReconciliationOut struct {
 	GLDebit       string `json:"glDebit"`
 	Difference    string `json:"difference"`
 	CreditNotes   string `json:"creditNotes"`
-	Reversed      string `json:"reversed"`
-	Deferred      string `json:"deferred"`
-	GLCredit      string `json:"glCredit"`
-	GLClosing     string `json:"glClosing"`
-	ClosingDiff   string `json:"closingDifference"`
-	Reconciled    bool   `json:"reconciled"`
+	// ModificationCredits is the per-product allocation decreases of contract modifications, which billing credits and debits to 2400.
+	ModificationCredits string `json:"modificationCredits"`
+	Reversed            string `json:"reversed"`
+	Deferred            string `json:"deferred"`
+	GLCredit            string `json:"glCredit"`
+	GLClosing           string `json:"glClosing"`
+	ClosingDiff         string `json:"closingDifference"`
+	Reconciled          bool   `json:"reconciled"`
 }
 
 func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
@@ -386,13 +392,15 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 	}
 	// 2400 is debited by revrec's recognition postings and by billing's credit notes for their deferred part, which revrec
 	// mirrors as negative adjustments when it consumes creditnote.booked; a credit note revrec has not reversed shows here.
+	// What billing credits for a modification (the products whose allocation fell) is debited to 2400 too (its revenue part is revrec's modification reversal, on
+	// the credit side).
 	creditNotes := rf.Adjustments.Neg()
-	diff := rf.Recognized.Add(creditNotes).Sub(bal.Debit)
+	diff := rf.Recognized.Add(creditNotes).Add(rf.ModificationCredits).Sub(bal.Debit)
 	glClosing := bal.Credit.Sub(bal.Debit)
 	closingDiff := rf.Closing.Sub(glClosing)
 	httpx.JSON(w, http.StatusOK, glReconciliationOut{
 		LegalEntityID: le, LedgerID: ledgerID, Currency: cur, Period: period, Account: store.DeferredAccount,
-		Recognized: fixed(rf.Recognized, cur), CreditNotes: fixed(creditNotes, cur), Reversed: fixed(rf.Reversed, cur),
+		Recognized: fixed(rf.Recognized, cur), CreditNotes: fixed(creditNotes, cur), ModificationCredits: fixed(rf.ModificationCredits, cur), Reversed: fixed(rf.Reversed, cur),
 		GLDebit: fixed(bal.Debit, cur), Difference: fixed(diff, cur),
 		Deferred: fixed(rf.Closing, cur), GLCredit: fixed(bal.Credit, cur), GLClosing: fixed(glClosing, cur), ClosingDiff: fixed(closingDiff, cur),
 		Reconciled: diff.IsZero() && closingDiff.IsZero(),

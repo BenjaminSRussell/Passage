@@ -194,3 +194,63 @@ func VerifyCredit(currency string, original []PostedLine, originalTotals Totals,
 	}
 	return nil
 }
+
+// AmountCredit is a credit of a net amount on one original line (a contract modification's price decrease).
+type AmountCredit struct {
+	LineNo int
+	Net    decimal.Decimal
+}
+
+// PlanAmountCredit builds the lines and totals of a credit note that credits net amounts on original lines: the net is credited
+// exactly, the quantity and the tax are the original's in the same proportion (quantity to 6 places, tax half-even to the minor
+// unit), and the last of a line's remaining net takes exactly what is left. Anything beyond the remainder is BIL-0005.
+func PlanAmountCredit(currency string, original []PostedLine, originalTotals Totals, used CreditUsage, req []AmountCredit) ([]CreditLine, Totals, error) {
+	exp := money.MinorUnits(currency)
+	byNo := make(map[int]PostedLine, len(original))
+	for _, l := range original {
+		byNo[l.No] = l
+	}
+	out := make([]CreditLine, 0, len(req))
+	totals := Totals{Net: decimal.Zero, Charges: decimal.Zero, Tax: decimal.Zero}
+	seen := map[int]bool{}
+	for _, r := range req {
+		orig, ok := byNo[r.LineNo]
+		switch {
+		case !ok:
+			return nil, Totals{}, &Error{Code: "COM-0001", Detail: fmt.Sprintf("line %d is not a line of the original invoice", r.LineNo)}
+		case seen[r.LineNo]:
+			return nil, Totals{}, &Error{Code: "COM-0001", Detail: fmt.Sprintf("line %d is listed twice", r.LineNo)}
+		case !r.Net.IsPositive() || r.Net.Exponent() < -exp:
+			return nil, Totals{}, &Error{Code: "COM-0001", Detail: fmt.Sprintf("line %d: the credited amount must be positive at the currency's minor unit", r.LineNo)}
+		}
+		seen[r.LineNo] = true
+		done := used.line(r.LineNo)
+		leftQty, leftNet, leftTax := orig.Qty.Sub(done.Qty), orig.Net.Sub(done.Net), orig.Tax.Sub(done.Tax)
+		if r.Net.GreaterThan(leftNet) {
+			return nil, Totals{}, &Error{Code: CodeCreditExceeded,
+				Detail: fmt.Sprintf("Credit exceeds remaining creditable amount: line %d has %s left to credit", r.LineNo, leftNet.StringFixed(exp))}
+		}
+		qty, tax := leftQty, leftTax
+		if r.Net.LessThan(leftNet) {
+			qty = decimal.Min(orig.Qty.Mul(r.Net).DivRound(orig.Net, 6), leftQty)
+			tax = decimal.Min(orig.Tax.Mul(r.Net).DivRound(orig.Net, 18).RoundBank(exp), leftTax)
+			if !qty.IsPositive() {
+				qty = decimal.New(1, -6)
+			}
+		}
+		line := orig.Line
+		line.No = len(out) + 1
+		line.Qty = qty
+		out = append(out, CreditLine{OriginalLineNo: r.LineNo, Line: line, Net: r.Net, Tax: tax})
+		totals.Net = totals.Net.Add(r.Net)
+		totals.Tax = totals.Tax.Add(tax)
+	}
+	totals.Gross = totals.Net.Add(totals.Tax)
+	if !totals.Gross.IsPositive() {
+		return nil, Totals{}, &Error{Code: "COM-0001", Detail: "a credit note must credit a positive amount"}
+	}
+	if err := VerifyCredit(currency, original, originalTotals, used, out, totals); err != nil {
+		return nil, Totals{}, err
+	}
+	return out, totals, nil
+}

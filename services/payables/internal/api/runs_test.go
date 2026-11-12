@@ -30,6 +30,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/payables/internal/party"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/tax"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/withholdingreport"
 	"github.com/BenjaminSRussell/passage/services/payables/migrations"
 )
 
@@ -231,13 +232,15 @@ type runFixture struct {
 	verify   ed25519.PublicKey
 	partyURL string
 	pg       *store.Postgres
-	proposal string
-	erin     caller
-	alice    caller
-	bob      caller
-	itemA    store.OpenItem
-	created  *httptest.ResponseRecorder
-	clock    *time.Time
+	// withholding sends the queued withholding reports to the fake tax service (the cmd/payables reporter).
+	withholding *withholdingreport.Reporter
+	proposal    string
+	erin        caller
+	alice       caller
+	bob         caller
+	itemA       store.OpenItem
+	created     *httptest.ResponseRecorder
+	clock       *time.Time
 }
 
 func runProposalBody(runID string, withholdingCodes map[string]string) string {
@@ -361,9 +364,12 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 		banks = party.New(partySrv.URL, nil).WithSigner(signer)
 	}
 	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks, keys).WithEmployeeVendors(pg)
+	var reporter *withholdingreport.Reporter
 	if !opts.noTax {
 		taxClient := tax.New(taxSrv.URL, nil).WithSigner(signer)
 		a.WithWithholding(taxClient, pg, runProfiles).WithWithholdingRecorder(taxClient)
+		// Now runs two hours behind, so a back-off lands in the past and the next run retries at once.
+		reporter = &withholdingreport.Reporter{Store: pg, Tax: taxClient, Now: func() time.Time { return time.Now().Add(-2 * time.Hour) }}
 	}
 	if opts.noGroupDimension {
 		a.WithVendorGroupDimension("")
@@ -371,7 +377,7 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	router := httpx.NewRouter()
 	a.Register(router)
 
-	f := &runFixture{t: t, router: router, api: a, ledger: fl, party: fp, tax: ft, keys: keys, signer: signer, verify: verifyKey, partyURL: partySrv.URL, pg: pg, itemA: itemA, clock: &clock,
+	f := &runFixture{t: t, router: router, api: a, ledger: fl, party: fp, tax: ft, keys: keys, signer: signer, verify: verifyKey, partyURL: partySrv.URL, pg: pg, withholding: reporter, itemA: itemA, clock: &clock,
 		erin: caller{duties: runDuties, user: "erin", entity: entityA}, alice: caller{duties: approveAll, user: "alice", entity: entityA}, bob: caller{duties: approveAll, user: "bob", entity: entityA}}
 	if opts.skipProposal {
 		return f

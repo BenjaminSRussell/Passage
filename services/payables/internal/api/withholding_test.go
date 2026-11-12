@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
@@ -297,8 +298,9 @@ func TestWithholding_SecondDraftForTheSameVendorIsRefusedAtApprovalAfterTheFirst
 	wantProblem(t, f.bob.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+secondID+":approve", ""), http.StatusConflict, "AP-PRP-001")
 }
 
-// #13: the tax withheld by a payment run is recorded with the tax service, one entry per invoice, so its remittance runs and certificates
-// cover it. The entry ids are stable, so a retry after a failed recording sends the same entries again.
+// #13: the tax withheld by a payment run is queued by post-journal and recorded with the tax service by the withholding reporter, one
+// entry per invoice, so its remittance runs and certificates cover it. A tax outage no longer fails post-journal: the report is retried
+// with back-off, and the entry ids are stable, so the retry sends the same entries.
 func TestWithholding_RunRecordsTheWithheldTaxWithTheTaxServiceAndRetriesIdempotently(t *testing.T) {
 	f := newRunFixture(t, fixtureOptions{withholdingCodes: map[string]string{vendorOne: "WHT30"}})
 	f.approve()
@@ -309,17 +311,26 @@ func TestWithholding_RunRecordsTheWithheldTaxWithTheTaxServiceAndRetriesIdempote
 	f.tax.mu.Lock()
 	f.tax.entriesStatus = http.StatusServiceUnavailable
 	f.tax.mu.Unlock()
-	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusBadGateway {
-		t.Fatalf("post-journal while tax is down: %d %s, want 502", rec.Code, rec.Body)
+	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK {
+		t.Fatalf("post-journal while tax is down: %d %s, want 200 (the report is queued)", rec.Code, rec.Body)
 	}
 	if len(f.ledger.bodies) != 1 {
 		t.Fatalf("the ledger journal was posted %d times", len(f.ledger.bodies))
 	}
+	if n, err := f.withholding.RunOnce(context.Background()); err != nil || n != 1 {
+		t.Fatalf("first report attempt: %d %v", n, err)
+	}
+	if got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "")); got["withholdingRecordError"] != nil {
+		t.Fatalf("an outage parked the run: %v", got["withholdingRecordError"])
+	}
 	f.tax.mu.Lock()
 	f.tax.entriesStatus = 0
 	f.tax.mu.Unlock()
-	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK {
-		t.Fatalf("post-journal retry: %d %s", rec.Code, rec.Body)
+	if n, err := f.withholding.RunOnce(context.Background()); err != nil || n != 1 {
+		t.Fatalf("retry: %d %v", n, err)
+	}
+	if n, _ := f.withholding.RunOnce(context.Background()); n != 0 {
+		t.Fatalf("a reported run was sent again: %d", n)
 	}
 	f.tax.mu.Lock()
 	defer f.tax.mu.Unlock()
@@ -340,7 +351,8 @@ func TestWithholding_RunRecordsTheWithheldTaxWithTheTaxServiceAndRetriesIdempote
 	}
 }
 
-// A refusal from tax that retrying cannot fix parks the run with a reason an operator sees, instead of an endless 502.
+// A refusal from tax that retrying cannot fix parks the report and puts the reason on the run (AP-RUN-019); repeating post-journal
+// after the fix queues it again and clears the reason, and the reporter then records it.
 func TestWithholding_PermanentTaxRefusalParksTheRun(t *testing.T) {
 	f := newRunFixture(t, fixtureOptions{withholdingCodes: map[string]string{vendorOne: "WHT30"}})
 	f.approve()
@@ -349,9 +361,14 @@ func TestWithholding_PermanentTaxRefusalParksTheRun(t *testing.T) {
 		t.Fatalf("generate-file: %d %s", rec.Code, rec.Body)
 	}
 	f.tax.mu.Lock()
-	f.tax.entriesStatus = http.StatusForbidden
+	f.tax.entriesStatus = http.StatusUnprocessableEntity
 	f.tax.mu.Unlock()
-	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusUnprocessableEntity, "AP-RUN-019")
+	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK {
+		t.Fatalf("post-journal: %d %s", rec.Code, rec.Body)
+	}
+	if _, err := f.withholding.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, ""))
 	if got["withholdingRecordError"] == nil || got["journalPostedAt"] == nil {
 		t.Fatalf("run = %v, want the journal posted and the park reason shown", got)
@@ -365,5 +382,13 @@ func TestWithholding_PermanentTaxRefusalParksTheRun(t *testing.T) {
 	got = decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, ""))
 	if got["withholdingRecordError"] != nil {
 		t.Errorf("the park was not cleared: %v", got["withholdingRecordError"])
+	}
+	if n, err := f.withholding.RunOnce(context.Background()); err != nil || n != 1 {
+		t.Fatalf("report after the fix: %d %v", n, err)
+	}
+	f.tax.mu.Lock()
+	defer f.tax.mu.Unlock()
+	if len(f.tax.entries) == 0 {
+		t.Fatal("tax received nothing after the fix")
 	}
 }
