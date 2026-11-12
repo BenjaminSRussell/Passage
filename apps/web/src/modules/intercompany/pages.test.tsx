@@ -65,6 +65,11 @@ describe("intercompany module", () => {
       "/intercompany/planning",
       "/intercompany/chains",
       "/intercompany/transfer-pricing",
+      "/intercompany/entities",
+      "/intercompany/matrix",
+      "/intercompany/transfer-prices",
+      "/intercompany/settings",
+      "/intercompany/ledger-reconciliation",
     ]);
     expect(intercompany.nav.map((n) => n.duty)).toEqual([
       "intercompany.view",
@@ -79,6 +84,11 @@ describe("intercompany module", () => {
       "intercompany.plan",
       "intercompany.view",
       "intercompany.view",
+      "intercompany.view",
+      "intercompany.view",
+      "intercompany.view",
+      "intercompany.view",
+      "intercompany.reconcile",
     ]);
   });
 
