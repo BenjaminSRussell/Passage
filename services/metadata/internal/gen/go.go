@@ -31,6 +31,14 @@ func goDomain(entity *domain.Entity) string {
 		}
 	}
 	builder.WriteString("\tExt map[string]any `json:\"ext\"`\n\tVersion int `json:\"version\"`\n}\n")
+	if phi := entity.PHIFields(); len(phi) > 0 {
+		quoted := make([]string, len(phi))
+		for i, name := range phi {
+			quoted[i] = fmt.Sprintf("%q", camel(name))
+		}
+		// The JSON names of the protected-health-information fields; the read-access audit (services/audit) records these.
+		fmt.Fprintf(&builder, "\n// %[1]sPHIFields are the JSON names of the phi fields; every one is stored sealed with fieldcrypt.\nfunc %[1]sPHIFields() []string { return []string{%[2]s} }\n", entity.Name, strings.Join(quoted, ", "))
+	}
 	return builder.String()
 }
 

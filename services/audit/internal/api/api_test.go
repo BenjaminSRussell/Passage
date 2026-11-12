@@ -24,6 +24,8 @@ type fakeStore struct {
 	applied []domain.Change
 	records []store.Record
 	alerts  []store.Alert
+	readStore
+	lastFilter store.ReadFilter
 }
 
 func (f *fakeStore) Apply(_ context.Context, change domain.Change) error {

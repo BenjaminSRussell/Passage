@@ -5,11 +5,15 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ed25519"
 	"encoding/base64"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 var (
@@ -99,5 +103,59 @@ func TestReseal_ValidatesArgumentsBeforeConnecting(t *testing.T) {
 				t.Fatalf("got %v, want error containing %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestPHIReadAuditFromEnv(t *testing.T) {
+	signer, err := tenant.NewServiceSigner("hr", ed25519.NewKeyFromSeed(bytes.Repeat([]byte{3}, ed25519.SeedSize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const url = "http://audit.example.svc:8080"
+	tests := []struct {
+		name    string
+		env     map[string]string
+		signer  *tenant.ServiceSigner
+		wantOn  bool
+		wantErr string
+	}{
+		{"commercial is off", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial"}, nil, false, ""},
+		{"unset is off", map[string]string{}, nil, false, ""},
+		{"hipaa overlay is on", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+hipaa", "AUDIT_URL": url}, signer, true, ""},
+		{"hipaa overlay needs the audit url", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+hipaa"}, signer, false, "AUDIT_URL is required"},
+		{"hipaa overlay needs a signing key", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+hipaa", "AUDIT_URL": url}, nil, false, "SIGNING_KEY"},
+		{"switch forces it on", map[string]string{"PASSAGE_PHI_READ_AUDIT": "true", "AUDIT_URL": url}, signer, true, ""},
+		{"switch forces it off", map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+hipaa", "PASSAGE_PHI_READ_AUDIT": "false"}, nil, false, ""},
+		{"unknown profile fails closed", map[string]string{"PASSAGE_CLOUD_PROFILE": "nowhere+hipaa"}, signer, false, "unknown cloud profile"},
+	}
+	for _, c := range tests {
+		rec, err := phiReadAuditFromEnv(envOf(c.env), c.signer)
+		if c.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("%s: err = %v, want %q", c.name, err, c.wantErr)
+			}
+			continue
+		}
+		if err != nil || (rec != nil) != c.wantOn {
+			t.Errorf("%s: recorder on = %v, err = %v, want on = %v", c.name, rec != nil, err, c.wantOn)
+		}
+	}
+}
+
+// TestSubcommandsLogThroughThePseudonymizer: reseal-pii and the tenant jobs never reach httpx.Serve, so the
+// pseudonymizer is installed with the logger, before the subcommand is chosen (#605).
+func TestSubcommandsLogThroughThePseudonymizer(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	var buf bytes.Buffer
+	if err := setupLogging(&buf, envOf(map[string]string{"LOG_PSEUDONYMIZE": "true"})); err != nil {
+		t.Fatal(err)
+	}
+	slog.Info("resealed", "tenant", "11111111-1111-4111-8111-111111111111", "email", "ann@example.com")
+	if strings.Contains(buf.String(), "ann@example.com") || !strings.Contains(buf.String(), `"service":"hr"`) {
+		t.Fatalf("log line: %s", buf.String())
+	}
+	if err := setupLogging(&buf, envOf(map[string]string{"PASSAGE_CLOUD_PROFILE": "nope"})); err == nil {
+		t.Fatal("a bad profile must stop the command, not log raw values")
 	}
 }

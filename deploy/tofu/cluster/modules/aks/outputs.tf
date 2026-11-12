@@ -33,8 +33,34 @@ output "key_vault_name" {
 }
 
 output "fieldcrypt_key_id" {
-  description = "Versionless Key Vault key id that wraps the fieldcrypt master keys."
-  value       = azurerm_key_vault_key.fieldcrypt.resource_versionless_id
+  description = "Versionless key id that wraps the fieldcrypt master keys (Key Vault, or Managed HSM when managed_hsm is on)."
+  value       = var.managed_hsm ? "${azurerm_key_vault_managed_hardware_security_module.this[0].hsm_uri}keys/${azurerm_key_vault_managed_hardware_security_module_key.fieldcrypt[0].name}" : azurerm_key_vault_key.fieldcrypt[0].resource_versionless_id
+}
+
+output "managed_hsm_name" {
+  value = var.managed_hsm ? azurerm_key_vault_managed_hardware_security_module.this[0].name : ""
+}
+
+output "customer_managed_keys" {
+  description = "Resource kind to the key that encrypts it (versionless ids). Empty without customer_managed_keys."
+  value = var.customer_managed_keys ? merge(
+    { for k, v in azurerm_key_vault_key.cmk : k => v.versionless_id },
+    { for k, v in azurerm_key_vault_managed_hardware_security_module_key.cmk : k => v.id },
+  ) : {}
+}
+
+output "node_pool_isolation" {
+  description = "Per node pool: whether it is an isolated size or on a dedicated host group."
+  value       = local.pool_isolated
+}
+
+output "hipaa_policy_assignment_id" {
+  description = "Azure Policy assignment of the HIPAA HITRUST initiative (hipaa overlay); empty otherwise."
+  value       = var.hipaa ? azurerm_subscription_policy_assignment.hipaa[0].id : ""
+}
+
+output "federated_fieldcrypt_service_accounts" {
+  value = sort(keys(local.fieldcrypt_accounts))
 }
 
 output "backup_storage_account" {

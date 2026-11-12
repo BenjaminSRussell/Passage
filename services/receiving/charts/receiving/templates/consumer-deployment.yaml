@@ -15,9 +15,11 @@ spec:
   template:
     metadata:
       labels:
+        {{- with include "passage.wiLabels" $ }}{{ . | nindent 8 }}{{- end }}
         app.kubernetes.io/name: receiving
         app.kubernetes.io/component: consumer
     spec:
+      {{- with include "passage.wiServiceAccount" (dict "root" $ "name" "passage-receiving") }}{{ . | nindent 6 }}{{- end }}
       securityContext:
         runAsNonRoot: true
         fsGroup: 65532

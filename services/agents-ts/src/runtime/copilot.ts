@@ -15,6 +15,7 @@ import { assertNoPii, Pseudonymizer } from "../domain/redaction.js";
 import { AgentError } from "../errors.js";
 import { StreamRestorer } from "../providers/stream.js";
 import { ProviderError, proposeTool } from "../providers/wire.js";
+import type { ModelEndpoint } from "../cloudprofile/index.js";
 import type { AuditPort, BudgetPort, KillSwitchPort, ModelProvider, ModelUsage, RunRequest, RunResult } from "./engine.js";
 import type { McpConnector } from "./mcp.js";
 import type { KnowledgeService } from "./knowledge.js";
@@ -278,14 +279,14 @@ export function createCopilotService(deps: CopilotDeps) {
         }
         if (answer === "" && refused === null) answer = "I could not complete the answer within the tool-call limit.";
         const display = refused !== null ? answer : pseudo.restore(answer);
-        const result = finished(runId, "COMMITTED", actions, usage, display);
+        const result = finished(runId, "COMMITTED", actions, usage, display, provider.endpoint);
         await deps.store.finishRun(runReq, result);
         const out: ChatResponse = { answer: display, citations, toolCalls, refusal: refused, generated: true };
         if (refused === null) deps.cache.put(asker, req.mode, prompt, JSON.stringify(out));
         return out;
       } catch (err) {
         await deps.store
-          .finishRun(runReq, { ...finished(runId, "FAILED", actions, usage, ""), ...(err instanceof AgentError ? { code: err.code } : {}), reason: err instanceof Error ? err.message : String(err) })
+          .finishRun(runReq, { ...finished(runId, "FAILED", actions, usage, "", provider.endpoint), ...(err instanceof AgentError ? { code: err.code } : {}), reason: err instanceof Error ? err.message : String(err) })
           .catch(() => undefined);
         throw err;
       } finally {
@@ -348,8 +349,8 @@ function auditRequest(runId: string, caller: Principal, modelId: string, cap: nu
   };
 }
 
-function finished(runId: string, status: "COMMITTED" | "FAILED", actions: ActionRecord[], usage: ModelUsage, displayText: string): RunResult {
-  return { runId, status, actions, tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: false, budgetState: "OK", displayText };
+function finished(runId: string, status: "COMMITTED" | "FAILED", actions: ActionRecord[], usage: ModelUsage, displayText: string, endpoint?: ModelEndpoint): RunResult {
+  return { runId, status, actions, tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, estimated: false, budgetState: "OK", displayText, ...(endpoint !== undefined ? { modelEndpoint: endpoint } : {}) };
 }
 
 export type CopilotService = ReturnType<typeof createCopilotService>;

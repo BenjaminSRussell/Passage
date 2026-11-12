@@ -1,0 +1,37 @@
+# Region file: westeurope is PRIMARY in the EU Azure pair (West Europe / North Europe), the pair for the
+# eu-data-boundary overlay (#605): both regions are in the overlay's allowedRegions and backups archive to a Blob
+# storage account in the same EU region, so no data leaves the EU. Check it with
+#   python3 deploy/multi-region/tools/check_region_pair.py --values-dir deploy/multi-region/values/eu-azure --cloud-profile commercial+eu-data-boundary
+# Render it with the cloud profile's global values so the Blob suffix comes from the profile:
+#   helm template mr deploy/multi-region/chart -f deploy/cloud-profiles/values/commercial.yaml -f deploy/multi-region/values/eu-azure/westeurope.yaml
+# objectStore.region is where the lakehouse and attachment object store of this region live; the residency evidence report
+# (tools/residency_report.py) reads it. MirrorMaker 2 does not run here while northeurope is its target.
+region:
+  id: westeurope
+  role: PRIMARY
+  provider: aks
+  namespace: passage-data
+
+postgres:
+  primary:
+    host: passage-pg-rw.northeurope.passage.internal
+
+backup:
+  store: azure-blob
+  azure:
+    storageAccount: passagepgbkpwesteurope
+    storageAccountRegion: westeurope
+    container: pg-backups
+
+objectStore:
+  region: westeurope
+
+kafka:
+  localAlias: westeurope
+  localBootstrap: passage-kafka-bootstrap.kafka.svc:9093
+  remoteAlias: northeurope
+  remoteBootstrap: passage-kafka-bootstrap.kafka.passage-northeurope.internal:9093
+
+mm2:
+  sourceAlias: westeurope
+  targetAlias: northeurope

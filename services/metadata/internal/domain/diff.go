@@ -42,6 +42,8 @@ func Diff(old, next *Entity) []Change {
 			out = append(out, Change{"fields." + o.Name, "field.removed", true})
 		case narrowed(o, n):
 			out = append(out, Change{"fields." + o.Name, "field.type_changed", true})
+		case o.Encrypted != n.Encrypted:
+			out = append(out, Change{"fields." + o.Name, "field.encryption_changed", true})
 		case !o.Required && n.Required:
 			out = append(out, Change{"fields." + o.Name, "field.required_added", true})
 		case !o.Unique && n.Unique:

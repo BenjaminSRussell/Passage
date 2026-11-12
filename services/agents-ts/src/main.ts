@@ -8,6 +8,7 @@ import type { AgentsApiDeps } from "./api/router.js";
 import { createProviderFactory, loadConfig, type Config } from "./config.js";
 import { CopilotAnswerCache } from "./domain/copilot.js";
 import { KillSwitchRegistry } from "./domain/killswitch.js";
+import { createLogger } from "./logging/pseudonymize.js";
 import { createCopilotService } from "./runtime/copilot.js";
 import { createKnowledgeService } from "./runtime/knowledge.js";
 import { PgKeywordIndex } from "./store/knowledge.js";
@@ -24,9 +25,8 @@ export function agentCatalog(cfg: Config) {
   return defaultCatalog(cfg.model).map((a) => ({ ...a, modelId: cfg.agentModels[a.agentId] ?? a.modelId }));
 }
 
-const log = (level: string, message: string, extra: Record<string, unknown> = {}): void => {
-  process.stdout.write(`${JSON.stringify({ level, message, service: "agents-ts", ...extra })}\n`);
-};
+// Under the eu-data-boundary overlay (or LOG_PSEUDONYMIZE=true) user and person values are pseudonymized before the line is written (#605).
+const log = createLogger(process.env, "agents-ts");
 
 async function main(): Promise<void> {
   const cfg = loadConfig(process.env);
