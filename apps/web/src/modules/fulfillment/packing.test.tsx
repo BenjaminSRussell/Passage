@@ -103,7 +103,7 @@ describe("packing rules", () => {
 
     fireEvent.change(screen.getByLabelText("Quantity per container"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Save packing rule" }));
-    expect((await findStatus()).textContent).toContain("12 per C12");
+    expect(await screen.findByText(/12 per C12/)).toBeInTheDocument();
     expect(posts("/packing-rules")[0].body).toEqual({ productId: PRODUCT, customerId: null, containerType: "C12", qtyPerContainer: "12", maxWeightKg: "15" });
   });
 
@@ -114,8 +114,9 @@ describe("packing rules", () => {
     };
     renderAt("/fulfillment/packing-rules");
     expect(await screen.findByText("Add a container type first")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Product", { selector: "#rules-product" }), { target: { value: PRODUCT } });
-    expect(await screen.findByText("No rules for this product")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Product", { selector: "#fulfillment-packing-rules-filter-productId" }), { target: { value: PRODUCT } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No packing rules match these filters")).toBeInTheDocument();
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("productId") === PRODUCT)).toBe(true));
   });
 
@@ -143,13 +144,13 @@ describe("packaging materials", () => {
       return json(200, { items: [{ productId: PRODUCT, materialCode: "PLASTIC", weightPerUnitKg: "0.05" }] });
     };
     const { container } = renderAt("/fulfillment/packaging-materials");
-    expect(await within(await findTable({ name: "Packaging per product unit" })).findByText("PLASTIC")).toBeInTheDocument();
+    expect(await within(await findTable({ name: "Packaging materials" })).findByText("PLASTIC")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Product", { selector: "#pp-product" }), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Material code"), { target: { value: "cardboard" } });
     fireEvent.change(screen.getByLabelText("Weight per unit (kg)"), { target: { value: "0.2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save packaging" }));
-    expect((await findStatus()).textContent).toContain("0.2 kg CARDBOARD");
+    expect(await screen.findByText(/0\.2 kg CARDBOARD/)).toBeInTheDocument();
     expect(posts("/product-packaging")[0].body).toEqual({ productId: PRODUCT, materialCode: "CARDBOARD", weightPerUnitKg: "0.2" });
   });
 
@@ -219,7 +220,7 @@ describe("returnable packaging", () => {
       return json(200, { items: [{ customerId: CUSTOMER, containerType: "PALLET", balance, lastShippedAt: "2026-10-26T08:00:00Z", lastReturnedAt: null }] });
     };
     const { container } = renderAt("/fulfillment/returnable-packaging");
-    const table = await findTable({ name: "Returnable packaging balances" });
+    const table = await findTable({ name: "Returnable packaging" });
     expect((await within(table).findByText("PALLET")).closest("tr")?.textContent).toContain("6");
     expect(pageViolations(container)).toEqual([]);
 
@@ -240,7 +241,7 @@ describe("returnable packaging", () => {
 
     fireEvent.change(screen.getByLabelText("Quantity returned"), { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: "Record return" }));
-    expect((await findStatus()).textContent).toContain("now holds 2 PALLET");
+    expect(await screen.findByText(/now holds 2 PALLET/)).toBeInTheDocument();
     const calls = posts("/returnable-packaging:return");
     expect(calls.at(-1)?.body).toEqual({ customerId: CUSTOMER, containerType: "PALLET", qty: "4" });
     expect(idempotencyKey(calls[0])).not.toBe(idempotencyKey(calls[1]));

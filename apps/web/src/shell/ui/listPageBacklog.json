@@ -1,15 +1,5 @@
 {
   "pages": [
-    "modules/billing/InvoiceDetailPage.tsx",
-    "modules/billing/NewShipmentProposalPage.tsx",
-    "modules/fulfillment/DeliveredNotInvoicedPage.tsx",
-    "modules/fulfillment/DropShipsPage.tsx",
-    "modules/fulfillment/ManifestsPage.tsx",
-    "modules/fulfillment/PackingRulesPage.tsx",
-    "modules/fulfillment/ProductPackagingPage.tsx",
-    "modules/fulfillment/ReturnablePackagingPage.tsx",
-    "modules/fulfillment/ShipmentDetailPage.tsx",
-    "modules/fulfillment/WaveDetailPage.tsx",
     "modules/purchasing/AgreementPages.tsx",
     "modules/purchasing/ApprovalPages.tsx",
     "modules/purchasing/CatalogImportPages.tsx",
@@ -34,7 +24,6 @@
     "modules/receivables/GLJournals.tsx",
     "modules/receivables/Statements.tsx",
     "modules/sales/AgreementsPage.tsx",
-    "modules/sales/CreditExposurePage.tsx",
     "modules/sales/ScheduleReleasesPage.tsx"
   ]
 }

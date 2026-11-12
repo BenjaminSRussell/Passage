@@ -82,7 +82,7 @@ describe("credit exposure report", () => {
   it("ranks customers by use of the limit and marks the status", async () => {
     handler = () => ({ status: 200, body: report });
     const { container } = renderAt("/sales/credit-exposure");
-    const table = await findTable({ name: "Credit exposure by customer" });
+    const table = await findTable({ name: "Credit exposure" });
     const rows = within(table).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(3);
     expect(within(rows[0]!).getByText(OVER)).toBeInTheDocument();
@@ -99,11 +99,11 @@ describe("credit exposure report", () => {
   it("sends the filters", async () => {
     handler = () => ({ status: 200, body: report });
     renderAt("/sales/credit-exposure");
-    await findTable({ name: "Credit exposure by customer" });
+    await findTable({ name: "Credit exposure" });
     fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "OVER_LIMIT" } });
     fireEvent.change(screen.getByLabelText(/Used at least/), { target: { value: "90.5" } });
     fireEvent.change(screen.getByLabelText(/^Customer/), { target: { value: WARN } });
-    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(calls).toHaveLength(2));
     const q = calls[1]!.searchParams;
     expect(q.get("status")).toBe("OVER_LIMIT");
@@ -114,9 +114,9 @@ describe("credit exposure report", () => {
   it("refuses a bad filter without calling the service", async () => {
     handler = () => ({ status: 200, body: report });
     renderAt("/sales/credit-exposure");
-    await findTable({ name: "Credit exposure by customer" });
+    await findTable({ name: "Credit exposure" });
     fireEvent.change(screen.getByLabelText(/Used at least/), { target: { value: "abc" } });
-    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(await screen.findByText("Enter a percent such as 80 or 92.5.")).toBeInTheDocument();
     expect(calls).toHaveLength(1);
   });
@@ -141,7 +141,7 @@ describe("credit exposure report", () => {
     expect(within(alert).getByText(/COM-0500/)).toBeInTheDocument();
     handler = () => ({ status: 200, body: report });
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    await findTable({ name: "Credit exposure by customer" });
+    await findTable({ name: "Credit exposure" });
   });
 });
 

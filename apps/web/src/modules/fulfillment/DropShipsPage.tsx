@@ -2,13 +2,12 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
+import { Badge, Button, Card, FormField, Input, ListPage, loadedRows, type BadgeTone, type DataTableColumn, type ListFilterDef, type ListQuery } from "../../shell/ui";
 import { createDropShip, DROP_SHIP_STATUSES, describeProblem, listDropShips, type DropShip, type DropShipInput, type DropShipStatus, type Problem } from "./api/client";
 import { compareDecimal, CURRENCY, dash, DECIMAL, formatDate, formatMoney, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { EntityName } from "../../shell/lookup/EntityName";
 import { OrderNumber } from "../sales/OrderNumber";
 
@@ -56,11 +55,13 @@ export function validateDropShip(v: Values): Partial<Record<keyof DropShipInput,
 }
 
 /** Drop-ships (FR-28.7): order lines a vendor ships straight to the customer, with the form that creates one. */
+const filters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: DROP_SHIP_STATUSES.map((s) => ({ value: s, label: LABELS[s] })) }];
+
 export function DropShipsPage() {
   const navigate = useNavigate();
   const canCreate = holdsDuty(usePrincipalDuties(), DUTY_CREATE);
-  const [status, setStatus] = useState<DropShipStatus | "">("");
-  const state = useLoad((signal) => listDropShips({ status }, signal), `drop-ships-${status}`);
+  // Bumped after a create, so the list reads the new drop-ship.
+  const [reloads, setReloads] = useState(0);
   const [values, setValues] = useState<Values>(EMPTY);
   const [errors, setErrors] = useState<Partial<Record<keyof DropShipInput, string>>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -87,7 +88,7 @@ export function DropShipsPage() {
       key.renew();
       setCreated(made);
       setValues(EMPTY);
-      state.reload();
+      setReloads((n) => n + 1);
     } catch (error) {
       const problem = describeProblem(error);
       setFailure(problem);
@@ -97,47 +98,14 @@ export function DropShipsPage() {
     }
   }
 
-  return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Drop-ships"
-        description="Order lines a vendor ships straight to the customer, linked to their purchase order line. The vendor's confirmation books the cost against goods received not invoiced; no stock moves."
-      />
-      <div className={styles.toolbar}>
-        <FormField id="drop-ship-status" label="Status">
-          {(control) => (
-            <Select {...control} value={status} onChange={(event) => setStatus(event.target.value as DropShipStatus | "")}>
-              <option value="">All statuses</option>
-              {DROP_SHIP_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </div>
-      {state.error ? (
-        <Alert tone="danger" title="Could not load the drop-ships" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Drop-ships"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          onRowOpen={(row) => navigate(`/fulfillment/drop-ships/${row.id}`)}
-          empty={
-            status
-              ? { title: "No drop-ships match", description: "Change the status filter." }
-              : canCreate
-                ? { title: "No drop-ships yet", description: "Create one below for an order line that a vendor ships to the customer." }
-                : { title: "No drop-ships yet", description: "Drop-ships appear here once an order line is routed to a vendor." }
-          }
-        />
-      )}
+  const useDropShipRows = (query: ListQuery) => {
+    const status = (query.filters.status ?? "") as DropShipStatus | "";
+    const state = useLoad((signal) => listDropShips({ status }, signal), `drop-ships-${status}-${reloads}`);
+    return loadedRows(state);
+  };
+
+  const createForm = (
+    <>
       {canCreate ? (
         <Card title="New drop-ship">
           <form className={styles.form} onSubmit={submit} noValidate>
@@ -172,6 +140,28 @@ export function DropShipsPage() {
           </form>
         </Card>
       ) : null}
-    </div>
+    </>
+  );
+
+  return (
+    <ListPage
+      id="fulfillment-drop-ships"
+      title="Drop-ships"
+      description="Order lines a vendor ships straight to the customer, linked to their purchase order line. The vendor's confirmation books the cost against goods received not invoiced; no stock moves."
+      noun="drop-ships"
+      singular="drop-ship"
+      columns={columns}
+      filters={filters}
+      useRows={useDropShipRows}
+      search={(row) => ({ number: row.dropShipNumber })}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/fulfillment/drop-ships/${row.id}`)}
+      empty={
+        canCreate
+          ? { title: "No drop-ships yet", description: "Create one below for an order line that a vendor ships to the customer." }
+          : { title: "No drop-ships yet", description: "Drop-ships appear here once an order line is routed to a vendor." }
+      }
+      footer={createForm}
+    />
   );
 }
