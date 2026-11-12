@@ -13,8 +13,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -34,6 +36,17 @@ const (
 	MatchRegex        = "expect_column_values_to_match_regex"
 	MaxDecimals       = "expect_column_values_to_have_max_decimals_for_currency"
 	EqualsWhenPresent = "expect_column_values_to_equal_when_column_present"
+	// PairGreater is Great Expectations' expect_column_pair_values_A_to_be_greater_than_B over decimal columns.
+	PairGreater = "expect_column_pair_values_A_to_be_greater_than_B"
+	// Strftime is Great Expectations' expect_column_values_to_match_strftime_format (a real calendar date, not only its shape).
+	Strftime = "expect_column_values_to_match_strftime_format"
+	// MaxPlaces bounds the decimal places of a column to a fixed number (the control totals' scale).
+	MaxPlaces = "expect_column_values_to_have_max_decimal_places"
+	// InSetByColumn takes the reference set from another column's value: a sales line's party is a customer, a purchase
+	// line's a vendor. A row whose column names no set is unexpected.
+	InSetByColumn = "expect_column_values_to_be_in_set_chosen_by_column"
+	// SignedSum asserts a column equals the signed sum of other columns exactly (net = gross - tax - deductions).
+	SignedSum = "expect_column_values_to_equal_signed_sum_of_columns"
 )
 
 // Expectation is one assertion over the rows of an extract.
@@ -57,6 +70,19 @@ type Expectation struct {
 	// When and Equals: with EqualsWhenPresent, a row whose When column is not blank must hold Equals in Column.
 	When   string `json:"when,omitempty"`
 	Equals string `json:"equals,omitempty"`
+	// ColumnA and ColumnB, OrEqual: with PairGreater, A must be above B (or equal when OrEqual).
+	ColumnA string `json:"column_A,omitempty"`
+	ColumnB string `json:"column_B,omitempty"`
+	OrEqual bool   `json:"or_equal,omitempty"`
+	// Format is the strftime format of Strftime; only %Y, %m and %d are understood.
+	Format string `json:"strftime_format,omitempty"`
+	// Places is the most decimal places of MaxPlaces.
+	Places int `json:"places,omitempty"`
+	// By and Sets: with InSetByColumn, the value of By picks the reference set name from Sets.
+	By   string            `json:"by,omitempty"`
+	Sets map[string]string `json:"sets,omitempty"`
+	// Terms are the signed columns of SignedSum, each "+column" or "-column".
+	Terms []string `json:"terms,omitempty"`
 }
 
 // Suite is the expectations of one pack.
@@ -245,10 +271,101 @@ func evaluate(e Expectation, rows []Row, sets map[string]map[string]bool) ([]int
 				bad = append(bad, i)
 			}
 		}
+	case PairGreater:
+		for i, r := range rows {
+			a, errA := decimal.NewFromString(strings.TrimSpace(r[e.ColumnA]))
+			b, errB := decimal.NewFromString(strings.TrimSpace(r[e.ColumnB]))
+			if errA != nil || errB != nil || a.LessThan(b) || (!e.OrEqual && a.Equal(b)) {
+				bad = append(bad, i)
+			}
+		}
+	case Strftime:
+		layout, err := goLayout(e.Format)
+		if err != nil {
+			return nil, err
+		}
+		for i, r := range rows {
+			v := strings.TrimSpace(r[e.Column])
+			if e.SkipBlank && v == "" {
+				continue
+			}
+			if _, err := time.Parse(layout, v); err != nil {
+				bad = append(bad, i)
+			}
+		}
+	case MaxPlaces:
+		for i, r := range rows {
+			v, err := decimal.NewFromString(strings.TrimSpace(r[e.Column]))
+			if err != nil || !v.Equal(v.Round(int32(e.Places))) {
+				bad = append(bad, i)
+			}
+		}
+	case InSetByColumn:
+		for i, r := range rows {
+			set, ok := sets[e.Sets[r[e.By]]]
+			if !ok || !set[r[e.Column]] {
+				bad = append(bad, i)
+			}
+		}
+	case SignedSum:
+		if len(e.Terms) == 0 {
+			return nil, fmt.Errorf("no terms named")
+		}
+		for i, r := range rows {
+			want, err := signedSum(r, e.Terms)
+			got, errGot := decimal.NewFromString(strings.TrimSpace(r[e.Column]))
+			if err != nil || errGot != nil || !got.Equal(want) {
+				bad = append(bad, i)
+			}
+		}
 	default:
 		return nil, fmt.Errorf("unknown expectation type")
 	}
 	return bad, nil
+}
+
+func signedSum(r Row, terms []string) (decimal.Decimal, error) {
+	sum := decimal.Zero
+	for _, t := range terms {
+		if len(t) < 2 || (t[0] != '+' && t[0] != '-') {
+			return sum, fmt.Errorf("term %q must start with + or -", t)
+		}
+		v, err := decimal.NewFromString(strings.TrimSpace(r[t[1:]]))
+		if err != nil {
+			return sum, err
+		}
+		if t[0] == '-' {
+			v = v.Neg()
+		}
+		sum = sum.Add(v)
+	}
+	return sum, nil
+}
+
+// goLayout turns a strftime format of %Y, %m and %d (and literal characters) into a Go time layout.
+func goLayout(format string) (string, error) {
+	var b strings.Builder
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			b.WriteByte(format[i])
+			continue
+		}
+		if i+1 == len(format) {
+			return "", fmt.Errorf("strftime format %q ends with %%", format)
+		}
+		i++
+		switch format[i] {
+		case 'Y':
+			b.WriteString("2006")
+		case 'm':
+			b.WriteString("01")
+		case 'd':
+			b.WriteString("02")
+		default:
+			return "", fmt.Errorf("strftime directive %%%c is not supported", format[i])
+		}
+	}
+	return b.String(), nil
 }
 
 func bounds(e Expectation) (lo, hi *decimal.Decimal, err error) {
@@ -267,4 +384,25 @@ func bounds(e Expectation) (lo, hi *decimal.Decimal, err error) {
 		hi = &v
 	}
 	return lo, hi, nil
+}
+
+// Flagged runs the pack's suite over the rows and returns, for every row the suite flags, the checks that flagged it.
+func Flagged(pack string, rows []Row, sets map[string]map[string]bool) (map[int][]string, error) {
+	s, err := Load(pack)
+	if err != nil {
+		return nil, err
+	}
+	rep, err := s.Run(rows, sets)
+	if err != nil {
+		return nil, err
+	}
+	out := map[int][]string{}
+	for _, res := range rep.Results {
+		for _, i := range res.Unexpected {
+			if !slices.Contains(out[i], res.Expectation.Check) {
+				out[i] = append(out[i], res.Expectation.Check)
+			}
+		}
+	}
+	return out, nil
 }
