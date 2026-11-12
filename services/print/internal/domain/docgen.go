@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Docgen (#46-1, #46-4): tenant document templates, standard text blocks with
@@ -16,6 +17,7 @@ const (
 	CodeTemplateNotFound  = "PRN-0012" // document template not found (service-local)
 	CodeTextBlockNotFound = "PRN-0013" // text block (or its language) not found (service-local)
 	CodeTextBlockData     = "PRN-0014" // a placeholder of a text block has no value (service-local)
+	CodeTemplateStale     = "PRN-0017" // If-Match names another version than the template's current one (service-local)
 
 	maxBlockBody     = 4000
 	maxTemplateItems = 8
@@ -63,6 +65,13 @@ type DocumentTemplate struct {
 	Default      bool           `json:"default"`
 	Version      int            `json:"version"`
 	Config       TemplateConfig `json:"config"`
+}
+
+// TemplateVersion is one saved version of a template, with who saved it and when.
+type TemplateVersion struct {
+	DocumentTemplate
+	SavedBy string    `json:"savedBy,omitempty"`
+	SavedAt time.Time `json:"savedAt"`
 }
 
 // ValidCodeName reports whether s is a template or text block code.

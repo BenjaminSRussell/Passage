@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -19,7 +20,10 @@ import (
 // rules. Postgres implements it next to Store; the API reads it through a type assertion,
 // so the label and job code does not depend on it.
 type DocStore interface {
-	PutTemplate(ctx context.Context, t domain.DocumentTemplate) (domain.DocumentTemplate, error)
+	// PutTemplate saves t; ifMatch, when not 0, must be the template's current version (0 for a new template is
+	// any). by names who saved it in the version history.
+	PutTemplate(ctx context.Context, t domain.DocumentTemplate, ifMatch int, by string) (domain.DocumentTemplate, error)
+	ListTemplateVersions(ctx context.Context, code string) ([]domain.TemplateVersion, error)
 	GetTemplate(ctx context.Context, code string) (domain.DocumentTemplate, error)
 	DefaultTemplate(ctx context.Context, documentType string) (*domain.DocumentTemplate, error)
 	ListTemplates(ctx context.Context, documentType string) ([]domain.DocumentTemplate, error)
@@ -48,8 +52,9 @@ func scanTemplate(row pgx.Row) (domain.DocumentTemplate, error) {
 }
 
 // PutTemplate creates or replaces the template with t.Code and raises its version. A
-// default template takes the default flag from the type's previous default.
-func (s *Postgres) PutTemplate(ctx context.Context, t domain.DocumentTemplate) (domain.DocumentTemplate, error) {
+// default template takes the default flag from the type's previous default. ifMatch, when not 0, must be the
+// current version (PRN-0017, 412, otherwise: someone saved it meanwhile); every saved version is kept with by.
+func (s *Postgres) PutTemplate(ctx context.Context, t domain.DocumentTemplate, ifMatch int, by string) (domain.DocumentTemplate, error) {
 	p, _ := tenant.FromContext(ctx)
 	cfg, err := json.Marshal(t.Config)
 	if err != nil {
@@ -58,11 +63,15 @@ func (s *Postgres) PutTemplate(ctx context.Context, t domain.DocumentTemplate) (
 	var out domain.DocumentTemplate
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var existing string
-		switch err := tx.QueryRow(ctx, `select document_type from print_document_template where tenant_id = $1 and code = $2 for update`, p.TenantID, t.Code).Scan(&existing); {
+		var current int
+		switch err := tx.QueryRow(ctx, `select document_type, version from print_document_template where tenant_id = $1 and code = $2 for update`, p.TenantID, t.Code).Scan(&existing, &current); {
 		case err == nil && existing != t.DocumentType:
 			return httpx.NewProblem(http.StatusConflict, domain.CodeInvalid, "the document type of a template cannot change")
 		case err != nil && !errors.Is(err, pgx.ErrNoRows):
 			return err
+		}
+		if ifMatch != 0 && ifMatch != current {
+			return httpx.NewProblem(http.StatusPreconditionFailed, domain.CodeTemplateStale, fmt.Sprintf("the template is at version %d, not %d: someone saved it after you opened it", current, ifMatch))
 		}
 		if t.Default {
 			if _, err := tx.Exec(ctx, `update print_document_template set is_default = false where tenant_id = $1 and document_type = $2 and code <> $3`, p.TenantID, t.DocumentType, t.Code); err != nil {
@@ -75,8 +84,44 @@ func (s *Postgres) PutTemplate(ctx context.Context, t domain.DocumentTemplate) (
 			on conflict (tenant_id, code) do update set name = excluded.name, is_default = excluded.is_default, config = excluded.config,
 				version = print_document_template.version + 1, updated_at = now()
 			returning `+templateColumns, p.TenantID, t.Code, t.Name, t.DocumentType, t.Default, cfg))
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `insert into print_document_template_version (tenant_id, code, version, name, document_type, is_default, config, saved_by)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)`, p.TenantID, out.Code, out.Version, out.Name, out.DocumentType, out.Default, cfg, by)
 		return err
 	})
+	return out, err
+}
+
+// ListTemplateVersions returns every saved version of a template, newest first, or a 404 problem.
+func (s *Postgres) ListTemplateVersions(ctx context.Context, code string) ([]domain.TemplateVersion, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := []domain.TemplateVersion{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select code, name, document_type, is_default, version, config, saved_by, saved_at from print_document_template_version
+			where tenant_id = $1 and code = $2 order by version desc`, p.TenantID, code)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v domain.TemplateVersion
+			var raw []byte
+			if err := rows.Scan(&v.Code, &v.Name, &v.DocumentType, &v.Default, &v.Version, &raw, &v.SavedBy, &v.SavedAt); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(raw, &v.Config); err != nil {
+				return err
+			}
+			v.SavedAt = v.SavedAt.UTC()
+			out = append(out, v)
+		}
+		return rows.Err()
+	})
+	if err == nil && len(out) == 0 {
+		return nil, httpx.NewProblem(http.StatusNotFound, domain.CodeTemplateNotFound, "document template not found")
+	}
 	return out, err
 }
 

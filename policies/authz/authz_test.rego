@@ -3162,3 +3162,9 @@ test_processmfg_potency_adjustments_follow_batch_order_write if {
 	allowed("production.batch-order.write", "PUT", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/potency-adjustments")
 	not allowed("production.batch-order.read", "PUT", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/potency-adjustments")
 }
+
+# #46: the version history of a document template is a read, like the template.
+test_print_document_template_versions_are_a_read if {
+	allowed("print.job.submit", "GET", "/print/v1/document-templates/INV-STD/versions")
+	not allowed("print.job.submit", "PUT", "/print/v1/document-templates/INV-STD")
+}

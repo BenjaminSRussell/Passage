@@ -2179,6 +2179,7 @@
       {"resource": "/print/v1/routing-rules", "methods": ["GET"]},
       {"resource": "/print/v1/document-templates", "methods": ["GET"]},
       {"resource": "/print/v1/document-templates/*", "methods": ["GET"]},
+      {"resource": "/print/v1/document-templates/*/versions", "methods": ["GET"]},
       {"resource": "/print/v1/text-blocks", "methods": ["GET"]},
       {"resource": "/print/v1/output-rules", "methods": ["GET"]},
       {"resource": "/print/v1/output-plan", "methods": ["GET"]}

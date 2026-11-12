@@ -24,16 +24,36 @@ type memDocs struct {
 	templates map[string]domain.DocumentTemplate
 	blocks    map[string]domain.TextBlock
 	rules     []domain.OutputRule
+	history   []domain.TemplateVersion
+}
+
+func (m *memDocs) ListTemplateVersions(_ context.Context, code string) ([]domain.TemplateVersion, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []domain.TemplateVersion
+	for i := len(m.history) - 1; i >= 0; i-- {
+		if m.history[i].Code == code {
+			out = append(out, m.history[i])
+		}
+	}
+	if len(out) == 0 {
+		return nil, httpx.NewProblem(http.StatusNotFound, domain.CodeTemplateNotFound, "document template not found")
+	}
+	return out, nil
 }
 
 func newMemDocs() *memDocs {
 	return &memDocs{templates: map[string]domain.DocumentTemplate{}, blocks: map[string]domain.TextBlock{}}
 }
 
-func (m *memDocs) PutTemplate(_ context.Context, t domain.DocumentTemplate) (domain.DocumentTemplate, error) {
+func (m *memDocs) PutTemplate(_ context.Context, t domain.DocumentTemplate, ifMatch int, by string) (domain.DocumentTemplate, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if ifMatch != 0 && ifMatch != m.templates[t.Code].Version {
+		return t, httpx.NewProblem(http.StatusPreconditionFailed, domain.CodeTemplateStale, "stale")
+	}
 	t.Version = m.templates[t.Code].Version + 1
+	m.history = append(m.history, domain.TemplateVersion{DocumentTemplate: t, SavedBy: by})
 	if t.Default {
 		for c, o := range m.templates {
 			if o.DocumentType == t.DocumentType && c != t.Code {
@@ -169,6 +189,48 @@ func TestTemplates_PutVersionDefaultAndDuties(t *testing.T) {
 	}
 	if rec := call(t, h, http.MethodGet, "/print/v1/document-templates/NOPE-1", "", "print.job.submit", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("missing template: %d", rec.Code)
+	}
+}
+
+// A save carries the version it was based on (If-Match); a save based on an older one is 412, and the history lists
+// every version with who saved it.
+func TestTemplates_IfMatchAndHistory(t *testing.T) {
+	h := docRouter()
+	body := `{"name":"Standard invoice","documentType":"CUSTOMER_INVOICE","config":{"title":"Tax invoice"}}`
+	put := func(ifMatch string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/print/v1/document-templates/INV-STD", strings.NewReader(body))
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-User", "designer-1")
+		req.Header.Set("X-Passage-Duties", "print.admin")
+		if ifMatch != "" {
+			req.Header.Set("If-Match", ifMatch)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := put(""); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"1"` {
+		t.Fatalf("first save: %d %v", rec.Code, rec.Header())
+	}
+	if rec := put(`"1"`); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` {
+		t.Fatalf("save on version 1: %d %s", rec.Code, rec.Body)
+	}
+	if rec := put(`"1"`); rec.Code != http.StatusPreconditionFailed || !strings.Contains(rec.Body.String(), domain.CodeTemplateStale) {
+		t.Fatalf("save on a stale version: %d %s", rec.Code, rec.Body)
+	}
+	if rec := put(`three`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed If-Match: %d", rec.Code)
+	}
+	rec := call(t, h, http.MethodGet, "/print/v1/document-templates/INV-STD", "", "print.job.submit", "")
+	if rec.Header().Get("ETag") != `"2"` {
+		t.Fatalf("read ETag: %v", rec.Header())
+	}
+	rec = call(t, h, http.MethodGet, "/print/v1/document-templates/INV-STD/versions", "", "print.job.submit", "")
+	if rec.Code != http.StatusOK || strings.Count(rec.Body.String(), `"savedBy":"designer-1"`) != 2 || !strings.Contains(rec.Body.String(), `"version":2`) {
+		t.Fatalf("history: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, h, http.MethodGet, "/print/v1/document-templates/NOPE-1/versions", "", "print.job.submit", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("history of a missing template: %d", rec.Code)
 	}
 }
 
