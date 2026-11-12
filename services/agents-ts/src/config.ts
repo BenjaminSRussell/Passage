@@ -30,6 +30,8 @@ export interface Config {
   copilotMaxTurns: number;
   selfApprovalLimit: { amount: string; currency: string };
   approvalExpiryHours: number | undefined;
+  /** How often each pod polls the shared kill switch (AC-47.6); below the 10 s fail-closed window. */
+  killSwitchPollMs: number;
   /** `agent@version` pairs whose evaluation passed (the eval pipeline sets this; FR-47.10). */
   evalPassed: ReadonlySet<string>;
   /** Provider credentials and endpoints, read from the environment only. */
@@ -95,6 +97,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const expiry = env["AGENTS_APPROVAL_EXPIRY_H"];
   const approvalExpiryHours = expiry === undefined || expiry === "" ? undefined : positiveInt(env, "AGENTS_APPROVAL_EXPIRY_H", 72);
   if (approvalExpiryHours !== undefined && approvalExpiryHours > 240) throw new Error("AGENTS_APPROVAL_EXPIRY_H must be 1 to 240");
+  const killSwitchPollMs = positiveInt(env, "AGENTS_KILLSWITCH_POLL_MS", 1000);
+  if (killSwitchPollMs < 100 || killSwitchPollMs > 5000) throw new Error("AGENTS_KILLSWITCH_POLL_MS must be 100 to 5000: a pod fails closed after 10 s without a poll");
   const model = env["AGENTS_MODEL"] ?? MODEL_SONNET;
   const issuer = env["AGENTS_JWT_ISSUER"] ?? "";
   if (!/^https?:\/\//.test(issuer)) throw new Error("AGENTS_JWT_ISSUER must be the issuer (realm URL) of the callers' bearer tokens");
@@ -118,6 +122,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     copilotMaxTurns: positiveInt(env, "AGENTS_COPILOT_MAX_TURNS", 4),
     selfApprovalLimit: { amount: limit, currency },
     approvalExpiryHours,
+    killSwitchPollMs,
     evalPassed: new Set((env["AGENTS_EVAL_PASSED"] ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "")),
     anthropic: { apiKey: env["ANTHROPIC_API_KEY"] ?? "", baseUrl: env["ANTHROPIC_BASE_URL"] },
     openai: {

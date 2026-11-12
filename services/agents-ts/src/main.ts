@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
@@ -16,6 +15,8 @@ import { createMcpConnector } from "./runtime/mcp.js";
 import { createRunService } from "./runtime/service.js";
 import { createAdminServer, createRequestHandler, listen, Metrics } from "./server.js";
 import { PgApprovalStore } from "./store/approvals.js";
+import { PgKillSwitchLog } from "./store/killswitch.js";
+import { KillSwitchPoller } from "./runtime/killswitch-poller.js";
 import { openAgentStore } from "./store/pg.js";
 
 export { loadConfig };
@@ -33,12 +34,10 @@ async function main(): Promise<void> {
   const { pool, store } = await openAgentStore(process.env);
   const inbox = new PgApprovalStore(store);
   const registry = new KillSwitchRegistry(() => Date.now());
-  // The registry fails closed after 10 s without a heartbeat. The Kafka feed that drives heartbeats
-  // across pods is not built (NOT-IMPLEMENTED.md), so each pod heartbeats itself and a toggle
-  // reaches only the pod that took it.
-  const heartbeat = setInterval(() => registry.heartbeat(), 2000);
-  heartbeat.unref();
-  let version = Date.now();
+  // Every pod polls kill_switch_change (AC-47.6); a pod that cannot read it for 10 s fails closed.
+  const killLog = new PgKillSwitchLog(store, pool);
+  const killPoller = new KillSwitchPoller(killLog, registry, (err) => log("warn", "kill switch poll failed", { error: String(err) }));
+  await killPoller.start(cfg.killSwitchPollMs);
   const mcp = createMcpConnector({ baseUrl: cfg.mcpUrl });
   const providerFor = createProviderFactory(cfg);
   const agents = agentCatalog(cfg);
@@ -77,20 +76,9 @@ async function main(): Promise<void> {
       jwks: cfg.jwt.jwksFile !== undefined ? (JSON.parse(readFileSync(cfg.jwt.jwksFile, "utf8")) as { keys: [] }) : undefined,
     }),
     registry,
-    versions: { next: () => (version += 1) },
+    // The toggle, its version and its killswitch.changed outbox row are stored in one transaction.
+    log: killLog,
     approvals: inbox,
-    // Writes the event to the tenant's outbox for the relay; the toggle answers only after it is stored.
-    publish: async (event) => {
-      await store.withTenant(event.tenantId, (c) =>
-        c.query("insert into outbox (id, tenant_id, aggregate_type, aggregate_id, type, payload) values ($1, $2, 'kill_switch', $3, $4, $5::jsonb)", [
-          randomUUID(),
-          event.tenantId,
-          event.tenantId,
-          event.type,
-          JSON.stringify(event.data),
-        ]),
-      );
-    },
     runs,
     copilot,
     knowledge,
@@ -108,7 +96,7 @@ async function main(): Promise<void> {
   const server = await listen(createServer(handler), cfg.host, cfg.port);
   log("info", "agents listening", { provider: cfg.provider, model: cfg.model, agents: AGENT_IDS.length });
   process.once("SIGTERM", () => {
-    clearInterval(heartbeat);
+    killPoller.stop();
     admin.close();
     server.close(() => void pool.end().finally(() => process.exit(0)));
   });

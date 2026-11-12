@@ -14,6 +14,29 @@ export interface KillSwitchVersionSource {
 /** Writes an event to the outbox in the toggle's transaction (production) or elsewhere (tests). */
 export type Publish = (event: AgentEvent<unknown>) => Promise<void>;
 
+/** A toggle as the shared log stores it: who wrote it (their tenant and user) and what it switches. */
+export interface KillSwitchToggle {
+  actorTenantId: string;
+  scope: "GLOBAL" | "TENANT";
+  tenantId?: string;
+  active: boolean;
+  byUser: string;
+  changedAt: string;
+}
+
+/**
+ * The kill switch shared by every pod (AC-47.6): `kill_switch_change` in production (PgKillSwitchLog).
+ * `toggle` is idempotent by scope against the stored state, draws the version and writes the
+ * `killswitch.changed` event in one transaction; `changesSince` is what each pod polls.
+ */
+export interface KillSwitchLog {
+  toggle(t: KillSwitchToggle): Promise<{ change: KillSwitchChange; created: boolean }>;
+  changesSince(version: number): Promise<KillSwitchChange[]>;
+}
+
+/** How a toggle is stored: the shared log, or (tests, a single process) a version source and a publish port. */
+export type KillSwitchWiring = { log: KillSwitchLog } | { versions: KillSwitchVersionSource; publish: Publish };
+
 export interface KillSwitchCommand {
   scope: "GLOBAL" | "TENANT";
   tenantId?: string;
@@ -79,14 +102,14 @@ function resultOf(change: KillSwitchChange): KillSwitchResult {
  * succeeded, so a failed publish never leaves this worker in a state the other
  * workers did not hear about.
  */
-export async function handleKillSwitchCommand(input: {
-  principal: Principal;
-  body: unknown;
-  registry: KillSwitchRegistry;
-  versions: KillSwitchVersionSource;
-  publish: Publish;
-  now: () => Date;
-}): Promise<KillSwitchOutcome> {
+export async function handleKillSwitchCommand(
+  input: {
+    principal: Principal;
+    body: unknown;
+    registry: KillSwitchRegistry;
+    now: () => Date;
+  } & KillSwitchWiring,
+): Promise<KillSwitchOutcome> {
   const cmd = parseKillSwitchCommand(input.body);
   if (cmd.scope === "GLOBAL") {
     requireDuty(input.principal, GLOBAL_KILL_DUTY, "the global kill switch");
@@ -95,6 +118,20 @@ export async function handleKillSwitchCommand(input: {
     if (cmd.tenantId !== input.principal.tenantId) {
       throw new ApiError(403, "AGT-0403", "a tenant administrator may only toggle their own tenant");
     }
+  }
+  if ("log" in input) {
+    // The stored state decides idempotence, so two pods taking the same toggle store it once.
+    const { change, created } = await input.log.toggle({
+      actorTenantId: input.principal.tenantId,
+      scope: cmd.scope,
+      ...(cmd.tenantId !== undefined ? { tenantId: cmd.tenantId } : {}),
+      active: cmd.active,
+      byUser: input.principal.userId,
+      changedAt: input.now().toISOString(),
+    });
+    // This pod applies at once; the others apply it on their next poll.
+    input.registry.apply(change);
+    return created ? { body: resultOf(change), event: killSwitchChangedEvent(change, input.principal.tenantId) } : { body: resultOf(change) };
   }
   const current = input.registry.lastChange(cmd.tenantId);
   if (current !== undefined && current.active === cmd.active) {

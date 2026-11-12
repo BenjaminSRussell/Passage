@@ -91,6 +91,8 @@ spec:
             - name: AGENTS_APPROVAL_EXPIRY_H
               value: {{ .Values.approvalExpiryHours | quote }}
             {{- end }}
+            - name: AGENTS_KILLSWITCH_POLL_MS
+              value: {{ .Values.killSwitchPollMs | quote }}
             - name: AGENTS_SELF_APPROVAL_LIMIT
               value: {{ .Values.selfApprovalLimit.amount | quote }}
             - name: AGENTS_SELF_APPROVAL_CURRENCY

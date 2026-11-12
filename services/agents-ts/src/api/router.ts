@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { KillSwitchRegistry } from "../domain/killswitch.js";
 import { type ApprovalStore, handleApprovalDecision } from "./decision.js";
-import { handleKillSwitchCommand, type KillSwitchVersionSource, type Publish, readKillSwitchStatus } from "./killswitch.js";
+import { handleKillSwitchCommand, type KillSwitchWiring, readKillSwitchStatus } from "./killswitch.js";
 import { COPILOT_DUTY, type CopilotService } from "../runtime/copilot.js";
 import { parseChunks, parseSearch, type KnowledgeService } from "../runtime/knowledge.js";
 import type { RunService } from "../runtime/service.js";
@@ -13,13 +13,13 @@ import { bearerToken, handleGetRun, handleListActions, handleStartRun } from "./
 /** 64 KiB is far above any control payload in this API. */
 export const MAX_BODY_BYTES = 64 * 1024;
 
-export interface AgentsApiDeps {
+export type AgentsApiDeps = AgentsApiBase & KillSwitchWiring;
+
+export interface AgentsApiBase {
   /** Who the caller is: the verified bearer token (auth.ts createAuthenticator), never the edge headers alone. */
   authenticate: Authenticate;
   registry: KillSwitchRegistry;
-  versions: KillSwitchVersionSource;
   approvals: ApprovalStore;
-  publish: Publish;
   /** Run start and read endpoints; absent in a process that serves only the control routes. */
   runs?: RunService;
   /** The copilot chat endpoint. */
@@ -129,9 +129,8 @@ export function createAgentsHandler(deps: AgentsApiDeps): (req: IncomingMessage,
           principal,
           body: await readBody(req),
           registry: deps.registry,
-          versions: deps.versions,
-          publish: deps.publish,
           now,
+          ...("log" in deps ? { log: deps.log } : { versions: deps.versions, publish: deps.publish }),
         });
         send(res, 200, out.body);
         return;
