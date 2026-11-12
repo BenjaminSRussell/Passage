@@ -164,7 +164,7 @@ describe("new REST push", () => {
     const { container } = renderAt("/integration/sync/new");
     expect(pageViolations(container)).toEqual([]);
     fill("Name", "Legacy ERP orders");
-    fill("Outbound mapping id", MAPPING);
+    fill("Outbound mapping", MAPPING);
     fill("Endpoint", "https://erp.corp.example/api/salesorders");
     fill("User name", "passage");
     fill("Password", "pw-123456");
@@ -187,7 +187,7 @@ describe("new REST push", () => {
 
     handler = () => json(422, { code: "HUB-0422", detail: "unsafe webhook url: host resolves to a non-public address (10.1.1.1)" });
     fill("Name", "ERP");
-    fill("Outbound mapping id", MAPPING);
+    fill("Outbound mapping", MAPPING);
     fill("Endpoint", "https://erp.corp.example/api");
     fill("User name", "u");
     fill("Password", "p");

@@ -8,6 +8,7 @@ const K_COURSE = 711;
 const K_SESSION = 712;
 const K_CERT = 713;
 const K_QUESTIONNAIRE = 714;
+const K_SCHEDULE = 720;
 const PAGE = (items: unknown[]) => ({ items });
 
 // Skills.
@@ -161,5 +162,23 @@ const QUESTIONNAIRES = [
   },
 ];
 route("GET", "/api/v1/hr/questionnaires", () => PAGE(QUESTIONNAIRES));
+// Schedules for the results lookup: the engagement survey ran in October.
+const SCHEDULES = QUESTIONNAIRES.slice(0, 1).map((q, n) => ({
+  id: uid(K_SCHEDULE, n + 1),
+  questionnaireId: q.id,
+  questionnaireCode: q.code,
+  questionnaireName: q.name,
+  population: 'employment_type == "FULL_TIME"',
+  opensAt: "2026-10-01T00:00:00Z",
+  closesAt: "2026-10-31T00:00:00Z",
+  invitedCount: 41,
+  status: "CLOSED",
+  createdAt: "2026-09-28T09:00:00Z",
+}));
+route("GET", "/api/v1/hr/questionnaires/schedules", () => PAGE(SCHEDULES));
 route("GET", "/api/v1/hr/questionnaires/schedules/open", () => PAGE([]));
+route("GET", "/api/v1/hr/questionnaires/schedules/{id}", ({ params }) => {
+  const s = SCHEDULES.find((x) => x.id === params.id);
+  return s ? { ...s, questionnaire: QUESTIONNAIRES.find((q) => q.id === s.questionnaireId) } : reply.problem(404, "HCM-QST-SCHEDULE-NOT-FOUND", "No questionnaire schedule with that id");
+});
 route("GET", "/api/v1/hr/questionnaires/{id}", ({ params }) => QUESTIONNAIRES.find((q) => q.id === params.id) ?? reply.problem(404, "HCM-QST-NOT-FOUND", "No questionnaire with that id"));

@@ -815,7 +815,7 @@ paths:
   /v1/engineering/resources:
     get:
       operationId: listResources
-      summary: List resources
+      summary: List resources (also readable with lean.kanban.work, eam.work-order.execute or eam.work.plan, for the resource lookup)
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -852,7 +852,7 @@ paths:
   /v1/engineering/resources/{id}:
     get:
       operationId: getResource
-      summary: Get a resource
+      summary: Get a resource (also readable with lean.kanban.work, eam.work-order.execute or eam.work.plan)
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }

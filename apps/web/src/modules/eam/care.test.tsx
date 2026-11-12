@@ -356,7 +356,7 @@ describe("work order detail: fault and downtime", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Record downtime" }));
     expect(await findStatus()).toHaveTextContent("Downtime recorded.");
     expect(sent("POST", "/downtime")[0].body).toEqual({ from: "2026-10-21T08:00:00.000Z", to: "2026-10-21T12:00:00.000Z" });
-    expect(await within(screen.getByRole("table", { name: "Downtime windows" })).findByText(M12)).toBeInTheDocument();
+    expect(await within(screen.getByRole("table", { name: "Downtime windows" })).findByText("240")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Complete" }));
     expect(screen.getByLabelText("Downtime in minutes")).toHaveValue("240");
   });

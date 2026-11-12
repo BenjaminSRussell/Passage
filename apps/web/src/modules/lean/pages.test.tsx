@@ -633,9 +633,8 @@ describe("slice 4: kanban jobs", () => {
     handler = (url) => (url.pathname === "/api/v1/lean/flows" ? json(200, { items: [flow] }) : undefined);
     const { container } = renderAt("/lean/work-cell");
     expect(await screen.findByText("Choose a work cell")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Work cell id"), { target: { value: "cell-7" } });
     fireEvent.click(screen.getByRole("button", { name: "Show board" }));
-    expect(await screen.findByText("Enter the work cell's resource id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the work cell.")).toBeInTheDocument();
     expect(calls.some((c) => c.url.pathname === "/api/v1/lean/board")).toBe(false);
     await waitFor(() => expect(pageViolations(container)).toEqual([]));
   });

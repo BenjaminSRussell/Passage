@@ -25,7 +25,10 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 	pathRe := regexp.MustCompile(`^  (/v1/\S+):$`)
 	methodRe := regexp.MustCompile(`^    (get|put|post|patch|delete):$`)
 	dutyRe := regexp.MustCompile(`^      x-passage-duty: (\S+)`)
+	alsoRe := regexp.MustCompile(`^      x-passage-also-duty: (\S+)`)
 	documented := map[string]string{}
+	// also holds the second duty a route accepts (RequireAnyDuty); it is left out of "every other duty".
+	also := map[string]string{}
 	var path, op string
 	for _, line := range strings.Split(string(raw), "\n") {
 		if m := pathRe.FindStringSubmatch(line); m != nil {
@@ -43,6 +46,9 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 		}
 		if m := dutyRe.FindStringSubmatch(line); m != nil && op != "" {
 			documented[op] = m[1]
+		}
+		if m := alsoRe.FindStringSubmatch(line); m != nil && op != "" {
+			also[op] = m[1]
 		}
 	}
 
@@ -83,7 +89,7 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 		}
 		var others []string
 		for _, d := range all {
-			if d != duty {
+			if d != duty && d != also[op] {
 				others = append(others, d)
 			}
 		}

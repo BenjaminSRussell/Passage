@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormField, Input, ListPage, loadedRows, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   createScheduleRelease,
   describeProblem,
@@ -67,7 +67,9 @@ export function ScheduleReleasesPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const agreement = useLoad((signal) => getAgreement(id, signal), id);
-  const releases = useLoad((signal) => listScheduleReleases(id, signal), id);
+  // Bumped after the shipped quantity is recorded, so the list reads the recalculated releases.
+  const [reloads, setReloads] = useState(0);
+  const useReleaseRows = () => loadedRows(useLoad((signal) => listScheduleReleases(id, signal), `${id}-${reloads}`));
   const [shipped, setShipped] = useState("");
   const [reset, setReset] = useState("");
   const [errors, setErrors] = useState<Errors>({});
@@ -89,7 +91,7 @@ export function ScheduleReleasesPage() {
       await recordAgreementShipped(id, etagOf(agreement.data.value.version), shipped, reset || undefined);
       setDone(true);
       agreement.reload();
-      releases.reload();
+      setReloads((n) => n + 1);
     } catch (error) {
       const problem = describeProblem(error);
       if (Object.keys(problem.fields).length > 0) setErrors(problem.fields);
@@ -101,23 +103,24 @@ export function ScheduleReleasesPage() {
 
   const a = agreement.data?.value;
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title={a ? `Scheduling releases for ${a.agreementNumber}` : "Scheduling releases"}
-        description="Forecast and JIT releases from the customer. A new release replaces the open schedule lines of the previous one; a cumulative quantity that differs from shipped beyond the tolerance is held for review."
-        actions={
-          <>
-            <Link className={buttonClassName("ghost")} to={`/sales/agreements/${id}`}>
-              Back to agreement
+    <ListPage
+      id="sales-schedule-releases"
+      title={a ? `Scheduling releases for ${a.agreementNumber}` : "Scheduling releases"}
+      description="Forecast and JIT releases from the customer. A new release replaces the open schedule lines of the previous one; a cumulative quantity that differs from shipped beyond the tolerance is held for review."
+      actions={
+        <>
+          <Link className={buttonClassName("ghost")} to={`/sales/agreements/${id}`}>
+            Back to agreement
+          </Link>
+          {a?.status === "CLOSED" ? null : (
+            <Link className={buttonClassName("primary")} to={`/sales/agreements/${id}/schedule-releases/new`}>
+              New release
             </Link>
-            {a?.status === "CLOSED" ? null : (
-              <Link className={buttonClassName("primary")} to={`/sales/agreements/${id}/schedule-releases/new`}>
-                New release
-              </Link>
-            )}
-          </>
-        }
-      />
+          )}
+        </>
+      }
+      notice={
+        <>
       {agreement.error && !a ? (
         <Alert tone="danger" title="Could not load the agreement" live="alert" action={<Button size="sm" onClick={agreement.reload}>Try again</Button>}>
           <ProblemMessage problem={agreement.error} />
@@ -168,22 +171,16 @@ export function ScheduleReleasesPage() {
           </Alert>
         </Card>
       )}
-      {releases.error ? (
-        <Alert tone="danger" title="Could not load the releases" live="alert" action={<Button size="sm" onClick={releases.reload}>Try again</Button>}>
-          <ProblemMessage problem={releases.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Scheduling releases"
-          columns={columns}
-          rows={releases.data ?? []}
-          getRowKey={(r) => r.id}
-          loading={releases.loading}
-          empty={{ title: "No releases yet", description: "Enter the customer's first forecast or JIT release to create open schedule lines." }}
-          onRowOpen={(r) => navigate(`/sales/agreements/${id}/schedule-releases/${r.id}`)}
-        />
-      )}
-    </div>
+        </>
+      }
+      noun="releases"
+      singular="release"
+      columns={columns}
+      useRows={useReleaseRows}
+      getRowKey={(r) => r.id}
+      onRowOpen={(r) => navigate(`/sales/agreements/${id}/schedule-releases/${r.id}`)}
+      empty={{ title: "No releases yet", description: "Enter the customer's first forecast or JIT release to create open schedule lines." }}
+    />
   );
 }
 

@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
 import { describeProblem, type Problem } from "./api/client";
@@ -82,7 +83,7 @@ export function validateSync(v: SyncValues): { errors: Errors; input?: NewRestSu
   if (name.length < 1 || name.length > 200) errors.name = "Enter a name, up to 200 characters.";
   const patterns = [...new Set(v.patterns.split(/[\n,]+/).map((p) => p.trim()).filter((p) => p !== ""))];
   if (patterns.length < 1 || patterns.length > 50) errors.patterns = "Enter 1 to 50 event types, one per line. Use * for one segment and a trailing ** for the rest.";
-  if (!UUID.test(v.outboundMappingId.trim())) errors.outboundMappingId = "Enter the outbound mapping id (a UUID from the migration workspace).";
+  if (!UUID.test(v.outboundMappingId.trim())) errors.outboundMappingId = "Choose the outbound mapping.";
   const url = v.url.trim();
   const origin = /^https?:\/\/[^/?#]*/i.exec(url)?.[0];
   if (!origin) errors.url = "Enter a full http(s) address, such as https://erp.example.com/api/salesorders.";
@@ -215,7 +216,15 @@ export function NewSyncSubscriptionPage() {
           <FormField id="sync-patterns" label="Event types" hint="One per line, such as dev.passage.sales.order.confirmed.v1." error={errors.patterns}>
             {(control) => <Textarea {...control} rows={3} mono value={values.patterns} onChange={(event) => update({ patterns: event.target.value })} invalid={Boolean(errors.patterns)} />}
           </FormField>
-          {text("outboundMappingId", "Outbound mapping id", "The mapping that renders the event into the ERP's body.", false, { spellCheck: false })}
+          <LookupFormField
+            id="sync-outboundMappingId"
+            label="Outbound mapping"
+            entity="outboundMapping"
+            hint="The active mapping that renders the event into the ERP's body. The list needs the migration duty; without it, paste the mapping's id."
+            value={values.outboundMappingId}
+            error={errors.outboundMappingId}
+            onChange={(outboundMappingId) => update({ outboundMappingId })}
+          />
           <FormField id="sync-method" label="Method">
             {(control) => (
               <Select {...control} value={values.method} onChange={(event) => update({ method: event.target.value as SyncMethod })}>

@@ -85,6 +85,8 @@ route("GET", `${BASE}/dock-appointments`, ({ query }) => {
   return { items };
 });
 
+route("GET", `${BASE}/dock-appointments/{id}`, ({ params }) => appointments.get(params.id) ?? reply.problem(404, "WMS-APPOINTMENT-NOT-FOUND", "No dock appointment with that id"));
+
 route("POST", `${BASE}/dock-appointments`, ({ body }) => {
   const input = body as AppointmentInput;
   const d = doors.get(input.doorId);

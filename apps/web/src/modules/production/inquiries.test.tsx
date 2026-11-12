@@ -173,8 +173,7 @@ describe("operations overview page (4.21.14)", () => {
     const form = screen.getByRole("form", { name: "Filter the operations" });
     await userEvent.selectOptions(within(form).getByLabelText("Operation status"), "started");
     await userEvent.selectOptions(within(form).getByLabelText("Order status"), "Started");
-    await within(form).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(form).getByLabelText(/Resource/), resource);
+    fireEvent.change(within(form).getByLabelText(/Resource/), { target: { value: resource } });
     fireEvent.change(within(form).getByLabelText(/Site/), { target: { value: site } });
     fireEvent.change(within(form).getByLabelText(/Due from/), { target: { value: "2026-11-01" } });
     await userEvent.click(within(form).getByRole("button", { name: "Show" }));

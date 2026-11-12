@@ -38,6 +38,7 @@ export function App() {
   const me = useLoad(() => get<Me>("/bff/me"), []);
   const [entity, setEntity] = useState("");
   const loc = useLocation();
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   useEffect(() => {
     if (me.data) {
       const first = me.data.legalEntityIds[0] ?? "";
@@ -60,10 +61,11 @@ export function App() {
               <label>Buyer entity <select value={entity} onChange={(e) => setEntity(e.target.value)}>{me.data.legalEntityIds.map((id) => <option key={id} value={id}>{id.slice(0, 8)}</option>)}</select></label>
             ) : null}
             <span>{me.data.name || me.data.userId}</span>
-            <button type="button" className="secondary" onClick={() => void signOut()}>Sign out</button>
+            <button type="button" className="secondary" onClick={() => void signOut().then(setSignOutError)}>Sign out</button>
           </div>
         ) : null}
       </header>
+      {signOutError ? <p role="alert" className="error">{signOutError}</p> : null}
       <nav aria-label="Main">
         <ul>{[...NAV, ...(me.data?.isAdmin ? [["/users", "Users"] as [string, string]] : [])].map(([to, label]) => <li key={to}><NavLink to={to} end={to === "/"}>{label}</NavLink></li>)}</ul>
       </nav>

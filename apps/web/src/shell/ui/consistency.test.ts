@@ -9,7 +9,8 @@
  *    `rawControlsAllowlist.json` with their counts; the audit fails when a count grows, a page is added, or a listed page
  *    no longer has the control (remove it from the list).
  * 2. List pages that are not on `ListPage`. A page with a header and a table whose rows open a record, and no
- *    `ListPage`, in a procure-to-pay or order-to-cash module. They are listed in `listPageBacklog.json`; the audit fails
+ *    `ListPage`, in a procure-to-pay or order-to-cash module. A record's detail page or a create page is not a list
+ *    page: its table holds the record's related rows. They are listed in `listPageBacklog.json`; the audit fails
  *    when a page is added to that shape and when a listed page has moved to `ListPage` (remove it from the list).
  *
  * Run `npx vitest run src/shell/ui/consistency.test.ts` to see the report; the failure message lists what to change.
@@ -51,6 +52,14 @@ export function isUnconvertedList(source: string): boolean {
   return source.includes("<PageHeader") && source.includes("<DataTable") && !source.includes("<ListPage") && /onRowOpen/.test(source);
 }
 
+/**
+ * A record's detail page or a create page: a table there lists the record's related rows (the credit notes of an
+ * invoice, the packing slips of a shipment), which open their own record but are not a list screen of their own.
+ */
+export function isRecordPage(file: string): boolean {
+  return /\/(?:[A-Za-z]+Detail|New[A-Za-z]+)Page\.tsx$/.test(file);
+}
+
 const moduleOf = (path: string) => path.replace("../../modules/", "").split("/")[0];
 const fileOf = (path: string) => path.replace("../../", "");
 
@@ -77,7 +86,7 @@ describe("UI consistency audit", () => {
   it("lists every procure-to-pay and order-to-cash list page that is not on ListPage", () => {
     const listed = new Set(backlog.pages);
     const now = Object.entries(sources)
-      .filter(([path, source]) => FLOW_MODULES.includes(moduleOf(path)) && isUnconvertedList(source))
+      .filter(([path, source]) => FLOW_MODULES.includes(moduleOf(path)) && !isRecordPage(path) && isUnconvertedList(source))
       .map(([path]) => fileOf(path))
       .sort();
     expect(now.filter((f) => !listed.has(f)), "new list pages use ListPage (docs/lists.md)").toEqual([]);
@@ -90,5 +99,8 @@ describe("UI consistency audit", () => {
     expect(isUnconvertedList("<PageHeader /><DataTable onRowOpen={open} />")).toBe(true);
     expect(isUnconvertedList("<ListPage /><PageHeader /><DataTable onRowOpen={open} />")).toBe(false);
     expect(isUnconvertedList("<PageHeader /><DataTable />")).toBe(false);
+    expect(isRecordPage("../../modules/billing/InvoiceDetailPage.tsx")).toBe(true);
+    expect(isRecordPage("../../modules/billing/NewShipmentProposalPage.tsx")).toBe(true);
+    expect(isRecordPage("../../modules/billing/InvoicesPage.tsx")).toBe(false);
   });
 });

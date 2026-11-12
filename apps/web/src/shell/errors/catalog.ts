@@ -1164,6 +1164,14 @@ const processManufacturing: Record<string, ProblemCatalogEntry> = {
   },
 };
 
+/** Lookups added for #500 (round 3): records a form picks by name. */
+const lookupReads: Record<string, ProblemCatalogEntry> = {
+  "WMS-APPOINTMENT-NOT-FOUND": {
+    message: "We couldn't find that dock appointment. It may have been cancelled or belong to another warehouse.",
+    action: "Choose the appointment again from the list, or leave it empty for a walk-in.",
+  },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -1194,6 +1202,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...phiReadLog,
   ...b2b,
   ...processManufacturing,
+  ...lookupReads,
 });
 
 /** The catalog entry for a problem code, if there is one. */

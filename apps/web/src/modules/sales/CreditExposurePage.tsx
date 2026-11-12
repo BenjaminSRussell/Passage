@@ -1,14 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, DataTable, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
-import { UTILIZATION_STATUSES, listCreditExposure, type CreditExposureFilter, type CreditExposureRow, type UtilizationStatus } from "./api/client";
-import { dash, money, sentence, UUID } from "./format";
+import { Alert, Badge, ListPage, loadedRows, type BadgeTone, type ListColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
+import { SalesApiError, UTILIZATION_STATUSES, listCreditExposure, type CreditExposureFilter, type CreditExposureRow, type UtilizationStatus } from "./api/client";
+import { dash, money, sentence } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { EntityName } from "../../shell/lookup/EntityName";
 import { PlainName } from "./OrderNumber";
-import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
 const PERCENT_2 = /^\d+(\.\d{1,2})?$/;
 
@@ -21,7 +19,7 @@ const labels: Record<UtilizationStatus, string> = {
   OVER_TOLERANCE: "Over tolerance",
 };
 
-const columns: DataTableColumn<CreditExposureRow>[] = [
+const columns: ListColumn<CreditExposureRow>[] = [
   { key: "customerId", header: "Customer", render: (row) => <PlainName entity="customer" id={row.customerId} /> },
   { key: "legalEntityId", header: "Legal entity", render: (r) => <EntityName entity="legalEntity" id={r.legalEntityId} /> },
   { key: "limit", header: "Credit limit", align: "end", render: (r) => money(r.limit, r.currency) },
@@ -40,90 +38,60 @@ const columns: DataTableColumn<CreditExposureRow>[] = [
   { key: "status", header: "Status", render: (r) => <Badge tone={tones[r.status]}>{labels[r.status]}</Badge> },
 ];
 
+const filters: ListFilterDef[] = [
+  { kind: "entity", key: "legalEntityId", label: "Legal entity", entity: "legalEntity" },
+  { kind: "entity", key: "customerId", label: "Customer", entity: "customer" },
+  { kind: "select", key: "status", label: "Status", anyLabel: "Any status", options: UTILIZATION_STATUSES.map((s) => ({ value: s, label: labels[s] })) },
+  { kind: "text", key: "minUtilizationPct", label: "Used at least (%)" },
+];
+
 /**
  * Credit exposure by customer (PRD §5.27.14): each customer's exposure against the credit
  * limit, highest use first, so a credit manager sees who is near or over the limit.
  */
 export function CreditExposurePage() {
   const navigate = useNavigate();
-  const [draft, setDraft] = useState({ legalEntityId: "", customerId: "", status: "" as UtilizationStatus | "", minUtilizationPct: "" });
-  const [filter, setFilter] = useState<CreditExposureFilter>({});
-  const invalid: Record<string, string> = {};
-  if (draft.legalEntityId.trim() && !UUID.test(draft.legalEntityId.trim())) invalid.legalEntityId = "Enter a legal entity UUID.";
-  if (draft.customerId.trim() && !UUID.test(draft.customerId.trim())) invalid.customerId = "Enter a customer UUID.";
-  if (draft.minUtilizationPct !== "" && !PERCENT_2.test(draft.minUtilizationPct)) invalid.minUtilizationPct = "Enter a percent such as 80 or 92.5.";
-  const state = useLoad((signal) => listCreditExposure(filter, signal), JSON.stringify(filter));
-  const report = state.data;
-
+  const [report, setReport] = useState<{ truncated: boolean; total: number; shown: number } | null>(null);
+  const useRows = (query: ListQuery): ListData<CreditExposureRow> => {
+    const f = query.filters;
+    const filter: CreditExposureFilter = {
+      legalEntityId: f.legalEntityId ?? "",
+      customerId: f.customerId ?? "",
+      status: (f.status ?? "") as UtilizationStatus | "",
+      minUtilizationPct: f.minUtilizationPct ?? "",
+    };
+    const bad = filter.minUtilizationPct !== "" && !PERCENT_2.test(filter.minUtilizationPct ?? "");
+    const state = useLoad(async (signal) => {
+      if (bad) throw new SalesApiError(400, "SAL-FILTER-PERCENT", "Enter a percent such as 80 or 92.5.", {});
+      const page = await listCreditExposure(filter, signal);
+      setReport({ truncated: page.truncated, total: page.total, shown: page.items.length });
+      return page.items;
+    }, JSON.stringify(filter));
+    return loadedRows(state);
+  };
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Credit exposure"
-        description="Each customer's exposure against the credit limit, highest use first. The figure counted against the limit is the one the credit check starts from: open AR less unapplied cash, plus delivered goods not yet invoiced and open orders where the limit type counts them."
-      />
-      <form
-        className={styles.toolbar}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (Object.keys(invalid).length > 0) return;
-          setFilter({
-            legalEntityId: draft.legalEntityId.trim(),
-            customerId: draft.customerId.trim(),
-            status: draft.status,
-            minUtilizationPct: draft.minUtilizationPct,
-          });
-        }}
-      >
-        <FormField id="exposure-le" label="Legal entity" hint="Leave empty for every legal entity you can see." error={invalid.legalEntityId} optional>
-          {(control) => <EntityLookup entity="legalEntity" {...control} prefill={false} placeholder="All legal entities" value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid.legalEntityId)} />}
-        </FormField>
-        <FormField id="exposure-customer" label="Customer" error={invalid.customerId} optional>
-          {(control) => <EntityLookup entity="customer" {...control} placeholder="All customers" value={draft.customerId} onChange={(e) => setDraft({ ...draft, customerId: e.target.value })} invalid={Boolean(invalid.customerId)} />}
-        </FormField>
-        <FormField id="exposure-status" label="Status" optional>
-          {(control) => (
-            <Select {...control} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as UtilizationStatus | "" })}>
-              <option value="">Any status</option>
-              {UTILIZATION_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {labels[s]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <FormField id="exposure-min" label="Used at least (%)" hint="Customers without a limit are left out." error={invalid.minUtilizationPct} optional>
-          {(control) => <Input {...control} inputMode="decimal" value={draft.minUtilizationPct} onChange={(e) => setDraft({ ...draft, minUtilizationPct: e.target.value })} invalid={Boolean(invalid.minUtilizationPct)} />}
-        </FormField>
-        <Button type="submit">Filter</Button>
-      </form>
-      {report?.truncated ? (
-        <Alert tone="warning" title="Partial ranking">
-          This scope has more than 50,000 credit profiles, so only the first 50,000 were measured and some customers may be missing. Narrow it to one legal entity or customer.
-        </Alert>
-      ) : null}
-      {state.error ? (
-        <Alert tone="danger" title="Could not load credit exposure" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
+    <ListPage
+      id="sales-credit-exposure"
+      title="Credit exposure"
+      description="Each customer's exposure against the credit limit, highest use first. The figure counted against the limit is the one the credit check starts from: open AR less unapplied cash, plus delivered goods not yet invoiced and open orders where the limit type counts them."
+      notice={
         <>
-          <DataTable
-            label="Credit exposure by customer"
-            columns={columns}
-            rows={report?.items ?? []}
-            getRowKey={(r) => `${r.legalEntityId}/${r.customerId}`}
-            loading={state.loading}
-            empty={{ title: "No customers match", description: "Credit profiles define the limits this report measures; change the filters or add a profile." }}
-            onRowOpen={(r) => navigate(`/sales/credit-profiles/${r.legalEntityId}/${r.customerId}`)}
-          />
-          {report && report.total > report.items.length ? (
-            <p className={styles.muted}>
-              Showing {report.items.length} of {report.total} customers.
-            </p>
+          {report?.truncated ? (
+            <Alert tone="warning" title="Partial ranking">
+              This scope has more than 50,000 credit profiles, so only the first 50,000 were measured and some customers may be missing. Narrow it to one legal entity or customer.
+            </Alert>
           ) : null}
+          {report && report.total > report.shown ? <p className={styles.muted}>{`Showing ${report.shown} of ${report.total} customers.`}</p> : null}
         </>
-      )}
-    </div>
+      }
+      noun="customers"
+      singular="customer"
+      columns={columns}
+      filters={filters}
+      useRows={useRows}
+      getRowKey={(r) => `${r.legalEntityId}/${r.customerId}`}
+      onRowOpen={(r) => navigate(`/sales/credit-profiles/${r.legalEntityId}/${r.customerId}`)}
+      empty={{ title: "No customers match", description: "Credit profiles define the limits this report measures; change the filters or add a profile." }}
+    />
   );
 }

@@ -5,12 +5,12 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { clientAddress, NO_TRUSTED_PROXIES, rateKey, type TrustedProxies } from "./clientAddress.ts";
-import { authorizationUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
+import { authorizationUrl, endSessionUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
 import { PendingProvisioner, type UserProvisioner } from "./provision.ts";
 import { matchRoute, QUERY_ALLOWLIST, STRIPPED_BODY_KEYS, type Route } from "./routes.ts";
 import { screenUpload, type ScanPolicy } from "./scan.ts";
 import { DUTY_INVITE_ACCEPT, DUTY_PORTAL_ADMIN, type Audience, type ServiceTokenSigner } from "./serviceToken.ts";
-import { LOGIN_TTL_MS, parseCookies, RateLimiter, SESSION_COOKIE, sameToken, type Session, type SessionStore } from "./session.ts";
+import { LOGIN_TTL_MS, parseCookies, RateLimiter, SESSION_COOKIE, sameToken, StoreUnavailable, type Session, type SessionStore } from "./session.ts";
 
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
 /** The public registration form is a few short fields; anything larger is refused before it is read. */
@@ -63,8 +63,8 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
   res.end(payload);
 }
 
-function problem(res: ServerResponse, status: number, code: string, detail: string): void {
-  send(res, status, { type: `https://passage.dev/problems/${code}`, title: detail, status, code, detail });
+function problem(res: ServerResponse, status: number, code: string, detail: string, headers: Record<string, string> = {}): void {
+  send(res, status, { type: `https://passage.dev/problems/${code}`, title: detail, status, code, detail }, headers);
 }
 
 async function readBody(req: IncomingMessage, max: number): Promise<Buffer | "too-large"> {
@@ -92,7 +92,7 @@ export function createHttpServer(deps: ServerDeps): Server {
     const state = randomToken();
     const nonce = randomToken();
     const { verifier, challenge } = pkcePair();
-    deps.sessions.putLogin(state, { nonce, verifier, expiresAt: now() + LOGIN_TTL_MS });
+    await deps.sessions.putLogin(state, { nonce, verifier, expiresAt: now() + LOGIN_TTL_MS });
     res.writeHead(302, { location: authorizationUrl(deps.oidc, state, nonce, challenge), "cache-control": "no-store" });
     res.end();
   }
@@ -100,12 +100,12 @@ export function createHttpServer(deps: ServerDeps): Server {
   async function callback(url: URL, res: ServerResponse): Promise<void> {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
-    const pending = state ? deps.sessions.takeLogin(state, now()) : undefined;
+    const pending = state ? await deps.sessions.takeLogin(state, now()) : undefined;
     if (!code || !pending) return problem(res, 400, "SUP-BFF-400", "the sign-in is not valid or has expired; start again");
     try {
       const idToken = await exchangeCode(deps.oidc, code, pending.verifier, deps.fetcher);
       const identity = await verifyIdToken(idToken, deps.oidc, deps.jwks, pending.nonce, now());
-      const session = deps.sessions.create(identity, now());
+      const session = await deps.sessions.create(identity, idToken, now());
       log({ msg: "sign-in", userId: identity.userId, vendorId: identity.vendorId });
       res.writeHead(302, { location: "/", "set-cookie": setSession(session.id, 8 * 3600), "cache-control": "no-store" });
       res.end();
@@ -340,7 +340,9 @@ export function createHttpServer(deps: ServerDeps): Server {
     if (method === "POST" && url.pathname === "/bff/invites/verify") return invitation(req, res, "verify");
     if (method === "POST" && url.pathname === "/bff/invites/accept") return invitation(req, res, "accept");
 
-    const session = deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
+    if (method === "POST" && url.pathname === "/bff/logout") return logout(req, res);
+
+    const session = await deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
     if (!session) return problem(res, 401, "SUP-BFF-401", "sign in first");
     if (method !== "GET" && method !== "HEAD") {
       const origin = req.headers.origin;
@@ -352,20 +354,42 @@ export function createHttpServer(deps: ServerDeps): Server {
       const i = session.identity;
       return send(res, 200, { userId: i.userId, name: i.name, vendorId: i.vendorId, legalEntityIds: i.legalEntityIds, isAdmin: i.isAdmin, csrfToken: session.csrf });
     }
-    if (method === "POST" && url.pathname === "/bff/logout") {
-      deps.sessions.delete(session.id);
-      res.writeHead(204, { "set-cookie": setSession("", 0), "cache-control": "no-store" });
-      res.end();
-      return;
-    }
     if (url.pathname.startsWith("/api/v1/")) return api(req, res, url, session);
     problem(res, 404, "SUP-BFF-404", "no such route");
+  }
+
+  /**
+   * Sign-out. The cookie is cleared on every answer but a refused one, so a store outage cannot leave the browser signed in: the
+   * portal session ends here and the browser goes on to Keycloak's end-session (client_id and post_logout_redirect_uri only; the
+   * ID token never reaches the browser). A known session needs its CSRF token; a session the store no longer knows just clears
+   * the cookie. When the store cannot be reached the answer is 503 (the app says so), with the cookie cleared all the same.
+   */
+  async function logout(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const origin = req.headers.origin;
+    if (origin !== undefined && origin !== deps.appOrigin) return problem(res, 403, "SUP-BFF-403", "the request does not come from the portal");
+    const clear = { "set-cookie": setSession("", 0) };
+    const logoutUrl = endSessionUrl(deps.oidc);
+    try {
+      const session = await deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
+      if (session) {
+        const csrf = req.headers["x-csrf-token"];
+        if (!sameToken(typeof csrf === "string" ? csrf : undefined, session.csrf)) return problem(res, 403, "SUP-BFF-403", "the request has no valid CSRF token");
+        await deps.sessions.delete(session.id);
+      }
+    } catch (err) {
+      if (!(err instanceof StoreUnavailable)) throw err;
+      log({ msg: "logout: the session store is unreachable; the cookie is cleared", err: String(err) });
+      return problem(res, 503, "SUP-BFF-503", "the portal cannot reach its session store; you are signed out on this device, the session ends by itself", clear);
+    }
+    send(res, 200, { logoutUrl }, clear);
   }
 
   return createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
       log({ msg: "unhandled", err: String(err) });
-      if (!res.headersSent) problem(res, 500, "SUP-BFF-500", "internal error");
+      // A store that cannot be reached is the service being unavailable, not the user being signed out.
+      const status = err instanceof StoreUnavailable ? 503 : 500;
+      if (!res.headersSent) problem(res, status, status === 503 ? "SUP-BFF-503" : "SUP-BFF-500", status === 503 ? "the portal cannot reach its session store; retry" : "internal error");
       else res.end();
     });
   });

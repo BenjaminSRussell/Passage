@@ -179,7 +179,7 @@ describe("personnel actions, jobs and compensation plans", () => {
     renderAt("/hr/actions/new");
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: "COMP_CHANGE" } });
     fireEvent.change(screen.getByLabelText("Worker"), { target: { value: WORKER } });
-    fireEvent.change(screen.getByLabelText("Employment id"), { target: { value: EMPLOYMENT } });
+    fireEvent.change(screen.getByLabelText("Employment"), { target: { value: EMPLOYMENT } });
     fireEvent.change(screen.getByLabelText("Effective date"), { target: { value: "2026-11-02" } });
     fireEvent.change(screen.getByLabelText("Compensation plan"), { target: { value: "salar" } });
     fireEvent.click(await screen.findByRole("option", { name: /Salaried/ }));

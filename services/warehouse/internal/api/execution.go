@@ -81,6 +81,7 @@ type Store interface {
 	ListDoors(ctx context.Context, warehouseID string) ([]domain.DockDoor, error)
 	CreateAppointment(ctx context.Context, idem store.Idem, a domain.Appointment) (domain.Appointment, bool, error)
 	ListAppointments(ctx context.Context, f store.AppointmentFilter) ([]domain.Appointment, error)
+	GetAppointment(ctx context.Context, id string) (domain.Appointment, error)
 	RegisterASN(ctx context.Context, idem store.Idem, r domain.Receipt) (domain.Receipt, bool, error)
 	ListReceipts(ctx context.Context, f store.ReceiptFilter) ([]domain.ReceiptSummary, error)
 	GetReceipt(ctx context.Context, id string) (domain.Receipt, error)

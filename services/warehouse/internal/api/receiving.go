@@ -24,6 +24,8 @@ import (
 const (
 	dutyReceive     = "warehouse.receipt.register"
 	dutyShipConfirm = "warehouse.shipment.confirm"
+	// dutyGateOperate is transport's gate guard duty; it reads dock appointments for the check-in lookup.
+	dutyGateOperate = "transport.gate.operate"
 )
 
 const (
@@ -37,6 +39,7 @@ const (
 // Error codes of receiving and dock scheduling (README "Error codes").
 const (
 	codeDoorNotFound    = "WMS-DOOR-NOT-FOUND"
+	codeApptNotFound    = "WMS-APPOINTMENT-NOT-FOUND"
 	codeReceiptNotFound = "WMS-RECEIPT-NOT-FOUND"
 	codePalletNotFound  = "WMS-PALLET-NOT-FOUND"
 )
@@ -48,7 +51,11 @@ func (a *API) registerReceiving(r chi.Router) {
 	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/dock-doors", a.listDoors)
 	r.With(authz.Require(anyDuty{dutyReceive, dutyShipConfirm}, dutyReceive+" or "+dutyShipConfirm, "")).
 		Post("/v1/warehouse/dock-appointments", a.createAppointment)
-	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/dock-appointments", a.listAppointments)
+	// The gate guard checking a truck in (transport.gate.operate) picks the appointment, so the gate duty reads them too.
+	r.With(authz.Require(anyDuty{dutyInquiry, dutyGateOperate}, dutyInquiry+" or "+dutyGateOperate, "")).
+		Get("/v1/warehouse/dock-appointments", a.listAppointments)
+	r.With(authz.Require(anyDuty{dutyInquiry, dutyGateOperate}, dutyInquiry+" or "+dutyGateOperate, "")).
+		Get("/v1/warehouse/dock-appointments/{id}", a.getAppointment)
 	r.With(authz.RequireDuty(dutyReceive)).Post("/v1/warehouse/receipts:from-asn", a.registerASN)
 	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/receipts", a.listReceipts)
 	r.With(authz.RequireDuty(dutyInquiry)).Get("/v1/warehouse/receipts/{id}", a.getReceipt)
@@ -240,6 +247,21 @@ func (a *API) listAppointments(w http.ResponseWriter, r *http.Request) {
 		out = []domain.Appointment{}
 	}
 	httpx.JSON(w, http.StatusOK, page[domain.Appointment]{Items: out})
+}
+
+// getAppointment reads one dock appointment (the appointment lookup of the gate check-in).
+func (a *API) getAppointment(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, codeApptNotFound, "not found"))
+		return
+	}
+	out, err := a.st.GetAppointment(r.Context(), strings.ToLower(id))
+	if err != nil {
+		fail(w, r, err, codeApptNotFound)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 type asnLineInput struct {

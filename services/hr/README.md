@@ -430,7 +430,8 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | POST | `/v1/hr/workers` | hr.worker.maintain |
 | GET | `/v1/hr/workers?q=&limit=&cursor=` | hr.worker.inquire |
 | GET | `/v1/hr/workers/{id}` | hr.worker.inquire |
-| GET | `/v1/hr/workers/{id}/employments` | hr.worker.inquire |
+| GET | `/v1/hr/workers/{id}/employments` | hr.worker.inquire or hr.action.maintain |
+| GET | `/v1/hr/employments/{id}` (the employment lookup) | hr.worker.inquire or hr.action.maintain |
 | GET | `/v1/hr/workers/{id}/as-of?date=` | hr.worker.inquire |
 | GET | `/v1/hr/workers/{id}/pii?reason=` | hr.pii.read |
 | POST | `/v1/hr/workers/{id}/employments` | hr.worker.maintain |
@@ -501,7 +502,7 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | GET | `/v1/hr/workers/{id}/loaned-items` | hr.worker.inquire |
 | GET | `/v1/hr/loaned-items/outstanding?dueBy=` | hr.worker.inquire |
 | POST | `/v1/hr/loaned-items/{id}/close` | hr.worker.maintain |
-| POST / GET | `/v1/hr/checklist-templates` | hr.setup.admin |
+| POST / GET | `/v1/hr/checklist-templates` | hr.setup.admin (GET also hr.action.maintain, so the person starting a checklist can pick the template) |
 | POST / GET | `/v1/hr/workers/{id}/checklists` | hr.action.maintain / hr.worker.inquire |
 | GET | `/v1/hr/checklists/{id}` | hr.worker.inquire |
 | POST | `/v1/hr/checklists/{id}/complete` | hr.action.maintain |
@@ -510,8 +511,9 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | POST / GET | `/v1/hr/questionnaires` | hr.questionnaire.admin |
 | GET | `/v1/hr/questionnaires/{id}` | hr.questionnaire.admin |
 | POST | `/v1/hr/questionnaires/schedules` | hr.questionnaire.admin |
+| GET | `/v1/hr/questionnaires/schedules` (every schedule with its questionnaire's name) | hr.questionnaire.admin |
 | GET | `/v1/hr/questionnaires/schedules/open` | hr.questionnaire.self |
-| GET | `/v1/hr/questionnaires/schedules/{id}` | hr.questionnaire.self |
+| GET | `/v1/hr/questionnaires/schedules/{id}` | hr.questionnaire.self or hr.questionnaire.admin |
 | POST | `/v1/hr/questionnaires/schedules/{id}/answers` | hr.questionnaire.self (own worker only) |
 | GET | `/v1/hr/questionnaires/schedules/{id}/results?by=department` | hr.questionnaire.admin |
 | POST / GET | `/v1/hr/me/profile-changes` | hr.profile.self (own worker only) |

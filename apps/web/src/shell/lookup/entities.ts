@@ -40,7 +40,18 @@ export type LookupEntityKey =
   | "paymentTerm"
   | "postingProfile"
   | "qualityOrder"
-  | "inventoryJournal";
+  | "inventoryJournal"
+  | "dashboard"
+  | "resource"
+  | "costBasis"
+  | "qualityTest"
+  | "outboundMapping"
+  | "costVersion"
+  | "incident"
+  | "checklistTemplate"
+  | "questionnaireSchedule"
+  | "employment"
+  | "dockAppointment";
 
 export interface LookupOption {
   id: string;
@@ -52,11 +63,15 @@ export interface LookupOption {
   serialTracked?: boolean;
   catchWeight?: boolean;
   currency?: string;
+  /** When the record happens (a dock appointment's start), as an ISO instant. */
+  at?: string;
 }
 
 export interface LookupScope {
   legalEntityId?: string;
   siteId?: string;
+  /** The worker whose records are listed (employments). */
+  workerId?: string;
 }
 
 export interface LookupDef {
@@ -590,7 +605,175 @@ const mainAccountDef: LookupDef = {
   resolve: async (id, signal) => (await mainAccountOptions({}, signal)).find((entry) => entry.id === id) ?? null,
 };
 
+const lower = (value: string | undefined) => value?.replace(/_/g, " ").toLowerCase();
+
+/** A quality test reads "Hardness (HARD-01 v2 · variable)": tests are lines of the newest version of each test group. */
+async function qualityTestOptions(signal?: AbortSignal): Promise<LookupOption[]> {
+  const groups = items(await getJson("/api/v1/quality/test-groups?limit=100", signal));
+  const newest = new Map<string, Raw>();
+  for (const group of groups) {
+    const code = text(group, "code") ?? "";
+    const seen = newest.get(code);
+    if (!seen || Number(group.version) > Number(seen.version)) newest.set(code, group);
+  }
+  const out: LookupOption[] = [];
+  for (const group of newest.values()) {
+    const tests = Array.isArray(group.tests) ? (group.tests as Raw[]) : [];
+    for (const test of tests) {
+      const id = text(test, "testId");
+      if (!id) continue;
+      out.push({ id, name: text(test, "name") ?? text(group, "code") ?? id, number: [`${text(group, "code")} v${String(group.version)}`, lower(text(test, "kind"))].filter(Boolean).join(" · ") });
+    }
+  }
+  return out;
+}
+
+const qualityTestDef: LookupDef = {
+  noun: "quality test",
+  search: async (q, _scope, signal) => narrow(await qualityTestOptions(signal), q),
+  resolve: async (id, signal) => (await qualityTestOptions(signal)).find((entry) => entry.id === id) ?? null,
+};
+
+/** An employment reads "Full time from 2024-03-01 (US01 · active)"; it is listed per worker. */
+async function employmentOption(row: Raw, codes?: Map<string, string>): Promise<LookupOption | null> {
+  const id = text(row, "id");
+  const hire = text(row, "hireDate");
+  if (!id || !hire) return null;
+  const entity = text(row, "legalEntityId") ?? "";
+  const code = (codes ?? (await entityCodes([entity]))).get(entity);
+  const kind = lower(text(row, "employmentType")) ?? "employment";
+  return { id, name: `${kind.charAt(0).toUpperCase()}${kind.slice(1)} from ${hire}`, number: [code, lower(text(row, "status"))].filter(Boolean).join(" · ") || undefined };
+}
+
+const employmentDef: LookupDef = {
+  noun: "employment",
+  search: async (q, scope, signal) => {
+    if (!scope.workerId) return [];
+    const rows = items(await getJson(`/api/v1/hr/workers/${encodeURIComponent(scope.workerId)}/employments`, signal));
+    const codes = await entityCodes(rows.map((row) => text(row, "legalEntityId")));
+    return narrow(present(await Promise.all(rows.map((row) => employmentOption(row, codes)))), q);
+  },
+  resolve: async (id, signal) => employmentOption(await getOne("/api/v1/hr/employments", id, signal)),
+};
+
+/** A dock appointment reads "ASN-1042 at door D2 (inbound · 2026-11-12 09:30)"; appointments are listed per warehouse. */
+function appointmentOption(row: Raw): LookupOption | null {
+  const id = text(row, "id");
+  const reference = text(row, "reference");
+  if (!id || !reference) return null;
+  const start = text(row, "start");
+  const door = text(row, "doorCode");
+  return {
+    id,
+    name: door ? `${reference} at door ${door}` : reference,
+    number: [lower(text(row, "direction")), start?.slice(0, 16).replace("T", " ")].filter(Boolean).join(" · ") || undefined,
+    at: start,
+  };
+}
+
+const dockAppointmentDef: LookupDef = {
+  noun: "dock appointment",
+  search: async (q, scope, signal) => {
+    if (!scope.siteId) return [];
+    const warehouses = items(await getJson(`/api/v1/org/warehouses${query({ siteId: scope.siteId, limit: String(PAGE_SIZE) })}`, signal));
+    const now = Date.now();
+    const from = new Date(now - 12 * 3600_000).toISOString();
+    const to = new Date(now + 36 * 3600_000).toISOString();
+    const lists = await Promise.all(
+      warehouses
+        .map((row) => text(row, "id"))
+        .filter((id): id is string => Boolean(id))
+        .map(async (warehouseId) => items(await getJson(`/api/v1/warehouse/dock-appointments${query({ warehouseId, from, to })}`, signal))),
+    );
+    return narrow(present(lists.flat().map(appointmentOption)), q);
+  },
+  resolve: async (id, signal) => appointmentOption(await getOne("/api/v1/warehouse/dock-appointments", id, signal)),
+};
+
+/** A checklist template reads "New starter (ONB-STD · onboarding)"; the template list has no single-template route. */
+function checklistTemplateOption(row: Raw): LookupOption | null {
+  const hit = codeAndName(row);
+  return hit ? { ...hit, number: [hit.number, lower(text(row, "kind"))].filter(Boolean).join(" · ") || undefined } : null;
+}
+
+/** A questionnaire schedule has no name of its own: it reads by its questionnaire and its window. */
+function scheduleOption(row: Raw): LookupOption | null {
+  const id = text(row, "id");
+  const name = text(row, "questionnaireName", "questionnaireCode");
+  if (!id || !name) return null;
+  const window = [text(row, "opensAt")?.slice(0, 10), text(row, "closesAt")?.slice(0, 10)].filter(Boolean).join(" to ");
+  return { id, name, number: [window, lower(text(row, "status"))].filter(Boolean).join(" · ") || undefined };
+}
+
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  dashboard: listedEntity("dashboard", "/api/v1/analytics/dashboards", (row) => option(row, ["title"], [], ["dashboardId", "id"])),
+  resource: listedEntity(
+    "resource",
+    "/api/v1/engineering/resources",
+    (row) => {
+      const hit = codeAndName(row);
+      return hit ? { ...hit, number: [hit.number, lower(text(row, "type"))].filter(Boolean).join(" · ") || undefined } : null;
+    },
+    (scope) => ({ limit: "100", siteId: scope.siteId }),
+  ),
+  costBasis: listedEntity(
+    "cost basis type",
+    "/api/v1/pricing/commodity/bases",
+    (row) => {
+      const hit = codeAndName(row);
+      const per = [text(row, "currency"), text(row, "unit")].filter(Boolean).join(" per ");
+      return hit ? { ...hit, number: [hit.number, per].filter(Boolean).join(" · ") || undefined, currency: text(row, "currency") } : null;
+    },
+    (scope) => ({ legalEntityId: scope.legalEntityId }),
+  ),
+  qualityTest: qualityTestDef,
+  outboundMapping: listedEntity(
+    "outbound mapping",
+    "/api/v1/integration/outbound-mappings",
+    (row) => {
+      const hit = option(row, ["name"], []);
+      return hit ? { ...hit, number: [text(row, "sourceSystem"), text(row, "eventType"), lower(text(row, "status"))].filter(Boolean).join(" · ") || undefined } : null;
+    },
+    () => ({ limit: "100", status: "ACTIVE" }),
+  ),
+  costVersion: listedEntity(
+    "cost version",
+    "/api/v1/costing/versions",
+    (row) => {
+      const hit = option(row, ["code"], []);
+      return hit
+        ? { ...hit, number: [lower(text(row, "type")), lower(text(row, "status")), text(row, "effectiveFrom") ? `from ${text(row, "effectiveFrom")}` : undefined].filter(Boolean).join(" · ") || undefined, currency: text(row, "currency") }
+        : null;
+    },
+    (scope) => ({ legalEntityId: scope.legalEntityId, limit: "100" }),
+  ),
+  incident: listedEntity(
+    "incident",
+    "/api/v1/hr/incidents",
+    (row) => {
+      const id = text(row, "id");
+      const caseNo = row.caseNo;
+      if (!id || (typeof caseNo !== "number" && typeof caseNo !== "string")) return null;
+      return { id, name: `Case ${String(caseNo)}`, number: [lower(text(row, "incidentType")), text(row, "occurredAt")?.slice(0, 10), lower(text(row, "status"))].filter(Boolean).join(" · ") || undefined };
+    },
+    () => ({ status: "CLOSED", limit: "100" }),
+  ),
+  checklistTemplate: {
+    noun: "checklist template",
+    search: async (q, _scope, signal) => narrow(present((await listRows("/api/v1/hr/checklist-templates", {}, signal)).map(checklistTemplateOption)), q),
+    resolve: async (id, signal) => present((await listRows("/api/v1/hr/checklist-templates", {}, signal)).map(checklistTemplateOption)).find((entry) => entry.id === id) ?? null,
+  },
+  questionnaireSchedule: {
+    noun: "questionnaire schedule",
+    search: async (q, _scope, signal) => narrow(present(items(await getJson("/api/v1/hr/questionnaires/schedules", signal)).map(scheduleOption)), q),
+    resolve: async (id, signal) => {
+      const row = await getOne("/api/v1/hr/questionnaires/schedules", id, signal);
+      const questionnaire = (row.questionnaire ?? {}) as Raw;
+      return scheduleOption({ ...row, questionnaireName: text(questionnaire, "name"), questionnaireCode: text(questionnaire, "code") });
+    },
+  },
+  employment: employmentDef,
+  dockAppointment: dockAppointmentDef,
   receipt: listedEntity(
     "receipt",
     "/api/v1/receiving/receipts",
