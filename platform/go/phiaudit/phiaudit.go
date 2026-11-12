@@ -71,8 +71,6 @@ type Read struct {
 	TraceID string
 	// OccurredAt defaults to now.
 	OccurredAt time.Time
-	// LegalEntityID scopes the service token; it defaults to the first legal entity of the caller.
-	LegalEntityID string
 }
 
 // Recorder records reads. Implementations are safe for concurrent use.
@@ -142,13 +140,9 @@ func (h *HTTP) RecordRead(ctx context.Context, r Read) error {
 		return fmt.Errorf("phiaudit: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	legalEntity := r.LegalEntityID
-	if legalEntity == "" {
-		if scopes := tenant.LegalEntityScopeList(p); len(scopes) > 0 {
-			legalEntity = scopes[0]
-		}
-	}
-	if _, err := h.signer.ApplyDuties(req, p, audience, legalEntity, []string{DutyWrite}); err != nil {
+	// audit.read-log.write is a tenant-level duty: the token names no legal entity, so a caller with no legal-entity
+	// claim (ALL scope, tenant administrator) is recorded like any other.
+	if _, err := h.signer.ApplyDuties(req, p, audience, "", []string{DutyWrite}); err != nil {
 		return fmt.Errorf("phiaudit: sign request: %w", err)
 	}
 	resp, err := h.client.Do(req)

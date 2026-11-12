@@ -76,6 +76,52 @@ func TestHTTPRecorderPostsOneReadWithAServiceTokenForTheCaller(t *testing.T) {
 	}
 }
 
+// TestHTTPRecorderRecordsCallersWithAnyScope: an HR user with ALL scope, a tenant administrator and a break-glass caller
+// have no legal-entity claim. Their reads must be recorded like a scoped user's, or every PHI read they make is refused
+// with 503. The token names no legal entity (audit.read-log.write is tenant-level) and verifies at the audit service.
+func TestHTTPRecorderRecordsCallersWithAnyScope(t *testing.T) {
+	s, pub := signer(t)
+	verifier := tenant.NewServiceVerifierKids("audit", map[string]map[string]ed25519.PublicKey{"hr": {"": pub}})
+	var token string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token = r.Header.Get(tenant.HeaderServiceToken)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	duties := func(d ...string) map[string]struct{} {
+		m := map[string]struct{}{}
+		for _, x := range d {
+			m[x] = struct{}{}
+		}
+		return m
+	}
+	for name, p := range map[string]tenant.Principal{
+		"one legal entity":      {LegalEntityID: testkit.TenantID(5)},
+		"two legal entities":    {LegalEntityID: testkit.TenantID(5) + "," + testkit.TenantID(6)},
+		"ALL scope":             {Duties: duties(tenant.DutyAllScope, "hr.worker.inquire")},
+		"tenant administrator":  {Duties: duties(tenant.DutyTenantAdmin)},
+		"break-glass, no scope": {Duties: duties("hr.benefits.break-glass")},
+	} {
+		p.TenantID, p.UserID = testkit.TenantID(1), "user-7"
+		token = ""
+		err := phiaudit.NewHTTP(srv.URL, s).RecordRead(tenant.With(context.Background(), p), phiaudit.Read{
+			Entity: "hr.worker.benefits", RecordID: "w-1", Fields: []string{"enrollments.optionCode"}, Purpose: "BREAK-GLASS: ER",
+		})
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		claims, err := verifier.Verify(token)
+		if err != nil {
+			t.Errorf("%s: token does not verify: %v", name, err)
+			continue
+		}
+		if claims.Le != "" || claims.Act != "user-7" || claims.Tid != testkit.TenantID(1) {
+			t.Errorf("%s: claims %+v; want the caller in the tenant and no legal entity", name, claims)
+		}
+	}
+}
+
 func TestHTTPRecorderFailsClosed(t *testing.T) {
 	s, _ := signer(t)
 	read := phiaudit.Read{Entity: "e", RecordID: "r", Fields: []string{"f"}, Purpose: "p"}

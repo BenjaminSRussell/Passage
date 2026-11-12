@@ -20,7 +20,7 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/audit`. Tes
 | `GET /v1/audit/records/{entity}/{recordId}` | `audit.read` |
 | `POST /v1/audit/alert-rules` | `audit.write` |
 | `GET /v1/audit/alerts` | `audit.read` |
-| `POST /v1/audit/reads` | `audit.read-log.write` (service-only: `hr` holds it through its service grant) |
+| `POST /v1/audit/reads` | `audit.read-log.write` (service-only: `hr` holds it through its service grant; tenant-level, so the token names no legal entity and callers with ALL scope or no legal-entity claim are recorded too) |
 | `GET /v1/audit/reads` | `audit.read-log.view` |
 | `GET /v1/audit/reads:export?format=csv\|ndjson` | `audit.read-log.export` |
 | `GET /v1/audit/reads:verify` | `audit.read-log.export` |
