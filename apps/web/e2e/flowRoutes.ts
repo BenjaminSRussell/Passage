@@ -44,6 +44,7 @@ export const FLOW_ROUTES: readonly string[] = [
   "/purchasing",
   "/purchasing/agreements",
   "/purchasing/approvals",
+  "/purchasing/punchout",
   "/purchasing/catalogs",
   "/purchasing/category-vendors",
   "/purchasing/charge-codes",
