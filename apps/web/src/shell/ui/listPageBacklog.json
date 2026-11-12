@@ -22,8 +22,6 @@
     "modules/receivables/DownPayments.tsx",
     "modules/receivables/Dunning.tsx",
     "modules/receivables/GLJournals.tsx",
-    "modules/receivables/Statements.tsx",
-    "modules/sales/AgreementsPage.tsx",
-    "modules/sales/ScheduleReleasesPage.tsx"
+    "modules/receivables/Statements.tsx"
   ]
 }

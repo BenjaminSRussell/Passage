@@ -176,7 +176,7 @@ describe("agreement usage and expiry filters", () => {
     expect(within(table).getByText("75%")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Ending by/), { target: { value: "2027-06-30" } });
     fireEvent.change(screen.getByLabelText(/Used at least/), { target: { value: "70" } });
-    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1]!.searchParams.get("expiringBy")).toBe("2027-06-30");
     expect(calls[1]!.searchParams.get("minUsedPct")).toBe("70");
@@ -187,7 +187,7 @@ describe("agreement usage and expiry filters", () => {
     renderAt("/sales/agreements");
     await screen.findByText("No sales agreements yet");
     fireEvent.change(screen.getByLabelText(/Used at least/), { target: { value: "-3" } });
-    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(await screen.findByText("Enter a percent such as 80 or 92.5.")).toBeInTheDocument();
     expect(calls).toHaveLength(1);
   });

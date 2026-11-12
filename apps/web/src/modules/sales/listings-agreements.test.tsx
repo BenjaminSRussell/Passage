@@ -213,7 +213,7 @@ describe("Sales agreements", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "EXHAUSTED" } });
-    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("status")).toBe("EXHAUSTED"));
   });
 
@@ -226,10 +226,10 @@ describe("Sales agreements", () => {
     expect(await screen.findByRole("heading", { name: "No sales agreements yet" })).toBeInTheDocument();
   });
 
-  it("shows the problem code when the list fails", async () => {
+  it("says when the caller may not view agreements", async () => {
     handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "the legal entity is outside the caller's scope" } });
     renderAt("/sales/agreements");
-    expect(await screen.findByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText("You can't view sales agreements")).toBeInTheDocument();
   });
 
   it("the new agreement form validates, posts with an Idempotency-Key and opens the agreement", async () => {

@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormField, Input, ListPage, loadedRows, PageHeader, Select, StatusPill, type DataTableColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
 import {
   AGREEMENT_STATUSES,
   COMMITMENT_TYPES,
@@ -8,6 +8,7 @@ import {
   describeProblem,
   listAgreements,
   newKey,
+  SalesApiError,
   type Agreement,
   type AgreementFilter,
   type AgreementInput,
@@ -102,83 +103,53 @@ const columns: DataTableColumn<Agreement>[] = [
 ];
 
 /** Sales agreements and releases (PRD §5.27.14): commitment, released and remaining per agreement (FR-27.10). */
+const agreementFilters: ListFilterDef[] = [
+  { kind: "entity", key: "legalEntityId", label: "Legal entity", entity: "legalEntity" },
+  { kind: "entity", key: "customerId", label: "Customer", entity: "customer" },
+  { kind: "select", key: "status", label: "Status", anyLabel: "Any status", options: AGREEMENT_STATUSES.map((s) => ({ value: s, label: sentence(s) })) },
+  { kind: "text", key: "expiringBy", label: "Ending by (YYYY-MM-DD)" },
+  { kind: "text", key: "minUsedPct", label: "Used at least (%)" },
+];
+
+function useAgreementRows(query: ListQuery): ListData<Agreement> {
+  const f = query.filters;
+  const filter: AgreementFilter = {
+    legalEntityId: f.legalEntityId ?? "",
+    customerId: f.customerId ?? "",
+    status: (f.status ?? "") as AgreementStatus | "",
+    expiringBy: f.expiringBy ?? "",
+    minUsedPct: f.minUsedPct ?? "",
+  };
+  const state = useLoad(async (signal) => {
+    if (filter.expiringBy && !DATE.test(filter.expiringBy)) throw new SalesApiError(400, "SAL-FILTER-DATE", "Enter the end date as YYYY-MM-DD.", {});
+    if (filter.minUsedPct && !PERCENT_USED.test(filter.minUsedPct)) throw new SalesApiError(400, "SAL-FILTER-PERCENT", "Enter a percent such as 80 or 92.5.", {});
+    return listAgreements(filter, signal);
+  }, JSON.stringify(filter));
+  return loadedRows(state);
+}
+
 export function AgreementsPage() {
   const navigate = useNavigate();
-  const [draft, setDraft] = useState<{ legalEntityId: string; customerId: string; status: AgreementStatus | ""; expiringBy: string; minUsedPct: string }>({
-    legalEntityId: "",
-    customerId: "",
-    status: "",
-    expiringBy: "",
-    minUsedPct: "",
-  });
-  const [filter, setFilter] = useState<AgreementFilter>({});
-  const invalid: Errors = {};
-  if (draft.legalEntityId.trim() && !UUID.test(draft.legalEntityId.trim())) invalid.legalEntityId = "Enter a legal entity UUID.";
-  if (draft.customerId.trim() && !UUID.test(draft.customerId.trim())) invalid.customerId = "Enter a customer UUID.";
-  if (draft.expiringBy !== "" && !DATE.test(draft.expiringBy)) invalid.expiringBy = "Choose a date.";
-  if (draft.minUsedPct !== "" && !PERCENT_USED.test(draft.minUsedPct)) invalid.minUsedPct = "Enter a percent such as 80 or 92.5.";
-  const state = useLoad((signal) => listAgreements(filter, signal), JSON.stringify(filter));
-
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Sales agreements"
-        description="Blanket commitments, by quantity or by amount, at an agreed price. Each release creates a draft order and draws down the commitment; a release beyond it and its over-delivery tolerance is refused."
-        actions={
-          <Link className={buttonClassName("primary")} to="/sales/agreements/new">
-            New agreement
-          </Link>
-        }
-      />
-      <form
-        className={styles.toolbar}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (Object.keys(invalid).length === 0) setFilter({ legalEntityId: draft.legalEntityId.trim(), customerId: draft.customerId.trim(), status: draft.status, expiringBy: draft.expiringBy, minUsedPct: draft.minUsedPct });
-        }}
-      >
-        <FormField id="agreements-le" label="Legal entity" error={invalid.legalEntityId} optional>
-          {(control) => <Input {...control} className={styles.mono} value={draft.legalEntityId} onChange={(e) => setDraft({ ...draft, legalEntityId: e.target.value })} invalid={Boolean(invalid.legalEntityId)} />}
-        </FormField>
-        <FormField id="agreements-customer" label="Customer" error={invalid.customerId} optional>
-          {(control) => <Input {...control} className={styles.mono} value={draft.customerId} onChange={(e) => setDraft({ ...draft, customerId: e.target.value })} invalid={Boolean(invalid.customerId)} />}
-        </FormField>
-        <FormField id="agreements-status" label="Status">
-          {(control) => (
-            <Select {...control} value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as AgreementStatus | "" })}>
-              <option value="">Any status</option>
-              {AGREEMENT_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {sentence(s)}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <FormField id="agreements-expiring" label="Ending by" hint="Only agreements that end on or before this day, soonest first." error={invalid.expiringBy} optional>
-          {(control) => <Input {...control} type="date" value={draft.expiringBy} onChange={(e) => setDraft({ ...draft, expiringBy: e.target.value })} invalid={Boolean(invalid.expiringBy)} />}
-        </FormField>
-        <FormField id="agreements-used" label="Used at least (%)" hint="Share of the commitment already released." error={invalid.minUsedPct} optional>
-          {(control) => <Input {...control} inputMode="decimal" value={draft.minUsedPct} onChange={(e) => setDraft({ ...draft, minUsedPct: e.target.value })} invalid={Boolean(invalid.minUsedPct)} />}
-        </FormField>
-        <Button type="submit">Filter</Button>
-      </form>
-      {state.error ? (
-        <Alert tone="danger" title="Could not load sales agreements" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Sales agreements"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(a) => a.id}
-          loading={state.loading}
-          empty={{ title: "No sales agreements yet", description: "Create an agreement to commit a customer to a quantity at an agreed price." }}
-          onRowOpen={(a) => navigate(`/sales/agreements/${a.id}`)}
-        />
-      )}
-    </div>
+    <ListPage
+      id="sales-agreements"
+      title="Sales agreements"
+      description="Blanket commitments, by quantity or by amount, at an agreed price. Each release creates a draft order and draws down the commitment; a release beyond it and its over-delivery tolerance is refused."
+      actions={
+        <Link className={buttonClassName("primary")} to="/sales/agreements/new">
+          New agreement
+        </Link>
+      }
+      noun="sales agreements"
+      singular="sales agreement"
+      columns={columns}
+      filters={agreementFilters}
+      useRows={useAgreementRows}
+      search={(a) => ({ number: a.agreementNumber })}
+      getRowKey={(a) => a.id}
+      onRowOpen={(a) => navigate(`/sales/agreements/${a.id}`)}
+      empty={{ title: "No sales agreements yet", description: "Create an agreement to commit a customer to a quantity at an agreed price." }}
+    />
   );
 }
 
