@@ -138,8 +138,10 @@ func TestDeriveRun_AnAssociateGoesThroughTheEquityMethodAndTheRegister(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Share of profit 30 percent of 2200 = 660; carrying 500 + 660 - 33 = 1127.
-	if len(res.Investments) != 1 || res.Investments[0].Method != MethodEquity || !res.Investments[0].ShareOfProfit.Equal(dec("660")) || !res.Investments[0].ClosingCarrying.Equal(dec("1127")) {
+	// Share of profit 30 percent of 2200 = 660. The EUR associate is retranslated (IAS 21.44): 500 EUR + 600 - 30 = 1070 EUR at the
+	// closing 1.2 is 1284.00; the 157.00 above 500 + 660 - 33 goes to the translation reserve.
+	if len(res.Investments) != 1 || res.Investments[0].Method != MethodEquity || !res.Investments[0].ShareOfProfit.Equal(dec("660")) || !res.Investments[0].ClosingCarrying.Equal(dec("1284")) ||
+		!res.Investments[0].FXDifference.Equal(dec("157")) || !res.Investments[0].ClosingCarryingUnit.Equal(dec("1070")) {
 		t.Fatalf("register = %+v", res.Investments)
 	}
 	var share string

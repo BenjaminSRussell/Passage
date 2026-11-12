@@ -62,6 +62,10 @@ export interface UnitTerms {
   fxGainLossAccount?: string;
   /** full consolidates the unit line by line; equity takes an associate with the equity method. */
   method?: "full" | "equity";
+  /** The account in the unit's ledger holding its receivable from the holder; a run reads the E2 receivable from it. */
+  icReceivableAccount?: string;
+  /** The account in the holder's ledger holding the payable to this unit; a run reads the E2 payable from it. */
+  parentPayableAccount?: string;
 }
 
 export interface MappingVersion {

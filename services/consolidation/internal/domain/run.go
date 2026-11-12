@@ -45,6 +45,8 @@ const (
 	LineOwnersProfit       = "OWNERS_PROFIT"
 	// LineShareOfAssociates is the group's share of the profit of its equity-method units; it is part of consolidated income.
 	LineShareOfAssociates = "SHARE_OF_PROFIT_ASSOCIATES"
+	// LineAssociateTranslation is the exchange difference on the retranslation of foreign associates' carrying amounts (OCI).
+	LineAssociateTranslation = "ASSOCIATE_TRANSLATION"
 )
 
 var (
@@ -120,6 +122,11 @@ type InvestmentLine struct {
 	Dividends        decimal.Decimal
 	ClosingCarrying  decimal.Decimal
 	UnrecognizedLoss decimal.Decimal
+	// For a foreign associate: its currency, the closing carrying amount in it and the exchange difference of the retranslation
+	// (group currency, to the translation reserve). Empty and zero otherwise.
+	UnitCurrency        string
+	ClosingCarryingUnit decimal.Decimal
+	FXDifference        decimal.Decimal
 }
 
 // Validate checks the run header and that unit ids are unique.
@@ -203,7 +210,7 @@ func ComputeRun(in RunInput) (RunResult, error) {
 		res.Investments = append(res.Investments, InvestmentLine{UnitID: u.ID, Method: MethodFull, OwnershipPct: u.Pair.OwnershipPct, Cost: cost, OpeningCarrying: cost, ClosingCarrying: cost,
 			Dividends: round(u.Pair.Dividend.Mul(u.Pair.Rates.Average).Mul(u.Pair.OwnershipPct).Div(decimal.NewFromInt(100)), in.Currency)})
 	}
-	associates := decimal.Zero
+	associates, associateFX := decimal.Zero, decimal.Zero
 	for _, a := range in.Associates {
 		eq, err := EquityMethod(a.Associate)
 		if err != nil {
@@ -213,9 +220,14 @@ func ComputeRun(in RunInput) (RunResult, error) {
 			res.Entries = append(res.Entries, UnitEntry{UnitID: a.ID, Entry: e})
 		}
 		associates = associates.Add(eq.ShareOfProfit)
-		res.Investments = append(res.Investments, InvestmentLine{UnitID: a.ID, Method: MethodEquity, OwnershipPct: a.Associate.OwnershipPct, Cost: round(a.Cost, in.Currency),
+		associateFX = associateFX.Add(eq.FXDifference)
+		line := InvestmentLine{UnitID: a.ID, Method: MethodEquity, OwnershipPct: a.Associate.OwnershipPct, Cost: round(a.Cost, in.Currency),
 			OpeningCarrying: round(a.Associate.OpeningCarrying, in.Currency), ShareOfProfit: eq.ShareOfProfit, Dividends: round(a.Associate.DividendsReceived, in.Currency),
-			ClosingCarrying: eq.ClosingCarrying, UnrecognizedLoss: eq.UnrecognizedLoss})
+			ClosingCarrying: eq.ClosingCarrying, UnrecognizedLoss: eq.UnrecognizedLoss}
+		if f := a.Associate.Foreign; f != nil {
+			line.UnitCurrency, line.ClosingCarryingUnit, line.FXDifference = f.UnitCurrency, eq.ClosingCarryingUnit, eq.FXDifference
+		}
+		res.Investments = append(res.Investments, line)
 	}
 	sort.Slice(res.Investments, func(i, j int) bool { return res.Investments[i].UnitID < res.Investments[j].UnitID })
 	e3, nci := decimal.Zero, decimal.Zero
@@ -228,7 +240,7 @@ func ComputeRun(in RunInput) (RunResult, error) {
 		}
 	}
 	consolidated := income.Sub(e3).Sub(icFX).Add(associates)
-	res.CTA = cta.Add(elimCTA)
+	res.CTA = cta.Add(elimCTA).Add(associateFX)
 	res.Statements = []StatementLine{
 		{StatementNetAssets, LineOpeningNetAssets, open}, {StatementNetAssets, LineUnitNetIncome, income},
 		{StatementNetAssets, LineCTA, cta}, {StatementNetAssets, LineClosingNetAssets, closing},
@@ -239,6 +251,9 @@ func ComputeRun(in RunInput) (RunResult, error) {
 	}
 	if len(in.Associates) > 0 {
 		res.Statements = append(res.Statements, StatementLine{StatementIncome, LineShareOfAssociates, associates})
+	}
+	if !associateFX.IsZero() {
+		res.Statements = append(res.Statements, StatementLine{StatementNetAssets, LineAssociateTranslation, associateFX})
 	}
 	if dividends.IsPositive() {
 		res.Statements = append(res.Statements, StatementLine{StatementNetAssets, LineDividends, dividends.Neg()})
@@ -256,7 +271,7 @@ func withUnit(unit string, err error) error {
 
 // RulesVersion names the elimination and translation rules a run was computed
 // with. It is part of the inputs hash, so a rule change never matches an older run.
-const RulesVersion = "consol-rules-3"
+const RulesVersion = "consol-rules-4"
 
 const hashScale = 6
 
@@ -292,6 +307,14 @@ type canonicalAssociate struct {
 	NetIncome string `json:"netIncome"`
 	Dividends string `json:"dividendsReceived"`
 	Cost      string `json:"cost"`
+	// Foreign associates (consol-rules-4): the associate's currency, its amounts in it and the three rates.
+	UnitCurrency  string `json:"unitCurrency,omitempty"`
+	OpeningUnit   string `json:"openingCarryingUnit,omitempty"`
+	NetIncomeUnit string `json:"netIncomeUnit,omitempty"`
+	DividendsUnit string `json:"dividendsUnit,omitempty"`
+	OpeningRate   string `json:"openingRate,omitempty"`
+	AverageRate   string `json:"averageRate,omitempty"`
+	ClosingRate   string `json:"closingRate,omitempty"`
 }
 
 type canonicalInput struct {
@@ -327,8 +350,13 @@ func (in RunInput) Canonical() ([]byte, error) {
 	var assoc []canonicalAssociate
 	for _, a := range in.Associates {
 		f := func(d decimal.Decimal) string { return d.StringFixed(hashScale) }
-		assoc = append(assoc, canonicalAssociate{ID: a.ID, Ownership: f(a.Associate.OwnershipPct), Opening: f(a.Associate.OpeningCarrying), NetIncome: f(a.Associate.NetIncome),
-			Dividends: f(a.Associate.DividendsReceived), Cost: f(a.Cost)})
+		c := canonicalAssociate{ID: a.ID, Ownership: f(a.Associate.OwnershipPct), Opening: f(a.Associate.OpeningCarrying), NetIncome: f(a.Associate.NetIncome),
+			Dividends: f(a.Associate.DividendsReceived), Cost: f(a.Cost)}
+		if fa := a.Associate.Foreign; fa != nil {
+			c.UnitCurrency, c.OpeningUnit, c.NetIncomeUnit, c.DividendsUnit = fa.UnitCurrency, f(fa.OpeningCarrying), f(fa.NetIncome), f(fa.Dividends)
+			c.OpeningRate, c.AverageRate, c.ClosingRate = f(fa.OpeningRate), f(fa.AverageRate), f(fa.ClosingRate)
+		}
+		assoc = append(assoc, c)
 	}
 	sort.Slice(assoc, func(i, j int) bool { return assoc[i].ID < assoc[j].ID })
 	return json.Marshal(canonicalInput{Rules: RulesVersion, GroupID: in.GroupID, Period: in.Period, Currency: in.Currency, Units: units, Associates: assoc})
