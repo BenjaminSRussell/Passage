@@ -149,18 +149,32 @@ func TestReadLogIsAppendOnlyAndRowLevelSecured(t *testing.T) {
 }
 
 func TestReadLogTriggerRejectsMutationEvenForTheOwner(t *testing.T) {
-	s, ctx := migrated(t)
-	if _, err := s.RecordRead(ctx, phiRead("w-1", "user-1", "audit")); err != nil {
+	// The owner holds every privilege, so only the trigger stands between it and the rows: the statements must fail
+	// with the trigger's exception (raise_exception, P0001), not because the table is missing.
+	pool := testkit.DB(t)
+	ctx := tenant.With(context.Background(), principal(1))
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	pool := testkit.DB(t)
-	for _, stmt := range []string{`update phi_read set purpose = 'tamper'`, `delete from phi_read`, `truncate phi_read`} {
+	s := store.New(pool)
+	read, err := s.RecordRead(ctx, phiRead("w-1", "user-1", "BREAK-GLASS: ER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReviewRead(ctx, read.ID, "user-2", domain.ReviewApproved, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`update phi_read set purpose = 'tamper'`, `delete from phi_read`, `truncate phi_read cascade`,
+		`update phi_read_review set outcome = 'FLAGGED', note = 'x'`, `delete from phi_read_review`, `truncate phi_read_review`,
+	} {
 		err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, stmt)
 			return err
 		})
-		if err == nil {
-			t.Errorf("%q must be rejected by the append-only trigger", stmt)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "P0001" {
+			t.Errorf("%q = %v; want the append-only trigger's exception (P0001)", stmt, err)
 		}
 	}
 }

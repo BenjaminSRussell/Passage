@@ -1120,7 +1120,10 @@ const phiReadLog: Record<string, ProblemCatalogEntry> = {
   "AUD-0001": { message: "That audit entry isn't complete, so it wasn't recorded.", action: "Check the entry's details and try again." },
   "AUD-0002": { message: "A read-log entry can't name who read the record, because the system records the signed-in person itself.", action: "Remove the user from the request and send it again." },
   "AUD-0003": { message: "The read-log filter, page or export format isn't valid.", action: "Check the dates, the page size and the format (CSV or NDJSON), then try again." },
+  "AUD-0004": { message: "That read isn't in this organization's read log.", action: "Refresh the break-glass queue and pick the read again." },
+  "AUD-0005": { message: "That read can't be reviewed: it isn't break-glass access, it has already been reviewed, or you are the person who read the record.", action: "Ask another reviewer, or refresh the queue to see the current review." },
   "HCM-PHI-AUDIT-UNAVAILABLE": { message: "This record has health information, and the system couldn't log that you opened it, so it wasn't shown.", action: TRY_LATER },
+  "HCM-BREAK-GLASS-UNAUDITED": { message: "Emergency access to health information is off, because reads of it aren't being logged here.", action: "Ask your administrator to turn on health-information read auditing, or ask someone with regular access." },
 };
 
 /** The B2B exchange (edi): e-invoices, the cXML exchange and self-billing (#35). */

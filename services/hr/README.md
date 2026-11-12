@@ -277,6 +277,8 @@ different `legalEntityId` than the existing review's is 422 `HCM-ENTITY-MISMATCH
 
 Health-plan elections (MEDICAL, DENTAL, VISION, HSA, FSA enrollments) and benefit life events on `GET /v1/hr/workers/{id}/benefits` are protected health information (`docs/ops/phi-field-inventory.md`). With read auditing on, a response that carries them is recorded first with `platform/go/phiaudit`: who (the verified caller, taken by the audit service from the service token), which record (`hr.worker.benefits`, the worker id) and fields, when, and `purpose` (`?purpose=`, at most 500 characters; required, except that a worker reading their own record defaults to `self-service`). A response with no phi fields (no health-plan enrollment and no life event) records nothing. If the record cannot be written, the data is not returned (503 `HCM-PHI-AUDIT-UNAVAILABLE`). Metric: `hr_phi_reads_recorded_total`.
 
+**Break-glass.** `hr.benefits.break-glass` is emergency read access, for a role kept unassigned until it is needed. It opens `GET /v1/hr/workers/{id}/benefits`; a caller without `hr.worker.inquire` who holds it reads another worker's benefits only with a purpose carrying the `BREAK-GLASS` reason code (`?purpose=BREAK-GLASS: member in ER, HR closed`), and gets nothing beyond their own record otherwise. The read is recorded like any other and the audit service queues it for a second person's review (`GET /v1/audit/reads:break-glass`, `POST /v1/audit/reads/{id}:review`, see `services/audit`). With read auditing off, break-glass reads are refused (403 `HCM-BREAK-GLASS-UNAUDITED`) so emergency access is never unlogged.
+
 ## Self-service profile changes (#267)
 
 An employee (`hr.profile.self`) changes their own record through
@@ -560,6 +562,7 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-OFR-004` | 422 | A hire from an offer has neither `workerId` nor `newWorker`, or the candidate was erased and `newWorker.legalName` is missing |
 | `HCM-BEN-001` | 422 | Enrollment outside the open window or the life event's 30 days |
 | `HCM-PHI-AUDIT-UNAVAILABLE` | 503 | PHI read auditing is on and the read could not be recorded in the audit service; the data is not returned |
+| `HCM-BREAK-GLASS-UNAUDITED` | 403 | a break-glass read (purpose `BREAK-GLASS`, duty `hr.benefits.break-glass`) while PHI read auditing is off |
 | `HCM-BEN-002` | 422 | Worker not eligible for the plan on the effective date; the detail gives the reason |
 | `HCM-BEN-003` | 422 | The option is not offered by the plan |
 | `HCM-BEN-004` | 409 | The worker already has an enrollment in the plan that overlaps the effective date |

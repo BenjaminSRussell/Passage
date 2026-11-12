@@ -163,7 +163,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyEssBenefits)).Post("/v1/hr/benefits/life-events", a.createLifeEvent)
 	r.With(authz.RequireDuty(dutyEssBenefits)).Post("/v1/hr/benefits/enrollments", a.createBenefitEnrollment)
 	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/benefits/enrollments/{id}/end", enrollmentRoute(a.endBenefitEnrollment))
-	r.With(authz.RequireDuty(dutyEssBenefits)).Get("/v1/hr/workers/{id}/benefits", workerRoute(a.workerBenefits))
+	r.With(authz.RequireAnyDuty(dutyEssBenefits, dutyBenefitsBreakGlass)).Get("/v1/hr/workers/{id}/benefits", workerRoute(a.workerBenefits))
 	r.With(authz.RequireDuty(dutySetupAdmin)).Post("/v1/hr/skills", a.createSkill)
 	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/skills", a.listSkills)
 	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/skills/search", a.searchSkills)

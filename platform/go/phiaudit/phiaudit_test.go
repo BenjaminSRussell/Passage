@@ -157,3 +157,18 @@ func TestEnabledFollowsTheHIPAAOverlayUnlessSwitched(t *testing.T) {
 		t.Errorf("an unknown profile must fail closed, got %v", err)
 	}
 }
+
+func TestIsBreakGlass(t *testing.T) {
+	for purpose, want := range map[string]bool{
+		"BREAK-GLASS":                    true,
+		"break-glass: member in ER":      true,
+		" Break-Glass ER admission":      true,
+		"BREAK-GLASSES are not a reason": false,
+		"benefits enquiry (BREAK-GLASS)": false,
+		"":                               false,
+	} {
+		if got := phiaudit.IsBreakGlass(purpose); got != want {
+			t.Errorf("IsBreakGlass(%q) = %v, want %v", purpose, got, want)
+		}
+	}
+}

@@ -3158,3 +3158,20 @@ test_audit_read_log_view_and_export_split if {
 	not allowed("audit.read-log.export", "GET", "/v1/audit/reads")
 	not allowed("audit.read-log.export", "POST", "/v1/audit/reads")
 }
+
+# Break-glass reads of PHI are reviewed by a second person under their own duty; the viewer and exporter cannot review.
+test_hr_benefits_break_glass_opens_only_the_benefits_read if {
+	allowed("hr.benefits.break-glass", "GET", "/v1/hr/workers/w1/benefits")
+	not allowed("hr.benefits.break-glass", "POST", "/v1/hr/benefits/enrollments")
+	not allowed("hr.benefits.break-glass", "GET", "/v1/hr/workers/w1")
+}
+
+test_audit_read_log_review_opens_only_the_break_glass_queue if {
+	allowed("audit.read-log.review", "GET", "/v1/audit/reads:break-glass")
+	allowed("audit.read-log.review", "POST", "/v1/audit/reads/0b7f4c1e-1d2a-4c55-9a0e-5f3f1c2d9e10:review")
+	not allowed("audit.read-log.review", "GET", "/v1/audit/reads")
+	not allowed("audit.read-log.review", "GET", "/v1/audit/reads:export")
+	not allowed("audit.read-log.review", "POST", "/v1/audit/reads")
+	not allowed("audit.read-log.view", "GET", "/v1/audit/reads:break-glass")
+	not allowed("audit.read-log.export", "POST", "/v1/audit/reads/0b7f4c1e-1d2a-4c55-9a0e-5f3f1c2d9e10:review")
+}

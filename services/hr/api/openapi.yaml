@@ -969,6 +969,13 @@ paths:
         returned; the read needs `purpose` (an employee reading their own defaults to
         self-service) and is refused with 503 HCM-PHI-AUDIT-UNAVAILABLE when the record
         cannot be written.
+
+        Break-glass (emergency access): hr.benefits.break-glass also opens this route. A
+        caller without hr.worker.inquire who holds it reads anyone's benefits by giving a
+        purpose with the BREAK-GLASS reason code ("BREAK-GLASS: <reason>"); the read is
+        recorded and queued for review by a second person (GET
+        /v1/audit/reads:break-glass). With read auditing off such a read is refused with
+        403 HCM-BREAK-GLASS-UNAUDITED.
       x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/WorkerId"

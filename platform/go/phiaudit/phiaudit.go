@@ -41,6 +41,21 @@ const (
 	maxResponse = 1 << 20
 )
 
+// BreakGlassPurpose is the reserved reason code of emergency access: a read whose purpose is "BREAK-GLASS", or starts
+// with "BREAK-GLASS:" or "BREAK-GLASS " and the reason (any letter case), was made under a duty kept for emergencies.
+// The audit service queues such reads for review by a second person (GET /v1/audit/reads:break-glass).
+const BreakGlassPurpose = "BREAK-GLASS"
+
+// IsBreakGlass reports whether purpose carries the break-glass reason code.
+func IsBreakGlass(purpose string) bool {
+	p := strings.ToUpper(strings.TrimSpace(purpose))
+	if !strings.HasPrefix(p, BreakGlassPurpose) {
+		return false
+	}
+	rest := p[len(BreakGlassPurpose):]
+	return rest == "" || rest[0] == ':' || rest[0] == ' '
+}
+
 // Read is one read of protected health information. Who read it is not a field: the audit service takes the
 // reader from the verified caller.
 type Read struct {

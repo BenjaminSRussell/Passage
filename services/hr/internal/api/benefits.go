@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/phiaudit"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 )
@@ -412,8 +413,22 @@ func (a *API) endBenefitEnrollment(w http.ResponseWriter, r *http.Request, enrol
 // life events are protected health information: with read auditing on (the hipaa
 // overlay, #606) a read that returns them is recorded in the audit service first
 // and needs a ?purpose= (an employee reading their own defaults to self-service).
+//
+// Break-glass (HIPAA emergency access): a caller without hr.worker.inquire who
+// holds hr.benefits.break-glass reads anyone's benefits by giving a purpose with
+// the BREAK-GLASS reason code. Such a read is always recorded, the audit service
+// queues it for review by a second person, and it is refused while read
+// auditing is off, so emergency access is never unlogged.
 func (a *API) workerBenefits(w http.ResponseWriter, r *http.Request, workerID string) {
 	ownOnly := benOwnOnly(r) && !caller(r).HasDuty(dutyWorkerInquire)
+	if ownOnly && caller(r).HasDuty(dutyBenefitsBreakGlass) && phiaudit.IsBreakGlass(r.URL.Query().Get("purpose")) {
+		if a.phiAudit == nil {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeBreakGlassUnaudited,
+				"break-glass access needs PHI read auditing, which is off for this deployment"))
+			return
+		}
+		ownOnly = false
+	}
 	out, err := a.listWorkerBenefits(r.Context(), workerID, ownOnly)
 	if err != nil {
 		logFailure(r, "list worker benefits", err)

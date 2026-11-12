@@ -15,7 +15,8 @@ import (
 
 // readStore is the read-log half of the fake store: it appends to a real in-memory hash chain.
 type readStore struct {
-	rows []store.ReadRecord
+	rows    []store.ReadRecord
+	reviews map[string]*store.ReadReview
 }
 
 func (f *fakeStore) RecordRead(_ context.Context, read domain.Read) (store.ReadRecord, error) {

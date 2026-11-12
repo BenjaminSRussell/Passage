@@ -15,6 +15,10 @@ const (
 	entityWorkerBenefits = "hr.worker.benefits"
 	// codePHIAuditUnavailable is returned instead of the data when the read cannot be recorded (fail closed).
 	codePHIAuditUnavailable = "HCM-PHI-AUDIT-UNAVAILABLE"
+	// codeBreakGlassUnaudited refuses break-glass access while PHI read auditing is off.
+	codeBreakGlassUnaudited = "HCM-BREAK-GLASS-UNAUDITED"
+	// dutyBenefitsBreakGlass is emergency read access to any worker's benefits (#606), reviewed in the audit service.
+	dutyBenefitsBreakGlass = "hr.benefits.break-glass"
 	maxPurposeLength        = 500
 	selfServicePurpose      = "self-service"
 )
