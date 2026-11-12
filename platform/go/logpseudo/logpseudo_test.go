@@ -6,8 +6,11 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
@@ -201,5 +204,38 @@ func TestInstalledDefaultLoggerPseudonymizes(t *testing.T) {
 	slog.InfoContext(ctxOf(tenantA), "hello", "email", "z@example.com")
 	if strings.Contains(buf.String(), "example.com") || !strings.Contains(buf.String(), logpseudo.Prefix) {
 		t.Fatalf("output: %s", buf.String())
+	}
+}
+
+// TestConcurrentInstallsWrapOnce: hr serves its API and admin listeners from two goroutines, and each httpx.Serve
+// installs. The check and the set must be one step, or both install and every line is pseudonymized twice.
+func TestConcurrentInstallsWrapOnce(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	for round := 0; round < 200; round++ {
+		slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+		var (
+			wg        sync.WaitGroup
+			start     = make(chan struct{})
+			installed atomic.Int32
+		)
+		for i := 0; i < 16; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if logpseudo.InstallWith(nil) {
+					installed.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if n := installed.Load(); n != 1 {
+			t.Fatalf("round %d: %d installs, want 1", round, n)
+		}
+		if !logpseudo.WrapsOnce(slog.Default().Handler()) {
+			t.Fatalf("round %d: the default handler is wrapped more than once", round)
+		}
 	}
 }

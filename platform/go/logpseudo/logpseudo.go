@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/BenjaminSRussell/passage/platform/cloudprofile"
@@ -86,8 +87,15 @@ func Install(getenv func(string) string) (bool, error) {
 	return InstallWith(mac), nil
 }
 
-// InstallWith wraps slog's default handler unconditionally, unless it is already wrapped. A nil mac redacts.
+// installMu makes InstallWith's check and set one step: a service that runs several httpx.Serve listeners installs from
+// each of them concurrently, and two unsynchronised installs would wrap the handler twice.
+var installMu sync.Mutex
+
+// InstallWith wraps slog's default handler unconditionally, unless it is already wrapped. A nil mac redacts. It is safe
+// for concurrent use.
 func InstallWith(mac MACer) bool {
+	installMu.Lock()
+	defer installMu.Unlock()
 	if _, done := slog.Default().Handler().(*Handler); done {
 		return false
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/logpseudo"
 	"github.com/BenjaminSRussell/passage/platform/phiaudit"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/api"
@@ -32,7 +33,10 @@ const (
 )
 
 func main() {
-	slog.SetDefault(newLogger(os.Stdout))
+	if err := setupLogging(os.Stdout, os.Getenv); err != nil {
+		slog.Error("hr logging", "err", err)
+		os.Exit(1)
+	}
 	if len(os.Args) > 1 && os.Args[1] == resealCommand {
 		if err := reseal(context.Background(), os.Getenv, os.Args[2:]); err != nil {
 			slog.Error("hr reseal-pii stopped", "err", err)
@@ -98,6 +102,15 @@ func reseal(ctx context.Context, getenv func(string) string, args []string) erro
 		slog.Info("hr pii re-sealed", "tenantId", id, "rewritten", n)
 	}
 	return nil
+}
+
+// setupLogging sets the default logger and, under the eu-data-boundary overlay or with LOG_PSEUDONYMIZE=true, the
+// pseudonymizer (#605) before any subcommand runs, so reseal-pii and the tenant jobs pseudonymize like the server.
+// httpx.Serve installs it again for the server and finds it already there.
+func setupLogging(w io.Writer, getenv func(string) string) error {
+	slog.SetDefault(newLogger(w))
+	_, err := logpseudo.Install(getenv)
+	return err
 }
 
 func newLogger(w io.Writer) *slog.Logger {

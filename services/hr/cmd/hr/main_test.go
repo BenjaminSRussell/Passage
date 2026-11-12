@@ -7,6 +7,7 @@ import (
 	"crypto/cipher"
 	"crypto/ed25519"
 	"encoding/base64"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,5 +139,23 @@ func TestPHIReadAuditFromEnv(t *testing.T) {
 		if err != nil || (rec != nil) != c.wantOn {
 			t.Errorf("%s: recorder on = %v, err = %v, want on = %v", c.name, rec != nil, err, c.wantOn)
 		}
+	}
+}
+
+// TestSubcommandsLogThroughThePseudonymizer: reseal-pii and the tenant jobs never reach httpx.Serve, so the
+// pseudonymizer is installed with the logger, before the subcommand is chosen (#605).
+func TestSubcommandsLogThroughThePseudonymizer(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	var buf bytes.Buffer
+	if err := setupLogging(&buf, envOf(map[string]string{"LOG_PSEUDONYMIZE": "true"})); err != nil {
+		t.Fatal(err)
+	}
+	slog.Info("resealed", "tenant", "11111111-1111-4111-8111-111111111111", "email", "ann@example.com")
+	if strings.Contains(buf.String(), "ann@example.com") || !strings.Contains(buf.String(), `"service":"hr"`) {
+		t.Fatalf("log line: %s", buf.String())
+	}
+	if err := setupLogging(&buf, envOf(map[string]string{"PASSAGE_CLOUD_PROFILE": "nope"})); err == nil {
+		t.Fatal("a bad profile must stop the command, not log raw values")
 	}
 }
