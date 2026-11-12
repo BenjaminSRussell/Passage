@@ -722,6 +722,7 @@ components:
               - type: object
                 properties:
                   usage: { $ref: '#/components/schemas/LicenseUsage' }
+                  tenantName: { type: string, description: The name the tenant was provisioned with; empty when it was not provisioned through ops. }
     SloLine:
       type: object
       properties:

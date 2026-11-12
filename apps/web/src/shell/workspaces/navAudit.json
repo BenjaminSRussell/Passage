@@ -641,6 +641,10 @@
     {"to": "/workflow/inbox", "module": "workflow", "label": "Inbox", "area": "administration", "decision": "keep", "taskLabel": "My approvals"},
     {"to": "/workflow/designer", "module": "workflow", "label": "Designer", "area": "administration", "decision": "advanced"},
     {"to": "/workflow/jobs", "module": "workflow", "label": "Job monitor", "area": "administration", "decision": "advanced"},
-    {"to": "/workflow/templates", "module": "workflow", "label": "Templates", "area": "administration", "decision": "advanced"}
+    {"to": "/workflow/templates", "module": "workflow", "label": "Templates", "area": "administration", "decision": "advanced"},
+    {"to": "/ops", "module": "ops", "label": "Failover status", "area": "administration", "decision": "advanced"},
+    {"to": "/ops/break-glass", "module": "ops", "label": "Break-glass windows", "area": "administration", "decision": "advanced"},
+    {"to": "/ops/slo", "module": "ops", "label": "Service levels", "area": "administration", "decision": "advanced"},
+    {"to": "/ops/licenses", "module": "ops", "label": "Licences", "area": "administration", "decision": "advanced"}
   ]
 }

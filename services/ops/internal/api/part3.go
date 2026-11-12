@@ -342,6 +342,8 @@ func (a *API) reportUsage(w http.ResponseWriter, r *http.Request) {
 type licenseListItem struct {
 	licenseView
 	Usage store.LicenseUsage `json:"usage"`
+	// TenantName is the name the tenant was provisioned with; empty for a tenant provisioned before the ops provisioning flow.
+	TenantName string `json:"tenantName"`
 }
 
 // listLicenses lists every installed licence with its state today, evaluated with the tenant's last reported full users.
@@ -351,6 +353,15 @@ func (a *API) listLicenses(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	provisions, err := a.store.Provisions(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	names := map[string]string{}
+	for _, p := range provisions {
+		names[p.TenantID] = p.Name
+	}
 	items := make([]licenseListItem, 0, len(list))
 	for _, rec := range list {
 		u, err := a.store.LicenseUsage(r.Context(), rec.License.TenantID)
@@ -358,7 +369,7 @@ func (a *API) listLicenses(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, r, err)
 			return
 		}
-		items = append(items, licenseListItem{licenseView: a.licenseView(rec, u.ActiveFull), Usage: u})
+		items = append(items, licenseListItem{licenseView: a.licenseView(rec, u.ActiveFull), Usage: u, TenantName: names[rec.License.TenantID]})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
