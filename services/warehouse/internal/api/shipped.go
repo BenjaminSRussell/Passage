@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -19,7 +20,9 @@ import (
 
 const (
 	codeShipmentNotFound = "WMS-SHIPMENT-NOT-FOUND"
-	maxShippedSSCCs      = 500
+	// codeShipmentShipped is a second confirmation of a shipment: a split load ships by packing slips in fulfillment.
+	codeShipmentShipped = "WMS-SHIPMENT-SHIPPED"
+	maxShippedSSCCs     = 500
 	// shipClockSkew is how far in the future a ship time may be: a handheld's clock may run a little ahead.
 	shipClockSkew = 15 * time.Minute
 )
@@ -96,6 +99,11 @@ func (a *API) confirmShipped(w http.ResponseWriter, r *http.Request) {
 	out, replayed, err := a.st.ConfirmShipped(r.Context(), idem, store.ShipConfirmation{ShipmentID: shipmentID, LegalEntityID: le,
 		WarehouseID: strings.ToLower(in.WarehouseID), CarrierCode: in.CarrierCode, ShippedAt: shippedAt.Truncate(time.Second),
 		SSCCs: in.SSCCs, ConfirmedBy: p.UserID})
+	if errors.Is(err, store.ErrShipmentShipped) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, codeShipmentShipped,
+			"the shipment was already confirmed shipped; a shipment that leaves in several loads is shipped by packing slips in fulfillment"))
+		return
+	}
 	if err != nil {
 		fail(w, r, err, codeShipmentNotFound)
 		return

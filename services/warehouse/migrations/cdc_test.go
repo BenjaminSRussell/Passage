@@ -21,7 +21,7 @@ func TestCDCMigrationsPublishTheOutboxAndRerunSafely(t *testing.T) {
 	if err := pool.QueryRow(ctx, `select exists(select 1 from pg_publication_rel pr join pg_publication p on p.oid = pr.prpubid where p.pubname = 'passage_outbox_warehouse' and pr.prrelid = to_regclass(current_schema() || '.outbox'))`).Scan(&published); err != nil || !published {
 		t.Fatalf("outbox published = %v, %v", published, err)
 	}
-	for _, name := range []string{"0009_cdc_publication.sql", "0010_cdc_role_grants.sql"} {
+	for _, name := range []string{"0010_cdc_publication.sql", "0011_cdc_role_grants.sql"} {
 		sql, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			t.Fatal(err)

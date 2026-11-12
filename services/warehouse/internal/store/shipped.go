@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -23,8 +24,12 @@ type ShipConfirmation struct {
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
+// ErrShipmentShipped is a second confirmation of a shipment the warehouse already confirmed shipped. A shipment leaves in one
+// confirmation: a split load is shipped by packing slips in fulfillment, whose asn.issued notifies each slip.
+var ErrShipmentShipped = errors.New("store: the shipment was already confirmed shipped")
+
 // ConfirmShipped records the confirmation and enqueues shipment.shipped in the same transaction. A shipment is confirmed
-// once: a second confirmation under another Idempotency-Key is ErrConflict, a repeat of the key replays the first answer.
+// once: a second confirmation under another Idempotency-Key is ErrShipmentShipped, a repeat of the key replays the first answer.
 func (s *Store) ConfirmShipped(ctx context.Context, idem Idem, c ShipConfirmation) (ShipConfirmation, bool, error) {
 	var (
 		out      ShipConfirmation
@@ -37,8 +42,10 @@ func (s *Store) ConfirmShipped(ctx context.Context, idem Idem, c ShipConfirmatio
 		var err error
 		out, replayed, err = once(ctx, tx, idem, http.StatusCreated, func() (ShipConfirmation, error) {
 			if err := tx.QueryRow(ctx, `insert into shipment_shipped (tenant_id, legal_entity_id, shipment_id, warehouse_id, carrier_code,
-				shipped_at, ssccs, confirmed_by) values ($1, $2, $3, $4, $5, $6, $7, $8) returning created_at`,
-				tenantID(ctx), c.LegalEntityID, c.ShipmentID, c.WarehouseID, c.CarrierCode, c.ShippedAt, c.SSCCs, c.ConfirmedBy).Scan(&c.CreatedAt); err != nil {
+				shipped_at, ssccs, confirmed_by) values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict (tenant_id, shipment_id) do nothing returning created_at`,
+				tenantID(ctx), c.LegalEntityID, c.ShipmentID, c.WarehouseID, c.CarrierCode, c.ShippedAt, c.SSCCs, c.ConfirmedBy).Scan(&c.CreatedAt); errors.Is(err, pgx.ErrNoRows) {
+				return c, ErrShipmentShipped
+			} else if err != nil {
 				return c, err
 			}
 			data := evts.ShipmentShippedData{ShipmentID: c.ShipmentID, LegalEntityID: c.LegalEntityID, WarehouseID: c.WarehouseID,

@@ -1151,6 +1151,7 @@ const b2b: Record<string, ProblemCatalogEntry> = {
   "EDI-0041": { message: "The partner's network didn't accept the document.", action: "Read the network's answer under Details, correct the cause and send the document again." },
   "EDI-0042": { message: "The document can't be turned into an order action because it is missing something or names more than one order.", action: "Ask the partner to correct and resend it." },
   "WMS-SHIPMENT-NOT-FOUND": { message: "The warehouse has no record of this shipment leaving the dock.", action: "Check the shipment, or confirm it as shipped first." },
+  "WMS-SHIPMENT-SHIPPED": { message: "This shipment was already confirmed as shipped.", action: "If it left in several loads, post a packing slip for each load in fulfillment instead." },
   "EINV-0110": { message: "A required part of the e-invoice is missing or isn't in the right format.", action: "Correct the invoice or the party profiles named in the issue, then build the e-invoice again." },
   "EINV-0111": { message: "The e-invoice's amounts don't add up.", action: "Check the invoice lines, discounts and tax in billing, then build the e-invoice again." },
   "EINV-0112": { message: "The e-invoice's total differs from the total on the billing invoice.", action: "Check the invoice's tax and charges in billing, then build the e-invoice again." },

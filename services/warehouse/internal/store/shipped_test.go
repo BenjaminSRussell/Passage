@@ -25,8 +25,8 @@ func TestStore_ConfirmShippedPublishesShipmentShippedOnce(t *testing.T) {
 	if _, replayed, err := st.ConfirmShipped(ctx, key("ship-"+sh), c); err != nil || !replayed {
 		t.Fatalf("repeat of the key = %v, %v", replayed, err)
 	}
-	if _, _, err := st.ConfirmShipped(ctx, key("other-"+sh), c); !errors.Is(err, ErrConflict) {
-		t.Fatalf("second confirmation of the shipment = %v, want ErrConflict", err)
+	if _, _, err := st.ConfirmShipped(ctx, key("other-"+sh), c); !errors.Is(err, ErrShipmentShipped) {
+		t.Fatalf("second confirmation of the shipment = %v, want ErrShipmentShipped", err)
 	}
 	var raw []byte
 	var n int

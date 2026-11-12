@@ -571,7 +571,8 @@ paths:
         shipment). legalEntityId defaults to the caller's and must be in its
         scope. shippedAt defaults to now and may not be in the future. A
         shipment is confirmed once: a second confirmation under another
-        Idempotency-Key is 409 WMS-DUPLICATE.
+        Idempotency-Key is 409 WMS-SHIPMENT-SHIPPED (a shipment that leaves in
+        several loads is shipped by packing slips in fulfillment).
       x-passage-duty: warehouse.shipment.confirm
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1059,7 +1060,7 @@ components:
     Conflict:
       description: >
         WMS-DUPLICATE (location name, directive sequence, door code or ASN
-        reference taken, or the shipment already confirmed shipped), WMS-0105 (line already confirmed with another key),
+        reference taken), WMS-SHIPMENT-SHIPPED (the shipment already confirmed shipped), WMS-0105 (line already confirmed with another key),
         WMS-0108 (door already booked for an overlapping window),
         WMS-RECEIPT-LINE-RECEIVED (pallet already received), WMS-0110 (illegal
         work or line transition, or a blocked location status at confirmation)

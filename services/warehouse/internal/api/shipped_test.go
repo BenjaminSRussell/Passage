@@ -100,10 +100,10 @@ func TestConfirmShipped_Refusals(t *testing.T) {
 	}
 }
 
-func TestConfirmShipped_SecondConfirmationIsADuplicate(t *testing.T) {
-	fs := &fakeStore{err: store.ErrConflict}
+func TestConfirmShipped_SecondConfirmationIsRefusedWithItsOwnCode(t *testing.T) {
+	fs := &fakeStore{err: store.ErrShipmentShipped}
 	rec := ship(httptest.NewRecorder(), NewWithStore(fs, time.Minute), "/v1/warehouse/shipments/"+ids.New()+":ship", dutyShipConfirm, shipLE, `{"warehouseId":"`+ids.New()+`"}`)
-	if rec.Code != 409 || !strings.Contains(rec.Body.String(), codeDuplicate) {
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), codeShipmentShipped) {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
 }
