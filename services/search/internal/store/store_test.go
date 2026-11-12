@@ -609,3 +609,60 @@ func TestWorkerFollowsItsPersonThroughAPartyMerge(t *testing.T) {
 		t.Fatalf("after the second merge and a replay: %v", got)
 	}
 }
+
+// Merges that arrive late or twice cannot point a merged party back: A→B then B→C, a replayed A→B keeps the worker on C;
+// B→C delivered before A→B moves A's worker straight to C; and two merges naming each other do not loop (#506).
+func TestWorkerMergeChainSurvivesReplayAndOutOfOrderDelivery(t *testing.T) {
+	st := setup(t)
+	ctx := asScope(testkit.TenantID(1), "")
+	find := func(q string) []string {
+		hits, err := st.Search(ctx, Query{Text: q, Types: []string{TypeWorker}, Limit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, h := range hits {
+			out = append(out, h.Number+" "+h.Title)
+		}
+		return out
+	}
+	apply := func(r Record) {
+		t.Helper()
+		if _, err := st.Apply(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b, c := ids.New(), ids.New(), ids.New()
+	apply(Record{Type: TypeParty, ID: a, Number: "P-000701", Title: "Lena Berg", Subtitle: "person", At: t0})
+	apply(Record{Type: TypeParty, ID: b, Number: "P-000702", Title: "Lena Berg-Holm", Subtitle: "person", At: t0})
+	apply(Record{Type: TypeParty, ID: c, Number: "P-000703", Title: "Lena Holm", Subtitle: "person", At: t0})
+	apply(Record{Type: TypeWorker, ID: ids.New(), Number: "WRK-000701", Title: "WRK-000701", Subtitle: "employee", PartyID: a, At: t0})
+	mergeAB := Record{Type: TypeParty, ID: a, Status: "MERGED", Removed: true, MergedInto: b, At: t0.Add(time.Minute)}
+	apply(mergeAB)
+	apply(Record{Type: TypeParty, ID: b, Status: "MERGED", Removed: true, MergedInto: c, At: t0.Add(2 * time.Minute)})
+	apply(mergeAB) // replayed
+	apply(Record{Type: TypeWorker, ID: ids.New(), Number: "WRK-000702", Title: "WRK-000702", Subtitle: "employee", PartyID: a, At: t0.Add(3 * time.Minute)})
+	if got := find("lena holm"); !slices.Equal(got, []string{"WRK-000701 Lena Holm", "WRK-000702 Lena Holm"}) {
+		t.Fatalf("after a replayed merge: %v", got)
+	}
+
+	// Out of order: E→F arrives before D→E.
+	d, e, f := ids.New(), ids.New(), ids.New()
+	apply(Record{Type: TypeParty, ID: d, Number: "P-000711", Title: "Omar Said", Subtitle: "person", At: t0})
+	apply(Record{Type: TypeParty, ID: e, Number: "P-000712", Title: "Omar Said Ali", Subtitle: "person", At: t0})
+	apply(Record{Type: TypeParty, ID: f, Number: "P-000713", Title: "Omar Ali", Subtitle: "person", At: t0})
+	apply(Record{Type: TypeWorker, ID: ids.New(), Number: "WRK-000711", Title: "WRK-000711", Subtitle: "employee", PartyID: d, At: t0})
+	apply(Record{Type: TypeParty, ID: e, Status: "MERGED", Removed: true, MergedInto: f, At: t0.Add(2 * time.Minute)})
+	apply(Record{Type: TypeParty, ID: d, Status: "MERGED", Removed: true, MergedInto: e, At: t0.Add(time.Minute)})
+	if got := find("omar ali"); !slices.Equal(got, []string{"WRK-000711 Omar Ali"}) {
+		t.Fatalf("after out-of-order merges: %v", got)
+	}
+
+	// A cycle (bad data) ends without looping.
+	g, h := ids.New(), ids.New()
+	apply(Record{Type: TypeParty, ID: g, Number: "P-000721", Title: "Cy Cle", Subtitle: "person", At: t0})
+	apply(Record{Type: TypeParty, ID: h, Number: "P-000722", Title: "Cy Clee", Subtitle: "person", At: t0})
+	apply(Record{Type: TypeParty, ID: g, Status: "MERGED", Removed: true, MergedInto: h, At: t0.Add(time.Minute)})
+	apply(Record{Type: TypeParty, ID: h, Status: "MERGED", Removed: true, MergedInto: g, At: t0.Add(2 * time.Minute)})
+	apply(Record{Type: TypeWorker, ID: ids.New(), Number: "WRK-000721", Title: "WRK-000721", Subtitle: "employee", PartyID: g, At: t0.Add(3 * time.Minute)})
+}
