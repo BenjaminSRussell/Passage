@@ -494,6 +494,15 @@ Sample files: `testdata/cxml/` (the three network documents, a punchout cart and
   posts nothing: an AP clerk matches it to receipts. An invoice of several orders, or with `EDI_PAYABLES_URL` (chart
   `sources.payablesUrl`) unset, is parked with EDI-0038; a refusal by payables (a changed resend, the vendor's invoice number taken)
   with EDI-0039. The payables chart must list edi's public key.
+- **35-5 self-billing.** An inbound X12 810 is read as the customer's self-billed invoice (Passage sends its own 810s and takes vendor
+  invoices through cXML and AP): BIG (date, document number, PO), CUR, REF*PK or REF*BM (delivery note), REF*LI (PO line, else IT101),
+  IT1, line TXI and TDS; it is matched right after receipt, and by the sweep, exactly like an INVOIC 389. A partner with a `taxCountry`
+  (plus `taxGroup` and `itemTaxGroup`) in `PUT /partners/{id}/self-billing` has its self-billed lines checked at the VAT rate the tax
+  service determines (`POST /v1/tax/calculate` with the stored configuration, on the document date and in its currency, as service
+  principal `edi-selfbill`, grant edi -> tax `tax.tax.calculate`; `EDI_TAX_URL`, chart `sources.taxUrl`); a tax outage leaves the
+  message MAPPED for the next run, and the document records which rate it used (`tax_rate_source`, migration 0017). Without a tax
+  country, or without the tax service, `taxRatePct` still applies. VDA 4908 is not built: there is no record layout or sample in the
+  repository. Billing's `SELF_BILLED` rule keeps billing from invoicing the shipments of a self-billing customer.
 
 ## Wave 35 proof
 

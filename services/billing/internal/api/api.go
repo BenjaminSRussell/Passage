@@ -152,6 +152,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:bill", a.billSubscription)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}/usage", a.recordUsage)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions:bill-due", a.billDue)
+	a.registerBillingRules(r)
 	a.registerCustomerPortal(r)
 }
 

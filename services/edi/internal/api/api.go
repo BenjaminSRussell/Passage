@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -113,6 +114,8 @@ type API struct {
 	Requisitions Requisitions
 	// CXMLMapper puts inbound cXML confirmations and ship notices onto purchasing and receiving (35-4); nil leaves them recorded only.
 	CXMLMapper *cxmlmap.Mapper
+	// SelfBillTax determines the VAT rate self-billed lines are checked at (35-5); nil leaves it a partner setting.
+	SelfBillTax SelfBillTax
 	// PunchoutHTTP sends the cXML PunchOutSetupRequest and the outbound cXML documents; nil uses a client with a 10 second timeout that follows no redirect.
 	PunchoutHTTP *http.Client
 }
@@ -379,10 +382,10 @@ type txResult struct {
 }
 
 // InboundSets lists the X12 transaction sets the receipt maps onto a
-// canonical document: the 850 order, the 820 remittance and the 214
-// shipment status. A 997 is matched, not mapped; any other set is rejected
-// (AK5 R, EDI-0006).
-var InboundSets = []string{"850", "820", "214"}
+// canonical document: the 850 order, the 820 remittance, the 214
+// shipment status and the 810 a self-billing customer issues (#35, 35-5).
+// A 997 is matched, not mapped; any other set is rejected (AK5 R, EDI-0006).
+var InboundSets = []string{"850", "820", "214", "810"}
 
 // mapTransaction maps one transaction and derives its 997 code and message
 // status: AK5 A and MAPPED without issues, E and FAILED with only
@@ -401,6 +404,9 @@ func mapTransaction(t domain.Transaction) (txResult, error) {
 	case "214":
 		st, is := domain.Map214(t)
 		res.document, issues = st, is
+	case "810":
+		inv, is := domain.Map810(t)
+		res.document, issues = inv, is
 	default:
 		res.outcome.Code = domain.AckRejected
 		res.status = "FAILED"
@@ -691,6 +697,15 @@ func (a *API) receiveX12Interchange(ctx context.Context, body []byte, o receiveO
 	}
 	if err != nil {
 		return receiveResponse{}, err
+	}
+	for _, m := range res.Messages {
+		if m.TransactionSet == "810" && m.Status == "MAPPED" {
+			// A self-billed 810 is matched right away; anything this misses is picked up by POST /self-billing:sweep.
+			if _, err := a.ReconcileSelfBilled(ctx, 50); err != nil {
+				slog.WarnContext(ctx, "self-billing match deferred", "interchange", res.InterchangeID, "err", err)
+			}
+			break
+		}
 	}
 	return receiveResponse{
 		InterchangeID: res.InterchangeID,

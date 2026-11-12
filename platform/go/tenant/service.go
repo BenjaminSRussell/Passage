@@ -266,6 +266,8 @@ var serviceGrants = map[string]map[string][]string{
 		"receiving": {"receiving.asn.maintain"},
 		// An inbound cXML invoice lands in payables' vendor-invoice intake for an AP clerk (#35, 35-4).
 		"payables": {"payables.vendor-invoice.intake"},
+		// A self-billed line's VAT is checked at the rate the tax service determines (#35, 35-5).
+		"tax": {"tax.tax.calculate"},
 	},
 	"fieldservice": {
 		"dispatch": {"dispatch.run.create", "dispatch.run.read"},

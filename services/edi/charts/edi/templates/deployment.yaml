@@ -76,6 +76,10 @@ spec:
             - name: EDI_PAYABLES_URL
               value: {{ .Values.sources.payablesUrl | quote }}
             {{- end }}
+            {{- if .Values.sources.taxUrl }}
+            - name: EDI_TAX_URL
+              value: {{ .Values.sources.taxUrl | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.allowBodyOutbound }}
             - name: EDI_ALLOW_BODY_OUTBOUND

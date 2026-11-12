@@ -2304,6 +2304,7 @@
     ]},
     "billing.creditnote.post": {"permissions": [{"resource": "/v1/billing/credit-notes/*:post", "methods": ["POST"]}]},
     "billing.invoice.maintain": {"permissions": [
+      {"resource": "/v1/billing/customers/*/billing-rule", "methods": ["PUT"]},
       {"resource": "/v1/billing/credit-notes", "methods": ["POST"]},
       {"resource": "/v1/billing/free-text-invoices", "methods": ["POST"]},
       {"resource": "/v1/billing/proposals", "methods": ["POST"]},
@@ -2323,6 +2324,7 @@
     ]},
     "billing.invoice.view": {"permissions": [
       {"resource": "/v1/search", "methods": ["GET"]},
+      {"resource": "/v1/billing/customers/*/billing-rule", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/billing/invoices/*/trace", "methods": ["GET"]},
@@ -4108,7 +4110,8 @@
       "sales": ["sales.order.lookup", "sales.channel.intake"],
       "purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
       "receiving": ["receiving.asn.maintain"],
-      "payables": ["payables.vendor-invoice.intake"]
+      "payables": ["payables.vendor-invoice.intake"],
+      "tax": ["tax.tax.calculate"]
     },
     "fieldservice": {
       "dispatch": ["dispatch.run.create", "dispatch.run.read"]
@@ -4137,6 +4140,7 @@
   "service_principals": {
     "edi-cxml": ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain", "payables.vendor-invoice.intake"],
     "edi-outbound": ["edi.outbound.from-event"],
+    "edi-selfbill": ["tax.tax.calculate"],
     "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],
     "pricing-cache": ["pricing.cache.invalidate"],

@@ -201,7 +201,9 @@ func exInbound(t *testing.T, orderKnown bool) (http.Handler, http.Handler, *pgxp
 	}
 	down := &exDownstream{po: poFixture()}
 	// wire switches the mapper on; a document received before it is mapped by :post, one received after it is mapped on receipt.
-	wire := func() { a.CXMLMapper = &cxmlmap.Mapper{Store: a.store, Purchasing: down, Receiving: down, Payables: down.payables} }
+	wire := func() {
+		a.CXMLMapper = &cxmlmap.Mapper{Store: a.store, Purchasing: down, Receiving: down, Payables: down.payables}
+	}
 	if orderKnown {
 		if _, err := pool.Exec(context.Background(), `insert into cxml_order (tenant_id, partner_id, order_id, purchase_order_id, legal_entity_id, vendor_id) values ($1,$2,'PO-1001',$3,$4,$5)`,
 			testkit.TenantID(7), partner, exPO, srcLE, exVendor); err != nil {

@@ -26,6 +26,9 @@ var servicePrincipals = map[string][]string{
 	// The consumer of fulfillment's asn.issued and billing's invoice.posted (#35, 35-1): it sends the 856, DESADV, 810 or
 	// INVOIC the partners of the legal entity asked for, through the same from-source path the route uses.
 	"edi-outbound": {"edi.outbound.from-event"},
+	// The self-billing match (#35, 35-5): it asks the tax service for the VAT rate of a customer's self-billed document, as the
+	// legal entity of the partner, with only the calculate duty.
+	"edi-selfbill": {"tax.tax.calculate"},
 	// The reporter of posted invoices to sales (#29): it signs :record-progress calls, and its token holds only the one duty of
 	// billing's grant on sales that reports invoices (sales.order.record-invoice).
 	"billing-sales-report": {"sales.order.record-invoice"},
@@ -62,6 +65,7 @@ var servicePrincipalIssuers = map[string][]string{
 	"billing-tax-report":       {"billing"},
 	"edi-cxml":                 {"edi"},
 	"edi-outbound":             {"edi"},
+	"edi-selfbill":             {"edi"},
 	"edi-sales":                {"edi"},
 	"finreport-ledger":         {"finreport"},
 	"purchasing-inbound":       {"purchasing"},

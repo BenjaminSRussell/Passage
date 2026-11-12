@@ -1056,6 +1056,61 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+  /v1/billing/customers/{customerId}/billing-rule:
+    put:
+      operationId: putBillingRule
+      summary: Set how a customer of a legal entity is invoiced (STANDARD or SELF_BILLED, #35 35-5)
+      x-passage-duty: billing.invoice.maintain
+      description: >
+        SELF_BILLED means the customer issues the invoice for our deliveries under a self-billing agreement (EU VAT Directive
+        art. 224): from `validFrom` to `validTo` (inclusive; open-ended without it) POST /v1/billing/proposals refuses that
+        customer's packing slips with 409 BIL-0150, because the customer's self-billed document (received by the EDI engine) is
+        the invoice. SELF_BILLED needs `agreementRef` and `validFrom`. If-Match carries the version last read (none for a customer
+        without a rule); a stale version is 409 BIL-0151. The ETag is the new version.
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: false, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [legalEntityId, rule]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                rule: { type: string, enum: [STANDARD, SELF_BILLED] }
+                agreementRef: { type: string, maxLength: 100 }
+                validFrom: { type: string, format: date }
+                validTo: { type: string, format: date }
+      responses:
+        "200":
+          description: The rule as stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BillingRule" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: getBillingRule
+      summary: Read a customer's billing rule in a legal entity (STANDARD with version 0 when none is set)
+      x-passage-duty: billing.invoice.view
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The rule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BillingRule" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     IdempotencyKey:
@@ -1106,6 +1161,19 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    BillingRule:
+      type: object
+      required: [legalEntityId, customerId, rule, agreementRef, version]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        rule: { type: string, enum: [STANDARD, SELF_BILLED] }
+        agreementRef: { type: string }
+        validFrom: { type: [string, "null"], format: date-time }
+        validTo: { type: [string, "null"], format: date-time }
+        version: { type: integer }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
     SubscriptionUsage:
       type: object
       required: [id, subscriptionId, externalId, meterCode, usageDate, quantity, unitPrice]

@@ -943,7 +943,8 @@ paths:
         Identifies the partner by ISA sender, rejects duplicate ISA13 values inside the
         duplicate window (EDI-0102), records every transaction and returns the 997 generated in the
         same transaction. Unknown senders are EDI-0101. The 850 is mapped onto the canonical order,
-        the 820 onto the remittance and the 214 onto the shipment status, each published with
+        the 820 onto the remittance, the 214 onto the shipment status and the 810 onto the customer's self-billed
+        invoice (matched right away against the shipments our 856s registered, like an INVOIC 389), each published with
         dev.passage.edi.message.received.v1 (and message.failed when a rule breaks, AK5 R or E);
         other sets are rejected (AK5 R, EDI-0006). A 997 group (GS01 FA) from the partner is
         matched by AK102 to the outbound interchange with that control number: answered messages
@@ -1323,13 +1324,16 @@ paths:
                 quantityTolerance: { type: string, default: '0' }
                 priceTolerance: { type: string, default: '0.01', description: per unit }
                 waitDays: { type: integer, minimum: 1, maximum: 120, default: 30 }
-                taxRatePct: { type: string, default: '0', description: the VAT rate the partner's shipments are recomputed at (BR-35.15) }
+                taxRatePct: { type: string, default: '0', description: the VAT rate the partner's shipments are recomputed at (BR-35.15) when no taxCountry is set or the tax service is not configured }
+                taxCountry: { type: string, pattern: '^[A-Z]{2}$', description: "the customer's tax country; set, the VAT rate is determined by the tax service (EDI_TAX_URL) on the document date" }
+                taxGroup: { type: string, maxLength: 40, description: the customer's tax group in the tax configuration }
+                itemTaxGroup: { type: string, maxLength: 40, description: the item tax group of the deliveries }
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string } } }
+              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string }, taxCountry: { type: string }, taxGroup: { type: string }, itemTaxGroup: { type: string } } }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409':
@@ -1348,7 +1352,7 @@ paths:
           description: OK
           content:
             application/json:
-              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string } } }
+              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string }, taxCountry: { type: string }, taxGroup: { type: string }, itemTaxGroup: { type: string } } }
         '404': { $ref: '#/components/responses/Problem' }
   /edi/v1/self-billing:sweep:
     post:

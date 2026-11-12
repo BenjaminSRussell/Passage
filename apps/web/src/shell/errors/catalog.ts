@@ -501,6 +501,8 @@ const billing: Record<string, ProblemCatalogEntry> = {
   "BIL-0106": { message: "The billing period overlaps one that is already invoiced.", action: "Choose a period that isn't invoiced yet." },
   "BIL-0107": { message: "The effective date falls in a period that is already invoiced.", action: "Choose a later effective date." },
   "BIL-0108": { message: "The subscription is cancelled.", action: "Create a new subscription instead." },
+  "BIL-0150": { message: "This customer bills itself under a self-billing agreement, so its shipments aren't invoiced here.", action: "Wait for the customer's self-billed invoice, or set the customer's billing rule back to standard." },
+  "BIL-0151": { message: "Someone changed this customer's billing rule since you opened it.", action: "Reload the rule and make your change again." },
   "BIL-0109": { message: "Subscriptions aren't available in this deployment.", action: ASK_ADMIN },
   "BIL-0130": { message: "A usage record with this reading id already exists with different values.", action: "Send the reading with a new id, or the original values." },
   "BIL-0131": { message: "This usage can't be added to the subscription.", action: "Check the usage date. It must fall between the start of the subscription and its last service day, in a period that isn't invoiced yet." },

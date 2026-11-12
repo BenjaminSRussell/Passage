@@ -766,6 +766,7 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 		"purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
 		"receiving": ["receiving.asn.maintain"],
 		"payables": ["payables.vendor-invoice.intake"],
+		"tax": ["tax.tax.calculate"],
 	}
 	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
@@ -3154,4 +3155,17 @@ test_payables_vendor_invoice_intake if {
 	not allowed("payables.vendor-invoice.intake", "GET", "/v1/payables/vendor-invoice-intake/i1")
 	"payables.vendor-invoice.intake" in data.service_grants.edi.payables
 	"payables.vendor-invoice.intake" in data.service_principals["edi-cxml"]
+}
+
+# #35 (35-5): the self-billing match asks the tax service for the VAT rate as edi-selfbill, with only the calculate duty.
+test_edi_selfbill_tax_grant if {
+	data.service_grants.edi.tax == ["tax.tax.calculate"]
+	data.service_principals["edi-selfbill"] == ["tax.tax.calculate"]
+}
+
+# #35 (35-5): billing's SELF_BILLED rule is set with the invoice maintain duty and read with the view duty.
+test_billing_customer_billing_rule if {
+	allowed("billing.invoice.maintain", "PUT", "/v1/billing/customers/c1/billing-rule")
+	not allowed("billing.invoice.view", "PUT", "/v1/billing/customers/c1/billing-rule")
+	allowed("billing.invoice.view", "GET", "/v1/billing/customers/c1/billing-rule")
 }

@@ -17,13 +17,17 @@ import (
 	ediev "github.com/BenjaminSRussell/passage/services/edi/internal/events"
 )
 
-// SelfBillConfig is a partner's self-billing settings (§6.35.13). TaxRatePct is the VAT rate the shipments of the partner are
-// recomputed at (BR-35.15); billing carries tax codes, not rates, and wave 13 does not expose the determination yet.
+// SelfBillConfig is a partner's self-billing settings (§6.35.13). With TaxCountry set (and the tax service configured) the VAT
+// rate the billed lines are recomputed at (BR-35.15) is determined by the tax service from TaxCountry, TaxGroup and ItemTaxGroup
+// on the document date; otherwise TaxRatePct is used.
 type SelfBillConfig struct {
 	QuantityTolerance decimal.Decimal `json:"quantityTolerance"`
 	PriceTolerance    decimal.Decimal `json:"priceTolerance"`
 	WaitDays          int             `json:"waitDays"`
 	TaxRatePct        decimal.Decimal `json:"taxRatePct"`
+	TaxCountry        string          `json:"taxCountry"`
+	TaxGroup          string          `json:"taxGroup"`
+	ItemTaxGroup      string          `json:"itemTaxGroup"`
 }
 
 // DefaultSelfBillConfig is what a partner without settings gets: tolerance 0 and 0.01, 30 days, tax 0.
@@ -39,11 +43,13 @@ func (s *Store) PutSelfBillConfig(ctx context.Context, partnerID string, c SelfB
 		if err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `insert into self_billing_config (tenant_id, partner_id, legal_entity_id, quantity_tolerance, price_tolerance, wait_days, tax_rate_pct)
-			select $1::uuid, partner_id, legal_entity_id, $3, $4, $5, $6 from partner_trade_profile where partner_id = $2
+		tag, err := tx.Exec(ctx, `insert into self_billing_config (tenant_id, partner_id, legal_entity_id, quantity_tolerance, price_tolerance, wait_days, tax_rate_pct,
+			tax_country, tax_group, item_tax_group)
+			select $1::uuid, partner_id, legal_entity_id, $3, $4, $5, $6, $7, $8, $9 from partner_trade_profile where partner_id = $2
 			on conflict (tenant_id, partner_id) do update set quantity_tolerance = excluded.quantity_tolerance,
-			price_tolerance = excluded.price_tolerance, wait_days = excluded.wait_days, tax_rate_pct = excluded.tax_rate_pct, updated_at = now()`,
-			tid, partnerID, c.QuantityTolerance, c.PriceTolerance, c.WaitDays, c.TaxRatePct)
+			price_tolerance = excluded.price_tolerance, wait_days = excluded.wait_days, tax_rate_pct = excluded.tax_rate_pct,
+			tax_country = excluded.tax_country, tax_group = excluded.tax_group, item_tax_group = excluded.item_tax_group, updated_at = now()`,
+			tid, partnerID, c.QuantityTolerance, c.PriceTolerance, c.WaitDays, c.TaxRatePct, c.TaxCountry, c.TaxGroup, c.ItemTaxGroup)
 		if err != nil {
 			return err
 		}
@@ -59,8 +65,9 @@ func (s *Store) GetSelfBillConfig(ctx context.Context, partnerID string) (SelfBi
 	c := DefaultSelfBillConfig()
 	found := true
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `select quantity_tolerance, price_tolerance, wait_days, tax_rate_pct from self_billing_config where partner_id = $1`,
-			partnerID).Scan(&c.QuantityTolerance, &c.PriceTolerance, &c.WaitDays, &c.TaxRatePct)
+		err := tx.QueryRow(ctx, `select quantity_tolerance, price_tolerance, wait_days, tax_rate_pct, tax_country, tax_group, item_tax_group
+			from self_billing_config where partner_id = $1`,
+			partnerID).Scan(&c.QuantityTolerance, &c.PriceTolerance, &c.WaitDays, &c.TaxRatePct, &c.TaxCountry, &c.TaxGroup, &c.ItemTaxGroup)
 		if errors.Is(err, pgx.ErrNoRows) {
 			found = false
 			return nil
@@ -99,13 +106,15 @@ func (s *Store) RegisterSelfBillShipments(ctx context.Context, partnerID, legalE
 	})
 }
 
-// SelfBillInput is one received self-billed document ready to be matched.
+// SelfBillInput is one received self-billed document ready to be matched. TaxRatePct, when set, is the VAT rate the tax service
+// determined for the document: every shipment's tax is recomputed at it instead of the rate stored when the shipment registered.
 type SelfBillInput struct {
-	MessageID string
-	Number    string
-	Date      string
-	Currency  string
-	Lines     []domain.SBLine
+	MessageID  string
+	Number     string
+	Date       string
+	Currency   string
+	Lines      []domain.SBLine
+	TaxRatePct *decimal.Decimal
 }
 
 // SelfBillDocument is the stored result of matching one document.
@@ -202,6 +211,11 @@ func (s *Store) ReconcileSelfBill(ctx context.Context, partnerID string, in Self
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		if in.TaxRatePct != nil {
+			for i := range ships {
+				ships[i].TaxRatePct = *in.TaxRatePct
+			}
+		}
 		res, err := domain.MatchSelfBilling(in.Lines, ships, domain.SBTolerance{Quantity: cfg.QuantityTolerance, Price: cfg.PriceTolerance}, time.Now().UTC(), cfg.WaitDays)
 		if err != nil {
 			return err
@@ -221,9 +235,13 @@ func (s *Store) ReconcileSelfBill(ctx context.Context, partnerID string, in Self
 		}
 		out = SelfBillDocument{ID: docID, PartnerID: partnerID, MessageID: in.MessageID, Number: in.Number, DocumentDate: in.Date, Status: status,
 			MatchedLines: matched, DisputedLines: disputed, Lines: res.Lines, CreatedAt: time.Now().UTC()}
+		rateSource := "PARTNER"
+		if in.TaxRatePct != nil {
+			rateSource = "TAX"
+		}
 		if _, err := tx.Exec(ctx, `insert into self_billing_document (tenant_id, id, partner_id, legal_entity_id, message_id, number, document_date, currency,
-			status, matched_lines, disputed_lines) values ($1,$2,$3,$4,nullif($5,'')::uuid,$6,$7,nullif($8,''),$9,$10,$11)`,
-			tid, docID, partnerID, legalEntityID, in.MessageID, in.Number, in.Date, in.Currency, status, matched, disputed); err != nil {
+			status, matched_lines, disputed_lines, tax_rate_source) values ($1,$2,$3,$4,nullif($5,'')::uuid,$6,$7,nullif($8,''),$9,$10,$11,$12)`,
+			tid, docID, partnerID, legalEntityID, in.MessageID, in.Number, in.Date, in.Currency, status, matched, disputed, rateSource); err != nil {
 			return err
 		}
 		byLine := map[string]domain.SBLine{}
@@ -344,7 +362,7 @@ func (s *Store) SweepUnbilled(ctx context.Context, asOf time.Time) ([]SelfBillDi
 	return opened, err
 }
 
-// PendingSelfBilled lists inbound INVOIC messages that carry a self-billed invoice and were not matched yet.
+// PendingSelfBilled lists inbound INVOIC and 810 messages that carry a self-billed invoice and were not matched yet.
 type PendingSelfBilled struct {
 	MessageID string
 	PartnerID string
@@ -356,7 +374,7 @@ func (s *Store) PendingSelfBilled(ctx context.Context, limit int) ([]PendingSelf
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select m.id::text, i.partner_id::text, m.canonical::text from message m
 			join interchange i on i.tenant_id = m.tenant_id and i.id = m.interchange_id and i.direction = 'IN'
-			where m.transaction_set = 'INVOIC' and m.status = 'MAPPED' and m.canonical->>'selfBilled' = 'true'
+			where m.transaction_set in ('INVOIC', '810') and m.status = 'MAPPED' and m.canonical->>'selfBilled' = 'true'
 			order by m.created_at limit $1`, limit)
 		if err != nil {
 			return err

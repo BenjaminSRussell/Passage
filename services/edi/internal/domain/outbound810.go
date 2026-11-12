@@ -55,18 +55,20 @@ type Invoice struct {
 	PONumber   string `json:"poNumber"`
 	PODate     string `json:"poDate"`
 	CreditNote bool   `json:"creditNote,omitempty"`
-	// SelfBilled marks an INVOIC 389 (or 390) the customer issued for our deliveries.
-	SelfBilled bool            `json:"selfBilled,omitempty"`
-	ShipDate   string          `json:"shipDate,omitempty"`
-	BOL        string          `json:"bol,omitempty"`
-	Terms      Terms           `json:"terms"`
-	RemitTo    Location        `json:"remitTo"`
-	BillTo     Location        `json:"billTo"`
-	ShipTo     Location        `json:"shipTo"`
-	Lines      []InvoiceLine   `json:"lines"`
-	Taxes      []TaxLine       `json:"taxes,omitempty"`
-	Charges    []InvoiceCharge `json:"charges,omitempty"`
-	Total      decimal.Decimal `json:"total"`
+	// SelfBilled marks an INVOIC 389 (or 390), or an inbound 810, the customer issued for our deliveries.
+	SelfBilled bool `json:"selfBilled,omitempty"`
+	// Currency is read from a self-billed document (EDIFACT CUX, X12 CUR); the builders never write it.
+	Currency string          `json:"currency,omitempty"`
+	ShipDate string          `json:"shipDate,omitempty"`
+	BOL      string          `json:"bol,omitempty"`
+	Terms    Terms           `json:"terms"`
+	RemitTo  Location        `json:"remitTo"`
+	BillTo   Location        `json:"billTo"`
+	ShipTo   Location        `json:"shipTo"`
+	Lines    []InvoiceLine   `json:"lines"`
+	Taxes    []TaxLine       `json:"taxes,omitempty"`
+	Charges  []InvoiceCharge `json:"charges,omitempty"`
+	Total    decimal.Decimal `json:"total"`
 }
 
 var taxTypes = map[string]bool{"ST": true, "VA": true, "GS": true}
