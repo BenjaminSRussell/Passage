@@ -129,7 +129,7 @@ func TestPlanGenerate_PositionsGoToTheCostCenterOfTheirDepartment(t *testing.T) 
 }
 
 func TestPlanGenerate_ProjectsAndDemandWriteTheirMonths(t *testing.T) {
-	const p1, m1 = "0196a6a4-0000-7000-8000-0000000000e1", "0196a6a4-0000-7000-8000-0000000000e2"
+	const p1, m1 = "P-1001", "0196a6a4-0000-7000-8000-0000000000e2"
 	f := eur2027()
 	src := &fakeSources{projects: map[string]sources.Months{p1: months("2027-03", "12000")}, demand: months("2027-01", "250.5")}
 	body := `{"source":"projects","account":"5100","projects":[{"projectId":"` + p1 + `","modelId":"` + m1 + `","costCenter":"CC-PRJ","amount":"sales"}]}`
@@ -162,7 +162,7 @@ func TestPlanGenerate_SourceProblems(t *testing.T) {
 		"accounts listed":  `{"source":"fixed-assets","account":"6500","accounts":["1"],"costCenters":[{"costCenter":"CC1","weight":"1"}]}`,
 		"no rates":         `{"source":"positions","account":"6000","departments":[{"departmentId":"0196a6a4-0000-7000-8000-0000000000d1","costCenter":"C"}]}`,
 		"bad project":      `{"source":"projects","account":"1","projects":[{"projectId":"x","modelId":"y","costCenter":"C"}]}`,
-		"repeated project": `{"source":"projects","account":"1","projects":[{"projectId":"0196a6a4-0000-7000-8000-0000000000e1","modelId":"0196a6a4-0000-7000-8000-0000000000e2","costCenter":"C"},{"projectId":"0196a6a4-0000-7000-8000-0000000000e1","modelId":"0196a6a4-0000-7000-8000-0000000000e2","costCenter":"D"}]}`,
+		"repeated project": `{"source":"projects","account":"1","projects":[{"projectId":"P-1001","modelId":"0196a6a4-0000-7000-8000-0000000000e2","costCenter":"C"},{"projectId":"P-1001","modelId":"0196a6a4-0000-7000-8000-0000000000e2","costCenter":"D"}]}`,
 		"no model code":    `{"source":"demand","account":"1","unitPrices":[{"itemId":"0196a6a4-0000-7000-8000-0000000000f1","price":"1"}],"costCenters":[{"costCenter":"C","weight":"1"}]}`,
 		"cost centers+pos": `{"source":"positions","account":"1","costCenters":[{"costCenter":"C","weight":"1"}]}`,
 	} {
