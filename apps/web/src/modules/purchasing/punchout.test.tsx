@@ -63,12 +63,12 @@ describe("punchout catalogs", () => {
   it("shows the service's refusal in plain words", async () => {
     stubFetch((url) => {
       if (url === "/api/v1/edi/punchout/suppliers") return json({ items: [supplier] });
-      if (url === "/api/v1/edi/punchout/sessions") return url && json({ items: [] });
+      if (url === "/api/v1/edi/punchout/sessions") return json({ items: [] });
       return json({});
     });
     renderAt("/purchasing/punchout");
     await screen.findByRole("heading", { name: "No punchout sessions yet" });
-    stubFetch((url, init) => (init.method === "POST" ? problem(502, "EDI-0033", "the supplier could not be reached") : json({ items: [supplier] })));
+    stubFetch((_url, init) => (init.method === "POST" ? problem(502, "EDI-0033", "the supplier could not be reached") : json({ items: [supplier] })));
     fireEvent.change(screen.getByRole("combobox", { name: /Supplier/ }), { target: { value: SUPPLIER } });
     fireEvent.click(screen.getByRole("button", { name: "Open catalog" }));
     expect(await screen.findByText(/The supplier's catalog couldn't be opened\./)).toBeInTheDocument();

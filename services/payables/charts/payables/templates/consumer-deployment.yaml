@@ -45,6 +45,7 @@ spec:
             - name: admin
               containerPort: 9090
           env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
