@@ -3157,3 +3157,10 @@ test_receivables_unapply_is_the_reversal_duty if {
 	not allowed("receivables.payment.post", "POST", "/v1/receivables/payments/p1:unapply")
 	not allowed("receivables.view", "POST", "/v1/receivables/payments/p1:unapply")
 }
+
+test_payables_withholding_reporter_holds_only_the_record_duty if {
+	data.service_principals["payables-withholding"] == ["tax.withholding.record"]
+	"tax.withholding.record" in data.service_grants.payables.tax
+	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/remittance-runs")
+}

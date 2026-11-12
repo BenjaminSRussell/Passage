@@ -58,6 +58,7 @@ type RunStore interface {
 	FailRun(ctx context.Context, id, reason string) (store.PaymentRun, error)
 	RunRemittance(ctx context.Context, runID, vendorID string) (store.Remittance, error)
 	SetWithholdingRecordError(ctx context.Context, id, reason string) error
+	QueueWithholdingReport(ctx context.Context, runID, legalEntityID string, body []byte) error
 }
 
 type LedgerPoster interface {
@@ -549,10 +550,11 @@ func withholdingEntryID(runID, openItemID string) string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// recordRunWithholding tells the tax service which tax the run withheld, one entry per invoice with withholding (the vendor, the
+// recordRunWithholding queues the tax the run withheld for the tax service, one entry per invoice with withholding (the vendor, the
 // withholding code, the payment date, the pay amount, the base and the tax), so its remittance runs and certificates cover the
-// payment. It returns false after answering the request with a failure; the run's journal is already posted then, and the executor's
-// retry of post-journal takes the same path again.
+// payment. The withholding reporter (cmd/payables) sends the queued report outside the request with back-off; a refusal parks it and
+// puts the reason on the run (AP-RUN-019), and repeating post-journal queues it again. The entry ids are stable, so the tax service
+// records each entry once. It returns false after answering the request with a failure.
 func (a *API) recordRunWithholding(w http.ResponseWriter, r *http.Request, run store.PaymentRun) bool {
 	if a.withholdingRecorder == nil {
 		return true
@@ -577,27 +579,17 @@ func (a *API) recordRunWithholding(w http.ResponseWriter, r *http.Request, run s
 				PaymentDate: proposal.RunDate, Currency: g.Currency, Gross: l.Pay, TaxableBase: base, Withheld: l.Withheld})
 		}
 	}
-	if err := a.withholdingRecorder.RecordWithholding(ctx, run.LegalEntityID, entries); err != nil {
-		var ts *tax.StatusError
-		if errors.As(err, &ts) && !retryableStatus(ts.Status) {
-			// A refusal retrying cannot fix: park the run with the reason where an operator sees it, and say so.
-			reason := fmt.Sprintf("the tax service refused the withholding entries with status %d", ts.Status)
-			if perr := a.runs.store.SetWithholdingRecordError(ctx, run.ID, reason); perr != nil {
-				a.fault(w, r, "withholding record park not saved", perr)
-				return false
-			}
-			slog.Error("withholding entries parked", "run", run.ID, "status", ts.Status, "correlationId", middleware.GetReqID(ctx))
-			a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunWithholdingParked, "the run's journal is posted, but the tax service refused its withholding entries ("+reason+"); correct the withholding configuration and repeat post-journal")
-			return false
-		}
-		a.upstreamFailure(w, r, "withholding record", err, false)
+	if len(entries) == 0 {
+		return true
+	}
+	body, err := json.Marshal(entries)
+	if err != nil {
+		a.fault(w, r, "withholding entries not encoded", err)
 		return false
 	}
-	if run.WithholdingRecordError != nil {
-		if err := a.runs.store.SetWithholdingRecordError(ctx, run.ID, ""); err != nil {
-			a.fault(w, r, "withholding record park not cleared", err)
-			return false
-		}
+	if err := a.runs.store.QueueWithholdingReport(ctx, run.ID, run.LegalEntityID, body); err != nil {
+		a.fault(w, r, "withholding report not queued", err)
+		return false
 	}
 	return true
 }

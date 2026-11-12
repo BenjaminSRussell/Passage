@@ -4150,6 +4150,7 @@
     "receivables-billing": ["receivables.openitem.from-billing"],
     "revrec-creditnotes": ["revrec.creditnote.reverse", "revrec.contract.from-invoice"],
     "revrec-billing": ["billing.contract-modification.bill"],
+    "payables-withholding": ["tax.withholding.record"],
     "receiving-ers": ["receiving.vendor-invoice.post"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
     "scheduling-order-import": ["scheduling.order.import"],
