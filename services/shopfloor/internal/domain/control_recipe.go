@@ -86,6 +86,26 @@ type Instruction struct {
 	// Materials is the structured form of a material-list instruction, scaled to the batch: the PI sheet
 	// shows each product by name with its quantity. Text stays required as the plain-language summary.
 	Materials []InstructionMaterial `json:"materials,omitempty"`
+	// Meaning is what a signature-request step's signature means (21 CFR 11.50(a)(3), FR-24.22): performed,
+	// verified, reviewed or approved. The kiosk shows it to the signer and records it with the signature; a step
+	// without one is signed as performed.
+	Meaning string `json:"meaning,omitempty"`
+}
+
+// Signature meanings of a signature-request step.
+var SignatureMeanings = []string{"performed", "verified", "reviewed", "approved"}
+
+// ValidMeaning reports whether m is a signature meaning ("" is the default, performed).
+func ValidMeaning(m string) bool {
+	if m == "" {
+		return true
+	}
+	for _, x := range SignatureMeanings {
+		if x == m {
+			return true
+		}
+	}
+	return false
 }
 
 // InstructionMaterial is one line of a material-list instruction.
@@ -205,6 +225,12 @@ func checkInstruction(f map[string]string, path string, want int, in Instruction
 	}
 	if len(in.Text) > 4000 {
 		f[path+".text"] = "must be at most 4000 characters"
+	}
+	switch {
+	case in.Meaning != "" && in.Category != InstSignature:
+		f[path+".meaning"] = "applies to a signature-request step only"
+	case !ValidMeaning(in.Meaning):
+		f[path+".meaning"] = "must be performed, verified, reviewed or approved"
 	}
 	switch in.Category {
 	case InstText, InstSignature, InstMaterials, InstSequence, InstCalculation:

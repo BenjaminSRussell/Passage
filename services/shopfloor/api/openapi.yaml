@@ -4671,6 +4671,10 @@ components:
         text: { type: string, maxLength: 4000 }
         node: { type: string, maxLength: 300, description: OPC-UA node id or topic of a setpoint or data request. }
         value: { type: number, description: The setpoint, scaled to the batch. }
+        meaning:
+          type: string
+          enum: [performed, verified, reviewed, approved]
+          description: What a signature-request step's signature means (21 CFR 11.50); the kiosk records it with the signature. Default performed; any other category refuses it.
         characteristic:
           type: object
           required: [name, type]
