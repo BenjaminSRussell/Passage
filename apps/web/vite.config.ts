@@ -12,12 +12,7 @@ function allDuties(): string {
   return Object.keys(authzCatalog.duties).join(",");
 }
 
-/**
- * Wave 5 owns the shell host. Module federation remotes are declared in
- * src/shell/federation.ts. The @module-federation/vite plugin is a lockfile
- * Need; discovery in tests and `vite` uses import.meta.glob.
- */
-/** PASSAGE_IDLE_TIMEOUT_MINUTES: a whole number of minutes, 1 to 480; anything else (or unset) is off. A bad value stops the build. */
+/** PASSAGE_IDLE_TIMEOUT_MINUTES: a whole number of minutes from 0 to 480; unset, empty or 0 is off, and any other value stops the build. */
 function idleMinutes(raw: string | undefined): number {
   if (raw === undefined || raw === "") return 0;
   const n = Number(raw);
@@ -25,6 +20,11 @@ function idleMinutes(raw: string | undefined): number {
   return n;
 }
 
+/**
+ * Wave 5 owns the shell host. Module federation remotes are declared in
+ * src/shell/federation.ts. The @module-federation/vite plugin is a lockfile
+ * Need; discovery in tests and `vite` uses import.meta.glob.
+ */
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, decodeURIComponent(new URL(".", import.meta.url).pathname), "PASSAGE_");
   // `vite build --mode demo` is the GitHub Pages demo: an in-browser fake backend (src/demo) and every screen visible.
