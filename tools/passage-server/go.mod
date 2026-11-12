@@ -6,7 +6,7 @@ require (
 	github.com/BenjaminSRussell/passage/platform v0.0.0
 	github.com/BenjaminSRussell/passage/services/identity v0.0.0
 	github.com/jackc/pgx/v5 v5.12.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
