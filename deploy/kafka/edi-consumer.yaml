@@ -1,7 +1,7 @@
-# The edi outbound consumer (#35, 35-1, `edi consume`, group edi-outbound) sends the 856 or DESADV of fulfillment's asn.issued and
-# the 810 or INVOIC of billing's invoice.posted to the partners that asked for them, and parks the events it cannot send on
+# The edi outbound consumer (#35, 35-1, `edi consume`, group edi-outbound) sends the 856 or DESADV of fulfillment's asn.issued and of
+# the warehouse's shipment.shipped (a shipment that left without a packing slip), and the 810 or INVOIC of billing's invoice.posted to the partners that asked for them, and parks the events it cannot send on
 # passage.edi.outbound.dlq. The chart's consumer.kafka.username names this user. Literal ACLs: the user reads only fulfillment's
-# asn topic and billing's invoice topic (billing routes its outbox by aggregate, so invoices and credit notes share
+# asn topic, the warehouse's shipment topic and billing's invoice topic (billing routes its outbox by aggregate, so invoices and credit notes share
 # passage.billing.invoice; the consumer skips the other types) and writes only its dead-letter topic. The consumer stays off in
 # dev until it is enabled in the edi chart.
 apiVersion: kafka.strimzi.io/v1beta2
@@ -18,6 +18,8 @@ spec:
     type: simple
     acls:
       - resource: {type: topic, name: passage.fulfillment.asn, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: passage.wms.shipment, patternType: literal}
         operations: [Read, Describe]
       - resource: {type: topic, name: passage.billing.invoice, patternType: literal}
         operations: [Read, Describe]

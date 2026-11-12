@@ -479,6 +479,15 @@ Sample files: `testdata/cxml/` (the three network documents, a punchout cart and
 - **35-5.** The self-billing sweep runs on a schedule with the transport workers (`EDI_SELFBILL_SWEEP_MINUTES`). Web:
   `/integration/self-billing/disputes`.
 
+## Slice 12 scope: B2B round 3 (#35, #40)
+
+- **35-1 shipped without a packing slip.** The warehouse publishes `dev.passage.wms.shipment.shipped.v1` (topic `passage.wms.shipment`)
+  when it confirms that a fulfillment shipment left the dock without a packing slip (`POST /v1/warehouse/shipments/{id}:ship`). The
+  consumer reads the shipment from fulfillment and sends the whole shipment's 856 or DESADV under the route's whole-shipment key, with the
+  warehouse's ship time as the ship date, its carrier when it named one, and only the containers that left (a named pallet takes its
+  cartons along). A shipment fulfillment already shipped by a packing slip, a container already on a slip, or an SSCC the shipment does not
+  hold is skipped with EDI-0007: the slip's `asn.issued` sends those notices.
+
 ## Wave 35 proof
 
 - **Partner simulator round trip** (`internal/api/partnersim_test.go`,
@@ -516,7 +525,7 @@ internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP a
 internal/delivery/  dispatcher (outbound AS2/SFTP deliveries) and SFTP poller
 internal/secrets/   resolves transport secret references from EDI_SECRETS_DIR
 internal/certtrust/ partner AS2 certificate chain and CRL checks (EDI_AS2_TRUST_ROOTS, EDI_AS2_CRL_DIR)
-internal/autosend/  the outbound consumer's handlers (asn.issued, invoice.posted) and the Sender seam (35-1)
+internal/autosend/  the outbound consumer's handlers (asn.issued, shipment.shipped, invoice.posted) and the Sender seam (35-1)
 internal/events/    event type constants and payloads
 migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery), 0008_edifact_inbound.sql (partner EDIFACT identity and CONTRL mode, interchange.refusal), 0009_partner_update.sql (partner UPDATE column grant, partner_entity_index and edi_partner_in_entity_scope())
 api/openapi.yaml    OpenAPI 3.1 for the routes above

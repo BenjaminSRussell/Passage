@@ -153,6 +153,13 @@ spec:
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.fulfillment.warehouseoperationrule, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
+      # warehouse: one literal per AsyncAPI channel of services/warehouse/events/asyncapi.yaml (outbox-warehouse routes by event type).
+      - resource: {type: topic, name: passage.wms.work, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.wms.receipt, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.wms.shipment, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]
       - resource: {type: group, name: passage-connect, patternType: literal}
@@ -675,6 +682,60 @@ spec:
     transforms.outbox.table.field.event.payload: payload
     transforms.outbox.route.by.field: aggregate_type
     transforms.outbox.route.topic.replacement: passage.billing.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# Warehouse routes by event type, as fulfillment does: dev.passage.wms.<entity>.<verb>.v<n> goes to passage.wms.<entity>, so work,
+# receipt and shipment events land on passage.wms.work, passage.wms.receipt and passage.wms.shipment, the AsyncAPI channels in
+# services/warehouse/events/asyncapi.yaml. The edi outbound consumer reads passage.wms.shipment for shipment.shipped (#35, 35-1,
+# deploy/kafka/edi-consumer.yaml). The ACLs above are literal per channel (a new entity needs an entry); deploy/scripts/
+# test_argocd_apps.py routes every message of the AsyncAPI through the regex and compares the ACLs with the channels.
+# snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# debezium_cdc_warehouse has REPLICATION; the warehouse database and that role are provisioned with the service's database.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-warehouse
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.hello-ledger.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc-warehouse:username}
+    database.password: ${secrets:kafka/debezium-cdc-warehouse:password}
+    database.dbname: passage_warehouse
+    topic.prefix: passage.wms
+    slot.name: passage_outbox_warehouse
+    publication.name: passage_outbox_warehouse
+    publication.autocreate.mode: disabled
+    table.include.list: public.outbox
+    snapshot.mode: no_data
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
+    transforms: outbox,enrich
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: type
+    transforms.outbox.route.topic.regex: 'dev\.passage\.wms\.(?<routedByValue>[a-z][a-z0-9]*)\.[a-z][a-z0-9]*\.v[0-9]+'
+    transforms.outbox.route.topic.replacement: passage.wms.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher

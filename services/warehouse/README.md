@@ -231,6 +231,13 @@ quantities and weights.
 
 `PUT/GET /v1/warehouse/gs1-settings` hold the tenant's GS1 company prefix; receiving a pallet whose ASN line names no license plate draws the next SSCC (under a row lock) and uses it as the plate. The put-away work line carries `lpId`, `sscc`, `lot` and `expiry`, and `GET /v1/warehouse/pallets/{sscc}/label` gives a device the same, so it prints the label with no second scan. `POST /v1/warehouse/rfid-reads:ingest` takes reader reads (EPC decoding in `internal/domain/epc.go`). `/v1/warehouse/automation/*` carries transport orders to a PLC's connector and the PLC's events back (an arrival confirms the work line). Duties `warehouse.rfid.ingest` and `warehouse.automation.execute`; migrations `0006` and `0007`.
 
+## Shipped without a packing slip (#35, 35-1)
+
+`POST /v1/warehouse/shipments/{id}:ship` (duty `warehouse.shipment.confirm`) records that the fulfillment shipment `{id}` left the
+dock without a packing slip posted for it, and enqueues `dev.passage.wms.shipment.shipped.v1` (topic `passage.wms.shipment`) in the
+same transaction. The EDI engine's outbound consumer sends the whole shipment's 856 or DESADV from it, as it does from fulfillment's
+`asn.issued` for a slip. A shipment is confirmed once (migration 0008). `GET /v1/warehouse/shipments/{id}/shipped` reads it back.
+
 ## Error codes
 
 | Code | Status | Meaning |
@@ -251,10 +258,11 @@ quantities and weights.
 | WMS-AUTO-ORDER-NOT-FOUND, WMS-AUTO-ORDER-EXISTS, WMS-AUTO-ORDER-STATE | 404, 409, 409 | Automation orders: unknown, a second order for the line, a report on an order past PENDING. |
 | WMS-AUTO-LOCATION, WMS-AUTO-LOAD-UNIT | 422 | A location a telegram cannot name (more than 12 characters, or missing), or a line with no pallet SSCC. |
 | WMS-0110 | 409 | Illegal work or line transition: confirming unassigned or finished work, a quantity below the open one (use a short pick), short picking a PUT line, cancelling after a confirmation, or a location status/stock that refuses the move. |
-| WMS-DUPLICATE | 409 | Location name or door code taken in the warehouse, directive sequence taken for the work type and direction, or the ASN already registered in the warehouse. |
+| WMS-DUPLICATE | 409 | Location name or door code taken in the warehouse, directive sequence taken for the work type and direction, or the ASN already registered in the warehouse, or the shipment already confirmed shipped. |
 | WMS-VERSION-CONFLICT | 409 | `If-Match` is not the work's (or receipt's) current version. |
 | WMS-NOT-ASSIGNEE | 403 | The work is assigned to another user (or unassigned, for a cancel without the supervise duty). |
 | WMS-WORK-NOT-FOUND, WMS-RECEIPT-NOT-FOUND, WMS-LINE-NOT-FOUND | 404 | No such work or receipt in the tenant, or no such line on it. |
+| WMS-SHIPMENT-NOT-FOUND | 404 | No ship confirmation for the shipment in the caller's legal entities. |
 | WMS-DOOR-NOT-FOUND | 404 | No such dock door in the appointment's warehouse. |
 | idempotency_key_reuse | 422 | The Idempotency-Key was used for another request (method, path, user and body). |
 | COM-0001 | 400 | Malformed body, unknown field, missing Idempotency-Key or X-Passage-User, or failed field validation (`errors` names the fields). |

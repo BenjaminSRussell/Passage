@@ -25,7 +25,7 @@ func TestAsyncAPIDocumentsEveryEvent(t *testing.T) {
 			t.Errorf("asyncapi.yaml has no message named %s", typ)
 		}
 	}
-	for _, payload := range []any{WorkCreatedData{}, WorkCompletedData{}, WorkReleasedData{}, Line{}, ReceiptRegisteredData{}, ItemQty{}} {
+	for _, payload := range []any{WorkCreatedData{}, WorkCompletedData{}, WorkReleasedData{}, Line{}, ReceiptRegisteredData{}, ItemQty{}, ShipmentShippedData{}, ShippedContainer{}} {
 		rt := reflect.TypeOf(payload)
 		for i := 0; i < rt.NumField(); i++ {
 			name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")

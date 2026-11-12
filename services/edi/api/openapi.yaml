@@ -1262,7 +1262,7 @@ paths:
       operationId: putAutoOutbound
       summary: Set the documents the partner receives when a shipment ships or an invoice posts
       description: >
-        The consumer of fulfillment asn.issued and billing invoice.posted (`edi consume`) sends the 856 or DESADV and the 810 or INVOIC listed here to this
+        The consumer of fulfillment asn.issued, warehouse shipment.shipped and billing invoice.posted (`edi consume`) sends the 856 or DESADV and the 810 or INVOIC listed here to this
         partner, generated from the source document as outbound:from-source does (same idempotency key, so a redelivered event, a replay and a route call
         made by hand yield one interchange). An empty list switches it off. The partner needs a trade profile (EDI-0012); the legal entity is its profile's.
       x-passage-duty: edi.admin

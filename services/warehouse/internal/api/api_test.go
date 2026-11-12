@@ -404,6 +404,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"POST /v1/warehouse/dock-appointments":                       dutyReceive + " or " + dutyShipConfirm,
 		"GET /v1/warehouse/dock-appointments":                        dutyInquiry,
 		"POST /v1/warehouse/receipts:from-asn":                       dutyReceive,
+		"POST /v1/warehouse/shipments/{id}:ship":                     dutyShipConfirm,
+		"GET /v1/warehouse/shipments/{id}/shipped":                   dutyInquiry,
 		"GET /v1/warehouse/receipts":                                 dutyInquiry,
 		"GET /v1/warehouse/receipts/{id}":                            dutyInquiry,
 		"POST /v1/warehouse/receipts/{id}/lines/{n}:receive":         dutyReceive,

@@ -61,6 +61,9 @@ type sourceRequest struct {
 	SourceID       string `json:"sourceId"`
 	// Slip is set by the event consumer for an 856 or DESADV of one packing slip (never by the route).
 	Slip *domain.SlipRef `json:"-"`
+	// Warehouse is set by the event consumer for the whole-shipment 856 or DESADV of a shipment the warehouse shipped without a
+	// packing slip (never by the route).
+	Warehouse *domain.WarehouseShip `json:"-"`
 }
 
 // outboundFromSource generates the 856 (or the EDIFACT DESADV) from a
@@ -114,6 +117,13 @@ func (a *API) SendFromSource(ctx context.Context, partnerID, transactionSet, sou
 	return a.fromSource(ctx, partnerID, sourceRequest{TransactionSet: transactionSet, SourceID: sourceID, Slip: slip})
 }
 
+// SendFromWarehouse generates and records the whole-shipment 856 or DESADV of a shipment the warehouse shipped without a packing
+// slip (dev.passage.wms.shipment.shipped.v1). It is keyed like the route's whole-shipment notice, so a redelivered event, or the
+// route asked later, returns the interchange already recorded.
+func (a *API) SendFromWarehouse(ctx context.Context, partnerID, transactionSet, shipmentID string, ws domain.WarehouseShip) (store.OutboundResult, bool, error) {
+	return a.fromSource(ctx, partnerID, sourceRequest{TransactionSet: transactionSet, SourceID: shipmentID, Warehouse: &ws})
+}
+
 func (a *API) fromSource(ctx context.Context, partnerID string, req sourceRequest) (store.OutboundResult, bool, error) {
 	if a.Sources == nil {
 		return store.OutboundResult{}, false, httpx.NewProblem(http.StatusServiceUnavailable, CodeSourceDown, "source services are not configured")
@@ -163,6 +173,11 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		var sh domain.SourceShipment
 		if sh, err = a.Sources.Shipment(ctx, p.LegalEntityID, req.SourceID); err != nil {
 			return nil, nil, err
+		}
+		if req.Warehouse != nil {
+			if sh, err = domain.ShippedByWarehouse(p, sh, *req.Warehouse); err != nil {
+				return nil, nil, err
+			}
 		}
 		if err = domain.ValidateShipmentSlip(p, sh, req.Slip); err != nil {
 			return nil, nil, err

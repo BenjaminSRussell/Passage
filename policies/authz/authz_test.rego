@@ -3134,3 +3134,12 @@ test_consolidation_ic_layers_and_investments_register if {
 	allowed("consolidation.view", "GET", "/v1/consol/runs/r1/investments")
 	not allowed("consolidation.configure", "GET", "/v1/consol/runs/r1/investments")
 }
+
+# #35 (35-1): the warehouse confirms a shipment shipped without a packing slip with the ship-confirm duty; reading it is an inquiry.
+test_warehouse_shipment_shipped_confirmation if {
+	allowed("warehouse.shipment.confirm", "POST", "/v1/warehouse/shipments/s1:ship")
+	not allowed("warehouse.receipt.register", "POST", "/v1/warehouse/shipments/s1:ship")
+	not allowed("warehouse.inquiry.view", "POST", "/v1/warehouse/shipments/s1:ship")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/shipments/s1/shipped")
+	not allowed("warehouse.shipment.confirm", "GET", "/v1/warehouse/shipments/s1/shipped")
+}

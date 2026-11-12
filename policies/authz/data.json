@@ -3835,7 +3835,8 @@
       {"resource": "/v1/warehouse/work/*", "methods": ["GET"]},
       {"resource": "/v1/warehouse/rfid-reads", "methods": ["GET"]},
       {"resource": "/v1/warehouse/pallets/*/label", "methods": ["GET"]},
-      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]}
+      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/shipments/*/shipped", "methods": ["GET"]}
     ]},
     "warehouse.rfid.ingest": {"permissions": [{"resource": "/v1/warehouse/rfid-reads:ingest", "methods": ["POST"]}]},
     "warehouse.automation.execute": {"permissions": [
@@ -3860,7 +3861,10 @@
       {"resource": "/v1/warehouse/location-directives:simulate", "methods": ["POST"]},
       {"resource": "/v1/warehouse/locations", "methods": ["GET"]}
     ]},
-    "warehouse.shipment.confirm": {"permissions": [{"resource": "/v1/warehouse/dock-appointments", "methods": ["POST"]}]},
+    "warehouse.shipment.confirm": {"permissions": [
+      {"resource": "/v1/warehouse/dock-appointments", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/shipments/*:ship", "methods": ["POST"]}
+    ]},
     "warehouse.work.execute": {"permissions": [
       {"resource": "/v1/warehouse/work/*/lines/*:confirm", "methods": ["POST"]},
       {"resource": "/v1/warehouse/work/*:exception", "methods": ["POST"]},

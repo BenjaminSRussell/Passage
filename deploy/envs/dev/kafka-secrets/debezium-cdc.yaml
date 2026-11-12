@@ -226,6 +226,31 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
+  name: debezium-cdc-warehouse
+  namespace: kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: passage
+  target:
+    name: debezium-cdc-warehouse
+    creationPolicy: Owner
+    template:
+      data:
+        username: debezium_cdc_warehouse
+        password: "{{ .password }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: passage/dev/warehouse-postgres/cdc-password
+        property: value
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
   name: debezium-cdc-fieldservice
   namespace: kafka
   annotations:
@@ -256,7 +281,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [debezium-cdc-metadata, debezium-cdc-batch, debezium-cdc-receiving, debezium-cdc-eam, debezium-cdc-transport, debezium-cdc-sales, debezium-cdc-fulfillment, debezium-cdc-budgeting, debezium-cdc-billing, debezium-cdc-fieldservice]
+    resourceNames: [debezium-cdc-metadata, debezium-cdc-batch, debezium-cdc-receiving, debezium-cdc-eam, debezium-cdc-transport, debezium-cdc-sales, debezium-cdc-fulfillment, debezium-cdc-budgeting, debezium-cdc-billing, debezium-cdc-fieldservice, debezium-cdc-warehouse]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
