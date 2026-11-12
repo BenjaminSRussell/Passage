@@ -273,21 +273,24 @@ func TestRFIDRuleAndCancelRoutes_DutiesAndValidation(t *testing.T) {
 		status int
 		field  string
 	}{
-		"rules listing needs setup view":  {req{method: "GET", path: "/v1/warehouse/rfid-rules", duties: dutyInquiry}, 403, ""},
-		"rules are listed":                {req{method: "GET", path: "/v1/warehouse/rfid-rules?readerId=dock-1", duties: dutySetupView}, 200, ""},
-		"a rule needs setup maintain":     {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupView, body: `{"readerId":"dock-1","action":"RECEIVE_PALLET"}`}, 403, ""},
-		"a rule's action is checked":      {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","action":"SHIP"}`}, 400, "action"},
-		"a rule's reader is required":     {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"action":"RECEIVE_PALLET"}`}, 400, "readerId"},
-		"a rule's antenna range":          {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","antenna":300,"action":"RECEIVE_PALLET"}`}, 400, "antenna"},
-		"a rule's warehouse is a uuid":    {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","warehouseId":"WH1","action":"RECEIVE_PALLET"}`}, 400, "warehouseId"},
-		"a rule is created":               {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","antenna":2,"action":"CONFIRM_PUTAWAY","locationCode":"A-01"}`}, 201, ""},
-		"a rule is deleted":               {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/" + id, duties: dutySetupMaintain}, 204, ""},
-		"deleting needs setup maintain":   {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/" + id, duties: dutySetupView}, 403, ""},
-		"a bad rule id is not found":      {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/x", duties: dutySetupMaintain}, 404, ""},
-		"cancel needs the supervise duty": {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyAutomation, body: `{"reason":"jam"}`}, 403, ""},
-		"cancel needs a reason":           {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyWorkSupervise, body: `{}`}, 400, "reason"},
-		"cancel is accepted":              {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyWorkSupervise, body: `{"reason":"jam","plcCleared":true}`}, 200, ""},
-		"cancel of a bad id is not found": {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/x:cancel", duties: dutyWorkSupervise, body: `{"reason":"jam"}`}, 404, ""},
+		"rules listing needs setup view":   {req{method: "GET", path: "/v1/warehouse/rfid-rules", duties: dutyInquiry}, 403, ""},
+		"rules are listed":                 {req{method: "GET", path: "/v1/warehouse/rfid-rules?readerId=dock-1", duties: dutySetupView}, 200, ""},
+		"a rule needs setup maintain":      {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupView, body: `{"readerId":"dock-1","action":"RECEIVE_PALLET"}`}, 403, ""},
+		"a rule's action is checked":       {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","action":"SHIP"}`}, 400, "action"},
+		"a rule's reader is required":      {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"action":"RECEIVE_PALLET"}`}, 400, "readerId"},
+		"a rule's antenna range":           {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","antenna":300,"action":"RECEIVE_PALLET"}`}, 400, "antenna"},
+		"a rule's warehouse is a uuid":     {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","warehouseId":"WH1","action":"RECEIVE_PALLET"}`}, 400, "warehouseId"},
+		"a rule needs a warehouse":         {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","action":"RECEIVE_PALLET","postedBy":"gw"}`}, 400, "warehouseId"},
+		"a rule needs its poster":          {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","warehouseId":"` + id + `","action":"RECEIVE_PALLET"}`}, 400, "postedBy"},
+		"a put-away rule needs a location": {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","warehouseId":"` + id + `","action":"CONFIRM_PUTAWAY","postedBy":"gw"}`}, 400, "locationCode"},
+		"a rule is created":                {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","antenna":2,"warehouseId":"` + id + `","action":"CONFIRM_PUTAWAY","locationCode":"A-01","postedBy":"gw"}`}, 201, ""},
+		"a rule is deleted":                {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/" + id, duties: dutySetupMaintain}, 204, ""},
+		"deleting needs setup maintain":    {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/" + id, duties: dutySetupView}, 403, ""},
+		"a bad rule id is not found":       {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/x", duties: dutySetupMaintain}, 404, ""},
+		"cancel needs the supervise duty":  {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyAutomation, body: `{"reason":"jam"}`}, 403, ""},
+		"cancel needs a reason":            {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyWorkSupervise, body: `{}`}, 400, "reason"},
+		"cancel is accepted":               {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyWorkSupervise, body: `{"reason":"jam","plcCleared":true}`}, 200, ""},
+		"cancel of a bad id is not found":  {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/x:cancel", duties: dutyWorkSupervise, body: `{"reason":"jam"}`}, 404, ""},
 	} {
 		rec := call(h, tc.q)
 		if rec.Code != tc.status || (tc.field != "" && !strings.Contains(rec.Body.String(), tc.field)) {
@@ -322,29 +325,40 @@ func TestRFIDRulesReceiveAndConfirmPutaway(t *testing.T) {
 	if rec := post("/v1/warehouse/receipts:from-asn", "asn", `{"warehouseId":"`+wh+`","asnRef":"ASN-RFID","lines":[{"lineNo":1,"itemId":"VALVE","lpId":"`+vendor.Key+`","expectedQty":"40"}]}`); rec.Code != 201 {
 		t.Fatalf("ASN: %d %s", rec.Code, rec.Body)
 	}
+	// The reader gateways post as u1 (the test caller); the rules accept only that identity.
 	for _, rule := range []string{
-		`{"readerId":"dock-1","action":"RECEIVE_PALLET","warehouseId":"` + wh + `"}`,
-		`{"readerId":"rack-A","antenna":1,"action":"CONFIRM_PUTAWAY","locationCode":"A-01"}`,
+		`{"readerId":"dock-1","action":"RECEIVE_PALLET","warehouseId":"` + wh + `","postedBy":"u1"}`,
+		`{"readerId":"rack-A","antenna":1,"action":"CONFIRM_PUTAWAY","locationCode":"A-01","warehouseId":"` + wh + `","postedBy":"u1"}`,
 	} {
 		if rec := post("/v1/warehouse/rfid-rules", "", rule); rec.Code != 201 {
 			t.Fatalf("rule %s: %d %s", rule, rec.Code, rec.Body)
 		}
 	}
-	if rec := post("/v1/warehouse/rfid-rules", "", `{"readerId":"dock-1","action":"RECEIVE_PALLET"}`); rec.Code != 409 || problemOf(t, rec).Code != store.CodeRFIDRuleExists {
+	if rec := post("/v1/warehouse/rfid-rules", "", `{"readerId":"dock-1","action":"RECEIVE_PALLET","warehouseId":"`+wh+`","postedBy":"u1"}`); rec.Code != 409 || problemOf(t, rec).Code != store.CodeRFIDRuleExists {
 		t.Fatalf("a second receive rule on the reader: %d %s", rec.Code, rec.Body)
 	}
-	ingest := func(reader string, antenna int, epc, at string) store.RFIDIngest {
+	ingestAs := func(poster, reader string, antenna int, epc, at string) store.RFIDIngest {
 		t.Helper()
-		rec := post("/v1/warehouse/rfid-reads:ingest", "", fmt.Sprintf(`{"reads":[{"readerId":%q,"antenna":%d,"epc":%q,"readAt":%q}]}`, reader, antenna, epc, at))
+		rec := call(h, req{method: "POST", path: "/v1/warehouse/rfid-reads:ingest", duties: all, user: poster,
+			body: fmt.Sprintf(`{"reads":[{"readerId":%q,"antenna":%d,"epc":%q,"readAt":%q}]}`, reader, antenna, epc, at)})
 		var out store.RFIDIngest
 		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 {
 			t.Fatalf("ingest: %d %s", rec.Code, rec.Body)
 		}
 		return out
 	}
+	ingest := func(reader string, antenna int, epc, at string) store.RFIDIngest {
+		t.Helper()
+		return ingestAs("u1", reader, antenna, epc, at)
+	}
+
+	// Someone else posting a read in the dock reader's name is stored but runs no rule.
+	if spoof := ingestAs("intruder", "dock-1", 0, tag, "2026-10-27T08:59:00Z"); spoof.Accepted != 1 || spoof.Reads[0].Actions[0].Outcome != store.RFIDSkipped {
+		t.Fatalf("a read posted by another identity: %+v", spoof.Reads)
+	}
 
 	// The dock portal reads the pallet: the receipt is received at the 40 the ASN announced, with put-away work.
-	got := ingest("dock-1", 0, tag, "2026-10-27T09:00:00Z")
+	got := ingest("dock-1", 0, tag, "2026-10-27T09:00:10Z")
 	if len(got.Reads) != 1 || len(got.Reads[0].Actions) != 1 || got.Reads[0].Actions[0].Outcome != store.RFIDDone || got.Reads[0].Actions[0].WorkID == "" {
 		t.Fatalf("dock read: %+v", got.Reads)
 	}
@@ -520,5 +534,89 @@ func TestAutomationFaultDivertAndCancelChangeTheWork(t *testing.T) {
 	}
 	if rec := cancel(fifth, `{"reason":"late"}`); rec.Code != 409 {
 		t.Fatalf("cancel an arrived order: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A reader never confirms in someone else's name: a put-away a person holds is left to them (SKIPPED). A confirmation
+// the warehouse refuses (the location is full) is REFUSED on the read and rolls back to the rule's savepoint: the work
+// the reader took is OPEN again and nothing moved, while the read itself is kept.
+func TestRFIDPutawayHeldByAPersonAndRefusedConfirmation(t *testing.T) {
+	pool := testkit.DB(t)
+	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := persistedRouter(store.New(pool))
+	wh := ids.New()
+	all := strings.Join([]string{dutySetupMaintain, dutySetupView, dutyReceive, dutyInquiry, dutyWorkSupervise, dutyWorkExecute, dutyRFIDIngest, dutyAutomation}, ",")
+	post := func(path, key, body, user string) *httptest.ResponseRecorder {
+		return call(h, req{method: "POST", path: path, duties: all, key: key, body: body, user: user})
+	}
+	if rec := post("/v1/warehouse/locations:bulk", "l1", `{"warehouseId":"`+wh+`","locations":[{"name":"B-01","zone":"B","capacity":{"allowMixedItems":true}}]}`, ""); rec.Code != 201 {
+		t.Fatalf("locations: %d %s", rec.Code, rec.Body)
+	}
+	if rec := post("/v1/warehouse/location-directives", "d1", `{"warehouseId":"`+wh+`","sequence":10,"workType":"PURCHASE_PUTAWAY","direction":"PUT","lines":[{"seq":1,"fromQty":"0","actions":[{"seq":1,"strategy":"consolidate","zone":"B"}]}]}`, ""); rec.Code != 201 {
+		t.Fatalf("directive: %d %s", rec.Code, rec.Body)
+	}
+	tagA, _ := domain.EncodeEPC96(0x31, 3, "0614141", "1000000101", nil)
+	tagB, _ := domain.EncodeEPC96(0x31, 3, "0614141", "1000000102", nil)
+	a, _ := domain.DecodeEPC(tagA)
+	b, _ := domain.DecodeEPC(tagB)
+	if rec := post("/v1/warehouse/receipts:from-asn", "asn", `{"warehouseId":"`+wh+`","asnRef":"ASN-HELD","lines":[{"lineNo":1,"itemId":"VALVE","lpId":"`+a.Key+`","expectedQty":"5"},{"lineNo":2,"itemId":"VALVE","lpId":"`+b.Key+`","expectedQty":"5"}]}`, ""); rec.Code != 201 {
+		t.Fatalf("ASN: %d %s", rec.Code, rec.Body)
+	}
+	var list struct{ Items []domain.ReceiptSummary }
+	rec := call(h, req{method: "GET", path: "/v1/warehouse/receipts?warehouseId=" + wh, duties: all})
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	works := map[int]string{}
+	for _, n := range []int{1, 2} {
+		rec := post(fmt.Sprintf("/v1/warehouse/receipts/%s/lines/%d:receive", list.Items[0].ID, n), fmt.Sprintf("r%d", n), `{"qty":"5"}`, "clerk")
+		var got store.Received
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 200 {
+			t.Fatalf("receive %d: %d %s", n, rec.Code, rec.Body)
+		}
+		works[n] = got.Work.ID
+	}
+	if rec := post("/v1/warehouse/rfid-rules", "", `{"readerId":"rack-B","action":"CONFIRM_PUTAWAY","locationCode":"B-01","warehouseId":"`+wh+`","postedBy":"gw"}`, ""); rec.Code != 201 {
+		t.Fatalf("rule: %d %s", rec.Code, rec.Body)
+	}
+	// A forklift driver takes the first put-away.
+	if rec := post("/v1/warehouse/work:assign", "as1", `{"warehouseId":"`+wh+`"}`, "driver-7"); rec.Code != 200 || !strings.Contains(rec.Body.String(), works[1]) {
+		t.Fatalf("assign: %d %s", rec.Code, rec.Body)
+	}
+	read := func(epc, at string) store.RFIDAction {
+		t.Helper()
+		rec := post("/v1/warehouse/rfid-reads:ingest", "", fmt.Sprintf(`{"reads":[{"readerId":"rack-B","epc":%q,"readAt":%q}]}`, epc, at), "gw")
+		var out store.RFIDIngest
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 || len(out.Reads) != 1 || len(out.Reads[0].Actions) != 1 {
+			t.Fatalf("ingest: %d %s", rec.Code, rec.Body)
+		}
+		return out.Reads[0].Actions[0]
+	}
+	work := func(id string) domain.Work {
+		var w domain.Work
+		rec := call(h, req{method: "GET", path: "/v1/warehouse/work/" + id, duties: all})
+		_ = json.Unmarshal(rec.Body.Bytes(), &w)
+		return w
+	}
+	if act := read(tagA, "2026-10-27T10:00:00Z"); act.Outcome != store.RFIDSkipped || !strings.Contains(act.Detail, "held by driver-7") {
+		t.Fatalf("a put-away a person holds: %+v", act)
+	}
+	if w := work(works[1]); w.Status != domain.WorkAssigned || w.AssignedUser != "driver-7" || w.Lines[0].Status != domain.LineOpen {
+		t.Fatalf("the person's work changed: %s %s", w.Status, w.AssignedUser)
+	}
+	// B-01 is now full: the reader's confirmation of the second pallet is refused and rolled back.
+	if _, err := pool.Exec(context.Background(), `update location set max_lps = 0 where name = 'B-01'`); err != nil {
+		t.Fatal(err)
+	}
+	act := read(tagB, "2026-10-27T10:01:00Z")
+	if act.Outcome != store.RFIDRefused || act.Detail == "" {
+		t.Fatalf("a refused confirmation: %+v", act)
+	}
+	if w := work(works[2]); w.Status != domain.WorkOpen || w.AssignedUser != "" || w.Lines[0].Status != domain.LineOpen {
+		t.Fatalf("the refused confirmation was not rolled back: %s %q", w.Status, w.AssignedUser)
+	}
+	rec = call(h, req{method: "GET", path: "/v1/warehouse/rfid-reads?key=" + b.Key, duties: all})
+	if !strings.Contains(rec.Body.String(), `"actionOutcome":"REFUSED"`) {
+		t.Fatalf("the refused read is kept with its outcome: %s", rec.Body)
 	}
 }

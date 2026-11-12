@@ -99,6 +99,10 @@ func (a *API) ingestRFID(w http.ResponseWriter, r *http.Request) {
 		}
 		reads = append(reads, store.RFIDRead{ReaderID: reader, Antenna: rd.Antenna, LocationCode: strings.TrimSpace(rd.LocationCode), EPC: rd.EPC, RSSI: rd.RSSI, ReadAt: at.UTC()})
 	}
+	poster := user(r, fields)
+	for i := range reads {
+		reads[i].PostedBy = poster
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -354,6 +358,7 @@ type rfidRuleInput struct {
 	Action       string `json:"action"`
 	WarehouseID  string `json:"warehouseId"`
 	LocationCode string `json:"locationCode"`
+	PostedBy     string `json:"postedBy"`
 }
 
 func (a *API) listRFIDRules(w http.ResponseWriter, r *http.Request) {
@@ -390,19 +395,26 @@ func (a *API) createRFIDRule(w http.ResponseWriter, r *http.Request) {
 		fields["action"] = "must be RECEIVE_PALLET or CONFIRM_PUTAWAY"
 	}
 	wh := strings.ToLower(strings.TrimSpace(in.WarehouseID))
-	if wh != "" && !ids.Valid(wh) {
-		fields["warehouseId"] = "must be a UUID"
+	if !ids.Valid(wh) {
+		fields["warehouseId"] = "is required, the UUID of the warehouse the rule acts in"
 	}
 	loc := strings.TrimSpace(in.LocationCode)
-	if len(loc) > 60 {
+	switch {
+	case len(loc) > 60:
 		fields["locationCode"] = "must be at most 60 characters"
+	case loc == "" && in.Action == store.RFIDConfirmPutaway:
+		fields["locationCode"] = "is required: the location of the warehouse the reader watches"
+	}
+	poster := strings.TrimSpace(in.PostedBy)
+	if poster == "" || len(poster) > 200 {
+		fields["postedBy"] = "is required: the user the reader's gateway posts its reads as"
 	}
 	who := user(r, fields)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
-	out, err := a.st.CreateRFIDRule(r.Context(), store.RFIDRule{ReaderID: reader, Antenna: in.Antenna, Action: in.Action, WarehouseID: wh, LocationCode: loc, CreatedBy: who})
+	out, err := a.st.CreateRFIDRule(r.Context(), store.RFIDRule{ReaderID: reader, Antenna: in.Antenna, Action: in.Action, WarehouseID: wh, LocationCode: loc, PostedBy: poster, CreatedBy: who})
 	if err != nil {
 		automationFail(w, r, err)
 		return

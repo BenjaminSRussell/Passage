@@ -10,21 +10,27 @@ ALTER TABLE rfid_read ADD COLUMN IF NOT EXISTS action text NOT NULL DEFAULT '';
 ALTER TABLE rfid_read ADD COLUMN IF NOT EXISTS action_outcome text NOT NULL DEFAULT '';
 ALTER TABLE rfid_read ADD COLUMN IF NOT EXISTS action_detail text NOT NULL DEFAULT '' CHECK (char_length(action_detail) <= 500);
 ALTER TABLE rfid_read ADD COLUMN IF NOT EXISTS action_ref text NOT NULL DEFAULT '';
+-- Who posted the read (the authenticated caller), against which a rule's posted_by is matched.
+ALTER TABLE rfid_read ADD COLUMN IF NOT EXISTS posted_by text NOT NULL DEFAULT '';
 
 -- A rule says what a read at a reader (or one antenna of it) does: RECEIVE_PALLET receives the ASN pallet whose SSCC was
 -- read (a dock-door portal), CONFIRM_PUTAWAY confirms the open put-away line of that pallet whose destination is the
--- rule's location (a portal or reader at the location).
+-- rule's location (a reader at the location). Both act in the rule's warehouse only. posted_by is the identity (the
+-- reader gateway's user) that posts this reader's reads: a read posted by anyone else is stored but runs no rule, so
+-- the reader id in a request body cannot borrow a rule.
 CREATE TABLE IF NOT EXISTS rfid_rule (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
   reader_id text NOT NULL CHECK (char_length(reader_id) BETWEEN 1 AND 64),
   antenna integer CHECK (antenna IS NULL OR antenna BETWEEN 0 AND 255),
   action text NOT NULL CHECK (action IN ('RECEIVE_PALLET', 'CONFIRM_PUTAWAY')),
-  warehouse_id text NOT NULL DEFAULT '' CHECK (char_length(warehouse_id) <= 60),
+  warehouse_id uuid NOT NULL,
   location_code text NOT NULL DEFAULT '' CHECK (char_length(location_code) <= 60),
+  posted_by text NOT NULL CHECK (char_length(posted_by) BETWEEN 1 AND 200),
   created_by text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (tenant_id, id)
+  PRIMARY KEY (tenant_id, id),
+  CHECK (action <> 'CONFIRM_PUTAWAY' OR location_code <> '')
 );
 CREATE UNIQUE INDEX IF NOT EXISTS rfid_rule_one_per_antenna ON rfid_rule (tenant_id, reader_id, coalesce(antenna, -1), action);
 

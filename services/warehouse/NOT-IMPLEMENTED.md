@@ -135,8 +135,10 @@ the work line as the station's identity in the same transaction, keyed by the or
 Added in round 3 (migration `0008`): SGTIN-198, SGLN-195, GRAI-170, GDTI-174 and GIAI-202 with their 7-bit alphanumeric
 serials (tags padded to a 16-bit word are accepted), GSRNP-96 and GID-96; the device app reads SGTIN-198 as a scan too.
 RFID rules per reader (`/v1/warehouse/rfid-rules`, duties `warehouse.setup.view`/`warehouse.setup.maintain`):
-RECEIVE_PALLET receives the expected ASN pallet whose SSCC or license plate a dock portal read, at the announced quantity;
-CONFIRM_PUTAWAY confirms the open put-away line of that pallet bound for the rule's location. Each read records what its rules
+each rule acts in one warehouse and names the identity that posts the reader's reads (a read posted by anyone else runs
+no rule). RECEIVE_PALLET receives the expected ASN pallet whose SSCC or license plate a dock portal read, at the announced
+quantity; CONFIRM_PUTAWAY confirms, as `rfid:<reader>`, the open put-away line of that pallet bound for the rule's
+location (a put-away a person holds is left for that person). Each read records what its rules
 did (DONE, SKIPPED, REFUSED with the reason); a refusal does not stop the batch. A PLC `fault` or `diverted` event notes the
 reason on the work line and returns a work still ASSIGNED to the station to OPEN for people; the line can be given to the PLC
 again. `POST /v1/warehouse/automation/transport-orders/{id}:cancel` (duty `warehouse.work.supervise`) cancels an order

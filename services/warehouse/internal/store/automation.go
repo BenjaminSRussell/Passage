@@ -25,6 +25,8 @@ type RFIDRead struct {
 	EPC          string // hexadecimal, 24 characters
 	RSSI         *int
 	ReadAt       time.Time
+	// PostedBy is the authenticated caller that posted the read; only a rule naming it acts on the read.
+	PostedBy string
 }
 
 // RFIDRejected is a read that was not stored, with its position in the batch.
@@ -116,8 +118,8 @@ func (s *Store) IngestRFID(ctx context.Context, reads []RFIDRead) (RFIDIngest, e
 			}
 			seen[seenKey{rd.ReaderID, hex}] = append(seen[seenKey{rd.ReaderID, hex}], rd.ReadAt)
 			id := ids.New()
-			if _, err := tx.Exec(ctx, `insert into rfid_read (tenant_id, id, reader_id, antenna, location_code, epc_hex, scheme, gs1_key, serial, rssi, read_at)
-				values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, tenantID(ctx), id, rd.ReaderID, rd.Antenna, rd.LocationCode, hex, epc.Scheme, epc.Key, epc.Serial, rd.RSSI, rd.ReadAt); err != nil {
+			if _, err := tx.Exec(ctx, `insert into rfid_read (tenant_id, id, reader_id, antenna, location_code, epc_hex, scheme, gs1_key, serial, rssi, read_at, posted_by)
+				values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, tenantID(ctx), id, rd.ReaderID, rd.Antenna, rd.LocationCode, hex, epc.Scheme, epc.Key, epc.Serial, rd.RSSI, rd.ReadAt, rd.PostedBy); err != nil {
 				return err
 			}
 			stored := RFIDStored{Index: i, ID: id, EPC: epc}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,25 +34,26 @@ const (
 	CodeRFIDRuleNotFound = "WMS-RFID-RULE-NOT-FOUND" // 404
 )
 
-// RFIDRule is one rule of a reader. Antenna nil matches every antenna of the reader. WarehouseID limits a receive to
-// the receipts of that warehouse; LocationCode is the location a put-away must be bound for (the read's own location
-// code when empty).
+// RFIDRule is one rule of a reader. Antenna nil matches every antenna of the reader. The rule acts in WarehouseID
+// only; LocationCode (required for CONFIRM_PUTAWAY) is the location of that warehouse a put-away must be bound for.
+// PostedBy is the authenticated identity that posts the reader's reads: a read posted by anyone else runs no rule.
 type RFIDRule struct {
 	ID           string    `json:"id"`
 	ReaderID     string    `json:"readerId"`
 	Antenna      *int      `json:"antenna,omitempty"`
 	Action       string    `json:"action"`
-	WarehouseID  string    `json:"warehouseId,omitempty"`
+	WarehouseID  string    `json:"warehouseId"`
 	LocationCode string    `json:"locationCode,omitempty"`
+	PostedBy     string    `json:"postedBy"`
 	CreatedBy    string    `json:"createdBy"`
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
-const ruleCols = `id::text, reader_id, antenna, action, warehouse_id, location_code, created_by, created_at`
+const ruleCols = `id::text, reader_id, antenna, action, warehouse_id::text, location_code, posted_by, created_by, created_at`
 
 func scanRule(row pgx.Row) (RFIDRule, error) {
 	var r RFIDRule
-	err := row.Scan(&r.ID, &r.ReaderID, &r.Antenna, &r.Action, &r.WarehouseID, &r.LocationCode, &r.CreatedBy, &r.CreatedAt)
+	err := row.Scan(&r.ID, &r.ReaderID, &r.Antenna, &r.Action, &r.WarehouseID, &r.LocationCode, &r.PostedBy, &r.CreatedBy, &r.CreatedAt)
 	r.CreatedAt = r.CreatedAt.UTC()
 	return r, err
 }
@@ -63,8 +63,8 @@ func (s *Store) CreateRFIDRule(ctx context.Context, r RFIDRule) (RFIDRule, error
 	var out RFIDRule
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var err error
-		out, err = scanRule(tx.QueryRow(ctx, `insert into rfid_rule (tenant_id, id, reader_id, antenna, action, warehouse_id, location_code, created_by)
-			values ($1,$2,$3,$4,$5,$6,$7,$8) returning `+ruleCols, tenantID(ctx), ids.New(), r.ReaderID, r.Antenna, r.Action, r.WarehouseID, r.LocationCode, r.CreatedBy))
+		out, err = scanRule(tx.QueryRow(ctx, `insert into rfid_rule (tenant_id, id, reader_id, antenna, action, warehouse_id, location_code, posted_by, created_by)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning `+ruleCols, tenantID(ctx), ids.New(), r.ReaderID, r.Antenna, r.Action, r.WarehouseID, r.LocationCode, r.PostedBy, r.CreatedBy))
 		if err != nil && mapErr(err) == ErrConflict {
 			return &domain.Error{Code: CodeRFIDRuleExists, Detail: fmt.Sprintf("reader %s has a %s rule for that antenna already", r.ReaderID, r.Action)}
 		}
@@ -142,6 +142,11 @@ func (s *Store) actOnRead(ctx context.Context, tx pgx.Tx, rules []RFIDRule, read
 			continue
 		}
 		act := RFIDAction{RuleID: rule.ID, Action: rule.Action}
+		if rd.PostedBy != rule.PostedBy {
+			act.Outcome, act.Detail = RFIDSkipped, "the read was not posted by the identity this reader's rule accepts"
+			out = append(out, act)
+			continue
+		}
 		if epc.Scheme != "SSCC-96" {
 			act.Outcome, act.Detail = RFIDSkipped, "the tag is a "+epc.Scheme+", not a pallet's SSCC"
 			out = append(out, act)
@@ -214,7 +219,7 @@ func receiveByRead(ctx context.Context, tx pgx.Tx, rule RFIDRule, rd RFIDRead, s
 	var lineNo int
 	var expected string
 	err := tx.QueryRow(ctx, `select l.receipt_id::text, l.line_no, l.expected_qty::text from receipt_line l join receipt r on r.id = l.receipt_id
-		where (l.sscc = $1 or l.lp_id = $1) and l.status = 'EXPECTED' and ($2 = '' or r.warehouse_id::text = $2)
+		where (l.sscc = $1 or l.lp_id = $1) and l.status = 'EXPECTED' and r.warehouse_id = $2::uuid
 		order by r.created_at limit 1`, sscc, rule.WarehouseID).Scan(&receiptID, &lineNo, &expected)
 	if errors.Is(err, pgx.ErrNoRows) {
 		act.Outcome, act.Detail = RFIDSkipped, "no expected ASN pallet has this SSCC"
@@ -236,23 +241,18 @@ func receiveByRead(ctx context.Context, tx pgx.Tx, rule RFIDRule, rd RFIDRead, s
 	return nil
 }
 
-// confirmPutawayByRead confirms the open put-away line of the pallet that was read at the rule's location (or the
-// read's location): the reader is the proof that the pallet arrived. An OPEN work is taken by the reader's identity;
-// a work a person holds is confirmed for that person, who brought the pallet.
+// confirmPutawayByRead confirms the open put-away line of the pallet that was read at the rule's location, a location
+// of the rule's warehouse: the reader is the proof that the pallet arrived. Like a PLC station's arrival, the reader
+// takes an OPEN work as its own identity (rfid:<reader>) and confirms it, so the confirmation is attributed to the
+// reader. A work a person holds is left for that person to confirm (SKIPPED with the reason): the reader never acts
+// in someone else's name.
 func (s *Store) confirmPutawayByRead(ctx context.Context, tx pgx.Tx, rule RFIDRule, readID string, rd RFIDRead, sscc string, now time.Time, act *RFIDAction, claims *undoLog) error {
 	location := rule.LocationCode
-	if location == "" {
-		location = rd.LocationCode
-	}
-	if location == "" {
-		act.Outcome, act.Detail = RFIDSkipped, "the rule and the read name no location"
-		return nil
-	}
 	var workID string
 	var lineNo int
 	err := tx.QueryRow(ctx, `select l.work_id::text, l.line_no from work_line l join work w on w.id = l.work_id join location loc on loc.id = l.to_location_id
-		where l.attributes->>'sscc' = $1 and l.status = 'OPEN' and l.direction = 'PUT' and loc.name = $2
-		  and w.status in ('OPEN', 'ASSIGNED', 'IN_PROGRESS') and ($3 = '' or w.warehouse_id::text = $3)
+		where l.attributes->>'sscc' = $1 and l.status = 'OPEN' and l.direction = 'PUT' and loc.name = $2 and loc.warehouse_id = $3::uuid
+		  and w.status in ('OPEN', 'ASSIGNED', 'IN_PROGRESS') and w.warehouse_id = $3::uuid
 		order by w.created_at limit 1`, sscc, location, rule.WarehouseID).Scan(&workID, &lineNo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		act.Outcome, act.Detail = RFIDSkipped, "no open put-away of this pallet is bound for "+location
@@ -265,24 +265,28 @@ func (s *Store) confirmPutawayByRead(ctx context.Context, tx pgx.Tx, rule RFIDRu
 	if err != nil {
 		return err
 	}
-	user := w.AssignedUser
-	if w.Status == domain.WorkOpen {
-		user = RFIDUser(rd.ReaderID)
-		if err := w.Assign(user, now); err != nil {
+	reader := RFIDUser(rd.ReaderID)
+	switch {
+	case w.Status == domain.WorkOpen:
+		if err := w.Assign(reader, now); err != nil {
 			return err
 		}
 		if err := updateWork(ctx, tx, &w); err != nil {
 			return err
 		}
+	case w.AssignedUser != reader:
+		act.Outcome, act.WorkID, act.LineNo = RFIDSkipped, workID, lineNo
+		act.Detail = fmt.Sprintf("the pallet reached %s, but the put-away is held by %s, who confirms it", location, w.AssignedUser)
+		return nil
 	}
 	line, err := w.Line(lineNo)
 	if err != nil {
 		return err
 	}
-	if _, _, err := s.confirmLineTx(ctx, tx, Idem{Key: "rfid-putaway:" + readID, Hash: "rfid-putaway"}, ConfirmInput{WorkID: workID, LineNo: lineNo, Qty: line.Qty, User: user, Now: now}, claims); err != nil {
+	if _, _, err := s.confirmLineTx(ctx, tx, Idem{Key: "rfid-putaway:" + readID, Hash: "rfid-putaway"}, ConfirmInput{WorkID: workID, LineNo: lineNo, Qty: line.Qty, User: reader, Now: now}, claims); err != nil {
 		return err
 	}
 	act.Outcome, act.WorkID, act.LineNo = RFIDDone, workID, lineNo
-	act.Detail = fmt.Sprintf("put-away line %d confirmed at %s for %s", lineNo, location, strings.TrimPrefix(user, "rfid:"))
+	act.Detail = fmt.Sprintf("put-away line %d confirmed at %s by reader %s", lineNo, location, rd.ReaderID)
 	return nil
 }
