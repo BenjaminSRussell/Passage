@@ -170,6 +170,8 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	"revrec": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
+		// revrec has billing invoice or credit a contract modification's price change (#29).
+		"billing": {"billing.contract-modification.bill"},
 	},
 	"costacct": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup"},

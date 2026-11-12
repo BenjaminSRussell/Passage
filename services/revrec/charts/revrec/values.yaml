@@ -12,6 +12,11 @@ migrateOnStart: false
 ledgerUrl: ""
 # Legal entity id -> ledger id; required when ledgerUrl is set (rendered as REVREC_LEDGER_IDS).
 ledgerIds: {}
+# Billing base URL for the modification billing reporter (#29): a contract modification's price change is sent to billing's
+# POST /v1/billing/contract-modifications (needs serviceIdentity.signingKeySecret). Unset, the requests wait PENDING.
+billingUrl: ""
+# How often the reporter sends due requests (REVREC_BILLING_INTERVAL).
+billingInterval: 30s
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

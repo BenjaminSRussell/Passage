@@ -9,6 +9,8 @@ controlAccount: "2000"
 fxUrl: ""
 partyUrl: ""
 taxUrl: ""
+# How often the withholding reporter sends the tax payment runs withheld to the tax service (#13; with taxUrl).
+withholdingReportInterval: 30s
 fxRateType: "spot"
 replicaCount: 1
 resources:

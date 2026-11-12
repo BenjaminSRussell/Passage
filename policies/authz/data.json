@@ -522,6 +522,7 @@
       {"resource": "/v1/billing/credit-reservations/*:release", "methods": ["POST"]}
     ]},
     "billing.invoice.read": {"service_only": true, "permissions": [{"resource": "/v1/billing/invoices/*", "methods": ["GET"]}]},
+    "billing.contract-modification.bill": {"service_only": true, "permissions": [{"resource": "/v1/billing/contract-modifications", "methods": ["POST"]}]},
     "sales.order.lookup": {"service_only": true, "permissions": [{"resource": "/v1/sales/orders/*", "methods": ["GET"]}]},
     "inventory.hold.apply": {"service_only": true, "permissions": [
       {"resource": "/v1/inventory/holds", "methods": ["POST"]},
@@ -1051,7 +1052,7 @@
     "receivables.aging.run": {"permissions": [{"resource": "/v1/receivables/aging-snapshots", "methods": ["POST"]}]},
     "receivables.bankaccount.manage": {"permissions": [{"resource": "/v1/receivables/bank-accounts", "methods": ["PUT", "DELETE"]}]},
     "receivables.fxsetting.manage": {"permissions": [{"resource": "/v1/receivables/fx-settings", "methods": ["PUT"]}]},
-    "receivables.payment.reverse": {"permissions": [{"resource": "/v1/receivables/payments/*:reverse", "methods": ["POST"]}]},
+    "receivables.payment.reverse": {"permissions": [{"resource": "/v1/receivables/payments/*:reverse", "methods": ["POST"]}, {"resource": "/v1/receivables/payments/*:unapply", "methods": ["POST"]}]},
     "receivables.payment-file.import": {"permissions": [
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["POST"]},
       {"resource": "/v1/receivables/lockbox/imports", "methods": ["POST"]}
@@ -3397,7 +3398,8 @@
     "receivables.openitem.from-billing": {"flag": true, "permissions": []},
     "revrec.post": {"permissions": [
       {"resource": "/v1/revrec/recognition-runs", "methods": ["POST"]},
-      {"resource": "/v1/revrec/journal-postings", "methods": ["POST"]}
+      {"resource": "/v1/revrec/journal-postings", "methods": ["POST"]},
+      {"resource": "/v1/revrec/modifications/*:retry-billing", "methods": ["POST"]}
     ]},
     "revrec.view": {"permissions": [
       {"resource": "/v1/revrec/allocations:preview", "methods": ["POST"]},
@@ -4019,7 +4021,8 @@
       "audit": ["audit.write"]
     },
     "revrec": {
-      "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
+      "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"],
+      "billing": ["billing.contract-modification.bill"]
     },
     "costacct": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup"]
@@ -4164,6 +4167,8 @@
     "receiving-erasure": ["compliance.legal-hold.check"],
     "receivables-billing": ["receivables.openitem.from-billing"],
     "revrec-creditnotes": ["revrec.creditnote.reverse", "revrec.contract.from-invoice"],
+    "revrec-billing": ["billing.contract-modification.bill"],
+    "payables-withholding": ["tax.withholding.record"],
     "receiving-ers": ["receiving.vendor-invoice.post"],
     "scheduling-downtime": ["scheduling.downtime.apply"],
     "scheduling-order-import": ["scheduling.order.import"],

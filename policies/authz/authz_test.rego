@@ -3174,4 +3174,33 @@ test_audit_read_log_review_opens_only_the_break_glass_queue if {
 	not allowed("audit.read-log.review", "POST", "/v1/audit/reads")
 	not allowed("audit.read-log.view", "GET", "/v1/audit/reads:break-glass")
 	not allowed("audit.read-log.export", "POST", "/v1/audit/reads/0b7f4c1e-1d2a-4c55-9a0e-5f3f1c2d9e10:review")
+
+test_revrec_billing_holds_only_the_service_only_modification_duty if {
+	data.service_principals["revrec-billing"] == ["billing.contract-modification.bill"]
+	data.duties["billing.contract-modification.bill"].service_only
+	"billing.contract-modification.bill" in data.service_grants.revrec.billing
+	allowed("billing.contract-modification.bill", "POST", "/v1/billing/contract-modifications")
+	not allowed("billing.contract-modification.bill", "POST", "/v1/billing/free-text-invoices")
+	not allowed("billing.contract-modification.bill", "POST", "/v1/billing/credit-notes")
+	not allowed("billing.contract-modification.bill", "POST", "/v1/billing/invoices/i1:post")
+	not allowed("billing.invoice.maintain", "POST", "/v1/billing/contract-modifications")
+}
+
+test_revrec_modification_billing_retry_is_a_posting_duty if {
+	allowed("revrec.post", "POST", "/v1/revrec/modifications/m1:retry-billing")
+	not allowed("revrec.view", "POST", "/v1/revrec/modifications/m1:retry-billing")
+	not allowed("revrec.maintain", "POST", "/v1/revrec/modifications/m1:retry-billing")
+}
+
+test_receivables_unapply_is_the_reversal_duty if {
+	allowed("receivables.payment.reverse", "POST", "/v1/receivables/payments/p1:unapply")
+	not allowed("receivables.payment.post", "POST", "/v1/receivables/payments/p1:unapply")
+	not allowed("receivables.view", "POST", "/v1/receivables/payments/p1:unapply")
+}
+
+test_payables_withholding_reporter_holds_only_the_record_duty if {
+	data.service_principals["payables-withholding"] == ["tax.withholding.record"]
+	"tax.withholding.record" in data.service_grants.payables.tax
+	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/remittance-runs")
 }

@@ -1,0 +1,26 @@
+{{- if and .Values.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: receivables
+    {{- with .Values.alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: receivables.ledger
+      rules:
+        # #30: a journal the ledger refused stays parked until an operator fixes the cause and retries it
+        # (POST /v1/receivables/gl-journals/{id}:retry or the ledger journals screen); until then the ledger and the subledger differ.
+        - alert: ReceivablesGLJournalsParked
+          expr: max(receivables_gl_journals_parked{namespace="{{ .Release.Namespace }}"}) > 0
+          for: {{ .Values.alerts.parkedFor }}
+          labels:
+            severity: {{ .Values.alerts.severity | quote }}
+            service: receivables
+          annotations:
+            summary: Receivables journals are parked after a ledger refusal
+            description: {{ "{{ $value }}" }} receivables journals are parked. The ledger refused them (for example a closed period or an unknown account); fix the cause and retry them from the ledger journals screen.
+{{- end }}

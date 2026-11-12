@@ -16,8 +16,10 @@ const Context = "receivables"
 var (
 	PaymentReceived = events.Type(Context, "payment", "received", 1)
 	PaymentApplied  = events.Type(Context, "payment", "applied", 1)
-	DisputeOpened   = events.Type(Context, "dispute", "opened", 1)
-	DisputeResolved = events.Type(Context, "dispute", "resolved", 1)
+	// PaymentUnapplied is published when a payment's applications are reversed (#30): the items it settled are open again.
+	PaymentUnapplied = events.Type(Context, "payment", "unapplied", 1)
+	DisputeOpened    = events.Type(Context, "dispute", "opened", 1)
+	DisputeResolved  = events.Type(Context, "dispute", "resolved", 1)
 	// DunningLetterIssued is the PRD's dunning-letter.issued.v1; the kernel's
 	// naming rule allows no hyphen, so the entity is "dunningletter".
 	DunningLetterIssued = events.Type(Context, "dunningletter", "issued", 1)
@@ -142,6 +144,10 @@ type CreditSettledData struct {
 type CreditSettledDebit struct {
 	OpenItemID string          `json:"open_item_id"`
 	Amount     decimal.Decimal `json:"amount"`
+	// ItemCurrency and ItemAmount are set for a cross-currency settlement: the debit's currency and what came off it in that
+	// currency (amount is then in the credit's currency).
+	ItemCurrency string          `json:"item_currency,omitempty"`
+	ItemAmount   decimal.Decimal `json:"item_amount,omitempty"`
 }
 
 // CaseOpenedData is the payload of dev.passage.receivables.case.opened.v1.
@@ -240,4 +246,14 @@ type DeductionResolvedData struct {
 	RebillItemID  *string          `json:"rebill_item_id"`
 	ChildIDs      []string         `json:"child_ids"`
 	Postings      []domain.Posting `json:"postings"`
+}
+
+// PaymentUnappliedData is the payload of payment.unapplied.v1: the settlements reversed, as they were applied.
+type PaymentUnappliedData struct {
+	PaymentID     string           `json:"payment_id"`
+	LegalEntityID string           `json:"legal_entity_id"`
+	CustomerID    *string          `json:"customer_id"`
+	Currency      string           `json:"currency"`
+	Settlements   []SettlementData `json:"settlements"`
+	Reason        string           `json:"reason,omitempty"`
 }

@@ -188,3 +188,23 @@ func TestPlanCredit_NeverExceedsTheOriginal(t *testing.T) {
 		}
 	})
 }
+
+// A credit by amount takes the net exactly, the quantity and tax in proportion, and the last of a line exactly what is left.
+func TestPlanAmountCredit(t *testing.T) {
+	d := decimal.RequireFromString
+	orig := []PostedLine{{Line: Line{No: 1, Description: "Support", Qty: d("12"), UnitPrice: d("100"), RevenueAccount: "4000", TaxCode: "S19"}, Net: d("1200.00"), Tax: d("228.00")}}
+	totals := Totals{Net: d("1200.00"), Charges: decimal.Zero, Tax: d("228.00"), Gross: d("1428.00")}
+	lines, got, err := PlanAmountCredit("EUR", orig, totals, CreditUsage{}, []AmountCredit{{LineNo: 1, Net: d("300.00")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lines[0].Net.Equal(d("300")) || !lines[0].Tax.Equal(d("57")) || !lines[0].Line.Qty.Equal(d("3")) || !got.Gross.Equal(d("357")) {
+		t.Fatalf("credit %+v totals %+v", lines[0], got)
+	}
+	if _, _, err := PlanAmountCredit("EUR", orig, totals, CreditUsage{}, []AmountCredit{{LineNo: 1, Net: d("1200.01")}}); err == nil {
+		t.Fatal("a credit above the line was accepted")
+	}
+	if _, _, err := PlanAmountCredit("EUR", orig, totals, CreditUsage{}, []AmountCredit{{LineNo: 1, Net: d("0.001")}}); err == nil {
+		t.Fatal("a credit below the minor unit was accepted")
+	}
+}

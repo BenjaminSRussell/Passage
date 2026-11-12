@@ -124,6 +124,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE receivables_payment_matches_total counter\nreceivables_payment_matches_total %d\n", a.matched.Load())
 		fmt.Fprintf(w, "# TYPE receivables_rma_reservation_attention_total counter\nreceivables_rma_reservation_attention_total %d\n", store.ReservationAttention.Load())
 		fmt.Fprintf(w, "# TYPE receivables_failures_total counter\nreceivables_failures_total %d\n", a.failed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP receivables_gl_journals_parked_total Journals this process parked after a ledger refusal.\n# TYPE receivables_gl_journals_parked_total counter\nreceivables_gl_journals_parked_total %d\n", store.JournalsParked.Load())
+		_, _ = fmt.Fprintf(w, "# HELP receivables_gl_journals_parked Parked journals still owed to the ledger, as the journal sweep last counted them.\n# TYPE receivables_gl_journals_parked gauge\nreceivables_gl_journals_parked %d\n", store.ParkedJournals.Load())
 	})
 }
 
@@ -294,6 +296,8 @@ func (a *API) paymentAction(w http.ResponseWriter, r *http.Request) {
 		a.matchPayment(w, r, id)
 	case "reverse":
 		a.reversePayment(w, r, id)
+	case "unapply":
+		a.unapplyPayment(w, r, id)
 	default:
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodePaymentNotFound, "unknown payment action "+action))
 	}

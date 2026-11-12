@@ -411,3 +411,24 @@ func TestReversalPostings_RefusalBacksOffAndParks(t *testing.T) {
 	}
 	requireTied(t, "after the retried reversal", g.reconcile(t, "2027-03"))
 }
+
+// A credit note billing issued for a contract modification's price decrease is acknowledged without touching the schedule: the
+// modification already re-allocated the contract.
+func TestCreditNoteConsumer_SkipsTheCreditNoteOfAContractModification(t *testing.T) {
+	g := newLedgerRig(t)
+	g.bill(t, "3600.00", "2027-03-10")
+	call(t, g.handler, http.MethodPost, "/v1/revrec/contracts", bundleContract, map[string]string{idempotencyKey: idemKey})
+	evt := g.creditNote(t, "CN-2027-0000009", "2027-03-20", creditLine{bundleSupport, "0.00", "250.00"})
+	var d map[string]any
+	if err := json.Unmarshal(evt.Data, &d); err != nil {
+		t.Fatal(err)
+	}
+	d["contract_modification_id"] = ids.New()
+	evt.Data, _ = json.Marshal(d)
+	if err := g.consume(t, evt); err != nil {
+		t.Fatalf("modification credit note: %v", err)
+	}
+	if rf := g.rollForward(t, "2027-03"); rf.Adjustments != "0.00" {
+		t.Errorf("roll-forward adjustments %s, want 0.00", rf.Adjustments)
+	}
+}
