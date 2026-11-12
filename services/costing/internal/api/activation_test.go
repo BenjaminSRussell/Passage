@@ -371,3 +371,18 @@ func TestCurrentCost_FR205Lookup(t *testing.T) {
 		}
 	}
 }
+
+// The packing slip poster records each line's unit cost and its cost version, so the slip duty reads the
+// standard cost and the versions, and nothing else of costing.
+func TestCostReads_TakeTheSlipPostersDuty(t *testing.T) {
+	h, fs := server()
+	fs.version = draftVersion()
+	for _, path := range []string{"/v1/costing/versions", "/v1/costing/versions/" + fs.version.ID, "/v1/costing/products/" + ids.New() + "/cost?site=" + ids.New()} {
+		if rec := call(h, http.MethodGet, path, "", dutySlipPost, nil); rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized {
+			t.Errorf("%s with %s: status %d, want the duty to be enough", path, dutySlipPost, rec.Code)
+		}
+	}
+	if rec := call(h, http.MethodGet, "/v1/costing/valuation-ledgers", "", dutySlipPost, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("valuation ledgers with %s: status %d, want 403", dutySlipPost, rec.Code)
+	}
+}

@@ -188,8 +188,7 @@ describe("Order quantity rules on the create form", () => {
     await userEvent.click(within(form).getByRole("button", { name: "Add component" }));
     fireEvent.change(within(form).getByLabelText("Item"), { target: { value: uuid(4) } });
     await userEvent.type(within(form).getByLabelText("Quantity per unit"), "1");
-    await within(form).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(form).getByLabelText("Resource"), uuid(5));
+    fireEvent.change(within(form).getByLabelText("Resource"), { target: { value: uuid(5) } });
     await userEvent.click(within(form).getByRole("button", { name: "Create production order" }));
 
     await waitFor(() => expect(calls(fetchMock).some(([, init]) => init?.method === "POST")).toBe(true));

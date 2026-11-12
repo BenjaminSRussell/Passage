@@ -52,7 +52,7 @@ export function validateAction(v: ActionValues): { errors: Errors; input?: NewPe
   if (!UUID.test(v.workerId.trim())) errors.workerId = "Choose the worker.";
   if (!DATE.test(v.effectiveDate)) errors.effectiveDate = "Choose the effective date.";
   if (v.reason.trim().length > 500) errors.reason = "Use up to 500 characters.";
-  if (v.actionType !== "HIRE" && !UUID.test(v.employmentId.trim())) errors.employmentId = "Enter the employment's id.";
+  if (v.actionType !== "HIRE" && !UUID.test(v.employmentId.trim())) errors.employmentId = "Choose the employment.";
 
   const details: ActionPayload = {};
   const position = v.positionId.trim();
@@ -137,8 +137,19 @@ export function NewPersonnelActionPage() {
             onChange={(v) => update({ actionType: v as ActionType })}
             options={labelled(TYPES)}
           />
-          <LookupField entity="worker" id="action-workerId" label="Worker" value={values.workerId} error={form.errors.workerId} onChange={(workerId) => update({ workerId })} />
-          {actionType !== "HIRE" ? text("employmentId", "Employment id") : null}
+          <LookupField entity="worker" id="action-workerId" label="Worker" value={values.workerId} error={form.errors.workerId} onChange={(workerId) => update({ workerId, employmentId: "" })} />
+          {actionType !== "HIRE" ? (
+            <LookupField
+              entity="employment"
+              id="action-employmentId"
+              label="Employment"
+              hint={values.workerId ? "The worker's employments, newest last." : "Choose the worker first."}
+              scope={{ workerId: values.workerId || undefined }}
+              value={values.employmentId}
+              error={form.errors.employmentId}
+              onChange={(employmentId) => update({ employmentId })}
+            />
+          ) : null}
           {text("effectiveDate", "Effective date", { type: "date" })}
           {actionType === "HIRE" ? (
             <>

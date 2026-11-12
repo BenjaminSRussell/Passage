@@ -1,5 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import { Alert, Button, Card, DataTable, FormField, Input, Select, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
@@ -158,7 +160,7 @@ const downtimeColumns: DataTableColumn<DowntimeWindow>[] = [
   { key: "from", header: "From (UTC)", mono: true, render: (row) => minuteOf(row.from) },
   { key: "to", header: "To (UTC)", mono: true, render: (row) => minuteOf(row.to) },
   { key: "minutes", header: "Minutes", align: "end" },
-  { key: "resourceId", header: "Production resource", mono: true },
+  { key: "resourceId", header: "Production resource", render: (row) => (row.resourceId ? <EntityName entity="resource" id={row.resourceId} /> : dash) },
   { key: "recordedBy", header: "By", render: (row) => row.recordedBy ?? dash },
 ];
 
@@ -177,7 +179,7 @@ export function validateDowntime(values: DowntimeValues): { errors: Partial<Reco
   if (!to) errors.to = "Enter when the resource ran again.";
   else if (from && Date.parse(to) - Date.parse(from) < 60_000) errors.to = "The stop must end at least one minute after it began.";
   const resourceId = values.resourceId.trim();
-  if (resourceId && !UUID.test(resourceId)) errors.resourceId = "Enter the production resource id (a UUID), or leave it empty.";
+  if (resourceId && !UUID.test(resourceId)) errors.resourceId = "Choose the production resource, or leave it empty.";
   if (Object.keys(errors).length > 0) return { errors };
   return { errors, input: { from: from!, to: to!, ...(resourceId ? { resourceId } : {}) } };
 }
@@ -226,9 +228,7 @@ export function DowntimeCard({ wo, onSaved }: { wo: WorkOrderDetail; onSaved(tex
             <FormField id="dt-to" label="Running again at (UTC)" error={errors.to}>
               {(control) => <Input {...control} type="datetime-local" value={values.to} invalid={Boolean(errors.to)} onChange={(e) => update({ to: e.target.value })} />}
             </FormField>
-            <FormField id="dt-resource" label="Production resource id" hint="Leave empty for the asset's production resource." error={errors.resourceId}>
-              {(control) => <Input {...control} value={values.resourceId} invalid={Boolean(errors.resourceId)} onChange={(e) => update({ resourceId: e.target.value })} />}
-            </FormField>
+            <LookupFormField id="dt-resource" label="Production resource" entity="resource" optional hint="Leave empty for the asset's production resource." value={values.resourceId} error={errors.resourceId} onChange={(resourceId) => update({ resourceId })} />
             {failure ? (
               <div className={styles.formActions}>
                 <Failure title={failure.code === "EAM-DT-001" ? "Downtime not recorded" : "Could not record the downtime"} problem={failure} />

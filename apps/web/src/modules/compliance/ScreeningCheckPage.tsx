@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Textarea, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, screenSubject, SUBJECT_TYPES, type ListEntry, type Problem, type ScreeningHit, type ScreeningResult, type ScreeningSubject, type SubjectType } from "./api/client";
@@ -56,7 +57,7 @@ type Errors = Partial<Record<Exclude<keyof ScreenValues, "type">, string>>;
 /** Checks the form and builds the request; mirrors the service's field checks. */
 export function toScreenInput(v: ScreenValues): { subject?: ScreeningSubject; entries?: ListEntry[]; errors: Errors } {
   const errors: Errors = {};
-  if (!UUID.test(v.id.trim())) errors.id = "Enter the party's or document's UUID.";
+  if (!UUID.test(v.id.trim())) errors.id = v.type === "PARTY" ? "Choose the party." : "Enter the document's UUID.";
   if (!v.name.trim()) errors.name = "Enter the name to screen.";
   if (v.country.trim() && !COUNTRY.test(v.country.trim())) errors.country = "Use a two-letter country code such as DE.";
   const parsed = parseEntries(v.entries);
@@ -129,7 +130,7 @@ export function ScreeningCheckPage() {
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Screening check">
           <FormField id="screen-type" label="Subject type">
             {(control) => (
-              <Select {...control} value={values.type} onChange={(e) => set("type", e.target.value as SubjectType)}>
+              <Select {...control} value={values.type} onChange={(e) => setValues((v) => ({ ...v, type: e.target.value as SubjectType, id: "" }))}>
                 {SUBJECT_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {sentence(t)}
@@ -138,9 +139,22 @@ export function ScreeningCheckPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="screen-id" label="Subject id" error={errors.id}>
-            {(control) => <Input {...control} className={styles.mono} value={values.id} onChange={(e) => set("id", e.target.value)} invalid={Boolean(errors.id)} />}
-          </FormField>
+          {values.type === "PARTY" ? (
+            <LookupFormField
+              id="screen-id"
+              label="Party"
+              entity="party"
+              prefill={false}
+              hint="The customer, vendor, bank or worker's party; its name fills in below."
+              value={values.id}
+              error={errors.id}
+              onChange={(id, option) => setValues((v) => ({ ...v, id, name: option && v.name.trim() === "" ? option.name : v.name }))}
+            />
+          ) : (
+            <FormField id="screen-id" label="Document id" hint="A sales order, delivery, purchase order or payment; no single list spans them." error={errors.id}>
+              {(control) => <Input {...control} className={styles.mono} value={values.id} onChange={(e) => set("id", e.target.value)} invalid={Boolean(errors.id)} />}
+            </FormField>
+          )}
           <FormField id="screen-name" label="Name" error={errors.name}>
             {(control) => <Input {...control} value={values.name} onChange={(e) => set("name", e.target.value)} invalid={Boolean(errors.name)} />}
           </FormField>

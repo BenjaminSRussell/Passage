@@ -253,6 +253,12 @@ func TestResolve_ValidationAndDuties(t *testing.T) {
 	}
 	if code, _ := call(t, h, http.MethodPost, "/v1/pricing/condition-records", "pricing.view", fmt.Sprintf(recordBody, legalEntity, "1")); code != http.StatusForbidden {
 		t.Fatalf("a viewer must not maintain records, got %d", code)
+	}	// Sales order entry prefills the unit price from resolve with the clerk's own duty, which reads nothing else.
+	if code, out := call(t, h, http.MethodPost, "/v1/pricing/resolve", "sales.order.write", fmt.Sprintf(resolveBody, legalEntity, "1")); code != http.StatusOK {
+		t.Fatalf("sales.order.write must resolve a price, got %d %v", code, out)
+	}
+	if code, _ := call(t, h, http.MethodGet, "/v1/pricing/condition-records?legalEntityId="+legalEntity, "sales.order.write", ""); code != http.StatusForbidden {
+		t.Fatalf("sales.order.write must not list condition records, got %d", code)
 	}
 }
 

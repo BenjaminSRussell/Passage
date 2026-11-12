@@ -563,7 +563,7 @@ describe("trade agreements", () => {
     const fetchMock = stubFetch(() => problem(409, "PRC-TA-002", "overlapping trade agreement row"));
     renderAt("/purchasing/trade-agreements/new");
     fireEvent.change(await screen.findByLabelText("Vendor level"), { target: { value: "ALL" } });
-    expect(screen.queryByLabelText("Vendor or group id")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Vendor")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Item level"), { target: { value: "ALL" } });
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "8" } });
     fireEvent.click(screen.getByRole("button", { name: "Save price row" }));
@@ -576,8 +576,8 @@ describe("trade agreements", () => {
   it("rejects a to quantity at or below the from quantity", async () => {
     const fetchMock = stubFetch(() => json({}));
     renderAt("/purchasing/trade-agreements/new");
-    fireEvent.change(await screen.findByLabelText("Vendor or group id"), { target: { value: VENDOR } });
-    fireEvent.change(screen.getByLabelText("Product or group id"), { target: { value: PRODUCT } });
+    fireEvent.change(await screen.findByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: PRODUCT } });
     fireEvent.change(screen.getByLabelText("Price"), { target: { value: "8" } });
     fireEvent.change(screen.getByLabelText("From quantity"), { target: { value: "100" } });
     fireEvent.change(screen.getByLabelText("To quantity"), { target: { value: "50" } });

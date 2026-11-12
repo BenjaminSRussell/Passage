@@ -35,6 +35,10 @@ Environment: `OIDC_ISSUER`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `APP_ORIG
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `SESSION_STORE_URL` | unset | `redis://` or `rediss://` of a Valkey or Redis server the pods share (with `SESSION_STORE_PASSWORD` or `_FILE`, `SESSION_STORE_CA_FILE`). Unset: sessions in this pod's memory, one replica only |
+| `OIDC_END_SESSION_ENDPOINT` | issuer `/protocol/openid-connect/logout` | Keycloak's end-session; `POST /bff/logout` answers the URL with `client_id` and `post_logout_redirect_uri` (no ID token reaches the browser); it clears the cookie even when the session store is down (then 503) |
+| `OIDC_POST_LOGOUT_REDIRECT_URI` | `APP_ORIGIN/` | where Keycloak returns the browser after sign-out (a `post.logout.redirect.uris` entry of the client) |
+| `KEYCLOAK_ADMIN_URL` | unset | Keycloak's base URL; set (with `KEYCLOAK_REALM`, `KEYCLOAK_ADMIN_CLIENT_ID`, `KEYCLOAK_ADMIN_CLIENT_SECRET` or `_FILE`): an accepted invitation creates the user (`KeycloakProvisioner`). Unset: an administrator creates it |
 | `CLAMAV_ADDR` | unset | `host:port` of clamd. Set: every upload is scanned and a failed scan refuses it |
 | `CLAMAV_TIMEOUT_MS` | 30000 | bound on one scan (at least 1000) |
 | `SCAN_ALLOW_UNSCANNED` | `false` | `true` accepts uploads when no scanner is configured (dev); ignored when a scanner is configured |

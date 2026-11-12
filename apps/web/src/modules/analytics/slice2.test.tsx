@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { setLookupFetcher } from "../../shell/lookup/entities";
 import { idempotencyKey, json, pageViolations, renderRoutes, server, useFakeServer } from "../../shell/testing/fakeServer";
 import { findAlert, findTable } from "../../test-utils";
 import type { ArchivePartition, DQRule, DQScore, Schedule } from "./api/client";
@@ -300,12 +301,16 @@ describe("report schedules", () => {
         return posts === 1 ? json(503, { code: "HTTP-503", detail: "upstream unavailable" }) : json(201, schedule);
       }
       if (url.pathname === `/api/v1/analytics/schedules/${SID}`) return json(200, schedule);
+      if (url.pathname === "/api/v1/analytics/dashboards") return json(200, { items: [{ dashboardId: "finance-overview", title: "Finance overview", tiles: [], refreshSeconds: 60, version: 1 }] });
+      if (url.pathname === "/api/v1/analytics/dashboards/finance-overview") return json(200, { dashboardId: "finance-overview", title: "Finance overview", tiles: [], refreshSeconds: 60, version: 1 });
       return undefined;
     };
+    setLookupFetcher(null);
     const { container } = render("/analytics/schedules/new");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Weekly revenue" } });
-    fireEvent.change(screen.getByLabelText("Report id"), { target: { value: "finance-overview" } });
+    fireEvent.change(screen.getByLabelText("Dashboard"), { target: { value: "fin" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Finance overview/ }));
     fireEvent.change(screen.getByLabelText("Time zone"), { target: { value: "Europe/Berlin" } });
     fireEvent.change(screen.getByLabelText("Recipients"), { target: { value: "cfo@example.com, controller@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Create schedule" }));
@@ -333,7 +338,8 @@ describe("report schedules", () => {
     server.handler = () => json(400, { code: "COM-0001", detail: "request failed validation", errors: { cron: "value out of range in \"61\"" } });
     render("/analytics/schedules/new");
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Bad" } });
-    fireEvent.change(screen.getByLabelText("Report id"), { target: { value: "q1" } });
+    fireEvent.change(screen.getByLabelText("Report type"), { target: { value: "QUERY" } });
+    fireEvent.change(screen.getByLabelText("Saved query id"), { target: { value: "q1" } });
     fireEvent.change(screen.getByLabelText(/^Cron/), { target: { value: "61 6 * * 1" } });
     fireEvent.change(screen.getByLabelText("Recipients"), { target: { value: "a@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Create schedule" }));

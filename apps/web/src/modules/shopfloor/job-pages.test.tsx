@@ -73,11 +73,6 @@ function renderAt(path: string, duties: readonly string[] = OPERATOR) {
 }
 
 const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
-const pick = async (label: string, value: string) => {
-  const select = screen.getByLabelText(label);
-  await waitFor(() => expect(select.querySelector(`option[value="${value}"]`)).not.toBeNull());
-  fireEvent.change(select, { target: { value } });
-};
 const posts = () => calls.filter((c) => c.method === "POST");
 
 const job = (extra: Partial<Job> = {}): Job => ({
@@ -120,7 +115,7 @@ describe("dispatch list", () => {
     handler = (url) => (url.pathname.endsWith("/engineering/resources") ? undefined : json(200, { items: [] }));
     renderAt("/shopfloor/jobs");
     expect(await screen.findByText("No open jobs")).toBeInTheDocument();
-    await pick("Resource", RESOURCE);
+    fill("Resource", RESOURCE);
     fireEvent.click(screen.getByRole("button", { name: "Show jobs" }));
     fill("Status", "finished");
     await waitFor(() => expect(calls.at(-1)?.url.search).toBe(`?resourceId=${RESOURCE}&status=finished`));

@@ -277,3 +277,16 @@ func (a *API) listEmployments(w http.ResponseWriter, r *http.Request, workerID s
 	}
 	httpx.JSON(w, http.StatusOK, listResponse[store.Employment]{Items: items})
 }
+
+// getEmployment is GET /v1/hr/employments/{id}: one employment, for the
+// employment lookup of the personnel action form (hr.worker.inquire or
+// hr.action.maintain).
+func (a *API) getEmployment(w http.ResponseWriter, r *http.Request, id string) {
+	out, err := a.store.GetEmployment(r.Context(), id)
+	if err != nil {
+		logFailure(r, "get employment", err)
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}

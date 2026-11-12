@@ -317,7 +317,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
     expect((await findAlert()).textContent).toContain("Items are still out on loan. Record them returned or lost first.");
   });
 
-  it("starts a checklist from a template, and falls back to an id when templates are off limits", async () => {
+  it("starts a checklist from a template, and falls back to the template lookup when the list fails", async () => {
     api.handler = routes({
       [`GET /api/v1/hr/workers/${WORKER}/checklists`]: json(200, { items: [] }),
       "GET /api/v1/hr/checklist-templates": json(200, { items: [template] }),
@@ -337,7 +337,7 @@ describe("incidents, OSHA logs, loaned items and checklists", () => {
       "GET /api/v1/hr/checklist-templates": problem(403, "AUTH-0003", "missing duty hr.setup.admin"),
     });
     renderAt(`/hr/workers/${WORKER}/checklists`);
-    expect(await screen.findByLabelText("Template id")).toBeTruthy();
+    expect((await screen.findByLabelText("Template")).getAttribute("role")).toBe("combobox");
   });
 
   it("asks for an owner before listing tasks and defaults to my tasks on request", async () => {

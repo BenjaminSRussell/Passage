@@ -122,10 +122,11 @@ function StartForm({ workerId, onStarted }: { workerId: string; onStarted(checkl
             placeholder={templates.data.length === 0 ? "No templates yet" : "Choose a template"}
           />
         ) : (
-          <TextField
+          <LookupField
+            entity="checklistTemplate"
             id="start-templateId"
-            label="Template id"
-            hint={templates.loading ? "Loading templates." : "The template list needs the setup administrator duty; enter the template's id."}
+            label="Template"
+            hint={templates.loading ? "Loading templates." : "The template list could not be loaded; search again, or paste the template's id."}
             value={values.templateId}
             error={form.errors.templateId}
             onChange={(v) => set({ templateId: v })}

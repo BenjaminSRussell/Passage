@@ -71,11 +71,6 @@ function renderAt(path: string) {
 
 const posts = (suffix: string) => calls.filter((c) => c.method === "POST" && c.url.pathname.endsWith(suffix));
 const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
-const pick = async (label: string, value: string) => {
-  const select = screen.getByLabelText(label);
-  await waitFor(() => expect(select.querySelector(`option[value="${value}"]`)).not.toBeNull());
-  fireEvent.change(select, { target: { value } });
-};
 
 const session = (extra: Partial<KioskSession> = {}): KioskSession => ({
   workerId: WORKER,
@@ -258,7 +253,7 @@ describe("Machine idle threshold", () => {
     handler = (url, init) => (url.pathname.endsWith("/machines") ? json(init.method === "POST" ? 201 : 200, init.method === "POST" ? machine : { items: [machine] }) : undefined);
     renderAt("/shopfloor/machines/new");
     fill("Machine code", "M-101");
-    await pick("Work center", RESOURCE);
+    fill("Work center", RESOURCE);
     fill("Ideal cycle time (seconds)", "60");
     fill("Idle threshold (seconds)", "600");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));

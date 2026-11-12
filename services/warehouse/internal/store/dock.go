@@ -115,6 +115,23 @@ func (s *Store) ListAppointments(ctx context.Context, f AppointmentFilter) ([]do
 	return out, err
 }
 
+// GetAppointment reads one dock appointment with its door code.
+func (s *Store) GetAppointment(ctx context.Context, id string) (domain.Appointment, error) {
+	var out domain.Appointment
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		found, err := queryAppointments(ctx, tx, `where a.id = $1::uuid`, id)
+		if err != nil {
+			return err
+		}
+		if len(found) == 0 {
+			return ErrNotFound
+		}
+		out = found[0]
+		return nil
+	})
+	return out, err
+}
+
 func queryAppointments(ctx context.Context, tx pgx.Tx, tail string, args ...any) ([]domain.Appointment, error) {
 	rows, err := tx.Query(ctx, `select a.id::text, a.warehouse_id::text, a.door_id::text, d.code, a.direction, a.reference,
 		a.start_at, a.end_at, a.created_at

@@ -89,7 +89,7 @@ describe("screening helpers", () => {
     const values: ScreenValues = { type: "PARTY", id: PARTY.toUpperCase(), name: " Volga ", address: "", country: "ru", entries: "OFAC_SDN | 1 | 1 | Volga" };
     expect(toScreenInput(values).subject).toEqual({ type: "PARTY", id: PARTY, name: "Volga", country: "RU" });
     const bad = toScreenInput({ ...values, id: "P-1", name: " ", entries: "" }).errors;
-    expect(bad).toEqual({ id: "Enter the party's or document's UUID.", name: "Enter the name to screen.", entries: "Paste at least one list entry to screen against." });
+    expect(bad).toEqual({ id: "Choose the party.", name: "Enter the name to screen.", entries: "Paste at least one list entry to screen against." });
   });
 
   it("needs a decision and a reason", () => {
@@ -186,7 +186,7 @@ describe("Screening check", () => {
     handler = () => ({ status: 200, body: { blocked: true, hits: [hit()] } });
     const { container } = renderAt("/compliance/screening/check");
     expect(screen.getByText("Nothing screened yet")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Subject id"), { target: { value: PARTY } });
+    fireEvent.change(screen.getByLabelText("Party"), { target: { value: PARTY } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Volga Maritim Holdings" } });
     fireEvent.change(screen.getByLabelText("List entries"), { target: { value: "OFAC_SDN | SDN-7001 | 2 | Volga Maritime Holdings | RU" } });
     fireEvent.click(screen.getByRole("button", { name: "Screen" }));
@@ -205,9 +205,9 @@ describe("Screening check", () => {
     handler = () => problem(422, "TRD-1004", "every list entry needs a list code, an entry id, a version from 1 and a name");
     renderAt("/compliance/screening/check");
     fireEvent.click(screen.getByRole("button", { name: "Screen" }));
-    expect(await screen.findByText("Enter the party's or document's UUID.")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the party.")).toBeInTheDocument();
     expect(calls).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Subject id"), { target: { value: PARTY } });
+    fireEvent.change(screen.getByLabelText("Party"), { target: { value: PARTY } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "X" } });
     fireEvent.change(screen.getByLabelText("List entries"), { target: { value: "UN_SC | 1 | 1 | Y" } });
     fireEvent.click(screen.getByRole("button", { name: "Screen" }));

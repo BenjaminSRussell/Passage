@@ -605,3 +605,21 @@ func (s *Postgres) ListEmployments(ctx context.Context, workerID string) ([]Empl
 	})
 	return out, err
 }
+
+// GetEmployment reads one employment, with its status as of now.
+func (s *Postgres) GetEmployment(ctx context.Context, id string) (Employment, error) {
+	p := principal(ctx)
+	var out Employment
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		e, err := scanEmployment(tx.QueryRow(ctx, `select `+employmentColumns+` from employment where tenant_id = $1 and id = $2`, p.TenantID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return problem(http.StatusNotFound, CodeEmploymentMissing, "employment not found")
+		}
+		if err != nil {
+			return err
+		}
+		out = e.statusAt(time.Now())
+		return nil
+	})
+	return out, err
+}

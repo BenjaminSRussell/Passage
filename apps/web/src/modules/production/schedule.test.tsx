@@ -210,8 +210,7 @@ describe("Scheduled jobs page", () => {
     const fetchMock = stubFetch(() => json({ items: [], total: 0, plannedHours: "0" }));
     renderAt("/production/jobs");
     expect(await screen.findByRole("heading", { name: "No jobs" })).toBeInTheDocument();
-    await screen.findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(screen.getByLabelText(/^Resource/), uuid(9));
+    fireEvent.change(screen.getByLabelText(/^Resource/), { target: { value: uuid(9) } });
     await userEvent.selectOptions(screen.getByLabelText("Job"), "setup");
     fireEvent.change(screen.getByLabelText(/^From/), { target: { value: "2026-11-02T08:00" } });
     await userEvent.click(screen.getByRole("button", { name: "Show" }));

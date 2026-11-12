@@ -504,6 +504,12 @@ func scenarioQuestionnaire(t *testing.T, s *Postgres, ctx context.Context, tag s
 	if open, err := s.ListOpenSchedules(ctx); err != nil || len(open) != 1 {
 		t.Fatalf("open schedules = %v %v", open, err)
 	}
+	if all, err := s.ListSchedules(ctx, ""); err != nil || len(all) != 1 || all[0].ID != sched.ID || all[0].QuestionnaireName != "Pulse" || all[0].QuestionnaireCode != "PULSE-"+tag {
+		t.Fatalf("all schedules: %+v %v", all, err)
+	}
+	if other, err := s.ListSchedules(ctx, ids.New()); err != nil || len(other) != 0 {
+		t.Fatalf("schedules of another questionnaire: %+v %v", other, err)
+	}
 	if v, err := s.GetSchedule(ctx, sched.ID); err != nil || len(v.Questionnaire.Questions) != 2 {
 		t.Fatalf("schedule view = %+v %v", v, err)
 	}

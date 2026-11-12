@@ -48,6 +48,9 @@ type Record struct {
 	// PartyID is the party person a worker was created for. The worker is
 	// titled with that party's name (see Apply), so it is found by name.
 	PartyID    string
+	// MergedInto is the surviving party of a merged (removed) party record. The
+	// workers created for the merged person move to the survivor and take its name.
+	MergedInto string
 	Number     string
 	Title      string
 	Subtitle   string
@@ -118,15 +121,24 @@ func (s *Store) Apply(ctx context.Context, r Record) (bool, error) {
 				args = append(args, r.LegalEntityID)
 			}
 			title, partySet := "$5", ""
+			if r.Type == TypeParty && r.MergedInto != "" {
+				columns, values = "merged_into, ", "$11::uuid, "
+				args = append(args, r.MergedInto)
+				// The first survivor a merged party was given stays: a replayed or late merge event cannot point it back.
+				partySet = "merged_into = coalesce(t.merged_into, excluded.merged_into), "
+			}
 			if r.Type == TypeWorker && r.PartyID != "" {
 				// A replay over a worker indexed before the party id was kept fills it in.
 				partySet = "party_id = coalesce(excluded.party_id, t.party_id), "
 				// The worker takes its person's name when the party is already indexed; otherwise the
 				// party's own event names it later (below).
-				columns, values = "party_id, ", "$11::uuid, "
+				// A person merged into another party stands for the survivor (merged_into), so a replayed
+				// worker.created that names the merged person lands on the survivor and takes its name.
+				party := survivorOf("$11::uuid")
+				columns, values = "party_id, ", party+", "
 				args = append(args, r.PartyID)
 				title = `coalesce((select p.title from search_record_tenant p where p.tenant_id = $1 and p.record_type = 'party'
-				  and p.record_id = $11::uuid and not p.removed and p.title <> ''), $5)`
+				  and p.record_id = ` + party + ` and not p.removed and p.title <> ''), $5)`
 			}
 			tag, err = tx.Exec(ctx, fmt.Sprintf(`insert into %[1]s as t (tenant_id, %[2]srecord_type, record_id, number, title, subtitle, status, removed, source_at, source_version)
 				values ($1, %[3]s$2, $3, $4, %[4]s, $6, $7, $8, $9, $10)
@@ -139,6 +151,20 @@ func (s *Store) Apply(ctx context.Context, r Record) (bool, error) {
 				where (t.source_version, t.source_at) <= (excluded.source_version, excluded.source_at)`, table, columns, values, title, partySet), args...)
 		}
 		applied = err == nil && tag.RowsAffected() == 1
+		if applied && r.Type == TypeParty && r.Removed && r.MergedInto != "" {
+			// The workers on the merged person, or on any party merged into it, move to the end of its merge chain (the
+			// survivor of the survivor, whatever order the merges arrived in) and take that party's indexed name.
+			_, err = tx.Exec(ctx, `with target as (select `+survivorOf("$2::uuid")+` as id)
+				update search_record_tenant w set party_id = target.id, indexed_at = now(),
+				  title = coalesce((select s.title from search_record_tenant s where s.tenant_id = $1 and s.record_type = 'party'
+				    and s.record_id = target.id and not s.removed and s.title <> ''), w.title)
+				from target
+				where w.tenant_id = $1 and w.record_type = 'worker' and w.party_id <> target.id
+				  and (w.party_id = $2::uuid or w.party_id in (select m.record_id from search_record_tenant m
+				    where m.tenant_id = $1 and m.record_type = 'party' and m.merged_into is not null and `+survivorOf("m.record_id")+` = target.id))`,
+				p.TenantID, r.ID)
+			return err
+		}
 		if applied && r.Type == TypeParty && !r.Removed && r.Title != "" {
 			// A newer name of a party person renames the workers created for it.
 			_, err = tx.Exec(ctx, `update search_record_tenant set title = $3, indexed_at = now()
@@ -243,3 +269,18 @@ var (
 	prefixSQL = fmt.Sprintf(searchTemplate, prefixWhere)
 	fuzzySQL  = fmt.Sprintf(searchTemplate, fuzzyWhere)
 )
+
+// maxMergeChain bounds how far survivorOf follows merged_into, so a cycle (two merges naming each other) cannot loop.
+const maxMergeChain = 16
+
+// survivorOf is SQL for the party a party id stands for: the end of its merge chain (merged_into, followed transitively), or the
+// id itself when it was never merged. $1 is the tenant. A cycle stops at maxMergeChain hops and takes the last party reached.
+func survivorOf(start string) string {
+	return fmt.Sprintf(`(with recursive chain(id, depth) as (
+		select %[1]s, 0
+		union all
+		select m.merged_into, c.depth + 1 from chain c
+		join search_record_tenant m on m.tenant_id = $1 and m.record_type = 'party' and m.record_id = c.id and m.merged_into is not null
+		where c.depth < %[2]d
+	) select id from chain order by depth desc limit 1)`, start, maxMergeChain)
+}
