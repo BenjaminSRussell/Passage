@@ -140,7 +140,7 @@ func testRouter(t *testing.T, withSCIM bool) http.Handler {
 		}
 		scim = identity.NewSCIMAPI(nil, verifiers, opa)
 	}
-	return newRouter(nil, cat, operatorID, scim, identity.NewCustomerContactsAPI(nil, nil, identity.Invitation{}))
+	return newRouter(nil, cat, operatorID, nil, scim, identity.NewCustomerContactsAPI(nil, nil, identity.Invitation{}))
 }
 
 func get(router http.Handler, path string, headers map[string]string) *httptest.ResponseRecorder {

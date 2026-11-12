@@ -67,6 +67,8 @@
         "computed": { "type": "string" },
         "visibility": { "enum": ["", "always", "advanced", "hidden"] },
         "pii": { "enum": ["", "none", "personal", "sensitive"] },
+        "phi": { "type": "boolean", "description": "Protected health information (HIPAA). A phi field must also set encrypted: true." },
+        "encrypted": { "type": "boolean", "description": "The stored value is a platform/fieldcrypt envelope. Only string, text and bytes fields." },
         "audit": { "type": "boolean" },
         "label": { "type": "string" }
       }

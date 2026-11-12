@@ -9,6 +9,9 @@ global:
   imageRegistryRequired: true
   allowedRegions: ["chinanorth", "chinaeast", "chinanorth2", "chinaeast2", "chinanorth3", "chinaeast3"]
   pagerDutyAllowed: false
+  idleTimeoutMinutes: 0
+  postgresSslMode: "require"
+  enforceProviders: true
   endpoints:
     entraAuthority: "https://login.partner.microsoftonline.cn"
     appRegistrationPortal: "portal.azure.cn"
@@ -20,4 +23,5 @@ global:
     postgresSuffix: "postgres.database.chinacloudapi.cn"
     azureOpenAISuffix: "openai.azure.cn"
     keyVaultPrivateLinkZone: "privatelink.vaultcore.azure.cn"
-  egressAllowlist: ["login.partner.microsoftonline.cn", "login.chinacloudapi.cn", "microsoftgraph.chinacloudapi.cn", "management.chinacloudapi.cn", "*.vault.azure.cn", "*.blob.core.chinacloudapi.cn", "*.azurecr.cn", "*.postgres.database.chinacloudapi.cn", "*.openai.azure.cn"]
+    managedHsmSuffix: "managedhsm.azure.cn"
+  egressAllowlist: ["login.partner.microsoftonline.cn", "login.chinacloudapi.cn", "microsoftgraph.chinacloudapi.cn", "management.chinacloudapi.cn", "*.vault.azure.cn", "*.managedhsm.azure.cn", "*.blob.core.chinacloudapi.cn", "*.azurecr.cn", "*.postgres.database.chinacloudapi.cn", "*.openai.azure.cn"]

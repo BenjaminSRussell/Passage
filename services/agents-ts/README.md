@@ -112,6 +112,7 @@ rejected with AGT-0202 and no provider call, tenants isolated).
 | `AGT-0206` | Provider unavailable (transport, timeout, 5xx), rate-limited or rejected (4xx), or an unusable response; the run fails. Only the first group counts towards failover |
 | `AGT-0212` | No knowledge source reaches citation similarity 0.75; the copilot says so instead of guessing |
 | `AGT-0214` | A tool call failed; 4xx is not retried. Also 502 when the MCP gateway cannot be reached at run start |
+| `AGT-0215` | A field the entity metadata tags `phi` is in text bound for a model; the run fails before any model call and the budget hold is released (#606) |
 | `AGT-0400` | Malformed request: body not a JSON object, unknown field or invalid value |
 | `AGT-0401` | The edge did not identify a tenant and user |
 | `AGT-0403` | A tenant administrator toggled another tenant's kill switch |

@@ -194,3 +194,79 @@ func TestNoAzureHostnameOutsideTheTable(t *testing.T) {
 		}
 	}
 }
+
+// GCC High, DoD, EU Data Boundary and HIPAA settings (#602 #603 #605 #606): Go resolves what Python and TypeScript do.
+func TestCloudEnvironmentSettings(t *testing.T) {
+	for _, name := range []string{"gcc-high", "dod"} {
+		p := mustResolve(t, name)
+		d := p.Deployment
+		if d.AzureEnvironment != "usgovernment" || !d.PrivateCluster || !d.CustomerManagedKeys || !d.ManagedHSM || d.PostgresSSLMode != "verify-full" {
+			t.Errorf("%s deployment = %+v", name, d)
+		}
+		if !p.EnforceProviders || !slices.Equal(p.LLMProviders, []string{"azure-openai"}) {
+			t.Errorf("%s providers = %v enforce=%v", name, p.LLMProviders, p.EnforceProviders)
+		}
+		if !p.AllowsHost("res.openai.azure.us") || p.AllowsHost("res.openai.azure.com") || p.AllowsHost("ghcr.io") {
+			t.Errorf("%s egress allowlist is wrong: %v", name, p.EgressAllowlist)
+		}
+	}
+	if d := mustResolve(t, "dod").Deployment; !d.IsolatedNodes || slices.Contains(d.IsolatedNodesRegions, "usdodeast") || len(d.IsolatedNodesRegions) != 3 {
+		t.Errorf("dod isolation = %+v", d)
+	}
+	if mustResolve(t, "gcc-high").Deployment.IsolatedNodes {
+		t.Error("gcc-high needs no isolated nodes")
+	}
+
+	eu := mustResolve(t, "commercial", "eu-data-boundary")
+	if !eu.EnforceProviders || !eu.RequireMirror || eu.PagerDutyAllowed || eu.AllowsHost("ghcr.io") || eu.AllowsHost("docker.io") || eu.AllowsHost("api.anthropic.com") {
+		t.Errorf("eu overlay: enforce=%v mirror=%v allowlist=%v", eu.EnforceProviders, eu.RequireMirror, eu.EgressAllowlist)
+	}
+	if eu.Endpoint("entraAuthority") != "https://login.microsoftonline.com" {
+		t.Error("the Entra authority stays global for EU tenants")
+	}
+
+	h := mustResolve(t, "gcc-high", "hipaa")
+	if !h.HasOverlay("hipaa") || h.IdleTimeoutMinutes != 15 || !h.EnforceProviders || h.Keycloak.EventRetentionDays < 2190 {
+		t.Errorf("hipaa = idle %d enforce %v retention %d", h.IdleTimeoutMinutes, h.EnforceProviders, h.Keycloak.EventRetentionDays)
+	}
+	if !slices.Contains(h.BAACoveredServices, "Azure OpenAI Service") || h.AzurePolicyInitiative == "" || !slices.Contains(h.PhiServices, "hr") {
+		t.Errorf("hipaa lists = %v %q %v", h.BAACoveredServices, h.AzurePolicyInitiative, h.PhiServices)
+	}
+	if mustResolve(t, "commercial").IdleTimeoutMinutes != 0 {
+		t.Error("no idle timeout without the hipaa overlay")
+	}
+}
+
+func TestPostgresTLSIsVerifiedUnderTheGovernmentProfiles(t *testing.T) {
+	noEnv := func(string) string { return "" }
+	for _, name := range []string{"gcc", "gcc-high", "dod"} {
+		p := mustResolve(t, name)
+		for _, bad := range []string{
+			"postgres://u@db.example.invalid/x?sslmode=disable",
+			"postgres://u@db.example.invalid/x?sslmode=require",
+			"postgres://u@db.example.invalid/x",
+			"host=db user=u sslmode=verify-ca",
+		} {
+			if err := p.CheckPostgresConn(bad, noEnv); err == nil {
+				t.Errorf("%s must refuse %q", name, bad)
+			}
+		}
+		for _, ok := range []string{"postgres://u@db.example.invalid/x?sslmode=verify-full", "host=db user=u sslmode='verify-full'"} {
+			if err := p.CheckPostgresConn(ok, noEnv); err != nil {
+				t.Errorf("%s must accept %q: %v", name, ok, err)
+			}
+		}
+		if err := p.CheckPostgresConn("postgres://u@db.example.invalid/x", func(k string) string {
+			if k == "PGSSLMODE" {
+				return "verify-full"
+			}
+			return ""
+		}); err != nil {
+			t.Errorf("%s: PGSSLMODE=verify-full in the environment is honoured: %v", name, err)
+		}
+	}
+	// The default profile keeps local development working.
+	if err := mustResolve(t, "commercial").CheckPostgresConn("postgres://u@localhost/x?sslmode=disable", noEnv); err != nil {
+		t.Errorf("commercial must not enforce: %v", err)
+	}
+}

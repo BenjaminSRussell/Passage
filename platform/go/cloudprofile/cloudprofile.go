@@ -52,8 +52,22 @@ type Keycloak struct {
 	EventRetentionDays int    `json:"eventRetentionDays"`
 }
 
+// Deployment holds the infrastructure switches of a profile: which Azure cloud the provider talks to, whether the
+// cluster is private, customer-managed keys, Managed HSM, isolated nodes and the Postgres TLS mode.
+type Deployment struct {
+	AzureEnvironment     string   `json:"azureEnvironment"`
+	PrivateCluster       bool     `json:"privateCluster"`
+	CustomerManagedKeys  bool     `json:"customerManagedKeys"`
+	ManagedHSM           bool     `json:"managedHsm"`
+	IsolatedNodes        bool     `json:"isolatedNodes"`
+	IsolatedNodesRegions []string `json:"isolatedNodesRegions"`
+	PostgresSSLMode      string   `json:"postgresSslMode"`
+	Source               string   `json:"source"`
+}
+
 type profile struct {
 	Description    string              `json:"description"`
+	Deployment     Deployment          `json:"deployment"`
 	Cloud          string              `json:"cloud"`
 	FIPS           bool                `json:"fips"`
 	AllowedRegions []string            `json:"allowedRegions"`
@@ -69,6 +83,16 @@ type overlay struct {
 	EgressRemove       []string `json:"egressRemove"`
 	RequireFIPS        bool     `json:"requireFips"`
 	EventRetentionDays int      `json:"eventRetentionDays"`
+	EnforceProviders   bool     `json:"enforceProviders"`
+	RequireMirror      bool     `json:"requireMirror"`
+	IdleTimeoutMinutes int      `json:"idleTimeoutMinutes"`
+	BAACoveredServices struct {
+		Services []string `json:"services"`
+	} `json:"baaCoveredServices"`
+	AzurePolicyInitiative struct {
+		PolicySetDefinitionID string `json:"policySetDefinitionId"`
+	} `json:"azurePolicyInitiative"`
+	PhiServices []string `json:"phiServices"`
 }
 
 // Doc is the whole profile table.
@@ -124,7 +148,19 @@ type Profile struct {
 	PagerDutyAllowed      bool
 	EgressAllowlist       []string
 	Keycloak              Keycloak
+	Deployment            Deployment
+	// IdleTimeoutMinutes is the web app's idle sign-out in minutes; 0 means the app default (the hipaa overlay sets 15).
+	IdleTimeoutMinutes int
+	// BAACoveredServices are the Azure services that may hold PHI (hipaa overlay); empty without it.
+	BAACoveredServices []string
+	// PhiServices are the Passage services whose data may include PHI (hipaa overlay).
+	PhiServices []string
+	// AzurePolicyInitiative is the policy set definition id OpenTofu assigns under the hipaa overlay.
+	AzurePolicyInitiative string
 }
+
+// HasOverlay reports whether the named overlay is active.
+func (p *Profile) HasOverlay(name string) bool { return slices.Contains(p.Overlays, name) }
 
 // ParseSelector splits "gcc+hipaa" into the base profile and its overlays; empty means commercial.
 func ParseSelector(selector string) (string, []string) {
@@ -165,7 +201,7 @@ func Resolve(base string, overlays ...string) (*Profile, error) {
 		EntraAuthorityAliases: slices.Clone(p.Endpoints["entraAuthority"].Aliases),
 		RequireMirror:         p.Registry.RequireMirror, RegistryDefault: p.Registry.Default,
 		LLMProviders: slices.Clone(p.Egress.LLMProviders), EnforceProviders: p.Egress.EnforceProviders,
-		PagerDutyAllowed: p.Egress.PagerDuty, Keycloak: p.Keycloak,
+		PagerDutyAllowed: p.Egress.PagerDuty, Keycloak: p.Keycloak, Deployment: p.Deployment,
 	}
 	for k, e := range p.Endpoints {
 		r.Endpoints[k] = e.Value
@@ -188,11 +224,24 @@ func Resolve(base string, overlays ...string) (*Profile, error) {
 		}
 		r.FIPS = r.FIPS || o.RequireFIPS
 		r.Keycloak.EventRetentionDays = max(r.Keycloak.EventRetentionDays, o.EventRetentionDays)
+		r.EnforceProviders = r.EnforceProviders || o.EnforceProviders
+		r.RequireMirror = r.RequireMirror || o.RequireMirror
+		r.IdleTimeoutMinutes = max(r.IdleTimeoutMinutes, o.IdleTimeoutMinutes)
+		if len(o.BAACoveredServices.Services) > 0 {
+			r.BAACoveredServices = slices.Clone(o.BAACoveredServices.Services)
+		}
+		if o.AzurePolicyInitiative.PolicySetDefinitionID != "" {
+			r.AzurePolicyInitiative = o.AzurePolicyInitiative.PolicySetDefinitionID
+		}
+		if len(o.PhiServices) > 0 {
+			r.PhiServices = slices.Clone(o.PhiServices)
+		}
 		for _, item := range o.EgressRemove {
 			if item == "pagerDuty" {
 				r.PagerDutyAllowed = false
 			}
 			r.LLMProviders = slices.DeleteFunc(r.LLMProviders, func(s string) bool { return s == item })
+			extra = slices.DeleteFunc(extra, func(s string) bool { return s == item })
 		}
 	}
 	r.EgressAllowlist = buildAllowlist(r, extra)
@@ -212,7 +261,7 @@ func buildAllowlist(r *Profile, extra []string) []string {
 		hosts = append(hosts, HostOf(a))
 	}
 	hosts = append(hosts, HostOf(ep["graphRoot"]), HostOf(ep["armEndpoint"]),
-		"*."+ep["keyVaultSuffix"], "*."+ep["blobSuffix"], "*."+ep["containerRegistrySuffix"], "*."+ep["postgresSuffix"])
+		"*."+ep["keyVaultSuffix"], "*."+ep["managedHsmSuffix"], "*."+ep["blobSuffix"], "*."+ep["containerRegistrySuffix"], "*."+ep["postgresSuffix"])
 	for _, name := range r.LLMProviders {
 		if name == "azure-openai" {
 			hosts = append(hosts, "*."+ep["azureOpenAISuffix"])

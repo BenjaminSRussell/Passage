@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -97,6 +98,31 @@ def render(chart: Path, profile: str, registry: str | None) -> str:
     return proc.stdout
 
 
+def render_with_values(chart: Path, values_text: str) -> str:
+    """Render a chart with an ad-hoc values file (a profile plus overlays, which the committed files do not cover)."""
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        fh.write(values_text)
+    try:
+        cmd = [HELM, "template", "egress", str(chart), "-f", fh.name]
+        for s in REQUIRED_VALUES.get(chart.relative_to(REPO).as_posix(), []):
+            cmd += ["--set", s]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    finally:
+        Path(fh.name).unlink(missing_ok=True)
+    if proc.returncode != 0:
+        raise AssertionError(f"helm template {chart.relative_to(REPO)} failed:\n{proc.stderr.strip()}")
+    return proc.stdout
+
+
+# What a Government-cloud render must never name (#602): commercial authority, *.windows.net, *.azure.com, ghcr.io.
+COMMERCIAL_REFERENCE = re.compile(r"login\.microsoftonline\.com|[A-Za-z0-9_.\-]+\.windows\.net|[A-Za-z0-9_.\-]+\.azure\.com|ghcr\.io")
+
+
+def commercial_references(manifest: str) -> set[str]:
+    body = "\n".join(line for line in manifest.splitlines() if not line.lstrip().startswith("#"))
+    return {m.group(0) for m in COMMERCIAL_REFERENCE.finditer(body)}
+
+
 def mirror_for(profile: str) -> str:
     """A mirror host in the profile's own registry suffix, as an operator would configure it."""
     return "passage." + cp.load()["profiles"][profile]["endpoints"]["containerRegistrySuffix"]["value"]
@@ -147,6 +173,47 @@ class RenderedChartsStayInsideTheAllowlist(unittest.TestCase):
             with self.subTest(profile=profile):
                 self.check_profile(profile, mirror_for(profile))
 
+    def test_government_clouds_render_no_commercial_reference(self) -> None:
+        """#602: a gcc-high or dod render fails on any commercial authority, *.windows.net, *.azure.com or ghcr.io."""
+        for profile in ("gcc-high", "dod"):
+            with self.subTest(profile=profile):
+                problems = {}
+                for chart in charts():
+                    found = commercial_references(render(chart, profile, mirror_for(profile)))
+                    if found:
+                        problems[chart.relative_to(REPO).as_posix()] = sorted(found)
+                self.assertEqual(problems, {})
+
+    def test_the_commercial_reference_scanner_sees_what_it_should(self) -> None:
+        text = "a: https://login.microsoftonline.com/x\nb: kv.vault.windows.net\nc: x.azure.com\nd: ghcr.io/o/i\n# https://ghcr.io\ne: login.microsoftonline.us\n"
+        self.assertEqual(commercial_references(text), {"login.microsoftonline.com", "kv.vault.windows.net", "x.azure.com", "ghcr.io"})
+
+    def test_overlays_stay_inside_their_allowlists(self) -> None:
+        """#605 #606: every chart under a profile plus an overlay calls only hosts the combined allowlist keeps."""
+        for base, overlay in (("commercial", "eu-data-boundary"), ("commercial", "hipaa"), ("gcc-high", "hipaa"), ("dod", "hipaa")):
+            with self.subTest(profile=f"{base}+{overlay}"):
+                registry = mirror_for(base)
+                resolved = cp.resolve(cp.load(), base, [overlay])
+                allow = list(resolved["egressAllowlist"])
+                if not cp.host_allowed(registry, allow):
+                    allow.append(registry)
+                values = cp.helm_values(resolved, registry)
+                problems = {}
+                for chart in charts():
+                    bad = violations(render_with_values(chart, values), allow)
+                    if bad:
+                        problems[chart.relative_to(REPO).as_posix()] = bad
+                self.assertEqual(problems, {}, f"charts call hosts outside the {base}+{overlay} allowlist {allow}")
+
+    def test_eu_overlay_removes_us_saas_and_the_unmirrored_registries(self) -> None:
+        allow = cp.resolve(cp.load(), "commercial", ["eu-data-boundary"])["egressAllowlist"]
+        for host in ("events.pagerduty.com", "api.anthropic.com", "api.openai.com", "ghcr.io", "docker.io"):
+            self.assertFalse(cp.host_allowed(host, allow), host)
+        self.assertTrue(cp.host_allowed("res.openai.azure.com", allow))
+        obs = REPO / "deploy/observability/charts/observability"
+        out = render_with_values(obs, cp.helm_values(cp.resolve(cp.load(), "commercial", ["eu-data-boundary"]), mirror_for("commercial")))
+        self.assertNotIn("pagerduty_configs", out)
+
     def test_mirror_only_profiles_refuse_to_render_without_a_mirror(self) -> None:
         for profile in ("gcc", "gcc-high", "dod", "china"):
             with self.subTest(profile=profile):
@@ -167,6 +234,25 @@ class RenderedChartsStayInsideTheAllowlist(unittest.TestCase):
         commercial = subprocess.run([HELM, "template", "o", str(obs), "-f", str(cp.values_path("commercial"))], capture_output=True, text=True, check=True).stdout
         self.assertNotIn("pagerduty_configs", gcc)
         self.assertIn("https://events.pagerduty.com/v2/enqueue", commercial)
+
+    def test_alerts_still_reach_an_in_boundary_receiver_without_pagerduty(self) -> None:
+        """#602: where the profile has no PagerDuty, alertmanager routes to the in-boundary webhook; commercial is unchanged."""
+        obs = REPO / "deploy/observability/charts/observability"
+        for profile in ("gcc", "gcc-high", "dod", "china"):
+            with self.subTest(profile=profile):
+                out = subprocess.run([HELM, "template", "o", str(obs), "-f", str(cp.values_path(profile))], capture_output=True, text=True, check=True).stdout
+                self.assertNotIn("pagerduty", out.lower().replace("pagerduty:", ""))
+                self.assertIn("receiver: in-boundary", out)
+                self.assertIn("webhook_configs:", out)
+                self.assertIn("credentials_file: /etc/alertmanager/secrets/token", out)
+                self.assertEqual(violations(out, cp.resolve(cp.load(), profile)["egressAllowlist"]), [])
+        commercial = subprocess.run([HELM, "template", "o", str(obs), "-f", str(cp.values_path("commercial"))], capture_output=True, text=True, check=True).stdout
+        self.assertNotIn("in-boundary", commercial)
+        custom = subprocess.run(
+            [HELM, "template", "o", str(obs), "-f", str(cp.values_path("gcc-high")), "--set", "alertWebhook.url=https://hooks.example.invalid/alerts"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        self.assertIn('url: "https://hooks.example.invalid/alerts"', custom)
 
     def test_services_get_the_profile_in_their_environment(self) -> None:
         out = render(REPO / "services/ledger/charts/ledger", "gcc", mirror_for("gcc"))

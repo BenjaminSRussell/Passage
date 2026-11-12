@@ -46,3 +46,30 @@ data:
             severity: {{ .Values.pagerDuty.severity | quote }}
             description: '{{ "{{" }} .CommonAnnotations.summary {{ "}}" }}'
 {{- end }}
+{{- /* The in-boundary receiver (#602): where alerts go when the profile has no PagerDuty (or alertWebhook.enabled forces it).
+       The URL is cluster-internal or an endpoint inside the customer's boundary (an Azure Monitor action group webhook, an
+       internal incident system); the profile's egress allowlist test still checks its host. The bearer token is read from
+       a file so it never sits in the ConfigMap. */}}
+{{- if or .Values.alertWebhook.enabled (and .Values.pagerDuty.enabled (eq (toString ((.Values.global | default dict).pagerDutyAllowed)) "false")) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-alertmanager-inboundary
+  labels:
+    app.kubernetes.io/name: observability
+data:
+  alertmanager.yaml: |-
+    route:
+      receiver: in-boundary
+      group_by: [alertname, service]
+    receivers:
+      - name: in-boundary
+        webhook_configs:
+          - url: {{ .Values.alertWebhook.url | quote }}
+            send_resolved: true
+            http_config:
+              authorization:
+                type: Bearer
+                credentials_file: /etc/alertmanager/secrets/{{ .Values.alertWebhook.tokenKey }}
+{{- end }}

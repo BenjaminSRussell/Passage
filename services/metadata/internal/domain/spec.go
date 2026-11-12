@@ -53,8 +53,12 @@ type Field struct {
 	Computed   string `json:"computed,omitempty" yaml:"computed"`
 	Visibility string `json:"visibility,omitempty" yaml:"visibility"`
 	PII        string `json:"pii,omitempty" yaml:"pii"`
-	Audit      *bool  `json:"audit,omitempty" yaml:"audit"`
-	Label      string `json:"label,omitempty" yaml:"label"`
+	// PHI marks protected health information (HIPAA). A PHI field must also be Encrypted (MET-0010).
+	PHI bool `json:"phi,omitempty" yaml:"phi"`
+	// Encrypted says the stored value is a platform/fieldcrypt envelope (sealed per tenant and field), never plaintext.
+	Encrypted bool   `json:"encrypted,omitempty" yaml:"encrypted"`
+	Audit     *bool  `json:"audit,omitempty" yaml:"audit"`
+	Label     string `json:"label,omitempty" yaml:"label"`
 }
 
 type Enum struct {
@@ -115,6 +119,22 @@ func Parse(data []byte) (*Entity, error) {
 
 func matches(pattern, s string) bool {
 	return regexp.MustCompile(pattern).MatchString(s)
+}
+
+// canHoldEnvelope reports whether a field type can carry a fieldcrypt envelope (opaque bytes, sent as base64 text).
+func canHoldEnvelope(kind string) bool {
+	return kind == "string" || kind == "text" || kind == "bytes"
+}
+
+// PHIFields returns the names of the entity's phi fields, in declaration order.
+func (e *Entity) PHIFields() []string {
+	var out []string
+	for _, f := range e.Fields {
+		if f.PHI {
+			out = append(out, f.Name)
+		}
+	}
+	return out
 }
 
 func isReserved(name string) bool {
@@ -202,6 +222,15 @@ func Validate(e *Entity) []Violation {
 		if msg := defaultProblem(e, f); msg != "" {
 			add(p+".default", "MET-0005", "%s", msg)
 		}
+		if f.PHI && !f.Encrypted {
+			add(p+".encrypted", "MET-0010", "field %q is phi and must set encrypted: true (stored sealed with fieldcrypt)", f.Name)
+		}
+		if f.Encrypted && !canHoldEnvelope(f.Type) {
+			add(p+".encrypted", "MET-0010", "field %q has type %q, which cannot hold a sealed envelope; encrypted is only allowed on string, text and bytes", f.Name, f.Type)
+		}
+		if f.Encrypted && (f.Unique || f.Default != "" || f.Computed != "") {
+			add(p+".encrypted", "MET-0010", "encrypted field %q cannot be unique, have a default or be computed (a sealed value is not comparable or derivable)", f.Name)
+		}
 	}
 	for i, f := range e.Fields {
 		if _, clash := fields[f.Name+"_currency"]; f.Type == "money" && clash {
@@ -211,6 +240,8 @@ func Validate(e *Entity) []Violation {
 	for i, t := range e.TitleFields {
 		if f, ok := fields[t]; !ok || f.Type != "string" {
 			add(fmt.Sprintf("title_fields[%d]", i), "MET-0008", "title field %q must be a declared string field", t)
+		} else if f.PHI || f.Encrypted {
+			add(fmt.Sprintf("title_fields[%d]", i), "MET-0010", "title field %q is phi or encrypted and would appear in plaintext titles", t)
 		}
 	}
 	for i, r := range e.Relations {
@@ -232,8 +263,10 @@ func Validate(e *Entity) []Violation {
 			add(p+".fields", "MET-0009", "index needs fields")
 		}
 		for _, name := range ix.Fields {
-			if _, ok := fields[name]; !ok {
+			if f, ok := fields[name]; !ok {
 				add(p+".fields", "MET-0009", "unknown field %q", name)
+			} else if f.PHI || f.Encrypted {
+				add(p+".fields", "MET-0010", "index cannot cover phi or encrypted field %q", name)
 			}
 		}
 		if ix.Where != "" {

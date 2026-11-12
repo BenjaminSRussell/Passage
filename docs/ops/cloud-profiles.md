@@ -57,9 +57,16 @@ UPDATE_GOLDEN=1 go test ./cloudprofile/                     # in platform/go: re
 
 **Secrets.** Under a profile, `ExternalSecret` references are Key Vault names (letters, digits, dashes; no JSON property); see [azure-aks.md](azure-aks.md).
 
+## Per-environment pages
+
+- [gcc.md](gcc.md): Microsoft 365 GCC (#601).
+- [gcc-high.md](gcc-high.md): GCC High on Azure Government (#602).
+- [dod-il5.md](dod-il5.md): DoD IL5 on Azure Government, and IL6 readiness with the offline bundle (#603).
+- [eu-data-boundary.md](eu-data-boundary.md): the `eu-data-boundary` overlay (#605).
+- [hipaa.md](hipaa.md): the `hipaa` overlay (#606).
+
 ## Still to do per profile
 
-- `gcc-high`, `dod`: confirm region lists (IL5 scope for DoD), registry and egress detail (#602, #603).
-- `china`: confirm the ACR and Azure OpenAI suffixes, mirror and egress detail (#605).
-- `eu-data-boundary`, `hipaa`: overlay detail, a rendered realm patch for the six-year event retention, BAA records (#604, #606).
-- Live proof on a real cluster and tenant (#213); authorization paperwork (#512).
+- `china`: confirm the ACR and Azure OpenAI suffixes marked `unverified` against a subscription in that cloud, then the mirror and egress detail (#599, #604).
+- `gcc-high`, `dod`: confirm the `managedHsmSuffix` marked `unverified` in an Azure Government subscription.
+- Live proof on a real cluster and tenant (#213); authorization paperwork, BAA and DPA sign-off (#512).

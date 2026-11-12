@@ -9,6 +9,7 @@ import uvicorn
 
 from .api import SERVICE, create_app
 from .auth import ServiceVerifier
+from .logpseudo import install as install_log_pseudonyms
 
 RESERVED = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
 
@@ -24,12 +25,15 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             line["exception"] = self.formatException(record.exc_info)
+        elif record.exc_text:
+            line["exception"] = record.exc_text
         return json.dumps(line, default=str)
 
 
 def main() -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
+    install_log_pseudonyms(handler, os.environ)  # eu-data-boundary or LOG_PSEUDONYMIZE=true (#605)
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
     verifier = ServiceVerifier.from_env(os.environ.get)
     if verifier is None:
