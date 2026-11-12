@@ -36,17 +36,27 @@ def repack(root: Path, archive: Path) -> None:
 DIGEST_B = "sha256:" + "b" * 64
 
 
+def provenance_with_postgres() -> dict:
+    """The committed provenance plus the postgres image the fake helm renders."""
+    prov = ob.load_provenance()
+    prov["images"].append({"match": "docker.io/library/postgres", "unsignedUpstream": "Docker Official Images carry no cosign signature"})
+    return prov
+
+
 class FakeRunner:
     """Records every command; answers the few that return data, and creates the files the real tools would."""
 
-    def __init__(self, fail_on: str | None = None) -> None:
+    def __init__(self, fail_on: str | tuple[str, ...] | None = None) -> None:
         self.calls: list[list[str]] = []
-        self.fail_on = fail_on
+        self.fail_on = (fail_on,) if isinstance(fail_on, str) else fail_on
 
     def __call__(self, cmd: list[str], *, cwd: Path | None = None) -> str:
         self.calls.append(cmd)
-        if self.fail_on and cmd[0] == self.fail_on:
-            raise RuntimeError(f"{cmd[0]} failed")
+        if self.fail_on and tuple(cmd[: len(self.fail_on)]) == self.fail_on:
+            raise RuntimeError(f"{' '.join(cmd[:2])} failed")
+        if cmd[:2] == ["syft", "scan"]:
+            out = Path(cmd[cmd.index("-o") + 1].split("=", 1)[1])
+            out.write_text('{"spdxVersion": "SPDX-2.3"}', encoding="utf-8")
         if cmd[:2] == ["helm", "template"]:
             return "image: ghcr.io/benjaminsrussell/passage-ledger:0.1.0\nimage: docker.io/library/postgres:17\n# image: ignored\n"
         if cmd[:2] == ["skopeo", "inspect"]:
@@ -122,9 +132,9 @@ class BuildVerifyInstallTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
-    def built(self) -> tuple[Path, FakeRunner]:
-        runner = FakeRunner()
-        return ob.build(self.tmp, "cosign.key", runner), runner
+    def built(self, runner: FakeRunner | None = None, provenance: dict | None = None) -> tuple[Path, FakeRunner]:
+        runner = runner or FakeRunner()
+        return ob.build(self.tmp, "cosign.key", runner, provenance=provenance or provenance_with_postgres()), runner
 
     def test_build_pins_every_image_by_digest_and_saves_its_signature_and_sbom(self) -> None:
         archive, runner = self.built()
@@ -132,11 +142,126 @@ class BuildVerifyInstallTests(unittest.TestCase):
         copies = runner.ran("skopeo", "copy")
         self.assertTrue(copies)
         self.assertTrue(all(any(DIGEST_A[7:] in a or DIGEST_B[7:] in a for a in c) for c in copies), "images are copied by digest")
-        self.assertEqual(len(runner.ran("cosign", "save")), len(copies))
+        self.assertEqual(len(runner.ran("cosign", "save")), len(copies) // 2, "two copies per image: into staging, then to the OCI layout")
         manifest = json.loads((self.tmp / "stage" / "manifest.json").read_text())
         self.assertTrue(all(ob.DIGEST.search(i["pinned"]) for i in manifest["images"]))
         self.assertTrue(runner.ran("helm", "pull"), "third-party charts are pulled")
         self.assertTrue(runner.ran("cosign", "sign-blob"))
+
+    def image_calls(self, runner: FakeRunner, repo: str) -> list[list[str]]:
+        """The commands that name repo, in order (resolve and the archive signature excluded)."""
+        return [c for c in runner.calls if any(repo in a for a in c) and c[:2] != ["skopeo", "inspect"]]
+
+    def test_each_image_is_verified_upstream_then_signed_and_attested_with_the_offline_key(self) -> None:
+        _, runner = self.built()
+        staged = "localhost:5000/benjaminsrussell/passage-ledger@" + DIGEST_A
+        calls = self.image_calls(runner, "passage-ledger")
+        self.assertEqual([c[:2] for c in calls], [
+            ["cosign", "verify"], ["skopeo", "copy"], ["skopeo", "copy"], ["syft", "scan"],
+            ["cosign", "sign"], ["cosign", "attest"], ["cosign", "save"],
+        ])
+        verify, to_staging, to_layout, syft, sign, attest, save = calls
+        # (a) the publisher's keyless identity from provenance.json, on the digest
+        self.assertEqual(verify[-1], "ghcr.io/benjaminsrussell/passage-ledger@" + DIGEST_A)
+        self.assertIn("--certificate-identity-regexp", verify)
+        self.assertIn("https://token.actions.githubusercontent.com", verify)
+        self.assertEqual(to_staging[-2:], ["docker://ghcr.io/benjaminsrussell/passage-ledger@" + DIGEST_A, "docker://" + staged])
+        self.assertIn("--preserve-digests", to_staging)
+        self.assertTrue(to_layout[-1].startswith("oci:") and to_layout[-2] == "docker://" + staged)
+        sbom = syft[-1].split("=", 1)[1]
+        self.assertTrue(Path(sbom).exists())
+        # (b) signature and SPDX attestation with the offline key, on the staged digest, no transparency log
+        self.assertEqual(sign[-1], staged)
+        self.assertEqual(sign[sign.index("--key") + 1], "cosign.key")
+        self.assertIn("--tlog-upload=false", sign)
+        self.assertEqual(attest[-1], staged)
+        self.assertEqual(attest[attest.index("--key") + 1], "cosign.key")
+        self.assertEqual(attest[attest.index("--type") + 1], "spdxjson")
+        self.assertEqual(attest[attest.index("--predicate") + 1], sbom)
+        self.assertEqual(save[-1], staged)
+        manifest = json.loads((self.tmp / "stage" / "manifest.json").read_text())
+        ledger = next(i for i in manifest["images"] if "passage-ledger" in i["ref"])
+        self.assertEqual((ledger["upstream"], ledger["sbom"]), ("verified", f"sboms/{ledger['slug']}.spdx.json"))
+
+    def test_an_image_marked_unsigned_upstream_skips_only_the_upstream_check(self) -> None:
+        _, runner = self.built()
+        calls = self.image_calls(runner, "keycloak")
+        self.assertEqual([c[:2] for c in calls], [
+            ["skopeo", "copy"], ["skopeo", "copy"], ["syft", "scan"], ["cosign", "sign"], ["cosign", "attest"], ["cosign", "save"],
+        ])
+        manifest = json.loads((self.tmp / "stage" / "manifest.json").read_text())
+        self.assertEqual(next(i for i in manifest["images"] if "keycloak" in i["ref"])["upstream"], "unsigned")
+
+    def test_an_image_without_provenance_stops_the_build_before_anything_is_copied(self) -> None:
+        runner = FakeRunner()
+        with self.assertRaises(RuntimeError) as ctx:
+            ob.build(self.tmp, "cosign.key", runner, provenance=ob.load_provenance())
+        self.assertIn("docker.io/library/postgres:17", str(ctx.exception))
+        self.assertEqual(runner.ran("skopeo", "copy") + runner.ran("cosign"), [])
+        empty = provenance_with_postgres()
+        empty["images"].append({"match": "docker.io/library/*"})
+        empty["images"].insert(0, empty["images"].pop())
+        with self.assertRaises(RuntimeError) as ctx:
+            ob.build(self.tmp, "cosign.key", FakeRunner(), provenance=empty)
+        self.assertIn("names no identity", str(ctx.exception))
+
+    def test_any_failing_step_fails_the_build_and_leaves_no_archive(self) -> None:
+        for step in [("cosign", "verify"), ("skopeo", "copy"), ("syft",), ("cosign", "sign"), ("cosign", "attest"), ("cosign", "save"), ("helm", "pull"), ("cosign", "sign-blob")]:
+            shutil.rmtree(self.tmp, ignore_errors=True)
+            self.tmp.mkdir()
+            with self.assertRaises(RuntimeError, msg=step):
+                self.built(FakeRunner(fail_on=step))
+            self.assertFalse((self.tmp / "passage-offline.tar.gz.sig").exists(), step)
+
+    def test_charts_are_checked_as_their_provenance_says(self) -> None:
+        prov = provenance_with_postgres()
+        for c in prov["charts"]:
+            if c["chart"] == "kyverno":
+                c.pop("unverified")
+                c["keyring"] = "deploy/offline/keys/kyverno.gpg"
+        _, runner = self.built(provenance=prov)
+        pulls = {c[2]: c for c in runner.ran("helm", "pull")}
+        self.assertIn("--verify", pulls["kyverno"])
+        self.assertTrue(pulls["kyverno"][pulls["kyverno"].index("--keyring") + 1].endswith("deploy/offline/keys/kyverno.gpg"))
+        self.assertNotIn("--verify", pulls["temporal"])
+        manifest = json.loads((self.tmp / "stage" / "manifest.json").read_text())
+        state = {c["chart"]: c["provenance"] for c in manifest["thirdPartyCharts"]}
+        self.assertEqual((state["kyverno"], state["temporal"]), ("keyring", "unverified"))
+
+        # A sha256 pin that does not match the pulled archive fails the build.
+        for c in prov["charts"]:
+            if c["chart"] == "temporal":
+                c.pop("unverified")
+                c["sha256"] = "0" * 64
+        shutil.rmtree(self.tmp)
+        self.tmp.mkdir()
+        with self.assertRaises(RuntimeError) as ctx:
+            self.built(provenance=prov)
+        self.assertIn("does not match the pinned", str(ctx.exception))
+
+        # A chart with no entry fails before anything is copied.
+        prov["charts"] = [c for c in prov["charts"] if c["chart"] != "argo-cd"]
+        runner = FakeRunner()
+        with self.assertRaises(RuntimeError) as ctx:
+            self.built(runner, prov)
+        self.assertIn("chart argo-cd", str(ctx.exception))
+        self.assertEqual(runner.ran("skopeo", "copy"), [])
+
+    def test_pin_charts_records_the_archive_hash_of_every_unverified_chart(self) -> None:
+        path = self.tmp / "provenance.json"
+        shutil.copy(ob.PROVENANCE, path)
+        pinned = ob.pin_charts(FakeRunner(), path, self.tmp / "work")
+        self.assertEqual(sorted(pinned), sorted(c["chart"] for c in ob.third_party_charts()))
+        prov = json.loads(path.read_text())
+        for c in prov["charts"]:
+            self.assertRegex(c["sha256"], r"^[0-9a-f]{64}$")
+            self.assertNotIn("unverified", c)
+
+    def test_the_committed_provenance_covers_every_third_party_chart_and_the_extra_images(self) -> None:
+        prov = ob.load_provenance()
+        manifest = {"images": [{"ref": r} for r in ob.extra_images()] + [{"ref": "ghcr.io/benjaminsrussell/passage-hr:0.1.0"}],
+                    "thirdPartyCharts": ob.third_party_charts()}
+        self.assertEqual(ob.missing_provenance(manifest, prov), [])
 
     def test_verify_accepts_an_untouched_bundle_and_checks_the_signature_first(self) -> None:
         archive, _ = self.built()

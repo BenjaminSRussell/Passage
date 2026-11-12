@@ -23,7 +23,7 @@ dev-down:
 
 # Signed offline install bundle for an air-gapped cluster (IL6 readiness, docs/ops/dod-il5.md): make offline-bundle KEY=cosign.key
 offline-bundle:
-	$(MAKE) -C deploy offline-bundle KEY="$(KEY)" $(if $(OUT),OUT="$(OUT)")
+	$(MAKE) -C deploy offline-bundle KEY="$(KEY)" $(if $(OUT),OUT="$(OUT)") $(if $(STAGING),STAGING="$(STAGING)") $(if $(STAGING_INSECURE),STAGING_INSECURE="$(STAGING_INSECURE)")
 
 test: test-go test-ts test-py check-deploy-local
 

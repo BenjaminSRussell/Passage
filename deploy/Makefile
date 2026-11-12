@@ -110,8 +110,12 @@ test-offline:
 
 # Build the signed offline bundle on a connected machine: every image (pinned by digest, with signature and SBOM), chart and
 # policy as one archive. OUT is the output directory, KEY the cosign private key (or a KMS/HSM URI). Needs skopeo, cosign, helm.
+# STAGING is a throwaway registry the images are signed and attested in (docker run -p 5000:5000 registry:2); set
+# STAGING_INSECURE=1 when it speaks plain http. Needs skopeo, syft, cosign and helm.
 OUT ?= ../dist/offline
 KEY ?=
+STAGING ?= localhost:5000
+STAGING_INSECURE ?=
 offline-bundle:
-	@test -n "$(KEY)" || { echo "Usage: make -C deploy offline-bundle KEY=<cosign private key> [OUT=<dir>]" >&2; exit 2; }
-	$(PYTHON) offline/offline_bundle.py build --out "$(OUT)" --key "$(KEY)"
+	@test -n "$(KEY)" || { echo "Usage: make -C deploy offline-bundle KEY=<cosign private key> [OUT=<dir>] [STAGING=<registry>]" >&2; exit 2; }
+	$(PYTHON) offline/offline_bundle.py build --out "$(OUT)" --key "$(KEY)" --staging-registry "$(STAGING)" $(if $(filter 1,$(STAGING_INSECURE)),--staging-insecure)

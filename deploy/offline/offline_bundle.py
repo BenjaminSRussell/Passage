@@ -4,8 +4,10 @@
 An air-gapped enclave (Azure Government Secret, SIPRNet only) cannot reach ghcr.io, github.com, quay.io, Docker Hub or any
 chart repository. The bundle is everything an install needs, as one signed archive:
 
-  images/<slug>/        every container image as an OCI layout, pinned by digest, with its cosign signature and SBOM
-                        attestation (`cosign save`), so the in-cluster policy can verify them against an offline key
+  images/<slug>/        every container image as an OCI layout, pinned by digest
+  signatures/<slug>/    the image with its signature and SPDX SBOM attestation made with the offline key (`cosign save`),
+                        so the in-cluster policy can verify them against the offline public key
+  sboms/<slug>.spdx.json  the SBOM (syft) that the attestation carries
   charts/               every Helm chart: the ones in this repository (helm package) and the third-party ones the
                         Argo CD Applications pull (helm pull)
   policies/             Kyverno admission policies (the offline variants) and the OPA authorization bundle
@@ -13,12 +15,15 @@ chart repository. The bundle is everything an install needs, as one signed archi
   SHA256SUMS            a hash of every file
   <bundle>.tar.gz.sig   cosign signature of the archive by the release key
 
+    docker run -d -p 5000:5000 registry:2                               # throwaway staging registry for signing
     make -C deploy offline-bundle OUT=dist/offline KEY=cosign.key     # build, on a connected machine
     python3 deploy/offline/offline_bundle.py verify dist/offline/passage-offline.tar.gz --key cosign.pub
     python3 deploy/offline/offline_bundle.py install dist/offline/passage-offline.tar.gz --registry registry.enclave:5000 \\
         --git-url https://git.enclave/passage.git --key cosign.pub        # inside the enclave
 
-`verify` and `install` need only skopeo, cosign and helm, all of which work against a local registry. Argo CD syncs from an
+`build` checks each image's upstream signature against provenance.json (an image or chart with no entry fails the
+build), then signs and attests every image with the offline key in a staging registry; it needs skopeo, syft, cosign
+and helm. `verify` and `install` need only skopeo, cosign and helm, all of which work against a local registry. Argo CD syncs from an
 in-enclave Git mirror: `render-argocd` rewrites every repoURL to the mirror and every chart repository to the in-enclave
 OCI registry. Kyverno verifies signatures against a static public key held in the cluster
 (deploy/policies/admission-offline), not keyless Sigstore, which needs Fulcio and Rekor on the internet.
@@ -30,6 +35,7 @@ bundle on a cluster with egress blocked is a live proof and is tracked on #213.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import re
@@ -37,6 +43,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
@@ -51,6 +58,7 @@ DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 ENCLAVE_MARKER = "REGISTRY_HOST"
 OFFLINE_POLICIES = DEPLOY / "policies" / "admission-offline"
 EXTRA_IMAGES = HERE / "extra-images.txt"
+PROVENANCE = HERE / "provenance.json"
 
 
 class Runner(Protocol):
@@ -169,29 +177,117 @@ def repository(ref: str) -> str:
     return f"{head}{sep}{last.split(':')[0]}"
 
 
-def build(out: Path, key: str, runner: Runner = run, now: Callable[[], str] | None = None) -> Path:
-    """Build the archive in `out` and return its path. Needs network access to the registries: run it where that exists."""
+def load_provenance(path: Path = PROVENANCE) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def image_provenance(ref: str, provenance: dict) -> dict | None:
+    """The first provenance entry whose match (a glob over the repository, no tag or digest) fits ref, else None."""
+    repo = repository(ref)
+    for entry in provenance.get("images", []):
+        if fnmatch.fnmatchcase(repo, entry["match"]):
+            return entry
+    return None
+
+
+def chart_provenance(chart: str, provenance: dict) -> dict | None:
+    return next((c for c in provenance.get("charts", []) if c["chart"] == chart), None)
+
+
+def missing_provenance(manifest: dict, provenance: dict) -> list[str]:
+    """Images and third-party charts the provenance file says nothing about, or says something unusable about."""
+    problems = []
+    for item in manifest["images"]:
+        entry = image_provenance(item["ref"], provenance)
+        if entry is None:
+            problems.append(f"image {item['ref']}: no provenance entry (an expected signer identity, a key, or unsignedUpstream with a reason)")
+        elif not (entry.get("unsignedUpstream") or entry.get("key") or (entry.get("certificateIdentityRegexp") and entry.get("certificateOidcIssuer"))):
+            problems.append(f"image {item['ref']}: provenance entry {entry['match']!r} names no identity, key or unsignedUpstream reason")
+    for c in manifest["thirdPartyCharts"]:
+        entry = chart_provenance(c["chart"], provenance)
+        if entry is None or not (entry.get("keyring") or entry.get("sha256") or entry.get("unverified")):
+            problems.append(f"chart {c['chart']}: no provenance entry (a keyring, a sha256 pin, or unverified with a reason)")
+    return problems
+
+
+def verify_upstream(ref: str, entry: dict, runner: Runner) -> str:
+    """Check the publisher's signature on a digest-pinned image; returns verified or unsigned."""
+    if entry.get("unsignedUpstream"):
+        return "unsigned"
+    if entry.get("key"):
+        runner(["cosign", "verify", "--key", str(REPO / entry["key"]), ref])
+    else:
+        runner(["cosign", "verify", "--certificate-identity-regexp", entry["certificateIdentityRegexp"],
+                "--certificate-oidc-issuer", entry["certificateOidcIssuer"], ref])
+    return "verified"
+
+
+def pull_chart(c: dict, entry: dict, dest: Path, runner: Runner) -> Path:
+    """helm pull one third-party chart into dest, checked as its provenance entry says; returns the archive."""
+    tmp = dest / ".pull" / c["chart"]
+    tmp.mkdir(parents=True, exist_ok=True)
+    cmd = ["helm", "pull", c["chart"], "--repo", c["repo"], "--version", c["version"], "--destination", str(tmp)]
+    if entry.get("keyring"):
+        cmd += ["--verify", "--keyring", str(REPO / entry["keyring"])]
+    runner(cmd)
+    archives = sorted(tmp.glob("*.tgz"))
+    if len(archives) != 1:
+        raise RuntimeError(f"helm pull {c['chart']} left {len(archives)} archives")
+    if entry.get("sha256") and sha256(archives[0]) != entry["sha256"]:
+        raise RuntimeError(f"chart {c['chart']} {c['version']}: sha256 {sha256(archives[0])} does not match the pinned {entry['sha256']}")
+    final = dest / archives[0].name
+    archives[0].replace(final)
+    return final
+
+
+def build(out: Path, key: str, runner: Runner = run, now: Callable[[], str] | None = None, *,
+          staging: str = "localhost:5000", staging_insecure: bool = False, provenance: dict | None = None) -> Path:
+    """Build the archive in `out` and return its path. Needs network access to the registries: run it where that exists.
+
+    For each image: check the publisher's signature (provenance.json), copy it by digest into the staging registry,
+    write an SPDX SBOM (syft), sign it and attest the SBOM there with the offline key, and save image, signature and
+    attestation (`cosign save`). The offline Kyverno policy requires exactly that signature and attestation. Any step
+    that fails stops the build: nothing is half-signed. The staging registry is a throwaway one next to the build
+    (`docker run -p 5000:5000 registry:2`), because cosign attaches signatures through a registry.
+    """
+    provenance = load_provenance() if provenance is None else provenance
     stage = out / "stage"
     if stage.exists():
         shutil.rmtree(stage)
     (stage / "images").mkdir(parents=True)
     (stage / "charts").mkdir()
+    (stage / "sboms").mkdir()
     manifest = plan(runner)
+    problems = missing_provenance(manifest, provenance)
+    if problems:
+        raise RuntimeError("provenance.json does not cover the bundle:\n  " + "\n  ".join(problems))
+    dest_tls = ["--dest-tls-verify=false"] if staging_insecure else []
+    src_tls = ["--src-tls-verify=false"] if staging_insecure else []
+    insecure = ["--allow-insecure-registry"] if staging_insecure else []
     pinned = []
     for item in manifest["images"]:
         ref = resolve_digest(item["ref"], runner)
+        upstream = verify_upstream(ref, image_provenance(item["ref"], provenance), runner)
+        staged = f"{staging}/{mirrored_path(ref)}"
+        runner(["skopeo", "copy", "--all", "--preserve-digests", *dest_tls, f"docker://{ref}", f"docker://{staged}"])
         d = stage / "images" / item["slug"]
-        runner(["skopeo", "copy", "--all", f"docker://{ref}", f"oci:{d}:image"])
-        # the signature and the SBOM attestation are separate OCI artifacts next to the image
-        runner(["cosign", "save", "--dir", str(stage / "signatures" / item["slug"]), ref])
-        pinned.append({"ref": item["ref"], "pinned": ref, "slug": item["slug"]})
+        runner(["skopeo", "copy", "--all", "--preserve-digests", *src_tls, f"docker://{staged}", f"oci:{d}:image"])
+        sbom = stage / "sboms" / f"{item['slug']}.spdx.json"
+        runner(["syft", "scan", f"oci-dir:{d}", "-o", f"spdx-json={sbom}"])
+        # The offline key signs the digest and attests the SBOM; there is no transparency log in the enclave.
+        runner(["cosign", "sign", "--yes", "--key", key, "--tlog-upload=false", *insecure, staged])
+        runner(["cosign", "attest", "--yes", "--key", key, "--tlog-upload=false", *insecure, "--type", "spdxjson", "--predicate", str(sbom), staged])
+        runner(["cosign", "save", *insecure, "--dir", str(stage / "signatures" / item["slug"]), staged])
+        pinned.append({"ref": item["ref"], "pinned": ref, "slug": item["slug"], "upstream": upstream, "sbom": f"sboms/{sbom.name}"})
     manifest["images"] = pinned
-    charts = []
     for c in manifest["repoCharts"]:
         runner(["helm", "package", str(REPO / c["path"]), "--destination", str(stage / "charts")])
-        charts.append(c)
     for c in manifest["thirdPartyCharts"]:
-        runner(["helm", "pull", c["chart"], "--repo", c["repo"], "--version", c["version"], "--destination", str(stage / "charts")])
+        entry = chart_provenance(c["chart"], provenance)
+        archive = pull_chart(c, entry, stage / "charts", runner)
+        c["archive"] = f"charts/{archive.name}"
+        c["provenance"] = "keyring" if entry.get("keyring") else "sha256" if entry.get("sha256") else "unverified"
+    shutil.rmtree(stage / "charts" / ".pull", ignore_errors=True)
     for pol in manifest["policies"]:
         src = REPO / pol
         if src.exists():
@@ -203,6 +299,28 @@ def build(out: Path, key: str, runner: Runner = run, now: Callable[[], str] | No
         tar.add(stage, arcname="passage-offline")
     runner(["cosign", "sign-blob", "--yes", "--key", key, "--output-signature", str(archive) + ".sig", str(archive)])
     return archive
+
+
+def pin_charts(runner: Runner = run, path: Path = PROVENANCE, work: Path | None = None) -> list[str]:
+    """On the connected build machine: pull every third-party chart that has neither a keyring nor a sha256 pin and
+    record the archive's sha256 in provenance.json, so later builds refuse a changed archive. Returns the charts pinned."""
+    provenance = load_provenance(path)
+    work = work or Path(tempfile.mkdtemp())
+    pinned = []
+    for c in third_party_charts():
+        entry = chart_provenance(c["chart"], provenance)
+        if entry is None:
+            entry = {"chart": c["chart"]}
+            provenance.setdefault("charts", []).append(entry)
+        if entry.get("keyring") or entry.get("sha256"):
+            continue
+        archive = pull_chart(c, {}, work, runner)
+        entry["sha256"] = sha256(archive)
+        entry["version"] = c["version"]
+        entry.pop("unverified", None)
+        pinned.append(c["chart"])
+    path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+    return pinned
 
 
 def write_sums(stage: Path) -> None:
@@ -256,6 +374,8 @@ def check_sums(root: Path) -> list[str]:
             problems.append(f"image {img['ref']} has no OCI layout")
         if not (root / "signatures" / img["slug"]).is_dir():
             problems.append(f"image {img['ref']} has no signature or SBOM attestation")
+        if not (root / img.get("sbom", f"sboms/{img['slug']}.spdx.json")).is_file():
+            problems.append(f"image {img['ref']} has no SBOM")
     return problems
 
 
@@ -351,6 +471,9 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("build", help="build and sign the archive (needs skopeo, cosign, helm and registry access)")
     b.add_argument("--out", type=Path, default=Path("dist/offline"))
     b.add_argument("--key", required=True, help="cosign private key (cosign.key, or a KMS/HSM URI)")
+    b.add_argument("--staging-registry", default="localhost:5000", help="throwaway registry the images are signed in")
+    b.add_argument("--staging-insecure", action="store_true", help="the staging registry speaks plain http")
+    sub.add_parser("pin-charts", help="pin the sha256 of every unverified third-party chart in provenance.json (needs helm and network)")
     v = sub.add_parser("verify", help="verify signature and hashes, offline")
     v.add_argument("archive", type=Path)
     v.add_argument("--key", required=True, help="cosign public key")
@@ -373,7 +496,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(plan(), indent=2))
         elif args.cmd == "build":
             args.out.mkdir(parents=True, exist_ok=True)
-            print(build(args.out, args.key))
+            print(build(args.out, args.key, staging=args.staging_registry, staging_insecure=args.staging_insecure))
+        elif args.cmd == "pin-charts":
+            for name in pin_charts():
+                print(f"pinned {name}")
         elif args.cmd == "verify":
             root = verify(args.archive, args.key)
             print(f"bundle verified: {root}")
