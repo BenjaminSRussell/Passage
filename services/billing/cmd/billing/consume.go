@@ -15,7 +15,6 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
-	"github.com/BenjaminSRussell/passage/services/billing/internal/api"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/iccharge"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 )
@@ -56,10 +55,6 @@ func consume(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	tax, err := api.ParseTaxRates(getenv("BILLING_TAX_RATES"))
-	if err != nil {
-		return err
-	}
 	kcfg, err := kafka.ConfigFromEnv(getenv, iccharge.ConsumerName, iccharge.ConsumerName, []string{iccharge.Topic})
 	if err != nil {
 		return err
@@ -75,7 +70,7 @@ func consume(ctx context.Context, getenv func(string) string) error {
 	}
 	defer client.Close()
 	c, err := eventing.NewConsumer(client, client, eventing.NewPgInbox(pool), eventing.Config{Name: iccharge.ConsumerName, Idempotent: true,
-		Handlers: iccharge.Handlers(store.New(pool), tax, cfg), DeadLetterTopic: iccharge.DeadLetterTopic, Log: slog.Default()})
+		Handlers: iccharge.Handlers(store.New(pool), cfg), DeadLetterTopic: iccharge.DeadLetterTopic, Log: slog.Default()})
 	if err != nil {
 		return err
 	}

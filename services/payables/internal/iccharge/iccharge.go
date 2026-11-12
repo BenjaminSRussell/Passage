@@ -35,10 +35,11 @@ const (
 	// Duty is the only duty of that principal.
 	Duty                       = "payables.iccharge.from-event"
 	ChargeInvoiceRequestedType = "dev.passage.interco.chargeinvoice.requested.v1"
-	Source                     = "intercompany"
-	Topic                      = "passage.interco.chargeinvoice"
-	DeadLetterTopic            = "passage.payables.iccharge.dlq"
-	intakeSource               = "INTERCOMPANY"
+	// Source is the CloudEvents source intercompany publishes with (services/intercompany/internal/events.Source).
+	Source          = "/passage/intercompany"
+	Topic           = "passage.interco.chargeinvoice"
+	DeadLetterTopic = "passage.payables.iccharge.dlq"
+	intakeSource    = "INTERCOMPANY"
 )
 
 // Store records the intake row; *store.Postgres implements it.
