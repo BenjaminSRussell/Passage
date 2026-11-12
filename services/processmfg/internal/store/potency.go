@@ -13,13 +13,14 @@ import (
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/domain"
 )
 
-// CodePotencyState is a potency change on an order whose recipe is fixed: reported or ended, or with its control
-// recipe already made. 409.
+// CodePotencyState is a potency change on an order whose control recipe is made or may be being made. 409.
 const CodePotencyState = "PMF-0507"
 
 // SetPotencyAdjustments replaces the potency adjustments of an order (BR-24.2) after checking them against its lines.
-// They apply to the control recipe the order's release generates, so an order whose recipe is made, or that is
-// reported or ended, refuses them.
+// They apply to the control recipe made at release, so they may change only while the order is planned, or after a
+// release whose recipe generation failed (the order keeps the error and no recipe). A generation in flight cleared the
+// error first under the order's lock (ClaimRecipeGeneration), so a change cannot slip in between the generation
+// reading the adjustments and the recipe reaching the shop floor.
 func (s *Postgres) SetPotencyAdjustments(ctx context.Context, orderID string, adjs []domain.PotencyAdjustment, user string) (BatchOrder, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out BatchOrder
@@ -28,12 +29,13 @@ func (s *Postgres) SetPotencyAdjustments(ctx context.Context, orderID string, ad
 		if err != nil {
 			return err
 		}
-		var recipe *string
-		if err := tx.QueryRow(ctx, `select control_recipe_id::text from batch_order where id = $1`, orderID).Scan(&recipe); err != nil {
+		var recipe, failure *string
+		if err := tx.QueryRow(ctx, `select control_recipe_id::text, control_recipe_error from batch_order where id = $1`, orderID).Scan(&recipe, &failure); err != nil {
 			return err
 		}
-		if o.Status == domain.StatusReported || o.Status == domain.StatusEnded || recipe != nil {
-			return httpx.NewProblem(http.StatusConflict, CodePotencyState, "the order's control recipe is fixed (made already, or the order is reported or ended); potency can no longer change it")
+		retry := (o.Status == domain.StatusReleased || o.Status == domain.StatusStarted) && recipe == nil && failure != nil
+		if o.Status != domain.StatusPlanned && !retry {
+			return httpx.NewProblem(http.StatusConflict, CodePotencyState, "the order's control recipe is made or being made; potency can change only before release, or after a failed recipe generation")
 		}
 		if _, err := domain.ApplyPotency(potencyLines(o), adjs); err != nil {
 			return err
@@ -82,4 +84,25 @@ func loadPotency(ctx context.Context, tx pgx.Tx, orderID string) ([]domain.Poten
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ClaimRecipeGeneration starts making an order's control recipe: under the order's lock it clears a previous
+// generation error (so SetPotencyAdjustments refuses changes while this generation runs) and returns the order with
+// the adjustments the recipe is made from. found is false when the order already has its recipe.
+func (s *Postgres) ClaimRecipeGeneration(ctx context.Context, orderID string) (BatchOrder, bool, error) {
+	var out BatchOrder
+	found := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		o, err := loadOrder(ctx, tx, orderID, " for update")
+		if err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `update batch_order set control_recipe_error = null where id = $1 and control_recipe_id is null`, orderID)
+		if err != nil {
+			return err
+		}
+		out, found = o, tag.RowsAffected() > 0
+		return nil
+	})
+	return out, found, err
 }

@@ -194,6 +194,7 @@ type Store interface {
 	DeleteRecipeTarget(ctx context.Context, legalEntityID, itemID string) (bool, error)
 	SetControlRecipe(ctx context.Context, orderID string, recipeID, errText *string) error
 	SetPotencyAdjustments(ctx context.Context, orderID string, adjs []domain.PotencyAdjustment, user string) (BatchOrder, error)
+	ClaimRecipeGeneration(ctx context.Context, orderID string) (BatchOrder, bool, error)
 	GetControlRecipeLink(ctx context.Context, orderID string) (ControlRecipeLink, error)
 	Ping(ctx context.Context) error
 }

@@ -32,6 +32,7 @@ const (
 // The store's own behaviour is covered by the database tests in internal/store.
 type fakeStore struct {
 	target        *store.RecipeTarget
+	claims        int
 	gotTarget     store.RecipeTarget
 	link          store.ControlRecipeLink
 	linkSet       int

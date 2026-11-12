@@ -231,6 +231,18 @@ func (a *API) generateRecipe(ctx context.Context, o store.BatchOrder) (store.Con
 	}
 	var link store.ControlRecipeLink
 	if err == nil {
+		// Read the order again under its lock, clearing a previous error: from here until the link is stored the
+		// potency adjustments cannot change, so the recipe carries the ones read now.
+		var claimed bool
+		var cur store.BatchOrder
+		if cur, claimed, err = a.store.ClaimRecipeGeneration(ctx, o.ID); err == nil {
+			if !claimed {
+				return a.currentLink(ctx, o.ID), true
+			}
+			o = cur
+		}
+	}
+	if err == nil {
 		var doc map[string]any
 		doc, err = ReleaseRecipe(o, target.Destination)
 		req := shopfloor.RecipeRequest{OrderID: o.ID, ResourceID: target.ResourceID, Destination: target.Destination, EdgeID: target.EdgeID,
@@ -258,6 +270,15 @@ func (a *API) generateRecipe(ctx context.Context, o store.BatchOrder) (store.Con
 		slog.Error("control recipe link not stored", "order", o.ID, "err", serr)
 	}
 	return link, true
+}
+
+// currentLink is the order's stored link, for a generation that found the recipe already made.
+func (a *API) currentLink(ctx context.Context, orderID string) store.ControlRecipeLink {
+	link, err := a.store.GetControlRecipeLink(ctx, orderID)
+	if err != nil {
+		slog.Warn("control recipe link not read", "order", orderID, "err", err)
+	}
+	return link
 }
 
 // RecipeKey is the Idempotency-Key of the request that makes an order's control recipe: the order and a hash

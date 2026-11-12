@@ -42,11 +42,36 @@ func TestPotencyAdjustmentsOfABatchOrder(t *testing.T) {
 	if got, err := s.SetPotencyAdjustments(ctx, o.ID, nil, "planner"); err != nil || len(got.PotencyAdjustments) != 0 {
 		t.Fatalf("clear: %+v %v", got.PotencyAdjustments, err)
 	}
+	// Released: the recipe is being made from the adjustments as they were, so they cannot change ...
+	if _, _, err := s.AdvanceBatchOrder(ctx, o.ID, domain.CmdRelease, o.Version, store.Idem{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetPotencyAdjustments(ctx, o.ID, adj, "planner"); problemCode(err) != store.CodePotencyState {
+		t.Fatalf("after release: %v", err)
+	}
+	// ... unless the generation failed: then they can, until the next generation claims the order.
+	reason := "the shopfloor service answered 503"
+	if err := s.SetControlRecipe(ctx, o.ID, nil, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetPotencyAdjustments(ctx, o.ID, adj, "planner"); err != nil {
+		t.Fatalf("after a failed generation: %v", err)
+	}
+	claimed, found, err := s.ClaimRecipeGeneration(ctx, o.ID)
+	if err != nil || !found || len(claimed.PotencyAdjustments) != 1 {
+		t.Fatalf("claim: %+v %v %v", claimed.PotencyAdjustments, found, err)
+	}
+	if _, err := s.SetPotencyAdjustments(ctx, o.ID, nil, "planner"); problemCode(err) != store.CodePotencyState {
+		t.Fatalf("while a generation runs: %v", err)
+	}
 	recipe := ids.New()
 	if err := s.SetControlRecipe(ctx, o.ID, &recipe, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SetPotencyAdjustments(ctx, o.ID, adj, "planner"); problemCode(err) != store.CodePotencyState {
 		t.Fatalf("after the recipe is made: %v", err)
+	}
+	if _, found, err := s.ClaimRecipeGeneration(ctx, o.ID); err != nil || found {
+		t.Fatalf("claim with the recipe made: %v %v", found, err)
 	}
 }

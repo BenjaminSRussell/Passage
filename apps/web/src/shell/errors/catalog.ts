@@ -1156,8 +1156,8 @@ const processManufacturing: Record<string, ProblemCatalogEntry> = {
     action: "Keep the current batch size. To make a different quantity, create another batch order for the difference.",
   },
   "PMF-0507": {
-    message: "The potency of this batch order's ingredients can no longer change: its control recipe is already made, or the order is reported or ended.",
-    action: "Charge the batch as the recipe says, and record the actual consumption when you report the order.",
+    message: "The potency of this batch order's ingredients can't change now: its control recipe is made or being made.",
+    action: "Set potency before you release the order. If making the recipe failed, change it and send the recipe again; otherwise charge the batch as the recipe says.",
   },
 };
 

@@ -49,6 +49,11 @@ func (f *fakeStore) SetPotencyAdjustments(_ context.Context, _ string, adjs []do
 	return f.order, f.err
 }
 
+func (f *fakeStore) ClaimRecipeGeneration(context.Context, string) (store.BatchOrder, bool, error) {
+	f.claims++
+	return f.order, f.link.ControlRecipeID == nil, f.err
+}
+
 func (f *fakeStore) GetControlRecipeLink(context.Context, string) (store.ControlRecipeLink, error) {
 	return f.link, f.err
 }

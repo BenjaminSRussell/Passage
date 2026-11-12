@@ -168,8 +168,9 @@ paths:
         recipe made at release or by :send-recipe charges the active line at planned x standard / batch potency and
         the filler with what is left, so the batch keeps its size, and names each adjustment in the material list.
         Several active lines may share one filler. A filler driven below zero is PMF-0002 (422); a line of the wrong
-        type is COM-0001 (400). Once the control recipe is made, or the order is reported or ended, PMF-0507 (409).
-        An empty list removes them.
+        type is COM-0001 (400). They can change only while the order is planned, or after a release whose recipe
+        generation failed (the order keeps the error and no recipe); a generation clears the error under the order's
+        lock before it reads them, so otherwise PMF-0507 (409). An empty list removes them.
       x-passage-duty: production.batch-order.write
       parameters:
         - $ref: '#/components/parameters/Id'
