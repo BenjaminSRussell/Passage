@@ -53,8 +53,10 @@ func (s *Postgres) InstallLicense(ctx context.Context, l domain.License, payload
 		if err != nil {
 			return err
 		}
-		rec, err = readLicense(ctx, tx, l.TenantID)
-		return err
+		if rec, err = readLicense(ctx, tx, l.TenantID); err != nil {
+			return err
+		}
+		return licenseInstalled(ctx, tx, rec, user, time.Now().UTC())
 	})
 	return rec, licenseProblem(err)
 }

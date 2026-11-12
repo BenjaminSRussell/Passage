@@ -56,6 +56,12 @@ type Config struct {
 	RPOTargetSeconds int
 	// Now is the clock for licence evaluation; nil means time.Now.
 	Now func() time.Time
+	// SLOSource reads the SLO figures (Prometheus, PROMETHEUS_URL); nil answers GET /v1/ops/slo with 503 OPS-1725.
+	SLOSource SLOSource
+	// SLOTargets are the objectives (SLO_AVAILABILITY_TARGET, SLO_LATENCY_P95_MS, SLO_LATENCY_P95_BY).
+	SLOTargets domain.SLOTargets
+	// CostRates are the unit rates of the cost statements (OPS_COST_RATES); nil refuses to record a statement (COST-1904).
+	CostRates *domain.CostRates
 }
 
 // API is the ops HTTP surface.
@@ -67,6 +73,7 @@ type API struct {
 
 	breakGlassOpened atomic.Int64
 	breakGlassUses   atomic.Int64
+	sloBreaches      atomic.Int64
 }
 
 // New builds the API.
@@ -101,6 +108,7 @@ func (a *API) Register(r chi.Router) {
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/break-glass", a.listBreakGlass)
 		g.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/ops/break-glass/{id}:revoke", a.revokeBreakGlass)
 		g.With(authz.RequireDuty(DutyBreakGlassReview)).Post("/v1/ops/break-glass/{id}:review", a.reviewBreakGlass)
+		a.registerPart3(g)
 	})
 }
 
@@ -125,6 +133,7 @@ func (a *API) Metrics() http.Handler {
 		_, _ = fmt.Fprintf(w, "# HELP ops_failovers_total Failovers applied.\n# TYPE ops_failovers_total counter\nops_failovers_total %d\n", a.failovers.Load())
 		a.writeGauges(w, r)
 		_, _ = fmt.Fprintf(w, "# HELP ops_failovers_rejected_total Failover requests refused by a rule.\n# TYPE ops_failovers_rejected_total counter\nops_failovers_rejected_total %d\n", a.rejected.Load())
+		_, _ = fmt.Fprintf(w, "# HELP ops_slo_breaches_total Services the hourly SLO check found newly breached.\n# TYPE ops_slo_breaches_total counter\nops_slo_breaches_total %d\n", a.sloBreaches.Load())
 	})
 }
 

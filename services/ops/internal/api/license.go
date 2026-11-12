@@ -103,8 +103,8 @@ func (a *API) licenseView(rec store.LicenseRecord, activeFull int) licenseView {
 	return v
 }
 
-// getLicense reads the licence and its state. activeFull (query) is the tenant's count of active full users, which the ops
-// service does not hold; without it only the date rules apply.
+// getLicense reads the licence and its state. activeFull (query) is the tenant's count of active full users; without it the
+// last count the user-count reporter sent applies, and without that only the date rules apply.
 func (a *API) getLicense(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !ids.Valid(id) {
@@ -124,6 +124,17 @@ func (a *API) getLicense(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
+	}
+	if active < 0 {
+		// Without a count in the query, the tenant's last reported count (PUT .../license/usage) applies.
+		u, err := a.store.LicenseUsage(r.Context(), id)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		if u.CountedAt != nil {
+			active = u.ActiveFull
+		}
 	}
 	w.Header().Set("ETag", `"`+strconv.FormatInt(rec.Version, 10)+`"`)
 	httpx.JSON(w, http.StatusOK, a.licenseView(rec, active))
