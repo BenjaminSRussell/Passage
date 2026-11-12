@@ -843,7 +843,7 @@ paths:
     post:
       operationId: reportTransportOrder
       summary: The connector reports a PENDING order sent to the PLC, or refused by it
-      description: Repeating the status it has changes nothing. Any other state is 409 WMS-AUTO-ORDER-STATE.
+      description: Repeating the status it has changes nothing. Any other state is 409 WMS-AUTO-ORDER-STATE. A refused order gives its work back to people, as a fault does (the line notes the PLC's reason and a work still assigned to the station returns to OPEN).
       x-passage-duty: warehouse.automation.execute
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -871,8 +871,9 @@ paths:
       operationId: cancelTransportOrder
       summary: Cancel an automation order that has not arrived; its work goes back to people
       description: >
-        A PENDING, REFUSED, FAULT or DIVERTED order is cancelled at once. A SENT order is in the PLC's hands: clear the
-        move on the PLC first and send `plcCleared: true`, else 409 WMS-AUTO-ORDER-STATE. An ARRIVED order is done (409).
+        A REFUSED, FAULT or DIVERTED order is cancelled at once. A PENDING or SENT order may be in the PLC's hands (the
+        connector sends the MOVE before it reports the order sent): clear the move on the PLC first and send
+        `plcCleared: true`, else 409 WMS-AUTO-ORDER-STATE. An ARRIVED order is done (409).
         Cancelling a cancelled order changes nothing. The work line notes the reason, and a work still ASSIGNED to the
         station with no other live order there returns to OPEN.
       x-passage-duty: warehouse.work.supervise

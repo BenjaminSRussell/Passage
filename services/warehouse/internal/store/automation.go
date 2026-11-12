@@ -410,9 +410,14 @@ func (s *Store) ReportAutomationOrder(ctx context.Context, id, status, reason st
 		if cur.Status != OrderPending {
 			return &domain.Error{Code: CodeAutoOrderState, Detail: fmt.Sprintf("the order is %s; only a PENDING order is reported sent or refused", cur.Status)}
 		}
-		out, err = scanOrder(tx.QueryRow(ctx, `update automation_order set status = $2, reason = $3, sent_at = case when $2 = 'SENT' then $4 else sent_at end
+		out, err = scanOrder(tx.QueryRow(ctx, `update automation_order set status = $2, reason = $3, sent_at = case when $2 = 'SENT' then $4 else sent_at end,
+			done_at = case when $2 = 'REFUSED' then $4 else done_at end
 			where id = $1 returning `+orderCols, id, status, reason, now))
-		return err
+		if err != nil || status != OrderRefused {
+			return err
+		}
+		// The PLC will not make the move: the work goes back to people, as after a fault.
+		return releaseFromStation(ctx, tx, cur.Station, cur.WorkID, cur.LineNo, "refused by the PLC: "+orDefault(reason, "no reason given"))
 	})
 	return out, err
 }
@@ -588,8 +593,8 @@ type CancelInput struct {
 	Now        time.Time
 }
 
-// CancelAutomationOrder cancels an order that has not arrived. A PENDING, REFUSED, FAULT or DIVERTED order is cancelled
-// at once; a SENT one only with PLCCleared. Its work goes back to people as after a fault. Cancelling a cancelled order
+// CancelAutomationOrder cancels an order that has not arrived. A REFUSED, FAULT or DIVERTED order is cancelled at once;
+// a PENDING or SENT one only with PLCCleared, since the connector may have sent the MOVE before reporting it. Its work goes back to people as after a fault. Cancelling a cancelled order
 // changes nothing; an ARRIVED order is done and cannot be cancelled.
 func (s *Store) CancelAutomationOrder(ctx context.Context, in CancelInput) (AutomationOrder, error) {
 	var out AutomationOrder
@@ -607,9 +612,11 @@ func (s *Store) CancelAutomationOrder(ctx context.Context, in CancelInput) (Auto
 			return nil
 		case OrderArrived:
 			return &domain.Error{Code: CodeAutoOrderState, Detail: "the order has arrived; its move is done"}
-		case OrderSent:
+		case OrderSent, OrderPending:
+			// A PENDING order may already be in the PLC's hands: the connector pulls it, sends the MOVE and only then
+			// reports it sent. Either way only a person who cleared the move on the PLC may cancel it.
 			if !in.PLCCleared {
-				return &domain.Error{Code: CodeAutoOrderState, Detail: "the order was sent to the PLC: clear the move on the PLC first, then cancel it with plcCleared"}
+				return &domain.Error{Code: CodeAutoOrderState, Detail: "the order may already be with the PLC (the connector sends the MOVE before it reports it): clear the move on the PLC first, then cancel it with plcCleared"}
 			}
 		}
 		out, err = scanOrder(tx.QueryRow(ctx, `update automation_order set status = 'CANCELLED', reason = $2, cancelled_by = $3, done_at = $4

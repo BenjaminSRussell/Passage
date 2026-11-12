@@ -501,7 +501,11 @@ func TestAutomationFaultDivertAndCancelChangeTheWork(t *testing.T) {
 	cancel := func(o store.AutomationOrder, body string) *httptest.ResponseRecorder {
 		return post(orderPath+"/"+o.ID+":cancel", "", body)
 	}
-	rec = cancel(third, `{"reason":"moving it by forklift"}`)
+	// A pending order may already be with the PLC (the connector reports SENT after the MOVE): plcCleared is needed.
+	if rec := cancel(third, `{"reason":"moving it by forklift"}`); rec.Code != 409 || problemOf(t, rec).Code != store.CodeAutoOrderState {
+		t.Fatalf("cancel a pending order without plcCleared: %d %s", rec.Code, rec.Body)
+	}
+	rec = cancel(third, `{"reason":"moving it by forklift","plcCleared":true}`)
 	var c store.AutomationOrder
 	_ = json.Unmarshal(rec.Body.Bytes(), &c)
 	if rec.Code != 200 || c.Status != store.OrderCancelled || c.Reason != "moving it by forklift" {
@@ -524,6 +528,14 @@ func TestAutomationFaultDivertAndCancelChangeTheWork(t *testing.T) {
 	}
 	if rec := cancel(fourth, `{"reason":"wrong pallet","plcCleared":true}`); rec.Code != 200 {
 		t.Fatalf("cancel a cleared sent order: %d %s", rec.Code, rec.Body)
+	}
+	// The PLC refuses an order: the work goes back to people with the PLC's reason.
+	refused := newOrder()
+	if rec := call(h, req{method: "POST", path: orderPath + "/" + refused.ID + ":report", duties: all, body: `{"status":"REFUSED","reason":"location blocked"}`}); rec.Code != 200 {
+		t.Fatalf("report refused: %d %s", rec.Code, rec.Body)
+	}
+	if w := work(); w.Status != domain.WorkOpen || w.AssignedUser != "" || w.Lines[0].Reason != "refused by the PLC: location blocked" {
+		t.Fatalf("work after the PLC refused: %s %q %q", w.Status, w.AssignedUser, w.Lines[0].Reason)
 	}
 	// An arrived order is done.
 	fifth := newOrder()
