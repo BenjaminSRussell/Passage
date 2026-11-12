@@ -1539,6 +1539,9 @@
       {"resource": "/v1/hr/workers/*/absence/balances", "methods": ["GET"]}
     ]},
     "hr.profile.self": {"permissions": [{"resource": "/v1/hr/me", "methods": ["GET"]}]},
+    "hr.benefits.break-glass": {"permissions": [
+      {"resource": "/v1/hr/workers/*/benefits", "methods": ["GET"]}
+    ]},
     "hr.benefits.self": {"permissions": [
       {"resource": "/v1/hr/benefits/enrollments", "methods": ["POST"]},
       {"resource": "/v1/hr/benefits/life-events", "methods": ["POST"]},
@@ -2286,6 +2289,20 @@
     "audit.read": {"permissions": [
       {"resource": "/v1/audit/alerts", "methods": ["GET"]},
       {"resource": "/v1/audit/records/*/*", "methods": ["GET"]}
+    ]},
+    "audit.read-log.write": {"service_only": true, "permissions": [
+      {"resource": "/v1/audit/reads", "methods": ["POST"]}
+    ]},
+    "audit.read-log.view": {"permissions": [
+      {"resource": "/v1/audit/reads", "methods": ["GET"]}
+    ]},
+    "audit.read-log.export": {"permissions": [
+      {"resource": "/v1/audit/reads:export", "methods": ["GET"]},
+      {"resource": "/v1/audit/reads:verify", "methods": ["GET"]}
+    ]},
+    "audit.read-log.review": {"permissions": [
+      {"resource": "/v1/audit/reads:break-glass", "methods": ["GET"]},
+      {"resource": "/v1/audit/reads/*:review", "methods": ["POST"]}
     ]},
     "audit.write": {"permissions": [
       {"resource": "/v1/audit/alert-rules", "methods": ["POST"]},
@@ -4077,7 +4094,8 @@
     },
     "hr": {
       "numbering": ["numbering.sequence.allocate"],
-      "compliance": ["compliance.legal-hold.check"]
+      "compliance": ["compliance.legal-hold.check"],
+      "audit": ["audit.read-log.write"]
     },
     "product": {
       "org": ["org.read"]

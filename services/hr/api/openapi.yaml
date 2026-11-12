@@ -961,9 +961,32 @@ paths:
       description: |
         A caller with only hr.benefits.self reads their own worker (HCM-BEN-NOT-OWN
         otherwise); hr.worker.inquire or hr.worker.maintain read anyone's.
+
+        Health-plan elections and life events are protected health information. With
+        PHI read auditing on (the hipaa cloud overlay or PASSAGE_PHI_READ_AUDIT=true) a
+        response that carries them is recorded in the audit service (POST
+        /v1/audit/reads: who, which record and fields, when, purpose) before it is
+        returned; the read needs `purpose` (an employee reading their own defaults to
+        self-service) and is refused with 503 HCM-PHI-AUDIT-UNAVAILABLE when the record
+        cannot be written.
+
+        Break-glass (emergency access): hr.benefits.break-glass also opens this route. A
+        caller without hr.worker.inquire who holds it reads anyone's benefits by giving a
+        purpose with the BREAK-GLASS reason code ("BREAK-GLASS: <reason>"); the read is
+        recorded and queued for review by a second person (GET
+        /v1/audit/reads:break-glass), even when the record holds no health-plan election.
+        With read auditing off such a read is refused with 403 HCM-BREAK-GLASS-UNAUDITED.
+        The reason code is reserved: a caller whose scope it would not widen gets 400.
       x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/WorkerId"
+        - name: purpose
+          in: query
+          required: false
+          description: Reason code or short reason for reading protected health information, at most 500 characters. Required when PHI read auditing is on, except for a worker reading their own record.
+          schema:
+            type: string
+            maxLength: 500
       responses:
         "200":
           description: The worker's benefits
@@ -971,11 +994,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkerBenefits"
+        "400":
+          $ref: "#/components/responses/Problem"
         "401":
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
   /v1/hr/skills:
     get:

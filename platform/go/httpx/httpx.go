@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/cloudprofile"
+	"github.com/BenjaminSRussell/passage/platform/logpseudo"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
@@ -134,11 +135,18 @@ func Fail(w http.ResponseWriter, r *http.Request, err error) {
 // In a FIPS cloud profile (PASSAGE_CLOUD_PROFILE, #599), or in a binary built with GOFIPS140, Serve
 // refuses to start unless crypto/fips140.Enabled() is true, so every service that serves through it
 // fails closed.
+//
+// Under the eu-data-boundary overlay, or with LOG_PSEUDONYMIZE=true, Serve also wraps the default slog handler so
+// user and person identifiers and email addresses are replaced by tenant-keyed pseudonyms before logs are exported
+// (platform/go/logpseudo, #605); a bad profile or key configuration stops the service rather than log raw values.
 func Serve(ctx context.Context, addr string, h http.Handler) error {
 	if err := cloudprofile.CheckFIPS(os.Getenv); err != nil {
 		return err
 	}
 	defer stopProcessFence()
+	if _, err := logpseudo.Install(os.Getenv); err != nil {
+		return err
+	}
 	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()

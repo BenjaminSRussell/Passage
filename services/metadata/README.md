@@ -44,6 +44,10 @@ Migration `0004_cdc_publication` pre-creates the `passage_outbox_metadata` publi
 | `metadata.data.read` | Generated record reads |
 | `metadata.data.write` | Generated record creates |
 
+## PHI classification (HIPAA overlay, #606)
+
+A field may set `phi: true` (protected health information) and `encrypted: true` (the stored value is a `platform/go/fieldcrypt` envelope, sealed per tenant and field; the column is `bytea` and the wire value is base64). `Validate` and `entitygen` fail with MET-0010 when a `phi` field is not `encrypted`. Generated artifacts carry the classification: `x-passage-phi` and `x-passage-encrypted` on the JSON schema and OpenAPI property, `x-passage-phi-fields` in the OpenAPI `info`, and a `<Entity>PHIFields()` function in the generated Go model that lists the JSON names the read-access audit (`POST /v1/audit/reads`) should record. A definition without these keys behaves as before. Toggling `encrypted` on a published field is a breaking change (MET-0201).
+
 ## Error codes
 
 | Code | Meaning |
@@ -57,6 +61,7 @@ Migration `0004_cdc_publication` pre-creates the `passage_outbox_metadata` publi
 | MET-0007 | enum missing, duplicate, empty or code out of range |
 | MET-0008 | title field is not a declared string field |
 | MET-0009 | duplicate or reserved field name, bad relation or index reference |
+| MET-0010 | phi field that is not `encrypted: true`; `encrypted` on a type that cannot hold a sealed envelope (only string, text, bytes); an encrypted or phi field used as unique, default, computed, title or index column |
 | MET-0101 | invalid extension identity or target |
 | MET-0102 | extension field collision |
 | MET-0103 | invalid extension enum value or code |
@@ -76,3 +81,5 @@ cd ../../apps/web && npm test -- --run src/modules/metadata
 ```
 
 The generated API load contract starts three handler nodes over a shared registry and asserts 1,000 simple reads/second with p95 below 50 ms.
+
+`internal/phiinventory` parses `docs/ops/phi-field-inventory.md` and fails when a column the HIPAA review lists is missing from the HR, payroll, expense or field-service migrations.

@@ -69,6 +69,14 @@ spec:
             - name: AGENTS_OPENAI_API_VERSION
               value: {{ .Values.openai.apiVersion | quote }}
             {{- end }}
+            {{- if .Values.model.region }}
+            - name: AGENTS_PROVIDER_REGION
+              value: {{ .Values.model.region | quote }}
+            {{- end }}
+            {{- if .Values.phiFields }}
+            - name: AGENTS_PHI_FIELDS
+              value: {{ join "," .Values.phiFields | quote }}
+            {{- end }}
             {{- if .Values.bedrock.region }}
             - name: AWS_REGION
               value: {{ .Values.bedrock.region | quote }}
