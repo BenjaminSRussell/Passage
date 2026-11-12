@@ -36,7 +36,7 @@ const (
 	codeOpeningInvalid = "INV-OPB-001"
 	// codeOpeningReferenceHeld is a reference another batch of the legal entity already opened.
 	codeOpeningReferenceHeld = "INV-OPB-005"
-	openingKeyPrefix   = "opening-batch:"
+	openingKeyPrefix         = "opening-batch:"
 )
 
 // OpeningBatches is what the opening import needs of the store.

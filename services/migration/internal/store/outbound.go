@@ -35,11 +35,11 @@ const (
 	HubService = "integration-hub"
 	// The route duties the outbound store admits (the API enforces them per route; the store checks them again before
 	// it opens a transaction with the all-entities scope).
-	DutyOutboundRender       = "migration.outbound.render"
-	DutyXrefRecord           = "migration.xref.record"
+	DutyOutboundRender = "migration.outbound.render"
+	DutyXrefRecord     = "migration.xref.record"
 	// DutyXrefRead lets a loading service (the migration factory) resolve legacy keys to the Passage ids this service loaded
 	// (#49, H-S8-6); it is service-only and reads no other route.
-	DutyXrefRead = "migration.xref.read"
+	DutyXrefRead             = "migration.xref.read"
 	DutyRun                  = "migration.run"
 	DutyProjectWrite         = "migration.project.write"
 	OutboundActive           = "active"
