@@ -19,10 +19,17 @@ CREATE POLICY print_document_template_version_tenant_access ON print_document_te
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
--- The templates saved before this migration keep their current version as their first recorded one.
+-- The templates saved before this migration keep their current version as their first recorded one. The migration
+-- sets no tenant, so under the forced policies an owner that is not a superuser (the deployed shape) would read no row
+-- and could write none; the policies are lifted for the owner and forced again in the same transaction, as edi 0009
+-- and finreport 0016 do.
+ALTER TABLE print_document_template NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE print_document_template_version NO FORCE ROW LEVEL SECURITY;
 INSERT INTO print_document_template_version (tenant_id, code, version, name, document_type, is_default, config, saved_at)
 SELECT tenant_id, code, version, name, document_type, is_default, config, updated_at FROM print_document_template
 ON CONFLICT DO NOTHING;
+ALTER TABLE print_document_template FORCE ROW LEVEL SECURITY;
+ALTER TABLE print_document_template_version FORCE ROW LEVEL SECURITY;
 
 DO $$
 BEGIN
