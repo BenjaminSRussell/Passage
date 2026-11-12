@@ -110,6 +110,7 @@ func setIdentity(pr *httputil.ProxyRequest) {
 		return
 	}
 	claims := claimsOf(pr.In.Header.Get("Authorization"))
+	tenant.ForwardGatewaySecret(pr.Out)
 	pr.Out.Header.Set(tenant.HeaderTenant, principal.TenantID)
 	pr.Out.Header.Set(tenant.HeaderUser, principal.UserID)
 	pr.Out.Header.Set(tenant.HeaderLegalEntity, claims.LegalEntity)

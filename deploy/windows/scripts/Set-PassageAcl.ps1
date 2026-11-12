@@ -1,0 +1,37 @@
+<#
+  Run by the MSI (deferred, as SYSTEM) after the Passage service exists. Restricts the data folder and, when -RegistryKey is given, that registry key
+  to SYSTEM, Administrators and the service account, so the database password and the service signing keys are not readable by
+  ordinary users. Safe to run again.
+#>
+param(
+    [Parameter(Mandatory)] [string] $DataDir,
+    [Parameter(Mandatory)] [string] $Account,
+    [string] $RegistryKey = ''
+)
+$ErrorActionPreference = 'Stop'
+
+function New-Rule($identity, $rights) {
+    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+    New-Object System.Security.AccessControl.FileSystemAccessRule($identity, $rights, $inherit, 'None', 'Allow')
+}
+
+$acl = Get-Acl -LiteralPath $DataDir
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
+$acl.AddAccessRule((New-Rule 'NT AUTHORITY\SYSTEM' 'FullControl'))
+$acl.AddAccessRule((New-Rule 'BUILTIN\Administrators' 'FullControl'))
+$acl.AddAccessRule((New-Rule $Account 'Modify'))
+Set-Acl -LiteralPath $DataDir -AclObject $acl
+
+$key = $RegistryKey
+if ($key -and (Test-Path $key)) {
+    $racl = Get-Acl -Path $key
+    $racl.SetAccessRuleProtection($true, $false)
+    foreach ($rule in @($racl.Access)) { [void]$racl.RemoveAccessRule($rule) }
+    foreach ($who in 'NT AUTHORITY\SYSTEM', 'BUILTIN\Administrators') {
+        $racl.AddAccessRule((New-Object System.Security.AccessControl.RegistryAccessRule($who, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+    }
+    $racl.AddAccessRule((New-Object System.Security.AccessControl.RegistryAccessRule($Account, 'ReadKey', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+    Set-Acl -Path $key -AclObject $racl
+}
+Write-Output "ACL set on $DataDir and $key for $Account"

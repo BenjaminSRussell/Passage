@@ -1,0 +1,309 @@
+name: windows-msi
+
+# Cross-builds passage-server and the Go services for Windows and packages them with WiX. See docs/adr/0004-windows-packaging.md and
+# docs/ops/windows-install.md. It is path-filtered so it does not run on every pull request.
+#
+#   build    runs for pull requests, tags and manual runs. It has NO secrets and no id-token: it builds unsigned packages to prove the
+#            build, and reports which files are unsigned. On a pull request it builds only the amd64 standard leg.
+#   release  runs for tags and for manual runs with sign=true, in the "platform-release" environment, which holds the signing secrets.
+#            It signs the executables before packaging, then the MSIs and the bundle, fails on any unsigned binary, writes the SPDX SBOM and
+#            the keyless cosign bundles, and uploads the release files. id-token: write exists only there.
+#
+# Secrets (referenced, not defined in the repository; they belong to the platform-release environment):
+#   WINDOWS_SIGNING_PFX_BASE64    base64 of the Authenticode code-signing certificate (.pfx)
+#   WINDOWS_SIGNING_PFX_PASSWORD  its password
+# Repository variables (optional):
+#   WINDOWS_TIMESTAMP_URL         RFC 3161 timestamp server (default http://timestamp.digicert.com)
+#   WIX_VERSION                   WiX dotnet tool version (default 6.0.2)
+#   WIX_OSMF_ACCEPTED             "true" once the organization accepted the WiX Open Source Maintenance Fee terms (WiX 7 and later)
+#   NODE_WIN_URL / NODE_WIN_SHA256 (arm64: NODE_WIN_ARM64_URL / _SHA256)        pinned node-v*-win-*.zip for the TypeScript services feature
+#   PYTHON_WIN_URL / PYTHON_WIN_SHA256 (arm64: PYTHON_WIN_ARM64_URL / _SHA256)  pinned python.org embeddable zip for the Python services feature
+#   TEMPORAL_WIN_URL / TEMPORAL_WIN_SHA256    pinned Temporal server release (.tar.gz or .zip) with temporal-server.exe at its top (x64 only)
+#   POSTGRES_WIN_URL / POSTGRES_WIN_SHA256    pinned EDB PostgreSQL installer (x64 only)
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/windows/**'
+      - 'tools/passage-server/**'
+      - 'platform/go/**'
+      - 'services/*/cmd/**'
+      - 'services/*/go.mod'
+      - '.github/workflows/windows-msi.yml'
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'MSI version (x.y.z); defaults to 0.0.<run number>'
+        required: false
+      sign:
+        description: 'Sign and release (needs the platform-release environment)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: windows-msi-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  WIX_VERSION: ${{ vars.WIX_VERSION || '6.0.2' }}
+
+jobs:
+  test:
+    name: passage-server (windows tests)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26'
+          cache-dependency-path: '**/go.sum'
+      - name: vet and test
+        working-directory: tools/passage-server
+        run: |
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw "go vet failed with exit code $LASTEXITCODE" }
+          go test -count=1 ./...
+          if ($LASTEXITCODE -ne 0) { throw "go test failed with exit code $LASTEXITCODE" }
+
+  build:
+    name: build (${{ matrix.arch }}${{ matrix.fips && ', fips' || '' }})
+    needs: test
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"arch":"amd64","wixarch":"x64","fips":false}]' || '[{"arch":"amd64","wixarch":"x64","fips":false},{"arch":"arm64","wixarch":"arm64","fips":false},{"arch":"amd64","wixarch":"x64","fips":true},{"arch":"arm64","wixarch":"arm64","fips":true}]') }}
+    env:
+      GOOS: windows
+      GOARCH: ${{ matrix.arch }}
+      CGO_ENABLED: '0'
+      # The FIPS variant links the Go Cryptographic Module (#599); passage-server then refuses to start when FIPS mode is off.
+      GOFIPS140: ${{ matrix.fips && 'v1.0.0' || 'off' }}
+      OUT: ${{ github.workspace }}\out
+      VERSION_INPUT: ${{ inputs.version }}
+      NODE_WIN_URL: ${{ vars.NODE_WIN_URL }}
+      NODE_WIN_SHA256: ${{ vars.NODE_WIN_SHA256 }}
+      NODE_WIN_ARM64_URL: ${{ vars.NODE_WIN_ARM64_URL }}
+      NODE_WIN_ARM64_SHA256: ${{ vars.NODE_WIN_ARM64_SHA256 }}
+      PYTHON_WIN_URL: ${{ vars.PYTHON_WIN_URL }}
+      PYTHON_WIN_SHA256: ${{ vars.PYTHON_WIN_SHA256 }}
+      PYTHON_WIN_ARM64_URL: ${{ vars.PYTHON_WIN_ARM64_URL }}
+      PYTHON_WIN_ARM64_SHA256: ${{ vars.PYTHON_WIN_ARM64_SHA256 }}
+      TEMPORAL_WIN_URL: ${{ vars.TEMPORAL_WIN_URL }}
+      TEMPORAL_WIN_SHA256: ${{ vars.TEMPORAL_WIN_SHA256 }}
+      POSTGRES_WIN_URL: ${{ vars.POSTGRES_WIN_URL }}
+      POSTGRES_WIN_SHA256: ${{ vars.POSTGRES_WIN_SHA256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26'
+          cache-dependency-path: '**/go.sum'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Version
+        shell: pwsh
+        run: |
+          $v = $env:VERSION_INPUT
+          if (-not $v -and $env:GITHUB_REF -like 'refs/tags/v*') { $v = $env:GITHUB_REF_NAME.TrimStart('v') }
+          if (-not $v) { $v = "0.0.${{ github.run_number }}" }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "version $v is not x.y.z (MSI versions are numeric)" }
+          $fips = if ('${{ matrix.fips }}' -eq 'true') { 'fips-' } else { '' }
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VARIANT=${fips}${{ matrix.wixarch }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # The web build is embedded into passage-server with go:embed (-tags webdist). It is not committed.
+      - name: Build the web app
+        working-directory: apps/web
+        run: |
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+          New-Item -ItemType Directory -Force -Path ..\..\tools\passage-server\internal\web | Out-Null
+          Copy-Item -Recurse -Force dist ..\..\tools\passage-server\internal\web\dist
+
+      - name: Cross-build passage-server and the Go services
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:OUT\bin" | Out-Null
+          $ld = "-s -w -X main.version=$env:VERSION"
+          Push-Location tools/passage-server
+          go build -trimpath -tags webdist -ldflags $ld -o "$env:OUT\bin\passage-server.exe" .
+          if ($LASTEXITCODE -ne 0) { throw 'passage-server build failed' }
+          Pop-Location
+          # One executable per service whose cmd directory carries the service's name (devgateway, entitygen and demo mains are skipped).
+          $n = 0
+          foreach ($svc in Get-ChildItem services -Directory) {
+              $cmd = Join-Path $svc.FullName "cmd\$($svc.Name)"
+              if (-not (Test-Path "$cmd\main.go")) { continue }
+              Push-Location $svc.FullName
+              go build -trimpath -ldflags "-s -w" -o "$env:OUT\bin\$($svc.Name).exe" ".\cmd\$($svc.Name)"
+              if ($LASTEXITCODE -ne 0) { throw "build failed: $($svc.Name)" }
+              Pop-Location
+              $n++
+          }
+          "built passage-server and $n services for $env:GOARCH (GOFIPS140=$env:GOFIPS140)"
+
+      - name: Install WiX
+        shell: pwsh
+        run: .\deploy\windows\scripts\Install-Wix.ps1 -Version $env:WIX_VERSION ${{ vars.WIX_OSMF_ACCEPTED == 'true' && '-OsmfAccepted' || '' }}
+
+      - name: Optional runtimes and prerequisites (pinned, hash-verified)
+        shell: pwsh
+        run: .\deploy\windows\scripts\Fetch-Optional.ps1 -Arch ${{ matrix.wixarch }} -Temp $env:RUNNER_TEMP
+
+      - name: Build the packages (unsigned)
+        shell: pwsh
+        run: |
+          # A hashtable splat: an empty array assigned from an if expression is $null and would be passed as a positional argument.
+          $p = @{ Version = $env:VERSION; Arch = '${{ matrix.wixarch }}'; Variant = $env:VARIANT; Out = $env:OUT }
+          if ('${{ matrix.fips }}' -eq 'true') { $p.Fips = $true }
+          .\deploy\windows\scripts\Build-Packages.ps1 @p
+
+      # The build job has no signing secrets: this lists the unsigned files and passes. The release job fails on any unsigned binary.
+      - name: Report unsigned binaries
+        shell: pwsh
+        run: .\deploy\windows\scripts\Test-Signed.ps1 -Root $env:OUT -AllowUnsigned
+
+      # actions/upload-artifact v4.6.2. The unsigned executables are kept briefly so the release job signs the very files built here.
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-${{ env.VARIANT }}
+          path: ${{ github.workspace }}/out
+          retention-days: 3
+          if-no-files-found: error
+
+  release:
+    name: release (${{ matrix.arch }}${{ matrix.fips && ', fips' || '' }})
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)
+    runs-on: windows-latest
+    environment: platform-release
+    permissions:
+      contents: read
+      id-token: write # keyless cosign signatures
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, wixarch: x64, fips: false }
+          - { arch: arm64, wixarch: arm64, fips: false }
+          - { arch: amd64, wixarch: x64, fips: true }
+          - { arch: arm64, wixarch: arm64, fips: true }
+    env:
+      OUT: ${{ github.workspace }}\out
+      NODE_WIN_URL: ${{ vars.NODE_WIN_URL }}
+      NODE_WIN_SHA256: ${{ vars.NODE_WIN_SHA256 }}
+      NODE_WIN_ARM64_URL: ${{ vars.NODE_WIN_ARM64_URL }}
+      NODE_WIN_ARM64_SHA256: ${{ vars.NODE_WIN_ARM64_SHA256 }}
+      PYTHON_WIN_URL: ${{ vars.PYTHON_WIN_URL }}
+      PYTHON_WIN_SHA256: ${{ vars.PYTHON_WIN_SHA256 }}
+      PYTHON_WIN_ARM64_URL: ${{ vars.PYTHON_WIN_ARM64_URL }}
+      PYTHON_WIN_ARM64_SHA256: ${{ vars.PYTHON_WIN_ARM64_SHA256 }}
+      TEMPORAL_WIN_URL: ${{ vars.TEMPORAL_WIN_URL }}
+      TEMPORAL_WIN_SHA256: ${{ vars.TEMPORAL_WIN_SHA256 }}
+      POSTGRES_WIN_URL: ${{ vars.POSTGRES_WIN_URL }}
+      POSTGRES_WIN_SHA256: ${{ vars.POSTGRES_WIN_SHA256 }}
+      TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Variant
+        shell: pwsh
+        run: |
+          $fips = if ('${{ matrix.fips }}' -eq 'true') { 'fips-' } else { '' }
+          "VARIANT=${fips}${{ matrix.wixarch }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      # actions/download-artifact v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: unsigned-${{ env.VARIANT }}
+          path: ${{ github.workspace }}/unsigned
+      - name: Take the unsigned executables and the version from the build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:OUT" | Out-Null
+          Copy-Item -Recurse -Force "$env:GITHUB_WORKSPACE\unsigned\bin" "$env:OUT\bin"
+          $msi = Get-ChildItem "$env:GITHUB_WORKSPACE\unsigned\Passage-*-$env:VARIANT.msi" | Select-Object -First 1
+          if (-not $msi) { throw "no unsigned Passage MSI for $env:VARIANT in the build artifact" }
+          $v = ($msi.BaseName -replace '^Passage-', '') -replace "-$([regex]::Escape($env:VARIANT))$", ''
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install WiX
+        shell: pwsh
+        run: .\deploy\windows\scripts\Install-Wix.ps1 -Version $env:WIX_VERSION ${{ vars.WIX_OSMF_ACCEPTED == 'true' && '-OsmfAccepted' || '' }}
+      - name: Optional runtimes and prerequisites (pinned, hash-verified)
+        shell: pwsh
+        run: .\deploy\windows\scripts\Fetch-Optional.ps1 -Arch ${{ matrix.wixarch }} -Temp $env:RUNNER_TEMP
+
+      # The secrets are mapped only onto the steps that sign.
+      - name: Sign the executables (services, passage-server, Temporal)
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          .\deploy\windows\scripts\Sign-Files.ps1 -Path "$env:OUT\bin\*.exe"
+          # Temporal's own executable is signed before it goes into the Temporal MSI.
+          if ($env:TEMPORAL_DIR) { .\deploy\windows\scripts\Sign-Files.ps1 -Path "$env:TEMPORAL_DIR\temporal-server.exe" }
+
+      - name: Build the packages
+        shell: pwsh
+        run: |
+          # A hashtable splat: an empty array assigned from an if expression is $null and would be passed as a positional argument.
+          $p = @{ Version = $env:VERSION; Arch = '${{ matrix.wixarch }}'; Variant = $env:VARIANT; Out = $env:OUT }
+          if ('${{ matrix.fips }}' -eq 'true') { $p.Fips = $true }
+          .\deploy\windows\scripts\Build-Packages.ps1 @p
+
+      - name: Sign the MSIs and the bundle
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          .\deploy\windows\scripts\Sign-Files.ps1 -Path "$env:OUT\*.msi"
+          $bundle = "$env:OUT\PassageSetup-$env:VERSION-$env:VARIANT.exe"
+          if (Test-Path $bundle) { .\deploy\windows\scripts\Sign-Bundle.ps1 -Bundle $bundle -Temp $env:RUNNER_TEMP }
+
+      # Fails the release on any unsigned or untimestamped binary.
+      - name: Verify Authenticode signatures
+        shell: pwsh
+        run: .\deploy\windows\scripts\Test-Signed.ps1 -Root $env:OUT
+
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c
+        with:
+          path: out/bin
+          format: spdx-json
+          output-file: out/Passage-${{ env.VERSION }}-${{ env.VARIANT }}.spdx.json
+          upload-artifact: false
+
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
+      # Keyless cosign signature next to each release file; the OIDC token exists only in this job.
+      - name: cosign sign-blob
+        shell: pwsh
+        run: |
+          Get-ChildItem "$env:OUT\*" -File -Include *.msi, *.exe, *.json | ForEach-Object {
+            cosign sign-blob --yes --bundle "$($_.FullName).cosign.bundle" $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "cosign sign-blob failed on $($_.Name) with exit code $LASTEXITCODE" }
+          }
+
+      - name: Collect release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\release" | Out-Null
+          Get-ChildItem "$env:OUT\*" -File | Copy-Item -Destination "$env:RUNNER_TEMP\release"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: passage-windows-${{ env.VERSION }}-${{ env.VARIANT }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error

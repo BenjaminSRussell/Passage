@@ -12,6 +12,7 @@ import (
 )
 
 func Forward(req *http.Request, p tenant.Principal) {
+	tenant.ForwardGatewaySecret(req)
 	req.Header.Set(tenant.HeaderTenant, p.TenantID)
 	if p.LegalEntityID != "" {
 		req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)

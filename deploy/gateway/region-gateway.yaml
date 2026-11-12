@@ -90,6 +90,7 @@ spec:
         - X-Passage-LegalEntity
         - X-Passage-LegalEntity-Scope
         - X-Passage-Service-Token
+        - X-Passage-Gateway-Secret
 ---
 # The route is unauthenticated, so it is rate limited per client address (health checkers are few and fixed; 600 a minute
 # is generous for them and caps anything else).

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PassageTemporal-<version>-<arch>.msi: the Temporal server (frontend, history, matching, worker in one process) as the
+  "PassageTemporal" Windows service. Optional: chained by PassageSetup.exe or installed on its own. Never `temporal server start-dev`.
+    wix build -arch x64 -d Version=1.2.3 -d TemporalDir=out\temporal -d BinDir=out\bin -ext WixToolset.Util.wixext Temporal.wxs -o PassageTemporal-1.2.3-x64.msi
+  TemporalDir holds temporal-server.exe from a pinned upstream release (CI verifies its SHA-256 and signs the executable). temporal-server.exe
+  does not speak the Windows service protocol, so the service is passage-server.exe in "wrap" mode, which runs it as its supervised child.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <?ifndef Version?><?define Version = "0.0.0" ?><?endif?>
+  <Package Name="Passage Temporal server" Manufacturer="Passage" Version="$(Version)"
+           UpgradeCode="088c43d3-8a88-4b8b-8cda-0aa062dc76ad" Scope="perMachine" Compressed="yes" InstallerVersion="500">
+    <MediaTemplate EmbedCab="yes" />
+    <MajorUpgrade DowngradeErrorMessage="A newer Passage Temporal server is already installed." />
+    <Property Id="SERVICE_ACCOUNT" Secure="yes" Value="NT SERVICE\PassageTemporal" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="PassageTemporal">
+        <Directory Id="SCRIPTSFOLDER" Name="scripts" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="PassageTemporal">
+        <Directory Id="CONFIGFOLDER" Name="config" />
+        <Directory Id="TLOGSFOLDER" Name="logs" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Temporal" Title="Temporal server" Level="1">
+      <Component Id="TemporalExe" Directory="INSTALLFOLDER" Guid="*" Bitness="always64">
+        <File Id="TemporalExe" Source="$(TemporalDir)\temporal-server.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="WrapperExe" Directory="INSTALLFOLDER" Guid="*" Bitness="always64">
+        <File Id="WrapperExe" Name="passage-server.exe" Source="$(BinDir)\passage-server.exe" KeyPath="yes" />
+        <ServiceInstall Id="TemporalService" Name="PassageTemporal" DisplayName="Passage Temporal server"
+                        Description="Workflow engine for Passage (frontend, history, matching, worker)."
+                        Type="ownProcess" Start="auto" ErrorControl="normal" Account="[SERVICE_ACCOUNT]"
+                        Arguments="wrap -service PassageTemporal -logdir &quot;[CommonAppDataFolder]PassageTemporal\logs&quot; -- &quot;[INSTALLFOLDER]temporal-server.exe&quot; --config-file &quot;[CONFIGFOLDER]passage.yaml&quot; --env passage --allow-no-auth start">
+          <ServiceDependency Id="Tcpip" />
+          <ServiceConfig FailureActionsWhen="failedToStopOrReturnedError" OnInstall="yes" OnReinstall="yes" />
+          <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="30" ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="TemporalServiceControl" Name="PassageTemporal" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+      </Component>
+      <Component Id="AclScript" Directory="SCRIPTSFOLDER" Guid="*" Bitness="always64">
+        <File Id="AclScript" Source="scripts\Set-PassageAcl.ps1" KeyPath="yes" />
+      </Component>
+      <!-- NeverOverwrite + Permanent: an admin's edited config (database password) survives upgrade and uninstall. -->
+      <Component Id="TemporalConfig" Directory="CONFIGFOLDER" Guid="*" Bitness="always64" NeverOverwrite="yes" Permanent="yes">
+        <File Id="TemporalConfigFile" Name="passage.yaml" Source="temporal\config.yaml" KeyPath="yes" />
+      </Component>
+      <Component Id="TemporalLogs" Directory="TLOGSFOLDER" Guid="*" Bitness="always64">
+        <CreateFolder />
+        <!-- A folder cannot be the key path of a component with a generated GUID (WIX0230). -->
+        <RegistryValue Root="HKLM" Key="SOFTWARE\PassageTemporal\Folders" Name="Logs" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </Feature>
+
+    <!-- The config holds the Temporal database password: only SYSTEM, Administrators and the service account may read the folder. -->
+    <SetProperty Id="TemporalSetAcl" Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[SCRIPTSFOLDER]Set-PassageAcl.ps1&quot; -DataDir &quot;[CommonAppDataFolder]PassageTemporal&quot; -Account &quot;[SERVICE_ACCOUNT]&quot;"
+                 Sequence="execute" Before="TemporalSetAcl" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    <CustomAction Id="TemporalSetAcl" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec" Execute="deferred" Return="check" Impersonate="no" />
+    <InstallExecuteSequence>
+      <Custom Action="TemporalSetAcl" After="InstallServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>
