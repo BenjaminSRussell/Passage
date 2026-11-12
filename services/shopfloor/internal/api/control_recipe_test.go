@@ -332,3 +332,46 @@ func TestHTTP_ControlRecipeLifecycleWriteAuditAndResend(t *testing.T) {
 		t.Fatalf("forced resend history = %+v", last)
 	}
 }
+
+// The meaning of a kiosk signature is the step's, not the kiosk's: a signature without one gets the step's meaning, one
+// with another meaning is refused, and a signature must name a signature step of a recipe of its order.
+func TestHTTP_SignatureMeaningComesFromTheStep(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	body := fmt.Sprintf(`{"orderId":%q,"resourceId":%q,"destination":"kiosk","recipe":{"procedure":{"name":"Batch","unitProcedures":[{"name":"Reactor","operations":[{"name":"Heat","phases":[{"name":"Ramp","instructions":[
+		{"seq":1,"category":"instruction-text","text":"Check the vessel is empty."},
+		{"seq":2,"category":"signature-request","text":"Verify the charge.","meaning":"verified"}]}]}]}]}}}`, recipeOrder, recipeResource)
+	rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/control-recipes", body, DutyControlRecipeCreate, map[string]string{"Idempotency-Key": "sig-recipe"})
+	var rc store.ControlRecipe
+	if err := json.Unmarshal(rec.Body.Bytes(), &rc); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("recipe: %d %s", rec.Code, rec.Body)
+	}
+	message := func(id, step, order string, values string) *httptest.ResponseRecorder {
+		b := fmt.Sprintf(`{"source":"kiosk","sourceMessageId":%q,"categoryCode":"process-data","orderId":%q,"phasePath":"Batch/Reactor/Heat/Ramp","occurredAt":"2026-10-27T10:00:00Z","values":[%s]}`,
+			id+":"+step, order, values)
+		return call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", b, DutyProcessCreate)
+	}
+	signed := `{"name":"signed-by","type":"text","value":"Ana Ruiz"}`
+	if rec := message(rc.ID, "Reactor/Heat/Ramp/2", recipeOrder, signed+`,{"name":"signature-meaning","type":"text","value":"performed"}`); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != domain.CodeSignatureStep {
+		t.Fatalf("a meaning other than the step's: %d %s", rec.Code, rec.Body)
+	}
+	if rec := message(rc.ID, "Reactor/Heat/Ramp/1", recipeOrder, signed); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a signature on a text step: %d %s", rec.Code, rec.Body)
+	}
+	if rec := message(rc.ID, "Reactor/Heat/Ramp/2", "0195f0a0-0000-7000-8000-0000000000ff", signed); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a signature for another order: %d %s", rec.Code, rec.Body)
+	}
+	if rec := message("not-a-recipe", "Reactor/Heat/Ramp/2", recipeOrder, signed); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a signature naming no recipe: %d %s", rec.Code, rec.Body)
+	}
+	rec = message(rc.ID, "Reactor/Heat/Ramp/2", recipeOrder, signed)
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"name":"signature-meaning","type":"text","value":"verified"`) {
+		t.Fatalf("a signature without a meaning gets the step's: %d %s", rec.Code, rec.Body)
+	}
+	if rec := message(rc.ID+"x", "", recipeOrder, `{"name":"temperature","type":"numeric","value":"70"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("a message without a signature is not checked: %d %s", rec.Code, rec.Body)
+	}
+}

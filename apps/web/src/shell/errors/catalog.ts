@@ -1058,6 +1058,8 @@ const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0182": { message: "Someone else changed this PI sheet after you opened it.", action: RELOAD_AND_REDO },
   "SF-0183": { message: "A PI sheet with this code exists, or the sheet already has a draft in progress.", action: "Open the existing sheet or its draft, or use another code." },
   "SF-0184": { message: "A control recipe can only be made from a released PI sheet whose steps fit where the recipe goes.", action: "Release the sheet, or give each setpoint the node it is written to when the recipe goes to a process control system." },
+  "SF-0185": { message: "That certificate wasn't issued to this edge node.", action: "Reload the node's certificate history and pick a certificate from it." },
+  "SF-0186": { message: "This signature doesn't match the step it signs: the step asks for a different signature meaning, or it isn't a signature step of this batch.", action: "Reload the PI sheet on the kiosk and sign the step again." },
 };
 
 const companySetup: Record<string, ProblemCatalogEntry> = {

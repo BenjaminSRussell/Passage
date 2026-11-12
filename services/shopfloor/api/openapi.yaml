@@ -1279,7 +1279,11 @@ paths:
       operationId: createProcessMessage
       summary: Record a process message (FR-25.17, BR-25.13)
       description: |
-        From a kiosk PI sheet, the edge connector or manual entry. The category (the tenant's
+        From a kiosk PI sheet, the edge connector or manual entry. A message that carries a signature (a
+        `signed-by` or `signature-meaning` value) must name the step it signs in its sourceMessageId
+        (`<control recipe id>:<unit procedure>/<operation>/<phase>/<seq>`), a signature-request step of a recipe
+        of the message's order: the meaning is that step's (performed by default) and is added when missing; another
+        meaning, or no such step, is SF-0186 (422). The category (the tenant's
         master row of that code, else the built-in default) decides the destinations; a code that
         is neither is SF-0164 and an inactive row SF-0165. The category's characteristic
         definitions govern the unit and limits of the values they name; a different type or a

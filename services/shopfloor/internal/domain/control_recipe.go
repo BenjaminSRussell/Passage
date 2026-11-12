@@ -450,3 +450,45 @@ func ReadbackTolerance(nodeType string, written decimal.Decimal) decimal.Decimal
 	}
 	return def
 }
+
+// CodeSignatureStep is a signature in a process message that does not match the step it signs: no such signature
+// step in the recipe, or a meaning other than the step's (21 CFR 11.50). 422.
+const CodeSignatureStep = "SF-0186"
+
+// SignatureStep finds the instruction a kiosk step key names: "unit procedure/operation/phase/seq", as the kiosk builds
+// it. ok is false when the recipe has no such instruction.
+func (d RecipeDoc) SignatureStep(key string) (Instruction, bool) {
+	parts := strings.Split(key, "/")
+	if len(parts) != 4 {
+		return Instruction{}, false
+	}
+	for _, up := range d.Procedure.UnitProcedures {
+		if up.Name != parts[0] {
+			continue
+		}
+		for _, op := range up.Operations {
+			if op.Name != parts[1] {
+				continue
+			}
+			for _, ph := range op.Phases {
+				if ph.Name != parts[2] {
+					continue
+				}
+				for _, in := range ph.Instructions {
+					if fmt.Sprint(in.Seq) == parts[3] {
+						return in, true
+					}
+				}
+			}
+		}
+	}
+	return Instruction{}, false
+}
+
+// MeaningOf is the meaning a signature step's signature carries: the step's own, or performed.
+func MeaningOf(in Instruction) string {
+	if in.Meaning == "" {
+		return "performed"
+	}
+	return in.Meaning
+}

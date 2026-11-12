@@ -189,7 +189,9 @@ func (s AndonSettings) Cleared(ended, now time.Time) bool {
 func (s AndonSettings) ClearAfter() time.Duration { return time.Duration(s.ClearMinutes) * time.Minute }
 
 // DownAfter is how long a machine may stay down.
-func (s AndonSettings) DownAfter() time.Duration { return time.Duration(s.DowntimeMinutes) * time.Minute }
+func (s AndonSettings) DownAfter() time.Duration {
+	return time.Duration(s.DowntimeMinutes) * time.Minute
+}
 
 // ScrapExceeded reports whether a bucket of total pieces with good of them good is over the scrap share.
 // Integer arithmetic, so a share exactly at the threshold does not raise.
