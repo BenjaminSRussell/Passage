@@ -5,6 +5,7 @@ import type { AccountPositionRow, BankAccount, CashDesk, CashDeskDay, CashDeskDe
 import { LEGAL_ENTITY } from "../company";
 import { reply, route } from "../backend";
 import { at, day, newId, table, uid } from "../store";
+import { byUsername, ME } from "./finance/people";
 
 const BASE = "/api/v1/treasury";
 const K_ACCOUNT = 360;
@@ -355,6 +356,8 @@ const desks = table<DemoDesk>([
 ]);
 const postsToLedger = (deskId: string): boolean => deskId === DESK;
 
+const ANA = byUsername("ana.ortiz").id;
+
 function entry(n: number, kind: CashDeskEntry["kind"], amount: number, description: string, by: string, reference?: string, counterAccount = "8000"): CashDeskEntry {
   return { id: uid(371, n), lineNo: 0, kind, amount: dec(amount), description, reference, createdBy: by, balanceAfter: "0.00", counterAccount, postingStatus: "posted" };
 }
@@ -363,8 +366,8 @@ const days = new Map<string, DemoDay[]>([
   [
     DESK,
     [
-      { deskId: DESK, businessDate: day(-2), status: "closed", openingBalance: "1200.00", bookBalance: "1480.50", countedBalance: "1480.50", difference: "0.00", openedBy: "ana.ortiz", closedBy: "ana.ortiz", differencePosting: "not_posted", entries: [entry(1, "receipt", 310.5, "Parts counter sales", "ana.ortiz", undefined, "4000"), entry(2, "payment", 30, "Office supplies", "ana.ortiz", "RCPT-4417", "6400")] },
-      { deskId: DESK, businessDate: day(0), status: "open", openingBalance: "1480.50", bookBalance: "1480.50", openedBy: "ana.ortiz", differencePosting: "not_posted", entries: [entry(3, "receipt", 250, "Walk-in sale, two seal kits", "ana.ortiz", "INV-30177", "4000"), entry(4, "payment", 36.4, "Courier tip", "ana.ortiz", undefined, "6400"), entry(5, "receipt", 120, "Customer deposit", "ana.ortiz", "DEP-0091", "2300")] },
+      { deskId: DESK, businessDate: day(-2), status: "closed", openingBalance: "1200.00", bookBalance: "1480.50", countedBalance: "1480.50", difference: "0.00", openedBy: ANA, closedBy: ANA, differencePosting: "not_posted", entries: [entry(1, "receipt", 310.5, "Parts counter sales", ANA, undefined, "4000"), entry(2, "payment", 30, "Office supplies", ANA, "RCPT-4417", "6400")] },
+      { deskId: DESK, businessDate: day(0), status: "open", openingBalance: "1480.50", bookBalance: "1480.50", openedBy: ANA, differencePosting: "not_posted", entries: [entry(3, "receipt", 250, "Walk-in sale, two seal kits", ANA, "INV-30177", "4000"), entry(4, "payment", 36.4, "Courier tip", ANA, undefined, "6400"), entry(5, "receipt", 120, "Customer deposit", ANA, "DEP-0091", "2300")] },
     ],
   ],
   [DOCK, []],
@@ -430,7 +433,7 @@ route("POST", `${BASE}/cash-desks/{id}/days`, ({ params, body }) => {
   if (activeDay(params.id)) return reply.problem(409, "TRS-0543", "the desk already has an open day; close it first");
   const last = list.filter((d) => d.status === "closed").sort((a, b) => b.businessDate.localeCompare(a.businessDate))[0];
   if (last && date <= last.businessDate) return reply.problem(409, "TRS-0545", `the last closed day is ${last.businessDate}; open a later day`);
-  const opened: DemoDay = { deskId: params.id, businessDate: date, status: "open", openingBalance: last?.countedBalance ?? "0.00", bookBalance: last?.countedBalance ?? "0.00", openedBy: "dev", differencePosting: "not_posted", entries: [] };
+  const opened: DemoDay = { deskId: params.id, businessDate: date, status: "open", openingBalance: last?.countedBalance ?? "0.00", bookBalance: last?.countedBalance ?? "0.00", openedBy: ME.id, differencePosting: "not_posted", entries: [] };
   list.push(opened);
   return reply.created(stripDay(opened));
 });
@@ -448,14 +451,14 @@ route("POST", `${BASE}/cash-desks/{id}/days/{date}:close`, ({ params, body }) =>
   const diff = total - cents(d.bookBalance);
   if (diff !== 0 && !input.reason) return reply.problem(422, "TRS-0542", `the count differs from the book balance by ${dec(diff)}; give the reason`);
   const dual = Boolean(desks.get(params.id)?.dualControl);
-  Object.assign(d, { status: dual ? "closing" : "closed", countedBalance: dec(total), difference: dec(diff), differenceReason: input.reason, denominations: input.denominations, closedBy: "dev", differencePosting: !dual && diff !== 0 && postsToLedger(params.id) ? "posted" : "not_posted" });
+  Object.assign(d, { status: dual ? "closing" : "closed", countedBalance: dec(total), difference: dec(diff), differenceReason: input.reason, denominations: input.denominations, closedBy: ME.id, differencePosting: !dual && diff !== 0 && postsToLedger(params.id) ? "posted" : "not_posted" });
   return stripDay(d);
 });
 route("POST", `${BASE}/cash-desks/{id}/days/{date}:approve`, ({ params }) => {
   const d = (days.get(params.id) ?? []).find((x) => x.businessDate === params.date);
   if (!d) return reply.problem(404, "TRS-0548", "the desk has no such business day");
   if (d.status !== "closing") return reply.problem(409, "TRS-0554", "the day is not waiting for a second signature");
-  Object.assign(d, { status: "closed", approvedBy: "second.signer", differencePosting: postsToLedger(params.id) && d.difference && cents(d.difference) !== 0 ? "posted" : "not_posted" });
+  Object.assign(d, { status: "closed", approvedBy: byUsername("marcus.lee").id, differencePosting: postsToLedger(params.id) && d.difference && cents(d.difference) !== 0 ? "posted" : "not_posted" });
   return stripDay(d);
 });
 route("POST", `${BASE}/cash-desks/{id}/days/{date}:reject`, ({ params }) => {
@@ -483,7 +486,7 @@ route("POST", `${BASE}/cash-desks/{id}/entries`, ({ params, body }) => {
   if (after < 0) return reply.problem(422, "TRS-0540", `the payment would overdraw the desk, which holds ${open.bookBalance}`);
   if (after > cents(desk.maxBalance)) return reply.problem(422, "TRS-0541", `the receipt would take the desk above its maximum of ${desk.maxBalance}`);
   if (postsToLedger(params.id) && !input.counterAccount && !input.bankAccountId) return reply.problem(400, "COM-0001", "request failed validation");
-  const created: CashDeskEntry = { ...entry(open.entries.length + 100, input.kind, Number(input.amount), input.description, "dev", input.reference, input.counterAccount), id: newId(), bankAccountId: input.bankAccountId, ...(input.bankAccountId ? { counterAccount: undefined } : {}), postingStatus: postsToLedger(params.id) ? "posted" : "not_posted" };
+  const created: CashDeskEntry = { ...entry(open.entries.length + 100, input.kind, Number(input.amount), input.description, ME.id, input.reference, input.counterAccount), id: newId(), bankAccountId: input.bankAccountId, ...(input.bankAccountId ? { counterAccount: undefined } : {}), postingStatus: postsToLedger(params.id) ? "posted" : "not_posted" };
   open.entries.push(created);
   numbered(open);
   return reply.created(created);

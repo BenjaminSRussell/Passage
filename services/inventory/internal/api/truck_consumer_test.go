@@ -104,3 +104,25 @@ func TestTruckConsumer_PolicyAndRefusals(t *testing.T) {
 }
 
 func storeRow() store.TransactionRow { return store.TransactionRow{} }
+
+// The truck's location (#612 review): when the event names the truck's own location, the issue is booked there, and a
+// location that is not an id parks the event instead of issuing from the whole warehouse.
+func TestTruckConsumer_HonoursTheTruckLocation(t *testing.T) {
+	const location = "99999999-9999-4999-8999-999999999996"
+	f := &fakePostings{cost: d("3.5")}
+	h := TruckConsumerHandlers(f, &fakeUnits{}, false, nil)[WorkOrderCompletedType]
+	withLocation := `{"siteId":"` + truckSite + `","warehouseId":"` + truckWarehouse + `","locationId":"` + strings.ToUpper(location) + `"}`
+	if err := h.Handle(postingsCtx(t), nil, postingEvent(t, WorkOrderCompletedType, ServiceSource, completed(withLocation, partLine(truckLineA, "2", "BOX")))); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.got) != 1 || f.got[0].Dims[domain.DimLocation] != location || f.got[0].Dims[domain.DimWarehouse] != truckWarehouse {
+		t.Fatalf("booking %+v; want the issue at the truck's location", f.got)
+	}
+	f = &fakePostings{}
+	h = TruckConsumerHandlers(f, &fakeUnits{}, false, nil)[WorkOrderCompletedType]
+	badLocation := `{"siteId":"` + truckSite + `","warehouseId":"` + truckWarehouse + `","locationId":"bin-3"}`
+	err := h.Handle(postingsCtx(t), nil, postingEvent(t, WorkOrderCompletedType, ServiceSource, completed(badLocation, partLine(truckLineA, "2", "BOX"))))
+	if err == nil || !eventing.IsPermanent(err) || len(f.got) != 0 {
+		t.Fatalf("a location that is not an id must park the event: %v, %d bookings", err, len(f.got))
+	}
+}

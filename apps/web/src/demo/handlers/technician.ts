@@ -91,6 +91,8 @@ function day(date: string): TechnicianDay {
 }
 
 route("GET", `${SERVICE}/technicians/me/day`, ({ query }) => day(query.get("date") || today()));
+// The route stream (#45) answers 503 SVC-RTE-001 in the demo, as a service without a feed does: the app polls.
+route("GET", `${SERVICE}/technicians/me/day/events`, () => reply.problem(503, "SVC-RTE-001", "route updates are not enabled in the demo; the app polls"));
 
 function apply(v: DayVisit, a: ActionBody): ActionOutcome {
   const base = { id: a.id, kind: a.kind };
@@ -174,9 +176,49 @@ route("PUT", `${SERVICE}/work-orders/{id}/captures/{captureId}`, ({ params, quer
   return duplicate ? reply.ok(body) : reply.created(body);
 });
 
-route("GET", "/api/v1/inventory/truck-stock-levels", () => ({
-  items: [
-    { productId: SEAL.id, unit: "EA", minQty: "2", maxQty: "6", onHandQty: "4", inboundQty: "0", short: false },
-    { productId: BEARING.id, unit: "EA", minQty: "4", maxQty: "10", onHandQty: "3", inboundQty: "0", short: true },
-  ],
-}));
+// Truck stock levels of inventory (/api/v1/inventory/truck-stock-levels): the PWA reads one truck's, the inventory screen
+// every truck of the legal entity. A refill moves the shortfall of each short product to "on its way", as the service's
+// draft transfer order does, so the screen shows the effect.
+interface TruckLevel {
+  productId: string;
+  unit: string;
+  minQty: number;
+  maxQty: number;
+  onHandQty: number;
+  inboundQty: number;
+}
+const truckLevels: TruckLevel[] = [
+  { productId: SEAL.id, unit: "EA", minQty: 2, maxQty: 6, onHandQty: 4, inboundQty: 0 },
+  { productId: BEARING.id, unit: "EA", minQty: 4, maxQty: 10, onHandQty: 3, inboundQty: 0 },
+];
+const isShort = (l: TruckLevel) => l.onHandQty + l.inboundQty < l.minQty;
+
+route("GET", "/api/v1/inventory/truck-stock-levels", ({ query }) => {
+  const warehouse = query.get("warehouseId");
+  return {
+    items:
+      warehouse && warehouse !== TRUCK.id
+        ? []
+        : truckLevels.map((l) => ({
+            legalEntityId: LEGAL_ENTITY.id,
+            siteId: PLANT.id,
+            warehouseId: TRUCK.id,
+            sourceSiteId: PLANT.code,
+            sourceWarehouseId: WAREHOUSES[2]!.code,
+            productId: l.productId,
+            unit: l.unit,
+            minQty: String(l.minQty),
+            maxQty: String(l.maxQty),
+            onHandQty: String(l.onHandQty),
+            inboundQty: String(l.inboundQty),
+            short: isShort(l),
+          })),
+  };
+});
+
+route("POST", "/api/v1/inventory/truck-stock:replenish", () => {
+  const short = truckLevels.filter(isShort);
+  if (short.length === 0) return { orders: [] };
+  for (const l of short) l.inboundQty = l.maxQty - l.onHandQty;
+  return { orders: [{ id: uid(454, 1), status: "DRAFT", fromWarehouseId: WAREHOUSES[2]!.code, toWarehouseId: TRUCK.id, lines: short.map((l) => ({ productId: l.productId })) }] };
+});

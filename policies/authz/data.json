@@ -1,7 +1,8 @@
 {
   "assignments": {},
   "duties": {
-    "identity.user.maintain": {"permissions": [{"resource": "/v1/identity/users{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "identity.user.maintain": {"permissions": [{"resource": "/v1/identity/users{,/**}", "methods": ["GET", "POST", "PATCH"]}, {"resource": "/v1/identity/user-names", "methods": ["GET"]}]},
+    "identity.user-name.read": {"permissions": [{"resource": "/v1/identity/user-names", "methods": ["GET"]}]},
     "identity.customer-contact.maintain": {"permissions": [{"resource": "/v1/identity/customer-contacts{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.user.provision": {"permissions": [{"resource": "/scim/v2{,/**}", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"]}]},
     "identity.effective-permission.view": {"permissions": [{"resource": "/v1/identity/users/*/effective-permissions", "methods": ["GET"]}]},
@@ -2048,7 +2049,8 @@
     "fieldservice.work-order.execute": {"permissions": [
       {"resource": "/v1/service/work-orders/*/actions", "methods": ["POST"]},
       {"resource": "/v1/service/work-orders/*/captures/*", "methods": ["PUT"]},
-      {"resource": "/v1/service/technicians/*/day", "methods": ["GET"]}
+      {"resource": "/v1/service/technicians/*/day", "methods": ["GET"]},
+      {"resource": "/v1/service/technicians/*/day/events", "methods": ["GET"]}
     ]},
     "fieldservice.technician.dispatch": {"permissions": [
       {"resource": "/v1/service/technicians", "methods": ["POST"]},

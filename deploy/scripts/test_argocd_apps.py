@@ -573,7 +573,8 @@ class ArgoApplicationsTest(unittest.TestCase):
                     if a["resource"]["type"] == "topic" and a["resource"].get("patternType") == "literal"
                     and "Write" in a["operations"]}
         connectors = {d["metadata"]["name"]: d["spec"]["config"] for d in docs if d["kind"] == "KafkaConnector"
-                      and d["spec"]["config"].get("transforms.outbox.route.by.field") == "type"}
+                      and d["spec"]["config"].get("transforms.outbox.route.by.field") == "type"
+                      and d["metadata"]["name"] != "outbox-fieldservice"}  # its own test: it spans three topic contexts
         self.assertLessEqual({"outbox-sales", "outbox-fulfillment"}, set(connectors))
         routed = set()
         for name, cfg in connectors.items():
@@ -599,6 +600,54 @@ class ArgoApplicationsTest(unittest.TestCase):
                                  f"{name}: debezium literal ACLs under {prefix} differ from the AsyncAPI channels")
                 routed |= channels
         self.assertLessEqual({"passage.sales.orderprogress", "passage.fulfillment.packingslip"}, routed)
+
+    def test_outbox_fieldservice_routes_every_event_to_its_asyncapi_channel(self):
+        # fieldservice writes workorder.posted, workorder.completed and assignment.changed under aggregate_type "workorder", and
+        # also publishes knowledge and case events, so outbox-fieldservice routes by event type (#45): workorder.completed must
+        # reach passage.service.workorder.completed, the topic inventory's truck-stock consumer reads, or truck consumption
+        # never fires. Every message of the AsyncAPI routes to its own channel and every channel has a literal ACL.
+        docs = load_docs(DEPLOY / "kafka/connect.yaml")
+        (debezium,) = [d for d in docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "debezium"]
+        writable = {a["resource"]["name"] for a in debezium["spec"]["authorization"]["acls"]
+                    if a["resource"]["type"] == "topic" and a["resource"].get("patternType") == "literal"
+                    and "Write" in a["operations"]}
+        (cfg,) = [d["spec"]["config"] for d in docs if d["kind"] == "KafkaConnector" and d["metadata"]["name"] == "outbox-fieldservice"]
+        self.assertEqual("type", cfg["transforms.outbox.route.by.field"])
+        self.assertEqual(["outbox", "enrich"], cfg["transforms"].split(","))
+        self.assertEqual("passage_outbox_fieldservice", cfg["publication.name"])
+        self.assertEqual("public.outbox", cfg["table.include.list"])
+        # Debezium applies the regex to the whole routing value and fills ${routedByValue} like Java's replaceAll.
+        regex = re.compile(cfg["transforms.outbox.route.topic.regex"].replace("(?<", "(?P<"))
+        replacement = cfg["transforms.outbox.route.topic.replacement"]
+        spec = yaml.safe_load((REPO / "services/fieldservice/events/asyncapi.yaml").read_text())
+        messages = spec["components"]["messages"]
+        channels, routed = set(), {}
+        for channel in spec["channels"].values():
+            channels.add(channel["address"])
+            for ref in channel["messages"].values():
+                typ = messages[ref["$ref"].rsplit("/", 1)[1]]["name"]
+                m = regex.fullmatch(typ)
+                self.assertIsNotNone(m, f"{typ} does not match the route")
+                routed[typ] = replacement.replace("${routedByValue}", m["routedByValue"])
+                self.assertEqual(channel["address"], routed[typ], typ)
+        self.assertEqual("passage.service.workorder.completed", routed["dev.passage.service.workorder.completed.v1"])
+        self.assertEqual("passage.service.workorder", routed["dev.passage.service.workorder.posted.v1"])
+        self.assertEqual("passage.service.assignment", routed["dev.passage.service.assignment.changed.v1"])
+        self.assertLessEqual(channels, writable, "a fieldservice channel without a literal ACL for the debezium user")
+        # Every event type the service defines in Go is declared in the AsyncAPI, so none can route to an unlisted topic.
+        defined = set()
+        ctx = {"Context": "service", "KnowledgeContext": "knowledge", "CaseContext": "case"}
+        for f in (REPO / "services/fieldservice/internal/events").glob("*.go"):
+            if not f.name.endswith("_test.go"):
+                for c, entity, verb, v in re.findall(r'events\.Type\((\w+), "(\w+)", "(\w+)", (\d+)\)', f.read_text()):
+                    defined.add(f"dev.passage.{ctx[c]}.{entity}.{verb}.v{v}")
+        self.assertEqual(set(routed), defined, "an event type the service defines is missing from (or extra in) its AsyncAPI")
+        secrets = {d["metadata"]["name"] for f in manifests(DEPLOY / "envs/dev/kafka-secrets") for d in load_docs(f)
+                   if d["kind"] == "ExternalSecret"}
+        self.assertIn("debezium-cdc-fieldservice", secrets)
+        (role,) = [d for f in manifests(DEPLOY / "envs/dev/kafka-secrets") for d in load_docs(f)
+                   if d["kind"] == "Role" and d["metadata"]["name"] == "passage-connect-read-debezium-cdc"]
+        self.assertIn("debezium-cdc-fieldservice", role["rules"][0]["resourceNames"])
 
     def test_outbox_budgeting_publishes_only_topics_the_debezium_user_may_write(self):
         docs = load_docs(DEPLOY / "kafka/connect.yaml")

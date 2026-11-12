@@ -226,3 +226,29 @@ func TestClient_ChecksARequisitionAndReleasesALine(t *testing.T) {
 		t.Fatal("a 503 must be reported")
 	}
 }
+
+func TestClient_CheckReportsACurrencyMismatchAsARefusalAndOtherFailuresAsErrors(t *testing.T) {
+	status, body := http.StatusUnprocessableEntity, `{"code":"BUD-0080","detail":"the budget control rule CTL-1 is in EUR but the requisition is in USD"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	signer, err := tenant.NewServiceSigner("purchasing", testKey(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(srv.URL, nil, signer)
+	le := ids.New()
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: ids.New(), LegalEntityID: le, UserID: "buyer", Duties: map[string]struct{}{}})
+	r := store.Requisition{ID: ids.New(), Number: "PR-1", LegalEntityID: le, Currency: "USD", Lines: []store.RequisitionLine{{ID: ids.New(), Status: "OPEN", GLAccount: "6100", CostCenter: "CC-1", Amount: decimal.NewFromInt(5)}}}
+	_, err = c.CheckRequisition(ctx, r)
+	var refused *Refusal
+	if !errors.As(err, &refused) || refused.Code != CurrencyMismatchCode || !strings.Contains(refused.Detail, "EUR") {
+		t.Fatalf("err = %v; want a Refusal naming the currencies", err)
+	}
+	body = `{"code":"BUD-0001"}`
+	if _, err = c.CheckRequisition(ctx, r); err == nil || errors.As(err, &refused) && refused.Code != CurrencyMismatchCode {
+		t.Fatalf("another 422 is an error, not a currency refusal: %v", err)
+	}
+}

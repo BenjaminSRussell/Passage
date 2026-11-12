@@ -783,6 +783,32 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/technicians/{id}/day/events:
+    get:
+      operationId: streamTechnicianRouteEvents
+      summary: Server-sent events that say the technician's route changed, so the device reads its day again instead of polling
+      description: |
+        A `text/event-stream` for the technician `{id}` (or `me`), with the same access rule as the day (403 SVC-SYNC-003).
+        The stream starts with `event: ready` and sends `event: route` (data `{"technicianId": "..."}`) whenever the
+        technician's route changed: an assignment, an unassignment, a published territory-day, a changed checklist or a
+        status move made by the office. The event carries no route data; the device reads the day. A comment line is sent
+        every 20 seconds, `retry: 5000` tells EventSource to reconnect after 5 seconds, and the device should read its day
+        on every (re)connect and keep a slow poll, because a notification sent while a pod is reconnecting is not replayed.
+        The pods share changes through a Postgres NOTIFY raised in the transaction of the change. 503 SVC-RTE-001 when the
+        service has no feed: the device falls back to polling.
+      x-passage-duty: fieldservice.work-order.execute
+      parameters:
+        - $ref: "#/components/parameters/TechnicianOrMe"
+      responses:
+        "200":
+          description: The event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
   /v1/service/work-orders/{id}/captures/{captureId}:
     put:
       operationId: putWorkOrderCapture

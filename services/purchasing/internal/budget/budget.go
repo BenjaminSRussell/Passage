@@ -125,6 +125,18 @@ func (c *Client) post(ctx context.Context, what, path, key, duty, legalEntityID 
 	return resp.StatusCode, body, nil
 }
 
+// CurrencyMismatchCode is budgeting's code for a control rule in another currency than the requisition (BUD-0080).
+const CurrencyMismatchCode = "BUD-0080"
+
+// Refusal is budgeting answering 422 with a code that is the user's to fix, not an outage: the check is refused and
+// nothing was reserved.
+type Refusal struct {
+	Code   string
+	Detail string
+}
+
+func (e *Refusal) Error() string { return "budget check refused: " + e.Code + ": " + e.Detail }
+
 // LineCheck is what budgeting answered for one requisition line.
 type LineCheck struct {
 	LineID  string          `json:"lineId"`
@@ -168,6 +180,15 @@ func (c *Client) CheckRequisition(ctx context.Context, r store.Requisition) (Che
 		map[string]any{"legalEntityId": r.LegalEntityID, "requisitionId": r.ID, "currency": r.Currency, "lines": lines})
 	if err != nil {
 		return Check{}, err
+	}
+	if status == http.StatusUnprocessableEntity {
+		var prob struct {
+			Code   string `json:"code"`
+			Detail string `json:"detail"`
+		}
+		if json.Unmarshal(body, &prob) == nil && prob.Code == CurrencyMismatchCode {
+			return Check{}, &Refusal{Code: prob.Code, Detail: prob.Detail}
+		}
 	}
 	if status != http.StatusOK {
 		return Check{}, fmt.Errorf("%s: status %d: %s", what, status, strings.TrimSpace(string(body)))

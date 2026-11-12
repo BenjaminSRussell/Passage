@@ -43,6 +43,120 @@ export async function fetchDay(date?: string): Promise<TechnicianDay> {
   return (await res.json()) as TechnicianDay;
 }
 
+export const ROUTE_EVENTS_URL = `${BASE}/technicians/me/day/events`;
+
+export interface RouteSubscription {
+  /** True while the stream is open: the device then polls only as a slow safety net. */
+  readonly open: boolean;
+  close(): void;
+}
+
+export interface SseEvent {
+  event: string;
+  data: string;
+}
+
+/**
+ * Parses a server-sent event stream a chunk at a time. Frames end with a blank line; `event:` and `data:` fields are read,
+ * comment lines (":") and other fields (`retry:`, `id:`) are ignored. Chunks may split a line or a frame anywhere.
+ */
+export function createSseParser(): (chunk: string) => SseEvent[] {
+  let buffer = "";
+  let event = "";
+  let data: string[] = [];
+  return (chunk) => {
+    buffer += chunk;
+    const out: SseEvent[] = [];
+    for (;;) {
+      const at = buffer.search(/\r\n|\n|\r/);
+      if (at < 0) break;
+      const line = buffer.slice(0, at);
+      const eol = buffer.startsWith("\r\n", at) ? 2 : 1;
+      if (at + eol === buffer.length && buffer[at] === "\r") break; // a CR at the end may be half of a CRLF
+      buffer = buffer.slice(at + eol);
+      if (line === "") {
+        if (event !== "" || data.length > 0) out.push({ event: event || "message", data: data.join("\n") });
+        event = "";
+        data = [];
+      } else if (line.startsWith(":")) {
+        continue;
+      } else {
+        const colon = line.indexOf(":");
+        const field = colon < 0 ? line : line.slice(0, colon);
+        let value = colon < 0 ? "" : line.slice(colon + 1);
+        if (value.startsWith(" ")) value = value.slice(1);
+        if (field === "event") event = value;
+        else if (field === "data") data.push(value);
+      }
+    }
+    return out;
+  };
+}
+
+export interface RouteStreamDeps {
+  /** The request function; defaults to apiFetch, which adds the bearer token the gateway reads. */
+  fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
+  /** Waits before a reconnect; tests replace it. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 30_000;
+
+/**
+ * Listens for "route" events (#45): the service says the technician's route changed (an assignment, a published day, a new
+ * checklist), and the device reads its day again at once instead of waiting for the next poll. The stream is read with fetch
+ * through apiFetch, not EventSource: the gateway authenticates the Authorization bearer header, which EventSource cannot send.
+ * A dropped stream reconnects with a backoff (1 s doubling to 30 s) and the device reads its day again on every reconnect.
+ * Without fetch streaming, or when the service answers 503 (no feed), the stream is never open and the device keeps its poll.
+ */
+export function subscribeRoute(onRoute: () => void, deps: RouteStreamDeps = {}): RouteSubscription {
+  const fetchImpl = deps.fetchImpl ?? ((url, init) => apiFetch(url, init));
+  const sleep = deps.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const controller = new AbortController();
+  let open = false;
+  let closed = false;
+  let connected = false;
+  void (async () => {
+    let wait = RECONNECT_MIN_MS;
+    while (!closed) {
+      try {
+        const res = await fetchImpl(ROUTE_EVENTS_URL, { headers: { Accept: "text/event-stream" }, signal: controller.signal });
+        if (!res.ok || !res.body) throw new Error(`route stream answered ${res.status}`);
+        open = true;
+        wait = RECONNECT_MIN_MS;
+        // The first open follows the day that was just read; a later one is a reconnect that may follow missed events.
+        if (connected) onRoute();
+        connected = true;
+        const parse = createSseParser();
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          for (const ev of parse(decoder.decode(value, { stream: true }))) if (ev.event === "route") onRoute();
+        }
+      } catch {
+        // dropped or refused: reconnect below unless closed
+      }
+      open = false;
+      if (closed) return;
+      await sleep(wait);
+      wait = Math.min(wait * 2, RECONNECT_MAX_MS);
+    }
+  })();
+  return {
+    get open() {
+      return open;
+    },
+    close: () => {
+      closed = true;
+      open = false;
+      controller.abort();
+    },
+  };
+}
+
 /** The truck's stock levels with what it holds; an empty list when inventory has none or cannot be reached. */
 export async function fetchTruckStock(legalEntityId: string, siteId: string, warehouseId: string): Promise<TruckStockItem[]> {
   const q = new URLSearchParams({ legalEntityId, siteId, warehouseId });

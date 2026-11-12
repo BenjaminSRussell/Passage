@@ -2995,6 +2995,9 @@ test_consolidation_unit_edit_terms_and_mapping_versions_follow_configure_and_vie
 test_fieldservice_technician_day_and_captures if {
 	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/me/day")
 	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/t1/day")
+	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/me/day/events")
+	not allowed("fieldservice.work-order.execute", "POST", "/v1/service/technicians/me/day/events")
+	not allowed("fieldservice.inquire", "GET", "/v1/service/technicians/me/day/events")
 	allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/captures/c1")
 	not allowed("fieldservice.work-order.execute", "GET", "/v1/service/work-orders/w1/captures/c1")
 	not allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/checklist")
@@ -3056,6 +3059,16 @@ test_migration_opening_load_routes_need_run_and_view_duties if {
 	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/opening-load")
 	allowed("migration.factory.view", "GET", "/api/v1/migration/runs/r1/opening-load")
 	not allowed("migration.factory.view", "POST", "/api/v1/migration/runs/r1/opening-load")
+}
+
+# #548/#552: any role can resolve user ids to display names without holding the user-maintenance duty, and user administrators can too.
+test_user_name_lookup if {
+	allowed("identity.user-name.read", "GET", "/v1/identity/user-names")
+	not allowed("identity.user-name.read", "GET", "/v1/identity/users")
+	not allowed("identity.user-name.read", "GET", "/v1/identity/users/u1")
+	not allowed("identity.user-name.read", "POST", "/v1/identity/user-names")
+	allowed("identity.user.maintain", "GET", "/v1/identity/user-names")
+	not allowed("identity.user.maintain", "POST", "/v1/identity/user-names")
 }
 
 # #40 round 3: the entity registry, accounting matrix, transfer prices and settings are configured with

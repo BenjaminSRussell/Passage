@@ -21,7 +21,7 @@ import (
 
 // The truck consumer books field service's completed work orders (FR-45.9, BR-45.7): each PART
 // line that names a product and has a consumed quantity is issued from the technician's truck
-// (the site and warehouse the event carries) at DEDUCTED, valued at the truck's running
+// (the site, warehouse and, when the truck has one, location the event carries) at DEDUCTED, valued at the truck's running
 // average, under the origin SERVICE_LINE of the work order line, so a replay books nothing
 // twice. A truck that does not hold the quantity is refused with INV-NEG-001 unless
 // service.allow-negative-truck is on (INV_ALLOW_NEGATIVE_TRUCK); a refused line parks the
@@ -122,6 +122,13 @@ func bookTruckIssues(ctx context.Context, s PostingsStore, conv UnitConverter, a
 	}
 	le := strings.ToLower(d.LegalEntityID)
 	dims := domain.Dimensions{domain.DimSite: strings.ToLower(d.Truck.SiteID), domain.DimWarehouse: strings.ToLower(d.Truck.WarehouseID)}
+	if d.Truck.LocationID != nil && *d.Truck.LocationID != "" {
+		// The truck's own bin: the technician's stock is kept at that location, not spread over the truck warehouse.
+		if !ids.Valid(*d.Truck.LocationID) {
+			return eventing.Permanent(fmt.Errorf("%s: the truck's locationId %q is not a UUID", CodeTruckNoTruck, *d.Truck.LocationID))
+		}
+		dims[domain.DimLocation] = strings.ToLower(*d.Truck.LocationID)
+	}
 	neg := domain.NegativePolicy{PhysicalAllowed: allowNegative, FinancialAllowed: allowNegative}
 	var failed lineFailures
 	booked := 0

@@ -313,6 +313,7 @@
     {"to": "/inventory/transfer-orders", "module": "inventory", "label": "Transfer orders", "area": "inventory-warehouse", "decision": "keep", "taskLabel": "Move stock between locations"},
     {"to": "/inventory/transfer-lines", "module": "inventory", "label": "Transfer lines", "area": "inventory-warehouse", "decision": "merge", "mergeInto": "/inventory/transfer-orders"},
     {"to": "/inventory/in-transit", "module": "inventory", "label": "Stock in transit", "area": "inventory-warehouse", "decision": "keep", "taskLabel": "Stock in transit"},
+    {"to": "/inventory/truck-stock", "module": "inventory", "label": "Truck stock", "area": "inventory-warehouse", "decision": "advanced"},
     {"to": "/inventory/abc-runs", "module": "inventory", "label": "ABC classification", "area": "inventory-warehouse", "decision": "advanced"},
     {"to": "/inventory/consignment-orders", "module": "inventory", "label": "Consignment orders", "area": "inventory-warehouse", "decision": "keep"},
     {"to": "/inventory/consignment/stock", "module": "inventory", "label": "Consignment stock", "area": "inventory-warehouse", "decision": "keep"},

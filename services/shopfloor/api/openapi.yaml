@@ -3781,6 +3781,10 @@ components:
         currency:
           type: string
           pattern: "^[A-Z]{3}$"
+        timeZone:
+          type: string
+          maxLength: 64
+          description: IANA zone of the site the worker works at (default UTC). The dated cost rate of a job stop is the one effective on the local day the work started in this zone.
     Worker:
       type: object
       required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId, defaultResourceId, deactivatedAt, deactivatedBy, deactivationReason]
@@ -3801,6 +3805,9 @@ components:
           type: string
         currency:
           type: string
+        timeZone:
+          type: string
+          description: IANA zone the worker's work days are reckoned in; UTC unless set.
         active:
           type: boolean
         version:
@@ -4698,6 +4705,10 @@ components:
         currency:
           type: string
           pattern: '^[A-Z]{3}$'
+        timeZone:
+          type: string
+          maxLength: 64
+          description: IANA zone of the site the worker works at (omitted keeps the stored zone). The dated cost rate of a job stop is the one effective on the local day the work started in this zone.
     DeactivateWorker:
       type: object
       required: [reason]

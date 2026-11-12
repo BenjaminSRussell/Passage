@@ -6,3 +6,17 @@ resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 250m, memory: 128Mi }
 serviceMonitor: { enabled: false }
+# Where technicians' photos and signatures are kept (#45). Empty keeps them in Postgres (2 MB each). "s3" is an S3-compatible
+# bucket (https endpoint; Secret `secretName` holds access-key and secret-key); "fs" is a directory on the PVC `fs.claimName`,
+# for a single-node install. With job.tenantIds set, every replica runs the capture job (FIELDSERVICE_CAPTURE_*): it moves
+# captures held in Postgres into the store and, with retentionDays > 0, deletes the images of work orders finished that many
+# days ago (the record of the image stays). It runs every `interval`, or daily at `at` (UTC "HH:MM") when that is set.
+captureStore:
+  kind: ""
+  fs: { claimName: "" }
+  s3: { endpoint: "", bucket: "", region: "", secretName: "" }
+  job:
+    tenantIds: []
+    retentionDays: 0
+    interval: 1h
+    at: ""

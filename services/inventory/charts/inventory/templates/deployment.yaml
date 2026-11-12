@@ -55,6 +55,17 @@ spec:
               value: {{ .Values.inventory.negativeDefault | quote }}
             - name: INV_ALLOW_NEGATIVE_TRUCK
               value: {{ .Values.inventory.allowNegativeTruck | quote }}
+            {{- if .Values.inventory.truckReplenish.tenantIds }}
+            - name: INV_TRUCK_REPLENISH_TENANT_IDS
+              value: {{ join "," .Values.inventory.truckReplenish.tenantIds | quote }}
+            {{- if .Values.inventory.truckReplenish.at }}
+            - name: INV_TRUCK_REPLENISH_AT
+              value: {{ .Values.inventory.truckReplenish.at | quote }}
+            {{- else }}
+            - name: INV_TRUCK_REPLENISH_INTERVAL
+              value: {{ .Values.inventory.truckReplenish.interval | quote }}
+            {{- end }}
+            {{- end }}
             - name: INV_RESERVATION_TTL_HOURS
               value: {{ .Values.inventory.reservationTTLHours | quote }}
             - name: INV_JOURNAL_MAX_LINES

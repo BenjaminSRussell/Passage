@@ -71,6 +71,42 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/identity/user-names:
+    get:
+      operationId: listUserNames
+      summary: "Resolve user ids to display names"
+      x-passage-duty: identity.user-name.read
+      description: >-
+        Up to 50 user ids of the caller's tenant (`ids`, comma separated) to display names, so a page can say who rejected,
+        released or approved something. Only the display name is returned. Unknown ids are left out; deprovisioned users
+        still resolve.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: ids, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The names found.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [userId, displayName]
+                      properties:
+                        userId: { type: string, format: uuid }
+                        displayName: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/identity/users/{id}:
     get:
       operationId: getUser

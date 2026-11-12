@@ -60,3 +60,46 @@ func TestRMASweep_SweepsEachLegalEntityUnderItsOwnScope(t *testing.T) {
 		}
 	}
 }
+
+type fakeExpiringSweeper struct {
+	fakeSweeper
+	ttl     time.Duration
+	expired []tenant.Principal
+}
+
+func (f *fakeExpiringSweeper) ExpireRMAReservations(ctx context.Context, _ time.Time, ttl time.Duration, _ int) (store.RMAExpiryResult, error) {
+	p, _ := tenant.FromContext(ctx)
+	f.expired = append(f.expired, p)
+	f.ttl = ttl
+	return store.RMAExpiryResult{Expired: 1}, nil
+}
+
+func TestNewRMASweep_ReservationTTLConfig(t *testing.T) {
+	base := map[string]string{"RECEIVABLES_RMA_SWEEP_TENANT_IDS": "00000000-0000-0000-0000-000000000001"}
+	s, err := newRMASweep(env(base), &fakeSweeper{})
+	if err != nil || s.reservationTTL != 0 {
+		t.Fatalf("expiry is off by default: %+v %v", s, err)
+	}
+	base["RECEIVABLES_RMA_RESERVATION_TTL"] = "30m"
+	if _, err := newRMASweep(env(base), &fakeSweeper{}); err == nil {
+		t.Fatal("a TTL below 1h must be refused")
+	}
+	base["RECEIVABLES_RMA_RESERVATION_TTL"] = "720h"
+	if s, err = newRMASweep(env(base), &fakeSweeper{}); err != nil || s.reservationTTL != 720*time.Hour {
+		t.Fatalf("ttl %+v %v", s, err)
+	}
+}
+
+func TestRMASweep_ExpiresAbandonedCreditsPerLegalEntityWhenATTLIsSet(t *testing.T) {
+	f := &fakeExpiringSweeper{fakeSweeper: fakeSweeper{entities: []string{"00000000-0000-0000-0000-0000000000a1"}}}
+	s := &rmaSweep{tenants: []string{"00000000-0000-0000-0000-000000000001"}, store: f}
+	s.once(context.Background())
+	if len(f.expired) != 0 {
+		t.Fatalf("no TTL, no expiry: %+v", f.expired)
+	}
+	s.reservationTTL = 48 * time.Hour
+	s.once(context.Background())
+	if len(f.expired) != 1 || f.ttl != 48*time.Hour || f.expired[0].LegalEntityID != f.entities[0] || f.expired[0].HasDuty(tenant.DutyAllScope) {
+		t.Fatalf("expired %+v ttl %v", f.expired, f.ttl)
+	}
+}

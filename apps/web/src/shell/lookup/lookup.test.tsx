@@ -375,6 +375,14 @@ describe("lookup adapters", () => {
     expect(calls).toContain("/api/v1/identity/users?q=ada&status=active&limit=20");
   });
 
+  it("resolves a user through the name-only route every role can read", async () => {
+    handler = () => json({ items: [{ userId: "u-1", displayName: "Ada Lovelace" }] });
+    expect(await lookupDefs.user.resolve("u-1")).toEqual({ id: "u-1", name: "Ada Lovelace", number: undefined });
+    expect(calls).toContain("/api/v1/identity/user-names?ids=u-1");
+    handler = () => json({ items: [] });
+    expect(await lookupDefs.user.resolve("u-2")).toBeNull();
+  });
+
   it("resolves a customer through its party for the display name", async () => {
     handler = (url) =>
       url.pathname.endsWith("/customers/c-1") ? json({ id: "c-1", partyId: "p1", accountNumber: "C-9" }) : json({ id: "p1", name: "Contoso Ltd", partyNumber: "P-1" });

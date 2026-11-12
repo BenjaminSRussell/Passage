@@ -9,6 +9,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/budget"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
@@ -161,5 +162,37 @@ func TestApproveRequisition_ARepeatApproverIsRefusedBeforeTheBudgetCheckReserves
 	}
 	if len(b2.checked) != 0 || h2.fake.approval.calls != 0 {
 		t.Fatalf("a refused approval ran %d budget checks (reserving funds) and %d store calls; want none", len(b2.checked), h2.fake.approval.calls)
+	}
+}
+
+// The check reserved the funds. An approval the store then refuses must NOT release them: budgeting refuses a new reservation
+// for a line whose pre-encumbrance was released (BUD-0011), so a release here would make the requisition unapprovable, or
+// approved with nothing encumbered after a replayed PASS. The re-approval checks again and keeps the reservation.
+func TestApproveRequisition_AFailedApprovalKeepsTheReservationAndAReApprovalSucceeds(t *testing.T) {
+	b := &fakeBudget{check: budget.Check{Result: "PASS"}, releaseOK: true}
+	h, id := budgetHarness(t, b)
+	h.fake.approval.err = httpx.NewProblem(http.StatusConflict, "PRC-REQ-VERSION", "changed meanwhile")
+	if code := decide(h, id, "approve", userApprover, []string{dutyRequisitionApprove}, ""); code != http.StatusConflict {
+		t.Fatalf("approve: %d, want the store's 409", code)
+	}
+	if len(b.checked) != 1 || len(b.releases) != 0 || len(h.fake.budgetCalls) != 0 {
+		t.Fatalf("checked %d, released %v, queued %+v; want the reservation left alone", len(b.checked), b.releases, h.fake.budgetCalls)
+	}
+	h.fake.approval.err = nil
+	if code := decide(h, id, "approve", userApprover, []string{dutyRequisitionApprove}, ""); code != http.StatusOK {
+		t.Fatalf("re-approval: %d", code)
+	}
+	if len(b.checked) != 2 || len(b.releases) != 0 {
+		t.Fatalf("checked %d times, released %v; want a second check and still no release", len(b.checked), b.releases)
+	}
+}
+
+func TestApproveRequisition_ACurrencyMismatchIsItsOwnRefusalNotAnOutage(t *testing.T) {
+	b := &fakeBudget{checkErr: &budget.Refusal{Code: budget.CurrencyMismatchCode, Detail: "the budget control rule CTL-1 is in EUR but the requisition is in USD"}}
+	h, id := budgetHarness(t, b)
+	rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions/" + id + ":approve", user: userApprover, duties: []string{dutyRequisitionApprove},
+		headers: map[string]string{"Idempotency-Key": "k-c", "If-Match": `"4"`}})
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeBudgetCurrency || !strings.Contains(rec.Body.String(), "EUR") || h.fake.approval.calls != 0 {
+		t.Fatalf("currency mismatch: %d %s; want 422 %s naming both currencies and no approval", rec.Code, rec.Body, CodeBudgetCurrency)
 	}
 }
