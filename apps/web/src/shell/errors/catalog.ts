@@ -1067,6 +1067,26 @@ const fieldService: Record<string, ProblemCatalogEntry> = {
   "INV-TRK-004": { message: "Truck stock isn't switched on for this service.", action: "Ask your administrator to enable it." },
 };
 
+/** The B2B exchange (edi): e-invoices, the cXML exchange and self-billing (#35). */
+const b2b: Record<string, ProblemCatalogEntry> = {
+  "EDI-0027": { message: "The seller or buyer details needed for an e-invoice haven't been entered yet.", action: "Enter the seller's profile for the legal entity and the buyer's profile for the customer, then build the e-invoice again." },
+  "EDI-0029": { message: "No access point is connected, so the e-invoice can't be sent to its network.", action: "Ask an administrator to connect the access point for this mandate, then submit again." },
+  "EDI-0030": { message: "The e-invoice isn't in a state where this can be done. It may already be on its way to the network, or another person just submitted it.", action: "Reload the page to see where it stands now." },
+  "EDI-0031": { message: "The e-invoice has blocking issues and can't be submitted.", action: "Fix the cause shown under Issues, then build the e-invoice again." },
+  "EDI-0036": { message: "No purchase order was sent to this partner under that order number, so the document can't be matched to an order.", action: "Check the order number the partner used, or send the purchase order to the partner first." },
+  "EDI-0037": { message: "The partner's confirmation rejects or changes a line instead of accepting the order as sent.", action: "Review the confirmation and decide on the purchase order yourself; it was not confirmed automatically." },
+  "EDI-0038": { message: "The partner's invoice was recorded but can't be posted automatically. Vendor invoices are posted against receipts.", action: "Match the invoice to the receipts in accounts payable." },
+  "EDI-0039": { message: "Purchasing or receiving refused the document.", action: "Read the reason under Details, fix the order or the quantities, then post the message again." },
+  "EDI-0040": { message: "This partner isn't set up for cXML yet.", action: "Add the partner's cXML identity and the outbound settings, then try again." },
+  "EDI-0041": { message: "The partner's network didn't accept the document.", action: "Read the network's answer under Details, correct the cause and send the document again." },
+  "EDI-0042": { message: "The document can't be turned into an order action because it is missing something or names more than one order.", action: "Ask the partner to correct and resend it." },
+  "EINV-0110": { message: "A required part of the e-invoice is missing or isn't in the right format.", action: "Correct the invoice or the party profiles named in the issue, then build the e-invoice again." },
+  "EINV-0111": { message: "The e-invoice's amounts don't add up.", action: "Check the invoice lines, discounts and tax in billing, then build the e-invoice again." },
+  "EINV-0112": { message: "The e-invoice's total differs from the total on the billing invoice.", action: "Check the invoice's tax and charges in billing, then build the e-invoice again." },
+  "EINV-0114": { message: "The e-invoice breaks one of the Peppol rules.", action: "Fix the party details or the invoice named in the rule, then build the e-invoice again." },
+  "EINV-0150": { message: "This e-invoice format isn't set up for your country yet.", action: "Ask an administrator to install the country's e-invoicing pack." },
+};
+
 /** Process manufacturing: batch orders and their control recipes (#25). */
 const processManufacturing: Record<string, ProblemCatalogEntry> = {
   "PMF-0506": {
@@ -1102,6 +1122,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...groupFinance,
   ...shared,
   ...fieldService,
+  ...b2b,
   ...processManufacturing,
 });
 

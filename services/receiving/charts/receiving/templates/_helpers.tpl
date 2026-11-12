@@ -27,6 +27,10 @@
   value: {{ .Values.serviceIdentity.keyId | quote }}
 {{- end }}
 {{- end }}
+{{- if .Values.serviceIdentity.publicKeys }}
+- name: PASSAGE_SERVICE_PUBLIC_KEYS
+  value: {{ .Values.serviceIdentity.publicKeys | quote }}
+{{- end }}
 {{- if .Values.fieldCrypt.keysSecret }}
 - { name: FIELDCRYPT_KEYS_FILE, value: /var/run/passage/field-crypt/keys }
 - { name: FIELDCRYPT_CURRENT_KEY_ID, value: {{ .Values.fieldCrypt.currentKeyId | quote }} }

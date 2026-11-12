@@ -276,6 +276,8 @@
     {"to": "/integration/edi/map-tester", "module": "integration", "label": "EDI map tester", "area": "administration", "decision": "advanced"},
     {"to": "/integration/punchout", "module": "integration", "label": "Punchout cart check", "area": "administration", "decision": "advanced"},
     {"to": "/integration/self-billing", "module": "integration", "label": "Self-billing match", "area": "administration", "decision": "keep"},
+    {"to": "/integration/self-billing/disputes", "module": "integration", "label": "Self-billing disputes", "area": "administration", "decision": "keep"},
+    {"to": "/integration/einvoices", "module": "integration", "label": "E-invoices", "area": "administration", "decision": "keep"},
     {"to": "/integration/peppol", "module": "integration", "label": "Peppol invoice", "area": "administration", "decision": "keep"},
     {"to": "/integration/sync", "module": "integration", "label": "Outbound sync", "area": "administration", "decision": "advanced"},
     {"to": "/integration/sync/deliveries", "module": "integration", "label": "Sync deliveries", "area": "administration", "decision": "merge", "mergeInto": "/integration/sync"},

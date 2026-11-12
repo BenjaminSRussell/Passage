@@ -19,3 +19,4 @@ import "./docdesign";
 import "./mobile";
 import "./technician";
 import "./analytics";
+import "./b2b";

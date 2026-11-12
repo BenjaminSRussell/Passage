@@ -247,7 +247,9 @@ var serviceGrants = map[string]map[string][]string{
 		"billing":     {"billing.invoice.read"},
 		"sales":       {"sales.order.lookup", "sales.channel.intake"},
 		// A returned punchout cart becomes a requisition of the requester (#35, 35-3): the token carries the requester as act.
-		"purchasing": {"procurement.requisition.create"},
+		"purchasing": {"procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"},
+		// An inbound ship notice of a cXML network becomes the receiving ASN of the purchase order it names (#35, 35-4).
+		"receiving": {"receiving.asn.maintain"},
 	},
 	"fieldservice": {
 		"dispatch": {"dispatch.run.create", "dispatch.run.read"},
