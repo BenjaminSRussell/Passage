@@ -437,3 +437,36 @@ func TestListReconciliations_PagesByKeysetAndFilters(t *testing.T) {
 		t.Fatalf("bad cursor: err = %v; want COM-0001", err)
 	}
 }
+
+// The first reconciliation of an account can start from the opening book balance the migration loaded (#49); a later one, a
+// statement before the cutover and an account without an opening balance must state it. Restating makes the balance stated.
+func TestCreateReconciliation_FirstOneStartsFromTheMigratedOpeningBalance(t *testing.T) {
+	f := newReconFixture(t)
+	if _, err := f.s.CreateReconciliation(f.ctx, NewReconciliation{StatementID: f.statement.ID, FromOpening: true}, ids.New()); problemCode(t, err) != CodeReconNoOpening {
+		t.Fatalf("no opening balance: %v", err)
+	}
+	asOf := f.statement.ClosingDate
+	if _, _, err := f.s.ImportOpeningBalances(f.ctx, OpeningImport{LegalEntityID: f.le, BatchKey: "cutover", AsOf: asOf,
+		Items: []OpeningItem{{Reference: "AX-OPER", BankAccountID: f.account.ID, Currency: f.account.Currency, BalanceMinor: 145700}}}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := f.s.CreateReconciliation(f.ctx, NewReconciliation{StatementID: f.statement.ID, FromOpening: true}, ids.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.BookBalance != "1457.00" || rec.BookBalanceSource != "opening" || rec.Difference != "0.00" {
+		t.Fatalf("reconciliation = %+v; want the opening 1457.00 as its book balance", rec)
+	}
+	restated, err := f.s.SetReconciliationBalances(f.ctx, rec.ID, rec.Version, decimal.RequireFromString("1450.00"), decimal.Zero)
+	if err != nil || restated.BookBalanceSource != "stated" {
+		t.Fatalf("restated = %+v, %v", restated, err)
+	}
+	// A second statement of the account is not its first reconciliation.
+	res, err := f.s.ImportStatement(f.ctx, importInput(t, f.account.ID, camtEntries("STMT-REC-2", []camtEntry{{"INV-2026-0009", "10.00"}})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.CreateReconciliation(f.ctx, NewReconciliation{StatementID: res.Statement.ID, FromOpening: true}, ids.New()); problemCode(t, err) != CodeReconNotFirstOpen {
+		t.Fatalf("a second reconciliation from the opening balance: %v", err)
+	}
+}

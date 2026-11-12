@@ -42,6 +42,8 @@ const STATE_LABELS: Record<ReconState, string> = { open: "Open", closed: "Closed
 const FAILURES: Record<string, string> = {
   "TRS-0410": "The difference is not zero, so the period cannot close",
   "TRS-0504": "This statement already has a reconciliation",
+  "TRS-0606": "This account has no opening balance from the migration",
+  "TRS-0607": "Only the first reconciliation after the cutover starts from the opening balance",
   "TRS-0506": "The period is closed",
   "TRS-0507": "Some lines are neither matched nor excluded",
   "TRS-0508": "A later period of this account is closed",
@@ -167,6 +169,7 @@ export function NewReconciliationPage() {
   const [bankAccountId, setBankAccountId] = useState("");
   const [statementId, setStatementId] = useState("");
   const [book, setBook] = useState("");
+  const [fromOpening, setFromOpening] = useState(false);
   const [outstanding, setOutstanding] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -177,14 +180,19 @@ export function NewReconciliationPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const found = validateBalances(book, outstanding);
+    const found = validateBalances(fromOpening ? "0" : book, outstanding);
     if (!UUID.test(statementId)) found.statementId = "Choose the statement to reconcile.";
     setErrors(found);
     setFailure(null);
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      const created = await createBankReconciliation({ statementId, bookBalance: book.trim(), outstandingAmount: outstanding.trim() || undefined }, key);
+      const created = await createBankReconciliation(
+        fromOpening
+          ? { statementId, bookBalanceSource: "opening", outstandingAmount: outstanding.trim() || undefined }
+          : { statementId, bookBalance: book.trim(), outstandingAmount: outstanding.trim() || undefined },
+        key,
+      );
       navigate(`/treasury/reconciliations/${created.id}`);
     } catch (error) {
       if (!keepKeyAfter(error)) setKey(newKey());
@@ -244,9 +252,19 @@ export function NewReconciliationPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="nr-book" label="Book balance" hint="The bank account's balance in the books on the statement's closing date." error={errors.bookBalance}>
-            {(c) => <Input {...c} className={styles.mono} inputMode="decimal" value={book} onChange={(e) => setBook(e.target.value)} invalid={Boolean(errors.bookBalance)} />}
+          <FormField id="nr-book-source" label="Book balance from" hint="The first reconciliation after the cutover can start from the opening balance the migration loaded for this account.">
+            {(c) => (
+              <Select {...c} value={fromOpening ? "opening" : "stated"} onChange={(e) => setFromOpening(e.target.value === "opening")}>
+                <option value="stated">I state it</option>
+                <option value="opening">The opening balance from the migration</option>
+              </Select>
+            )}
           </FormField>
+          {fromOpening ? null : (
+            <FormField id="nr-book" label="Book balance" hint="The bank account's balance in the books on the statement's closing date." error={errors.bookBalance}>
+              {(c) => <Input {...c} className={styles.mono} inputMode="decimal" value={book} onChange={(e) => setBook(e.target.value)} invalid={Boolean(errors.bookBalance)} />}
+            </FormField>
+          )}
           <FormField id="nr-outstanding" label="Items not yet on the statement" hint="Positive for outstanding payments such as checks, negative for deposits in transit." error={errors.outstandingAmount}>
             {(c) => <Input {...c} className={styles.mono} inputMode="decimal" value={outstanding} onChange={(e) => setOutstanding(e.target.value)} invalid={Boolean(errors.outstandingAmount)} />}
           </FormField>
@@ -423,7 +441,9 @@ function ReconciliationDetail({ id }: { id: string }) {
           </Detail>
           <Detail term="Matched lines">{`${recon.summary.matchedCount} of ${recon.summary.lines}`}</Detail>
           <Detail term="Unmatched lines">{`${recon.summary.unmatchedCount}, ${money(recon.summary.unmatchedTotal, recon.currency)}`}</Detail>
-          <Detail term="Book balance stated by">{recon.bookBalanceStatedBy ? `${recon.bookBalanceStatedBy} on ${dateTime(recon.bookBalanceStatedAt)}` : "Not recorded"}</Detail>
+          <Detail term={recon.bookBalanceSource === "opening" ? "Book balance" : "Book balance stated by"}>
+            {recon.bookBalanceSource === "opening" ? "The opening balance from the migration" : recon.bookBalanceStatedBy ? `${recon.bookBalanceStatedBy} on ${dateTime(recon.bookBalanceStatedAt)}` : "Not recorded"}
+          </Detail>
           {recon.closedAt ? <Detail term="Closed">{`${recon.closedBy ?? "Unknown"} on ${dateTime(recon.closedAt)}`}</Detail> : null}
           {recon.reopenedAt ? <Detail term="Reopened">{`${recon.reopenedBy ?? "Unknown"} on ${dateTime(recon.reopenedAt)}: ${recon.reopenReason ?? ""}`}</Detail> : null}
         </dl>

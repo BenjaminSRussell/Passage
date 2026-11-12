@@ -97,7 +97,16 @@ type NewReconciliation struct {
 	StatementID       string
 	BookBalance       decimal.Decimal
 	OutstandingAmount decimal.Decimal
+	// FromOpening starts the account's first reconciliation from the opening book balance the migration factory loaded
+	// (#49) instead of BookBalance.
+	FromOpening bool
 }
+
+// Problems of a reconciliation that starts from the migrated opening balance.
+const (
+	CodeReconNoOpening    = "TRS-0606" // the account has no migrated opening balance
+	CodeReconNotFirstOpen = "TRS-0607" // only the account's first reconciliation, of a statement after the cutover, starts from it
+)
 
 type ReconciliationQuery struct {
 	LegalEntityID string
@@ -116,7 +125,7 @@ type ReconciliationPage struct {
 
 const reconSelect = `select r.id, r.legal_entity_id, r.bank_account_id, r.statement_id, r.currency, r.period_from::text, r.period_to::text, r.state,
 	r.opening_balance::text, r.closing_balance::text, r.book_balance::text, r.outstanding_amount::text, r.book_balance_stated_by, r.book_balance_stated_at,
-	r.closed_by, r.closed_at, r.reopened_by, r.reopened_at, r.reopen_reason, r.version, r.created_by, r.created_at, r.updated_at,
+	r.book_balance_source, r.closed_by, r.closed_at, r.reopened_by, r.reopened_at, r.reopen_reason, r.version, r.created_by, r.created_at, r.updated_at,
 	s.lines, s.matched_count, s.matched_total::text, s.excluded_count, s.excluded_total::text, s.unmatched_count, s.unmatched_total::text
 	from bank_reconciliation r
 	cross join lateral (select count(*)::int as lines,
@@ -133,7 +142,7 @@ func scanReconciliation(row pgx.Row) (Reconciliation, error) {
 	var opening, closing, book, outstanding string
 	if err := row.Scan(&r.ID, &r.LegalEntityID, &r.BankAccountID, &r.StatementID, &r.Currency, &r.PeriodFrom, &r.PeriodTo, &r.State,
 		&opening, &closing, &book, &outstanding, &r.BookBalanceStatedBy, &r.BookBalanceStatedAt,
-		&r.ClosedBy, &r.ClosedAt, &r.ReopenedBy, &r.ReopenedAt, &r.ReopenReason, &r.Version, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt,
+		&r.BookBalanceSource, &r.ClosedBy, &r.ClosedAt, &r.ReopenedBy, &r.ReopenedAt, &r.ReopenReason, &r.Version, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt,
 		&r.Summary.Lines, &r.Summary.MatchedCount, &r.Summary.MatchedTotal, &r.Summary.ExcludedCount, &r.Summary.ExcludedTotal,
 		&r.Summary.UnmatchedCount, &r.Summary.UnmatchedTotal); err != nil {
 		return r, err
@@ -150,7 +159,6 @@ func scanReconciliation(row pgx.Row) (Reconciliation, error) {
 	places := int32(money.MinorUnits(r.Currency))
 	format := func(text string) string { return decimal.RequireFromString(text).StringFixed(places) }
 	r.OpeningBalance, r.ClosingBalance, r.BookBalance, r.OutstandingAmount = format(opening), format(closing), format(book), format(outstanding)
-	r.BookBalanceSource = "stated"
 	r.Summary.MatchedTotal, r.Summary.ExcludedTotal, r.Summary.UnmatchedTotal = format(r.Summary.MatchedTotal), format(r.Summary.ExcludedTotal), format(r.Summary.UnmatchedTotal)
 	r.Difference = domain.Difference(r.closing, r.book, r.outstanding.Add(r.excluded)).StringFixed(places)
 	return r, nil
@@ -247,14 +255,22 @@ func (s *Postgres) CreateReconciliation(ctx context.Context, in NewReconciliatio
 			if err != nil {
 				return Reconciliation{}, err
 			}
+			source := "stated"
+			if in.FromOpening {
+				book, err := openingBook(ctx, tx, p.TenantID, in.StatementID, currency)
+				if err != nil {
+					return Reconciliation{}, err
+				}
+				in.BookBalance, source = book, "opening"
+			}
 			if err := checkScale(currency, map[string]decimal.Decimal{"bookBalance": in.BookBalance, "outstandingAmount": in.OutstandingAmount}); err != nil {
 				return Reconciliation{}, err
 			}
 			id := ids.New()
 			_, err = tx.Exec(ctx, `insert into bank_reconciliation (tenant_id, id, legal_entity_id, bank_account_id, statement_id, currency, period_from, period_to,
-				opening_balance, closing_balance, book_balance, outstanding_amount, book_balance_stated_by, created_by)
-				select tenant_id, $3, legal_entity_id, bank_account_id, id, currency, opening_date, closing_date, opening_amount, closing_amount, $4, $5, $6, $6
-				from bank_statement where tenant_id = $1 and id = $2`, p.TenantID, in.StatementID, id, in.BookBalance.String(), in.OutstandingAmount.String(), createdBy(p))
+				opening_balance, closing_balance, book_balance, outstanding_amount, book_balance_stated_by, created_by, book_balance_source)
+				select tenant_id, $3, legal_entity_id, bank_account_id, id, currency, opening_date, closing_date, opening_amount, closing_amount, $4, $5, $6, $6, $7
+				from bank_statement where tenant_id = $1 and id = $2`, p.TenantID, in.StatementID, id, in.BookBalance.String(), in.OutstandingAmount.String(), createdBy(p), source)
 			var pg *pgconn.PgError
 			if errors.As(err, &pg) && pg.Code == uniqueViolation {
 				return Reconciliation{}, httpx.NewProblem(http.StatusConflict, CodeReconExists, "this statement already has a reconciliation")
@@ -263,7 +279,7 @@ func (s *Postgres) CreateReconciliation(ctx context.Context, in NewReconciliatio
 				return Reconciliation{}, err
 			}
 			if err := recordReconEvent(ctx, tx, p.TenantID, legalEntityID, id, "created", createdBy(p), nil,
-				map[string]string{"bookBalance": in.BookBalance.String(), "outstandingAmount": in.OutstandingAmount.String()}); err != nil {
+				map[string]string{"bookBalance": in.BookBalance.String(), "outstandingAmount": in.OutstandingAmount.String(), "bookBalanceSource": source}); err != nil {
 				return Reconciliation{}, err
 			}
 			return loadReconciliation(ctx, tx, p.TenantID, id, false)
@@ -271,6 +287,35 @@ func (s *Postgres) CreateReconciliation(ctx context.Context, in NewReconciliatio
 		return err
 	})
 	return out, err
+}
+
+// openingBook is the migrated opening book balance of the statement's account, for the account's first reconciliation of a
+// statement that closes on or after the cutover date.
+func openingBook(ctx context.Context, tx pgx.Tx, tenantID, statementID, currency string) (decimal.Decimal, error) {
+	var account, closing string
+	var asOfPtr *string
+	var minorPtr *int64
+	err := tx.QueryRow(ctx, `select s.bank_account_id::text, s.closing_date::text, o.as_of::text, o.balance_minor
+		from bank_statement s left join bank_opening_balance o on o.tenant_id = s.tenant_id and o.bank_account_id = s.bank_account_id
+		where s.tenant_id = $1 and s.id = $2`, tenantID, statementID).Scan(&account, &closing, &asOfPtr, &minorPtr)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if asOfPtr == nil || minorPtr == nil {
+		return decimal.Zero, httpx.NewProblem(http.StatusUnprocessableEntity, CodeReconNoOpening, "the account has no opening balance from the migration; state the book balance")
+	}
+	asOf, minor := *asOfPtr, *minorPtr
+	if closing < asOf {
+		return decimal.Zero, httpx.NewProblem(http.StatusUnprocessableEntity, CodeReconNotFirstOpen, "the statement closes before the cutover date "+asOf+"; state the book balance")
+	}
+	var earlier int
+	if err := tx.QueryRow(ctx, `select count(*) from bank_reconciliation where tenant_id = $1 and bank_account_id = $2`, tenantID, account).Scan(&earlier); err != nil {
+		return decimal.Zero, err
+	}
+	if earlier > 0 {
+		return decimal.Zero, httpx.NewProblem(http.StatusUnprocessableEntity, CodeReconNotFirstOpen, "the account was reconciled before; only its first reconciliation starts from the opening balance, so state the book balance")
+	}
+	return decimal.New(minor, -int32(money.MinorUnits(currency))), nil
 }
 
 func checkScale(currency string, amounts map[string]decimal.Decimal) error {
@@ -383,7 +428,7 @@ func (s *Postgres) SetReconciliationBalances(ctx context.Context, id string, ver
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update bank_reconciliation set book_balance = $3, outstanding_amount = $4, book_balance_stated_by = $5, book_balance_stated_at = now(),
-			version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`, p.TenantID, id, book.String(), outstanding.String(), createdBy(p)); err != nil {
+			book_balance_source = 'stated', version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`, p.TenantID, id, book.String(), outstanding.String(), createdBy(p)); err != nil {
 			return err
 		}
 		if err := recordReconEvent(ctx, tx, p.TenantID, cur.LegalEntityID, id, "balances_set", createdBy(p), nil, map[string]string{

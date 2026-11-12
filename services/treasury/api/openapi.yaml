@@ -311,7 +311,8 @@ paths:
       summary: Booked and available balance of every active bank account of a legal entity, with totals per currency (FR-36.8)
       description: >-
         Each account shows the freshest of its latest camt.052 report and its latest camt.053 statement: the report when it was
-        created after the statement's closing day ended, otherwise the statement (as of the end of its closing day). Booked is the
+        created after the statement's closing day ended, otherwise the statement (as of the end of its closing day); an account with a
+        migrated opening balance starts from it (source opening, as of the end of the cutover day) until either is newer. Booked is the
         interim booked balance (ITBD, else the opening booked one); available is ITAV or CLAV and falls back to booked. A position
         older than staleHours (24) is stale, and an account with no report and no statement has source none and zero balances.
         Totals are per currency, never across currencies.
@@ -2005,7 +2006,7 @@ components:
               currency: {type: string}
               booked: {type: string}
               available: {type: string}
-              source: {type: string, enum: [camt.052, camt.053, none]}
+              source: {type: string, enum: [camt.052, camt.053, opening, none], description: "opening is the migrated opening book balance (#49), used until a statement or report newer than the end of the cutover day arrives"}
               asOf: {type: string, format: date-time}
               stale: {type: boolean}
         totals:
@@ -2545,12 +2546,13 @@ components:
         reason: {type: string, minLength: 1, maxLength: 200}
     CreateBankReconciliationRequest:
       type: object
-      required: [statementId, bookBalance]
+      required: [statementId]
       additionalProperties: false
       properties:
         statementId: {type: string, format: uuid}
-        bookBalance: {type: string, description: "Signed decimal, at most the currency's minor units"}
+        bookBalance: {type: string, description: "Signed decimal, at most the currency's minor units; required unless bookBalanceSource is opening"}
         outstandingAmount: {type: string, description: "Book items not yet on the statement, signed; default 0"}
+        bookBalanceSource: {type: string, enum: [stated, opening], default: stated, description: "opening starts the account's first reconciliation, of a statement closing on or after the cutover, from the opening book balance the migration factory loaded (#49); leave bookBalance out. 422 TRS-0606 without an opening balance, TRS-0607 for a later reconciliation or an earlier statement."}
     BankReconciliationLines:
       type: object
       required: [lines, matchedCount, matchedTotal, excludedCount, excludedTotal, unmatchedCount, unmatchedTotal]
@@ -2578,7 +2580,7 @@ components:
         closingBalance: {type: string}
         bookBalance: {type: string}
         outstandingAmount: {type: string, description: "Signed. Positive: book payments not yet on the statement (outstanding checks). Negative: book receipts not yet on it (deposits in transit)."}
-        bookBalanceSource: {type: string, enum: [stated], description: The book balance is stated by a person, not read from the ledger}
+        bookBalanceSource: {type: string, enum: [stated, opening], description: "stated by a person, or opening: the account's first reconciliation started from the migrated opening book balance; a restatement makes it stated"}
         bookBalanceStatedBy: {type: string, description: The person who last stated the book balance; cannot close the reconciliation}
         bookBalanceStatedAt: {type: string, format: date-time}
         difference: {type: string, description: "closing - (book + outstanding + excluded lines); zero to close"}
