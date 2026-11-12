@@ -145,3 +145,29 @@ func TestSelfBilling_VATRateComesFromTheTaxService(t *testing.T) {
 		t.Fatalf("tax query %+v", q)
 	}
 }
+
+// #35 (35-5): receiving an interchange matches only the self-billed messages it brought in; another pending message is left to the
+// sweep instead of being matched inside someone else's receipt.
+func TestSelfBilling_ReceiptMatchesOnlyItsOwnMessages(t *testing.T) {
+	f, a, h, partner := selfBillSetup(t)
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/self-billing", `{"taxRatePct":"8.5","waitDays":30,"taxCountry":"US"}`, "edi.admin", srcScope); rec.Code != http.StatusOK {
+		t.Fatalf("config: %d %s", rec.Code, rec.Body.String())
+	}
+	sendShipment(t, f, h, partner, srcShipment, "SHP-0001", time.Now().AddDate(0, 0, -3))
+	tax := &fakeTax{err: errors.New("tax down")}
+	a.SelfBillTax = tax
+	body := strings.NewReplacer("DTM+137:20261111:102'", "DTM+137:20261111:102'CUX+2:USD:4'", "UNT+21+1", "UNT+22+1").Replace(selfBilledSample(t))
+	receiveEdifactBody(t, h, body) // stays MAPPED: the tax service is down
+	tax.err, tax.rate = nil, decimal.RequireFromString("8.5")
+	rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", selfBilled810(t, "SB-8102", "8", "6.80", "8680"), "edi.operate", srcScope)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("receive: %d %s", rec.Code, rec.Body.String())
+	}
+	docs := documents(t, h)
+	if len(docs) != 1 || docs[0].Number != "SB-8102" {
+		t.Fatalf("the 810's receipt must match only the 810: %+v", docs)
+	}
+	if n, err := a.ReconcileSelfBilled(consumerCtx(t), 10); err != nil || n != 1 {
+		t.Fatalf("the sweep picks up the INVOIC: %d %v", n, err)
+	}
+}

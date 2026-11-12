@@ -84,3 +84,39 @@ func ShippedByWarehouse(p TradeProfile, sh SourceShipment, ws WarehouseShip) (So
 	}
 	return sh, nil
 }
+
+// NoticeSSCCs are the containers an advance ship notice of the shipment (or of the slip) lists: the shipped ones.
+func NoticeSSCCs(sh SourceShipment, slip *SlipRef) []string {
+	var out []string
+	for _, c := range OnlySlip(sh, slip).Containers {
+		if c.Status == "SHIPPED" && c.SSCC != "" {
+			out = append(out, c.SSCC)
+		}
+	}
+	return out
+}
+
+// KeepSSCCs narrows the notice to the containers in keep: a slip notice lists only those, a whole-shipment notice drops the others.
+func KeepSSCCs(sh SourceShipment, slip *SlipRef, keep []string) (SourceShipment, *SlipRef) {
+	in := make(map[string]bool, len(keep))
+	for _, s := range keep {
+		in[s] = true
+	}
+	if slip.perSlip() {
+		narrowed := &SlipRef{ID: slip.ID, Number: slip.Number}
+		for _, s := range slip.SSCCs {
+			if in[s] {
+				narrowed.SSCCs = append(narrowed.SSCCs, s)
+			}
+		}
+		return sh, narrowed
+	}
+	kept := make([]SourceContainer, 0, len(sh.Containers))
+	for _, c := range sh.Containers {
+		if in[c.SSCC] {
+			kept = append(kept, c)
+		}
+	}
+	sh.Containers = kept
+	return sh, slip
+}

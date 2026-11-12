@@ -487,6 +487,10 @@ Sample files: `testdata/cxml/` (the three network documents, a punchout cart and
   warehouse's ship time as the ship date, its carrier when it named one, and only the containers that left (a named pallet takes its
   cartons along). A shipment fulfillment already shipped by a packing slip, a container already on a slip, or an SSCC the shipment does not
   hold is skipped with EDI-0007: the slip's `asn.issued` sends those notices.
+  Each container is notified to a partner once (`notified_sscc`, migration 0019, unique per partner, set and SSCC): the notice that
+  claims it first owns it, so a packing slip posted after the warehouse confirmed the shipment lists only the containers not sent
+  yet, sends nothing when none are left (EDI-0007), and registers no self-billing line twice. The consumer's inbox is
+  `consumer_inbox` (migration 0018).
 - **35-4 cXML invoices into payables.** An inbound InvoiceDetailRequest of exactly one purchase order is put into payables'
   vendor-invoice intake (`POST /v1/payables/vendor-invoice-intake`, grant edi -> payables `payables.vendor-invoice.intake`, principal
   `edi-cxml`) for the vendor of that purchase order (read from purchasing), with the invoice number, date, purpose, currency, gross and
@@ -496,7 +500,8 @@ Sample files: `testdata/cxml/` (the three network documents, a punchout cart and
   with EDI-0039. The payables chart must list edi's public key.
 - **35-5 self-billing.** An inbound X12 810 is read as the customer's self-billed invoice (Passage sends its own 810s and takes vendor
   invoices through cXML and AP): BIG (date, document number, PO), CUR, REF*PK or REF*BM (delivery note), REF*LI (PO line, else IT101),
-  IT1, line TXI and TDS; it is matched right after receipt, and by the sweep, exactly like an INVOIC 389. A partner with a `taxCountry`
+  IT1, line TXI and TDS; it is matched right after receipt (only the messages of that interchange; other pending ones are left to
+  the sweep), and by the sweep, exactly like an INVOIC 389. A partner with a `taxCountry`
   (plus `taxGroup` and `itemTaxGroup`) in `PUT /partners/{id}/self-billing` has its self-billed lines checked at the VAT rate the tax
   service determines (`POST /v1/tax/calculate` with the stored configuration, on the document date and in its currency, as service
   principal `edi-selfbill`, grant edi -> tax `tax.tax.calculate`; `EDI_TAX_URL`, chart `sources.taxUrl`); a tax outage leaves the

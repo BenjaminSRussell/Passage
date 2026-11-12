@@ -699,13 +699,10 @@ func (a *API) receiveX12Interchange(ctx context.Context, body []byte, o receiveO
 	if err != nil {
 		return receiveResponse{}, err
 	}
-	for _, m := range res.Messages {
-		if m.TransactionSet == "810" && m.Status == "MAPPED" {
-			// A self-billed 810 is matched right away; anything this misses is picked up by POST /self-billing:sweep.
-			if _, err := a.ReconcileSelfBilled(ctx, 50); err != nil {
-				slog.WarnContext(ctx, "self-billing match deferred", "interchange", res.InterchangeID, "err", err)
-			}
-			break
+	// A self-billed 810 of this interchange is matched right away; anything this misses is picked up by POST /self-billing:sweep.
+	if received := mappedMessages(res.Messages, "810"); len(received) > 0 {
+		if _, err := a.ReconcileSelfBilledMessages(ctx, received); err != nil {
+			slog.WarnContext(ctx, "self-billing match deferred", "interchange", res.InterchangeID, "err", err)
 		}
 	}
 	return receiveResponse{

@@ -167,6 +167,20 @@ func (a *API) ReconcileSelfBilled(ctx context.Context, limit int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	return a.reconcilePending(ctx, pending)
+}
+
+// ReconcileSelfBilledMessages matches only the given messages: the receipt of an interchange matches what it brought in and leaves
+// every other pending message to the sweep, so one partner's receipt never runs another partner's matching.
+func (a *API) ReconcileSelfBilledMessages(ctx context.Context, messageIDs []string) (int, error) {
+	pending, err := a.store.PendingSelfBilledIn(ctx, messageIDs)
+	if err != nil {
+		return 0, err
+	}
+	return a.reconcilePending(ctx, pending)
+}
+
+func (a *API) reconcilePending(ctx context.Context, pending []store.PendingSelfBilled) (int, error) {
 	done := 0
 	var first error
 	for _, p := range pending {
@@ -380,4 +394,15 @@ func (a *API) RunSelfBillSweep(ctx context.Context) (int, error) {
 		total += done + len(opened)
 	}
 	return total, errors.Join(failed...)
+}
+
+// mappedMessages are the ids of the MAPPED messages of the set an interchange brought in.
+func mappedMessages(messages []store.Message, set string) []string {
+	var out []string
+	for _, m := range messages {
+		if m.TransactionSet == set && m.Status == "MAPPED" {
+			out = append(out, m.ID)
+		}
+	}
+	return out
 }

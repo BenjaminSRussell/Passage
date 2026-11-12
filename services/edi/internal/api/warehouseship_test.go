@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/events"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/autosend"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
@@ -141,5 +145,64 @@ func TestShippedByWarehouse(t *testing.T) {
 				t.Fatal("accepted")
 			}
 		})
+	}
+}
+
+// #35 (35-1): the warehouse confirms the shipment first and a packing slip is posted later. The slip's notice leaves out the
+// containers the warehouse's notice already sent, so the partner hears of each container once and self-billing registers it once.
+func TestAutoOutbound_SlipAfterWarehouseShippedSendsOnlyNewContainers(t *testing.T) {
+	f := newFake()
+	packedShipment(f)
+	f.shipment.Containers = append(f.shipment.Containers, domain.SourceContainer{SSCC: "003456789012340026", Status: "OPEN", GrossKg: decimal.NewFromInt(40),
+		Lines: []domain.SourceContainerLine{{ShipmentLineID: "sl-1", Qty: decimal.NewFromInt(4)}}})
+	_, h, pool, partner, handlers := autoSetup(t, f)
+	do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/auto-outbound", `{"transactionSets":["856"]}`, "edi.admin", srcScope)
+	shipped := event(t, autosend.ShipmentShippedType, autosend.WarehouseSource, map[string]any{"shipment_id": srcShipment, "legal_entity_id": srcLE,
+		"shipped_at": "2026-11-10T08:30:00Z", "containers": []map[string]string{{"sscc": "003456789012340019"}}})
+	if err := handlers[autosend.ShipmentShippedType](consumerCtx(t), shipped); err != nil {
+		t.Fatal(err)
+	}
+	// Later a slip posts in fulfillment for both containers: the first already shipped, the second is new.
+	shippedAt := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	f.shipment.Status, f.shipment.ActualShipDate = "SHIPPED", &shippedAt
+	f.shipment.Containers[0].Status, f.shipment.Containers[1].Status = "SHIPPED", "SHIPPED"
+	slip := func(ssccs ...string) events.Event {
+		cs := []map[string]string{}
+		for _, s := range ssccs {
+			cs = append(cs, map[string]string{"sscc": s})
+		}
+		return event(t, autosend.ASNIssuedType, autosend.FulfillmentSource, map[string]any{"shipment_id": srcShipment, "legal_entity_id": srcLE,
+			"packing_slip_id": "00000000-0000-0000-0000-0000000000d9", "packing_slip_number": "PS-9", "containers": cs})
+	}
+	if err := handlers[autosend.ASNIssuedType](consumerCtx(t), slip("003456789012340019", "003456789012340026")); err != nil {
+		t.Fatal(err)
+	}
+	if n := countInterchanges(t, h, "OUT"); n != 2 {
+		t.Fatalf("856s = %d, want the warehouse's and the slip's", n)
+	}
+	var raw string
+	if err := pool.QueryRow(context.Background(), `select raw_payload from interchange where direction = 'OUT' and raw_payload like '%PS-9%'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "003456789012340019") || !strings.Contains(raw, "003456789012340026") {
+		t.Fatalf("the slip's 856 must list only the new container: %s", raw)
+	}
+	var registered int
+	if err := pool.QueryRow(context.Background(), `select count(*) from self_billing_shipment`).Scan(&registered); err != nil || registered != 2 {
+		t.Fatalf("self-billing lines = %d, %v; want one per delivery note", registered, err)
+	}
+	// A slip of only the container the warehouse sent sends nothing.
+	f.shipment.Containers = f.shipment.Containers[:1]
+	other := slip("003456789012340019")
+	other.ID = "evt-other-slip"
+	var d map[string]any
+	_ = json.Unmarshal(other.Data, &d)
+	d["packing_slip_id"], d["packing_slip_number"] = "00000000-0000-0000-0000-0000000000da", "PS-10"
+	other.Data, _ = json.Marshal(d)
+	if err := handlers[autosend.ASNIssuedType](consumerCtx(t), other); err != nil {
+		t.Fatalf("a fully notified slip is a skip, not a retry: %v", err)
+	}
+	if n := countInterchanges(t, h, "OUT"); n != 2 {
+		t.Fatalf("856s = %d after a slip of already notified containers", n)
 	}
 }

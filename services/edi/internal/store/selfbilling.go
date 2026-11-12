@@ -370,12 +370,25 @@ type PendingSelfBilled struct {
 }
 
 func (s *Store) PendingSelfBilled(ctx context.Context, limit int) ([]PendingSelfBilled, error) {
+	return s.pendingSelfBilled(ctx, limit, nil)
+}
+
+// PendingSelfBilledIn is PendingSelfBilled limited to the given messages (those one interchange just brought in).
+func (s *Store) PendingSelfBilledIn(ctx context.Context, messageIDs []string) ([]PendingSelfBilled, error) {
+	if len(messageIDs) == 0 {
+		return nil, nil
+	}
+	return s.pendingSelfBilled(ctx, len(messageIDs), messageIDs)
+}
+
+func (s *Store) pendingSelfBilled(ctx context.Context, limit int, messageIDs []string) ([]PendingSelfBilled, error) {
 	var out []PendingSelfBilled
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select m.id::text, i.partner_id::text, m.canonical::text from message m
 			join interchange i on i.tenant_id = m.tenant_id and i.id = m.interchange_id and i.direction = 'IN'
 			where m.transaction_set in ('INVOIC', '810') and m.status = 'MAPPED' and m.canonical->>'selfBilled' = 'true'
-			order by m.created_at limit $1`, limit)
+			and ($2::uuid[] is null or m.id = any($2::uuid[]))
+			order by m.created_at limit $1`, limit, messageIDs)
 		if err != nil {
 			return err
 		}

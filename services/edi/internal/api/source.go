@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -140,15 +141,15 @@ func (a *API) fromSource(ctx context.Context, partnerID string, req sourceReques
 	if err != nil {
 		return store.OutboundResult{}, false, err
 	}
-	doc, shipped, err := a.sourceDocument(ctx, req, profile)
-	if err != nil {
-		return store.OutboundResult{}, false, sourceProblem(err)
-	}
 	parts := []string{"source", partnerID, req.TransactionSet, req.SourceID}
 	if req.Slip != nil && req.Slip.ID != "" {
 		parts = append(parts, req.Slip.ID)
 	}
 	key := strings.Join(parts, ":")
+	doc, shipped, err := a.sourceDocument(ctx, req, profile, partnerID, key)
+	if err != nil {
+		return store.OutboundResult{}, false, sourceProblem(err)
+	}
 	res, created, err := a.recordOutbound(ctx, key, partnerID, req.TransactionSet, doc)
 	if err != nil {
 		return res, created, err
@@ -162,7 +163,10 @@ func (a *API) fromSource(ctx context.Context, partnerID string, req sourceReques
 	return res, created, nil
 }
 
-func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.TradeProfile) (json.RawMessage, []domain.SBShipmentLine, error) {
+// sourceDocument builds the document. An 856 or DESADV lists only the containers this notice owns (ClaimNoticeSSCCs): one another
+// notice of the partner already sent, such as the warehouse's whole-shipment notice before a later packing slip, is left out, and a
+// notice left with none is not sent.
+func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.TradeProfile, partnerID, key string) (json.RawMessage, []domain.SBShipmentLine, error) {
 	var (
 		doc     any
 		err     error
@@ -186,9 +190,24 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		if o, err = a.Sources.Order(ctx, p.LegalEntityID, sh.OrderID); err != nil {
 			return nil, nil, err
 		}
-		doc, err = domain.ASNFromSlip(p, sh, o, req.Slip)
+		// The notice must build before it claims its containers, so a document that cannot be sent claims nothing.
+		if _, err = domain.ASNFromSlip(p, sh, o, req.Slip); err != nil {
+			return nil, nil, err
+		}
+		slip, wanted := req.Slip, domain.NoticeSSCCs(sh, req.Slip)
+		owned, cerr := a.store.ClaimNoticeSSCCs(ctx, partnerID, p.LegalEntityID, req.TransactionSet, key, wanted)
+		if cerr != nil {
+			return nil, nil, cerr
+		}
+		if len(owned) == 0 && len(wanted) > 0 {
+			return nil, nil, fmt.Errorf("%w: every container of shipment %s was already notified to this partner", domain.ErrOutbound, sh.ShipmentNumber)
+		}
+		if len(owned) < len(wanted) {
+			sh, slip = domain.KeepSSCCs(sh, slip, owned)
+		}
+		doc, err = domain.ASNFromSlip(p, sh, o, slip)
 		if err == nil {
-			shipped, err = domain.SelfBillingLinesForSlip(p, sh, o, req.Slip)
+			shipped, err = domain.SelfBillingLinesForSlip(p, sh, o, slip)
 		}
 	default:
 		var inv domain.SourceInvoice
