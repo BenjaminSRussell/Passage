@@ -21,3 +21,4 @@ import "./mobile";
 import "./technician";
 import "./analytics";
 import "./b2b";
+import "./party";

@@ -186,6 +186,15 @@ route("GET", "/api/v1/hr/workers/{id}/employments", ({ params }) => {
   return p ? PAGE(asOf(p).employments) : reply.problem(404, "HR-0404", "No worker with that id");
 });
 
+// One employment, for the employment lookup of the personnel action form.
+route("GET", "/api/v1/hr/employments/{id}", ({ params }) => {
+  for (const p of PEOPLE) {
+    const found = asOf(p).employments.find((e) => e.id === params.id);
+    if (found) return found;
+  }
+  return reply.problem(404, "HCM-EMP-NOT-FOUND", "No employment with that id");
+});
+
 // The worker detail page: employment as of a date, absence balances, absence plans and the job catalog.
 route("GET", "/api/v1/hr/workers/{id}/as-of", ({ params }) => {
   const p = personById(params.id);

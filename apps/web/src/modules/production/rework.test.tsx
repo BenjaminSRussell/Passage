@@ -216,8 +216,7 @@ describe("Production order detail: rework and as-built", () => {
     }
     fireEvent.change(within(component).getByLabelText("Item"), { target: { value: uuid(1) } });
     const operation = screen.getByRole("group", { name: "Operation 1" });
-    await within(operation).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(operation).getByLabelText("Resource"), uuid(5));
+    fireEvent.change(within(operation).getByLabelText("Resource"), { target: { value: uuid(5) } });
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     await waitFor(() => expect(location.pathname).toBe(`/production/${reworkId}`));
     const post = calls(fetchMock).find(([, init]) => init?.method === "POST");
@@ -244,8 +243,7 @@ describe("Production order detail: rework and as-built", () => {
     fireEvent.change(within(component).getByLabelText("Item"), { target: { value: uuid(4) } });
     fireEvent.change(within(component).getByLabelText("Quantity per unit"), { target: { value: "1" } });
     const operation = screen.getByRole("group", { name: "Operation 1" });
-    await within(operation).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(operation).getByLabelText("Resource"), uuid(5));
+    fireEvent.change(within(operation).getByLabelText("Resource"), { target: { value: uuid(5) } });
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     await waitFor(() => expect(screen.getByLabelText("Reference")).toHaveAttribute("aria-invalid", "true"));
     expect(screen.getByLabelText("Reference")).toHaveAccessibleDescription(/must be the id of the original production order/);

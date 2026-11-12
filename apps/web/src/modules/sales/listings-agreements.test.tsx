@@ -33,6 +33,8 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
+      // The price prefill reads the customer group and asks pricing for the price; these tests are about the order calls only.
+      if (url.pathname === "/api/v1/pricing/resolve" || url.pathname.startsWith("/api/v1/party/customers/")) return new Response("{}", { status: 404, headers: { "Content-Type": "application/json" } });
       calls.push({ method: init.method ?? "GET", url, headers: new Headers(init.headers), body: init.body ? JSON.parse(init.body as string) : undefined });
       const { status, body, etag } = await handler(url, init);
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -211,7 +213,7 @@ describe("Sales agreements", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "EXHAUSTED" } });
-    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("status")).toBe("EXHAUSTED"));
   });
 
@@ -224,10 +226,10 @@ describe("Sales agreements", () => {
     expect(await screen.findByRole("heading", { name: "No sales agreements yet" })).toBeInTheDocument();
   });
 
-  it("shows the problem code when the list fails", async () => {
+  it("says when the caller may not view agreements", async () => {
     handler = () => ({ status: 403, body: { code: "AUTH-0003", detail: "the legal entity is outside the caller's scope" } });
     renderAt("/sales/agreements");
-    expect(await screen.findByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText("You can't view sales agreements")).toBeInTheDocument();
   });
 
   it("the new agreement form validates, posts with an Idempotency-Key and opens the agreement", async () => {

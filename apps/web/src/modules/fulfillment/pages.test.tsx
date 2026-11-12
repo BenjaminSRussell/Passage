@@ -277,7 +277,7 @@ describe("shipment detail", () => {
     };
     renderAt(`/fulfillment/shipments/${SH}`);
     fireEvent.change(await screen.findByLabelText("Unit cost"), { target: { value: "12.50" } });
-    fireEvent.change(screen.getByLabelText("Cost snapshot id"), { target: { value: "snap-1" } });
+    fireEvent.change(screen.getByLabelText("Cost version"), { target: { value: "0195d6a0-0000-7000-8000-00000000c057" } });
     expect(await screen.findByText(/delivered not invoiced \(Dr 1405\), the legal entity's policy/)).toBeInTheDocument();
     const preview = screen.getByRole("table", { name: "Journal preview" });
     expect(within(preview).getByText("1405").closest("tr")?.textContent).toContain("125.00 USD");
@@ -289,7 +289,7 @@ describe("shipment detail", () => {
     expect(await screen.findByRole("heading", { name: "Packing slip PS-0000001" })).toBeInTheDocument();
     const call = posts(":post-packing-slip")[0];
     expect(header(call, "If-Match")).toBe('"5"');
-    expect(call.body).toMatchObject({ currency: "USD", costs: [{ shipmentLineId: LINE, unitCost: "12.50", costSnapshotId: "snap-1" }] });
+    expect(call.body).toMatchObject({ currency: "USD", costs: [{ shipmentLineId: LINE, unitCost: "12.50", costSnapshotId: "0195d6a0-0000-7000-8000-00000000c057" }] });
     expect(call.body).not.toHaveProperty("cogsAtShipment");
   });
 
@@ -300,7 +300,7 @@ describe("shipment detail", () => {
       init.method === "POST" ? json(412, { code: "conflict_version", detail: "shipment is at version 6" }) : base(url, init);
     renderAt(`/fulfillment/shipments/${SH}`);
     fireEvent.change(await screen.findByLabelText("Unit cost"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Cost snapshot id"), { target: { value: "s" } });
+    fireEvent.change(screen.getByLabelText("Cost version"), { target: { value: "0195d6a0-0000-7000-8000-00000000c057" } });
     fireEvent.click(screen.getByRole("button", { name: "Post packing slip" }));
     expect((await findAlert()).textContent).toContain("Someone else changed this shipment");
   });

@@ -225,7 +225,7 @@ describe("packing slip post with a short pick action (FR-28.8)", () => {
     };
     renderAt(`/fulfillment/shipments/${SH}`);
     fireEvent.change(await screen.findByLabelText("Unit cost"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Cost snapshot id"), { target: { value: "snap-1" } });
+    fireEvent.change(screen.getByLabelText("Cost version"), { target: { value: "0195d6a0-0000-7000-8000-00000000c057" } });
     fireEvent.click(screen.getByRole("button", { name: "Post packing slip" }));
     expect(await screen.findByRole("heading", { name: "Packing slip PS-0000007" })).toBeInTheDocument();
     expect(await screen.findByText("Remainder moved to a backorder shipment")).toBeInTheDocument();

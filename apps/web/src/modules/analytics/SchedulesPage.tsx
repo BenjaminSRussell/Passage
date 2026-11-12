@@ -1,5 +1,7 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import {
   Alert,
   Badge,
@@ -45,7 +47,7 @@ function destinationText(d: Schedule["destination"]): string {
 
 const columns: DataTableColumn<Schedule>[] = [
   { key: "name", header: "Name" },
-  { key: "target", header: "Report", render: (s) => `${enumLabel(s.targetType)} ${s.targetId}` },
+  { key: "target", header: "Report", render: (s) => <ScheduleTarget type={s.targetType} id={s.targetId} /> },
   { key: "cron", header: "Cron", mono: true },
   { key: "timezone", header: "Time zone", mono: true },
   { key: "format", header: "Format" },
@@ -134,7 +136,7 @@ function splitTargets(raw: string): string[] {
 export function validateSchedule(d: Draft): DraftErrors {
   const errors: DraftErrors = {};
   if (d.name.trim() === "" || d.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
-  if (!TARGET_ID.test(d.targetId)) errors.targetId = "Enter the dashboard or saved query id.";
+  if (!TARGET_ID.test(d.targetId)) errors.targetId = d.targetType === "DASHBOARD" ? "Choose the dashboard." : "Enter the saved query id.";
   if (d.cron.trim().split(/\s+/).length !== 5) errors.cron = "Use five fields: minute, hour, day of month, month and day of week.";
   if (d.timezone.trim() === "") errors.timezone = "Enter a time zone such as Europe/Berlin.";
   const targets = splitTargets(d.targets);
@@ -210,7 +212,7 @@ export function ScheduleCreatePage() {
           </FormField>
           <FormField id="schedule-target-type" label="Report type">
             {(control) => (
-              <Select {...control} value={draft.targetType} onChange={(e) => set("targetType", e.target.value as Draft["targetType"])}>
+              <Select {...control} value={draft.targetType} onChange={(e) => setDraft((d) => ({ ...d, targetType: e.target.value as Draft["targetType"], targetId: "" }))}>
                 {TARGET_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {t === "QUERY" ? "Saved explorer query" : "Dashboard"}
@@ -219,9 +221,13 @@ export function ScheduleCreatePage() {
               </Select>
             )}
           </FormField>
-          <FormField id="schedule-target-id" label="Report id" error={errors.targetId}>
-            {(control) => <Input {...control} className={styles.mono} invalid={invalid("targetId")} value={draft.targetId} onChange={(e) => set("targetId", e.target.value)} />}
-          </FormField>
+          {draft.targetType === "DASHBOARD" ? (
+            <LookupFormField id="schedule-target-id" label="Dashboard" entity="dashboard" value={draft.targetId} error={errors.targetId} onChange={(targetId) => set("targetId", targetId)} />
+          ) : (
+            <FormField id="schedule-target-id" label="Saved query id" hint="Saved explorer queries have no list yet; copy the id from the explorer." error={errors.targetId}>
+              {(control) => <Input {...control} className={styles.mono} invalid={invalid("targetId")} value={draft.targetId} onChange={(e) => set("targetId", e.target.value)} />}
+            </FormField>
+          )}
           <FormField id="schedule-format" label="Format">
             {(control) => (
               <Select {...control} value={draft.format} onChange={(e) => set("format", e.target.value as Draft["format"])}>
@@ -336,7 +342,7 @@ export function ScheduleDetailPage() {
   const s = state.data;
   return (
     <div className={styles.stack}>
-      <PageHeader title={s.name} description={`${enumLabel(s.targetType)} ${s.targetId} as ${s.format}.`} />
+      <PageHeader title={s.name} description={<>{<ScheduleTarget type={s.targetType} id={s.targetId} />}{` as ${s.format}.`}</>} />
       <Card title="Delivery">
         <dl className={styles.details}>
           <Entry term="Cron">
@@ -424,5 +430,17 @@ function Deliveries({ schedule }: { schedule: Schedule }) {
         )}
       </Card>
     </div>
+  );
+}
+
+/** A schedule's report: a dashboard by its title; a saved explorer query by its key (queries have no list to name them from). */
+function ScheduleTarget({ type, id }: { type: string; id: string }) {
+  return type === "DASHBOARD" ? (
+    <>
+      {"Dashboard "}
+      <EntityName entity="dashboard" id={id} />
+    </>
+  ) : (
+    <>{`Saved query ${id}`}</>
   );
 }

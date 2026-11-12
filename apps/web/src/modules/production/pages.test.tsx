@@ -407,8 +407,7 @@ describe("New production order form", () => {
     await userEvent.selectOptions(within(component).getByLabelText("Flushing"), "finish");
     fill("Item group", "FG");
     const operation = screen.getByRole("group", { name: "Operation 1" });
-    await within(operation).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(operation).getByLabelText("Resource"), v.operations[0].resourceId);
+    fireEvent.change(within(operation).getByLabelText("Resource"), { target: { value: v.operations[0].resourceId } });
     fill("Run hours per unit", "0.5", operation);
     await userEvent.click(screen.getByRole("button", { name: "Add component" }));
     expect(screen.getByRole("group", { name: "Component 2" })).toBeInTheDocument();
@@ -442,8 +441,7 @@ describe("New production order form", () => {
     set("Item", v.lines[0].itemId, screen.getByRole("group", { name: "Component 1" }));
     set("Quantity per unit", "3", screen.getByRole("group", { name: "Component 1" }));
     const op = screen.getByRole("group", { name: "Operation 1" });
-    await within(op).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(op).getByLabelText("Resource"), v.operations[0].resourceId);
+    fireEvent.change(within(op).getByLabelText("Resource"), { target: { value: v.operations[0].resourceId } });
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     const alerts = await screen.findAllByRole("alert");
     const summaryAlert = alerts.find((a) => a.textContent?.includes("The order was not created"));

@@ -31,20 +31,20 @@ const calls = () => server.calls.filter((c) => c.url.pathname === PATH);
 
 function ask(le: string, asOf = "2026-10-21", customer = "") {
   fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: le } });
-  fireEvent.change(screen.getByLabelText("Customer", { exact: false }), { target: { value: customer } });
-  fireEvent.change(screen.getByLabelText("As of"), { target: { value: asOf } });
-  fireEvent.click(screen.getByRole("button", { name: "Show report" }));
+  if (customer) fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customer } });
+  fireEvent.change(screen.getByLabelText("As of (YYYY-MM-DD)"), { target: { value: asOf } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
 }
 
 describe("delivered not invoiced", () => {
   it("asks for a legal entity, then shows the 1405 total and the open slips", async () => {
     server.handler = (url) => (url.pathname === PATH ? json(200, report) : undefined);
     const { container } = renderAt("/fulfillment/delivered-not-invoiced");
-    expect(screen.getByText(/Choose a legal entity/)).toBeInTheDocument();
+    expect(await screen.findByText("Choose a legal entity")).toBeInTheDocument();
     expect(calls()).toHaveLength(0);
 
     ask(LE, "2026-10-21", CUSTOMER);
-    const table = await findTable({ name: "Delivered not invoiced as of 2026-10-21" });
+    const table = await findTable({ name: "Delivered not invoiced" });
     const row = (await within(table).findByText("PS-0000003")).closest("tr");
     const cells = Array.from(row?.querySelectorAll("td, th") ?? []).map((cell) => cell.textContent);
     expect(cells).toEqual(["PS-0000003", "2026-10-18", "3", "Not available⋯Copy id", "Sales order", "125.00 USD"]);
@@ -72,9 +72,11 @@ describe("delivered not invoiced", () => {
 
   it("validates the query before calling the service", async () => {
     renderAt("/fulfillment/delivered-not-invoiced");
-    ask("not-a-uuid", "2026-10-21", "nope");
-    expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
-    expect(screen.queryByText("Enter the customer id (a UUID), or leave it empty.")).toBeNull();
+    ask("not-a-uuid", "2026-10-21");
+    expect(await screen.findByText(/Pick a legal entity in the filters/)).toBeInTheDocument();
+    expect(calls()).toHaveLength(0);
+    ask(LE, "21/10/2026");
+    expect(await screen.findByText(/Enter the report date as YYYY-MM-DD/)).toBeInTheDocument();
     expect(calls()).toHaveLength(0);
   });
 
@@ -83,7 +85,7 @@ describe("delivered not invoiced", () => {
     server.handler = (url) => (url.pathname === PATH ? json(200, body) : undefined);
     renderAt("/fulfillment/delivered-not-invoiced");
     ask(LE);
-    expect(await screen.findByText("Nothing delivered and not invoiced")).toBeInTheDocument();
+    expect(await screen.findByText("No packing slips match these filters")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Delivered not invoiced totals" })).toBeNull();
 
     body = { ...report, lineCount: 900 };

@@ -199,16 +199,21 @@ func removeMergedParties(ctx context.Context, s Applier, evt events.Event) error
 		if !ids.Valid(id) {
 			return eventing.Permanent(fmt.Errorf("%s names merged party %q, not an id", evt.Type, id))
 		}
-		if err := apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: id, Status: statusMerged, Removed: true}); err != nil {
+	}
+	// The survivor is indexed first, so the merged persons' workers take its new name as they move to it. A merge
+	// without the survivor's data still takes the losers out; the survivor is indexed by its own party events.
+	if d.SurvivorPartyID != "" && d.Survivor.PartyNumber != "" {
+		if err := apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: d.SurvivorPartyID, Number: d.Survivor.PartyNumber, Title: d.Survivor.Name,
+			Subtitle: d.Survivor.PartyType, Status: d.Survivor.Status, Version: d.Survivor.Version}); err != nil {
 			return err
 		}
 	}
-	// A merge without the survivor's data still takes the losers out; the survivor is indexed by its own party events.
-	if d.SurvivorPartyID == "" || d.Survivor.PartyNumber == "" {
-		return nil
+	for _, id := range d.MergedPartyIDs {
+		if err := apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: id, Status: statusMerged, Removed: true, MergedInto: d.SurvivorPartyID}); err != nil {
+			return err
+		}
 	}
-	return apply(ctx, s, evt, store.Record{Type: store.TypeParty, ID: d.SurvivorPartyID, Number: d.Survivor.PartyNumber, Title: d.Survivor.Name,
-		Subtitle: d.Survivor.PartyType, Status: d.Survivor.Status, Version: d.Survivor.Version})
+	return nil
 }
 
 func indexProduct(ctx context.Context, s Applier, evt events.Event) error {

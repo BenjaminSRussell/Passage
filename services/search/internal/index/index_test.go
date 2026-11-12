@@ -139,14 +139,15 @@ func TestMergeRemovesLosersAndReindexesTheSurvivor(t *testing.T) {
 	if len(f.got) != 3 {
 		t.Fatalf("applied %d records, want 2 removals and the survivor", len(f.got))
 	}
-	for i, id := range []string{recordID, otherID} {
-		if r := f.got[i].rec; r.ID != id || !r.Removed || r.Status != "MERGED" || r.At != eventTime {
-			t.Errorf("record %d = %+v", i, r)
-		}
-	}
+	// The survivor first, so the merged persons' workers take its name as they move to it.
 	want := store.Record{Type: store.TypeParty, ID: survivorID, Number: "P-1", Title: "Contoso Group", Subtitle: "organization", Status: "active", Version: 5, At: eventTime}
-	if f.got[2].rec != want {
-		t.Errorf("survivor = %+v, want %+v", f.got[2].rec, want)
+	if f.got[0].rec != want {
+		t.Errorf("survivor = %+v, want %+v", f.got[0].rec, want)
+	}
+	for i, id := range []string{recordID, otherID} {
+		if r := f.got[i+1].rec; r.ID != id || !r.Removed || r.Status != "MERGED" || r.MergedInto != survivorID || r.At != eventTime {
+			t.Errorf("record %d = %+v", i+1, r)
+		}
 	}
 }
 

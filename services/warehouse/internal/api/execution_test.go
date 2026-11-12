@@ -109,6 +109,14 @@ func (f *fakeStore) CreateAppointment(_ context.Context, idem store.Idem, a doma
 	f.idem, f.appt = idem, a
 	return a, f.replayed, f.err
 }
+func (f *fakeStore) GetAppointment(_ context.Context, id string) (domain.Appointment, error) {
+	f.calls++
+	if f.err != nil {
+		return domain.Appointment{}, f.err
+	}
+	return domain.Appointment{ID: id, DoorCode: "D1", Reference: "ASN-1"}, nil
+}
+
 func (f *fakeStore) ListAppointments(_ context.Context, af store.AppointmentFilter) ([]domain.Appointment, error) {
 	f.calls++
 	f.afilter = af

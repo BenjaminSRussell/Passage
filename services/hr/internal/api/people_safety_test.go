@@ -31,6 +31,7 @@ func TestPeopleSafetyValidation(t *testing.T) {
 		{"questionnaire empty", http.MethodPost, "/v1/hr/questionnaires", `{"code":"bad code","name":"","questions":[]}`, dutyQuestionnaireAdmin, "questions"},
 		{"schedule window", http.MethodPost, "/v1/hr/questionnaires/schedules", `{"questionnaireId":"` + id + `","opensAt":"2026-03-02T00:00:00Z","closesAt":"2026-03-01T00:00:00Z"}`, dutyQuestionnaireAdmin, "closesAt"},
 		{"answer worker", http.MethodPost, "/v1/hr/questionnaires/schedules/" + id + "/answers", `{"workerId":"x","answers":{}}`, dutyEssQuestionnaire, "workerId"},
+		{"schedule list questionnaire", http.MethodGet, "/v1/hr/questionnaires/schedules?questionnaireId=x", ``, dutyQuestionnaireAdmin, "questionnaireId"},
 		{"results by", http.MethodGet, "/v1/hr/questionnaires/schedules/" + id + "/results?by=team", ``, dutyQuestionnaireAdmin, "by"},
 	}
 	for _, c := range cases {
@@ -47,9 +48,34 @@ func TestPeopleSafetyRoutesRefuseMalformedIDs(t *testing.T) {
 		"/v1/hr/checklists/not-a-uuid":                       dutyWorkerInquire,
 		"/v1/hr/questionnaires/schedules/not-a-uuid":         dutyEssQuestionnaire,
 		"/v1/hr/questionnaires/schedules/not-a-uuid/results": dutyQuestionnaireAdmin,
+		"/v1/hr/employments/not-a-uuid":                      dutyActionMaintain,
 	} {
 		if rec := serve(t, tid(), http.MethodGet, target, "", duty); rec.Code != http.StatusNotFound {
 			t.Errorf("%s: status %d, want 404", target, rec.Code)
+		}
+	}
+}
+
+// The people who start checklists and file personnel actions read the template list and
+// employments for their lookups; the schedule list stays with the questionnaire admin.
+func TestLookupReadsTakeTheFormFillersDuty(t *testing.T) {
+	id := testkit.TenantID(9)
+	for _, c := range []struct{ target, duty string }{
+		{"/v1/hr/employments/not-a-uuid", dutyActionMaintain},
+		{"/v1/hr/workers/not-a-uuid/employments", dutyActionMaintain},
+		{"/v1/hr/questionnaires/schedules/not-a-uuid", dutyQuestionnaireAdmin},
+	} {
+		// A malformed id answers 404 once the duty check has passed, before the store is read.
+		if rec := serve(t, tid(), http.MethodGet, c.target, "", c.duty); rec.Code != http.StatusNotFound {
+			t.Errorf("%s with %s: %d, want 404 past the duty check", c.target, c.duty, rec.Code)
+		}
+	}
+	for _, c := range []struct{ target, duty string }{
+		{"/v1/hr/questionnaires/schedules", dutyActionMaintain},
+		{"/v1/hr/employments/" + id, dutyEssQuestionnaire},
+	} {
+		if rec := serve(t, tid(), http.MethodGet, c.target, "", c.duty); rec.Code != http.StatusForbidden {
+			t.Errorf("%s with %s: %d, want 403", c.target, c.duty, rec.Code)
 		}
 	}
 }

@@ -1,7 +1,27 @@
 image: { repository: ghcr.io/benjaminsrussell/passage-supplier-portal, digest: "", tag: "", pullPolicy: IfNotPresent }
-# One replica: sessions and the rate limiter are in memory (NOT-IMPLEMENTED.md). A second replica would not know the first one's sessions.
+# One replica unless sessionStore.url is set: without a shared store sessions live in the pod's memory, a restart signs everyone out and a
+# second replica would not know the first one's sessions, so the chart refuses replicaCount > 1 then.
 replicaCount: 1
+sessionStore:
+  # redis:// or rediss:// (TLS) URL of a Valkey or Redis server in the cluster, e.g. redis://valkey.valkey.svc:6379. Empty: in memory.
+  url: ""
+  # Secret holding the server's password under passwordSecretKey; empty when the server has none.
+  passwordSecretName: ""
+  passwordSecretKey: password
+  # The namespace and port the network policy opens egress to when url is set.
+  namespace: valkey
+  port: 6379
+# Keycloak Admin API client that creates an accepted invitation's user (realm-management manage-users and view-realm). Empty url: an
+# administrator creates the user, as before.
+keycloakAdmin:
+  url: ""
+  realm: passage
+  clientId: passage-supplier-portal-admin
+  # Secret holding the client secret under the key "client-secret". Created outside Git.
+  clientSecretName: supplier-portal-keycloak-admin
 oidc:
+  # Where Keycloak sends the browser after sign-out; empty: APP_ORIGIN/. Must be a post.logout.redirect.uris entry of the client.
+  postLogoutRedirectUri: ""
   # The Keycloak realm URL, e.g. https://keycloak.<env>.passage.dev/realms/passage. Required.
   issuer: ""
   clientId: passage-portal-supplier

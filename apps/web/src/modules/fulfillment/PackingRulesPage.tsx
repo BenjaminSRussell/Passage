@@ -1,13 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormField, Input, ListPage, loadedRows, Select, type DataTableColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
 import { describeProblem, listContainerTypes, listPackingRules, savePackingRule, type ContainerType, type PackingRule, type Problem } from "./api/client";
 import { compareDecimal, DECIMAL, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { EntityName } from "../../shell/lookup/EntityName";
 import { PlainName } from "../sales/OrderNumber";
 
@@ -29,26 +28,25 @@ interface Values {
 
 const blank: Values = { productId: "", customerId: "", containerType: "", qtyPerContainer: "", maxWeightKg: "" };
 
-interface Data {
-  rules: PackingRule[];
-  types: ContainerType[];
-}
+const ruleFilters: ListFilterDef[] = [{ kind: "entity", key: "productId", label: "Product", entity: "product" }];
 
 /** Packing rules (FR-28.15): product, optionally for one customer, to a container type and its limits. */
 export function PackingRulesPage() {
-  const [product, setProduct] = useState("");
-  const filter = UUID.test(product.trim()) ? product.trim() : "";
-  const state = useLoad<Data>(async (signal) => {
-    const [rules, types] = await Promise.all([listPackingRules({ productId: filter }, signal), listContainerTypes(signal)]);
-    return { rules, types };
-  }, filter);
+  // Bumped after a save, so the list reads the saved rule.
+  const [reloads, setReloads] = useState(0);
+  const typeState = useLoad<ContainerType[]>((signal) => listContainerTypes(signal), "container-types");
+  const useRuleRows = (query: ListQuery): ListData<PackingRule> => {
+    const filter = query.filters.productId ?? "";
+    const state = useLoad<PackingRule[]>((signal) => listPackingRules({ productId: filter }, signal), `${filter}-${reloads}`);
+    return loadedRows(state);
+  };
   const [values, setValues] = useState<Values>(blank);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useCommandKey();
-  const types = state.data?.types ?? [];
+  const types = typeState.data ?? [];
 
   function set(patch: Partial<Values>) {
     setValues({ ...values, ...patch });
@@ -82,7 +80,7 @@ export function PackingRulesPage() {
       key.renew();
       setValues(blank);
       setNotice(`Saved: ${saved.qtyPerContainer} per ${saved.containerType}, at most ${saved.maxWeightKg} kg.`);
-      state.reload();
+      setReloads((n) => n + 1);
     } catch (error) {
       setFailure(describeProblem(error));
       key.renew();
@@ -92,47 +90,31 @@ export function PackingRulesPage() {
   }
 
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Packing rules"
-        description="Auto-pack uses the customer's rule for a product when there is one, otherwise the product's general rule. Lines without a rule stay unpacked."
-        actions={
-          <Link className={buttonClassName("secondary")} to="/fulfillment/container-types">
-            Container types
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="rules-product" label="Product" hint="Show the rules of one product." optional>
-          {(control) => <EntityLookup entity="product" {...control} value={product} onChange={(event) => setProduct(event.target.value)} />}
-        </FormField>
-      </div>
-      {state.error ? (
-        <Alert tone="danger" title="Could not load packing rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Packing rules"
-          columns={columns}
-          rows={state.data?.rules ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          onRowOpen={(row) => {
-            setValues({ productId: row.productId, customerId: row.customerId ?? "", containerType: row.containerType, qtyPerContainer: row.qtyPerContainer, maxWeightKg: row.maxWeightKg });
-            key.renew();
-          }}
-          empty={
-            filter
-              ? { title: "No rules for this product", description: "Add one below; until then auto-pack leaves its lines unpacked (FUL-0012)." }
-              : { title: "No packing rules yet", description: "Add a rule per product so auto-pack can fill containers." }
-          }
-        />
-      )}
+    <ListPage
+      id="fulfillment-packing-rules"
+      title="Packing rules"
+      description="Auto-pack uses the customer's rule for a product when there is one, otherwise the product's general rule. Lines without a rule stay unpacked. Open a rule to change it below."
+      actions={
+        <Link className={buttonClassName("secondary")} to="/fulfillment/container-types">
+          Container types
+        </Link>
+      }
+      noun="packing rules"
+      singular="packing rule"
+      columns={columns}
+      filters={ruleFilters}
+      useRows={useRuleRows}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => {
+        setValues({ productId: row.productId, customerId: row.customerId ?? "", containerType: row.containerType, qtyPerContainer: row.qtyPerContainer, maxWeightKg: row.maxWeightKg });
+        key.renew();
+      }}
+      empty={{ title: "No packing rules yet", description: "Add a rule per product so auto-pack can fill containers." }}
+      footer={
       <Card title="Add or change a packing rule">
         <form className={styles.form} onSubmit={submit} noValidate>
           <p className={styles.note}>One rule per product and customer: saving the same product and customer replaces the rule. Open a row above to edit it.</p>
-          {state.data && types.length === 0 ? (
+          {typeState.data && types.length === 0 ? (
             <div className={styles.formActions}>
               <Alert tone="info" title="Add a container type first">
                 A rule names a container type. <Link to="/fulfillment/container-types">Add container types</Link>.
@@ -176,6 +158,7 @@ export function PackingRulesPage() {
           </div>
         </form>
       </Card>
-    </div>
+      }
+    />
   );
 }

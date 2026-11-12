@@ -40,6 +40,7 @@ import {
   type Failure,
 } from "./parts";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -62,8 +63,8 @@ export function quantityBreak(t: Pick<TradeAgreement, "fromQty" | "toQty">): str
 }
 
 const listColumns: DataTableColumn<TradeAgreement>[] = [
-  { key: "account", header: "Vendor", render: (t) => level(accountLabels[t.accountCode], t.accountId, t.accountCode === "VENDOR" ? "vendor" : undefined) },
-  { key: "item", header: "Item", render: (t) => level(itemLabels[t.itemCode], t.itemId, t.itemCode === "PRODUCT" ? "product" : undefined) },
+  { key: "account", header: "Vendor", render: (t) => level(accountLabels[t.accountCode], t.accountId, t.accountCode === "VENDOR" ? "vendor" : t.accountCode === "GROUP" ? "vendorGroup" : undefined) },
+  { key: "item", header: "Item", render: (t) => level(itemLabels[t.itemCode], t.itemId, t.itemCode === "PRODUCT" ? "product" : t.itemCode === "GROUP" ? "itemGroup" : undefined) },
   { key: "price", header: "Price", align: "end", render: (t) => `${money(t.price, t.currency)} / ${t.priceUnit} ${t.unit}` },
   { key: "break", header: "Quantity", render: quantityBreak },
   { key: "validFrom", header: "Valid from", mono: true },
@@ -136,8 +137,8 @@ type Errors = Partial<Record<keyof Draft, string>>;
 
 export function validateAgreement(d: Draft): Errors {
   const errors: Errors = {};
-  if (d.accountCode !== "ALL" && !uuidPattern.test(d.accountId)) errors.accountId = "Enter the vendor or vendor group id (a UUID).";
-  if (d.itemCode !== "ALL" && !uuidPattern.test(d.itemId)) errors.itemId = "Enter the product or product group id (a UUID).";
+  if (d.accountCode !== "ALL" && !uuidPattern.test(d.accountId)) errors.accountId = d.accountCode === "VENDOR" ? "Choose the vendor." : "Choose the vendor group.";
+  if (d.itemCode !== "ALL" && !uuidPattern.test(d.itemId)) errors.itemId = d.itemCode === "PRODUCT" ? "Choose the product." : "Choose the item group.";
   if (!currencyPattern.test(d.currency)) errors.currency = "Use a three-letter ISO code such as USD.";
   if (d.unit.trim() === "") errors.unit = "Enter a unit.";
   if (d.fromQty !== "" && !decimalPattern.test(d.fromQty)) errors.fromQty = "Enter a decimal quantity.";
@@ -232,9 +233,16 @@ export function TradeAgreementCreatePage() {
               )}
             </FormField>
             {draft.accountCode !== "ALL" ? (
-              <FormField id="ta-account-id" label="Vendor or group id" error={errors.accountId}>
-                {(c) => <Input {...c} value={draft.accountId} onChange={(e) => set({ accountId: e.target.value })} />}
-              </FormField>
+              <LookupFormField
+                key={draft.accountCode}
+                id="ta-account-id"
+                label={draft.accountCode === "VENDOR" ? "Vendor" : "Vendor group"}
+                entity={draft.accountCode === "VENDOR" ? "vendor" : "vendorGroup"}
+                prefill={false}
+                value={draft.accountId}
+                error={errors.accountId}
+                onChange={(accountId) => set({ accountId })}
+              />
             ) : null}
             <FormField id="ta-item-code" label="Item level">
               {(c) => (
@@ -248,9 +256,16 @@ export function TradeAgreementCreatePage() {
               )}
             </FormField>
             {draft.itemCode !== "ALL" ? (
-              <FormField id="ta-item-id" label="Product or group id" error={errors.itemId}>
-                {(c) => <Input {...c} value={draft.itemId} onChange={(e) => set({ itemId: e.target.value })} />}
-              </FormField>
+              <LookupFormField
+                key={draft.itemCode}
+                id="ta-item-id"
+                label={draft.itemCode === "PRODUCT" ? "Product" : "Item group"}
+                entity={draft.itemCode === "PRODUCT" ? "product" : "itemGroup"}
+                prefill={false}
+                value={draft.itemId}
+                error={errors.itemId}
+                onChange={(itemId) => set({ itemId })}
+              />
             ) : null}
           </div>
         </Card>
@@ -347,9 +362,9 @@ export function TradeAgreementDetailPage() {
         <Details
           items={[
             { label: "Vendor level", value: accountLabels[t.accountCode] },
-            { label: "Vendor or group", value: t.accountCode === "VENDOR" ? <Named entity="vendor" id={t.accountId} /> : (t.accountId ?? "") },
+            { label: "Vendor or group", value: t.accountCode === "ALL" ? accountLabels.ALL : <Named entity={t.accountCode === "VENDOR" ? "vendor" : "vendorGroup"} id={t.accountId} /> },
             { label: "Item level", value: itemLabels[t.itemCode] },
-            { label: "Product or group", value: t.itemCode === "PRODUCT" ? <Named entity="product" id={t.itemId} /> : (t.itemId ?? "") },
+            { label: "Product or group", value: t.itemCode === "ALL" ? itemLabels.ALL : <Named entity={t.itemCode === "PRODUCT" ? "product" : "itemGroup"} id={t.itemId} /> },
             { label: "Price", value: `${money(t.price, t.currency)} per ${t.priceUnit} ${t.unit}`, mono: true },
             { label: "Quantity", value: quantityBreak(t) },
             { label: "Valid from", value: t.validFrom, mono: true },

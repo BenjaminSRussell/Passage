@@ -526,3 +526,42 @@ func (s *Postgres) QuestionnaireResults(ctx context.Context, scheduleID string, 
 	})
 	return res, err
 }
+
+// ScheduleSummary is a schedule with its questionnaire's code and name, for the
+// administrator's list and the schedule lookup.
+type ScheduleSummary struct {
+	QuestionnaireSchedule
+	QuestionnaireCode string `json:"questionnaireCode"`
+	QuestionnaireName string `json:"questionnaireName"`
+}
+
+// ListSchedules returns every schedule, newest opening first, at most 200;
+// questionnaireID narrows it to one questionnaire when set.
+func (s *Postgres) ListSchedules(ctx context.Context, questionnaireID string) ([]ScheduleSummary, error) {
+	p := principal(ctx)
+	out := []ScheduleSummary{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select s.id::text, s.questionnaire_id::text, s.population, s.opens_at, s.closes_at, s.invited_count, s.created_at,
+				q.code, q.name
+			from hr_questionnaire_schedule s
+			join hr_questionnaire q on q.tenant_id = s.tenant_id and q.id = s.questionnaire_id
+			where s.tenant_id = $1 and ($2::text = '' or s.questionnaire_id = $2::uuid)
+			order by s.opens_at desc, s.id limit 200`, p.TenantID, questionnaireID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var sc ScheduleSummary
+			if err := rows.Scan(&sc.ID, &sc.QuestionnaireID, &sc.Population, &sc.OpensAt, &sc.ClosesAt, &sc.InvitedCount, &sc.CreatedAt,
+				&sc.QuestionnaireCode, &sc.QuestionnaireName); err != nil {
+				return err
+			}
+			sc.OpensAt, sc.ClosesAt, sc.CreatedAt = utc(sc.OpensAt), utc(sc.ClosesAt), utc(sc.CreatedAt)
+			sc.Status = scheduleStatus(sc.OpensAt, sc.ClosesAt, s.now())
+			out = append(out, sc)
+		}
+		return rows.Err()
+	})
+	return out, err
+}

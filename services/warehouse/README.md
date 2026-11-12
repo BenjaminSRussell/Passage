@@ -49,7 +49,8 @@ rule-by-rule trace. PRD: §6.31 of `docs/prd/phase-6-logistics.md`; ticket PSG-3
 | `POST /v1/warehouse/dock-doors` | `warehouse.setup.maintain` (WMS_SETUP_MAINTAIN) |
 | `GET /v1/warehouse/dock-doors?warehouseId=` | `warehouse.inquiry.view` (WMS_INQUIRY) |
 | `POST /v1/warehouse/dock-appointments` | INBOUND `warehouse.receipt.register` (WMS_RECEIVE), OUTBOUND `warehouse.shipment.confirm` (WMS_SHIP_CONFIRM) |
-| `GET /v1/warehouse/dock-appointments?warehouseId=&doorId=&from=&to=` | `warehouse.inquiry.view` |
+| `GET /v1/warehouse/dock-appointments?warehouseId=&doorId=&from=&to=` | `warehouse.inquiry.view` or `transport.gate.operate` (the gate check-in picks the appointment) |
+| `GET /v1/warehouse/dock-appointments/{id}` | `warehouse.inquiry.view` or `transport.gate.operate` |
 | `POST /v1/warehouse/receipts:from-asn` | `warehouse.receipt.register` (WMS_RECEIVE) |
 | `GET /v1/warehouse/receipts?warehouseId=&status=&limit=&cursor=`, `GET /v1/warehouse/receipts/{id}` | `warehouse.inquiry.view` |
 | `POST /v1/warehouse/receipts/{id}/lines/{n}:receive` | `warehouse.receipt.register` |
