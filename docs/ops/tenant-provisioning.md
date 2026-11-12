@@ -17,7 +17,7 @@ Acceptance (AC-50.6): residency EU provisions into `eu-west` with RLS, realm, AC
 ## Tenant residency (#605)
 Every tenant record carries a **residency**: `identity_tenants.residency` (migration `services/identity/migrations/0016_tenant_residency.sql`) is
 one of `EU`, `US`, `UK`, `GLOBAL`, and `identity_tenants.region` is where the tenant was placed. `POST /v1/tenants` (identity, operator only)
-takes `residency` (default `GLOBAL`, which allows any region) and an optional `region`, and refuses a region outside the residency with
+takes `residency` (default `GLOBAL`, which allows any region; `EU` under the `eu-data-boundary` overlay) and a `region` (required unless the residency is `GLOBAL`), and refuses a region outside the residency, or outside the cloud profile's `allowedRegions` when it lists any, with
 422 `OPS-1705` ("Residency region {region} is not deployed; tenant not provisioned" in the PRD catalogue, here also the placement refusal)
 before it writes anything: no tenant row, audit row or event exists for a refused placement. Tenants created before this migration are
 `GLOBAL` with no region, so nothing changes for them until an operator sets a residency; the evidence report lists them as unplaced.

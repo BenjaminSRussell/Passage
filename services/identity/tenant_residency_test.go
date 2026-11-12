@@ -5,6 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/BenjaminSRussell/passage/platform/cloudprofile"
+	"github.com/BenjaminSRussell/passage/services/identity"
 )
 
 type residentTenant struct {
@@ -56,9 +61,42 @@ func TestTenantResidencyIsCheckedAtProvisioning(t *testing.T) {
 		if got.Residency != "GLOBAL" || got.Region != "westeurope" {
 			t.Fatalf("created = %+v, want GLOBAL in westeurope", got)
 		}
-		none := decode[residentTenant](t, create(map[string]string{"realmName": "no-region", "displayName": "None", "residency": "eu"}), http.StatusCreated)
-		if none.Residency != "EU" || none.Region != "" {
-			t.Fatalf("created = %+v, want EU with no region yet", none)
+	})
+
+	t.Run("a restricted residency needs a region, so no tenant is left unplaced", func(t *testing.T) {
+		p := wantProblem(t, create(map[string]string{"realmName": "no-region", "displayName": "None", "residency": "eu"}), http.StatusBadRequest, "COM-0001")
+		if p.Errors["region"] == "" || count("no-region") != 0 {
+			t.Fatalf("errors = %v", p.Errors)
+		}
+		global := decode[residentTenant](t, create(map[string]string{"realmName": "global-later", "displayName": "Later"}), http.StatusCreated)
+		if global.Residency != "GLOBAL" || global.Region != "" {
+			t.Fatalf("created = %+v, want GLOBAL with no region yet", global)
+		}
+	})
+
+	t.Run("under the eu-data-boundary overlay the default residency is EU and regions follow the profile", func(t *testing.T) {
+		profile, err := cloudprofile.FromEnv(func(k string) string {
+			return map[string]string{"PASSAGE_CLOUD_PROFILE": "commercial+eu-data-boundary"}[k]
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := f.router
+		t.Cleanup(func() { f.router = saved })
+		r := chi.NewRouter()
+		identity.NewTenantsAPI(f.app, f.operator).WithCloudProfile(profile).Register(r)
+		f.router = r
+
+		got := decode[residentTenant](t, create(map[string]string{"realmName": "eudb-default", "displayName": "EU", "region": "westeurope"}), http.StatusCreated)
+		if got.Residency != "EU" {
+			t.Fatalf("created = %+v, want EU by default under the overlay", got)
+		}
+		wantProblem(t, create(map[string]string{"realmName": "eudb-us", "displayName": "US", "region": "eastus2"}), http.StatusUnprocessableEntity, "OPS-1705")
+		// GLOBAL allows any region by residency, but the deployment's profile still pins the regions.
+		wantProblem(t, create(map[string]string{"realmName": "eudb-global-us", "displayName": "G", "residency": "GLOBAL", "region": "eastus2"}), http.StatusUnprocessableEntity, "OPS-1705")
+		wantProblem(t, create(map[string]string{"realmName": "eudb-legacy", "displayName": "L", "region": "eu-west"}), http.StatusUnprocessableEntity, "OPS-1705")
+		if n := count("eudb-us") + count("eudb-global-us") + count("eudb-legacy"); n != 0 {
+			t.Fatalf("%d tenant rows after refused placements", n)
 		}
 	})
 
