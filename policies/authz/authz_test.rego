@@ -3151,3 +3151,9 @@ test_revrec_modification_billing_retry_is_a_posting_duty if {
 	not allowed("revrec.view", "POST", "/v1/revrec/modifications/m1:retry-billing")
 	not allowed("revrec.maintain", "POST", "/v1/revrec/modifications/m1:retry-billing")
 }
+
+test_receivables_unapply_is_the_reversal_duty if {
+	allowed("receivables.payment.reverse", "POST", "/v1/receivables/payments/p1:unapply")
+	not allowed("receivables.payment.post", "POST", "/v1/receivables/payments/p1:unapply")
+	not allowed("receivables.view", "POST", "/v1/receivables/payments/p1:unapply")
+}

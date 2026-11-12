@@ -38,6 +38,11 @@ type journalSweeper interface {
 	PostDueJournals(ctx context.Context, now time.Time, limit int) (store.JournalSweepResult, error)
 }
 
+// parkedCounter counts the parked journals of a tenant, for the receivables_gl_journals_parked gauge.
+type parkedCounter interface {
+	CountParkedJournals(ctx context.Context) (int64, error)
+}
+
 // rmaSweep posts the PENDING RMA credits the request path left behind (a ledger outage, a lost answer, a crash after
 // the PENDING commit). Per tenant it lists the legal entities with due credits under an all-scope read principal, then
 // sweeps each under a principal scoped to that legal entity, which the ledger post's service token needs.
@@ -111,6 +116,7 @@ func (s *rmaSweep) journalPass(ctx context.Context) {
 	if !ok {
 		return
 	}
+	defer s.countParked(ctx)
 	for _, tenantID := range s.tenants {
 		listCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{
 			TenantID: tenantID, UserID: rmaSweepActor, Duties: map[string]struct{}{tenant.DutyAllScope: {}},
@@ -134,6 +140,32 @@ func (s *rmaSweep) journalPass(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// countParked sets the receivables_gl_journals_parked gauge to the parked journals of the sweep's tenants after each journal pass. A
+// tenant that cannot be counted keeps the gauge at its last value rather than hiding parked journals.
+func (s *rmaSweep) countParked(ctx context.Context) {
+	pc, ok := s.store.(parkedCounter)
+	if !ok {
+		return
+	}
+	var total int64
+	for _, tenantID := range s.tenants {
+		listCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{
+			TenantID: tenantID, UserID: rmaSweepActor, Duties: map[string]struct{}{tenant.DutyAllScope: {}},
+		}), rmaSweepTimeout)
+		n, err := pc.CountParkedJournals(listCtx)
+		cancel()
+		if err != nil {
+			slog.Error("receivables parked journal count failed", "tenantId", tenantID, "err", err)
+			return
+		}
+		if n > 0 {
+			slog.Warn("receivables journals are parked; fix the cause and retry them from the ledger journals screen", "tenantId", tenantID, "parked", n)
+		}
+		total += n
+	}
+	store.ParkedJournals.Store(total)
 }
 
 func (s *rmaSweep) rmaPass(ctx context.Context) {

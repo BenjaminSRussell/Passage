@@ -70,10 +70,10 @@ func TestApplyPayment_CrossCurrencyBooksTheRealizedFXAsItsOwnJournal(t *testing.
 	if _, err := s.PutFXSetting(ctx, FXSetting{LegalEntityID: legalEntity, CrossCurrencyEnabled: true, FunctionalCurrency: "USD"}); err != nil {
 		t.Fatal(err)
 	}
-	// No itemAmount: the caller must say what comes off the item.
+	// No itemAmount: it is priced at the value-date rate, which the fx service does not have here.
 	noItem := ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("90.00")}}}
-	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, noItem, ""); problemCode(err) != domain.CodeApplyMismatch {
-		t.Fatalf("missing itemAmount: %v", err)
+	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, noItem, ""); problemCode(err) != CodeFXUnavailable {
+		t.Fatalf("missing itemAmount without a rate: %v", err)
 	}
 	// A rate the fx service does not have: 422 and nothing changes.
 	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, req, ""); problemCode(err) != CodeFXUnavailable {
@@ -414,5 +414,174 @@ func TestReversePayment_RefusedWhenItConfirmedARemittanceAdvice(t *testing.T) {
 	execAdmin(t, s, `update payment set status = 'CONFIRMED', confirmed_by_payment_id = $2 where id = $1`, advised.ID, bank.ID)
 	if _, err := s.ReversePayment(ctx, bank.ID, bank.Version); problemCode(err) != CodePaymentState {
 		t.Fatalf("reversing the confirming payment: %v", err)
+	}
+}
+
+// itemAmount left out is priced at what the cash is worth in the item's currency on the value date: 90.00 EUR x 1.12 = 100.80 USD,
+// no realized difference (the item is in the functional currency at rate 1).
+func TestApplyPayment_CrossCurrencyItemAmountIsPricedWhenLeftOut(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx)
+	s.WithRates(fakeRates{"EUR>USD@2027-03-08": "1.12"})
+	if _, err := s.PutFXSetting(ctx, FXSetting{LegalEntityID: legalEntity, CrossCurrencyEnabled: true, FunctionalCurrency: "USD"}); err != nil {
+		t.Fatal(err)
+	}
+	pay := eurPayment(t, s, item.CustomerID, "auto-1")
+	out, err := s.ApplyPayment(ctx, pay.ID, pay.Version, ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("90.00")}}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.Settlements[0]; !got.ItemAmount.Equal(amt("100.80")) || !got.OpenAfter.Equal(amt("899.20")) || !got.RealizedFX.IsZero() {
+		t.Fatalf("settlement %+v", got)
+	}
+}
+
+// An entity tolerance of zero demands the market value; BR-30.4's default allows 5.00.
+func TestApplyPayment_EntityFXToleranceReplacesTheDefault(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx)
+	s.WithRates(fakeRates{"EUR>USD@2027-03-08": "1.12"})
+	zero := decimal.Zero
+	set, err := s.PutFXSetting(ctx, FXSetting{LegalEntityID: legalEntity, CrossCurrencyEnabled: true, FunctionalCurrency: "USD", ToleranceAmount: &zero, TolerancePercent: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetFXSetting(ctx, legalEntity); got.ToleranceAmount == nil || !got.ToleranceAmount.IsZero() || set.TolerancePercent == nil {
+		t.Fatalf("stored tolerance %+v", got)
+	}
+	pay := eurPayment(t, s, item.CustomerID, "tol-e")
+	off := ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("90.00"), ItemCurrencyAmount: amt("104.00")}}}
+	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, off, ""); problemCode(err) != CodeFXTolerance {
+		t.Fatalf("3.20 off with a zero tolerance: %v", err)
+	}
+	bad := decimal.NewFromInt(101)
+	if _, err := s.PutFXSetting(ctx, FXSetting{LegalEntityID: legalEntity, TolerancePercent: &bad}); problemCode(err) != "COM-0001" {
+		t.Fatalf("a 101%% tolerance: %v", err)
+	}
+	if got := domain.FXTolerance(amt("10000.00"), nil, nil); !got.Equal(amt("50.00")) {
+		t.Fatalf("default tolerance %s", got)
+	}
+	two, pct := amt("2.00"), amt("1")
+	if got := domain.FXTolerance(amt("1000.00"), &two, &pct); !got.Equal(amt("10.00")) {
+		t.Fatalf("entity tolerance %s", got)
+	}
+}
+
+// Unapply reverses a cross-currency application: the item is open again by what the settlement took off it, the cash is unapplied,
+// the application and the realized gain are mirrored in the ledger, the statement shows the item settled before and open after,
+// and the payment can then be reversed.
+func TestUnapplyPayment_ReopensTheItemsAndMirrorsTheJournals(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx)
+	s.WithRates(fakeRates{"EUR>USD@2027-03-08": "1.12"})
+	if _, err := s.PutFXSetting(ctx, FXSetting{LegalEntityID: legalEntity, CrossCurrencyEnabled: true, FunctionalCurrency: "USD"}); err != nil {
+		t.Fatal(err)
+	}
+	pay := eurPayment(t, s, item.CustomerID, "un-1")
+	applied, err := s.ApplyPayment(ctx, pay.ID, pay.Version, ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("90.00"), ItemCurrencyAmount: amt("100.00")}}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UnapplyPayment(ctx, pay.ID, pay.Version, ""); problemCode(err) != CodeVersionConflict {
+		t.Fatalf("stale version: %v", err)
+	}
+	out, err := s.UnapplyPayment(ctx, pay.ID, applied.Payment.Version, "applied to the wrong invoice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Payment.Status != "RECEIVED" || !out.Payment.UnappliedAmount.Equal(amt("90.00")) || len(out.Reversed) != 1 ||
+		!out.Reversed[0].OpenAfter.Equal(amt("1000.00")) || out.Reversed[0].ItemStatus != "OPEN" {
+		t.Fatalf("unapply %+v", out)
+	}
+	if _, err := s.UnapplyPayment(ctx, pay.ID, out.Payment.Version, ""); problemCode(err) != CodePaymentState {
+		t.Fatalf("a second unapply: %v", err)
+	}
+	unapply := fxJournalLines(t, s, JournalPaymentUnapply)
+	if len(unapply) < 2 || unapply[0].Account != "1200" || unapply[0].Credit || !unapply[0].Amount.Equal(amt("90.00")) || unapply[1].Account != "1205" || !unapply[1].Credit {
+		t.Fatalf("unapply journal %+v", unapply)
+	}
+	fx, err := s.ListGLJournals(ctx, GLJournalFilter{SourceType: JournalRealizedFX})
+	if err != nil || len(fx) != 2 {
+		t.Fatalf("fx journals %+v %v", fx, err)
+	}
+	var mirrored bool
+	for _, j := range fx {
+		if j.Lines[0].Account == "7100" && j.Lines[0].Side == "D" && j.Lines[0].Amount.Equal(amt("0.80")) {
+			mirrored = true
+		}
+	}
+	if !mirrored {
+		t.Fatalf("the 0.80 gain was not mirrored: %+v", fx)
+	}
+	if n := countOutbox(t, s, ctx, "dev.passage.receivables.payment.unapplied.v1"); n != 1 {
+		t.Fatalf("payment.unapplied events %d", n)
+	}
+	// The cash can now be reversed.
+	if _, err := s.ReversePayment(ctx, pay.ID, out.Payment.Version); err != nil {
+		t.Fatalf("reverse after unapply: %v", err)
+	}
+	var open string
+	if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select (o.amount - coalesce((select sum(coalesce(st.item_amount, st.settled_amount + st.cash_discount_taken + st.write_off_amount))
+			from settlement st where st.open_item_id = o.id), 0))::text from open_item o where o.id = $1`, item.ID).Scan(&open)
+	}); err != nil || !amt(open).Equal(amt("1000.00")) {
+		t.Fatalf("as-of open %s (%v)", open, err)
+	}
+}
+
+// A EUR credit note offset against a USD invoice: 100.00 EUR worth 108.00 USD today comes off the invoice; the credit was carried at
+// 1.10 (110.00 USD), so 2.00 is a realized gain, booked Dr 1200 / Cr 7100 in USD.
+func TestSettleCredit_CrossCurrencyPricesTheDebitAndBooksTheDifference(t *testing.T) {
+	s := setup(t)
+	ctx := tenantCtx(1)
+	item := seedInvoice(t, s, ctx)
+	credit, err := s.CreateOpenItem(ctx, OpenItem{LegalEntityID: legalEntity, CustomerID: item.CustomerID, SourceType: "CREDIT_NOTE",
+		DocumentNumber: "CN-30001", DocumentDate: "2027-02-01", DueDate: "2027-02-01", Currency: "EUR", Amount: amt("-100.00"), OpenAmount: amt("-100.00")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := CreditSettlementRequest{LegalEntityID: legalEntity, CreditItemID: credit.ID, Debits: []CreditDebit{{OpenItemID: item.ID, Amount: amt("100.00")}}}
+	if _, err := s.SettleCredit(ctx, req, ""); problemCode(err) != CodeCreditSettleInvalid {
+		t.Fatalf("cross-currency without the setting: %v", err)
+	}
+	if _, err := s.PutFXSetting(ctx, FXSetting{LegalEntityID: legalEntity, CrossCurrencyEnabled: true, FunctionalCurrency: "USD"}); err != nil {
+		t.Fatal(err)
+	}
+	s.WithRates(fakeRates{"EUR>USD@2027-02-01": "1.10", "EUR>USD@" + today(): "1.08"})
+	far := CreditSettlementRequest{LegalEntityID: legalEntity, CreditItemID: credit.ID, Debits: []CreditDebit{{OpenItemID: item.ID, Amount: amt("100.00"), ItemAmount: amt("150.00")}}}
+	if _, err := s.SettleCredit(ctx, far, ""); problemCode(err) != CodeFXTolerance {
+		t.Fatalf("150.00 for a credit worth 108.00: %v", err)
+	}
+	res, err := s.SettleCredit(ctx, req, "cs-fx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := res.Settlements[0]
+	if line.ItemCurrency != "USD" || line.ItemAmount == nil || !line.ItemAmount.Equal(amt("108.00")) || !line.OpenAfter.Equal(amt("892.00")) ||
+		line.RealizedFX == nil || !line.RealizedFX.Equal(amt("2.00")) || res.CreditStatus != "SETTLED" {
+		t.Fatalf("settlement %+v", res)
+	}
+	fx := fxJournalLines(t, s, JournalRealizedFX)
+	if len(fx) != 2 || fx[0].Account != "1200" || fx[0].Credit || !fx[0].Amount.Equal(amt("2.00")) || fx[1].Account != "7100" {
+		t.Fatalf("fx journal %+v", fx)
+	}
+	// The statement takes the debit's own amount off the invoice.
+	sections, err := s.Statement(ctx, legalEntity, item.CustomerID, parseDay("2027-12-31"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sec := range sections {
+		for _, l := range sec.Lines {
+			if l.DocumentNumber == "INV-30001" && l.OpenAmount.Equal(amt("892.00")) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("statement %+v", sections)
 	}
 }
