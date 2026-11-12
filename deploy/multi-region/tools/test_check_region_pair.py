@@ -399,6 +399,67 @@ class TestMain(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("must be an https URL on *.blob.core.windows.net", text)
 
+    EU_OVERLAY = "commercial+eu-data-boundary"
+
+    def _eu_layout(self, root: Path, west: str, north: str) -> list[str]:
+        values = root / "values" / "eu-azure"
+        values.mkdir(parents=True)
+        (values / "westeurope.yaml").write_text(west, encoding="utf-8")
+        (values / "northeurope.yaml").write_text(north, encoding="utf-8")
+        chart_path = root / "chart-values.yaml"
+        chart_path.write_text(CHART, encoding="utf-8")
+        return ["--values-dir", str(values), "--chart-values", str(chart_path)]
+
+    @staticmethod
+    def _eu(text: str) -> str:
+        return text.replace("eastus2", "westeurope").replace("centralus", "northeurope")
+
+    def test_eu_azure_pair_passes_the_eu_data_boundary(self):
+        for selector in (self.EU_OVERLAY, "commercial"):
+            code, text = self._run("--values-dir", str(crp.VALUES_DIR / "eu-azure"), "--cloud-profile", selector)
+            self.assertEqual(code, 0, text)
+            self.assertIn("northeurope, westeurope", text)
+        with tempfile.TemporaryDirectory() as tmp:
+            code, text = self._run(*self._eu_layout(Path(tmp), self._eu(US_EAST), self._eu(US_CENTRAL)), "--cloud-profile", self.EU_OVERLAY)
+            self.assertEqual(code, 0, text)
+
+    def test_eu_and_us_pairs_do_not_pass_each_others_profile(self):
+        code, text = self._run("--values-dir", str(crp.VALUES_DIR / "eu-azure"), "--cloud-profile", "gcc")
+        self.assertEqual(code, 1)
+        self.assertIn("westeurope: region is not in the gcc allowedRegions", text)
+        code, text = self._run("--values-dir", str(crp.VALUES_DIR / "us"), "--cloud-profile", self.EU_OVERLAY)
+        self.assertEqual(code, 1)
+        self.assertIn("eastus2: region is not in the commercial+eu-data-boundary allowedRegions", text)
+
+    def test_eu_overlay_refuses_a_backup_outside_the_eu(self):
+        west = self._eu(US_EAST).replace("storageAccountRegion: westeurope", "storageAccountRegion: eastus2")
+        with tempfile.TemporaryDirectory() as tmp:
+            code, text = self._run(*self._eu_layout(Path(tmp), west, self._eu(US_CENTRAL)), "--cloud-profile", self.EU_OVERLAY)
+            self.assertEqual(code, 1)
+            self.assertIn("expected the region itself ('westeurope')", text)
+            self.assertIn("backup storage region 'eastus2' is not in the commercial+eu-data-boundary allowedRegions", text)
+
+    def test_a_restricting_profile_refuses_an_s3_backup_on_any_provider(self):
+        for provider in ("aks", "eks"):
+            store_s3 = self._eu(US_EAST).replace("provider: aks", f"provider: {provider}").replace("store: azure-blob", "store: s3")
+            with tempfile.TemporaryDirectory() as tmp:
+                code, text = self._run(*self._eu_layout(Path(tmp), store_s3, self._eu(US_CENTRAL)), "--cloud-profile", self.EU_OVERLAY)
+                self.assertEqual(code, 1, provider)
+                self.assertTrue("s3 backup destination is not allowed" in text or "needs backup.store azure-blob" in text, text)
+        eks_path = self._eu(US_EAST).replace("provider: aks", "provider: eks").replace(
+            "    container: pg-backups", "    container: pg-backups\n  destinationPath: s3://passage-pg-backups-eu/"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            code, text = self._run(*self._eu_layout(Path(tmp), eks_path, self._eu(US_CENTRAL)), "--cloud-profile", self.EU_OVERLAY)
+            self.assertEqual(code, 1)
+            self.assertIn("westeurope: an s3 backup destination is not allowed under commercial+eu-data-boundary", text)
+
+    def test_an_unrestricted_profile_still_allows_s3_on_a_non_aks_provider(self):
+        eks = self._eu(US_EAST).replace("provider: aks", "provider: eks").replace("store: azure-blob", "store: s3")
+        with tempfile.TemporaryDirectory() as tmp:
+            code, text = self._run(*self._eu_layout(Path(tmp), eks, self._eu(US_CENTRAL)), "--cloud-profile", "commercial")
+            self.assertEqual(code, 0, text)
+
     def test_unknown_profile_is_reported(self):
         code, text = self._run("--values-dir", str(crp.VALUES_DIR / "us"), "--cloud-profile", "azure-stack")
         self.assertEqual(code, 1)

@@ -63,9 +63,17 @@ func openAPI(e *domain.Entity) (string, error) {
 	for _, h := range e.Hooks {
 		hooks = append(hooks, h.Name)
 	}
+	info := obj{"title": e.Name + " API", "version": "1.0.0", "x-passage-hooks": hooks}
+	if phi := e.PHIFields(); len(phi) > 0 {
+		wire := make([]string, len(phi))
+		for i, name := range phi {
+			wire[i] = camel(name)
+		}
+		info["x-passage-phi-fields"] = wire
+	}
 	doc := obj{
 		"openapi": "3.1.0",
-		"info":    obj{"title": e.Name + " API", "version": "1.0.0", "x-passage-hooks": hooks},
+		"info":    info,
 		"paths": obj{
 			path: obj{
 				"get":  operation("list", "read", obj{"responses": responses("200", jsonBody(obj{"type": "array", "items": entityRef}))}),

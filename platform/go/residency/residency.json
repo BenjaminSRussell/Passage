@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "comment": "The one table that maps a tenant residency code to the regions its data may live in. Go embeds this file (platform/go/residency) and deploy/multi-region/tools/residency_report.py reads it; a drift test in each language fails when a copy or a profile differs. Regions are written both as Azure region names (deploy/cloud-profiles/profiles.json) and as the legacy region ids in deploy/multi-region/values (eu-west, eu-central, us-east). An empty list means any region (GLOBAL).",
+  "default": "GLOBAL",
+  "residencies": {
+    "EU": {
+      "description": "EU and EFTA only (the EU Data Boundary scope, issue 605): the 27 EU states plus Iceland, Liechtenstein, Norway and Switzerland. The Azure names are the eu-data-boundary overlay's allowedRegions.",
+      "regions": [
+        "northeurope",
+        "westeurope",
+        "francecentral",
+        "francesouth",
+        "germanywestcentral",
+        "germanynorth",
+        "swedencentral",
+        "swedensouth",
+        "italynorth",
+        "polandcentral",
+        "spaincentral",
+        "norwayeast",
+        "norwaywest",
+        "switzerlandnorth",
+        "switzerlandwest",
+        "eu-west",
+        "eu-central",
+        "eu-north"
+      ]
+    },
+    "UK": {
+      "description": "United Kingdom only.",
+      "regions": ["uksouth", "ukwest", "uk-south", "uk-west"]
+    },
+    "US": {
+      "description": "United States only: the commercial US Azure regions (the gcc profile's allowedRegions) and the legacy us-east and us-west ids.",
+      "regions": [
+        "eastus",
+        "eastus2",
+        "centralus",
+        "northcentralus",
+        "southcentralus",
+        "westcentralus",
+        "westus",
+        "westus2",
+        "westus3",
+        "us-east",
+        "us-west"
+      ]
+    },
+    "GLOBAL": {
+      "description": "No restriction: any region. The default for a tenant that names no residency.",
+      "regions": []
+    }
+  }
+}

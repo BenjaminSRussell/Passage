@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/phiaudit"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/store"
 )
@@ -408,13 +409,45 @@ func (a *API) endBenefitEnrollment(w http.ResponseWriter, r *http.Request, enrol
 
 // workerBenefits is GET /v1/hr/workers/{id}/benefits (hr.benefits.self): the
 // worker's enrollments and life events. An employee reads their own;
-// hr.worker.inquire or hr.worker.maintain reads anyone's.
+// hr.worker.inquire or hr.worker.maintain reads anyone's. Health-plan elections and
+// life events are protected health information: with read auditing on (the hipaa
+// overlay, #606) a read that returns them is recorded in the audit service first
+// and needs a ?purpose= (an employee reading their own defaults to self-service).
+//
+// Break-glass (HIPAA emergency access): a caller without hr.worker.inquire who
+// holds hr.benefits.break-glass reads anyone's benefits by giving a purpose with
+// the BREAK-GLASS reason code. Such a read is always recorded, the audit service
+// queues it for review by a second person, and it is refused while read
+// auditing is off, so emergency access is never unlogged. The BREAK-GLASS
+// reason code is reserved for that case: a caller whose scope it would not
+// widen gets 400, so the review queue holds only real emergency access.
 func (a *API) workerBenefits(w http.ResponseWriter, r *http.Request, workerID string) {
 	ownOnly := benOwnOnly(r) && !caller(r).HasDuty(dutyWorkerInquire)
-	out, err := a.store.ListWorkerBenefits(r.Context(), workerID, ownOnly)
+	breakGlass := false
+	if phiaudit.IsBreakGlass(r.URL.Query().Get("purpose")) {
+		if !ownOnly || !caller(r).HasDuty(dutyBenefitsBreakGlass) {
+			validationFailed(w, r, map[string]string{"purpose": "BREAK-GLASS is reserved for break-glass access: give the reason for this read instead"})
+			return
+		}
+		if a.phiAudit == nil {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeBreakGlassUnaudited,
+				"break-glass access needs PHI read auditing, which is off for this deployment"))
+			return
+		}
+		ownOnly, breakGlass = false, true
+	}
+	out, err := a.listWorkerBenefits(r.Context(), workerID, ownOnly)
 	if err != nil {
 		logFailure(r, "list worker benefits", err)
 		httpx.Fail(w, r, err)
+		return
+	}
+	fields := benefitPHIFields(out)
+	if breakGlass && len(fields) == 0 {
+		// Emergency access is recorded whatever the record turned out to hold, so every use reaches the review queue.
+		fields = []string{"enrollments", "lifeEvents"}
+	}
+	if !a.auditPHIRead(w, r, entityWorkerBenefits, workerID, fields, ownOnly) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)

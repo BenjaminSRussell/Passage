@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/BenjaminSRussell/passage/platform/cloudprofile"
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -54,6 +55,9 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 type config struct {
+	// cloudProfile is PASSAGE_CLOUD_PROFILE: tenant placement follows its allowedRegions and the eu-data-boundary
+	// overlay's EU default residency (#605).
+	cloudProfile     *cloudprofile.Profile
 	databaseURL      string
 	migrateURL       string
 	migrateOnStart   bool
@@ -121,6 +125,11 @@ func configFrom(getenv func(string) string) (config, error) {
 	if c.databaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")
 	}
+	profile, err := cloudprofile.FromEnv(getenv)
+	if err != nil {
+		return c, err
+	}
+	c.cloudProfile = profile
 	if c.cataloguePath == "" {
 		return c, errors.New("IDENTITY_DUTY_CATALOGUE_PATH is required (the policies/authz/data.json the OPA bundle is built from)")
 	}
@@ -191,11 +200,11 @@ func loadCatalogue(path string) (*identity.Catalogue, error) {
 	return identity.LoadCatalogue(raw)
 }
 
-func newRouter(pool *pgxpool.Pool, catalogue *identity.Catalogue, operatorTenantID string, scim *identity.SCIMAPI, contacts *identity.CustomerContactsAPI) chi.Router {
+func newRouter(pool *pgxpool.Pool, catalogue *identity.Catalogue, operatorTenantID string, profile *cloudprofile.Profile, scim *identity.SCIMAPI, contacts *identity.CustomerContactsAPI) chi.Router {
 	router := httpx.NewRouterWithoutTenant()
 	router.Group(func(admin chi.Router) {
 		admin.Use(tenant.Middleware)
-		identity.NewTenantsAPI(pool, operatorTenantID).Register(admin)
+		identity.NewTenantsAPI(pool, operatorTenantID).WithCloudProfile(profile).Register(admin)
 		identity.NewLegalEntitiesAPI(pool).Register(admin)
 		identity.NewTenantFeaturesAPI(pool).Register(admin)
 		identity.NewTenantSetupAPI(pool).Register(admin)
@@ -370,7 +379,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	router := newRouter(pool, catalogue, cfg.operatorTenantID, scim, newContactsAPI(pool, cfg, keycloakAdmin))
+	router := newRouter(pool, catalogue, cfg.operatorTenantID, cfg.cloudProfile, scim, newContactsAPI(pool, cfg, keycloakAdmin))
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	if deprovisioner != nil {

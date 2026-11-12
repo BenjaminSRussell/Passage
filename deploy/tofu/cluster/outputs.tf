@@ -24,5 +24,10 @@ output "aks" {
     external_secrets_identity_client_id = module.aks[0].external_secrets_identity_client_id
     backup_identity_client_id           = module.aks[0].backup_identity_client_id
     fieldcrypt_identity_client_id       = module.aks[0].fieldcrypt_identity_client_id
+    fieldcrypt_service_accounts         = module.aks[0].federated_fieldcrypt_service_accounts
+    managed_hsm_name                    = module.aks[0].managed_hsm_name
+    customer_managed_keys               = module.aks[0].customer_managed_keys
+    node_pool_isolation                 = module.aks[0].node_pool_isolation
+    hipaa_policy_assignment_id          = module.aks[0].hipaa_policy_assignment_id
   } : null
 }

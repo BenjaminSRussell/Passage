@@ -1,4 +1,4 @@
-import { assertProviderEndpoint, type EgressOptions } from "../cloudprofile/index.js";
+import { assertProviderEndpoint, describeEndpoint, type EgressOptions } from "../cloudprofile/index.js";
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
@@ -33,6 +33,7 @@ export function createOpenAICompatibleProvider(cfg: OpenAICompatibleConfig): Mod
   const headers: Record<string, string> =
     (cfg.auth ?? "bearer") === "api-key" ? { "api-key": cfg.apiKey } : { authorization: `Bearer ${cfg.apiKey}` };
   return {
+    endpoint: describeEndpoint(/\.openai\.azure\./.test(url.hostname) ? "azure-openai" : "openai-compatible", url.toString(), cfg.egress?.region),
     async complete(req): Promise<ModelResponse> {
       assertNoPii(req.user);
       const tool = proposeTool(req.allowedTools);

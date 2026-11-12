@@ -51,6 +51,7 @@ const common: Record<string, ProblemCatalogEntry> = {
   "OPS-1713": { message: "That failover request doesn't exist.", action: "Check the request link, or start the failover again." },
   "OPS-1714": { message: "The failover request expired before a second operator approved it.", action: "Start the failover again and have it approved within 5 minutes." },
   "OPS-1715": { message: "Region operations are open to the platform operator only.", action: "Sign in with a platform operator account." },
+  "OPS-1705": { message: "That region is outside the data residency chosen for this company, so it can't be set up there.", action: "Pick a region inside the residency (for example a European region for an EU company), or change the residency first." },
   "OPS-1716": { message: "The break-glass request is incomplete or out of range.", action: "Give a reason, the ticket number and a duration of 15 to 120 minutes." },
   "OPS-1717": { message: "You already have an open break-glass window.", action: "Use it, or end it first and open a new one." },
   "OPS-1718": { message: "That break-glass window can't be reviewed this way.", action: "Review it after it has ended, as a different operator, and say what was wrong if you flag it." },
@@ -1120,6 +1121,17 @@ const fieldService: Record<string, ProblemCatalogEntry> = {
   "INV-TRK-004": { message: "Truck stock isn't switched on for this service.", action: "Ask your administrator to enable it." },
 };
 
+/** Read-access log for protected health information (#606). */
+const phiReadLog: Record<string, ProblemCatalogEntry> = {
+  "AUD-0001": { message: "That audit entry isn't complete, so it wasn't recorded.", action: "Check the entry's details and try again." },
+  "AUD-0002": { message: "A read-log entry can't name who read the record, because the system records the signed-in person itself.", action: "Remove the user from the request and send it again." },
+  "AUD-0003": { message: "The read-log filter, page or export format isn't valid.", action: "Check the dates, the page size and the format (CSV or NDJSON), then try again." },
+  "AUD-0004": { message: "That read isn't in this organization's read log.", action: "Refresh the break-glass queue and pick the read again." },
+  "AUD-0005": { message: "That read can't be reviewed: it isn't break-glass access, it has already been reviewed, or you are the person who read the record.", action: "Ask another reviewer, or refresh the queue to see the current review." },
+  "HCM-PHI-AUDIT-UNAVAILABLE": { message: "This record has health information, and the system couldn't log that you opened it, so it wasn't shown.", action: TRY_LATER },
+  "HCM-BREAK-GLASS-UNAUDITED": { message: "Emergency access to health information is off, because reads of it aren't being logged here.", action: "Ask your administrator to turn on health-information read auditing, or ask someone with regular access." },
+};
+
 /** The B2B exchange (edi): e-invoices, the cXML exchange and self-billing (#35). */
 const b2b: Record<string, ProblemCatalogEntry> = {
   "EDI-0027": { message: "The seller or buyer details needed for an e-invoice haven't been entered yet.", action: "Enter the seller's profile for the legal entity and the buyer's profile for the customer, then build the e-invoice again." },
@@ -1181,6 +1193,7 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...groupFinance,
   ...shared,
   ...fieldService,
+  ...phiReadLog,
   ...b2b,
   ...processManufacturing,
 });

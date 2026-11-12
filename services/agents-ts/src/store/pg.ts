@@ -1,3 +1,4 @@
+import type { ModelEndpoint } from "../cloudprofile/index.js";
 import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import pg from "pg";
@@ -55,6 +56,8 @@ export interface StoredRun {
   tokensOut: number;
   estimated: boolean;
   postCommitError?: string;
+  /** Where the model call was served; absent when the run made none (#605). */
+  modelEndpoint?: ModelEndpoint;
   createdAt: string;
 }
 
@@ -153,6 +156,7 @@ export class PgAgentStore implements AuditPort, BudgetPort {
         await c.query<{
           run_id: string; agent_id: string; agent_version: number; invoker_user_id: string; status: string; code: string | null;
           reason: string | null; tokens_in: string; tokens_out: string; estimated: boolean; post_commit_error: string | null; created_at: Date;
+          model_provider: string | null; model_host: string | null; model_region: string | null;
         }>("select * from agent_run where tenant_id = $1 and run_id = $2", [tenantId, runId])
       ).rows[0];
       if (r === undefined) return undefined;
@@ -168,6 +172,9 @@ export class PgAgentStore implements AuditPort, BudgetPort {
         tokensOut: Number(r.tokens_out),
         estimated: r.estimated,
         ...(r.post_commit_error !== null ? { postCommitError: r.post_commit_error } : {}),
+        ...(r.model_provider !== null && r.model_host !== null && r.model_region !== null
+          ? { modelEndpoint: { provider: r.model_provider, host: r.model_host, region: r.model_region } }
+          : {}),
         createdAt: r.created_at.toISOString(),
       };
     });
@@ -177,7 +184,8 @@ export class PgAgentStore implements AuditPort, BudgetPort {
     await this.withTenant(req.tenantId, async (c) => {
       const res = await c.query(
         `update agent_run
-            set status = $3, code = $4, reason = $5, tokens_in = $6, tokens_out = $7, estimated = $8, post_commit_error = $9
+            set status = $3, code = $4, reason = $5, tokens_in = $6, tokens_out = $7, estimated = $8, post_commit_error = $9,
+                model_provider = $10, model_host = $11, model_region = $12
           where tenant_id = $1 and run_id = $2 and status = 'RUNNING'`,
         [
           req.tenantId,
@@ -189,6 +197,9 @@ export class PgAgentStore implements AuditPort, BudgetPort {
           result.tokensOut,
           result.estimated,
           afterCommitError ?? null,
+          result.modelEndpoint?.provider ?? null,
+          result.modelEndpoint?.host ?? null,
+          result.modelEndpoint?.region ?? null,
         ],
       );
       if (res.rowCount === 0) throw new Error(`run ${result.runId} is not open for audit`);

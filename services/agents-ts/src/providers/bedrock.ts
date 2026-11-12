@@ -1,5 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
-import { assertProviderEndpoint, type EgressOptions } from "../cloudprofile/index.js";
+import { assertProviderEndpoint, describeEndpoint, type EgressOptions } from "../cloudprofile/index.js";
 import { assertNoPii } from "../domain/redaction.js";
 import type { ModelProvider, ModelResponse, ModelUsage } from "../runtime/engine.js";
 import { postJson } from "./http.js";
@@ -48,6 +48,7 @@ export function createBedrockProvider(cfg: BedrockConfig): ModelProvider {
     .map((segment) => uriEncode(segment))
     .join("/");
   return {
+    endpoint: describeEndpoint("bedrock", base, cfg.egress?.region ?? cfg.region),
     async complete(req): Promise<ModelResponse> {
       assertNoPii(req.user);
       const tool = proposeTool(req.allowedTools);

@@ -27,6 +27,8 @@ still lint. This tool reads both region files of a pair, merges each over the ch
   cloud profile (#599), when a profile is named with --cloud-profile or by ``region.cloudProfile`` in the files
     - ``region.id`` is in the profile's ``allowedRegions`` (a region outside the list fails; a profile with no list
       allows any), so a gcc pair can only be US regions and an EU-data-boundary pair only EU ones
+    - a profile that restricts regions refuses an s3 backup destination (``backup.store: s3`` or an ``s3://``
+      ``backup.destinationPath``), on any provider; an azure-blob account's region must be allowed too (#605)
     - on ``provider: aks`` the backup store is ``azure-blob``, its storage account sits in the region itself, that
       region is allowed, and an explicit ``backup.destinationPath`` is an https URL on the profile's Blob suffix
 
@@ -34,6 +36,7 @@ Run it after every edit to the region files, including step 3 of docs/ops/runboo
 
     python3 deploy/multi-region/tools/check_region_pair.py
     python3 deploy/multi-region/tools/check_region_pair.py --values-dir deploy/multi-region/values/us --cloud-profile gcc
+    python3 deploy/multi-region/tools/check_region_pair.py --values-dir deploy/multi-region/values/eu-azure --cloud-profile commercial+eu-data-boundary
 
 Without --values-dir it checks the pair in values/ and every pair in a subdirectory of values/ (values/us).
 
@@ -237,6 +240,40 @@ def check(files: dict[str, dict[str, Any]], chart: dict[str, Any]) -> list[str]:
     return problems
 
 
+def _check_backup(name: str, doc: dict[str, Any], selector: str, allowed: list[str], blob: str) -> list[str]:
+    """Problems with one region's backup destination against a cloud profile.
+
+    On ``provider: aks`` the store must be azure-blob. Whatever the provider, a profile that restricts regions refuses an
+    s3 destination (``backup.store: s3`` or an ``s3://`` path): a bucket's region cannot be shown to be one of the
+    profile's Azure regions, and the chart's s3 default is ``s3://passage-pg-backups-<region.id>/`` with no check at all
+    (#605). An azure-blob account must sit in the region itself and that region must be in allowedRegions.
+    """
+    problems: list[str] = []
+    store = _get(doc, "backup.store")
+    destination = _get(doc, "backup.destinationPath")
+    if _get(doc, "region.provider") == "aks" and store != "azure-blob":
+        return [f"{name}: provider aks needs backup.store azure-blob, got {store!r}"]
+    if allowed and (store == "s3" or (isinstance(destination, str) and destination.startswith("s3://"))):
+        return [
+            f"{name}: an s3 backup destination is not allowed under {selector}: its regions are limited to "
+            f"{', '.join(allowed)} and a bucket cannot be shown to be in one of them; use backup.store azure-blob"
+        ]
+    if store != "azure-blob":
+        return problems
+    account_region = _get(doc, "backup.azure.storageAccountRegion")
+    if account_region != name:
+        problems.append(f"{name}: backup.azure.storageAccountRegion is {account_region!r}, expected the region itself ({name!r})")
+    if allowed and account_region not in allowed:
+        problems.append(f"{name}: backup storage region {account_region!r} is not in the {selector} allowedRegions")
+    if not _get(doc, "backup.azure.storageAccount"):
+        problems.append(f"{name}: backup.azure.storageAccount is not set")
+    if destination:
+        host = cloudprofile.host_of(destination)
+        if not destination.startswith("https://") or not host.endswith("." + blob):
+            problems.append(f"{name}: backup.destinationPath {destination!r} must be an https URL on *.{blob}")
+    return problems
+
+
 def check_cloud_profile(files: dict[str, dict[str, Any]], chart: dict[str, Any], selector: str | None = None) -> list[str]:
     """Problems with the pair against a cloud profile; the profile is `selector` or the files' region.cloudProfile."""
     declared = {name: _get(doc, "region.cloudProfile") for name, doc in files.items()}
@@ -257,23 +294,7 @@ def check_cloud_profile(files: dict[str, dict[str, Any]], chart: dict[str, Any],
     for name, doc in sorted({n: merge(chart, d) for n, d in files.items()}.items()):
         if allowed and name not in allowed:
             problems.append(f"{name}: region is not in the {selector} allowedRegions ({', '.join(allowed)})")
-        if _get(doc, "region.provider") != "aks":
-            continue
-        if _get(doc, "backup.store") != "azure-blob":
-            problems.append(f"{name}: provider aks needs backup.store azure-blob, got {_get(doc, 'backup.store')!r}")
-            continue
-        account_region = _get(doc, "backup.azure.storageAccountRegion")
-        if account_region != name:
-            problems.append(f"{name}: backup.azure.storageAccountRegion is {account_region!r}, expected the region itself ({name!r})")
-        if allowed and account_region not in allowed:
-            problems.append(f"{name}: backup storage region {account_region!r} is not in the {selector} allowedRegions")
-        if not _get(doc, "backup.azure.storageAccount"):
-            problems.append(f"{name}: backup.azure.storageAccount is not set")
-        destination = _get(doc, "backup.destinationPath")
-        if destination:
-            host = cloudprofile.host_of(destination)
-            if not destination.startswith("https://") or not host.endswith("." + blob):
-                problems.append(f"{name}: backup.destinationPath {destination!r} must be an https URL on *.{blob}")
+        problems += _check_backup(name, doc, selector, allowed, blob)
     return problems
 
 

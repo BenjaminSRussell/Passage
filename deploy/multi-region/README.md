@@ -27,6 +27,9 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
 - `values/eu-west.yaml` (PRIMARY) and `values/eu-central.yaml` (PASSIVE): the reference pair. Both are EU
   regions because failover never crosses a residency boundary (PRD 9.50.20); other residencies get their
   own pair from the same chart.
+- `values/eu-azure/westeurope.yaml` (PRIMARY) and `northeurope.yaml` (PASSIVE): the EU pair for Azure (#605), backups to Blob storage in the
+  same EU region. `python3 deploy/multi-region/tools/check_region_pair.py --values-dir deploy/multi-region/values/eu-azure --cloud-profile commercial+eu-data-boundary`
+  passes it; under that profile an s3 backup destination or a backup region outside the overlay's `allowedRegions` fails.
 - `test_chart.py`: render tests per role (`python3 -m unittest discover -s deploy/multi-region`).
 
 ## Game day and release tools
@@ -78,6 +81,9 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
   warning values sit in their ranges. Run it after every edit to `values/`, including failover step 3.
   Stdlib only (a strict parser for the YAML subset these files use). Exit 1 on a problem.
   Usage: `python3 deploy/multi-region/tools/check_region_pair.py`. Tests: `tools/test_check_region_pair.py`.
+- `tools/residency_report.py` — the residency evidence report for an auditor (#605): tenant -> regions for the database, object
+  store, Kafka and backups, and every tenant whose residency allows less than where its data is. It reads a tenants export, the region
+  files and `platform/go/residency/residency.json`; see `docs/ops/tenant-provisioning.md`. Tests: `tools/test_residency_report.py`.
 - Run tests: `python3 -m unittest discover -s deploy/multi-region/gameday`,
   `python3 -m unittest discover -s deploy/multi-region/tools` and
   `python3 -m unittest discover -s deploy/multi-region/chaos`.

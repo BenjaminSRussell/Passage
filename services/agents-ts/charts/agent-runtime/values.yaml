@@ -14,6 +14,9 @@ model:
   # Model id for agents and for the copilot. Claude defaults: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5.
   default: claude-sonnet-5-5
   copilot: ""
+  # Azure region the model endpoint is hosted in (AGENTS_PROVIDER_REGION). Required under a cloud profile that pins
+  # regions (gcc, gcc-high, dod, eu-data-boundary): the endpoint is refused without it, and every run records it (#605).
+  region: ""
   # JSON object of agent id to model id, for example '{"ap_coding":"claude-opus-5-5","anomaly":"claude-haiku-5-5"}'.
   overrides: ""
 # Secret holding the provider credentials as env keys: ANTHROPIC_API_KEY, or OPENAI_API_KEY, or
@@ -22,6 +25,9 @@ providerSecret: agents-provider
 # Optional endpoint settings for the openai and bedrock providers.
 openai: { baseUrl: "", auth: bearer, apiVersion: "" }
 bedrock: { region: "" }
+# Entity fields tagged phi in the metadata (the generated <Entity>PHIFields() lists). Text that carries a value under
+# one of them is never sent to a model: the run fails AGT-0215 (#606).
+phiFields: []
 runTokenCap: 20000
 copilot: { tokenCap: 8000, maxTurns: 4 }
 # agent.approval_expiry_h (BR-47.3): 1 to 240; empty means 72.

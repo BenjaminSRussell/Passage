@@ -9,7 +9,7 @@ PYTHON ?= python3
 IMAGE_DIGEST ?=
 SKIP_VERIFY ?=
 
-.PHONY: test-tofu test-cloud-profiles deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema test-argocd
+.PHONY: test-tofu test-cloud-profiles test-offline offline-bundle deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema test-argocd
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -90,8 +90,10 @@ test-cloud-profiles:
 	$(PYTHON) multi-region/tools/check_region_pair.py
 	$(PYTHON) multi-region/tools/check_region_pair.py --values-dir multi-region/values/us --cloud-profile gcc
 	$(PYTHON) multi-region/tools/check_region_pair.py --values-dir multi-region/values/us --cloud-profile commercial
+	$(PYTHON) multi-region/tools/check_region_pair.py --values-dir multi-region/values/eu-azure --cloud-profile commercial+eu-data-boundary
 	$(PYTHON) -m unittest discover -s multi-region -p 'test_chart.py' -v
 	$(PYTHON) -m unittest discover -s multi-region/tools -p 'test_check_region_pair.py' -v
+	$(PYTHON) -m unittest discover -s multi-region/tools -p 'test_residency_report.py' -v
 	$(PYTHON) -m unittest discover -s secret-store -v
 
 # AKS (#600): offline OpenTofu tests (providers mocked, no subscription needed) plus validate.
@@ -101,3 +103,19 @@ test-tofu:
 	tofu -chdir=tofu/cluster test
 	tofu -chdir=tofu/cluster/modules/aks init -backend=false -input=false
 	tofu -chdir=tofu/cluster/modules/aks test
+
+# Offline install bundle (#603, IL6 readiness): the tool's tests, with skopeo, cosign and helm replaced by a recorder.
+test-offline:
+	$(PYTHON) -m unittest discover -s offline -v
+
+# Build the signed offline bundle on a connected machine: every image (pinned by digest, with signature and SBOM), chart and
+# policy as one archive. OUT is the output directory, KEY the cosign private key (or a KMS/HSM URI). Needs skopeo, cosign, helm.
+# STAGING is a throwaway registry the images are signed and attested in (docker run -p 5000:5000 registry:2); set
+# STAGING_INSECURE=1 when it speaks plain http. Needs skopeo, syft, cosign and helm.
+OUT ?= ../dist/offline
+KEY ?=
+STAGING ?= localhost:5000
+STAGING_INSECURE ?=
+offline-bundle:
+	@test -n "$(KEY)" || { echo "Usage: make -C deploy offline-bundle KEY=<cosign private key> [OUT=<dir>] [STAGING=<registry>]" >&2; exit 2; }
+	$(PYTHON) offline/offline_bundle.py build --out "$(OUT)" --key "$(KEY)" --staging-registry "$(STAGING)" $(if $(filter 1,$(STAGING_INSECURE)),--staging-insecure)

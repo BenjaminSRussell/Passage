@@ -8,17 +8,27 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/BenjaminSRussell/passage/platform/cloudprofile"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
-// Connect opens a pool. url is a libpq/pgx connection string.
+// Connect opens a pool. url is a libpq/pgx connection string. Under a cloud profile that requires verified TLS
+// (gcc, gcc-high, dod: PASSAGE_CLOUD_PROFILE) any sslmode other than verify-full is refused before a connection is made.
 func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
+	profile, err := cloudprofile.FromEnv(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	if err := profile.CheckPostgresConn(url, os.Getenv); err != nil {
+		return nil, err
+	}
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, err

@@ -36,6 +36,9 @@ provider "azurerm" {
   for_each = local.is_aks ? toset(["aks"]) : toset([])
 
   features {}
+  # The cloud the provider talks to: public, usgovernment or china, from the cloud profile (#602). Tokens and
+  # endpoints are not interchangeable between them.
+  environment                     = var.azure_environment
   subscription_id                 = var.azure_subscription_id
   resource_provider_registrations = "none"
 }
@@ -48,15 +51,25 @@ module "aks" {
     azurerm = azurerm.aks["aks"]
   }
 
-  name                     = var.name
-  location                 = var.azure_location
-  allowed_regions          = var.allowed_regions
-  fips                     = var.fips
-  tenant_id                = var.azure_tenant_id
-  kubernetes_version       = var.kubernetes_version
-  node_pools               = var.node_pools
-  backup_replication_type  = var.azure_backup_replication_type
-  postgres_flexible_server = var.azure_postgres_flexible_server
+  name                                        = var.name
+  location                                    = var.azure_location
+  allowed_regions                             = var.allowed_regions
+  fips                                        = var.fips
+  tenant_id                                   = var.azure_tenant_id
+  kubernetes_version                          = var.kubernetes_version
+  node_pools                                  = var.node_pools
+  private_cluster                             = var.private_cluster
+  customer_managed_keys                       = var.customer_managed_keys
+  managed_hsm                                 = var.managed_hsm
+  require_isolated_nodes                      = var.require_isolated_nodes
+  isolated_nodes_regions                      = var.isolated_nodes_regions
+  hipaa                                       = var.hipaa
+  azure_policy_initiative_id                  = var.azure_policy_initiative_id
+  fieldcrypt_service_accounts                 = var.fieldcrypt_service_accounts
+  managed_hsm_admin_object_ids                = var.azure_managed_hsm_admin_object_ids
+  managed_hsm_security_domain_certificate_ids = var.azure_managed_hsm_security_domain_certificate_ids
+  backup_replication_type                     = var.azure_backup_replication_type
+  postgres_flexible_server                    = var.azure_postgres_flexible_server
 
   postgres_admin_group_object_id = var.azure_postgres_admin_group_object_id
   cloud_endpoints = {
@@ -64,6 +77,7 @@ module "aks" {
     containerRegistrySuffix = lookup(var.cloud_endpoints, "containerRegistrySuffix", "")
     postgresSuffix          = lookup(var.cloud_endpoints, "postgresSuffix", "")
     keyVaultPrivateLinkZone = lookup(var.cloud_endpoints, "keyVaultPrivateLinkZone", "")
+    managedHsmSuffix        = lookup(var.cloud_endpoints, "managedHsmSuffix", "")
   }
 }
 
@@ -92,6 +106,7 @@ provider "helm" {
 }
 
 resource "helm_release" "cert_manager" {
+  count            = var.install_cluster_addons ? 1 : 0
   name             = "cert-manager"
   repository       = "https://charts.jetstack.io"
   chart            = "cert-manager"
@@ -104,6 +119,7 @@ resource "helm_release" "cert_manager" {
 }
 
 resource "helm_release" "argocd" {
+  count            = var.install_cluster_addons ? 1 : 0
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argo-cd"

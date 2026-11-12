@@ -5,6 +5,7 @@ import { Alert, Button } from "../ui";
 import type { Auth } from "./auth";
 import type { Session } from "./oidc";
 import styles from "./account.module.css";
+import { configuredIdleMinutes, IdleSignOut } from "./idle";
 
 interface Account {
   name: string;
@@ -18,7 +19,7 @@ export function useAccount(): Account | null {
   return useContext(AccountContext);
 }
 
-export function AccountProvider({ auth, session, children }: { auth: Auth; session: Session; children: ReactNode }) {
+export function AccountProvider({ auth, session, children, idleMinutes = configuredIdleMinutes() }: { auth: Auth; session: Session; children: ReactNode; idleMinutes?: number }) {
   const [expired, setExpired] = useState(false);
   useEffect(() => {
     const onExpired = () => setExpired(true);
@@ -35,6 +36,7 @@ export function AccountProvider({ auth, session, children }: { auth: Auth; sessi
           </Alert>
         </div>
       ) : null}
+      <IdleSignOut minutes={idleMinutes} onTimeout={() => auth.logout()} />
       {children}
     </AccountContext.Provider>
   );

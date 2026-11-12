@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,9 +16,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/BenjaminSRussell/passage/platform/cloudprofile"
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/residency"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
@@ -24,15 +28,39 @@ const (
 	codeTenantNotFound = "IDN-TENANT-NOT-FOUND"
 	codeTenantExists   = "IDN-TENANT-EXISTS"
 	codeTenantInactive = "IDN-TENANT-INACTIVE"
-	maxDisplayName     = 200
-	maxIdpSubject      = 255
+	// codeResidency is the PRD's OPS-1705: the tenant would be placed in a region outside its residency. The check is
+	// platform/go/residency, the same table the residency evidence report reads.
+	codeResidency  = residency.CodeRegionNotAllowed
+	maxDisplayName = 200
+	maxIdpSubject  = 255
 )
 
 var realmNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
 
+// regionNamePattern is the shape of a region name (westeurope, eu-west); which regions a residency allows is the
+// residency table's business.
+var regionNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
+
 type TenantsAPI struct {
 	pool             *pgxpool.Pool
 	operatorTenantID string
+	// profile is the deployment's cloud profile; nil is commercial with no region restriction.
+	profile *cloudprofile.Profile
+}
+
+// WithCloudProfile places tenants under the deployment's cloud profile (#605): a region must be one of its
+// allowedRegions when it lists any, and under the eu-data-boundary overlay a tenant created without a residency is EU.
+func (a *TenantsAPI) WithCloudProfile(p *cloudprofile.Profile) *TenantsAPI {
+	a.profile = p
+	return a
+}
+
+// defaultResidency is the residency of a tenant created without one.
+func (a *TenantsAPI) defaultResidency() string {
+	if a.profile != nil && a.profile.HasOverlay("eu-data-boundary") {
+		return "EU"
+	}
+	return residency.NormalizeCode("")
 }
 
 // NewTenantsAPI serves tenant provisioning for the platform operator on the ordinary application pool. Only
@@ -81,13 +109,17 @@ type tenantResource struct {
 	DisplayName string    `json:"displayName"`
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"createdAt"`
+	// Residency is where the tenant's data may live (EU, US, UK, GLOBAL); Region is where it was placed, empty for a
+	// tenant created before regions were recorded.
+	Residency string `json:"residency"`
+	Region    string `json:"region,omitempty"`
 }
 
-const tenantColumns = `tenant_id::text, realm_name, display_name, status, created_at`
+const tenantColumns = `tenant_id::text, realm_name, display_name, status, created_at, residency, coalesce(region, '')`
 
 func scanTenant(row pgx.CollectableRow) (tenantResource, error) {
 	var t tenantResource
-	err := row.Scan(&t.TenantID, &t.RealmName, &t.DisplayName, &t.Status, &t.CreatedAt)
+	err := row.Scan(&t.TenantID, &t.RealmName, &t.DisplayName, &t.Status, &t.CreatedAt, &t.Residency, &t.Region)
 	return t, err
 }
 
@@ -96,6 +128,9 @@ type createTenantRequest struct {
 	DisplayName     string `json:"displayName"`
 	AdminUserID     string `json:"adminUserId"`
 	AdminIdpSubject string `json:"adminIdpSubject"`
+	// Residency is EU, US, UK or GLOBAL (default GLOBAL). Region, when given, must be allowed by it (OPS-1705).
+	Residency string `json:"residency"`
+	Region    string `json:"region"`
 }
 
 func grantTenantAdmin(ctx context.Context, tx pgx.Tx, tenantID, actor, userID, reason string) (roleAssignmentResource, error) {
@@ -141,9 +176,39 @@ func (a *TenantsAPI) create(w http.ResponseWriter, r *http.Request) {
 	if utf8.RuneCountInString(req.AdminIdpSubject) > maxIdpSubject {
 		fields["adminIdpSubject"] = "must be at most 255 characters"
 	}
+	if strings.TrimSpace(req.Residency) == "" {
+		req.Residency = a.defaultResidency()
+	}
+	req.Residency = residency.NormalizeCode(req.Residency)
+	req.Region = residency.NormalizeRegion(req.Region)
+	if !residency.Valid(req.Residency) {
+		fields["residency"] = "must be one of " + strings.Join(residency.Codes(), ", ")
+	} else if req.Region != "" && !regionNamePattern.MatchString(req.Region) {
+		fields["region"] = "must be a region name such as westeurope or eu-west"
+	} else if req.Region == "" && req.Residency != residency.NormalizeCode("GLOBAL") {
+		// A restricted residency with no region cannot be shown to hold: the tenant would be unplaced.
+		fields["region"] = "is required for residency " + req.Residency + ": the region the tenant is placed in"
+	}
 	if len(fields) > 0 {
 		invalidFields(w, r, "invalid tenant", fields)
 		return
+	}
+	if req.Region != "" && a.profile != nil && len(a.profile.AllowedRegions) > 0 && !slices.Contains(a.profile.AllowedRegions, req.Region) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeResidency, fmt.Sprintf(
+			"region %s is not one of the %s cloud profile's allowed regions (%s); tenant not provisioned",
+			req.Region, a.profile.Selector(), strings.Join(a.profile.AllowedRegions, ", "))))
+		return
+	}
+	if req.Region != "" {
+		if err := residency.Check(req.Residency, req.Region); err != nil {
+			var refused *residency.Error
+			if errors.As(err, &refused) {
+				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, codeResidency, refused.Detail))
+				return
+			}
+			httpx.Fail(w, r, err)
+			return
+		}
 	}
 
 	created := tenantResource{}
@@ -152,8 +217,8 @@ func (a *TenantsAPI) create(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(r.Context(), `select set_config('passage.tenant_id', $1, true), set_config('passage.operator_context', $2, true)`, tenantID, a.operatorTenantID); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, $2, $3) returning `+tenantColumns,
-			tenantID, req.RealmName, req.DisplayName)
+		rows, err := tx.Query(r.Context(), `insert into identity_tenants (tenant_id, realm_name, display_name, residency, region) values ($1, $2, $3, $4, nullif($5, '')) returning `+tenantColumns,
+			tenantID, req.RealmName, req.DisplayName, req.Residency, req.Region)
 		if err != nil {
 			return err
 		}
