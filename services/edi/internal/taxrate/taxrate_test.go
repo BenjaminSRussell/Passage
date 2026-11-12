@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -52,7 +53,13 @@ func TestParseRate_RefusesWhatIsNotARate(t *testing.T) {
 			t.Errorf("%s accepted", raw)
 		}
 	}
-	if r, err := parseRate([]byte(`{"document_taxes_by_code":[]}`)); err != nil || !r.IsZero() {
-		t.Fatalf("no tax is a zero rate: %s %v", r, err)
+	// No determination is not a 0% rate: no rows, or the provider's fallback, leave the partner's rate in force.
+	for _, raw := range []string{`{"document_taxes_by_code":[]}`, `{}`, `{"fallback":true,"document_taxes_by_code":[{"code":"X","tax_amount":"0"}]}`} {
+		if _, err := parseRate([]byte(raw)); !errors.Is(err, ErrNoDetermination) {
+			t.Errorf("%s = %v, want ErrNoDetermination", raw, err)
+		}
+	}
+	if r, err := parseRate([]byte(`{"document_taxes_by_code":[{"code":"EXEMPT","tax_amount":"0.00"}]}`)); err != nil || !r.IsZero() {
+		t.Fatalf("an exempt code is a determined 0%% rate: %s %v", r, err)
 	}
 }

@@ -171,3 +171,19 @@ func TestSelfBilling_ReceiptMatchesOnlyItsOwnMessages(t *testing.T) {
 		t.Fatalf("the sweep picks up the INVOIC: %d %v", n, err)
 	}
 }
+
+// #35 (35-5): when the tax service determines no rate (no tax code row, or its fallback) the partner's rate applies; it is not 0%.
+func TestSelfBilling_NoTaxDeterminationKeepsThePartnersRate(t *testing.T) {
+	f, a, h, partner := selfBillSetup(t) // partner rate 8.5, the sample bills 6.80 on 80
+	if rec := do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/self-billing", `{"taxRatePct":"8.5","waitDays":30,"taxCountry":"US"}`, "edi.admin", srcScope); rec.Code != http.StatusOK {
+		t.Fatalf("config: %d %s", rec.Code, rec.Body.String())
+	}
+	sendShipment(t, f, h, partner, srcShipment, "SHP-0001", time.Now().AddDate(0, 0, -3))
+	a.SelfBillTax = &fakeTax{err: taxrate.ErrNoDetermination}
+	body := strings.NewReplacer("DTM+137:20261111:102'", "DTM+137:20261111:102'CUX+2:USD:4'", "UNT+21+1", "UNT+22+1").Replace(selfBilledSample(t))
+	receiveEdifactBody(t, h, body)
+	docs := documents(t, h)
+	if len(docs) != 1 || docs[0].Status != "MATCHED" {
+		t.Fatalf("documents %+v, disputes %+v", docs, disputes(t, h, "OPEN"))
+	}
+}

@@ -46,6 +46,10 @@ type Query struct {
 // ErrUnavailable is any answer that is not a usable tax amount.
 var ErrUnavailable = errors.New("taxrate: the tax service did not give a usable answer")
 
+// ErrNoDetermination is an answer that determined no tax: no tax code row, or the provider's fallback. It is not a 0% rate; the
+// caller keeps the partner's rate.
+var ErrNoDetermination = fmt.Errorf("%w: the tax service determined no tax for the deliveries", ErrUnavailable)
+
 // Client calls the tax service.
 type Client struct {
 	baseURL string
@@ -127,12 +131,16 @@ func (c *Client) RatePct(ctx context.Context, q Query) (decimal.Decimal, error) 
 
 func parseRate(raw []byte) (decimal.Decimal, error) {
 	var res struct {
-		Rows []struct {
+		Fallback bool `json:"fallback"`
+		Rows     []struct {
 			TaxAmount string `json:"tax_amount"`
 		} `json:"document_taxes_by_code"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return decimal.Zero, ErrUnavailable
+	}
+	if res.Fallback || len(res.Rows) == 0 {
+		return decimal.Zero, ErrNoDetermination
 	}
 	total := decimal.Zero
 	for _, row := range res.Rows {

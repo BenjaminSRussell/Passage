@@ -257,6 +257,11 @@ func (a *API) selfBillTaxRate(ctx context.Context, partnerID string, in store.Se
 	}
 	rate, err := a.SelfBillTax.RatePct(tenant.With(ctx, sp), taxrate.Query{LegalEntityID: profile.LegalEntityID, Currency: in.Currency, Date: date,
 		Country: cfg.TaxCountry, TaxGroup: cfg.TaxGroup, ItemTaxGroup: cfg.ItemTaxGroup})
+	if errors.Is(err, taxrate.ErrNoDetermination) {
+		// No tax was determined (no code row, or the provider's fallback): not 0%, so the partner's rate stands.
+		slog.WarnContext(ctx, "the tax service determined no rate for the self-billed document; the partner's tax rate is used", "message", in.MessageID)
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
