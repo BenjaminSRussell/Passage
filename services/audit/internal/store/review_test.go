@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -148,5 +149,40 @@ func TestReviewWorksAsTheAppRoleAndIsRowLevelSecured(t *testing.T) {
 		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
 			t.Errorf("%q = %v; want insufficient_privilege 42501", stmt, err)
 		}
+	}
+}
+
+// TestTheBreakGlassQueueCanUseItsPartialIndex: the partial index's predicate must be implied by the query's WHERE, or
+// Postgres never uses it. With sequential scans off, the plan names the index only when the expressions match.
+func TestTheBreakGlassQueueCanUseItsPartialIndex(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := tenant.With(context.Background(), principal(1))
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	var plan []string
+	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `set local enable_seqscan = off`); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `explain `+store.BreakGlassSelect+` order by r.seq`, testkit.TenantID(1))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				return err
+			}
+			plan = append(plan, line)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "phi_read_break_glass") {
+		t.Fatalf("the queue query does not use phi_read_break_glass:\n%s", strings.Join(plan, "\n"))
 	}
 }

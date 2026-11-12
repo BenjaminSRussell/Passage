@@ -21,7 +21,7 @@ CREATE POLICY phi_read_review_tenant_access ON phi_read_review AS PERMISSIVE
 
 -- Break-glass reads, oldest first, for the review queue.
 CREATE INDEX IF NOT EXISTS phi_read_break_glass ON phi_read (tenant_id, seq)
-  WHERE upper(purpose) LIKE 'BREAK-GLASS%';
+  WHERE upper(btrim(purpose)) LIKE 'BREAK-GLASS%';
 
 CREATE FUNCTION phi_read_review_immutable() RETURNS trigger AS $$
 BEGIN
