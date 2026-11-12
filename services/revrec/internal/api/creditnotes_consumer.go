@@ -53,7 +53,10 @@ type creditNoteBookedData struct {
 	LegalEntityID string `json:"legal_entity_id"`
 	Currency      string `json:"currency"`
 	PostingDate   string `json:"posting_date"`
-	Lines         []struct {
+	// ContractModificationID is set on the credit note billing issued for a contract modification's price decrease: the modification
+	// already re-allocated the contract (and took back the revenue), so the consumer applies nothing.
+	ContractModificationID string `json:"contract_modification_id"`
+	Lines                  []struct {
 		LineNo         int    `json:"line_no"`
 		OriginalLineNo int    `json:"original_line_no"`
 		OrderID        string `json:"order_id"`
@@ -100,6 +103,9 @@ func reverseCreditNote(ctx context.Context, s CreditNoteStore, evt events.Event)
 	ctx, err := creditNoteScope(ctx, evt, d.LegalEntityID)
 	if err != nil {
 		return err
+	}
+	if d.ContractModificationID != "" {
+		return nil
 	}
 	date, err := time.Parse(dateLayout, d.PostingDate)
 	if !ids.Valid(d.CreditNoteID) || err != nil || !currencyCode.MatchString(d.Currency) {

@@ -64,6 +64,14 @@ serviceMonitor:
   enabled: false
   interval: 30s
 
+# PrometheusRule (#30): ReceivablesGLJournalsParked fires while the journal sweep counts parked journals (the gauge
+# receivables_gl_journals_parked, set by the sweep that RECEIVABLES_RMA_SWEEP_TENANT_IDS turns on).
+alerts:
+  enabled: false
+  severity: warning
+  parkedFor: 30m
+  labels: {}
+
 # The billing consumer (#30, args [consume]): opens the open items of billing's posted
 # invoices (one per installment) and credit notes. It exits at start unless
 # service:receivables-billing is seeded in the service principal table. Its KafkaUser,

@@ -121,13 +121,16 @@ type CreditNoteBookedLine struct {
 // CreditNoteBookedData is the data member of creditnote.booked. JournalEntryID
 // is the ledger entry of the credit note (invoice.journal_posting_id).
 type CreditNoteBookedData struct {
-	CreditNoteID      string                 `json:"credit_note_id"`
-	Number            string                 `json:"number"`
-	OriginalInvoiceID string                 `json:"original_invoice_id"`
-	OriginalNumber    string                 `json:"original_number"`
-	LegalEntityID     string                 `json:"legal_entity_id"`
-	Currency          string                 `json:"currency"`
-	PostingDate       string                 `json:"posting_date"`
-	JournalEntryID    string                 `json:"journal_entry_id"`
-	Lines             []CreditNoteBookedLine `json:"lines"`
+	CreditNoteID      string `json:"credit_note_id"`
+	Number            string `json:"number"`
+	OriginalInvoiceID string `json:"original_invoice_id"`
+	OriginalNumber    string `json:"original_number"`
+	LegalEntityID     string `json:"legal_entity_id"`
+	Currency          string `json:"currency"`
+	PostingDate       string `json:"posting_date"`
+	JournalEntryID    string `json:"journal_entry_id"`
+	// ContractModificationID is set on a credit note billing issued for a revrec contract modification's price decrease; revrec
+	// does not apply it again (the modification re-allocated the contract).
+	ContractModificationID string                 `json:"contract_modification_id,omitempty"`
+	Lines                  []CreditNoteBookedLine `json:"lines"`
 }

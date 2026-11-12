@@ -83,6 +83,7 @@ spec:
             - { name: FX_URL, value: {{ .Values.fxUrl | quote }} }
             - { name: PARTY_URL, value: {{ .Values.partyUrl | quote }} }
             - { name: TAX_URL, value: {{ .Values.taxUrl | quote }} }
+            - { name: PAYABLES_WITHHOLDING_REPORT_INTERVAL, value: {{ .Values.withholdingReportInterval | quote }} }
             - { name: FX_RATE_TYPE, value: {{ .Values.fxRateType | quote }} }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }

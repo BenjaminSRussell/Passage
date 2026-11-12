@@ -72,10 +72,10 @@ func TestSettleCredit_NamedDebitsAreCheckedAndAtomic(t *testing.T) {
 		debits []CreditDebit
 		code   string
 	}{
-		{"more than the credit holds", []CreditDebit{{i1.ID, amt("100.00")}, {i2.ID, amt("60.00")}}, CodeCreditSettleInvalid},
-		{"more than the debit has open", []CreditDebit{{i1.ID, amt("400.00")}}, CodeCreditSettleInvalid},
-		{"a credit as a debit", []CreditDebit{{credit.ID, amt("10.00")}}, CodeNotDebit},
-		{"the same debit twice", []CreditDebit{{i1.ID, amt("10.00")}, {i1.ID, amt("10.00")}}, CodeCreditSettleInvalid},
+		{"more than the credit holds", []CreditDebit{{OpenItemID: i1.ID, Amount: amt("100.00")}, {OpenItemID: i2.ID, Amount: amt("60.00")}}, CodeCreditSettleInvalid},
+		{"more than the debit has open", []CreditDebit{{OpenItemID: i1.ID, Amount: amt("400.00")}}, CodeCreditSettleInvalid},
+		{"a credit as a debit", []CreditDebit{{OpenItemID: credit.ID, Amount: amt("10.00")}}, CodeNotDebit},
+		{"the same debit twice", []CreditDebit{{OpenItemID: i1.ID, Amount: amt("10.00")}, {OpenItemID: i1.ID, Amount: amt("10.00")}}, CodeCreditSettleInvalid},
 	}
 	for _, c := range cases {
 		if _, err := s.SettleCredit(ctx, CreditSettlementRequest{LegalEntityID: legalEntity, CreditItemID: credit.ID, Debits: c.debits}, ""); problemCode(err) != c.code {
@@ -87,11 +87,11 @@ func TestSettleCredit_NamedDebitsAreCheckedAndAtomic(t *testing.T) {
 		t.Fatalf("a refused settlement changed the credit: %+v", got)
 	}
 	res, err := s.SettleCredit(ctx, CreditSettlementRequest{LegalEntityID: legalEntity, CreditItemID: credit.ID,
-		Debits: []CreditDebit{{i1.ID, amt("100.00")}, {i2.ID, amt("30.00")}}}, "")
+		Debits: []CreditDebit{{OpenItemID: i1.ID, Amount: amt("100.00")}, {OpenItemID: i2.ID, Amount: amt("30.00")}}}, "")
 	if err != nil || !res.Total.Equal(amt("130.00")) || res.CreditStatus != "PARTIALLY_SETTLED" || !res.CreditOpenAfter.Equal(amt("-20.00")) {
 		t.Fatalf("settle: %+v %v", res, err)
 	}
-	if again, err := s.SettleCredit(ctx, CreditSettlementRequest{LegalEntityID: legalEntity, CreditItemID: credit.ID, Debits: []CreditDebit{{i2.ID, amt("20.00")}}}, ""); err != nil ||
+	if again, err := s.SettleCredit(ctx, CreditSettlementRequest{LegalEntityID: legalEntity, CreditItemID: credit.ID, Debits: []CreditDebit{{OpenItemID: i2.ID, Amount: amt("20.00")}}}, ""); err != nil ||
 		again.CreditStatus != "SETTLED" {
 		t.Fatalf("second settlement: %+v %v", again, err)
 	}
