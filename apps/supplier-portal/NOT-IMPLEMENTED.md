@@ -14,6 +14,6 @@
 | Users page: MFA option | not built | Keycloak user administration (live infra) |
 | Company details change request (PROFILE_CHANGE) with structured fields | built | `/requests`: legal name, trade name, registration number, industry code; approval writes them to the buyer's record and the request shows when |
 | Demo vendor login and fixture, phase-exit walkthrough | not built | needs the realm and a seeded vendor |
-| Installable PWA | not built | no manifest or service worker; online only |
+| Installable PWA | built | `public/manifest.webmanifest` and `public/sw.js`, the customer portal's worker: static files and an offline page only, never `/api/` or `/bff/` answers; registered in production builds only |
 | Document virus scan | built in the BFF | uploads are refused when infected or when a configured scanner cannot answer; the page says so. Deploying clamd is live infra |
 | 25 MB document limit | not built | no object store (decision on #512); documents are stored in Postgres, 5 MB |

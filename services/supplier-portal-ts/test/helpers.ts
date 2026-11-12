@@ -7,7 +7,7 @@ import { createHttpServer } from "../src/server.ts";
 import type { UserProvisioner } from "../src/provision.ts";
 import type { ScanPolicy } from "../src/scan.ts";
 import { createServiceTokenSigner } from "../src/serviceToken.ts";
-import { RateLimiter, SessionStore } from "../src/session.ts";
+import { MemorySessionStore, RateLimiter } from "../src/session.ts";
 
 export const TENANT = "11111111-1111-4111-8111-111111111111";
 export const VENDOR_A = "0b1c2d3e-0000-4000-8000-0000000000aa";
@@ -26,6 +26,8 @@ export const oidc: OidcConfig = {
   authorizationEndpoint: `${ISSUER}/protocol/openid-connect/auth`,
   tokenEndpoint: `${ISSUER}/protocol/openid-connect/token`,
   jwksUri: `${ISSUER}/protocol/openid-connect/certs`,
+  endSessionEndpoint: `${ISSUER}/protocol/openid-connect/logout`,
+  postLogoutRedirectUri: `${APP}/`,
 };
 
 export interface Call {
@@ -92,7 +94,7 @@ export async function startRig(opts: RigOptions = {}): Promise<Rig> {
     calls.push({ url, method: init?.method ?? "GET", headers: new Headers(init?.headers), body: typeof init?.body === "string" ? init.body : "" });
     return queue.shift() ?? Response.json({});
   };
-  const sessions = new SessionStore();
+  const sessions = new MemorySessionStore();
   const server = createHttpServer({
     oidc,
     jwks: new Jwks(oidc.jwksUri, fetcher),

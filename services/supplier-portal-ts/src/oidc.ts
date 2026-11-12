@@ -12,6 +12,10 @@ export interface OidcConfig {
   authorizationEndpoint: string;
   tokenEndpoint: string;
   jwksUri: string;
+  /** Keycloak's end_session_endpoint: sign-out ends the single sign-on session there, not only the portal's. */
+  endSessionEndpoint: string;
+  /** Where Keycloak sends the browser after the end-session (a post.logout.redirect.uris entry of the client). */
+  postLogoutRedirectUri: string;
 }
 
 export interface SupplierIdentity {
@@ -21,6 +25,8 @@ export interface SupplierIdentity {
   legalEntityIds: string[];
   name: string;
   isAdmin: boolean;
+  /** The Keycloak session id (sid claim) of this sign-in; empty when Keycloak sent none. The shared store indexes it. */
+  sessionId: string;
 }
 
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -54,6 +60,16 @@ export function authorizationUrl(cfg: OidcConfig, state: string, nonce: string, 
 }
 
 export class LoginRefused extends Error {}
+
+/** The end-session URL the browser goes to on sign-out; the ID token of the sign-in is the hint, else the client id. */
+export function endSessionUrl(cfg: OidcConfig, idToken: string | undefined): string {
+  const url = new URL(cfg.endSessionEndpoint);
+  const params = new URLSearchParams({ post_logout_redirect_uri: cfg.postLogoutRedirectUri });
+  if (idToken) params.set("id_token_hint", idToken);
+  else params.set("client_id", cfg.clientId);
+  url.search = params.toString();
+  return url.toString();
+}
 
 export async function exchangeCode(cfg: OidcConfig, code: string, verifier: string, fetcher: Fetch): Promise<string> {
   const res = await fetcher(cfg.tokenEndpoint, {
@@ -142,5 +158,5 @@ export async function verifyIdToken(token: string, cfg: OidcConfig, jwks: Jwks, 
   }
   const legalEntityIds = str(claims["le"]).split(",").map((e) => e.trim().toLowerCase()).filter((e) => UUID.test(e) && e !== NIL);
   if (legalEntityIds.length === 0) throw new LoginRefused("the account has no legal entity");
-  return { userId, tenantId, vendorId, legalEntityIds, name: str(claims["name"]) || str(claims["preferred_username"]), isAdmin: roles.includes("supplier-admin") };
+  return { userId, tenantId, vendorId, legalEntityIds, name: str(claims["name"]) || str(claims["preferred_username"]), isAdmin: roles.includes("supplier-admin"), sessionId: str(claims["sid"]) };
 }

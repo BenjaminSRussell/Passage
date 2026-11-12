@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { LE_1, LE_2, VENDOR_A, signIn, startRig, type Rig } from "./helpers.ts";
+import { LE_1, LE_2, VENDOR_A, oidc, signIn, startRig, type Rig } from "./helpers.ts";
 
 let rig: Rig;
 afterEach(() => rig.close());
@@ -94,7 +94,13 @@ describe("sign-in", () => {
     const s = await signIn(rig);
     expect((await fetch(`${rig.base}/bff/me`, { headers: { cookie: s.cookie } })).status).toBe(200);
     expect((await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie } })).status).toBe(403);
-    expect((await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie, "x-csrf-token": s.csrf } })).status).toBe(204);
+    const out = await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie, "x-csrf-token": s.csrf } });
+    expect(out.status).toBe(200);
+    // The browser goes on to Keycloak's end-session with the sign-in's ID token as the hint.
+    const logoutUrl = new URL(((await out.json()) as { logoutUrl: string }).logoutUrl);
+    expect(logoutUrl.origin + logoutUrl.pathname).toBe(oidc.endSessionEndpoint);
+    expect(logoutUrl.searchParams.get("post_logout_redirect_uri")).toBe(oidc.postLogoutRedirectUri);
+    expect(logoutUrl.searchParams.get("id_token_hint")).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
     expect((await fetch(`${rig.base}/bff/me`, { headers: { cookie: s.cookie } })).status).toBe(401);
 
     const again = await signIn(rig);

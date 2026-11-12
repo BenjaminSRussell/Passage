@@ -103,9 +103,16 @@ export async function download(path: string, fallbackName: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+/** Ends the session here and sends the browser to Keycloak's end-session endpoint, so the single sign-on session ends too. */
 export async function signOut(): Promise<void> {
-  await request<void>("POST", "/bff/logout", undefined).catch(() => undefined);
-  window.location.assign("/");
+  let target = "/";
+  try {
+    const out = await request<{ logoutUrl?: string } | undefined>("POST", "/bff/logout", undefined);
+    if (out && typeof out.logoutUrl === "string") target = out.logoutUrl;
+  } catch {
+    /* the session ends on the server by itself after the idle time; go home */
+  }
+  window.location.assign(target);
 }
 
 /** A file as base64, for the upload endpoints. */
