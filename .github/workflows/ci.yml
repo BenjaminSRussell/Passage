@@ -27,6 +27,10 @@ on:
         type: boolean
         required: false
         default: false
+      workflow:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -337,6 +341,28 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: ${{ matrix.package }}/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # Temporal worker (services/workflow-ts): typecheck, the event-schema compatibility gate and the workflow tests, which
+  # run every workflow (budget plan continue-as-new included) against the Temporal time-skipping test server that
+  # @temporalio/testing downloads, then the production build the Dockerfile and the Windows bundle use.
+  workflow:
+    name: workflow (services/workflow-ts)
+    if: inputs.workflow
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: services/workflow-ts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: services/workflow-ts/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
