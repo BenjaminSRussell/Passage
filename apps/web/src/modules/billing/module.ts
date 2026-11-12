@@ -5,6 +5,7 @@ import { CreditNotesPage } from "./CreditNotesPage";
 import { DeferredRevenuePage } from "./DeferredRevenuePage";
 import { InvoiceDetailPage } from "./InvoiceDetailPage";
 import { InvoicesPage } from "./InvoicesPage";
+import { ModifyRevenueContractPage } from "./ModifyRevenueContractPage";
 import { NewCreditNotePage } from "./NewCreditNotePage";
 import { NewFreeTextInvoicePage } from "./NewFreeTextInvoicePage";
 import { NewShipmentProposalPage } from "./NewShipmentProposalPage";
@@ -30,6 +31,7 @@ const billing: PassageModule = {
     { path: "/billing/revenue-contracts", element: createElement(RevenueContractsPage), handle: { title: "Revenue contracts" } },
     { path: "/billing/revenue-contracts/new", element: createElement(NewRevenueContractPage), handle: { title: "New revenue contract" } },
     { path: "/billing/revenue-contracts/:id", element: createElement(RevenueContractDetailPage), handle: { title: "Revenue contract" } },
+    { path: "/billing/revenue-contracts/:id/modify", element: createElement(ModifyRevenueContractPage), handle: { title: "Modify revenue contract" } },
     { path: "/billing/deferred-revenue", element: createElement(DeferredRevenuePage), handle: { title: "Deferred revenue" } },
   ],
   nav: [
