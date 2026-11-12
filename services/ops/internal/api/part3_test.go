@@ -170,6 +170,9 @@ func TestProvisionEnforcesResidencyAndCompletesWithItsEvent(t *testing.T) {
 	if rec := e.do("GET", "/v1/ops/tenants", "alice", DutyView, "", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Cedar Ridge Pumps") {
 		t.Fatalf("list = %d %s", rec.Code, rec.Body)
 	}
+	if rec := e.do("GET", "/v1/ops/licenses", "alice", DutyView, "", ""); !strings.Contains(rec.Body.String(), `"tenantName":"Cedar Ridge Pumps"`) {
+		t.Fatalf("licence list names the tenant: %s", rec.Body)
+	}
 }
 
 const testRates = `{"cpu_core_hours":"0.04","memory_gb_hours":"0.005","storage_gb":"0.10","kafka_gb":"0.02","lakehouse_gb":"0.023","ai_tokens":"0.000002"}`
