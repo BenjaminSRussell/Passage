@@ -26,6 +26,67 @@ func (a *API) WithIssuer(i pki.Issuer) *API {
 func (a *API) registerEnrollment(r chi.Router) {
 	r.With(authz.RequireDuty(DutyEdgeConfigure)).Post("/v1/shopfloor/edge-nodes/{id}:enrollment-token", a.mintEnrollmentToken)
 	r.With(authz.RequireDuty(DutyEdgeConnect)).Post("/v1/shopfloor/edge-nodes/{id}:renew-certificate", a.renewCertificate)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/edge-nodes/{id}/certificates", a.listEdgeCertificates)
+	r.With(authz.RequireDuty(DutyEdgeConfigure)).Post("/v1/shopfloor/edge-nodes/{id}/certificates/{serial}:revoke", a.revokeEdgeCertificate)
+}
+
+// listEdgeCertificates is a node's certificate history: every certificate issued at enrollment or renewal, which one
+// is current, and which were revoked, by whom and why.
+func (a *API) listEdgeCertificates(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := pathID(w, r, store.CodeEdgeNotFound, "edge node")
+	if !ok {
+		return
+	}
+	items, err := a.store.ListEdgeCertificates(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "list edge certificates", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, itemsResponse[store.CertificateRecord]{Items: items})
+}
+
+type revokeCertificateRequest struct {
+	Reason string `json:"reason"`
+}
+
+// revokeEdgeCertificate revokes one certificate of a node with a reason. Revoking the current one unbinds the node,
+// so the connector has to enroll again with a new token.
+func (a *API) revokeEdgeCertificate(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	user, ok := authenticatedUser(w, r, "revoking a certificate")
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r, store.CodeEdgeNotFound, "edge node")
+	if !ok {
+		return
+	}
+	serial := strings.ToLower(chi.URLParam(r, "serial"))
+	if serial == "" || len(serial) > 200 {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeCertNotFound, "the node has no certificate with that serial"))
+		return
+	}
+	var req revokeCertificateRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	reason, problem := cleanReason(req.Reason)
+	if problem != "" {
+		validationFailed(w, r, map[string]string{"reason": problem})
+		return
+	}
+	out, err := a.store.RevokeEdgeCertificate(r.Context(), id, serial, reason, user, a.now().UTC())
+	if err != nil {
+		a.fail(w, r, "revoke edge certificate", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 // RegisterPublic mounts the one route that carries no identity: a connector redeeming its enrollment

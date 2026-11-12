@@ -38,8 +38,8 @@ const (
 
 	recipeSource = "controlrecipe"
 	// ReadbackTolerance is the absolute difference between the value written and the value read back that
-	// still counts as a match (BR-25.15 leaves the tolerance open; see NOT-IMPLEMENTED.md).
-	ReadbackTolerance = 0.001
+	// still counts as a match for a Double node or one of unknown type; domain.ReadbackTolerance gives it by node type.
+	ReadbackTolerance = domain.DefaultReadbackTolerance
 )
 
 // ControlRecipe is one generated recipe with its tracking state (the control recipe monitor row).
@@ -114,9 +114,11 @@ type EdgeWrite struct {
 	Node      string
 	Value     decimal.Decimal
 	Readback  *decimal.Decimal
-	Written   bool
-	Reason    *string
-	At        time.Time
+	// NodeType is the data type of the node the connector reports (Double, Float, Int32, Boolean, ...), "" when unknown.
+	NodeType string
+	Written  bool
+	Reason   *string
+	At       time.Time
 }
 
 // EdgeRecipeReport is what the connector reports for a recipe: an optional status and the writes it made
@@ -470,7 +472,7 @@ func auditEdgeWrites(ctx context.Context, tx pgx.Tx, tenantID string, c ControlR
 		if w.Written {
 			switch {
 			case w.Readback != nil:
-				deviation = w.Value.Sub(*w.Readback).Abs().GreaterThan(decimal.NewFromFloat(ReadbackTolerance))
+				deviation = w.Value.Sub(*w.Readback).Abs().GreaterThan(domain.ReadbackTolerance(w.NodeType, w.Value))
 			case c.Destination != domain.DestPCSMQTT:
 				// MQTT has no readback, so a missing one proves nothing; every other protocol must give one.
 				deviation = true
@@ -480,8 +482,8 @@ func auditEdgeWrites(ctx context.Context, tx pgx.Tx, tenantID string, c ControlR
 		if at.IsZero() {
 			at = time.Now().UTC()
 		}
-		if _, err := tx.Exec(ctx, `insert into edge_write_audit (tenant_id, id, recipe_id, edge_id, phase_path, node, value, readback, written, deviation, reason, at)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, tenantID, ids.New(), c.ID, *c.EdgeID, w.PhasePath, w.Node, w.Value.String(), nullDecimal(w.Readback), w.Written, deviation, w.Reason, at); err != nil {
+		if _, err := tx.Exec(ctx, `insert into edge_write_audit (tenant_id, id, recipe_id, edge_id, phase_path, node, value, readback, written, deviation, reason, at, node_type)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, tenantID, ids.New(), c.ID, *c.EdgeID, w.PhasePath, w.Node, w.Value.String(), nullDecimal(w.Readback), w.Written, deviation, w.Reason, at, w.NodeType); err != nil {
 			return err
 		}
 		if deviation {

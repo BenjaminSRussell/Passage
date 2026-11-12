@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"strings"
@@ -31,6 +32,8 @@ const (
 	CodeCSRInvalid = "SF-0172"
 	// CodeIssuerMissing is certificate issuing not being configured on this service. 503.
 	CodeIssuerMissing = "SF-0173"
+	// CodeCertNotFound is a certificate serial the node was never issued. 404.
+	CodeCertNotFound = "SF-0185"
 )
 
 // EnrollmentTTL is how long a minted token can be redeemed.
@@ -206,8 +209,19 @@ func bindCertificate(ctx context.Context, tx pgx.Tx, tenantID, edgeID string, cs
 	if err != nil {
 		return EdgeCertificate{}, err
 	}
-	if _, err := tx.Exec(ctx, `insert into edge_certificate (tenant_id, id, edge_id, serial, subject, not_before, not_after, reason)
-		values ($1, $2, $3, $4, $5, $6, $7, $8)`, tenantID, ids.New(), edgeID, issued.Serial, subject, issued.NotBefore, issued.NotAfter, reason); err != nil {
+	fp, err := certFingerprint(issued.CertPEM)
+	if err != nil {
+		return EdgeCertificate{}, err
+	}
+	if reason == "enroll" {
+		// A new enrollment replaces whatever the node held: its earlier certificates (same subject) stop working.
+		if _, err := tx.Exec(ctx, `update edge_certificate set revoked_at = $3, revoked_by = $4, revoke_reason = 'superseded by a new enrollment'
+			where tenant_id = $1 and edge_id = $2 and revoked_at is null`, tenantID, edgeID, now, by); err != nil {
+			return EdgeCertificate{}, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `insert into edge_certificate (tenant_id, id, edge_id, serial, subject, not_before, not_after, reason, fingerprint)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, tenantID, ids.New(), edgeID, issued.Serial, subject, issued.NotBefore, issued.NotAfter, reason, fp); err != nil {
 		return EdgeCertificate{}, err
 	}
 	if _, err := tx.Exec(ctx, `update edge_node set connector_subject = $3, cert_serial = $4, cert_expires_at = $5, version = version + 1, updated_at = now()
@@ -228,13 +242,130 @@ func bindCertificate(ctx context.Context, tx pgx.Tx, tenantID, edgeID string, cs
 // EdgeNodeTenant finds the tenant of an edge node by its id with the SECURITY DEFINER function edge_node_tenant,
 // before any tenant is known (the gateway forwards a connector's certificate, which names a node and no tenant).
 // It returns "" for an unknown node.
-func (s *Postgres) EdgeNodeTenant(ctx context.Context, id string) (string, error) {
+//
+// A certHash that is the fingerprint of a revoked certificate of the node gives "" too (edge_node_tenant_cert): every
+// certificate of a node carries the same subject, so a revoked one is told apart by its fingerprint.
+func (s *Postgres) EdgeNodeTenant(ctx context.Context, id, certHash string) (string, error) {
 	var tenantID *string
-	if err := s.pool.QueryRow(ctx, `select edge_node_tenant($1::uuid)::text`, id).Scan(&tenantID); err != nil {
+	if err := s.pool.QueryRow(ctx, `select edge_node_tenant_cert($1::uuid, $2)::text`, id, strings.ToLower(certHash)).Scan(&tenantID); err != nil {
 		return "", err
 	}
 	if tenantID == nil {
 		return "", nil
 	}
 	return *tenantID, nil
+}
+
+// certFingerprint is the SHA-256 of a PEM certificate's DER, hex: what Envoy forwards as the Hash of the client
+// certificate.
+func certFingerprint(certPEM string) (string, error) {
+	blk, _ := pem.Decode([]byte(certPEM))
+	if blk == nil {
+		return "", errors.New("store: the issued certificate is not PEM")
+	}
+	sum := sha256.Sum256(blk.Bytes)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// CertificateRecord is one certificate a node was issued, with its revocation.
+type CertificateRecord struct {
+	Serial       string     `json:"serial"`
+	Subject      string     `json:"subject"`
+	Reason       string     `json:"reason"`
+	NotBefore    time.Time  `json:"notBefore"`
+	NotAfter     time.Time  `json:"notAfter"`
+	IssuedAt     time.Time  `json:"issuedAt"`
+	Fingerprint  string     `json:"fingerprint,omitempty"`
+	Current      bool       `json:"current"`
+	RevokedAt    *time.Time `json:"revokedAt,omitempty"`
+	RevokedBy    string     `json:"revokedBy,omitempty"`
+	RevokeReason string     `json:"revokeReason,omitempty"`
+}
+
+const certCols = `c.serial, c.subject, c.reason, c.not_before, c.not_after, c.issued_at, coalesce(c.fingerprint, ''), c.serial = coalesce(n.cert_serial, ''),
+	c.revoked_at, coalesce(c.revoked_by, ''), coalesce(c.revoke_reason, '')`
+
+func scanCert(row pgx.Row) (CertificateRecord, error) {
+	var c CertificateRecord
+	err := row.Scan(&c.Serial, &c.Subject, &c.Reason, &c.NotBefore, &c.NotAfter, &c.IssuedAt, &c.Fingerprint, &c.Current, &c.RevokedAt, &c.RevokedBy, &c.RevokeReason)
+	c.NotBefore, c.NotAfter, c.IssuedAt = c.NotBefore.UTC(), c.NotAfter.UTC(), c.IssuedAt.UTC()
+	if c.RevokedAt != nil {
+		t := c.RevokedAt.UTC()
+		c.RevokedAt = &t
+	}
+	return c, err
+}
+
+// ListEdgeCertificates is the certificate history of a node, newest first (FR-25.19).
+func (s *Postgres) ListEdgeCertificates(ctx context.Context, edgeID string) ([]CertificateRecord, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := []CertificateRecord{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `select exists (select 1 from edge_node where tenant_id = $1 and id = $2)`, p.TenantID, edgeID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return httpx.NewProblem(http.StatusNotFound, CodeEdgeNotFound, "edge node not found")
+		}
+		rows, err := tx.Query(ctx, `select `+certCols+` from edge_certificate c join edge_node n on n.tenant_id = c.tenant_id and n.id = c.edge_id
+			where c.tenant_id = $1 and c.edge_id = $2 order by c.issued_at desc, c.serial`, p.TenantID, edgeID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			c, err := scanCert(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// RevokeEdgeCertificate revokes one certificate of a node: the gateway's forwarded fingerprint of that certificate no
+// longer gives an identity. Revoking the node's current certificate also unbinds the node's connector subject, so
+// none of its certificates works until the connector enrolls again with a new token. Revoking a revoked
+// certificate changes nothing.
+func (s *Postgres) RevokeEdgeCertificate(ctx context.Context, edgeID, serial, reason, by string, now time.Time) (CertificateRecord, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out CertificateRecord
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var curSerial *string
+		err := tx.QueryRow(ctx, `select cert_serial from edge_node where tenant_id = $1 and id = $2 for update`, p.TenantID, edgeID).Scan(&curSerial)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, CodeEdgeNotFound, "edge node not found")
+		}
+		if err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `update edge_certificate set revoked_at = $4, revoked_by = $5, revoke_reason = $6
+			where tenant_id = $1 and edge_id = $2 and serial = $3 and revoked_at is null`, p.TenantID, edgeID, serial, now, by, reason)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() > 0 && curSerial != nil && *curSerial == serial {
+			if _, err := tx.Exec(ctx, `update edge_node set connector_subject = null, cert_serial = null, cert_expires_at = null, version = version + 1, updated_at = now()
+				where tenant_id = $1 and id = $2`, p.TenantID, edgeID); err != nil {
+				return err
+			}
+			node, err := scanEdgeNode(tx.QueryRow(ctx, `select `+edgeColumns+` from edge_node n where n.id = $1`, edgeID))
+			if err != nil {
+				return err
+			}
+			if err := edgeEvent(ctx, tx, p.TenantID, node, by); err != nil {
+				return err
+			}
+		}
+		out, err = scanCert(tx.QueryRow(ctx, `select `+certCols+` from edge_certificate c join edge_node n on n.tenant_id = c.tenant_id and n.id = c.edge_id
+			where c.tenant_id = $1 and c.edge_id = $2 and c.serial = $3`, p.TenantID, edgeID, serial))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, CodeCertNotFound, "the node has no certificate with that serial")
+		}
+		return err
+	})
+	return out, err
 }

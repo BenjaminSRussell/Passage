@@ -394,3 +394,33 @@ func RecipeEnd(category, phasePath string, values []Characteristic, doc RecipeDo
 	}
 	return "", "", false
 }
+
+// Node types of a process control system a readback tolerance is chosen by (OPC-UA built-in data types).
+var integerNodeTypes = map[string]bool{"SByte": true, "Byte": true, "Int16": true, "UInt16": true, "Int32": true, "UInt32": true, "Int64": true, "UInt64": true}
+
+// DefaultReadbackTolerance is the absolute tolerance of a Double node or of a node whose type the connector does not
+// report (an MQTT topic).
+const DefaultReadbackTolerance = 0.001
+
+// KnownNodeType reports whether t is a node type the readback rule distinguishes ("" is unknown and allowed).
+func KnownNodeType(t string) bool {
+	return t == "" || t == "Double" || t == "Float" || t == "Boolean" || integerNodeTypes[t]
+}
+
+// ReadbackTolerance is how far the value read back may be from the value written for a node of nodeType before the
+// write is a deviation (BR-25.15): a Double within DefaultReadbackTolerance, a Float also within the rounding of a
+// 32-bit float (2^-23 of the value), an integer or Boolean exactly. The connector applies the same rule.
+func ReadbackTolerance(nodeType string, written decimal.Decimal) decimal.Decimal {
+	def := decimal.NewFromFloat(DefaultReadbackTolerance)
+	switch {
+	case nodeType == "Float":
+		rel := written.Abs().Div(decimal.NewFromInt(1 << 23))
+		if rel.GreaterThan(def) {
+			return rel
+		}
+		return def
+	case nodeType == "Boolean", integerNodeTypes[nodeType]:
+		return decimal.Zero
+	}
+	return def
+}

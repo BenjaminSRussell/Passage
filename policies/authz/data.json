@@ -3620,7 +3620,8 @@
       {"resource": "/v1/shopfloor/edge-nodes", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/edge-nodes/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/edge-nodes/*/config-versions", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/edge-nodes/*:enrollment-token", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/edge-nodes/*:enrollment-token", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*/certificates/*:revoke", "methods": ["POST"]}
     ]},
     "shopfloor.edge.connect": {"permissions": [
       {"resource": "/v1/shopfloor/edge-nodes/*/config", "methods": ["GET"]},
@@ -3659,6 +3660,7 @@
       {"resource": "/v1/shopfloor/process-messages:retry-due", "methods": ["POST"]}
     ]},
     "shopfloor.setup.maintain": {"permissions": [
+      {"resource": "/v1/shopfloor/andon-settings", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/absence-codes", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/absence-codes/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/machines", "methods": ["POST"]},
@@ -3695,6 +3697,8 @@
       {"resource": "/v1/shopfloor/pi-sheets/*:obsolete", "methods": ["POST"]}
     ]},
     "shopfloor.view": {"permissions": [
+      {"resource": "/v1/shopfloor/andon-settings", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*/certificates", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/pi-sheets", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/pi-sheets/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/control-recipes", "methods": ["GET"]},

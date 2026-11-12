@@ -3145,3 +3145,14 @@ test_warehouse_rfid_rules_and_automation_cancel if {
 	allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:cancel")
 	not allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:cancel")
 }
+
+# #25: andon thresholds are shop floor setup; a node's certificate history is a read, revoking one is edge configuration.
+test_shopfloor_andon_settings_and_certificate_revocation if {
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/andon-settings")
+	not allowed("shopfloor.view", "PUT", "/v1/shopfloor/andon-settings")
+	allowed("shopfloor.setup.maintain", "PUT", "/v1/shopfloor/andon-settings")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates")
+	allowed("shopfloor.edge.configure", "POST", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates/3f2a:revoke")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates/3f2a:revoke")
+	not allowed("shopfloor.edge.connect", "POST", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates/3f2a:revoke")
+}

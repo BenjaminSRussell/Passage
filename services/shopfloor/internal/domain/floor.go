@@ -141,10 +141,69 @@ func DowntimeStepFor(open bool, state string) DowntimeStep {
 	return DowntimeNone
 }
 
+// AndonSettings are a tenant's andon thresholds (FR-25.11, D4): how long a machine may stay down before the
+// alert, how long the condition must stay clear before the alert closes, and the scrap share of a bucket of at
+// least ScrapMinCount pieces above which the scrap-rate alert is raised. The zero value is not valid; use
+// DefaultAndonSettings.
+type AndonSettings struct {
+	DowntimeMinutes int `json:"downtimeMinutes"`
+	ClearMinutes    int `json:"clearMinutes"`
+	ScrapPercent    int `json:"scrapPercent"`
+	ScrapMinCount   int `json:"scrapMinCount"`
+}
+
+// DefaultAndonSettings are the PRD thresholds a tenant has until it sets its own.
+func DefaultAndonSettings() AndonSettings {
+	return AndonSettings{DowntimeMinutes: int(AndonAfter / time.Minute), ClearMinutes: int(AndonClearAfter / time.Minute), ScrapPercent: ScrapRatePercent, ScrapMinCount: ScrapMinCount}
+}
+
+// FieldErrors checks the settings: 1 to 240 minutes down, 0 to 120 minutes clear, 1 to 100 percent, 1 to 100000 pieces.
+func (s AndonSettings) FieldErrors() map[string]string {
+	f := map[string]string{}
+	if s.DowntimeMinutes < 1 || s.DowntimeMinutes > 240 {
+		f["downtimeMinutes"] = "must be 1 to 240"
+	}
+	if s.ClearMinutes < 0 || s.ClearMinutes > 120 {
+		f["clearMinutes"] = "must be 0 to 120"
+	}
+	if s.ScrapPercent < 1 || s.ScrapPercent > 100 {
+		f["scrapPercent"] = "must be 1 to 100"
+	}
+	if s.ScrapMinCount < 1 || s.ScrapMinCount > 100000 {
+		f["scrapMinCount"] = "must be 1 to 100000"
+	}
+	return f
+}
+
+// Due reports whether a downtime that began at start has lasted past the downtime threshold at now.
+func (s AndonSettings) Due(start, now time.Time) bool {
+	return now.Sub(start) > time.Duration(s.DowntimeMinutes)*time.Minute
+}
+
+// Cleared reports whether a condition that ended at ended has stayed clear long enough at now.
+func (s AndonSettings) Cleared(ended, now time.Time) bool {
+	return now.Sub(ended) >= time.Duration(s.ClearMinutes)*time.Minute
+}
+
+// ClearAfter is how long a condition must stay clear.
+func (s AndonSettings) ClearAfter() time.Duration { return time.Duration(s.ClearMinutes) * time.Minute }
+
+// DownAfter is how long a machine may stay down.
+func (s AndonSettings) DownAfter() time.Duration { return time.Duration(s.DowntimeMinutes) * time.Minute }
+
+// ScrapExceeded reports whether a bucket of total pieces with good of them good is over the scrap share.
+// Integer arithmetic, so a share exactly at the threshold does not raise.
+func (s AndonSettings) ScrapExceeded(total, good int64) bool {
+	if total < int64(s.ScrapMinCount) || good < 0 || good > total {
+		return false
+	}
+	return (total-good)*100 > total*int64(s.ScrapPercent)
+}
+
 // AndonDue reports whether a downtime that began at start has lasted past the
-// andon threshold at now (FR-25.11, AC-25.6).
+// default andon threshold at now (FR-25.11, AC-25.6).
 func AndonDue(start, now time.Time) bool {
-	return now.Sub(start) > AndonAfter
+	return DefaultAndonSettings().Due(start, now)
 }
 
 // AndonCleared reports whether the condition has stayed clear for AndonClearAfter

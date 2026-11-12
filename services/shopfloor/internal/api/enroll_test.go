@@ -34,6 +34,12 @@ func (f *fakeStore) Enroll(context.Context, string, string, pki.Issuer, time.Tim
 	return store.EdgeCertificate{}, httpx.NewProblem(http.StatusUnauthorized, store.CodeEnrollmentInvalid, "not valid")
 }
 
+func (f *fakeStore) ListEdgeCertificates(context.Context, string) ([]store.CertificateRecord, error) {
+	return nil, nil
+}
+func (f *fakeStore) RevokeEdgeCertificate(context.Context, string, string, string, string, time.Time) (store.CertificateRecord, error) {
+	return store.CertificateRecord{}, nil
+}
 func (f *fakeStore) RenewCertificate(_ context.Context, id, subject, _ string, _ pki.Issuer, _ time.Time) (store.EdgeCertificate, error) {
 	f.edge().subject = subject
 	return store.EdgeCertificate{EdgeID: id, Subject: subject}, nil
@@ -231,6 +237,57 @@ func TestHTTP_EdgeEnrollmentBindsTheCertificateIdentity(t *testing.T) {
 	var issued int
 	if err := admin.QueryRow(context.Background(), `select count(*) from edge_certificate where edge_id = $1`, node.ID).Scan(&issued); err != nil || issued != 2 {
 		t.Fatalf("certificate rows = %d, %v", issued, err)
+	}
+
+	// Certificate history: both certificates, the renewed one current.
+	certsPath := "/v1/shopfloor/edge-nodes/" + node.ID + "/certificates"
+	var hist struct{ Items []store.CertificateRecord }
+	rec = send(http.MethodGet, certsPath, "", DutyView, "supervisor-1")
+	_ = json.Unmarshal(rec.Body.Bytes(), &hist)
+	if rec.Code != http.StatusOK || len(hist.Items) != 2 || !hist.Items[0].Current || hist.Items[0].Serial != renewed.Serial || hist.Items[1].Current || hist.Items[0].Fingerprint == "" {
+		t.Fatalf("certificate history: %d %s", rec.Code, rec.Body)
+	}
+	lookup := store.New(app)
+	fpOld, fpNew := hist.Items[1].Fingerprint, hist.Items[0].Fingerprint
+	if got, err := lookup.EdgeNodeTenant(context.Background(), node.ID, fpOld); err != nil || got != testkit.TenantID(1) {
+		t.Fatalf("the old certificate before revocation: %q %v", got, err)
+	}
+	// Revoking the superseded certificate: its fingerprint gives no identity, the current one still works.
+	if rec := send(http.MethodPost, certsPath+"/"+cert.Serial+":revoke", `{"reason":"laptop stolen"}`, DutyView, "supervisor-1"); rec.Code != http.StatusForbidden {
+		t.Fatalf("revoke without the configure duty: %d", rec.Code)
+	}
+	if rec := send(http.MethodPost, certsPath+"/"+cert.Serial+":revoke", `{}`, DutyEdgeConfigure, "supervisor-1"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("revoke without a reason: %d", rec.Code)
+	}
+	rec = send(http.MethodPost, certsPath+"/"+cert.Serial+":revoke", `{"reason":"laptop stolen"}`, DutyEdgeConfigure, "supervisor-1")
+	var revoked store.CertificateRecord
+	_ = json.Unmarshal(rec.Body.Bytes(), &revoked)
+	if rec.Code != http.StatusOK || revoked.RevokedAt == nil || revoked.RevokedBy != "supervisor-1" || revoked.RevokeReason != "laptop stolen" {
+		t.Fatalf("revoke the old certificate: %d %s", rec.Code, rec.Body)
+	}
+	if got, _ := lookup.EdgeNodeTenant(context.Background(), node.ID, fpOld); got != "" {
+		t.Fatalf("a revoked certificate still names the tenant: %q", got)
+	}
+	if got, _ := lookup.EdgeNodeTenant(context.Background(), node.ID, fpNew); got != testkit.TenantID(1) {
+		t.Fatalf("the current certificate after revoking the old one: %q", got)
+	}
+	if rec := send(http.MethodPost, "/v1/shopfloor/edge-nodes/"+node.ID+":heartbeat", beat, DutyEdgeConnect, subject); rec.Code != http.StatusOK {
+		t.Fatalf("heartbeat after revoking the old certificate: %d", rec.Code)
+	}
+	if rec := send(http.MethodPost, certsPath+"/ffff:revoke", `{"reason":"x"}`, DutyEdgeConfigure, "supervisor-1"); rec.Code != http.StatusNotFound {
+		t.Fatalf("revoke an unknown serial: %d %s", rec.Code, rec.Body)
+	}
+	// Revoking the current certificate unbinds the node: the connector must enroll again.
+	if rec := send(http.MethodPost, certsPath+"/"+renewed.Serial+":revoke", `{"reason":"decommissioned"}`, DutyEdgeConfigure, "supervisor-1"); rec.Code != http.StatusOK {
+		t.Fatalf("revoke the current certificate: %d %s", rec.Code, rec.Body)
+	}
+	if rec := send(http.MethodPost, "/v1/shopfloor/edge-nodes/"+node.ID+":heartbeat", beat, DutyEdgeConnect, subject); rec.Code != http.StatusForbidden {
+		t.Fatalf("heartbeat after revoking the current certificate: %d %s", rec.Code, rec.Body)
+	}
+	cur0 := send(http.MethodGet, "/v1/shopfloor/edge-nodes/"+node.ID, "", DutyView, "supervisor-1")
+	_ = json.Unmarshal(cur0.Body.Bytes(), &bound)
+	if bound.ConnectorSubject != nil || bound.CertSerial != nil {
+		t.Fatalf("node after revoking its current certificate: %s", cur0.Body)
 	}
 
 	// A token expires, and a switched-off node cannot be enrolled or given a token.

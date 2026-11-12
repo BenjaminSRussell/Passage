@@ -358,12 +358,12 @@ func TestEdgeNodeTenantFindsTheTenantOfANode(t *testing.T) {
 	na := newEdge(t, s, testkit.Ctx(a), "Plant A", "a-1")
 	nb := newEdge(t, s, testkit.Ctx(b), "Plant B", "b-1")
 	for id, want := range map[string]string{na.ID: a, nb.ID: b} {
-		got, err := s.EdgeNodeTenant(context.Background(), id)
+		got, err := s.EdgeNodeTenant(context.Background(), id, "")
 		if err != nil || got != want {
 			t.Fatalf("node %s: tenant %q err %v, want %q", id, got, err, want)
 		}
 	}
-	if got, err := s.EdgeNodeTenant(context.Background(), ids.New()); err != nil || got != "" {
+	if got, err := s.EdgeNodeTenant(context.Background(), ids.New(), ""); err != nil || got != "" {
 		t.Fatalf("unknown node: %q %v", got, err)
 	}
 }
