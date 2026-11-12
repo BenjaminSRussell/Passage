@@ -36,6 +36,14 @@ const common: Record<string, ProblemCatalogEntry> = {
   "COM-0412": { message: "Someone else changed this record after you opened it.", action: RELOAD_AND_REDO },
   "OPS-1701": { message: "The target region is too far behind to take over without losing data.", action: "Wait for it to catch up, or ask a second platform administrator to approve accepting the data loss." },
   "OPS-1702": { message: "A failover that accepts data loss needs a second operator, and you can't approve your own request.", action: "Ask a different platform operator to approve the failover request." },
+  "OPS-1703": { message: "This region is being failed over and is not serving requests right now.", action: "Wait a moment and try again; requests are served from the new primary region once the failover completes." },
+  "LIC-1801": { message: "Your licence expires soon.", action: "Ask your administrator to renew it before it runs out." },
+  "LIC-1802": { message: "Your licence is in its grace period.", action: "Ask your administrator to renew it or to bring the number of active full users within the licence." },
+  "LIC-1803": { message: "Your licence has expired and sign-in is blocked. Administrators can still sign in and export data.", action: "Ask your administrator to install a renewed licence." },
+  "LIC-1804": { message: "That licence file's signature is not valid.", action: "Get a new licence file from Passage commercial operations." },
+  "LIC-1805": { message: "That licence file can't be installed: it is incomplete, out of range or issued to another tenant.", action: "Check the licence terms with Passage commercial operations." },
+  "LIC-1806": { message: "The installed licence changed since you read it.", action: "Read the licence again and install the renewal against the new version." },
+  "LIC-1807": { message: "No licence is installed for this tenant yet.", action: "Install the signed licence file." },
   "OPS-1709": { message: "That region cannot change to the requested role right now.", action: "Check the regions list for each region's current role, then choose a passive region." },
   "OPS-1710": { message: "That region is not part of this platform.", action: "Pick one of the regions in the regions list." },
   "OPS-1711": { message: "The region has not been verified as fully re-synced.", action: "Finish and verify the re-sync, then bring the region back as passive." },
@@ -43,6 +51,11 @@ const common: Record<string, ProblemCatalogEntry> = {
   "OPS-1713": { message: "That failover request doesn't exist.", action: "Check the request link, or start the failover again." },
   "OPS-1714": { message: "The failover request expired before a second operator approved it.", action: "Start the failover again and have it approved within 5 minutes." },
   "OPS-1715": { message: "Region operations are open to the platform operator only.", action: "Sign in with a platform operator account." },
+  "OPS-1716": { message: "The break-glass request is incomplete or out of range.", action: "Give a reason, the ticket number and a duration of 15 to 120 minutes." },
+  "OPS-1717": { message: "You already have an open break-glass window.", action: "Use it, or end it first and open a new one." },
+  "OPS-1718": { message: "That break-glass window can't be reviewed this way.", action: "Review it after it has ended, as a different operator, and say what was wrong if you flag it." },
+  "OPS-1719": { message: "That break-glass window doesn't exist.", action: "Check the window in the break-glass list." },
+  "OPS-1720": { message: "Only the operator who opened a break-glass window can end it.", action: "Ask the operator who opened it, or wait for it to expire." },
   "COM-0413": { message: "The request is too large for the service to accept.", action: "Send fewer lines or a smaller file, then try again." },
   "COM-0428": { message: "This page is out of date, so your change can't be saved safely.", action: RELOAD_AND_REDO },
   "COM-0500": { message: "Something went wrong on our side.", action: TRY_LATER },
@@ -215,6 +228,12 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "PRN-0006": { message: "That queue already has a printer at this failover position.", action: "Pick a free position in the queue, or move the other printer first." },
   "PRN-0010": { message: "That printer wasn't found, or it was already retired.", action: "Reload the printers page to see the current list." },
   "PRN-0011": { message: "That routing rule wasn't found.", action: "Reload the routing rules to see the current list." },
+  "ANA-0120": { message: "The analytics engine isn't answering, so these figures can't be shown right now.", action: "Try again in a minute. If it keeps failing, contact support with the details below." },
+  "PRN-0012": { message: "That document template wasn't found.", action: "Check the template code, or save the template first." },
+  "PRN-0013": { message: "A text block this document uses doesn't exist, or has no English version to fall back on.", action: "Add the text block (and its English version) under text blocks, then try again." },
+  "PRN-0014": { message: "A text block has a placeholder that the document gave no value for.", action: "Open Details to see which values are missing and send them with the document." },
+  "PRN-0015": { message: "That output rule wasn't found.", action: "Reload the output rules to see the current list." },
+  "PRN-0016": { message: "Document templates, text blocks and output rules aren't available right now.", action: "Try again in a few minutes. If it keeps failing, contact support with the details below." },
   "MOB-0112": { message: "No printer queue is set up for this document.", action: "Add a routing rule for the document type, or choose a queue." },
   "AP-OPN-001": { message: "A settled or reversed open item can't be held or released.", action: "Reload the page to see the item's current state." },
   "INV-OPB-001": { message: "Some opening stock rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
@@ -1016,6 +1035,11 @@ const treasury: Record<string, ProblemCatalogEntry> = {
 
 const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0143": { message: "Someone else changed the worker after you opened it.", action: RELOAD_AND_REDO },
+  "SF-0180": { message: "That PI sheet does not exist.", action: "Go back to the list of PI sheets and open it from there." },
+  "SF-0181": { message: "That change is not possible in the sheet's current state: only a draft can be edited or released, and only a released sheet can get a new version or be retired.", action: "Make a new version of the released sheet and edit that." },
+  "SF-0182": { message: "Someone else changed this PI sheet after you opened it.", action: RELOAD_AND_REDO },
+  "SF-0183": { message: "A PI sheet with this code exists, or the sheet already has a draft in progress.", action: "Open the existing sheet or its draft, or use another code." },
+  "SF-0184": { message: "A control recipe can only be made from a released PI sheet whose steps fit where the recipe goes.", action: "Release the sheet, or give each setpoint the node it is written to when the recipe goes to a process control system." },
 };
 
 const companySetup: Record<string, ProblemCatalogEntry> = {
@@ -1065,6 +1089,34 @@ const fieldService: Record<string, ProblemCatalogEntry> = {
   "INV-TRK-004": { message: "Truck stock isn't switched on for this service.", action: "Ask your administrator to enable it." },
 };
 
+/** The B2B exchange (edi): e-invoices, the cXML exchange and self-billing (#35). */
+const b2b: Record<string, ProblemCatalogEntry> = {
+  "EDI-0027": { message: "The seller or buyer details needed for an e-invoice haven't been entered yet.", action: "Enter the seller's profile for the legal entity and the buyer's profile for the customer, then build the e-invoice again." },
+  "EDI-0029": { message: "No access point is connected, so the e-invoice can't be sent to its network.", action: "Ask an administrator to connect the access point for this mandate, then submit again." },
+  "EDI-0030": { message: "The e-invoice isn't in a state where this can be done. It may already be on its way to the network, or another person just submitted it.", action: "Reload the page to see where it stands now." },
+  "EDI-0031": { message: "The e-invoice has blocking issues and can't be submitted.", action: "Fix the cause shown under Issues, then build the e-invoice again." },
+  "EDI-0036": { message: "No purchase order was sent to this partner under that order number, so the document can't be matched to an order.", action: "Check the order number the partner used, or send the purchase order to the partner first." },
+  "EDI-0037": { message: "The partner's confirmation rejects or changes a line instead of accepting the order as sent.", action: "Review the confirmation and decide on the purchase order yourself; it was not confirmed automatically." },
+  "EDI-0038": { message: "The partner's invoice was recorded but can't be posted automatically. Vendor invoices are posted against receipts.", action: "Match the invoice to the receipts in accounts payable." },
+  "EDI-0039": { message: "Purchasing or receiving refused the document.", action: "Read the reason under Details, fix the order or the quantities, then post the message again." },
+  "EDI-0040": { message: "This partner isn't set up for cXML yet.", action: "Add the partner's cXML identity and the outbound settings, then try again." },
+  "EDI-0041": { message: "The partner's network didn't accept the document.", action: "Read the network's answer under Details, correct the cause and send the document again." },
+  "EDI-0042": { message: "The document can't be turned into an order action because it is missing something or names more than one order.", action: "Ask the partner to correct and resend it." },
+  "EINV-0110": { message: "A required part of the e-invoice is missing or isn't in the right format.", action: "Correct the invoice or the party profiles named in the issue, then build the e-invoice again." },
+  "EINV-0111": { message: "The e-invoice's amounts don't add up.", action: "Check the invoice lines, discounts and tax in billing, then build the e-invoice again." },
+  "EINV-0112": { message: "The e-invoice's total differs from the total on the billing invoice.", action: "Check the invoice's tax and charges in billing, then build the e-invoice again." },
+  "EINV-0114": { message: "The e-invoice breaks one of the Peppol rules.", action: "Fix the party details or the invoice named in the rule, then build the e-invoice again." },
+  "EINV-0150": { message: "This e-invoice format isn't set up for your country yet.", action: "Ask an administrator to install the country's e-invoicing pack." },
+};
+
+/** Process manufacturing: batch orders and their control recipes (#25). */
+const processManufacturing: Record<string, ProblemCatalogEntry> = {
+  "PMF-0506": {
+    message: "This batch order can't be rescaled: its control recipe is already on the shop floor with the current quantities, and a recipe can't be replaced once it is sent.",
+    action: "Keep the current batch size. To make a different quantity, create another batch order for the difference.",
+  },
+};
+
 export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Object.freeze({
   ...common,
   ...purchasing,
@@ -1092,6 +1144,8 @@ export const problemCatalog: Readonly<Record<string, ProblemCatalogEntry>> = Obj
   ...groupFinance,
   ...shared,
   ...fieldService,
+  ...b2b,
+  ...processManufacturing,
 });
 
 /** The catalog entry for a problem code, if there is one. */

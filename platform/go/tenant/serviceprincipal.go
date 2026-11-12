@@ -19,6 +19,9 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 // test keeps them equal.
 var servicePrincipals = map[string][]string{
 	"edi-sales": {"sales.channel.intake"},
+	// The cXML exchange (#35, 35-4): an inbound ConfirmationRequest confirms the purchase order it answers and a ShipNoticeRequest creates
+	// the receiving ASN, as the legal entity of the order, with only these three duties.
+	"edi-cxml": {"procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"},
 	// The consumer of fulfillment's asn.issued and billing's invoice.posted (#35, 35-1): it sends the 856, DESADV, 810 or
 	// INVOIC the partners of the legal entity asked for, through the same from-source path the route uses.
 	"edi-outbound": {"edi.outbound.from-event"},
@@ -56,6 +59,7 @@ var servicePrincipals = map[string][]string{
 var servicePrincipalIssuers = map[string][]string{
 	"billing-sales-report":     {"billing"},
 	"billing-tax-report":       {"billing"},
+	"edi-cxml":                 {"edi"},
 	"edi-outbound":             {"edi"},
 	"edi-sales":                {"edi"},
 	"finreport-ledger":         {"finreport"},

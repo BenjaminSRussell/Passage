@@ -55,3 +55,41 @@ route("PUT", `${BASE}/dashboards/{id}`, ({ params, body }) => {
   dashboards.set(params.id, next);
   return current ? next : reply.created(next);
 });
+
+// Current tile values (46-3), in the demo's net revenue and shipment figures. A metric without a value says why.
+const TILE_VALUES: Record<string, { value: string | null; unit?: "REPORTING_CURRENCY" | "RATIO"; currency?: string; mixed?: boolean }> = {
+  net_revenue: { value: "4182650.40", currency: "USD" },
+  gross_margin_pct: { value: "0.3825", unit: "RATIO" },
+  cogs: { value: null, mixed: true }, // the group books in USD and EUR; the tile never adds them
+  pump_units_shipped: { value: "1286" },
+  open_order_value: { value: "1934120.00", currency: "USD" },
+  on_time_delivery_pct: { value: "0.947", unit: "RATIO" },
+  machine_utilisation_pct: { value: "0.812", unit: "RATIO" },
+  scrap_rate_pct: { value: "0.0213", unit: "RATIO" },
+};
+route("GET", `${BASE}/dashboards/{id}/values`, ({ params }) => {
+  const d = dashboards.get(params.id);
+  if (!d) return reply.problem(404, "ANA-0112", "No dashboard with that id");
+  const to = at(0).slice(0, 10);
+  return {
+    dashboardId: d.dashboardId,
+    title: d.title,
+    refreshSeconds: d.refreshSeconds,
+    computedAt: at(0),
+    tiles: d.tiles.map((t) => {
+      const v = TILE_VALUES[t.metric];
+      return {
+        title: t.title,
+        metric: t.metric,
+        metricName: METRICS.find((m) => m.metricId === t.metric)?.name ?? t.metric,
+        period: t.period,
+        from: `${to.slice(0, 4)}-01-01`,
+        to,
+        status: v?.mixed ? "MIXED_CURRENCY" : v ? "OK" : "NOT_MODELLED",
+        value: v?.value ?? null,
+        ...(v?.unit ? { unit: v.unit } : v ? { unit: "REPORTING_CURRENCY" } : {}),
+        ...(v?.currency ? { currency: v.currency } : {}),
+      };
+    }),
+  };
+});

@@ -21,6 +21,7 @@ apps/web/test-results/
 apps/web/playwright-report/
 # `go build` in a service dir drops the binary there
 /services/receiving/receiving
+/services/iot-edge/cmd/iot-edge/iot-edge
 **/testdata/rapid/**/*.fail
 deploy/.gateway-schemas/
 

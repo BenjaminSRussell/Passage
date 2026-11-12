@@ -16,5 +16,8 @@ import "./shell";
 import "./identity";
 import "./fx";
 import "./print";
+import "./docdesign";
+import "./mobile";
 import "./technician";
 import "./analytics";
+import "./b2b";

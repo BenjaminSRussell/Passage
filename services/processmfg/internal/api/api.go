@@ -28,6 +28,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/processmfg/internal/shopfloor"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/store"
 )
 
@@ -71,6 +72,8 @@ type API struct {
 	reauth Reauthenticator
 	now    func() time.Time
 	gate   func(http.Handler) http.Handler
+	// recipes generates the control recipe of a released batch order (WithShopfloor).
+	recipes shopfloor.Sender
 }
 
 // New returns the handler set. Signing fails closed until WithReauth binds a
@@ -179,6 +182,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Get("/v1/production/batch-orders/{id}", a.getBatchOrder)
 	r.With(authz.RequireDuty(DutyBatchOrderWrite)).Post("/v1/production/batch-orders/{id}:rescale", a.rescale)
 	a.registerLifecycle(r)
+	a.registerRecipes(r)
 	r.With(read).Post("/v1/production/potency:consume", handle(consume))
 	r.With(read).Post("/v1/production/catch-weight:validate", handle(validateCatchWeight))
 	r.With(authz.RequireDuty(DutyCoProductAllocate)).Post("/v1/production/co-products:allocate", handle(allocateCoProducts))

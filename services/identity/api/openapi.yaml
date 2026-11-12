@@ -379,13 +379,14 @@ paths:
     get:
       operationId: listTenants
       x-passage-duty: identity.tenant.maintain
-      description: Operator only. Lists all tenants by id, keyset-paged.
+      description: Operator only. Lists all tenants by id, keyset-paged, optionally only those with one status. A service holding the read-only identity.tenant-registry.read duty (a scheduled job that needs the active tenants) may also list; every other tenant route needs identity.tenant.maintain.
       security: [{ gatewayHeaders: [] }]
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/Duties'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/After'
+        - { name: status, in: query, required: false, description: Only tenants with this status., schema: { type: string, enum: [active, suspended, deprovisioned] } }
       responses:
         '200': { description: A page of tenants., content: { application/json: { schema: { $ref: '#/components/schemas/TenantPage' } } } }
         '400': { $ref: '#/components/responses/Problem' }

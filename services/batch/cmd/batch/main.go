@@ -110,11 +110,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 		metrics = append(metrics, n.Metrics())
 		background.Go(func() { n.Run(ctx) })
 	}
-	admin.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	admin.Handle("/metrics", httpx.WithMetrics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, h := range metrics {
 			h.ServeHTTP(w, r)
 		}
-	}))
+	})))
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

@@ -45,6 +45,7 @@ type Sender interface {
 // API groups the handlers over a store and a sender.
 type API struct {
 	store         store.Store
+	docs          store.DocStore // templates, text blocks, output rules; nil without one
 	sender        Sender
 	attempts      int // sends per device before failover (PRINT_RETRY + 1)
 	retentionDays int // PRINT_JOB_RETENTION_DAYS
@@ -77,9 +78,18 @@ func WithRetentionDays(days int) Option {
 	}
 }
 
+// WithDocStore sets the store of templates, text blocks and output rules. A Postgres store
+// passed to New already is one.
+func WithDocStore(d store.DocStore) Option {
+	return func(a *API) { a.docs = d }
+}
+
 // New returns the API.
 func New(s store.Store, sender Sender, opts ...Option) *API {
 	a := &API{store: s, sender: sender, attempts: domain.FailoverAttempts, retentionDays: domain.DefaultRetentionDays}
+	if ds, ok := s.(store.DocStore); ok {
+		a.docs = ds
+	}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -105,6 +115,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/jobs:sweep", a.sweepJobs)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/jobs/{id}", a.getJob)
 		r.With(authz.RequireDuty(dutyRenderDocument)).Post("/documents:render", a.renderDocument)
+		a.registerDocgen(r)
 	})
 }
 

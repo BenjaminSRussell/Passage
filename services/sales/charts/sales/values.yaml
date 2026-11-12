@@ -48,7 +48,8 @@ serviceIdentity:
   keyId: ""
   # Callers' public keys (name[:kid]=base64 Ed25519 public key, comma separated; not secret).
   # List fulfillment's key so its packing slip reports reach :record-progress (#496,
-  # sales.order.record-delivery only) and billing's for invoice reports.
+  # sales.order.record-delivery only) and billing's for invoice reports. List edi's key as edi=<base64 Ed25519 key>
+  # too: edi reads sales orders and posts channel intake orders (sales.channel.intake) with it (#35).
   publicKeys: ""
 
 upstream:

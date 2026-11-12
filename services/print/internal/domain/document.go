@@ -29,6 +29,11 @@ const (
 	// DocRemittanceAdvice is sent by the payables payment run page (#528): the vendor is the
 	// counterparty, the lines are the invoices a payment settled and the totals what was paid.
 	DocRemittanceAdvice = "REMITTANCE_ADVICE"
+	// Correspondence (#46-4): letters with a body text from a text block. The table is
+	// optional, so a payment notice or a balance confirmation can be a letter alone.
+	DocPeriodicStatement   = "PERIODIC_STATEMENT"
+	DocPaymentNotice       = "PAYMENT_NOTICE"
+	DocBalanceConfirmation = "BALANCE_CONFIRMATION"
 
 	CodeDocument         = "PRN-0008" // a business document cannot be rendered (service-local)
 	CodeDocumentTooLarge = "PRN-0009" // a business document has more lines than one PDF holds (service-local)
@@ -38,6 +43,9 @@ const (
 	maxDocField        = 200  // names, labels, values, address lines, the number
 	maxDocCell         = 500  // a table cell (descriptions wrap)
 	maxDocNotes        = 2000 // the notes (wrap; may hold line breaks)
+	maxDocBody         = 4000 // the letter body of a correspondence document
+	maxDocTitle        = 60
+	maxDocFooter       = 200
 	maxDocAddressLines = 8
 	maxDocParties      = 2 // additional parties besides the counterparty
 	maxDocFieldCount   = 20
@@ -59,6 +67,21 @@ var docTitles = map[string]string{
 	DocCustomerInvoice:  "Invoice",
 	DocPackingSlip:      "Packing slip",
 	DocRemittanceAdvice: "Remittance advice",
+
+	DocPeriodicStatement:   "Statement of account",
+	DocPaymentNotice:       "Payment notice",
+	DocBalanceConfirmation: "Balance confirmation",
+}
+
+// IsCorrespondence reports whether t is a letter type: its table is optional and it has a body.
+func IsCorrespondence(t string) bool {
+	return t == DocPeriodicStatement || t == DocPaymentNotice || t == DocBalanceConfirmation
+}
+
+// DocumentTypes lists every type the renderer knows, in a fixed order.
+func DocumentTypes() []string {
+	return []string{DocPurchaseOrder, DocCustomerInvoice, DocPackingSlip, DocRemittanceAdvice,
+		DocPeriodicStatement, DocPaymentNotice, DocBalanceConfirmation}
 }
 
 // DocParty is a named party with address lines: the legal entity issuing the document,
@@ -94,6 +117,11 @@ type DocumentRequest struct {
 	Lines             [][]string  `json:"lines"`
 	Totals            []DocField  `json:"totals,omitempty"`
 	Notes             string      `json:"notes,omitempty"`
+	// Title replaces the standard title (a template sets it), Body is the letter text of
+	// a correspondence document and FooterText a line at the foot of every page.
+	Title      string `json:"title,omitempty"`
+	Body       string `json:"body,omitempty"`
+	FooterText string `json:"footerText,omitempty"`
 }
 
 // RenderedDocument is a rendered PDF with what the caller may want to tell the user.
@@ -148,7 +176,7 @@ func checkParty(prefix string, p DocParty) error {
 func ValidateDocument(d DocumentRequest) error {
 	d = normalizeDocument(d)
 	if _, ok := docTitles[d.DocumentType]; !ok {
-		return docErr("documentType", "must be PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP or REMITTANCE_ADVICE")
+		return docErr("documentType", "must be PURCHASE_ORDER, CUSTOMER_INVOICE, PACKING_SLIP, REMITTANCE_ADVICE, PERIODIC_STATEMENT, PAYMENT_NOTICE or BALANCE_CONFIRMATION")
 	}
 	if err := checkText("number", d.Number, true, maxDocField, false); err != nil {
 		return err
@@ -185,7 +213,20 @@ func ValidateDocument(d DocumentRequest) error {
 			}
 		}
 	}
-	if len(d.Columns) == 0 || len(d.Columns) > maxDocCols {
+	if IsCorrespondence(d.DocumentType) {
+		if err := checkText("body", d.Body, true, maxDocBody, true); err != nil {
+			return err
+		}
+	} else if strings.TrimSpace(d.Body) != "" {
+		return docErr("body", "is only used by correspondence documents")
+	}
+	if err := checkText("title", d.Title, false, maxDocTitle, false); err != nil {
+		return err
+	}
+	if err := checkText("footerText", d.FooterText, false, maxDocFooter, false); err != nil {
+		return err
+	}
+	if len(d.Columns) > maxDocCols || (len(d.Columns) == 0 && !IsCorrespondence(d.DocumentType)) {
 		return docErr("columns", fmt.Sprintf("needs between 1 and %d entries", maxDocCols))
 	}
 	for i, c := range d.Columns {
@@ -252,6 +293,9 @@ func normalizeDocument(d DocumentRequest) DocumentRequest {
 		Fields:       fields(d.Fields),
 		Totals:       fields(d.Totals),
 		Notes:        n(d.Notes),
+		Title:        n(d.Title),
+		Body:         n(d.Body),
+		FooterText:   n(d.FooterText),
 	}
 	if d.Counterparty != nil {
 		c := party(*d.Counterparty)
@@ -283,19 +327,20 @@ type textStyle struct {
 }
 
 var (
-	styleTitle   = textStyle{face: faceBold, size: 18, lead: 21}
-	styleNumber  = textStyle{face: faceRegular, size: 11, lead: 13.5}
-	styleEntity  = textStyle{face: faceBold, size: 13, lead: 16}
-	styleBody    = textStyle{face: faceRegular, size: 9, lead: 11.5}
-	styleName    = textStyle{face: faceBold, size: 10, lead: 12.5}
-	styleLabel   = textStyle{face: faceBold, size: 7, lead: 10, gray: 0.4, upper: true}
-	styleField   = textStyle{face: faceBold, size: 8, lead: 11.5, gray: 0.35}
-	styleHead    = textStyle{face: faceBold, size: 8, lead: 10, gray: 0.2}
-	styleCell    = textStyle{face: faceRegular, size: 9, lead: 11}
-	styleTotal   = textStyle{face: faceRegular, size: 9.5, lead: 15}
-	styleGrand   = textStyle{face: faceBold, size: 10.5, lead: 16}
-	styleRunning = textStyle{face: faceBold, size: 9, lead: 11}
-	styleFooter  = textStyle{face: faceRegular, size: 7.5, lead: 9, gray: 0.4}
+	styleTitle    = textStyle{face: faceBold, size: 18, lead: 21}
+	styleNumber   = textStyle{face: faceRegular, size: 11, lead: 13.5}
+	styleEntity   = textStyle{face: faceBold, size: 13, lead: 16}
+	styleBody     = textStyle{face: faceRegular, size: 9, lead: 11.5}
+	styleName     = textStyle{face: faceBold, size: 10, lead: 12.5}
+	styleLabel    = textStyle{face: faceBold, size: 7, lead: 10, gray: 0.4, upper: true}
+	styleField    = textStyle{face: faceBold, size: 8, lead: 11.5, gray: 0.35}
+	styleHead     = textStyle{face: faceBold, size: 8, lead: 10, gray: 0.2}
+	styleBodyText = textStyle{face: faceRegular, size: 10, lead: 14}
+	styleCell     = textStyle{face: faceRegular, size: 9, lead: 11}
+	styleTotal    = textStyle{face: faceRegular, size: 9.5, lead: 15}
+	styleGrand    = textStyle{face: faceBold, size: 10.5, lead: 16}
+	styleRunning  = textStyle{face: faceBold, size: 9, lead: 11}
+	styleFooter   = textStyle{face: faceRegular, size: 7.5, lead: 9, gray: 0.4}
 )
 
 const ellipsis = "…"
@@ -521,7 +566,8 @@ func (l *docLayout) parties() {
 	}
 	var blocks []block
 	if l.d.Counterparty != nil {
-		def := map[string]string{DocPurchaseOrder: "Vendor", DocCustomerInvoice: "Bill to", DocPackingSlip: "Ship to", DocRemittanceAdvice: "Vendor"}[l.d.DocumentType]
+		def := map[string]string{DocPurchaseOrder: "Vendor", DocCustomerInvoice: "Bill to", DocPackingSlip: "Ship to", DocRemittanceAdvice: "Vendor",
+			DocPeriodicStatement: "Customer", DocPaymentNotice: "Customer", DocBalanceConfirmation: "Customer"}[l.d.DocumentType]
 		blocks = append(blocks, block{l.d.Counterparty, def})
 	}
 	for i := range l.d.AdditionalParties {
@@ -724,7 +770,25 @@ func (l *docLayout) headerHeight() float64 {
 	return rowHeight(styleHead, n)
 }
 
+// body draws the letter text of a correspondence document.
+func (l *docLayout) body() {
+	if strings.TrimSpace(l.d.Body) == "" {
+		return
+	}
+	for _, s := range l.wrap(styleBodyText, strings.TrimSpace(l.d.Body), contentWidth) {
+		if l.y < contentFloor {
+			l.continuation()
+		}
+		l.text(styleBodyText, contentLeft, l.y, s)
+		l.y -= styleBodyText.lead
+	}
+	l.y -= 10
+}
+
 func (l *docLayout) table() {
+	if len(l.d.Columns) == 0 {
+		return
+	}
 	l.colW = l.columnWidths()
 	headerH := l.headerHeight()
 	// A row never needs more than a fresh continuation page.
@@ -826,6 +890,9 @@ func (l *docLayout) footers() {
 		l.rule(contentLeft, contentRight, 44, 0.4, 0.8)
 		l.text(styleFooter, contentLeft, 32, l.fit(styleFooter, left, contentWidth-l.width(styleFooter, page)-20))
 		l.textRight(styleFooter, contentRight, 32, page)
+		if l.d.FooterText != "" {
+			l.text(styleFooter, contentLeft, 20, l.fit(styleFooter, l.d.FooterText, contentWidth))
+		}
 	}
 }
 
@@ -845,9 +912,13 @@ func RenderDocumentReport(d DocumentRequest) (RenderedDocument, error) {
 		return RenderedDocument{}, err
 	}
 	l := &docLayout{d: normalizeDocument(d), t: newDocText(), title: docTitles[d.DocumentType]}
+	if l.d.Title != "" {
+		l.title = l.d.Title
+	}
 	l.newPage()
 	l.header()
 	l.parties()
+	l.body()
 	l.table()
 	l.totals()
 	l.notes()

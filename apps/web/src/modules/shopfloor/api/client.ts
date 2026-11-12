@@ -1373,7 +1373,7 @@ export interface ControlRecipe {
   edgeId: string | null;
   topic: string | null;
   status: RecipeStatus;
-  recipe: { procedure?: { name: string; unitProcedures: { name: string; operations: { name: string; phases: { name: string; instructions: { seq: number; category: string; text?: string; node?: string; value?: number }[] }[] }[] }[] } };
+  recipe: { procedure?: RecipeDocument["procedure"] };
   sendCount: number;
   lastSentAt: string;
   lastError: string | null;
@@ -1425,4 +1425,113 @@ export function getControlRecipe(id: string, signal?: AbortSignal): Promise<Cont
 /** Sends a recipe in error again (BR-25.11); force and a reason are needed once process messages for the order exist. */
 export function resendControlRecipe(id: string, input: { force: boolean; reason: string }, key: string = newKey()): Promise<ControlRecipe> {
   return post<ControlRecipe>(`/control-recipes/${encodeURIComponent(id)}:resend`, input, key);
+}
+
+// PI sheets (FR-25.16): the designer's templates and the kiosk's report of a recipe it renders.
+
+export type InstructionCategory =
+  | "instruction-text"
+  | "process-parameter-setpoint"
+  | "process-data-request"
+  | "calculation"
+  | "inspection-characteristic"
+  | "material-list"
+  | "signature-request"
+  | "sequence-definition";
+
+export interface InstructionCharacteristic {
+  name: string;
+  type: "numeric" | "text" | "boolean";
+  unit?: string;
+  min?: number;
+  max?: number;
+}
+
+export interface InstructionMaterial {
+  itemId: string;
+  qty: string;
+  unit?: string;
+  role?: "ingredient" | "co-product" | "by-product";
+}
+
+/** One process instruction of a phase, as the service stores it. */
+export interface Instruction {
+  seq: number;
+  category: InstructionCategory;
+  text?: string;
+  characteristic?: InstructionCharacteristic;
+  value?: number;
+  node?: string;
+  materials?: InstructionMaterial[];
+}
+
+export interface RecipePhase {
+  name: string;
+  instructions: Instruction[];
+}
+export interface RecipeOperation {
+  name: string;
+  phases: RecipePhase[];
+}
+export interface RecipeUnitProcedure {
+  name: string;
+  operations: RecipeOperation[];
+}
+export interface RecipeDocument {
+  procedure: { name: string; unitProcedures: RecipeUnitProcedure[] };
+}
+
+export type PISheetStatus = "draft" | "released" | "obsolete";
+
+export interface PISheet {
+  id: string;
+  code: string;
+  version: number;
+  name: string;
+  status: PISheetStatus;
+  recipe: RecipeDocument;
+  rev: number;
+  createdBy: string;
+  createdAt: string;
+  updatedBy: string;
+  updatedAt: string;
+  releasedBy: string | null;
+  releasedAt: string | null;
+}
+
+export const DUTY_PI_SHEET_MAINTAIN = "shopfloor.pisheet.maintain";
+/** Kiosk operators report the recipes they run with this duty. */
+export const DUTY_CONTROL_RECIPE_EXECUTE = "shopfloor.controlrecipe.execute";
+
+export function listPISheets(filter: { status?: PISheetStatus; code?: string } = {}, signal?: AbortSignal): Promise<PISheet[]> {
+  return items<PISheet>(`/pi-sheets${query({ status: filter.status, code: filter.code })}`, signal);
+}
+
+export function getPISheet(id: string, signal?: AbortSignal): Promise<PISheet> {
+  return send<PISheet>(`/pi-sheets/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createPISheet(input: { code: string; name: string; recipe: RecipeDocument }): Promise<PISheet> {
+  return post<PISheet>("/pi-sheets", input);
+}
+
+export function updatePISheet(id: string, input: { name: string; rev: number; recipe: RecipeDocument }): Promise<PISheet> {
+  return send<PISheet>(`/pi-sheets/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export function releasePISheet(id: string, rev: number): Promise<PISheet> {
+  return post<PISheet>(`/pi-sheets/${encodeURIComponent(id)}:release`, { rev });
+}
+
+export function newPISheetVersion(id: string): Promise<PISheet> {
+  return post<PISheet>(`/pi-sheets/${encodeURIComponent(id)}:new-version`, {});
+}
+
+export function obsoletePISheet(id: string, rev: number): Promise<PISheet> {
+  return post<PISheet>(`/pi-sheets/${encodeURIComponent(id)}:obsolete`, { rev });
+}
+
+/** Reports a kiosk recipe's status: received, in-execution, completed or error with a message. */
+export function reportControlRecipe(id: string, input: { status: RecipeStatus; error?: string }): Promise<ControlRecipe> {
+  return post<ControlRecipe>(`/control-recipes/${encodeURIComponent(id)}:report`, input);
 }

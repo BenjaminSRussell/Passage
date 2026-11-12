@@ -155,7 +155,7 @@ func run() error {
 	r := httpx.NewRouter()
 	h.Register(r)
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", h.Metrics())
+	admin.Handle("/metrics", httpx.WithMetrics(h.Metrics()))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

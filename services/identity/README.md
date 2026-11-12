@@ -46,6 +46,8 @@ Tenant-level writes (creating a legal entity, a tenant-wide assignment, ending o
 
 An assigned role must be a seeded duty name. The no-overlap rule for one user, role and legal entity is the `identity_role_assignments_no_overlap` exclusion constraint (409 `IDN-ASSIGNMENT-OVERLAP`); a revoke is `end` (never a delete), which only shortens; ending a future-dated assignment sets `valid_to = valid_from`, an empty range that overlaps nothing and grants nothing. Every mutation writes an `identity_audit` row (actor from `X-Passage-User`) and an `outbox` event (`dev.passage.identity.{tenant,legalentity,roleassignment}.{created,assigned,ended}.v1`) in the same transaction as the change.
 
+`GET /v1/tenants` also takes `status=active|suspended|deprovisioned` and accepts the read-only duty `identity.tenant-registry.read` (from the operator tenant) in place of `identity.tenant.maintain`, so a scheduled job of another service can read the list of active tenants (the shopfloor sweeper, service grant shopfloor to identity); every other tenant route still needs `identity.tenant.maintain`.
+
 ## User directory and role/duty catalogue
 
 `NewUsersAPI(pool)` serves `GET /v1/identity/users` (filters `status`, `q`, `legalEntityId`; keyset paging) and `GET /v1/identity/users/{id}` under the seeded duty `identity.user.maintain`. Users belong to the tenant, not to a legal entity, so every holder sees the whole tenant; `legalEntityId` narrows to users with an active (current, not ended or future) assignment for that entity and is bounded by the caller's own scope through the assignments' RLS.

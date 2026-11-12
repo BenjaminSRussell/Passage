@@ -36,8 +36,13 @@ type Region struct {
 	Name       string `json:"name"`
 	Role       Role   `json:"role"`
 	LagSeconds int    `json:"lagSeconds"`
-	Version    int64  `json:"version"`
+	// LagStale is true when no recent lag report exists; LagSeconds is then UnknownLagSeconds, far above any limit.
+	LagStale bool  `json:"lagStale,omitempty"`
+	Version  int64 `json:"version"`
 }
+
+// UnknownLagSeconds is the lag assumed when it cannot be trusted (a stale or missing report).
+const UnknownLagSeconds = 1 << 30
 
 // Error is a rule violation with its problem code.
 type Error struct {
@@ -132,6 +137,9 @@ func PlanFailover(regions []Region, req FailoverRequest) (Plan, error) {
 	lossy := to.LagSeconds > req.MaxLagSeconds
 	if lossy {
 		if !req.AcceptDataLoss {
+			if to.LagStale {
+				return Plan{}, fail(CodeLagExceeded, "target region lag is unknown (no lag report in the last staleness window; is the lag reporter running?). Use acceptDataLoss with a second approver")
+			}
 			return Plan{}, fail(CodeLagExceeded, "target region lag %d s exceeds %d s. Use acceptDataLoss with a second approver", to.LagSeconds, req.MaxLagSeconds)
 		}
 		if req.Approver == "" || req.Approver == req.Caller {

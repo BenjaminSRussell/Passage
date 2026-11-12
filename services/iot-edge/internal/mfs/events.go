@@ -17,10 +17,14 @@ const (
 )
 
 // Event is the normalized payload of EventType. LoadUnit is the SSCC; it is empty for a fault that
-// belongs to no unit. Seq and Station let the consumer drop a repeat and see which controller sent it.
+// belongs to no unit. Station, Session and Seq let the consumer drop a repeat and see which controller
+// sent it: the PLC numbers its telegrams per link session (from 1 again after every reconnect, wrapping
+// after MaxSeq), so Seq alone does not name an event. Session is the connector's name for the link
+// session the telegram came in on; EventFrom leaves it empty for the caller to fill.
 type Event struct {
 	Kind     string    `json:"kind"`
 	Station  string    `json:"station"`
+	Session  string    `json:"session,omitempty"`
 	Seq      int       `json:"seq"`
 	LoadUnit string    `json:"loadUnit,omitempty"`
 	Location string    `json:"location,omitempty"`

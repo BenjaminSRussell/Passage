@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -184,6 +185,10 @@ func (a *API) cxmlReceive(w http.ResponseWriter, r *http.Request) {
 	if res.Decision == domain.RepeatConflict {
 		writeCXML(w, env.PayloadID, 409, domain.CodeCXMLPayloadConflict+": payloadID "+env.PayloadID+" was already used with other content")
 		return
+	}
+	if res.Decision == domain.RepeatNew && res.ResponseCode == 200 && a.CXMLMapper != nil {
+		// The network has its answer; the document is put onto purchasing or receiving on its own time (a failure leaves it MAPPED).
+		go a.mapReceivedCXML(store.EntityContext(context.WithoutCancel(r.Context()), tid, cfg.LegalEntityID), res.MessageID)
 	}
 	writeCXML(w, env.PayloadID, res.ResponseCode, res.ResponseText)
 }

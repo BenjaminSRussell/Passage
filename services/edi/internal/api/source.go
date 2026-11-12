@@ -59,6 +59,8 @@ func (a *API) putTradeProfile(w http.ResponseWriter, r *http.Request) {
 type sourceRequest struct {
 	TransactionSet string `json:"transactionSet"`
 	SourceID       string `json:"sourceId"`
+	// Slip is set by the event consumer for an 856 or DESADV of one packing slip (never by the route).
+	Slip *domain.SlipRef `json:"-"`
 }
 
 // outboundFromSource generates the 856 (or the EDIFACT DESADV) from a
@@ -106,8 +108,10 @@ func (a *API) outboundFromSource(w http.ResponseWriter, r *http.Request) {
 
 // SendFromSource generates and records the 856, DESADV, 810 or INVOIC of one source document for a partner, as the
 // route does; the event consumer calls it. A document already sent returns its interchange with created false.
-func (a *API) SendFromSource(ctx context.Context, partnerID, transactionSet, sourceID string) (store.OutboundResult, bool, error) {
-	return a.fromSource(ctx, partnerID, sourceRequest{TransactionSet: transactionSet, SourceID: sourceID})
+// A slip (nil for the route's whole-shipment notice) limits the 856 or DESADV to that slip's containers and keys it by shipment
+// and slip, so a second slip of the same shipment is sent too.
+func (a *API) SendFromSource(ctx context.Context, partnerID, transactionSet, sourceID string, slip *domain.SlipRef) (store.OutboundResult, bool, error) {
+	return a.fromSource(ctx, partnerID, sourceRequest{TransactionSet: transactionSet, SourceID: sourceID, Slip: slip})
 }
 
 func (a *API) fromSource(ctx context.Context, partnerID string, req sourceRequest) (store.OutboundResult, bool, error) {
@@ -130,7 +134,11 @@ func (a *API) fromSource(ctx context.Context, partnerID string, req sourceReques
 	if err != nil {
 		return store.OutboundResult{}, false, sourceProblem(err)
 	}
-	key := strings.Join([]string{"source", partnerID, req.TransactionSet, req.SourceID}, ":")
+	parts := []string{"source", partnerID, req.TransactionSet, req.SourceID}
+	if req.Slip != nil && req.Slip.ID != "" {
+		parts = append(parts, req.Slip.ID)
+	}
+	key := strings.Join(parts, ":")
 	res, created, err := a.recordOutbound(ctx, key, partnerID, req.TransactionSet, doc)
 	if err != nil {
 		return res, created, err
@@ -156,16 +164,16 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		if sh, err = a.Sources.Shipment(ctx, p.LegalEntityID, req.SourceID); err != nil {
 			return nil, nil, err
 		}
-		if err = domain.ValidateShipmentSource(p, sh); err != nil {
+		if err = domain.ValidateShipmentSlip(p, sh, req.Slip); err != nil {
 			return nil, nil, err
 		}
 		var o domain.SourceOrder
 		if o, err = a.Sources.Order(ctx, p.LegalEntityID, sh.OrderID); err != nil {
 			return nil, nil, err
 		}
-		doc, err = domain.ASNFromShipment(p, sh, o)
+		doc, err = domain.ASNFromSlip(p, sh, o, req.Slip)
 		if err == nil {
-			shipped, err = domain.SelfBillingLines(p, sh, o)
+			shipped, err = domain.SelfBillingLinesForSlip(p, sh, o, req.Slip)
 		}
 	default:
 		var inv domain.SourceInvoice

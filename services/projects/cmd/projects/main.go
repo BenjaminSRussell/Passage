@@ -68,5 +68,5 @@ func run() error {
 	r := httpx.NewRouter()
 	h.Register(r)
 	slog.Info("projects listening", "addr", addr)
-	return httpx.Serve(ctx, addr, r)
+	return httpx.ServeWithMetrics(ctx, addr, r)
 }

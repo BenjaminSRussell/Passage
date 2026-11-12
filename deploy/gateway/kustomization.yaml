@@ -14,3 +14,10 @@ resources:
   - as2-httproute.yaml
   - as2-clienttrafficpolicy.yaml
   - as2-backendtrafficpolicy.yaml
+  # Region health edge (PSG-50, OPS-1703): GET /healthz/region without a JWT, a Gateway of its own.
+  - region-gateway.yaml
+  # Plant edge for iot-edge connectors (#25): a Gateway of its own, mTLS with the edge CA, outside the JWT SecurityPolicy.
+  - edge-gateway.yaml
+  - edge-certificate.yaml
+  - edge-httproute.yaml
+  - edge-clienttrafficpolicy.yaml

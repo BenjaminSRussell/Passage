@@ -470,3 +470,13 @@ func (s *Store) ResolveDispute(ctx context.Context, id, decision, note, userID s
 	})
 	return d, err
 }
+
+// SelfBillDueTenants lists the tenants with self-billing work: a self-billed INVOIC not matched yet, or a shipment past its wait that was
+// not billed and has no dispute. It reads across tenants through a SECURITY DEFINER function, like PostDueTenants.
+func (s *Store) SelfBillDueTenants(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `select distinct t::text from edi_selfbill_due_tenants() t`)
+	if err != nil {
+		return nil, fmt.Errorf("edi: due self-billing tenants: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}

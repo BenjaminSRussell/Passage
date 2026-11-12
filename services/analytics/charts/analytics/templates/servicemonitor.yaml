@@ -12,7 +12,7 @@ spec:
       app.kubernetes.io/name: analytics
       app.kubernetes.io/instance: {{ .Release.Name }}
   endpoints:
-    - port: http
+    - port: admin
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
 {{- end }}
