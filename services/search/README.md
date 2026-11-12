@@ -48,7 +48,9 @@ tenant-wide, as HR's worker list is.
 - Rows carry `source_version` (the source row's version) and `source_at` (the event time). An upsert applies only when
   the incoming pair is not older than the stored one, so redelivery and reordering change nothing.
 - A party merge removes the losers as tombstones that outrank every version (a late event cannot bring one back) and
-  re-indexes the survivor from the snapshot on `party.merged`. A cancelled purchase order stays searchable with status
+  re-indexes the survivor from the snapshot on `party.merged`. Each removed loser keeps the survivor (`merged_into`, migration
+  `0006`): the workers created for a merged person move to the survivor and take its name, a replayed `worker.created`
+  that still names the merged person lands on the survivor, and a later merge of the survivor carries them along. A cancelled purchase order stays searchable with status
   `CANCELLED`; a cancellation of an order that was never confirmed updates an existing row and never creates one.
 - `search_text` is the number and title only, so a status or type word does not match every row.
 

@@ -2,7 +2,6 @@
 
 | Item | Source | Status | Reason |
 | --- | --- | --- | --- |
-| Workers by name after a party merge | #506 | later slice | A worker is titled with its party person's name (migration `0005`). When that person is merged into another party, the worker keeps the merged party's last name until HR points the worker at the survivor; HR emits no event for that. |
 | Worker and production order changes after the first event | #506 | later slice | HR emits no event when a worker is renumbered or ends, so a worker row never changes. A production order's status follows `order.statuschanged`; `order.updated` (quantity, delivery date) is not read, so the record shows number and status only. |
 | Draft and unconfirmed purchase orders | #506 | later slice | Purchasing emits `po.confirmed` and `po.cancelled` only; drafts are not indexed. |
 | Backfill of records that existed before the consumer started | #506 | later slice | The index fills from events; a replay of the topics or a one-off export is needed for history. |

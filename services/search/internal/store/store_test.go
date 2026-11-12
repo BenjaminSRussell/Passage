@@ -543,3 +543,69 @@ func TestSearchMatchesTheSharedCases(t *testing.T) {
 		}
 	}
 }
+
+// A person merged into another party: the merged person's worker moves to the
+// survivor and takes its name, a replayed worker.created that still names the
+// merged person lands on the survivor, a later rename of the survivor reaches
+// the worker, and a second merge carries the worker along (#506).
+func TestWorkerFollowsItsPersonThroughAPartyMerge(t *testing.T) {
+	st := setup(t)
+	ctx := asScope(testkit.TenantID(1), "")
+	merged, survivor, last := ids.New(), ids.New(), ids.New()
+	workerID := ids.New()
+	for _, r := range []Record{
+		{Type: TypeParty, ID: merged, Number: "P-000601", Title: "Ana Perez", Subtitle: "person", At: t0},
+		{Type: TypeParty, ID: survivor, Number: "P-000602", Title: "Ana Perez-Gomez", Subtitle: "person", At: t0},
+		{Type: TypeWorker, ID: workerID, Number: "WRK-000601", Title: "WRK-000601", Subtitle: "employee", PartyID: merged, At: t0},
+	} {
+		if _, err := st.Apply(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	find := func(q string) []string {
+		hits, err := st.Search(ctx, Query{Text: q, Types: []string{TypeWorker}, Limit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, h := range hits {
+			out = append(out, h.Number+" "+h.Title)
+		}
+		return out
+	}
+	if got := find("perez"); !slices.Equal(got, []string{"WRK-000601 Ana Perez"}) {
+		t.Fatalf("before the merge: %v", got)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: merged, Status: "MERGED", Removed: true, MergedInto: survivor, At: t0.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := find("perez-gomez"); !slices.Equal(got, []string{"WRK-000601 Ana Perez-Gomez"}) {
+		t.Fatalf("after the merge: %v", got)
+	}
+	// A replay of worker.created still names the merged person.
+	if _, err := st.Apply(ctx, Record{Type: TypeWorker, ID: workerID, Number: "WRK-000601", Title: "WRK-000601", Subtitle: "employee", PartyID: merged, At: t0.Add(2 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := find("perez-gomez"); !slices.Equal(got, []string{"WRK-000601 Ana Perez-Gomez"}) {
+		t.Fatalf("after a replay: %v", got)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: survivor, Number: "P-000602", Title: "Ana Gomez", Version: 2, At: t0.Add(3 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := find("ana gomez"); !slices.Equal(got, []string{"WRK-000601 Ana Gomez"}) {
+		t.Fatalf("after the survivor's rename: %v", got)
+	}
+	// The survivor is merged in turn: the worker, and the first merged person, follow.
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: last, Number: "P-000603", Title: "Ana Gomez Ruiz", Subtitle: "person", At: t0.Add(4 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: survivor, Status: "MERGED", Removed: true, MergedInto: last, At: t0.Add(5 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeWorker, ID: workerID, Number: "WRK-000601", Title: "WRK-000601", Subtitle: "employee", PartyID: merged, At: t0.Add(6 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := find("gomez ruiz"); !slices.Equal(got, []string{"WRK-000601 Ana Gomez Ruiz"}) {
+		t.Fatalf("after the second merge and a replay: %v", got)
+	}
+}
