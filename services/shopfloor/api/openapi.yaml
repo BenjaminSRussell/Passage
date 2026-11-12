@@ -3224,10 +3224,12 @@ paths:
       operationId: revokeEdgeCertificate
       summary: Revoke one certificate of an edge node
       description: |
-        The gateway forwards each client certificate's SHA-256 as its Hash; a revoked certificate's fingerprint gives no
-        identity any more. Revoking the node's current certificate also unbinds the node (connector subject, serial and
-        expiry are cleared), so the connector has to enroll again with a new token. A new enrollment revokes the node's
-        earlier certificates by itself. Revoking a revoked certificate changes nothing; an unknown serial is SF-0185 (404).
+        The gateway forwards each client certificate's SHA-256 as its Hash, and a connector gets its identity only for a
+        hash that is the fingerprint of a certificate issued to that node and not revoked (no hash, no identity). A
+        certificate issued before fingerprints were kept is accepted only until the node has a fingerprinted one, and
+        revoking one of those revokes all of them. Revoking the node's current certificate also unbinds the node
+        (connector subject, serial and expiry are cleared), so the connector has to enroll again with a new token. A new
+        enrollment revokes the node's earlier certificates by itself. Revoking a revoked certificate changes nothing; an unknown serial is SF-0185 (404).
       x-passage-duty: shopfloor.edge.configure
       parameters:
         - $ref: "#/components/parameters/EdgeId"

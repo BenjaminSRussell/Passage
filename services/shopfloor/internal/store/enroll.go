@@ -327,9 +327,10 @@ func (s *Postgres) ListEdgeCertificates(ctx context.Context, edgeID string) ([]C
 }
 
 // RevokeEdgeCertificate revokes one certificate of a node: the gateway's forwarded fingerprint of that certificate no
-// longer gives an identity. Revoking the node's current certificate also unbinds the node's connector subject, so
-// none of its certificates works until the connector enrolls again with a new token. Revoking a revoked
-// certificate changes nothing.
+// longer gives an identity. A certificate issued before fingerprints were kept cannot be told apart from the node's
+// other unfingerprinted ones, so revoking it revokes all of them. Revoking the node's current certificate (or a group
+// it is in) also unbinds the node's connector subject, so the connector has to enroll again with a new token.
+// Revoking a revoked certificate changes nothing.
 func (s *Postgres) RevokeEdgeCertificate(ctx context.Context, edgeID, serial, reason, by string, now time.Time) (CertificateRecord, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out CertificateRecord
@@ -342,12 +343,34 @@ func (s *Postgres) RevokeEdgeCertificate(ctx context.Context, edgeID, serial, re
 		if err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `update edge_certificate set revoked_at = $4, revoked_by = $5, revoke_reason = $6
-			where tenant_id = $1 and edge_id = $2 and serial = $3 and revoked_at is null`, p.TenantID, edgeID, serial, now, by, reason)
+		var legacy bool
+		err = tx.QueryRow(ctx, `select fingerprint is null from edge_certificate where tenant_id = $1 and edge_id = $2 and serial = $3`, p.TenantID, edgeID, serial).Scan(&legacy)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, CodeCertNotFound, "the node has no certificate with that serial")
+		}
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() > 0 && curSerial != nil && *curSerial == serial {
+		rows, err := tx.Query(ctx, `update edge_certificate set revoked_at = $4, revoked_by = $5, revoke_reason = $6
+			where tenant_id = $1 and edge_id = $2 and revoked_at is null and (serial = $3 or ($7 and fingerprint is null))
+			returning serial`, p.TenantID, edgeID, serial, now, by, reason, legacy)
+		if err != nil {
+			return err
+		}
+		hitCurrent := false
+		for rows.Next() {
+			var sr string
+			if err := rows.Scan(&sr); err != nil {
+				rows.Close()
+				return err
+			}
+			hitCurrent = hitCurrent || (curSerial != nil && *curSerial == sr)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if hitCurrent {
 			if _, err := tx.Exec(ctx, `update edge_node set connector_subject = null, cert_serial = null, cert_expires_at = null, version = version + 1, updated_at = now()
 				where tenant_id = $1 and id = $2`, p.TenantID, edgeID); err != nil {
 				return err
