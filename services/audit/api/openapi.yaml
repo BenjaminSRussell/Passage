@@ -99,6 +99,8 @@ paths:
         Streams the filtered rows as CSV or NDJSON in chain order. The whole chain is verified first and the verdict is in the
         X-Passage-Read-Chain-* response headers. Keep the head hash: a later export whose chain does not contain it was cut
         short. CSV neutralises cells that start with a formula character; NDJSON is lossless, so recompute hashes from it.
+        The trailers X-Passage-Read-Export-Rows and X-Passage-Read-Export-Complete (true) follow the last row; a failure
+        while rows are streaming aborts the connection, so a body without the completion trailer is incomplete.
       x-passage-duty: audit.read-log.export
       parameters:
         - { name: format, in: query, schema: { type: string, enum: [csv, ndjson], default: csv } }

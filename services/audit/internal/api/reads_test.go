@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/audit/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/audit/internal/store"
 )
@@ -17,6 +20,8 @@ import (
 type readStore struct {
 	rows    []store.ReadRecord
 	reviews map[string]*store.ReadReview
+	// exportFailAfter, when positive, makes ExportReads fail after that many rows were streamed.
+	exportFailAfter int
 }
 
 func (f *fakeStore) RecordRead(_ context.Context, read domain.Read) (store.ReadRecord, error) {
@@ -87,7 +92,10 @@ func (f *fakeStore) ExportReads(_ context.Context, flt store.ReadFilter, begin f
 	if err := begin(f.chainStatus()); err != nil {
 		return err
 	}
-	for _, r := range f.rows {
+	for i, r := range f.rows {
+		if f.exportFailAfter > 0 && i == f.exportFailAfter {
+			return context.DeadlineExceeded
+		}
 		if err := each(r); err != nil {
 			return err
 		}
@@ -291,5 +299,41 @@ func TestReadLogStoreErrorsAreHidden(t *testing.T) {
 	rec := do(r, http.MethodPost, readsPath, validRead, dutyWriter, true)
 	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "COM-0500") || strings.Contains(rec.Body.String(), "deadline") {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAnExportThatFailsMidStreamIsNeverACleanVerifiedResponse: the chain verdict is in the headers, which are out
+// before the rows. A failure after that must break the transfer, and only a complete export carries the trailers.
+func TestAnExportThatFailsMidStreamIsNeverACleanVerifiedResponse(t *testing.T) {
+	r, f := seeded(t, 3)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	get := func() (*http.Response, []byte, error) {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+readsPath+":export?format=ndjson", nil)
+		req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+		req.Header.Set("X-Passage-User", "user-1")
+		req.Header.Set("X-Passage-Duties", dutyExport)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		return resp, body, err
+	}
+
+	resp, body, err := get()
+	if err != nil || resp.StatusCode != http.StatusOK || resp.Trailer.Get("X-Passage-Read-Export-Complete") != "true" ||
+		resp.Trailer.Get("X-Passage-Read-Export-Rows") != "3" || strings.Count(string(body), "\n") != 3 {
+		t.Fatalf("complete export: %v %v trailers %v\n%s", resp, err, resp.Trailer, body)
+	}
+
+	f.exportFailAfter = 1
+	resp, body, err = get()
+	if err == nil {
+		t.Fatalf("a failed export ended cleanly: %d trailers %v body %q", resp.StatusCode, resp.Trailer, body)
+	}
+	if resp != nil && resp.Trailer.Get("X-Passage-Read-Export-Complete") == "true" {
+		t.Fatal("a failed export claimed to be complete")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -177,8 +178,15 @@ func (a *API) verifyReads(w http.ResponseWriter, r *http.Request) {
 }
 
 // Chain verification headers of the export: an auditor keeps the head to prove later that no row was cut off the end.
+//
+// Entries and Head describe the whole chain that was verified, not the filtered rows in the body. The body's own
+// completeness is in the trailers: X-Passage-Read-Export-Rows (rows written) and X-Passage-Read-Export-Complete: true,
+// sent only after the last row. A failure once rows are streaming aborts the connection, so a client never sees a
+// clean end of a truncated export; a body without the completion trailer is incomplete.
 const (
-	headerChainVerified = "X-Passage-Read-Chain-Verified"
+	trailerExportRows     = "X-Passage-Read-Export-Rows"
+	trailerExportComplete = "X-Passage-Read-Export-Complete"
+	headerChainVerified   = "X-Passage-Read-Chain-Verified"
 	headerChainEntries  = "X-Passage-Read-Chain-Entries"
 	headerChainHead     = "X-Passage-Read-Chain-Head"
 	headerChainBroken   = "X-Passage-Read-Chain-Broken-At"
@@ -215,6 +223,7 @@ func (a *API) exportReads(w http.ResponseWriter, r *http.Request) {
 			h.Set(headerChainBroken, strconv.FormatInt(*chain.BrokenAt, 10))
 		}
 		h.Set("Cache-Control", "no-store")
+		h.Set("Trailer", trailerExportRows+", "+trailerExportComplete)
 		if format == exportCSV {
 			h.Set("Content-Type", "text/csv; charset=utf-8")
 			h.Set("Content-Disposition", `attachment; filename="phi-read-log.csv"`)
@@ -226,7 +235,9 @@ func (a *API) exportReads(w http.ResponseWriter, r *http.Request) {
 		enc = json.NewEncoder(w)
 		return nil
 	}
+	var rows int64
 	each := func(rec store.ReadRecord) error {
+		rows++
 		if cw != nil {
 			return cw.Write(csvRow(rec))
 		}
@@ -235,12 +246,22 @@ func (a *API) exportReads(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.ExportReads(r.Context(), f, begin, each); err != nil {
 		if cw == nil && enc == nil {
 			httpx.Fail(w, r, err)
+			return
 		}
-		return
+		// The headers (with the chain verdict) and part of the body are out: a problem cannot be sent any more, so the
+		// connection is aborted and the client sees a broken transfer, never a 200 that ends cleanly.
+		slog.Error("phi read export failed while streaming", "err", err, "rows", rows, "correlationId", middleware.GetReqID(r.Context()))
+		panic(http.ErrAbortHandler)
 	}
 	if cw != nil {
 		cw.Flush()
+		if err := cw.Error(); err != nil {
+			slog.Error("phi read export failed while streaming", "err", err, "rows", rows, "correlationId", middleware.GetReqID(r.Context()))
+			panic(http.ErrAbortHandler)
+		}
 	}
+	w.Header().Set(trailerExportRows, strconv.FormatInt(rows, 10))
+	w.Header().Set(trailerExportComplete, "true")
 	a.exports.Add(1)
 }
 
