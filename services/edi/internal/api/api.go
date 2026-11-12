@@ -165,6 +165,7 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/returns:parse", a.punchoutParse)
 		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/sessions", a.createPunchoutSession)
 		r.With(authz.RequireDuty("edi.requisition.create")).Get("/punchout/sessions", a.listPunchoutSessions)
+		r.With(authz.RequireDuty("edi.requisition.create")).Get("/punchout/suppliers", a.listPunchoutSuppliers)
 		r.With(authz.RequireDuty("edi.requisition.create")).Get("/punchout/sessions/{id}", a.getPunchoutSession)
 		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/sessions/{id}:cancel", a.cancelPunchoutSession)
 		r.With(authz.RequireDuty("edi.requisition.create")).Post("/punchout/sessions/{id}:create-requisition", a.createRequisitionFromSession)

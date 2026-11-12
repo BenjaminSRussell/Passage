@@ -1763,6 +1763,30 @@ paths:
             application/json:
               schema: { type: object }
         '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/punchout/suppliers:
+    get:
+      operationId: listPunchoutSuppliers
+      summary: List the suppliers whose punchout catalog the caller can open (active partners with punchout settings, by name)
+      x-passage-duty: edi.requisition.create
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        partnerId: { type: string, format: uuid }
+                        name: { type: string }
+                        legalEntityId: { type: string, format: uuid }
+                        currencies: { type: array, items: { type: string } }
   /edi/v1/punchout/sessions:
     post:
       operationId: createPunchoutSession

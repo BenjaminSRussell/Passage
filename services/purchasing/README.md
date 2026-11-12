@@ -560,6 +560,13 @@ action is not for a PO, -002 no open line (of the item in that warehouse), -003 
 (nothing to take off or add, more than the line holds, a line with receipts to zero), -005 date (none, the same, the wrong
 direction), -006 the order is not CONFIRMED, -007 no change (the line already had that quantity and date), -008 (the 409 of settling a change that is not an unsettled REFUSED one).
 
+## Punchout lines (#35, 35-3)
+
+A requisition line returned from a supplier's punchout catalog carries `catalogSource: PUNCHOUT`, the supplier's `supplierPartId`
+and the BR-35.13 approval flag `needsApproval` (the price is above the catalog price plus the supplier's tolerance); the EDI engine
+sets them when it turns a returned cart into a requisition. A requisition with a flagged line is never approved automatically on
+submit: at least the manager approves it. `supplierPartId` and `needsApproval` need `catalogSource`. Migration 0036.
+
 ## Error codes
 
 Problems are RFC 9457 with `code` set to the stable value below. Domain and

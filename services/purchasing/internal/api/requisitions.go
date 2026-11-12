@@ -44,6 +44,11 @@ type requisitionLineBody struct {
 	CostCenter string `json:"costCenter,omitempty"`
 	// CatalogEntryID picks the line from a published procurement catalog (FR-17.18).
 	CatalogEntryID string `json:"catalogEntryId,omitempty"`
+	// CatalogSource PUNCHOUT marks a line returned from a supplier's punchout catalog (#35, 35-3), with SupplierPartID; NeedsApproval
+	// is its BR-35.13 approval flag, which keeps the requisition from being approved automatically.
+	CatalogSource  string `json:"catalogSource,omitempty"`
+	SupplierPartID string `json:"supplierPartId,omitempty"`
+	NeedsApproval  bool   `json:"needsApproval,omitempty"`
 }
 
 func (a *API) createRequisition(w http.ResponseWriter, r *http.Request) {
@@ -177,6 +182,15 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 	if err != nil {
 		return store.RequisitionLine{}, invalid(field("requestedDate"), "must be YYYY-MM-DD")
 	}
+	partID := strings.TrimSpace(l.SupplierPartID)
+	switch {
+	case l.CatalogSource != "" && l.CatalogSource != store.CatalogSourcePunchout:
+		return store.RequisitionLine{}, invalid(field("catalogSource"), "must be PUNCHOUT or left out")
+	case l.CatalogSource == "" && (partID != "" || l.NeedsApproval):
+		return store.RequisitionLine{}, invalid(field("catalogSource"), "is required with supplierPartId or needsApproval: they describe a punchout line")
+	case len(partID) > 100:
+		return store.RequisitionLine{}, invalid(field("supplierPartId"), "must be at most 100 characters")
+	}
 	return store.RequisitionLine{
 		LineNo:             no,
 		ProductID:          l.ProductID,
@@ -193,6 +207,9 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 		CatalogEntryID:     l.CatalogEntryID,
 		GLAccount:          l.GLAccount,
 		CostCenter:         l.CostCenter,
+		CatalogSource:      l.CatalogSource,
+		SupplierPartID:     partID,
+		NeedsApproval:      l.NeedsApproval,
 	}, nil
 }
 
@@ -404,6 +421,10 @@ func (a *API) approvalChain(r store.Requisition) []string {
 		if c := a.policy.Route(r.Total, l.Category); len(c) > len(chain) {
 			chain = c
 		}
+	}
+	// A punchout line priced above its catalog price plus tolerance (BR-35.13) is never approved automatically.
+	if len(chain) == 0 && slices.ContainsFunc(r.Lines, func(l store.RequisitionLine) bool { return l.NeedsApproval }) {
+		chain = []string{domain.RoleManager}
 	}
 	return chain
 }

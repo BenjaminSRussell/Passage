@@ -1822,6 +1822,7 @@
     "edi.requisition.create": {"permissions": [
       {"resource": "/edi/v1/punchout/returns:parse", "methods": ["POST"]},
       {"resource": "/edi/v1/punchout/sessions", "methods": ["GET", "POST"]},
+      {"resource": "/edi/v1/punchout/suppliers", "methods": ["GET"]},
       {"resource": "/edi/v1/punchout/sessions/*", "methods": ["GET"]},
       {"resource": "/edi/v1/punchout/sessions/*:cancel", "methods": ["POST"]},
       {"resource": "/edi/v1/punchout/sessions/*:create-requisition", "methods": ["POST"]}

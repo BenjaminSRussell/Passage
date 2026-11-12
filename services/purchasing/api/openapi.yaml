@@ -425,6 +425,9 @@ components:
         glAccount: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', description: "The general ledger account the line is charged to. With costCenter it makes the line budget controlled: the last approval checks it against the plan (FR-38.4) and reserves a pre-encumbrance (FR-38.5). Both or neither." }
         costCenter: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$', description: "The cost center the line is charged to; see glAccount." }
         catalogEntryId: { type: string, format: uuid, description: "Pick the line from a PUBLISHED catalog entry (FR-17.18): blank product, description, category, unit, estimate and preferred vendor take the entry's values; a different unit, product or category is refused (COM-0001). 422 PRC-CAT-004 when the catalog is not published to the legal entity and unit today, PRC-CAT-006 when its currency differs." }
+        catalogSource: { type: string, enum: [PUNCHOUT], description: "PUNCHOUT for a line returned from a supplier's punchout catalog (#35, 35-3); required with supplierPartId or needsApproval." }
+        supplierPartId: { type: string, maxLength: 100, description: "The supplier's part id of a punchout line." }
+        needsApproval: { type: boolean, description: "BR-35.13 approval flag: the punchout price is above the catalog price plus the supplier's tolerance. A requisition with a flagged line is never approved automatically on submit (at least the manager approves)." }
     RequisitionInput:
       type: object
       required: [legalEntityId, currency, lines]
@@ -460,6 +463,9 @@ components:
         purchaseOrderId: { type: string, format: uuid, description: "Set when CONSOLIDATED: the PO that orders the line." }
         purchaseOrderLineNo: { type: integer, description: "Set when CONSOLIDATED: the PO line that orders the line." }
         catalogEntryId: { type: string, format: uuid, description: "The catalog entry the line was picked from; absent on a non-catalog line." }
+        catalogSource: { type: string, enum: [PUNCHOUT] }
+        supplierPartId: { type: string }
+        needsApproval: { type: boolean }
         splitFromLineId: { type: string, format: uuid, description: "The line this one was cut out of by a split (FR-17.3); absent on a line as entered." }
     BudgetCall:
       type: object

@@ -3199,3 +3199,9 @@ test_billing_customer_billing_rule if {
 	not allowed("billing.invoice.view", "PUT", "/v1/billing/customers/c1/billing-rule")
 	allowed("billing.invoice.view", "GET", "/v1/billing/customers/c1/billing-rule")
 }
+
+# #35 (35-3): a requester lists the punchout suppliers with the requisition duty; the partner list stays with edi.admin.
+test_edi_punchout_suppliers_for_requesters if {
+	allowed("edi.requisition.create", "GET", "/edi/v1/punchout/suppliers")
+	not allowed("edi.operate", "GET", "/edi/v1/punchout/suppliers")
+}

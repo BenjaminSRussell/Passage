@@ -503,6 +503,9 @@ Sample files: `testdata/cxml/` (the three network documents, a punchout cart and
   message MAPPED for the next run, and the document records which rate it used (`tax_rate_source`, migration 0017). Without a tax
   country, or without the tax service, `taxRatePct` still applies. VDA 4908 is not built: there is no record layout or sample in the
   repository. Billing's `SELF_BILLED` rule keeps billing from invoicing the shipments of a self-billing customer.
+- **35-3 punchout to requisition.** The requisition lines a returned cart becomes carry `catalogSource: PUNCHOUT`, the supplier part id
+  and the BR-35.13 approval flag, so purchasing never approves a flagged requisition automatically. Web: `/purchasing/punchout`
+  opens a supplier's catalog, shows the returned cart and creates the requisition.
 
 ## Wave 35 proof
 
