@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/budgeting/internal/api"
+	"github.com/BenjaminSRussell/passage/services/budgeting/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/budgeting/internal/store"
 	"github.com/BenjaminSRussell/passage/services/budgeting/migrations"
 )
@@ -75,6 +76,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 		a.WithPlanning(pg, gl)
 	} else {
 		a.WithPlanning(pg, nil)
+	}
+	// ASSETS_URL, HR_URL, PROJECTS_URL and PLANNING_URL (with the service signing key) let a plan be generated from the fixed asset
+	// schedules, HR positions, project forecasts and the demand forecast; a source whose URL is unset answers 503 BUD-0063.
+	rd, err := sources.FromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	if rd != nil {
+		a.WithPlanSources(rd)
 	}
 	a.Register(router)
 	admin := http.NewServeMux()

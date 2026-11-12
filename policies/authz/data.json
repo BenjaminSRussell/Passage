@@ -1270,6 +1270,7 @@
       {"resource": "/v1/consol/groups/*/account-map", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units", "methods": ["POST"]},
       {"resource": "/v1/consol/groups/*/units/*", "methods": ["PATCH", "DELETE"]},
+      {"resource": "/v1/consol/groups/*/units/*/layers/*", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units/*/terms", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units/*/ownership", "methods": ["POST"]}
     ]},
@@ -1297,8 +1298,11 @@
       {"resource": "/v1/consol/groups/*/account-map/versions", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/unit-terms", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/collections", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/investments", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/layers/*", "methods": ["GET"]},
       {"resource": "/v1/consol/runs", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/consol/runs/*/investments", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*/statements", "methods": ["GET"]}
     ]},
     "knowledge.write": {"permissions": [
@@ -1686,8 +1690,12 @@
     "intercompany.configure": {"permissions": [
       {"resource": "/v1/interco/centralized-payments/reversals:preview", "methods": ["POST"]},
       {"resource": "/v1/interco/centralized-payments:preview", "methods": ["POST"]},
+      {"resource": "/v1/interco/entities/*", "methods": ["PUT"]},
+      {"resource": "/v1/interco/matrix", "methods": ["PUT"]},
       {"resource": "/v1/interco/partners", "methods": ["POST"]},
-      {"resource": "/v1/interco/partners/*", "methods": ["PATCH"]}
+      {"resource": "/v1/interco/partners/*", "methods": ["PATCH"]},
+      {"resource": "/v1/interco/settings", "methods": ["PUT"]},
+      {"resource": "/v1/interco/transfer-prices", "methods": ["POST"]}
     ]},
     "intercompany.plan": {"permissions": [{"resource": "/v1/interco/planning-groups:sequence", "methods": ["POST"]}]},
     "intercompany.post": {"permissions": [
@@ -1697,6 +1705,7 @@
       {"resource": "/v1/interco/journals:preview", "methods": ["POST"]}
     ]},
     "intercompany.reconcile": {"permissions": [
+      {"resource": "/v1/interco/reconciliations/items/*/fx-adjust", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations/items/*/resolve", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations/run", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations:classify", "methods": ["POST"]}
@@ -1705,15 +1714,19 @@
       {"resource": "/v1/interco/chains:preview", "methods": ["POST"]},
       {"resource": "/v1/interco/charges", "methods": ["GET"]},
       {"resource": "/v1/interco/charges/*", "methods": ["GET"]},
+      {"resource": "/v1/interco/entities", "methods": ["GET"]},
       {"resource": "/v1/interco/journals", "methods": ["GET"]},
       {"resource": "/v1/interco/journals/*", "methods": ["GET"]},
+      {"resource": "/v1/interco/matrix", "methods": ["GET"]},
       {"resource": "/v1/interco/reconciliations", "methods": ["GET"]},
       {"resource": "/v1/interco/reconciliations/*", "methods": ["GET"]},
       {"resource": "/v1/interco/partners", "methods": ["GET"]},
       {"resource": "/v1/interco/partners/*", "methods": ["GET"]},
       {"resource": "/v1/interco/partners/*/changes:evaluate", "methods": ["POST"]},
       {"resource": "/v1/interco/partners/*/lines:price", "methods": ["POST"]},
-      {"resource": "/v1/interco/transfer-pricing/evidence:export", "methods": ["POST"]}
+      {"resource": "/v1/interco/settings", "methods": ["GET"]},
+      {"resource": "/v1/interco/transfer-pricing/evidence:export", "methods": ["POST"]},
+      {"resource": "/v1/interco/transfer-prices", "methods": ["GET"]}
     ]},
     "receivables.interest.post": {"permissions": [
       {"resource": "/v1/receivables/interest-notes:calculate", "methods": ["POST"]},
@@ -2323,6 +2336,7 @@
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*/scenarios/*:spread", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/scenarios/*:generate", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:import", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/stage-owners", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*:submit", "methods": ["POST"]}
     ]},
@@ -2353,6 +2367,7 @@
       {"resource": "/v1/budget/plans", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["GET"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:export", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*/scenarios:compare", "methods": ["GET"]},
       {"resource": "/v1/budget/available", "methods": ["GET"]},
       {"resource": "/v1/budget/checks", "methods": ["GET"]},
@@ -3894,8 +3909,17 @@
     "platform.global.admin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {
-    "consolidation": {"ledger": ["ledger.balance.read"]},
-    "intercompany": {"ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup"]},
+    "consolidation": {
+      "ledger": ["ledger.balance.read"],
+      "fx": ["fx.rate.lookup"],
+      "org": ["org.read"]
+    },
+    "intercompany": {
+      "ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup", "ledger.balance.read"],
+      "fx": ["fx.rate.lookup"],
+      "org": ["org.read"],
+      "tax": ["tax.tax.calculate", "tax.transaction.record"]
+    },
     "finreport": {"ledger": ["ledger.entry.lookup", "ledger.balance.read"]},
     "billing": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
@@ -3945,7 +3969,11 @@
       "engineering": ["engineering.read"]
     },
     "budgeting": {
-      "ledger": ["ledger.balance.read"]
+      "ledger": ["ledger.balance.read"],
+      "assets": ["assets.asset.view"],
+      "hr": ["hr.org.inquire"],
+      "projects": ["projects.inquire"],
+      "planning": ["planning.read"]
     },
     "costing": {
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]

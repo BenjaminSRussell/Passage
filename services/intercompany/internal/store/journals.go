@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -85,7 +86,7 @@ func scanJournal(row pgx.Row) (domain.JournalRecord, error) {
 }
 
 func loadEntries(ctx context.Context, tx pgx.Tx, tenantID, journalID string) ([]domain.PostedEntry, error) {
-	rows, err := tx.Query(ctx, `select entity, legal_entity_id::text, ledger_id, currency, legs, coalesce(ledger_entry_id, ''), coalesce(reversal_entry_id, '')
+	rows, err := tx.Query(ctx, `select entity, legal_entity_id::text, ledger_id, currency, legs, coalesce(ledger_entry_id, ''), coalesce(reversal_entry_id, ''), posted_on, shifted_from
 		from ic_journal_entry where tenant_id = $1 and journal_id = $2::uuid order by seq`, tenantID, journalID)
 	if err != nil {
 		return nil, err
@@ -95,8 +96,15 @@ func loadEntries(ctx context.Context, tx pgx.Tx, tenantID, journalID string) ([]
 	for rows.Next() {
 		var e domain.PostedEntry
 		var legs []byte
-		if err := rows.Scan(&e.Entity, &e.Target.LegalEntityID, &e.Target.LedgerID, &e.Currency, &legs, &e.LedgerEntryID, &e.ReversalEntryID); err != nil {
+		var postedOn, shiftedFrom *time.Time
+		if err := rows.Scan(&e.Entity, &e.Target.LegalEntityID, &e.Target.LedgerID, &e.Currency, &legs, &e.LedgerEntryID, &e.ReversalEntryID, &postedOn, &shiftedFrom); err != nil {
 			return nil, err
+		}
+		if postedOn != nil {
+			e.PostedOn = *postedOn
+		}
+		if shiftedFrom != nil {
+			e.ShiftedFrom = *shiftedFrom
 		}
 		if e.Legs, err = decodeLegs(e.Entity, e.Currency, legs); err != nil {
 			return nil, err
@@ -104,6 +112,14 @@ func loadEntries(ctx context.Context, tx pgx.Tx, tenantID, journalID string) ([]
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// nullDate is the date as the text Postgres reads, or nil for the zero time.
+func nullDate(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t.Format(time.DateOnly)
 }
 
 func errPostingNotFound(id string) error {
@@ -176,7 +192,7 @@ func readJournal(ctx context.Context, tx pgx.Tx, tenantID, id string) (domain.Jo
 
 // RecordEntry notes the ledger entry an entity's side made, or the entry that
 // reversed it. Recording the same id twice is harmless.
-func (s *Postgres) RecordEntry(ctx context.Context, journalID, entity, ledgerEntryID string, reversal bool) error {
+func (s *Postgres) RecordEntry(ctx context.Context, journalID, entity, ledgerEntryID string, reversal bool, postedOn, shiftedFrom time.Time) error {
 	pr, _, err := principalOf(ctx)
 	if err != nil {
 		return err
@@ -186,7 +202,14 @@ func (s *Postgres) RecordEntry(ctx context.Context, journalID, entity, ledgerEnt
 		column = "reversal_entry_id"
 	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `update ic_journal_entry set `+column+` = $4 where tenant_id = $1 and journal_id = $2::uuid and entity = $3`, pr.TenantID, journalID, entity, ledgerEntryID)
+		query := `update ic_journal_entry set ` + column + ` = $4 where tenant_id = $1 and journal_id = $2::uuid and entity = $3`
+		args := []any{pr.TenantID, journalID, entity, ledgerEntryID}
+		if !reversal {
+			// The date a side went in on belongs to the entry; a compensation's own date is in the ledger.
+			query = `update ic_journal_entry set ledger_entry_id = $4, posted_on = $5::date, shifted_from = $6::date where tenant_id = $1 and journal_id = $2::uuid and entity = $3`
+			args = append(args, nullDate(postedOn), nullDate(shiftedFrom))
+		}
+		tag, err := tx.Exec(ctx, query, args...)
 		if err != nil {
 			return err
 		}

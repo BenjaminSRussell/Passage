@@ -8,6 +8,13 @@ resources:
 serviceMonitor: { enabled: false }
 # The general ledger the prior-year-actuals spreading helper reads; unset, that helper answers 503 BUD-0054.
 ledgerUrl: ""
+# The services a plan is generated from (FR-38.14): the fixed asset register (depreciation schedules), HR (positions), projects
+# (forecast models) and planning (demand forecast). Each needs serviceIdentity.signingKeySecret, and budgeting's public key in that
+# service's serviceIdentity.publicKeys. A source whose URL is unset answers 503 BUD-0063.
+assetsUrl: ""
+hrUrl: ""
+projectsUrl: ""
+planningUrl: ""
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""

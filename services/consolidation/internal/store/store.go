@@ -147,7 +147,7 @@ func insertRun(ctx context.Context, tx pgx.Tx, tenantID, createdBy string, in do
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::numeric, $13, nullif($14, '')::uuid)
 		returning `+runColumns,
 		tenantID, id, in.GroupID, in.Period, in.Currency, version, StatusCompleted, hash, raw,
-		len(in.Units), len(res.Entries), res.CTA.String(), createdBy, collectionID))
+		len(in.Units)+len(in.Associates), len(res.Entries), res.CTA.String(), createdBy, collectionID))
 	if err != nil {
 		return RunRecord{}, err
 	}
@@ -172,6 +172,9 @@ func insertRun(ctx context.Context, tx pgx.Tx, tenantID, createdBy string, in do
 		}
 	}
 	if err := results.Close(); err != nil {
+		return RunRecord{}, err
+	}
+	if err := insertInvestments(ctx, tx, tenantID, id, res.Investments); err != nil {
 		return RunRecord{}, err
 	}
 	evt, err := events.New(coevents.RunCompleted, coevents.Source, rec.ID, tenantID, coevents.RunCompletedData{
@@ -369,6 +372,9 @@ func idempotent[T any](ctx context.Context, tx pgx.Tx, tenantID, key, hash strin
 }
 
 func wrap(op string, err error) error {
+	if err == nil {
+		return nil
+	}
 	var de *domain.Error
 	if errors.As(err, &de) {
 		return de

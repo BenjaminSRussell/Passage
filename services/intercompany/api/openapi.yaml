@@ -842,6 +842,210 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/reconciliations/items/{id}/fx-adjust:
+    post:
+      operationId: adjustIntercompanyFxDifference
+      summary: Book the FX difference of an open pair to the entity's FX-difference account
+      description: >-
+        For an open item whose two sides are in different currencies, the entity that holds the due-from side moves its balance to the
+        other side's converted amount against its FX-difference account, in its own currency, on the last day of the period. A
+        ledger that refuses the date because its period is closed is asked for the first day of the next period (only close may post
+        into a closed period); the entry's text says so. The item is resolved with a note naming the ledger entry. A second call
+        returns the stored adjustment. A Timing item, or a difference larger than settings fxAdjustMaxPct of the larger side, is refused (IC-0858, IC-0861): a missing or wrong entry needs a correcting entry. IC-0857 when the entity has no FX-difference account, IC-0858 when the item has no FX
+        difference, IC-0852 when the item is not open, IC-0845 when the ledger refuses the entry, IC-0846 when it does not answer.
+      x-passage-duty: intercompany.reconcile
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/PartnerID'
+      responses:
+        '200':
+          description: The adjustment and the ledger entry it made
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FxAdjustment' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/entities:
+    get:
+      operationId: listIntercompanyEntities
+      summary: List the entity registry
+      description: Each entity code with its legal entity, ledger, currency, country, FX-difference account and tax accounts; only the entities in the caller's legal entity scope.
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      responses:
+        '200':
+          description: The registry
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Entity' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/entities/{entity}:
+    put:
+      operationId: putIntercompanyEntity
+      summary: Store the registry entry of an entity code
+      description: The caller must be in the legal entity's scope (403 AUTH-0003). Postings, charges and the ledger reconciliation take the legal entity and ledger of an entity from here when the request sends none.
+      x-passage-duty: intercompany.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - { name: entity, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Entity' }
+      responses:
+        '200':
+          description: The stored entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Entity' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/matrix:
+    get:
+      operationId: getIntercompanyMatrix
+      summary: Read the stored IC accounting matrix
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      responses:
+        '200':
+          description: The matrix rows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoredMatrix' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: putIntercompanyMatrix
+      summary: Replace the IC accounting matrix
+      description: One row per ordered pair, naming registered entities only (IC-0853); the caller must see every entity of the registry (403 AUTH-0003).
+      x-passage-duty: intercompany.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StoredMatrix' }
+      responses:
+        '200':
+          description: The stored matrix
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoredMatrix' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/transfer-prices:
+    get:
+      operationId: listIntercompanyTransferPrices
+      summary: List the stored transfer prices
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - { name: lender, in: query, schema: { type: string } }
+        - { name: borrower, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Prices, the newest effective date first within each lender, borrower, category and role
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/StoredTransferPrice' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: addIntercompanyTransferPrice
+      summary: Store an effective-dated transfer price
+      description: Prices are never edited; the next one takes over from its own date (BR-40.12). A price for the same lender, borrower, category and role on the same date is 409 IC-0854. A charge that sends no transferPrices is priced from these.
+      x-passage-duty: intercompany.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StoredTransferPrice' }
+      responses:
+        '201':
+          description: The stored price
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoredTransferPrice' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/interco/settings:
+    get:
+      operationId: getIntercompanySettings
+      summary: Read the tenant's charge and reconciliation settings
+      x-passage-duty: intercompany.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      responses:
+        '200':
+          description: The settings, or the defaults when none were stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: putIntercompanySettings
+      summary: Store the tenant's charge and reconciliation settings
+      description: chargeSettlementMode Journal posts a charge to both entities, Invoice hands it to the pairing's invoice documents and posts nothing here. crossBorderTax makes a charge between two countries carry the tax the tax service works out. reconCurrency switches the scheduled reconciliation on.
+      x-passage-duty: intercompany.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Settings' }
+      responses:
+        '200':
+          description: The stored settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     TenantHeader:
@@ -882,6 +1086,74 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    Entity:
+      type: object
+      required: [legalEntityId, ledgerId, currency]
+      properties:
+        entity: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        ledgerId: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        country: { type: string, pattern: '^[A-Z]{2}$', description: Two entities in different countries make a charge between them cross-border }
+        fxDifferenceAccount: { type: string }
+        outputTaxAccount: { type: string }
+        inputTaxAccount: { type: string }
+        taxGroup: { type: string }
+    StoredMatrix:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            required: [entityA, entityB, dueFrom, dueTo]
+            properties:
+              entityA: { type: string }
+              entityB: { type: string }
+              dueFrom: { type: string, description: Receivable account in entity A }
+              dueTo: { type: string, description: Payable account in entity B }
+    StoredTransferPrice:
+      type: object
+      required: [lendingEntity, borrowingEntity, category, method, currency, effectiveFrom]
+      properties:
+        id: { type: string, format: uuid }
+        lendingEntity: { type: string }
+        borrowingEntity: { type: string }
+        category: { type: string, enum: [Expense, Hour, Item, Fee] }
+        resourceRole: { type: string }
+        method: { type: string, enum: [Cost, CostPlus, Table] }
+        markupPct: { type: string }
+        unitPrice: { type: string }
+        currency: { type: string }
+        effectiveFrom: { type: string, format: date }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    Settings:
+      type: object
+      required: [chargeSettlementMode]
+      properties:
+        chargeSettlementMode: { type: string, enum: [Journal, Invoice] }
+        crossBorderTax: { type: boolean }
+        reconCurrency: { type: string, description: Empty switches the scheduled reconciliation off }
+        fxTolerancePct: { type: string, description: 0 to 5 }
+        fxAdjustMaxPct: { type: string, description: 'The most, in percent of the larger side of a pair, that an FX adjustment may book (0 to 10, default 2); a larger difference is IC-0861 and needs a correcting entry' }
+    FxAdjustment:
+      type: object
+      required: [id, itemId, entity, currency, amount, direction, account, fxAccount, ledgerEntryId, postedOn, periodEnd]
+      properties:
+        id: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        entity: { type: string }
+        currency: { type: string }
+        amount: { type: string }
+        direction: { type: string, enum: [increase, decrease], description: Whether the due-from balance went up or down }
+        account: { type: string }
+        fxAccount: { type: string }
+        ledgerEntryId: { type: string }
+        postedOn: { type: string, format: date, description: The first open period when the period end was closed }
+        periodEnd: { type: string, format: date }
     EntityTarget:
       type: object
       required: [entity, legalEntityId, ledgerId]
@@ -957,7 +1229,11 @@ components:
         quantity: { type: string }
         unitCost: { type: string }
         currency: { type: string }
-        status: { type: string, enum: [pending, posted, compensated, suspense] }
+        status: { type: string, enum: [pending, posted, compensated, suspense, invoice_requested], description: invoice_requested is Invoice settlement mode; the charge was handed to the pairing's invoice documents (event chargeinvoice.requested) and nothing was posted here }
+        settlementMode: { type: string, enum: [Journal, Invoice] }
+        tax: { type: string, description: Cross-border tax the charge carries; absent when none applies }
+        taxCode: { type: string }
+        taxRecorded: { type: boolean, description: The tax service has the transaction; a repeat of the request tries again }
         transferPriceMethod: { type: string }
         cost: { type: string }
         price: { type: string }
@@ -968,10 +1244,20 @@ components:
         createdAt: { type: string, format: date-time }
     ReconRunRequest:
       type: object
-      required: [period, currency, items]
+      required: [period, currency]
       properties:
         period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
+        source:
+          type: string
+          enum: [request, ledger]
+          default: request
+          description: >-
+            ledger reads the pair amounts instead of taking items: for each pair of the stored matrix the closing balance of the due-from
+            account in the first entity's ledger and of the due-to account in the second's, up to the period, and what each booked in the
+            next period, converted to currency at the fx rate tables' closing rate. items must be empty. IC-0853 for an entity that is
+            not in the registry, IC-0805 for a pair that is not in the matrix, IC-0859 when a rate is missing, IC-0846 when a ledger does
+            not answer.
         fxTolerancePct: { type: string, description: Decimal from 0 to 5, default '0.5' }
         items:
           type: array
@@ -1001,6 +1287,7 @@ components:
         mismatch: { type: integer }
         open: { type: integer, description: Items still to resolve }
         blocking: { type: boolean, description: True while the run holds a Mismatch }
+        source: { type: string, enum: [request, ledger], description: Where the pair amounts came from }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
     ReconItem:

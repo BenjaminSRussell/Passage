@@ -18,6 +18,9 @@ type Statement struct {
 	OpeningNetAssets decimal.Decimal
 	NetIncome        decimal.Decimal
 	ClosingNetAssets decimal.Decimal
+	// Dividends is what the unit declared to its shareholders in the year (unit currency): it left the net assets at the average
+	// rate, so it is not part of the translation difference.
+	Dividends decimal.Decimal
 }
 
 // Translated is a statement in group currency plus the CTA that closes it.
@@ -59,6 +62,7 @@ type UnitTranslation struct {
 	Currency         string
 	OpeningNetAssets decimal.Decimal
 	NetIncome        decimal.Decimal
+	Dividends        decimal.Decimal
 	ClosingNetAssets decimal.Decimal
 	CTA              decimal.Decimal
 	NCIShareOfCTA    decimal.Decimal
@@ -67,7 +71,7 @@ type UnitTranslation struct {
 
 // TranslateUnit translates one unit's statement into group currency. Each
 // translated amount rounds once; the CTA is derived from the rounded amounts,
-// so opening + net income + CTA equals closing exactly. The NCI share of the
+// so opening + net income - dividends + CTA equals closing exactly. The NCI share of the
 // CTA rounds once and the group share takes the remainder, so the two add up
 // to the CTA.
 func TranslateUnit(s Statement, r Rates, ownershipPct decimal.Decimal, currency string) (UnitTranslation, error) {
@@ -82,12 +86,14 @@ func TranslateUnit(s Statement, r Rates, ownershipPct decimal.Decimal, currency 
 	open := round(s.OpeningNetAssets.Mul(r.Opening), currency)
 	income := round(s.NetIncome.Mul(r.Average), currency)
 	closing := round(s.ClosingNetAssets.Mul(r.Closing), currency)
-	cta := closing.Sub(open.Add(income))
+	dividends := round(s.Dividends.Mul(r.Average), currency)
+	cta := closing.Sub(open.Add(income).Sub(dividends))
 	nci := round(NCIShare(cta, ownershipPct), currency)
 	return UnitTranslation{
 		Currency:         currency,
 		OpeningNetAssets: open,
 		NetIncome:        income,
+		Dividends:        dividends,
 		ClosingNetAssets: closing,
 		CTA:              cta,
 		NCIShareOfCTA:    nci,

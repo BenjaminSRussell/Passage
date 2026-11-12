@@ -41,6 +41,14 @@ spec:
 {{- if .Values.ledgerUrl }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
 {{- end }}
+{{- if .Values.fxUrl }}
+            - { name: FX_URL, value: {{ .Values.fxUrl | quote }} }
+            - { name: FX_AVERAGE_RATE_TYPE, value: {{ .Values.fxAverageRateType | quote }} }
+            - { name: FX_CLOSING_RATE_TYPE, value: {{ .Values.fxClosingRateType | quote }} }
+{{- end }}
+{{- if .Values.orgUrl }}
+            - { name: ORG_URL, value: {{ .Values.orgUrl | quote }} }
+{{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key

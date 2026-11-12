@@ -22,9 +22,11 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/fxclient"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/orgclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/domain"
 )
@@ -54,6 +56,10 @@ type API struct {
 	runs                 RunStore
 	groups               GroupStore
 	ledger               LedgerBalances
+	rates                fxclient.Rater
+	averageType          string
+	closingType          string
+	fiscal               *orgclient.Years
 	collections          atomic.Int64
 	runsCompleted        atomic.Int64
 	eliminationPreviews  atomic.Int64
@@ -98,6 +104,10 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/consol/groups/{id}/units/{unitId}/ownership", DutyConfigure, a.addOwnership},
 		{http.MethodPut, "/v1/consol/groups/{id}/units/{unitId}/terms", DutyConfigure, a.setUnitTerms},
 		{http.MethodGet, "/v1/consol/groups/{id}/unit-terms", DutyView, a.listUnitTerms},
+		{http.MethodPut, "/v1/consol/groups/{id}/units/{unitId}/layers/{period}", DutyConfigure, a.setLayers},
+		{http.MethodGet, "/v1/consol/groups/{id}/layers/{period}", DutyView, a.listLayers},
+		{http.MethodGet, "/v1/consol/groups/{id}/investments", DutyView, a.listGroupInvestments},
+		{http.MethodGet, "/v1/consol/runs/{id}/investments", DutyView, a.getRunInvestments},
 		{http.MethodGet, "/v1/consol/groups/{id}/account-map/versions", DutyView, a.listMappingVersions},
 		{http.MethodPut, "/v1/consol/groups/{id}/account-map", DutyConfigure, a.setMapping},
 		{http.MethodGet, "/v1/consol/groups/{id}/account-map", DutyView, a.getMapping},

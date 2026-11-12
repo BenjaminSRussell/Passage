@@ -13,6 +13,22 @@
 - name: LEDGER_URL
   value: {{ .Values.ledgerUrl | quote }}
 {{- end }}
+{{- if .Values.assetsUrl }}
+- name: ASSETS_URL
+  value: {{ .Values.assetsUrl | quote }}
+{{- end }}
+{{- if .Values.hrUrl }}
+- name: HR_URL
+  value: {{ .Values.hrUrl | quote }}
+{{- end }}
+{{- if .Values.projectsUrl }}
+- name: PROJECTS_URL
+  value: {{ .Values.projectsUrl | quote }}
+{{- end }}
+{{- if .Values.planningUrl }}
+- name: PLANNING_URL
+  value: {{ .Values.planningUrl | quote }}
+{{- end }}
 {{- if .Values.serviceIdentity.publicKeys }}
 - name: PASSAGE_SERVICE_PUBLIC_KEYS
   value: {{ .Values.serviceIdentity.publicKeys | quote }}
