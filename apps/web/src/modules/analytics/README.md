@@ -35,8 +35,8 @@ Wave 46 (PSG-46), slices 1 to 4. Screens over `services/analytics/api/openapi.ya
 
 No new npm dependencies.
 
-Not yet: tile values, sparklines and the freshness badge (they need Cube
-execution), embedding the dashboard host in other workspaces, running a plan
+Dashboard tiles show their values (`GET /v1/analytics/dashboards/{id}/values`) and refresh on the
+dashboard's interval; a tile says why when it has no value. Not yet: sparklines and the freshness badge, embedding the dashboard host in other workspaces, running a plan
 for rows, saved views, downloading an export file, "run now", the process
 variant explorer, pipeline health and the document designer (see
 `services/analytics/NOT-IMPLEMENTED.md`).

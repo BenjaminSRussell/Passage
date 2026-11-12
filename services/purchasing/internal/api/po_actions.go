@@ -17,6 +17,9 @@ import (
 // dutyPurchaseOrderConfirm covers :confirm and the PO approval tasks (PRD 3.17.17).
 const dutyPurchaseOrderConfirm = "procurement.purchase-order.confirm"
 
+// dutyPurchaseOrderVendorConfirm is the service-only duty of a trusted integration relaying a vendor's acceptance: :confirm only.
+const dutyPurchaseOrderVendorConfirm = "procurement.purchase-order.vendor-confirm"
+
 // poActionDuty is the duty a PO custom method needs (PRD 3.17.17): approving,
 // rejecting and confirming are procurement.purchase-order.confirm; submit and cancel are
 // maintenance.
@@ -197,7 +200,9 @@ func (a *API) orderAction(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, httpx.NewProblem(http.StatusNotFound, codeUnknownAction, "unknown purchase order action"))
 		return
 	}
-	if duty := poActionDuty(action); !p.HasDuty(duty) {
+	// A service that only relays the partner's acceptance (edi) holds procurement.purchase-order.vendor-confirm, which opens :confirm and
+	// nothing else: not :approve, :reject, the reprice apply or the acknowledgement decisions.
+	if duty := poActionDuty(action); !p.HasDuty(duty) && !(action == domain.POActionConfirm && p.HasDuty(dutyPurchaseOrderVendorConfirm)) {
 		fail(w, r, httpx.NewProblem(http.StatusForbidden, codeScope, "missing duty "+duty))
 		return
 	}

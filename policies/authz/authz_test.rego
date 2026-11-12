@@ -763,7 +763,8 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 		"fulfillment": ["fulfillment.shipment.read"],
 		"billing": ["billing.invoice.read"],
 		"sales": ["sales.order.lookup", "sales.channel.intake"],
-		"purchasing": ["procurement.requisition.create"],
+		"purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
+		"receiving": ["receiving.asn.maintain"],
 	}
 	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
@@ -2576,8 +2577,8 @@ test_dev_seed_every_user_reads_features_but_cannot_change_them if {
 	not dev_seed_decision("clerk", "PUT", "/v1/tenant/features").allow
 }
 
-test_processmfg_service_grant_reads_features_only if {
-	data.service_grants.processmfg == {"identity": ["identity.feature.view"]}
+test_processmfg_service_grant_reads_features_and_creates_recipes if {
+	data.service_grants.processmfg == {"identity": ["identity.feature.view"], "shopfloor": ["shopfloor.controlrecipe.create"]}
 	allowed("identity.feature.view", "GET", "/v1/tenant/features")
 	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
 	not allowed("identity.feature.view", "GET", "/v1/tenants")
@@ -2664,11 +2665,22 @@ test_edi_b2b_routes_belong_to_their_duties if {
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/self-billing")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/punchout")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml/outbound")
+	allowed("edi.admin", "GET", "/edi/v1/partners/p1/cxml/outbound")
+	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/cxml/outbound")
+	allowed("edi.operate", "POST", "/edi/v1/partners/p1/cxml:send")
+	not allowed("edi.einvoice.operate", "POST", "/edi/v1/partners/p1/cxml:send")
 	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/auto-outbound")
 	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices")
 	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
 	allowed("edi.einvoice.operate", "PUT", "/edi/v1/einvoice/parties/SELLER/s1")
 	not allowed("edi.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
+	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices/e1:validate")
+	allowed("edi.einvoice.operate", "GET", "/edi/v1/einvoice/invoices/e1/facturx.pdf")
+	allowed("edi.einvoice.operate", "GET", "/edi/v1/einvoice/mandates")
+	allowed("edi.einvoice.operate", "PUT", "/edi/v1/einvoice/mandates/c1/PEPPOL")
+	allowed("edi.einvoice.operate", "DELETE", "/edi/v1/einvoice/mandates/c1/PEPPOL")
+	not allowed("edi.operate", "PUT", "/edi/v1/einvoice/mandates/c1/PEPPOL")
 	allowed("edi.requisition.create", "POST", "/edi/v1/punchout/sessions")
 	allowed("edi.requisition.create", "POST", "/edi/v1/punchout/sessions/s1:create-requisition")
 	not allowed("edi.self-billing.reconcile", "POST", "/edi/v1/punchout/sessions")
@@ -2677,8 +2689,30 @@ test_edi_b2b_routes_belong_to_their_duties if {
 	not allowed("edi.operate", "POST", "/edi/v1/self-billing/disputes/d1:resolve")
 }
 
+test_edi_cxml_grants_are_narrow if {
+	data.service_grants.edi.receiving == ["receiving.asn.maintain"]
+	data.service_principals["edi-cxml"] == ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"]
+	every duty in ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"] {
+		data.duties[duty].service_only
+	}
+	allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:confirm")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:approve")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:reject")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders:reprice")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/acknowledgements/a1:approve")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/acknowledgements/a1:decline")
+	allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders/o1")
+	not allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders")
+	not allowed("procurement.purchase-order.lookup", "POST", "/v1/procurement/purchase-orders/o1:confirm")
+	# edi's grants and principal hold none of the duties that approve, reject or reprice.
+	every duty in ["procurement.purchase-order.confirm", "procurement.purchase-order.inquire", "procurement.purchase-order.maintain"] {
+		not duty in data.service_grants.edi.purchasing
+		not duty in data.service_principals["edi-cxml"]
+	}
+}
+
 test_edi_requisition_grant_is_the_requester_duty_only if {
-	data.service_grants.edi.purchasing == ["procurement.requisition.create"]
+	"procurement.requisition.create" in data.service_grants.edi.purchasing
 	not allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r1:approve")
 }
 
@@ -2784,11 +2818,102 @@ test_print_queue_management_is_admin_only if {
 	not allowed("print.job.submit", "POST", "/print/v1/jobs:sweep")
 }
 
+test_analytics_view_executes_queries_and_reads_tile_values if {
+	allowed("analytics.view", "POST", "/v1/analytics/query:execute")
+	allowed("analytics.view", "GET", "/v1/analytics/dashboards/controller_kpis/values")
+	not allowed("analytics.author", "POST", "/v1/analytics/query:execute")
+	not allowed("analytics.export", "GET", "/v1/analytics/dashboards/controller_kpis/values")
+	not allowed("analytics.view", "PUT", "/v1/analytics/dashboards/controller_kpis/values")
+}
+
+test_print_docgen_reads_and_admin_writes if {
+	allowed("print.job.submit", "GET", "/print/v1/document-templates")
+	allowed("print.job.submit", "GET", "/print/v1/document-templates/INV-STD")
+	allowed("print.job.submit", "GET", "/print/v1/text-blocks")
+	allowed("print.job.submit", "GET", "/print/v1/output-rules")
+	allowed("print.job.submit", "GET", "/print/v1/output-plan")
+	allowed("print.admin", "PUT", "/print/v1/document-templates/INV-STD")
+	allowed("print.admin", "PUT", "/print/v1/text-blocks/PAY-TERMS/de")
+	allowed("print.admin", "POST", "/print/v1/output-rules")
+	allowed("print.admin", "DELETE", "/print/v1/output-rules/r-1")
+	not allowed("print.job.submit", "PUT", "/print/v1/document-templates/INV-STD")
+	not allowed("print.job.submit", "PUT", "/print/v1/text-blocks/PAY-TERMS/de")
+	not allowed("print.job.submit", "POST", "/print/v1/output-rules")
+	not allowed("print.job.submit", "DELETE", "/print/v1/output-rules/r-1")
+	not allowed("print.document.render", "GET", "/print/v1/output-plan")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}
+
 test_receiving_document_flow_is_read_only_and_separate if {
 	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
+}
+
+# The shopfloor sweeper reads the registry of active tenants and nothing else of identity (#25).
+test_shopfloor_service_grant_reads_the_tenant_registry_only if {
+	data.service_grants.shopfloor == {"identity": ["identity.tenant-registry.read"]}
+	allowed("identity.tenant-registry.read", "GET", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "POST", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "PATCH", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "GET", "/v1/tenants/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("identity.tenant-registry.read", "GET", "/v1/legal-entities")
+}
+
+# A released batch order may create control recipes and nothing else of the shop floor (#25).
+test_processmfg_may_create_control_recipes_only if {
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes")
+	not allowed("shopfloor.controlrecipe.create", "GET", "/v1/shopfloor/edge-nodes/e1/control-recipes")
+	not allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/edge-nodes/e1/control-recipes/r1:report")
+}
+
+# Recipe targets and the control recipe of a released batch order (#25): the targets are set with the formula
+# duty, read with the batch order read duty, and sending the recipe again needs the batch order write duty.
+test_recipe_target_duties if {
+	allowed("production.formula.write", "PUT", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("production.formula.write", "DELETE", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("production.batch-order.read", "PUT", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("production.batch-order.read", "GET", "/v1/production/recipe-targets")
+	allowed("production.batch-order.read", "GET", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/control-recipe")
+	allowed("production.batch-order.write", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
+	not allowed("production.batch-order.read", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
+}
+
+# The PI sheet designer (#25, FR-25.16): designing and releasing needs the maintain duty, reading the view duty, and a
+# control recipe made from a released sheet the control recipe create duty.
+test_pi_sheet_duties if {
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.pisheet.maintain", "PUT", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:release")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:new-version")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:obsolete")
+	not allowed("shopfloor.pisheet.maintain", "GET", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/pi-sheets")
+	not allowed("shopfloor.view", "PUT", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
+	not allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
+}
+
+# RFID ingest and warehouse automation (#32): readers and the PLC connector hold their own duties, people read, and
+# a supervisor gives transport work to a PLC.
+test_warehouse_rfid_and_automation_duties if {
+	allowed("warehouse.rfid.ingest", "POST", "/v1/warehouse/rfid-reads:ingest")
+	not allowed("warehouse.rfid.ingest", "GET", "/v1/warehouse/rfid-reads")
+	not allowed("warehouse.inquiry.view", "POST", "/v1/warehouse/rfid-reads:ingest")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/rfid-reads")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.automation.execute", "GET", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:report")
+	allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/events")
+	not allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/transport-orders")
+	not allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/events")
+	allowed("warehouse.setup.maintain", "PUT", "/v1/warehouse/gs1-settings")
+	allowed("warehouse.setup.view", "GET", "/v1/warehouse/gs1-settings")
+	not allowed("warehouse.setup.view", "PUT", "/v1/warehouse/gs1-settings")
 }
 
 test_consolidation_unit_edit_terms_and_mapping_versions_follow_configure_and_view if {

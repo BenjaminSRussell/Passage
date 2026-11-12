@@ -664,3 +664,96 @@ export function matchSelfBilling(input: SelfBillMatch): Promise<SelfBillResult> 
 export function buildPeppolInvoice(invoice: unknown): Promise<UblBuildResult> {
   return postJson<UblBuildResult>("/peppol/invoices:build", invoice);
 }
+
+// ---- E-invoices (35-2) ----
+
+export type EInvoiceStatus = "VALID" | "INVALID" | "SUBMITTING" | "SUBMITTED" | "ACCEPTED" | "REJECTED";
+export const EINVOICE_STATUSES: readonly EInvoiceStatus[] = ["VALID", "INVALID", "SUBMITTING", "SUBMITTED", "ACCEPTED", "REJECTED"];
+export type EInvoiceMandate = "PEPPOL" | "IT_SDI" | "MX_CFDI" | "FACTURX";
+export const EINVOICE_MANDATES: readonly EInvoiceMandate[] = ["PEPPOL", "IT_SDI", "MX_CFDI", "FACTURX"];
+
+export interface EInvoice {
+  id: string;
+  legalEntityId: string;
+  invoiceId: string;
+  /** The billing invoice number. */
+  number: string;
+  mandate: EInvoiceMandate;
+  format: string;
+  documentType: "INVOICE" | "CREDIT_NOTE";
+  status: EInvoiceStatus;
+  /** The document; the list leaves it out. */
+  xml?: string;
+  issues: Issue[];
+  reference?: string;
+  responseText?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listEInvoices(filter: { status?: EInvoiceStatus | ""; mandate?: EInvoiceMandate | "" } = {}, signal?: AbortSignal): Promise<EInvoice[]> {
+  return items<EInvoice>(`/einvoice/invoices${query({ status: filter.status, mandate: filter.mandate, limit: 200 })}`, signal);
+}
+
+export function getEInvoice(id: string, signal?: AbortSignal): Promise<EInvoice> {
+  return send<EInvoice>(`/einvoice/invoices/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Hands a VALID or rejected e-invoice to the access point; a second call while it is being submitted is refused. */
+export function submitEInvoice(id: string): Promise<EInvoice> {
+  return send<EInvoice>(`/einvoice/invoices/${encodeURIComponent(id)}:submit`, { method: "POST" });
+}
+
+/** Records the network's answer to a submitted e-invoice. */
+export function recordEInvoiceResponse(id: string, answer: { outcome: "ACCEPTED" | "REJECTED"; reference?: string; reason?: string }): Promise<EInvoice> {
+  return postJson<EInvoice>(`/einvoice/invoices/${encodeURIComponent(id)}:response`, answer);
+}
+
+export interface EInvoiceRuleCheck {
+  valid: boolean;
+  issues: Issue[];
+  rules: string;
+}
+
+/** Runs the Peppol rule subset on the stored document. */
+export function validateEInvoice(id: string): Promise<EInvoiceRuleCheck> {
+  return send<EInvoiceRuleCheck>(`/einvoice/invoices/${encodeURIComponent(id)}:validate`, { method: "POST" });
+}
+
+/** Where the Factur-X PDF of an e-invoice is downloaded from. */
+export const facturXPdfPath = (id: string): string => `${base}/einvoice/invoices/${encodeURIComponent(id)}/facturx.pdf`;
+
+// ---- Self-billing disputes (35-5) ----
+
+export type DisputeStatus = "OPEN" | "ACCEPTED" | "REJECTED";
+export const DISPUTE_STATUSES: readonly DisputeStatus[] = ["OPEN", "ACCEPTED", "REJECTED"];
+
+export interface SelfBillDispute {
+  id: string;
+  partnerId: string;
+  kind: string;
+  code: string;
+  documentId?: string;
+  line?: string;
+  shipmentId?: string;
+  detail: string;
+  status: DisputeStatus;
+  resolution?: string;
+  resolvedAt?: string;
+  createdAt: string;
+}
+
+export function listSelfBillDisputes(filter: { status?: DisputeStatus | ""; partnerId?: string } = {}, signal?: AbortSignal): Promise<SelfBillDispute[]> {
+  return items<SelfBillDispute>(`/self-billing/disputes${query({ status: filter.status, partnerId: filter.partnerId, limit: 200 })}`, signal);
+}
+
+/** Decides a dispute: ACCEPTED takes the customer's figures, REJECTED keeps ours; the note is kept with the decision. */
+export function resolveSelfBillDispute(id: string, decision: "ACCEPTED" | "REJECTED", note: string): Promise<SelfBillDispute> {
+  return postJson<SelfBillDispute>(`/self-billing/disputes/${encodeURIComponent(id)}:resolve`, { decision, note });
+}
+
+/** Matches the pending self-billed documents and opens the unbilled disputes now, as the scheduled sweep does. */
+export function runSelfBillSweep(): Promise<{ reconciled: number; unbilled: SelfBillDispute[] }> {
+  return send<{ reconciled: number; unbilled: SelfBillDispute[] }>("/self-billing:sweep", { method: "POST" });
+}

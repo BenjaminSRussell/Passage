@@ -1,5 +1,12 @@
 import { devices, expect, test, type Page } from "@playwright/test";
 
+// The device can show more than one status line at once (a queued confirmation and a pallet label saved offline), so a status is
+// matched by its exact text rather than by being the only one.
+function statusWith(scope: Page, text: string) {
+  const exact = new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+  return scope.getByRole("status").filter({ hasText: exact });
+}
+
 /** GS1-128 labels from the ASN fixture vectors used by the designer simulator. */
 const SSCC = "]C100340123456789012340";
 const GTIN = "]C10109501234567891";
@@ -80,7 +87,7 @@ test.describe("AC1 inbound-to-outbound GS1-128 on an emulated device", () => {
     await scan(page, LOCATION);
     await expect(page.getByText("Confirm put-away")).toBeVisible();
     await page.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByRole("status")).toHaveText("Confirmation queued.");
+    await expect(statusWith(page, "Confirmation queued.")).toBeVisible();
     await page.getByRole("button", { name: "Menu" }).click();
 
     await page.getByRole("button", { name: "pick", exact: true }).click();
@@ -94,7 +101,7 @@ test.describe("AC1 inbound-to-outbound GS1-128 on an emulated device", () => {
     await page.getByRole("button", { name: "full" }).click();
     await expect(page.getByText("Confirm pick")).toBeVisible();
     await page.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByRole("status")).toHaveText("Confirmation queued.");
+    await expect(statusWith(page, "Confirmation queued.")).toBeVisible();
     await page.getByRole("button", { name: "Menu" }).click();
 
     await page.getByRole("button", { name: "pack" }).click();
@@ -106,7 +113,7 @@ test.describe("AC1 inbound-to-outbound GS1-128 on an emulated device", () => {
     await enterValue(page, "4");
     await expect(page.getByText("Confirm the pack")).toBeVisible();
     await page.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByRole("status")).toHaveText("Confirmation queued.");
+    await expect(statusWith(page, "Confirmation queued.")).toBeVisible();
     await page.getByRole("button", { name: "Menu" }).click();
 
     await page.getByRole("button", { name: "ship" }).click();
@@ -114,11 +121,11 @@ test.describe("AC1 inbound-to-outbound GS1-128 on an emulated device", () => {
     await scan(page, SSCC);
     await expect(page.getByText("Confirm the shipment")).toBeVisible();
     await page.getByRole("button", { name: "Confirm" }).click();
-    await expect(page.getByRole("status")).toHaveText("Confirmation queued.");
+    await expect(statusWith(page, "Confirmation queued.")).toBeVisible();
     await expect(page.getByText("4 queued, 496 left")).toBeVisible();
 
     await page.getByRole("button", { name: "Sync 4 queued" }).click();
-    await expect(page.getByRole("status")).toHaveText("Synced 4; 0 waiting (drained).");
+    await expect(statusWith(page, "Synced 4; 0 waiting (drained).")).toBeVisible();
     await expect(page.getByText("0 queued, 500 left")).toBeVisible();
 
     const replayed = await replaysFor(page, "e2e-ac1");
@@ -176,9 +183,9 @@ test.describe("AC4 flow designer publish reaches the device", () => {
       await scan(device, LOT_LABEL);
       await expect(device.getByText("Confirm put-away")).toBeVisible();
       await device.getByRole("button", { name: "Confirm" }).click();
-      await expect(device.getByRole("status")).toHaveText("Confirmation queued.");
+      await expect(statusWith(device, "Confirmation queued.")).toBeVisible();
       await device.getByRole("button", { name: "Sync 1 queued" }).click();
-      await expect(device.getByRole("status")).toHaveText("Synced 1; 0 waiting (drained).");
+      await expect(statusWith(device, "Synced 1; 0 waiting (drained).")).toBeVisible();
       const [lotTx] = await replaysFor(device, "e2e-ac4");
       expect(lotTx.payload.flowCode).toBe("RECEIVE_PUTAWAY");
       expect(lotTx.payload.fields.confirm_lot).toMatchObject({ "01": "09501234567891", "10": "LOT42", "21": "SER" });

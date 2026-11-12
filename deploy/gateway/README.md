@@ -34,6 +34,14 @@ The edi chart's NetworkPolicy admits only the Envoy proxies of `passage-as2` (na
 
 Operations: point DNS for `as2.<env>.passage.dev` at the load balancer address of the `passage-as2` Envoy Service (its own address, not passage-api's). In dev the certificate comes from the local CA, which partners do not trust; for stage and prod set the hostname (`as2.stage.passage.dev`, `as2.prod.passage.dev`, like the hello-ledger hosts) and issue the certificate from a publicly trusted issuer (ACME), or give partners the CA to pin. Partners that allow-list our address need the AS2 Envoy Service's address. The edge has no allow-list of partner addresses: the signature is the authentication.
 
+## Plant edge for iot-edge connectors (#25)
+
+iot-edge connectors redeem a one-time enrollment token without a session and then call the shop floor service with the mTLS client certificate they were issued, so they come in through a third Gateway, `passage-edge` (`edge-gateway.yaml`, `edge-certificate.yaml`, `edge-clienttrafficpolicy.yaml`, `edge-httproute.yaml`), outside the JWT SecurityPolicy:
+
+- The listener (`edge-https`, 443, hostname `edge.<env>.passage.dev`) asks for a client certificate but does not require one (`clientValidation.optional`): a connector with no certificate yet may call only `POST /v1/shopfloor/edge-nodes/{id}:enroll`, whose body token is its credential. A certificate that is presented must chain to the edge CA in Secret `passage-edge-ca-trust` (key `ca.crt`, the CA certificate of the shop floor chart's `edgePki` issuer).
+- Envoy forwards the verified certificate's subject in `X-Forwarded-Client-Cert` (`SanitizeSet`: built from the verified certificate, a client-sent value is dropped). The shop floor service reads the common name `edge:<node id>`, finds the node's tenant (`edge_node_tenant`, migration shopfloor/0026), and treats the call as that connector with the one connector duty; it still matches the name to the node's bound `connectorSubject`. A request that already carries a tenant is left alone.
+- The only route, `shopfloor-edge`, exposes what a connector calls (`:enroll`, `:renew-certificate`, `:heartbeat`, `GET .../config`, `GET .../control-recipes`, `POST .../control-recipes/{rid}:report` and `POST /v1/shopfloor/machine-events`) and nothing else of the shop floor service; `test_gateway.py` checks the matches against the paths the service serves and the connector calls. Enforcement against a live Envoy is #213, and a rate limit on the public redeem route is open.
+
 ## Dev JWKS and claim contract
 
 `passage-dev-jwks` holds a static placeholder public key (kid `passage-dev-placeholder`); no private key is kept, so nothing can mint accepted tokens until #80 supplies an IdP. To switch to the IdP, replace `localJWKS` in the SecurityPolicy provider with `remoteJWKS: {uri: https://<idp>/realms/<realm>/protocol/openid-connect/certs}` and set `issuer` to the realm URL. Realm-per-tenant needs one provider per realm.

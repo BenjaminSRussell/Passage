@@ -173,3 +173,46 @@ func TestSweepConfig_Validation(t *testing.T) {
 		t.Error("2 hour auto clock-out accepted")
 	}
 }
+
+type fakeRegistry struct {
+	lists [][]string
+	err   error
+	calls int
+}
+
+func (f *fakeRegistry) Tenants(context.Context) ([]string, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.lists[min(f.calls-1, len(f.lists)-1)], nil
+}
+
+// The tenants swept are the configured ones plus the registry's, each once; while the registry is down the
+// last list it gave is used, and with no list at all there is nothing to sweep (an error, not an empty run).
+func TestSweeperTenantsFromTheRegistry(t *testing.T) {
+	reg := &fakeRegistry{lists: [][]string{{sweepTenantA, sweepTenantB}}}
+	sw, err := (&API{}).NewSweeper(SweepConfig{Registry: reg, AndonEvery: time.Minute, AutoClockAfterHour: 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := sw.Tenants(context.Background())
+	if err != nil || len(got) != 2 {
+		t.Fatalf("registry only: %v, %v", got, err)
+	}
+	reg.err = errors.New("identity is down")
+	if got, err = sw.Tenants(context.Background()); err != nil || len(got) != 2 {
+		t.Fatalf("registry down after a good read: %v, %v", got, err)
+	}
+	cold, _ := (&API{}).NewSweeper(SweepConfig{Registry: &fakeRegistry{err: errors.New("down")}, AndonEvery: time.Minute, AutoClockAfterHour: 12})
+	if _, err := cold.Tenants(context.Background()); err == nil {
+		t.Fatal("a registry that never answered must be an error")
+	}
+	if failed := cold.RunJob(context.Background(), JobAndon); failed != 1 {
+		t.Fatalf("RunJob with no tenants known: %d failures", failed)
+	}
+	mixed, _ := (&API{}).NewSweeper(SweepConfig{TenantIDs: []string{sweepTenantA}, Registry: &fakeRegistry{lists: [][]string{{sweepTenantA, sweepTenantB}}}, AndonEvery: time.Minute, AutoClockAfterHour: 12})
+	if got, _ := mixed.Tenants(context.Background()); len(got) != 2 || got[0] != sweepTenantA || got[1] != sweepTenantB {
+		t.Fatalf("configured plus registry, de-duplicated: %v", got)
+	}
+}

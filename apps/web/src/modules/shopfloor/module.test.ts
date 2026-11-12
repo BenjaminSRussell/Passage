@@ -78,6 +78,10 @@ describe("shopfloor module", () => {
       "/shopfloor/edge-nodes/:id",
       "/shopfloor/control-recipes",
       "/shopfloor/control-recipes/:id",
+      "/shopfloor/pi-sheets",
+      "/shopfloor/pi-sheets/new",
+      "/shopfloor/pi-sheets/:id",
+      "/shopfloor/kiosk/pi/:id",
       "/shopfloor/process-messages",
       "/shopfloor/process-messages/new",
       "/shopfloor/process-messages/:id",
@@ -104,6 +108,7 @@ describe("shopfloor module", () => {
       { label: "OEE", to: "/shopfloor/oee", duty: "shopfloor.view" },
       { label: "Edge fleet", to: "/shopfloor/edge-nodes", duty: "shopfloor.view" },
       { label: "Control recipes", to: "/shopfloor/control-recipes", duty: "shopfloor.view" },
+      { label: "PI sheets", to: "/shopfloor/pi-sheets", duty: "shopfloor.view" },
       { label: "Process messages", to: "/shopfloor/process-messages", duty: "shopfloor.view" },
       { label: "Process categories", to: "/shopfloor/process-categories", duty: "shopfloor.view" },
     ]);

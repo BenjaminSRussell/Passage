@@ -17,6 +17,14 @@ type CXMLLine struct {
 	Item      string `json:"item,omitempty"`
 	UnitPrice string `json:"unitPrice,omitempty"`
 	Status    string `json:"status,omitempty"`
+	// Statuses is every ConfirmationStatus of a confirmation item (an item may be split: part accepted, part backordered); Status is the first.
+	Statuses []CXMLStatus `json:"statuses,omitempty"`
+}
+
+// CXMLStatus is one ConfirmationStatus of a confirmation item: its type (accept, reject, detail, backordered, ...) and quantity.
+type CXMLStatus struct {
+	Type     string `json:"type"`
+	Quantity string `json:"quantity,omitempty"`
 }
 
 // CXMLCanonical is the canonical form the message monitor and the consumers read for a document from a cXML network (#35, 35-4).
@@ -176,8 +184,14 @@ func MapCXMLDocument(raw []byte, env CXMLEnvelope) (CXMLCanonical, error) {
 		out.Number, out.Purpose, out.Date = h.Attr["confirmID"], h.Attr["type"], h.Attr["noticeDate"]
 		for _, it := range doc.all("ConfirmationItem") {
 			l := CXMLLine{Line: it.Attr["lineNumber"], Quantity: it.Attr["quantity"], Unit: it.text("UnitOfMeasure")}
-			if st := it.child("ConfirmationStatus"); st != nil {
-				l.Status = st.Attr["type"]
+			for _, st := range it.Children {
+				if st.Name != "ConfirmationStatus" {
+					continue
+				}
+				if l.Status == "" {
+					l.Status = st.Attr["type"]
+				}
+				l.Statuses = append(l.Statuses, CXMLStatus{Type: st.Attr["type"], Quantity: st.Attr["quantity"]})
 			}
 			out.Lines = append(out.Lines, l)
 		}

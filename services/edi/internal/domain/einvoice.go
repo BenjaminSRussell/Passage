@@ -21,8 +21,6 @@ const (
 	CodeMandateHook = "EINV-0150"
 	// CodeBillingTotal is the EINV code for an e-invoice whose payable differs from the billing invoice's gross.
 	CodeBillingTotal = "EINV-0112"
-	// CodeMixedRates is the EINV code for an invoice that cannot be mapped to one VAT rate.
-	CodeMixedRates = "EINV-0113"
 )
 
 // Mandate renders an invoice for one mandate. Build returns the document, or the blocking issues and no document.
@@ -34,9 +32,19 @@ type Mandate interface {
 
 type peppolMandate struct{}
 
-func (peppolMandate) Code() string                           { return MandatePeppol }
-func (peppolMandate) Format() string                         { return "UBL21" }
-func (peppolMandate) Build(inv UBLInvoice) (string, []Issue) { return BuildUBL(inv) }
+func (peppolMandate) Code() string   { return MandatePeppol }
+func (peppolMandate) Format() string { return "UBL21" }
+func (peppolMandate) Build(inv UBLInvoice) (string, []Issue) {
+	doc, issues := BuildUBL(inv)
+	if len(issues) > 0 {
+		return doc, issues
+	}
+	// The rule subset runs on the document as it will be stored and sent (CheckPeppolRules).
+	if rules := CheckPeppolRules(doc); len(rules) > 0 {
+		return "", rules
+	}
+	return doc, nil
+}
 
 // HookMandate is a mandate whose document is produced by a generator a country pack installs (FatturaPA for IT_SDI, CFDI 4.0 for
 // MX_CFDI). The generator receives the same canonical invoice the Peppol builder does.
@@ -59,13 +67,14 @@ func (h HookMandate) Build(inv UBLInvoice) (string, []Issue) {
 // Mandates is the registry the service builds with.
 type Mandates map[string]Mandate
 
-// DefaultMandates has Peppol built and the Italian and Mexican mandates as hooks without a generator. Pass the generators a country
+// DefaultMandates has Peppol and Factur-X (the CII XML; the PDF is built on demand) built and the Italian and Mexican mandates as hooks without a generator. Pass the generators a country
 // pack provides to replace the hooks.
 func DefaultMandates(extra ...Mandate) Mandates {
 	m := Mandates{
-		MandatePeppol: peppolMandate{},
-		MandateITSDI:  HookMandate{MandateCode: MandateITSDI, MandateFormat: "FATTURAPA"},
-		MandateMXCFDI: HookMandate{MandateCode: MandateMXCFDI, MandateFormat: "CFDI40"},
+		MandatePeppol:  peppolMandate{},
+		MandateITSDI:   HookMandate{MandateCode: MandateITSDI, MandateFormat: "FATTURAPA"},
+		MandateMXCFDI:  HookMandate{MandateCode: MandateMXCFDI, MandateFormat: "CFDI40"},
+		MandateFacturX: facturxMandate{},
 	}
 	for _, e := range extra {
 		m[e.Code()] = e
@@ -74,9 +83,9 @@ func DefaultMandates(extra ...Mandate) Mandates {
 }
 
 // EInvoiceFromBilling maps a posted billing invoice or credit note to the canonical UBL invoice. Billing carries net amounts and
-// tax amounts per line, not rates, so the VAT rate is derived: tax over net, rounded to two decimals, one rate for the whole
-// invoice (an invoice whose lines imply different rates is refused with EINV-0113). Line discounts become one document allowance
-// and header charges one document charge, both at that rate, so quantity times unit price stays the line extension. Lines are named
+// tax amounts per line, not rates, so the VAT rate is derived: tax over net per line (several rates per invoice are carried as one VAT
+// breakdown per rate). Line discounts become one document allowance per rate and header charges one document charge at the rate
+// billing's tax total implies, so quantity times unit price stays the line extension. Lines are named
 // by their billing description and carry unit C62 (billing has no unit of measure per line). orderRef is the customer's PO from the
 // sales order, when there is one; the buyer's own reference (buyerRef) is the fallback Peppol requires. The seller's IBAN and payment means code come from its profile.
 func EInvoiceFromBilling(inv SourceInvoice, orderRef, buyerRef, iban, paymentMeans string, seller, buyer UBLParty) (UBLInvoice, []Issue) {
@@ -93,28 +102,23 @@ func EInvoiceFromBilling(inv SourceInvoice, orderRef, buyerRef, iban, paymentMea
 		return UBLInvoice{}, issues
 	}
 	netTotal := decimal.Zero
-	for _, l := range inv.Lines {
+	lineTax := decimal.Zero
+	rates := make([]decimal.Decimal, len(inv.Lines))
+	for i, l := range inv.Lines {
 		netTotal = netTotal.Add(l.Net)
+		lineTax = lineTax.Add(l.Tax)
+		rates[i] = lineRate(l.Net, l.Tax)
 	}
-	base := netTotal.Add(inv.Totals.Charges)
-	percent := decimal.Zero
-	if base.IsPositive() {
-		percent = inv.Totals.Tax.Div(base).Mul(hundred).Round(2)
+	// The VAT on header charges is what billing's tax total holds beyond its lines' tax.
+	chargeRate := decimal.Zero
+	if inv.Totals.Charges.IsPositive() {
+		chargeRate = lineRate(inv.Totals.Charges, inv.Totals.Tax.Sub(lineTax))
 	}
-	category := "S"
-	if percent.IsZero() {
-		category = "Z"
-	}
-	for _, l := range inv.Lines {
-		if l.Net.IsPositive() {
-			lineRate := l.Tax.Div(l.Net).Mul(hundred).Round(2)
-			if lineRate.Sub(percent).Abs().GreaterThan(decimal.RequireFromString("0.1")) {
-				reject(CodeMixedRates, "line %d implies VAT %s%% but the invoice %s%%; billing carries no rate per line, so mixed rates cannot be mapped", l.LineNo, lineRate, percent)
-			}
+	category := func(r decimal.Decimal) string {
+		if r.IsZero() {
+			return "Z"
 		}
-	}
-	if len(issues) > 0 {
-		return UBLInvoice{}, issues
+		return "S"
 	}
 	out := UBLInvoice{
 		CreditNote: inv.Type == "CREDIT_NOTE", ID: inv.Number, IssueDate: inv.InvoiceDate, DueDate: inv.DueDate, Currency: inv.Currency,
@@ -125,21 +129,29 @@ func EInvoiceFromBilling(inv SourceInvoice, orderRef, buyerRef, iban, paymentMea
 			out.DueDate = d.AddDate(0, 0, inv.PaymentTermDays).Format("2006-01-02")
 		}
 	}
-	extension := decimal.Zero
-	for _, l := range inv.Lines {
+	// A line discount is lowered at the line's own rate, so each rate has its own document allowance.
+	discounts := map[string]decimal.Decimal{}
+	var order []decimal.Decimal
+	for i, l := range inv.Lines {
 		name := l.Description
 		if name == "" {
 			name = "Invoice line " + strconv.Itoa(l.LineNo)
 		}
 		out.Lines = append(out.Lines, UBLLine{ID: strconv.Itoa(l.LineNo), Name: name, UnitCode: "C62", Quantity: l.Qty, UnitPrice: l.UnitPrice,
-			Category: category, Percent: percent})
-		extension = extension.Add(l.Qty.Mul(l.UnitPrice).Round(2))
+			Category: category(rates[i]), Percent: rates[i]})
+		if d := l.Qty.Mul(l.UnitPrice).Round(2).Sub(l.Net); d.IsPositive() {
+			k := rates[i].String()
+			if _, seen := discounts[k]; !seen {
+				order = append(order, rates[i])
+			}
+			discounts[k] = discounts[k].Add(d)
+		}
 	}
-	if discount := extension.Sub(netTotal); discount.IsPositive() {
-		out.AllowanceCharges = append(out.AllowanceCharges, UBLAllowanceCharge{Reason: "Discount", Amount: discount, Category: category, Percent: percent})
+	for _, r := range order {
+		out.AllowanceCharges = append(out.AllowanceCharges, UBLAllowanceCharge{Reason: "Discount", Amount: discounts[r.String()], Category: category(r), Percent: r})
 	}
 	if inv.Totals.Charges.IsPositive() {
-		out.AllowanceCharges = append(out.AllowanceCharges, UBLAllowanceCharge{Charge: true, Reason: "Charges", Amount: inv.Totals.Charges, Category: category, Percent: percent})
+		out.AllowanceCharges = append(out.AllowanceCharges, UBLAllowanceCharge{Charge: true, Reason: "Charges", Amount: inv.Totals.Charges, Category: category(chargeRate), Percent: chargeRate})
 	}
 	if t := ComputeUBLTotals(out); t.Payable.Sub(inv.Totals.Gross).Abs().GreaterThan(decimal.RequireFromString("0.02")) {
 		reject(CodeBillingTotal, "the e-invoice payable %s differs from billing's gross %s for %s", t.Payable.StringFixed(2), inv.Totals.Gross.StringFixed(2), inv.Number)
@@ -155,4 +167,21 @@ func ValidateInvoiceStatus(inv SourceInvoice) (bool, error) {
 		return true, nil
 	}
 	return false, fmt.Errorf("%w: invoice %s is %s, not posted", ErrSourceNotReady, inv.Number, inv.Status)
+}
+
+// lineRate derives the VAT rate of an amount from its tax: the tax over the net, taken to the nearest half percent and then the nearest
+// tenth of a percent, and only when that rate reproduces the tax to the cent exactly (so 3.33 net with 0.63 tax is 19%, not 18.92%,
+// while 10.00 net with 0.21 tax is 2.1%, never 2%); otherwise the ratio rounded to two decimals.
+func lineRate(net, tax decimal.Decimal) decimal.Decimal {
+	if !net.IsPositive() || !tax.IsPositive() {
+		return decimal.Zero
+	}
+	raw := tax.Div(net).Mul(hundred)
+	two, ten := decimal.NewFromInt(2), decimal.NewFromInt(10)
+	for _, candidate := range []decimal.Decimal{raw.Mul(two).Round(0).Div(two), raw.Mul(ten).Round(0).Div(ten)} {
+		if net.Mul(candidate).Div(hundred).Round(2).Equal(tax) {
+			return candidate
+		}
+	}
+	return raw.Round(2)
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -182,6 +183,9 @@ var errStoredPayload = store.ErrUnreadable
 // is only unique inside a group), stays FAILED with the reason. An EDIFACT
 // interchange is reprocessed by edifactReprocessPlan.
 func reprocessPlan(raw string, failed []store.Message) ([]store.Message, error) {
+	if strings.HasPrefix(strings.TrimSpace(raw), "<") {
+		return cxmlReprocessPlan(raw, failed)
+	}
 	if domain.DetectSyntax([]byte(raw)) == domain.SyntaxEdifact {
 		return edifactReprocessPlan(raw, failed)
 	}
@@ -213,6 +217,35 @@ func reprocessPlan(raw string, failed []store.Message) ([]store.Message, error) 
 			next.Status, next.Canonical, next.Error = res.status, res.canonical, res.errText
 		default:
 			next.Error = fmt.Sprintf("transaction set %s ST02 %s occurs in more than one group; reprocess cannot tell them apart", m.TransactionSet, m.STControl)
+		}
+		out = append(out, next)
+	}
+	return out, nil
+}
+
+// cxmlReprocessPlan is reprocessPlan for a cXML payload (#35, 35-4): the one document of the payload is mapped again, so a failed
+// message whose document now maps (the mapping was fixed, or the document was edited by a support tool) becomes MAPPED and is put
+// onto purchasing or receiving by :post. A message whose document type is no longer the payload's stays FAILED with the reason.
+func cxmlReprocessPlan(raw string, failed []store.Message) ([]store.Message, error) {
+	env, err := domain.ParseCXML([]byte(raw))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errStoredPayload, err)
+	}
+	out := make([]store.Message, 0, len(failed))
+	for _, m := range failed {
+		next := store.Message{ID: m.ID, TransactionSet: m.TransactionSet, STControl: m.STControl, Status: "FAILED"}
+		if m.TransactionSet != env.DocType {
+			next.Error = fmt.Sprintf("document %s is not in the stored payload (it holds a %s)", m.TransactionSet, env.DocType)
+			out = append(out, next)
+			continue
+		}
+		canonical, mapErr := domain.MapCXMLDocument([]byte(raw), env)
+		if mapErr != nil {
+			next.Error = CodeSyntax + ": " + mapErr.Error()
+		} else if next.Canonical, err = json.Marshal(canonical); err != nil {
+			return nil, err
+		} else {
+			next.Status = "MAPPED"
 		}
 		out = append(out, next)
 	}

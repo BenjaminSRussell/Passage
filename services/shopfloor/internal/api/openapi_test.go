@@ -152,6 +152,14 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/workers/{id}:reactivate post":                               DutySetup,
 		"/v1/shopfloor/jobs/{id}:reopen post":                                      DutyJobReopen,
 		"/v1/shopfloor/jobs/{id}/reopenings get":                                   DutyView,
+		"/v1/shopfloor/pi-sheets post":                                             DutyPISheetMaintain,
+		"/v1/shopfloor/pi-sheets get":                                              DutyView,
+		"/v1/shopfloor/pi-sheets/{id} get":                                         DutyView,
+		"/v1/shopfloor/pi-sheets/{id} put":                                         DutyPISheetMaintain,
+		"/v1/shopfloor/pi-sheets/{id}:release post":                                DutyPISheetMaintain,
+		"/v1/shopfloor/pi-sheets/{id}:new-version post":                            DutyPISheetMaintain,
+		"/v1/shopfloor/pi-sheets/{id}:obsolete post":                               DutyPISheetMaintain,
+		"/v1/shopfloor/control-recipes:from-pi-sheet post":                         DutyControlRecipeCreate,
 	}
 	keyed := map[string]bool{
 		"/v1/shopfloor/workers post":                                               true,
@@ -182,6 +190,7 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/workers/{id}:deactivate post":                               true,
 		"/v1/shopfloor/workers/{id}:reactivate post":                               true,
 		"/v1/shopfloor/jobs/{id}:reopen post":                                      true,
+		"/v1/shopfloor/control-recipes:from-pi-sheet post":                         true,
 	}
 	for op := range served {
 		d, ok := declared[op]

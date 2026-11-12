@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/api"
+	"github.com/BenjaminSRussell/passage/services/processmfg/internal/shopfloor"
 	"github.com/BenjaminSRussell/passage/services/processmfg/internal/store"
 	"github.com/BenjaminSRussell/passage/services/processmfg/migrations"
 )
@@ -61,16 +62,27 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if getenv("PASSAGE_ENV") == "dev" {
 		h.WithReauth(api.DevReauth{})
 	}
-	if identityURL := getenv("IDENTITY_URL"); identityURL != "" {
+	identityURL, shopfloorURL := getenv("IDENTITY_URL"), getenv("SHOPFLOOR_URL")
+	if identityURL != "" || shopfloorURL != "" {
 		signer, err := tenant.ServiceSignerFromEnv(getenv)
 		if err != nil {
 			return err
 		}
 		if signer == nil {
-			return errors.New("IDENTITY_URL needs a service signing key (PASSAGE_SERVICE_NAME and PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
+			return errors.New("IDENTITY_URL and SHOPFLOOR_URL need a service signing key (PASSAGE_SERVICE_NAME and PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE)")
 		}
-		source := features.NewCache(features.NewHTTPSource(identityURL, nil, signer), features.DefaultTTL)
-		h.WithFeatureGate(features.Require(source, "process-manufacturing"))
+		if identityURL != "" {
+			source := features.NewCache(features.NewHTTPSource(identityURL, nil, signer), features.DefaultTTL)
+			h.WithFeatureGate(features.Require(source, "process-manufacturing"))
+		}
+		if shopfloorURL != "" {
+			// Releasing a batch order generates its control recipe in the shop floor service (#25).
+			client, err := shopfloor.New(shopfloorURL, signer, nil)
+			if err != nil {
+				return err
+			}
+			h.WithShopfloor(client)
+		}
 	}
 	h.Register(router)
 	addr := getenv("HTTP_ADDR")

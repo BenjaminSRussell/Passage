@@ -68,6 +68,10 @@ spec:
             - name: EDI_PURCHASING_URL
               value: {{ .Values.sources.purchasingUrl | quote }}
             {{- end }}
+            {{- if .Values.sources.receivingUrl }}
+            - name: EDI_RECEIVING_URL
+              value: {{ .Values.sources.receivingUrl | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.allowBodyOutbound }}
             - name: EDI_ALLOW_BODY_OUTBOUND
@@ -84,6 +88,8 @@ spec:
               value: {{ .Values.transports.intervalSeconds | quote }}
             - name: EDI_AS2_MDN_TIMEOUT_MINUTES
               value: {{ .Values.transports.mdnTimeoutMinutes | quote }}
+            - name: EDI_SELFBILL_SWEEP_MINUTES
+              value: {{ .Values.transports.selfBillSweepMinutes | quote }}
             {{- end }}
             {{- if .Values.transports.as2.enabled }}
             - name: EDI_AS2_ADDR
