@@ -733,10 +733,15 @@ paths:
       operationId: ingestRFIDReads
       summary: Post the reads of an RFID reader or portal (FR-32.9)
       description: >
-        Up to 500 reads. Each EPC (24 hexadecimal characters, 96 bits) is decoded: SGTIN-96, SSCC-96, SGLN-96,
-        GRAI-96, GIAI-96, GSRN-96 and GDTI-96. A read that cannot be decoded is listed in `rejected` with its position
-        (WMS-EPC-INVALID) and the rest are stored. A tag read again at the same reader within five seconds is counted
-        in `duplicates`. A tag that is an SSCC the warehouse labelled names its receipt and pallet.
+        Up to 500 reads. Each EPC is decoded: the 96-bit SGTIN, SSCC, SGLN, GRAI, GIAI, GSRN, GSRNP, GDTI and GID (24
+        hexadecimal characters), and SGTIN-198, SGLN-195, GRAI-170, GDTI-174 and GIAI-202 with their alphanumeric
+        serial (up to 52 characters, padded to a 16-bit word with zero bits). A read that cannot be decoded is listed in
+        `rejected` with its position (WMS-EPC-INVALID) and the rest are stored. A tag read again at the same reader
+        within five seconds is counted in `duplicates`. A tag that is an SSCC the warehouse labelled names its receipt
+        and pallet. A stored read then runs the rules of its reader (`/v1/warehouse/rfid-rules`): RECEIVE_PALLET
+        receives the expected ASN pallet with that SSCC at its announced quantity, CONFIRM_PUTAWAY confirms the open
+        put-away of that pallet bound for the rule's location. Each read lists what its rules did in `actions`
+        (DONE, SKIPPED or REFUSED with the reason); a refusal does not stop the batch.
       x-passage-duty: warehouse.rfid.ingest
       requestBody:
         required: true
@@ -759,7 +764,7 @@ paths:
                       readerId: { type: string, minLength: 1, maxLength: 64 }
                       antenna: { type: integer, minimum: 0, maximum: 255 }
                       locationCode: { type: string, maxLength: 60 }
-                      epc: { type: string, pattern: "^[0-9A-Fa-f]{24}$" }
+                      epc: { type: string, pattern: "^[0-9A-Fa-f]{24,64}$" }
                       rssi: { type: integer, minimum: -200, maximum: 0 }
                       readAt: { type: string, format: date-time }
       responses:
@@ -861,6 +866,93 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { description: WMS-AUTO-ORDER-NOT-FOUND }
         "409": { description: WMS-AUTO-ORDER-STATE }
+  /v1/warehouse/automation/transport-orders/{id}:cancel:
+    post:
+      operationId: cancelTransportOrder
+      summary: Cancel an automation order that has not arrived; its work goes back to people
+      description: >
+        A PENDING, REFUSED, FAULT or DIVERTED order is cancelled at once. A SENT order is in the PLC's hands: clear the
+        move on the PLC first and send `plcCleared: true`, else 409 WMS-AUTO-ORDER-STATE. An ARRIVED order is done (409).
+        Cancelling a cancelled order changes nothing. The work line notes the reason, and a work still ASSIGNED to the
+        station with no other live order there returns to OPEN.
+      x-passage-duty: warehouse.work.supervise
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 200 }
+                plcCleared: { type: boolean, description: A person has made sure the PLC no longer holds the move. }
+      responses:
+        "200":
+          description: The cancelled order.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutomationOrder" } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: WMS-AUTO-ORDER-NOT-FOUND }
+        "409": { description: WMS-AUTO-ORDER-STATE }
+  /v1/warehouse/rfid-rules:
+    get:
+      operationId: listRFIDRules
+      summary: What a read at each reader does (FR-32.9)
+      x-passage-duty: warehouse.setup.view
+      parameters:
+        - { name: readerId, in: query, required: false, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: The rules.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/RFIDRule" } } } } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createRFIDRule
+      summary: Say what a read at a reader (or one antenna of it) does
+      description: >
+        RECEIVE_PALLET (a dock-door portal) receives the expected ASN pallet whose SSCC or license plate was read, at the
+        quantity the ASN announced, as `rfid:<reader>`; `warehouseId` limits it to one warehouse's receipts.
+        CONFIRM_PUTAWAY (a reader at a location) confirms the open put-away line of the pallet that was read, when the
+        line is bound for `locationCode` (the read's own location code when left out): an OPEN work is taken by
+        `rfid:<reader>`, a work a person holds is confirmed for that person. A reader (antenna) has at most one rule per
+        action: 409 WMS-RFID-RULE-EXISTS.
+      x-passage-duty: warehouse.setup.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [readerId, action]
+              properties:
+                readerId: { type: string, minLength: 1, maxLength: 64 }
+                antenna: { type: integer, minimum: 0, maximum: 255, description: Left out for every antenna of the reader. }
+                action: { type: string, enum: [RECEIVE_PALLET, CONFIRM_PUTAWAY] }
+                warehouseId: { type: string, format: uuid }
+                locationCode: { type: string, maxLength: 60 }
+      responses:
+        "201":
+          description: The rule.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RFIDRule" } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: WMS-RFID-RULE-EXISTS }
+  /v1/warehouse/rfid-rules/{id}:
+    delete:
+      operationId: deleteRFIDRule
+      summary: Remove an RFID rule; reads already acted on keep what was done
+      x-passage-duty: warehouse.setup.maintain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Removed. }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: WMS-RFID-RULE-NOT-FOUND }
   /v1/warehouse/automation/events:
     post:
       operationId: ingestAutomationEvents
@@ -1032,6 +1124,32 @@ components:
               epc: { type: object, additionalProperties: true }
               receiptId: { type: string, format: uuid }
               lineNo: { type: integer }
+              actions:
+                type: array
+                description: What the reader's rules did with the read.
+                items:
+                  type: object
+                  required: [ruleId, action, outcome]
+                  properties:
+                    ruleId: { type: string, format: uuid }
+                    action: { type: string, enum: [RECEIVE_PALLET, CONFIRM_PUTAWAY] }
+                    outcome: { type: string, enum: [DONE, SKIPPED, REFUSED] }
+                    detail: { type: string }
+                    receiptId: { type: string, format: uuid }
+                    lineNo: { type: integer }
+                    workId: { type: string, format: uuid }
+    RFIDRule:
+      type: object
+      required: [id, readerId, action, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        readerId: { type: string }
+        antenna: { type: integer }
+        action: { type: string, enum: [RECEIVE_PALLET, CONFIRM_PUTAWAY] }
+        warehouseId: { type: string, format: uuid }
+        locationCode: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
     AutomationOrder:
       type: object
       required: [id, workId, lineNo, station, loadUnit, fromLocation, toLocation, priority, status, createdBy, createdAt]

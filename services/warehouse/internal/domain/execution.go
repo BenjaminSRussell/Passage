@@ -266,6 +266,37 @@ func (w *Work) Assign(user string, at time.Time) error {
 	return nil
 }
 
+// Release hands an ASSIGNED work back to the queue (BR-31.3 ASSIGNED -> OPEN) for its assignee user, as an idle
+// work returns after the lock timeout: a PLC station that faulted or diverted the load gives its work back to people.
+// A work with a confirmed line is IN_PROGRESS and cannot go back.
+func (w *Work) Release(user string) error {
+	if w.AssignedUser != user {
+		return ErrNotAssignee
+	}
+	if err := CheckTransition(w.Status, WorkOpen, w.confirmedCount()); err != nil {
+		return err
+	}
+	w.Status = WorkOpen
+	w.AssignedUser, w.AssignedAt = "", nil
+	return nil
+}
+
+// NoteLine records why an open line is waiting (a PLC fault, a divert, a cancelled automation order), for the person who
+// picks the work up. A settled line keeps its reason.
+func (w *Work) NoteLine(n int, reason string) error {
+	i, err := w.lineIndex(n)
+	if err != nil {
+		return err
+	}
+	if w.Lines[i].Status == LineOpen {
+		if len(reason) > 200 {
+			reason = reason[:200]
+		}
+		w.Lines[i].Reason = reason
+	}
+	return nil
+}
+
 // requireExecutable checks the work can take line movements by user: it is
 // ASSIGNED or IN_PROGRESS, and user is its assignee.
 func (w *Work) requireExecutable(user string) error {

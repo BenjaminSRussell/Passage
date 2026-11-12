@@ -43,6 +43,10 @@ func (a *API) registerAutomation(r chi.Router) {
 	r.With(authz.Require(anyDuty{dutyInquiry, dutyAutomation}, dutyInquiry+" or "+dutyAutomation, "")).Get("/v1/warehouse/automation/transport-orders", a.listTransportOrders)
 	r.With(authz.RequireDuty(dutyAutomation)).Post("/v1/warehouse/automation/transport-orders/{id}:report", a.reportTransportOrder)
 	r.With(authz.RequireDuty(dutyAutomation)).Post("/v1/warehouse/automation/events", a.ingestAutomationEvents)
+	r.With(authz.RequireDuty(dutyWorkSupervise)).Post("/v1/warehouse/automation/transport-orders/{id}:cancel", a.cancelTransportOrder)
+	r.With(authz.RequireDuty(dutySetupView)).Get("/v1/warehouse/rfid-rules", a.listRFIDRules)
+	r.With(authz.RequireDuty(dutySetupMaintain)).Post("/v1/warehouse/rfid-rules", a.createRFIDRule)
+	r.With(authz.RequireDuty(dutySetupMaintain)).Delete("/v1/warehouse/rfid-rules/{id}", a.deleteRFIDRule)
 }
 
 type rfidReadInput struct {
@@ -309,15 +313,125 @@ func (a *API) ingestAutomationEvents(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
+type orderCancelInput struct {
+	Reason     string `json:"reason"`
+	PLCCleared bool   `json:"plcCleared"`
+}
+
+// cancelTransportOrder cancels an automation order that has not arrived; its work goes back to people.
+func (a *API) cancelTransportOrder(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var in orderCancelInput
+	if err := httpx.Decode(r, &in); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeAutoOrderNotFound, "automation order not found"))
+		return
+	}
+	fields := map[string]string{}
+	reason := strings.TrimSpace(in.Reason)
+	if reason == "" || len(reason) > 200 {
+		fields["reason"] = "is required, at most 200 characters"
+	}
+	who := user(r, fields)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	out, err := a.st.CancelAutomationOrder(r.Context(), store.CancelInput{ID: strings.ToLower(id), Reason: reason, User: who, PLCCleared: in.PLCCleared, Now: time.Now()})
+	if err != nil {
+		automationFail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+type rfidRuleInput struct {
+	ReaderID     string `json:"readerId"`
+	Antenna      *int   `json:"antenna"`
+	Action       string `json:"action"`
+	WarehouseID  string `json:"warehouseId"`
+	LocationCode string `json:"locationCode"`
+}
+
+func (a *API) listRFIDRules(w http.ResponseWriter, r *http.Request) {
+	reader := strings.TrimSpace(r.URL.Query().Get("readerId"))
+	if len(reader) > 64 {
+		validationFailed(w, r, map[string]string{"readerId": "must be at most 64 characters"})
+		return
+	}
+	out, err := a.st.ListRFIDRules(r.Context(), reader)
+	if err != nil {
+		automationFail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, page[store.RFIDRule]{Items: out})
+}
+
+// createRFIDRule says what a read at a reader does: receive the ASN pallet (a dock portal) or confirm the put-away of
+// the pallet at the rule's location.
+func (a *API) createRFIDRule(w http.ResponseWriter, r *http.Request) {
+	var in rfidRuleInput
+	if err := httpx.Decode(r, &in); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	reader := strings.TrimSpace(in.ReaderID)
+	if reader == "" || len(reader) > 64 {
+		fields["readerId"] = "is required, at most 64 characters"
+	}
+	if in.Antenna != nil && (*in.Antenna < 0 || *in.Antenna > 255) {
+		fields["antenna"] = "must be 0 to 255, or left out for every antenna"
+	}
+	if in.Action != store.RFIDReceivePallet && in.Action != store.RFIDConfirmPutaway {
+		fields["action"] = "must be RECEIVE_PALLET or CONFIRM_PUTAWAY"
+	}
+	wh := strings.ToLower(strings.TrimSpace(in.WarehouseID))
+	if wh != "" && !ids.Valid(wh) {
+		fields["warehouseId"] = "must be a UUID"
+	}
+	loc := strings.TrimSpace(in.LocationCode)
+	if len(loc) > 60 {
+		fields["locationCode"] = "must be at most 60 characters"
+	}
+	who := user(r, fields)
+	if len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
+	out, err := a.st.CreateRFIDRule(r.Context(), store.RFIDRule{ReaderID: reader, Antenna: in.Antenna, Action: in.Action, WarehouseID: wh, LocationCode: loc, CreatedBy: who})
+	if err != nil {
+		automationFail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, out)
+}
+
+func (a *API) deleteRFIDRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeRFIDRuleNotFound, "RFID rule not found"))
+		return
+	}
+	if err := a.st.DeleteRFIDRule(r.Context(), strings.ToLower(id)); err != nil {
+		automationFail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // automationFail maps the automation codes, then the common failures.
 func automationFail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		switch de.Code {
-		case store.CodeAutoOrderNotFound:
+		case store.CodeAutoOrderNotFound, store.CodeRFIDRuleNotFound:
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, de.Code, de.Detail))
 			return
-		case store.CodeAutoOrderExists, store.CodeAutoOrderState:
+		case store.CodeAutoOrderExists, store.CodeAutoOrderState, store.CodeRFIDRuleExists:
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, de.Code, de.Detail))
 			return
 		}

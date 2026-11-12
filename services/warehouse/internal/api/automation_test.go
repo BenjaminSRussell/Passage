@@ -253,3 +253,272 @@ func TestPalletFromReceiptToPLCArrival(t *testing.T) {
 		t.Fatalf("orders after the arrival: %s", rec.Body)
 	}
 }
+func (f *fakeStore) CancelAutomationOrder(context.Context, store.CancelInput) (store.AutomationOrder, error) {
+	return store.AutomationOrder{}, f.err
+}
+func (f *fakeStore) CreateRFIDRule(_ context.Context, r store.RFIDRule) (store.RFIDRule, error) {
+	return r, f.err
+}
+func (f *fakeStore) ListRFIDRules(context.Context, string) ([]store.RFIDRule, error) {
+	return nil, f.err
+}
+func (f *fakeStore) DeleteRFIDRule(context.Context, string) error { return f.err }
+
+// Duties and validation of the RFID rule and order cancel routes.
+func TestRFIDRuleAndCancelRoutes_DutiesAndValidation(t *testing.T) {
+	h := persistedRouter(&fakeStore{})
+	id := ids.New()
+	for name, tc := range map[string]struct {
+		q      req
+		status int
+		field  string
+	}{
+		"rules listing needs setup view":  {req{method: "GET", path: "/v1/warehouse/rfid-rules", duties: dutyInquiry}, 403, ""},
+		"rules are listed":                {req{method: "GET", path: "/v1/warehouse/rfid-rules?readerId=dock-1", duties: dutySetupView}, 200, ""},
+		"a rule needs setup maintain":     {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupView, body: `{"readerId":"dock-1","action":"RECEIVE_PALLET"}`}, 403, ""},
+		"a rule's action is checked":      {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","action":"SHIP"}`}, 400, "action"},
+		"a rule's reader is required":     {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"action":"RECEIVE_PALLET"}`}, 400, "readerId"},
+		"a rule's antenna range":          {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","antenna":300,"action":"RECEIVE_PALLET"}`}, 400, "antenna"},
+		"a rule's warehouse is a uuid":    {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","warehouseId":"WH1","action":"RECEIVE_PALLET"}`}, 400, "warehouseId"},
+		"a rule is created":               {req{method: "POST", path: "/v1/warehouse/rfid-rules", duties: dutySetupMaintain, body: `{"readerId":"dock-1","antenna":2,"action":"CONFIRM_PUTAWAY","locationCode":"A-01"}`}, 201, ""},
+		"a rule is deleted":               {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/" + id, duties: dutySetupMaintain}, 204, ""},
+		"deleting needs setup maintain":   {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/" + id, duties: dutySetupView}, 403, ""},
+		"a bad rule id is not found":      {req{method: "DELETE", path: "/v1/warehouse/rfid-rules/x", duties: dutySetupMaintain}, 404, ""},
+		"cancel needs the supervise duty": {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyAutomation, body: `{"reason":"jam"}`}, 403, ""},
+		"cancel needs a reason":           {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyWorkSupervise, body: `{}`}, 400, "reason"},
+		"cancel is accepted":              {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/" + id + ":cancel", duties: dutyWorkSupervise, body: `{"reason":"jam","plcCleared":true}`}, 200, ""},
+		"cancel of a bad id is not found": {req{method: "POST", path: "/v1/warehouse/automation/transport-orders/x:cancel", duties: dutyWorkSupervise, body: `{"reason":"jam"}`}, 404, ""},
+	} {
+		rec := call(h, tc.q)
+		if rec.Code != tc.status || (tc.field != "" && !strings.Contains(rec.Body.String(), tc.field)) {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}
+
+// RFID rules act on reads: a dock portal that reads the vendor's SSCC receives the ASN pallet at the announced
+// quantity, and a reader at the shelf confirms the put-away of that pallet once it arrives there; a repeat read or a
+// tag that is not a pallet does nothing.
+func TestRFIDRulesReceiveAndConfirmPutaway(t *testing.T) {
+	pool := testkit.DB(t)
+	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := persistedRouter(store.New(pool))
+	wh := ids.New()
+	all := strings.Join([]string{dutySetupMaintain, dutySetupView, dutyReceive, dutyInquiry, dutyWorkSupervise, dutyRFIDIngest, dutyAutomation}, ",")
+	post := func(path, key, body string) *httptest.ResponseRecorder {
+		return call(h, req{method: "POST", path: path, duties: all, key: key, body: body})
+	}
+	if rec := post("/v1/warehouse/locations:bulk", "l1", `{"warehouseId":"`+wh+`","locations":[{"name":"DOCK","zone":"I","capacity":{"allowMixedItems":true}},{"name":"A-01","zone":"A","capacity":{"allowMixedItems":true}}]}`); rec.Code != 201 {
+		t.Fatalf("locations: %d %s", rec.Code, rec.Body)
+	}
+	if rec := post("/v1/warehouse/location-directives", "d1", `{"warehouseId":"`+wh+`","sequence":10,"workType":"PURCHASE_PUTAWAY","direction":"PUT","lines":[{"seq":1,"fromQty":"0","actions":[{"seq":1,"strategy":"consolidate","zone":"A"}]}]}`); rec.Code != 201 {
+		t.Fatalf("directive: %d %s", rec.Code, rec.Body)
+	}
+	// The vendor labelled the pallet with its own SSCC, which the ASN names as the license plate.
+	tag, _ := domain.EncodeEPC96(0x31, 3, "0614141", "1000000077", nil)
+	vendor, _ := domain.DecodeEPC(tag)
+	if rec := post("/v1/warehouse/receipts:from-asn", "asn", `{"warehouseId":"`+wh+`","asnRef":"ASN-RFID","lines":[{"lineNo":1,"itemId":"VALVE","lpId":"`+vendor.Key+`","expectedQty":"40"}]}`); rec.Code != 201 {
+		t.Fatalf("ASN: %d %s", rec.Code, rec.Body)
+	}
+	for _, rule := range []string{
+		`{"readerId":"dock-1","action":"RECEIVE_PALLET","warehouseId":"` + wh + `"}`,
+		`{"readerId":"rack-A","antenna":1,"action":"CONFIRM_PUTAWAY","locationCode":"A-01"}`,
+	} {
+		if rec := post("/v1/warehouse/rfid-rules", "", rule); rec.Code != 201 {
+			t.Fatalf("rule %s: %d %s", rule, rec.Code, rec.Body)
+		}
+	}
+	if rec := post("/v1/warehouse/rfid-rules", "", `{"readerId":"dock-1","action":"RECEIVE_PALLET"}`); rec.Code != 409 || problemOf(t, rec).Code != store.CodeRFIDRuleExists {
+		t.Fatalf("a second receive rule on the reader: %d %s", rec.Code, rec.Body)
+	}
+	ingest := func(reader string, antenna int, epc, at string) store.RFIDIngest {
+		t.Helper()
+		rec := post("/v1/warehouse/rfid-reads:ingest", "", fmt.Sprintf(`{"reads":[{"readerId":%q,"antenna":%d,"epc":%q,"readAt":%q}]}`, reader, antenna, epc, at))
+		var out store.RFIDIngest
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 {
+			t.Fatalf("ingest: %d %s", rec.Code, rec.Body)
+		}
+		return out
+	}
+
+	// The dock portal reads the pallet: the receipt is received at the 40 the ASN announced, with put-away work.
+	got := ingest("dock-1", 0, tag, "2026-10-27T09:00:00Z")
+	if len(got.Reads) != 1 || len(got.Reads[0].Actions) != 1 || got.Reads[0].Actions[0].Outcome != store.RFIDDone || got.Reads[0].Actions[0].WorkID == "" {
+		t.Fatalf("dock read: %+v", got.Reads)
+	}
+	workID := got.Reads[0].Actions[0].WorkID
+	var rcp domain.Receipt
+	rec := call(h, req{method: "GET", path: "/v1/warehouse/receipts/" + got.Reads[0].Actions[0].ReceiptID, duties: all})
+	_ = json.Unmarshal(rec.Body.Bytes(), &rcp)
+	if rcp.Lines[0].Status != domain.PalletReceived || rcp.Lines[0].ReceivedQty.String() != "40" || rcp.Lines[0].ReceivedBy != "rfid:dock-1" || rcp.Lines[0].SSCC != vendor.Key {
+		t.Fatalf("receipt after the dock read: %+v", rcp.Lines[0])
+	}
+	// The same portal reading the pallet a minute later (it was received) does nothing.
+	if again := ingest("dock-1", 0, tag, "2026-10-27T09:01:00Z"); again.Reads[0].Actions[0].Outcome != store.RFIDSkipped {
+		t.Fatalf("a second dock read: %+v", again.Reads[0].Actions)
+	}
+	// A reader at the shelf, on another antenna than the rule's, does nothing either.
+	if other := ingest("rack-A", 2, tag, "2026-10-27T09:05:00Z"); len(other.Reads[0].Actions) != 0 {
+		t.Fatalf("a read on another antenna: %+v", other.Reads[0].Actions)
+	}
+	// The reader at A-01 sees the pallet arrive: the put-away is confirmed and the stock lands.
+	put := ingest("rack-A", 1, tag, "2026-10-27T09:06:00Z")
+	if a := put.Reads[0].Actions; len(a) != 1 || a[0].Outcome != store.RFIDDone || a[0].WorkID != workID {
+		t.Fatalf("shelf read: %+v", a)
+	}
+	var w domain.Work
+	rec = call(h, req{method: "GET", path: "/v1/warehouse/work/" + workID, duties: all})
+	_ = json.Unmarshal(rec.Body.Bytes(), &w)
+	if w.Status != domain.WorkCompleted || w.AssignedUser != "rfid:rack-A" {
+		t.Fatalf("work after the shelf read: %s %s", w.Status, w.AssignedUser)
+	}
+	if late := ingest("rack-A", 1, tag, "2026-10-27T09:20:00Z"); late.Reads[0].Actions[0].Outcome != store.RFIDSkipped {
+		t.Fatalf("a read after the put-away: %+v", late.Reads[0].Actions)
+	}
+	// A trade item's SGTIN-198 is decoded and stored; it is not a pallet, so the dock rule skips it.
+	item, _ := domain.EncodeEPCString(0x36, 1, "0614141", "712345", "SN-0042")
+	sg := ingest("dock-1", 0, item, "2026-10-27T09:30:00Z")
+	if sg.Accepted != 1 || sg.Reads[0].EPC.Scheme != "SGTIN-198" || sg.Reads[0].Actions[0].Outcome != store.RFIDSkipped {
+		t.Fatalf("SGTIN-198 read: %+v", sg)
+	}
+	rec = call(h, req{method: "GET", path: "/v1/warehouse/rfid-reads?readerId=rack-A", duties: all})
+	if !strings.Contains(rec.Body.String(), `"action":"CONFIRM_PUTAWAY"`) || !strings.Contains(rec.Body.String(), `"actionOutcome":"DONE"`) {
+		t.Fatalf("stored reads keep what was done: %s", rec.Body)
+	}
+	rec = call(h, req{method: "GET", path: "/v1/warehouse/rfid-rules", duties: all})
+	var rules struct{ Items []store.RFIDRule }
+	_ = json.Unmarshal(rec.Body.Bytes(), &rules)
+	if len(rules.Items) != 2 {
+		t.Fatalf("rules: %s", rec.Body)
+	}
+	if rec := call(h, req{method: "DELETE", path: "/v1/warehouse/rfid-rules/" + rules.Items[0].ID, duties: all}); rec.Code != 204 {
+		t.Fatalf("delete rule: %d", rec.Code)
+	}
+	if rec := call(h, req{method: "DELETE", path: "/v1/warehouse/rfid-rules/" + rules.Items[0].ID, duties: all}); rec.Code != 404 {
+		t.Fatalf("delete it again: %d", rec.Code)
+	}
+}
+
+// A PLC fault or divert gives the work back to people with the reason on its line; the line can be given to the PLC
+// again; an order can be cancelled before it arrives (a SENT one only once the PLC is cleared), and the work goes back.
+func TestAutomationFaultDivertAndCancelChangeTheWork(t *testing.T) {
+	pool := testkit.DB(t)
+	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := persistedRouter(store.New(pool))
+	wh := ids.New()
+	all := strings.Join([]string{dutySetupMaintain, dutySetupView, dutyReceive, dutyInquiry, dutyWorkSupervise, dutyRFIDIngest, dutyAutomation}, ",")
+	post := func(path, key, body string) *httptest.ResponseRecorder {
+		return call(h, req{method: "POST", path: path, duties: all, key: key, body: body, user: "super"})
+	}
+	if rec := post("/v1/warehouse/locations:bulk", "l1", `{"warehouseId":"`+wh+`","locations":[{"name":"ASRS-01","zone":"A","capacity":{"allowMixedItems":true}}]}`); rec.Code != 201 {
+		t.Fatalf("locations: %d %s", rec.Code, rec.Body)
+	}
+	if rec := post("/v1/warehouse/location-directives", "d1", `{"warehouseId":"`+wh+`","sequence":10,"workType":"PURCHASE_PUTAWAY","direction":"PUT","lines":[{"seq":1,"fromQty":"0","actions":[{"seq":1,"strategy":"consolidate","zone":"A"}]}]}`); rec.Code != 201 {
+		t.Fatalf("directive: %d %s", rec.Code, rec.Body)
+	}
+	tag, _ := domain.EncodeEPC96(0x31, 3, "0614141", "1000000088", nil)
+	pallet, _ := domain.DecodeEPC(tag)
+	if rec := post("/v1/warehouse/receipts:from-asn", "asn", `{"warehouseId":"`+wh+`","asnRef":"ASN-PLC","lines":[{"lineNo":1,"itemId":"PUMP","lpId":"`+pallet.Key+`","expectedQty":"1"}]}`); rec.Code != 201 {
+		t.Fatalf("ASN: %d %s", rec.Code, rec.Body)
+	}
+	var list struct{ Items []domain.ReceiptSummary }
+	rec := call(h, req{method: "GET", path: "/v1/warehouse/receipts?warehouseId=" + wh, duties: all})
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	rec = post("/v1/warehouse/receipts/"+list.Items[0].ID+"/lines/1:receive", "r1", `{"qty":"1"}`)
+	var got store.Received
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 200 {
+		t.Fatalf("receive: %d %s", rec.Code, rec.Body)
+	}
+	workID := got.Work.ID
+	orderPath := "/v1/warehouse/automation/transport-orders"
+	newOrder := func() store.AutomationOrder {
+		t.Helper()
+		rec := post(orderPath, "", fmt.Sprintf(`{"workId":%q,"lineNo":1,"station":"PLC","fromLocation":"INFEED-1"}`, workID))
+		var o store.AutomationOrder
+		if err := json.Unmarshal(rec.Body.Bytes(), &o); err != nil || rec.Code != 201 {
+			t.Fatalf("order: %d %s", rec.Code, rec.Body)
+		}
+		return o
+	}
+	send := func(o store.AutomationOrder) {
+		t.Helper()
+		if rec := call(h, req{method: "POST", path: orderPath + "/" + o.ID + ":report", duties: all, body: `{"status":"SENT"}`}); rec.Code != 200 {
+			t.Fatalf("report: %d %s", rec.Code, rec.Body)
+		}
+	}
+	work := func() domain.Work {
+		t.Helper()
+		var w domain.Work
+		rec := call(h, req{method: "GET", path: "/v1/warehouse/work/" + workID, duties: all})
+		_ = json.Unmarshal(rec.Body.Bytes(), &w)
+		return w
+	}
+	event := func(seq int, kind, extra string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"station":"PLC","events":[{"kind":%q,"session":"link-9","seq":%d,"loadUnit":%q,%s"at":"2026-10-27T10:00:00Z"}]}`, kind, seq, pallet.Key, extra)
+		if rec := call(h, req{method: "POST", path: "/v1/warehouse/automation/events", duties: all, body: body}); rec.Code != 200 {
+			t.Fatalf("event: %d %s", rec.Code, rec.Body)
+		}
+	}
+
+	// A fault: the order is FAULT and the work is OPEN again for people, its line saying why.
+	first := newOrder()
+	if w := work(); w.Status != domain.WorkAssigned || w.AssignedUser != "automation:PLC" {
+		t.Fatalf("work given to the PLC: %s %s", w.Status, w.AssignedUser)
+	}
+	send(first)
+	event(1, "fault", `"code":"E12","text":"jam at infeed",`)
+	if w := work(); w.Status != domain.WorkOpen || w.AssignedUser != "" || !strings.Contains(w.Lines[0].Reason, "PLC fault: E12 jam at infeed") {
+		t.Fatalf("work after the fault: %s %q %q", w.Status, w.AssignedUser, w.Lines[0].Reason)
+	}
+	// The line can be given to the PLC again; a divert gives it back once more, naming the lane.
+	second := newOrder()
+	send(second)
+	event(2, "diverted", `"lane":"3","location":"REJECT","text":"height",`)
+	if w := work(); w.Status != domain.WorkOpen || w.Lines[0].Reason != "diverted by the PLC to lane 3 at REJECT: height" {
+		t.Fatalf("work after the divert: %s %q", w.Status, w.Lines[0].Reason)
+	}
+	// A pending order is cancelled; the work goes back to OPEN.
+	third := newOrder()
+	cancel := func(o store.AutomationOrder, body string) *httptest.ResponseRecorder {
+		return post(orderPath+"/"+o.ID+":cancel", "", body)
+	}
+	rec = cancel(third, `{"reason":"moving it by forklift"}`)
+	var c store.AutomationOrder
+	_ = json.Unmarshal(rec.Body.Bytes(), &c)
+	if rec.Code != 200 || c.Status != store.OrderCancelled || c.Reason != "moving it by forklift" {
+		t.Fatalf("cancel pending: %d %s", rec.Code, rec.Body)
+	}
+	if w := work(); w.Status != domain.WorkOpen || w.Lines[0].Reason != "automation order cancelled: moving it by forklift" {
+		t.Fatalf("work after the cancel: %s %q", w.Status, w.Lines[0].Reason)
+	}
+	if rec := cancel(third, `{"reason":"again"}`); rec.Code != 200 {
+		t.Fatalf("cancelling a cancelled order: %d %s", rec.Code, rec.Body)
+	}
+	// A sent order needs the PLC cleared first.
+	fourth := newOrder()
+	send(fourth)
+	if rec := cancel(fourth, `{"reason":"wrong pallet"}`); rec.Code != 409 || problemOf(t, rec).Code != store.CodeAutoOrderState {
+		t.Fatalf("cancel a sent order: %d %s", rec.Code, rec.Body)
+	}
+	if w := work(); w.Status != domain.WorkAssigned {
+		t.Fatalf("a refused cancel changed the work: %s", w.Status)
+	}
+	if rec := cancel(fourth, `{"reason":"wrong pallet","plcCleared":true}`); rec.Code != 200 {
+		t.Fatalf("cancel a cleared sent order: %d %s", rec.Code, rec.Body)
+	}
+	// An arrived order is done.
+	fifth := newOrder()
+	send(fifth)
+	event(3, "arrived", fmt.Sprintf(`"location":%q,`, fifth.ToLocation))
+	if w := work(); w.Status != domain.WorkCompleted {
+		t.Fatalf("work after the arrival: %s", w.Status)
+	}
+	if rec := cancel(fifth, `{"reason":"late"}`); rec.Code != 409 {
+		t.Fatalf("cancel an arrived order: %d %s", rec.Code, rec.Body)
+	}
+}

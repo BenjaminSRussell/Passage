@@ -99,67 +99,72 @@ func (s *Store) ReceiveLine(ctx context.Context, idem Idem, in ReceiveInput) (Re
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var err error
 		out, replayed, err = once(ctx, tx, idem, http.StatusOK, func() (Received, error) {
-			r, err := readReceipt(ctx, tx, in.ReceiptID, true)
-			if err != nil {
-				return Received{}, err
-			}
-			if in.IfMatch != 0 && in.IfMatch != r.Version {
-				return Received{}, fmt.Errorf("%w: current version is %d", ErrVersionConflict, r.Version)
-			}
-			line, err := r.Receive(in.LineNo, in.Qty, in.User, in.Now)
-			if err != nil {
-				return Received{}, err
-			}
-			if in.Lot != "" {
-				line.Lot = in.Lot
-			}
-			if in.ExpiryDate != "" {
-				line.ExpiryDate = in.ExpiryDate
-			}
-			if err := identifyPallet(ctx, tx, &line); err != nil {
-				return Received{}, err
-			}
-			for i := range r.Lines {
-				if r.Lines[i].LineNo == line.LineNo {
-					r.Lines[i].LPID, r.Lines[i].SSCC, r.Lines[i].Lot, r.Lines[i].ExpiryDate = line.LPID, line.SSCC, line.Lot, line.ExpiryDate
-				}
-			}
-			planned, err := planWork(ctx, tx, PlanInput{WarehouseID: r.WarehouseID, WorkType: putAwayWorkType,
-				Lines: []domain.NewLine{line.PutAwayLine(r.ID)}})
-			if err != nil {
-				return Received{}, err
-			}
-			line.WorkID = planned.Work.ID
-			for i := range r.Lines {
-				if r.Lines[i].LineNo == line.LineNo {
-					r.Lines[i].WorkID = line.WorkID
-				}
-			}
-			if _, err := tx.Exec(ctx, `update receipt_line set status = $3, received_qty = $4, variance_qty = $5, variance_pct = $6,
-				discrepancy = $7, reason = $8, work_id = $9, received_by = $10, received_at = $11,
-				lp_id = $12, sscc = $13, lot = $14, expiry_date = $15
-				where receipt_id = $1 and line_no = $2`,
-				r.ID, line.LineNo, string(line.Status), line.ReceivedQty, line.VarianceQty, line.VariancePct,
-				line.Discrepancy, line.Reason, line.WorkID, line.ReceivedBy, line.ReceivedAt,
-				line.LPID, line.SSCC, line.Lot, nullable(line.ExpiryDate)); err != nil {
-				return Received{}, err
-			}
-			if err := tx.QueryRow(ctx, `update receipt set status = $2, version = version + 1, updated_at = now()
-				where id = $1 returning version, updated_at`, r.ID, string(r.Status)).Scan(&r.Version, &r.UpdatedAt); err != nil {
-				return Received{}, err
-			}
-			if err := enqueueFor(ctx, tx, "receipt", r.ID, evts.ReceiptRegistered, registeredData(r, line, in.User)); err != nil {
-				return Received{}, err
-			}
-			res := Received{Receipt: r, Work: planned.Work, Traces: planned.Traces, Warnings: []Warning{}}
-			if line.Discrepancy {
-				res.Warnings = append(res.Warnings, Warning{Code: domain.CodeVariance, Detail: line.Reason})
-			}
-			return res, nil
+			return receiveLineTx(ctx, tx, in)
 		})
 		return err
 	})
 	return out, replayed, err
+}
+
+// receiveLineTx is ReceiveLine inside the caller's transaction, without its idempotency record.
+func receiveLineTx(ctx context.Context, tx pgx.Tx, in ReceiveInput) (Received, error) {
+	r, err := readReceipt(ctx, tx, in.ReceiptID, true)
+	if err != nil {
+		return Received{}, err
+	}
+	if in.IfMatch != 0 && in.IfMatch != r.Version {
+		return Received{}, fmt.Errorf("%w: current version is %d", ErrVersionConflict, r.Version)
+	}
+	line, err := r.Receive(in.LineNo, in.Qty, in.User, in.Now)
+	if err != nil {
+		return Received{}, err
+	}
+	if in.Lot != "" {
+		line.Lot = in.Lot
+	}
+	if in.ExpiryDate != "" {
+		line.ExpiryDate = in.ExpiryDate
+	}
+	if err := identifyPallet(ctx, tx, &line); err != nil {
+		return Received{}, err
+	}
+	for i := range r.Lines {
+		if r.Lines[i].LineNo == line.LineNo {
+			r.Lines[i].LPID, r.Lines[i].SSCC, r.Lines[i].Lot, r.Lines[i].ExpiryDate = line.LPID, line.SSCC, line.Lot, line.ExpiryDate
+		}
+	}
+	planned, err := planWork(ctx, tx, PlanInput{WarehouseID: r.WarehouseID, WorkType: putAwayWorkType,
+		Lines: []domain.NewLine{line.PutAwayLine(r.ID)}})
+	if err != nil {
+		return Received{}, err
+	}
+	line.WorkID = planned.Work.ID
+	for i := range r.Lines {
+		if r.Lines[i].LineNo == line.LineNo {
+			r.Lines[i].WorkID = line.WorkID
+		}
+	}
+	if _, err := tx.Exec(ctx, `update receipt_line set status = $3, received_qty = $4, variance_qty = $5, variance_pct = $6,
+		discrepancy = $7, reason = $8, work_id = $9, received_by = $10, received_at = $11,
+		lp_id = $12, sscc = $13, lot = $14, expiry_date = $15
+		where receipt_id = $1 and line_no = $2`,
+		r.ID, line.LineNo, string(line.Status), line.ReceivedQty, line.VarianceQty, line.VariancePct,
+		line.Discrepancy, line.Reason, line.WorkID, line.ReceivedBy, line.ReceivedAt,
+		line.LPID, line.SSCC, line.Lot, nullable(line.ExpiryDate)); err != nil {
+		return Received{}, err
+	}
+	if err := tx.QueryRow(ctx, `update receipt set status = $2, version = version + 1, updated_at = now()
+		where id = $1 returning version, updated_at`, r.ID, string(r.Status)).Scan(&r.Version, &r.UpdatedAt); err != nil {
+		return Received{}, err
+	}
+	if err := enqueueFor(ctx, tx, "receipt", r.ID, evts.ReceiptRegistered, registeredData(r, line, in.User)); err != nil {
+		return Received{}, err
+	}
+	res := Received{Receipt: r, Work: planned.Work, Traces: planned.Traces, Warnings: []Warning{}}
+	if line.Discrepancy {
+		res.Warnings = append(res.Warnings, Warning{Code: domain.CodeVariance, Detail: line.Reason})
+	}
+	return res, nil
 }
 
 // GetReceipt returns one receipt with its pallets.

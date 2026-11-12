@@ -132,11 +132,21 @@ stored once by station, link session and sequence (the PLC numbers telegrams per
 repeat is the same session and number within ten minutes) and an arrival of a load unit with an order sent to the station confirms
 the work line as the station's identity in the same transaction, keyed by the order (migration `0007`). Duties `warehouse.rfid.ingest` and `warehouse.automation.execute`.
 
+Added in round 3 (migration `0008`): SGTIN-198, SGLN-195, GRAI-170, GDTI-174 and GIAI-202 with their 7-bit alphanumeric
+serials (tags padded to a 16-bit word are accepted), GSRNP-96 and GID-96; the device app reads SGTIN-198 as a scan too.
+RFID rules per reader (`/v1/warehouse/rfid-rules`, duties `warehouse.setup.view`/`warehouse.setup.maintain`):
+RECEIVE_PALLET receives the expected ASN pallet whose SSCC or license plate a dock portal read, at the announced quantity;
+CONFIRM_PUTAWAY confirms the open put-away line of that pallet bound for the rule's location. Each read records what its rules
+did (DONE, SKIPPED, REFUSED with the reason); a refusal does not stop the batch. A PLC `fault` or `diverted` event notes the
+reason on the work line and returns a work still ASSIGNED to the station to OPEN for people; the line can be given to the PLC
+again. `POST /v1/warehouse/automation/transport-orders/{id}:cancel` (duty `warehouse.work.supervise`) cancels an order
+that has not arrived (a SENT one only with `plcCleared`), with the same effect on the work.
+
 | Item | Status | Reason |
 |---|---|---|
 | RFID reader hardware and the gateway that posts reads | human/infra (#213) | A Zebra or Impinj reader and its gateway are needed; the endpoint takes any reader that posts JSON. |
-| SGTIN-198 and the other non-96-bit schemes (GIAI-202, SGLN-195, GRAI-170) | later slice | Their 7-bit character encodings are not decoded: the read is rejected as WMS-EPC-INVALID. |
-| What an RFID read does to stock (move an LP on a portal read, raise an exception on an unexpected read) | later slice | Reads are stored and resolved to a receipt pallet; nothing acts on them yet. |
-| `fault` and `diverted` PLC events changing work | later slice | They mark the order FAULT or DIVERTED with the PLC's code and leave the work as it is for a person. |
-| Cancelling an automation order, and a MOVE for an order the PLC never acknowledged | later slice | An order whose MOVE got no acknowledgement stays pending and is offered again after the connector reconnects; the PLC must treat a repeated MOVE for a load unit it holds as a duplicate. |
+| CPI-96/var, SGCN-96, ITIP and ADI-var EPC schemes | later slice | Not read in a warehouse flow yet; rejected as WMS-EPC-INVALID. The device app scans SGTIN-96, SGTIN-198 and SSCC-96 only. |
+| More RFID actions (raise an exception on an unexpected read, move a pallet between two locations on a portal read, ship-confirm at a dock door) | later slice | Rules receive a pallet and confirm its put-away only. There is no web screen for rules or for the action of a read; both are API only. |
+| An IN_PROGRESS work after a fault or divert | later slice | A work the station already confirmed a line of stays with the station (it cannot go back to OPEN under BR-31.3); its open line gets the reason and can be given to the PLC again, but a person cannot take it over without a reassign command (not built). |
+| A cancel telegram to the PLC, and a MOVE for an order the PLC never acknowledged | later slice / #213 | Cancelling a SENT order needs a person to clear it on the PLC (`plcCleared`); the connector sends no cancel telegram because the vendor layout is unknown. An order whose MOVE got no acknowledgement stays pending and is offered again after the connector reconnects. No web screen lists or cancels automation orders. |
 | A real vendor's telegram layout | human/infra (#213) | Needs a PLC. |

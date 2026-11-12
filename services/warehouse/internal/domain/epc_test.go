@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -111,5 +112,119 @@ func TestDecodeEPC_RefusesWhatItCannotRead(t *testing.T) {
 	}
 	if _, err := EncodeEPC96(0x30, 1, "0614141", "812345", new(big.Int).Lsh(big.NewInt(1), 38)); err == nil {
 		t.Error("a serial of 39 bits")
+	}
+}
+
+// The schemes longer than 96 bits: the serial is 7-bit characters, the tag is padded to a whole 16-bit word.
+func TestDecodeEPC_LongSchemesRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		header           int
+		scheme           string
+		cp, ref, serial  string
+		hexLen           int
+		wantKey, wantURN string
+	}{
+		{0x36, "SGTIN-198", "0614141", "712345", "32a/b", 52, "70614141123451", "urn:epc:id:sgtin:0614141.712345.32a%2Fb"},
+		{0x39, "SGLN-195", "0614141", "12345", "Dock-3", 52, "0614141123452", "urn:epc:id:sgln:0614141.12345.Dock-3"},
+		{0x37, "GRAI-170", "0614141", "12345", "ABC123", 44, "00614141123452", "urn:epc:id:grai:0614141.12345.ABC123"},
+		{0x3E, "GDTI-174", "0614141", "12345", "PO-77", 44, "0614141123452", "urn:epc:id:gdti:0614141.12345.PO-77"},
+		{0x38, "GIAI-202", "0614141", "", "FORK&LIFT-12", 52, "0614141FORK&LIFT-12", "urn:epc:id:giai:0614141.FORK%26LIFT-12"},
+	} {
+		hex, err := EncodeEPCString(tc.header, 1, tc.cp, tc.ref, tc.serial)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.scheme, err)
+		}
+		if len(hex) != tc.hexLen {
+			t.Fatalf("%s: %d hex characters, want %d", tc.scheme, len(hex), tc.hexLen)
+		}
+		got, err := DecodeEPC(hex)
+		if err != nil || got.Scheme != tc.scheme || got.Filter != 1 || got.CompanyPrefix != tc.cp || got.Key != tc.wantKey || got.URN != tc.wantURN {
+			t.Fatalf("%s: %+v %v", tc.scheme, got, err)
+		}
+		if tc.scheme != "GIAI-202" && got.Serial != tc.serial {
+			t.Fatalf("%s serial %q", tc.scheme, got.Serial)
+		}
+		// a reader that reports only the scheme's own bits, rounded to a hex digit, is read the same
+		trimmed := hex[:(epcSchemes[tc.header].bits+3)/4]
+		if again, err := DecodeEPC(trimmed); err != nil || again.URN != got.URN {
+			t.Fatalf("%s trimmed: %+v %v", tc.scheme, again, err)
+		}
+	}
+}
+
+// SGTIN-198 is laid out bit by bit as GS1 TDS 14.5.1.2 has it: header 00110110, filter, partition, company prefix and
+// item reference as in SGTIN-96, then the serial in 7-bit characters.
+func TestDecodeEPC_SGTIN198Layout(t *testing.T) {
+	hex, err := EncodeEPCString(0x36, 3, "0614141", "712345", "AB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, _ := new(big.Int).SetString(hex, 16)
+	b := epcBits{v: v, width: 208}
+	if b.at(0, 8).Int64() != 0x36 || b.at(8, 3).Int64() != 3 || b.at(11, 3).Int64() != 5 || b.at(14, 24).Int64() != 614141 || b.at(38, 20).Int64() != 712345 {
+		t.Fatalf("header fields of %s", hex)
+	}
+	if b.at(58, 7).Int64() != 'A' || b.at(65, 7).Int64() != 'B' || b.at(72, 7).Int64() != 0 || b.at(72, 136).Sign() != 0 {
+		t.Fatalf("serial characters of %s", hex)
+	}
+	// the same item as SGTIN-96 gives the same GTIN
+	short, _ := EncodeEPC96(0x30, 3, "0614141", "712345", big.NewInt(1))
+	a, _ := DecodeEPC(short)
+	c, _ := DecodeEPC(hex)
+	if a.Key != c.Key {
+		t.Fatalf("GTIN of SGTIN-96 %s and SGTIN-198 %s", a.Key, c.Key)
+	}
+}
+
+func TestDecodeEPC_GIDAndGSRNP(t *testing.T) {
+	// GID-96: header 0x35, manager 95100000, class 12345, serial 400
+	v := new(big.Int).Lsh(big.NewInt(0x35), 88)
+	v.Or(v, new(big.Int).Lsh(big.NewInt(95100000), 60))
+	v.Or(v, new(big.Int).Lsh(big.NewInt(12345), 36))
+	v.Or(v, big.NewInt(400))
+	got, err := DecodeEPC(fmt.Sprintf("%024X", v))
+	if err != nil || got.Scheme != "GID-96" || got.URN != "urn:epc:id:gid:95100000.12345.400" {
+		t.Fatalf("GID-96: %+v %v", got, err)
+	}
+	gsrn, _ := EncodeEPC96(0x2D, 0, "0614141", "1234567890", nil)
+	p, err := DecodeEPC("2E" + gsrn[2:])
+	if err != nil || p.Scheme != "GSRNP-96" || !strings.HasPrefix(p.URN, "urn:epc:id:gsrnp:0614141.1234567890") {
+		t.Fatalf("GSRNP-96: %+v %v", p, err)
+	}
+}
+
+func TestDecodeEPC_RefusesBrokenLongTags(t *testing.T) {
+	good, err := EncodeEPCString(0x36, 1, "0614141", "712345", "AB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, in := range map[string]string{
+		"96 bits of a 198-bit scheme": good[:24],
+		"padding not zero":            good[:51] + "1",
+		"too long":                    good + "0000",
+		"empty serial":                good[:14] + strings.Repeat("0", 38),
+		"character outside the set": func() string {
+			h, _ := EncodeEPCString(0x36, 1, "0614141", "712345", "A")
+			v, _ := new(big.Int).SetString(h, 16)
+			v.Or(v, new(big.Int).Lsh(big.NewInt(0x7F^'A'), 208-65))
+			return fmt.Sprintf("%052X", v)
+		}(),
+		"text after the end": func() string {
+			v, _ := new(big.Int).SetString(good, 16)
+			v.Or(v, new(big.Int).Lsh(big.NewInt('C'), 208-86))
+			return fmt.Sprintf("%052X", v)
+		}(),
+	} {
+		_, err := DecodeEPC(in)
+		var de *Error
+		if err == nil || !errors.As(err, &de) || de.Code != CodeEPCInvalid {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := EncodeEPCString(0x36, 1, "0614141", "712345", "with space"); err == nil {
+		t.Error("a space is not in the character set")
+	}
+	if _, err := EncodeEPCString(0x36, 1, "0614141", "712345", strings.Repeat("A", 21)); err == nil {
+		t.Error("21 characters do not fit SGTIN-198")
 	}
 }

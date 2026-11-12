@@ -3134,3 +3134,14 @@ test_consolidation_ic_layers_and_investments_register if {
 	allowed("consolidation.view", "GET", "/v1/consol/runs/r1/investments")
 	not allowed("consolidation.configure", "GET", "/v1/consol/runs/r1/investments")
 }
+
+# #32: RFID rules are warehouse setup; cancelling an automation order is supervision, not the connector's.
+test_warehouse_rfid_rules_and_automation_cancel if {
+	allowed("warehouse.setup.view", "GET", "/v1/warehouse/rfid-rules")
+	not allowed("warehouse.setup.view", "POST", "/v1/warehouse/rfid-rules")
+	allowed("warehouse.setup.maintain", "POST", "/v1/warehouse/rfid-rules")
+	allowed("warehouse.setup.maintain", "DELETE", "/v1/warehouse/rfid-rules/0195f0a0-0000-7000-8000-0000000000a2")
+	not allowed("warehouse.rfid.ingest", "POST", "/v1/warehouse/rfid-rules")
+	allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:cancel")
+	not allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:cancel")
+}

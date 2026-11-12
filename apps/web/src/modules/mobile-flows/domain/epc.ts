@@ -1,9 +1,10 @@
-// RFID EPC decoding (FR-32.9). Pure: no I/O, no React. Reads the 96-bit GS1 EPC binary encodings
-// of GS1 TDS: SGTIN-96 (a trade item with serial) and SSCC-96 (a logistic unit). An EPC becomes
+// RFID EPC decoding (FR-32.9). Pure: no I/O, no React. Reads the GS1 EPC binary encodings of GS1
+// TDS a device scans: SGTIN-96 and SGTIN-198 (a trade item with serial; the 198-bit one carries an
+// alphanumeric serial of 7-bit characters) and SSCC-96 (a logistic unit). An EPC becomes
 // the same GS1 element string a barcode scan carries, so the flow runner treats a tag read and a
 // GS1-128 scan alike.
 
-export type EpcScheme = "SGTIN-96" | "SSCC-96";
+export type EpcScheme = "SGTIN-96" | "SGTIN-198" | "SSCC-96";
 
 export interface Epc {
   scheme: EpcScheme;
@@ -14,7 +15,7 @@ export interface Epc {
   companyPrefix: string;
   /** SGTIN-96: the 14-digit GTIN with its check digit. */
   gtin?: string;
-  /** SGTIN-96: the serial number, decimal (up to 38 bits). */
+  /** SGTIN-96: the serial number, decimal (up to 38 bits); SGTIN-198: up to 20 characters. */
   serial?: string;
   /** SSCC-96: the 18-digit SSCC with its check digit. */
   sscc?: string;
@@ -30,6 +31,9 @@ export class EpcError extends Error {
 
 const HEADER_SGTIN96 = 0x30;
 const HEADER_SSCC96 = 0x31;
+const HEADER_SGTIN198 = 0x36;
+/** Characters an SGTIN-198 serial can hold: the GS1 AI encodable character set 82. */
+const SERIAL_CHARS = /^[!"%&'()*+,\-./0-9:;<=>?A-Z_a-z]$/;
 
 /** Partition tables of GS1 TDS: company prefix and the item or serial reference, in bits and digits. */
 interface Partition {
@@ -73,19 +77,52 @@ function toBits(hex: string): bigint {
   return BigInt(`0x${hex}`);
 }
 
-/** Reads `width` bits starting `from` bits after the most significant bit of a 96-bit value. */
-function field(value: bigint, from: number, width: number): bigint {
-  return (value >> BigInt(96 - from - width)) & ((1n << BigInt(width)) - 1n);
+/** Reads `width` bits starting `from` bits after the most significant bit of a value `total` bits wide. */
+function field(value: bigint, from: number, width: number, total = 96): bigint {
+  return (value >> BigInt(total - from - width)) & ((1n << BigInt(width)) - 1n);
 }
 
-/** Decodes the hex of an SGTIN-96 or SSCC-96 tag. Anything else is MOB-0118. */
+/**
+ * Decodes an SGTIN-198 (50 or 52 hexadecimal characters: 198 bits, padded to a 16-bit word with zero bits): the item as in
+ * SGTIN-96, then a serial of up to 20 7-bit characters ending at the first zero character.
+ */
+function decodeSgtin198(clean: string): Epc {
+  const total = clean.length * 4;
+  const bits = toBits(clean);
+  if (total > 198 && field(bits, 198, total - 198, total) !== 0n) throw new EpcError("The bits after an SGTIN-198 are not zero.");
+  const filter = Number(field(bits, 8, 3, total));
+  const partition = Number(field(bits, 11, 3, total));
+  const p = SGTIN_PARTITIONS[partition];
+  if (!p) throw new EpcError(`EPC partition ${partition} is not defined.`);
+  const prefix = field(bits, 14, p.cpBits, total);
+  const ref = field(bits, 14 + p.cpBits, p.refBits, total);
+  if (prefix >= 10n ** BigInt(p.cpDigits) || ref >= 10n ** BigInt(p.refDigits)) throw new EpcError("EPC company prefix or reference is out of range.");
+  let serial = "";
+  let pos = 58;
+  for (let i = 0; i < 20; i++, pos += 7) {
+    const c = Number(field(bits, pos, 7, total));
+    if (c === 0) break;
+    const ch = String.fromCharCode(c);
+    if (!SERIAL_CHARS.test(ch)) throw new EpcError(`Character 0x${c.toString(16)} cannot be in an SGTIN-198 serial.`);
+    serial += ch;
+  }
+  if (pos < 198 && field(bits, pos, 198 - pos, total) !== 0n) throw new EpcError("The SGTIN-198 serial does not end in zero bits.");
+  if (serial === "") throw new EpcError("The SGTIN-198 serial is empty.");
+  const companyPrefix = pad(prefix, p.cpDigits);
+  const refDigits = pad(ref, p.refDigits);
+  const base = refDigits.slice(0, 1) + companyPrefix + refDigits.slice(1);
+  return { scheme: "SGTIN-198", filter, partition, companyPrefix, gtin: base + checkDigitOf(base), serial };
+}
+
+/** Decodes the hex of an SGTIN-96, SGTIN-198 or SSCC-96 tag. Anything else is MOB-0118. */
 export function decodeEpc(hex: string): Epc {
   const clean = hex.trim().toUpperCase();
-  if (!/^[0-9A-F]{24}$/.test(clean)) throw new EpcError("An EPC is 24 hexadecimal characters (96 bits).");
+  if (/^36[0-9A-F]{48}([0-9A-F]{2})?$/.test(clean)) return decodeSgtin198(clean);
+  if (!/^[0-9A-F]{24}$/.test(clean)) throw new EpcError("An EPC is 24 hexadecimal characters (96 bits), or 52 for an SGTIN-198.");
   const bits = toBits(clean);
   const header = Number(field(bits, 0, 8));
   if (header !== HEADER_SGTIN96 && header !== HEADER_SSCC96) {
-    throw new EpcError(`EPC header 0x${header.toString(16)} is not SGTIN-96 or SSCC-96.`);
+    throw new EpcError(`EPC header 0x${header.toString(16)} is not SGTIN-96, SGTIN-198 or SSCC-96.`);
   }
   const filter = Number(field(bits, 8, 3));
   const partition = Number(field(bits, 11, 3));
@@ -113,6 +150,29 @@ export function decodeEpc(hex: string): Epc {
 export function epcToScan(hex: string): string {
   const epc = decodeEpc(hex);
   return epc.scheme === "SSCC-96" ? `]C100${epc.sscc}` : `]C101${epc.gtin}21${epc.serial}`;
+}
+
+/** Encodes an SGTIN-198 with an alphanumeric serial, padded to 52 hexadecimal characters (for the tests and for tag printing). */
+export function encodeSgtin198(gtin14: string, serial: string, companyPrefixDigits: number, filter = 1): string {
+  if (!/^\d{14}$/.test(gtin14) || checkDigitOf(gtin14.slice(0, 13)) !== gtin14[13]) throw new EpcError("The GTIN-14 is not valid.");
+  if (serial.length < 1 || serial.length > 20 || ![...serial].every((ch) => SERIAL_CHARS.test(ch))) throw new EpcError("An SGTIN-198 serial is 1 to 20 GS1 characters.");
+  const partition = SGTIN_PARTITIONS.findIndex((p) => p.cpDigits === companyPrefixDigits);
+  if (partition < 0) throw new EpcError("A company prefix has 6 to 12 digits.");
+  const p = SGTIN_PARTITIONS[partition];
+  const prefix = BigInt(gtin14.slice(1, 1 + p.cpDigits));
+  const ref = BigInt(gtin14[0] + gtin14.slice(1 + p.cpDigits, 13));
+  let v = BigInt(HEADER_SGTIN198);
+  for (const [value, width] of [
+    [BigInt(filter), 3],
+    [BigInt(partition), 3],
+    [prefix, p.cpBits],
+    [ref, p.refBits],
+  ] as const) {
+    v = (v << BigInt(width)) | value;
+  }
+  for (let i = 0; i < 20; i++) v = (v << 7n) | BigInt(i < serial.length ? serial.charCodeAt(i) : 0);
+  v <<= 10n; // pad 198 bits to 208
+  return v.toString(16).toUpperCase().padStart(52, "0");
 }
 
 /** Encodes an SGTIN-96 (for the tests and for tag printing). The GTIN must have a valid check digit. */
