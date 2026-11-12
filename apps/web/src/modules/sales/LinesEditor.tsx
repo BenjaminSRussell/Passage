@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { pickProductPatch } from "../../shell/lookup/entities";
 import { Button, FormField, Input, Select } from "../../shell/ui";
@@ -27,7 +27,7 @@ export interface LinesEditorProps {
   /** The selling legal entity, which narrows the site and warehouse pickers. */
   legalEntityId?: string;
   /** The customer and currency of the order: a product picked on a line with no price yet gets the customer's price. */
-  pricing?: { customerId: string; currency: string };
+  pricing?: { customerId: string; customerGroupId?: string; currency: string };
 }
 
 /** The line grid shared by the order and quotation forms: one fieldset per line. */
@@ -36,17 +36,34 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
   // The latest lines, so a price that arrives after the clerk typed on keeps what was typed.
   const latest = useRef(lines);
   latest.current = lines;
+  const pricingKey = pricing ? `${pricing.customerId}|${pricing.customerGroupId ?? ""}|${pricing.currency}` : "";
+  const canPrice = Boolean(pricing && legalEntityId && UUID_TEXT.test(pricing.customerId) && /^[A-Z]{3}$/.test(pricing.currency));
+  // A line is prefilled only while it has no price and no discount of its own: the suggestion is the net price after the
+  // customer's discounts, so a discount the clerk entered would count twice.
   const prefillPrice = (i: number, line: LineValues) => {
-    if (!pricing || !legalEntityId || !UUID_TEXT.test(pricing.customerId) || !/^[A-Z]{3}$/.test(pricing.currency) || line.productId === "" || line.unitPrice !== "") return;
-    void suggestUnitPrice({ legalEntityId, customerId: pricing.customerId, currency: pricing.currency, productId: line.productId, unit: line.unit, quantity: line.quantity }).then(
+    if (!pricing || !legalEntityId || !canPrice || line.productId === "" || line.unitPrice !== "" || !(line.discPct === "" || Number(line.discPct) === 0)) return;
+    const key = pricingKey;
+    void suggestUnitPrice({ legalEntityId, customerId: pricing.customerId, customerGroupId: pricing.customerGroupId, currency: pricing.currency, productId: line.productId, unit: line.unit, quantity: line.quantity }).then(
       (price) => {
         const now = latest.current[i];
-        if (price === null || !now || now.productId !== line.productId || now.unitPrice !== "") return;
-        onChange(latest.current.map((l, idx) => (idx === i ? { ...l, unitPrice: price } : l)));
+        if (price === null || !now || now.productId !== line.productId || now.unitPrice !== "" || latestKey.current !== key) return;
+        onChange(latest.current.map((l, idx) => (idx === i ? { ...l, unitPrice: price, pricedFor: key } : l)));
       },
       () => undefined,
     );
   };
+  // A change of customer, group or currency drops the prices pricing suggested for the old ones (a typed price stays) and asks again.
+  const latestKey = useRef(pricingKey);
+  latestKey.current = pricingKey;
+  useEffect(() => {
+    const stale = latest.current.some((l) => l.pricedFor !== undefined && l.pricedFor !== pricingKey);
+    if (!stale) return;
+    const cleared = latest.current.map((l) => (l.pricedFor !== undefined && l.pricedFor !== pricingKey ? { ...l, unitPrice: "", pricedFor: undefined } : l));
+    onChange(cleared);
+    cleared.forEach((l, i) => prefillPrice(i, l));
+    // prefillPrice and onChange are rebuilt every render; only the pricing inputs matter here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pricingKey]);
   return (
     <div className={`${styles.formActions} ${styles.lines}`}>
       {lines.map((line, i) => (
@@ -57,7 +74,7 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
           {lineFields.map((f) => {
             const path = `lines[${i}].${f.name}`;
             return (
-              <FormField key={f.name} id={`${idPrefix}-${i}-${f.name}`} label={f.label} hint={f.name === "productId" ? line.productHint || undefined : f.name === "unitPrice" && pricing ? "Filled in from the customer's prices when you pick a product; you can change it." : undefined} error={errors[path]}>
+              <FormField key={f.name} id={`${idPrefix}-${i}-${f.name}`} label={f.label} hint={f.name === "productId" ? line.productHint || undefined : f.name === "unitPrice" && pricing ? "Filled in with the customer's net price (after its discounts) when you pick a product; you can change it." : undefined} error={errors[path]}>
                 {(control) =>
                   f.name === "productId" ? (
                     <EntityLookup
@@ -96,7 +113,7 @@ export function LinesEditor({ lines, errors, newLineDate, onChange, withDelivery
                       inputMode={f.inputMode}
                       className={f.mono ? styles.mono : undefined}
                       value={line[f.name]}
-                      onChange={(e) => updateLine(i, { [f.name]: e.target.value })}
+                      onChange={(e) => updateLine(i, f.name === "unitPrice" ? { unitPrice: e.target.value, pricedFor: undefined } : { [f.name]: e.target.value })}
                       invalid={Boolean(errors[path])}
                     />
                   )

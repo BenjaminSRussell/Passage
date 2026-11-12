@@ -12,6 +12,8 @@ export interface LineValues {
   siteId: string;
   warehouseId: string;
   unitPrice: string;
+  /** Set while unitPrice is the price pricing suggested (customer, group and currency it was asked for); typing clears it. */
+  pricedFor?: string;
   discPct: string;
   requestedShipDate: string;
   /** Empty: the legal entity default applies. Shown on the order form only. */

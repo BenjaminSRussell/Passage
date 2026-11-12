@@ -1,8 +1,8 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
-import { createOrder, describeProblem, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem, type Proposal } from "./api/client";
+import { createOrder, describeProblem, getCustomerGroup, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem, type Proposal } from "./api/client";
 import { sentence, today, UUID } from "./format";
 import { emptyLine, validateLines, type LineValues } from "./lines";
 import { emptyOneTime, OneTimeFields, validateOneTime, type OneTimeValues } from "./OneTimeFields";
@@ -80,6 +80,21 @@ export function NewOrderPage() {
     listingOverrideReason: "",
     lines: [emptyLine(start)],
   });
+  // The customer's group, which pricing's group conditions key on; read once per customer for the price prefill.
+  const [customerGroup, setCustomerGroup] = useState("");
+  useEffect(() => {
+    const customerId = values.customerId.trim();
+    setCustomerGroup("");
+    if (!UUID.test(customerId)) return;
+    const controller = new AbortController();
+    getCustomerGroup(customerId, controller.signal).then(
+      (group) => {
+        if (!controller.signal.aborted) setCustomerGroup(group);
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+  }, [values.customerId]);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -191,7 +206,7 @@ export function NewOrderPage() {
             lines={values.lines}
             errors={errors}
             legalEntityId={values.legalEntityId}
-            pricing={{ customerId: values.customerId, currency: values.currency }}
+            pricing={{ customerId: values.customerId, customerGroupId: customerGroup, currency: values.currency }}
             newLineDate={values.requestedShipDate}
             onChange={(lines) => update({ lines })}
             withDeliveryControl

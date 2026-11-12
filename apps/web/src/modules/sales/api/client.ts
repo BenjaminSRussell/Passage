@@ -2105,11 +2105,12 @@ export function recordOrderProgress(orderId: string, input: RecordProgressInput,
 }
 
 /**
- * The unit price the customer's active price conditions give one line (pricing's resolve, no trace), for prefilling
- * order entry. Null when pricing finds no price for the line, or the caller may not ask (403): the clerk types it.
+ * The net unit price the customer's active price conditions give one line (pricing's resolve, no trace): the price after the
+ * line's discounts, for prefilling order entry with no discount of its own. Null when pricing finds no price for the line, or the
+ * caller may not ask (403): the clerk types it.
  */
 export async function suggestUnitPrice(
-  input: { legalEntityId: string; customerId: string; currency: string; productId: string; unit: string; quantity: string },
+  input: { legalEntityId: string; customerId: string; customerGroupId?: string; currency: string; productId: string; unit: string; quantity: string },
   signal?: AbortSignal,
 ): Promise<string | null> {
   const res = await apiFetch("/api/v1/pricing/resolve?explain=false", {
@@ -2120,13 +2121,23 @@ export async function suggestUnitPrice(
     body: JSON.stringify({
       legalEntityId: input.legalEntityId,
       customerId: input.customerId,
+      ...(input.customerGroupId ? { customerGroupId: input.customerGroupId } : {}),
       currency: input.currency,
       lines: [{ productId: input.productId, unit: input.unit, quantity: input.quantity || "1" }],
     }),
   });
   if (!res.ok) return null;
-  const body = (await res.json()) as { lines?: { unitPrice?: string | number; errorCode?: string }[] };
+  const body = (await res.json()) as { lines?: { unitPrice?: string | number; netUnitPrice?: string | number; errorCode?: string }[] };
   const line = body.lines?.[0];
-  if (!line || line.errorCode || line.unitPrice === undefined || line.unitPrice === null) return null;
-  return String(line.unitPrice);
+  if (!line || line.errorCode) return null;
+  const price = line.netUnitPrice ?? line.unitPrice;
+  return price === undefined || price === null ? null : String(price);
+}
+
+/** The customer's group (party customerGroupId), which pricing's group conditions key on; empty when unknown or not readable. */
+export async function getCustomerGroup(customerId: string, signal?: AbortSignal): Promise<string> {
+  const res = await apiFetch(`/api/v1/party/customers/${encodeURIComponent(customerId)}`, { headers: { Accept: "application/json" }, credentials: "same-origin", signal });
+  if (!res.ok) return "";
+  const body = (await res.json()) as { customerGroupId?: unknown };
+  return typeof body.customerGroupId === "string" ? body.customerGroupId : "";
 }
