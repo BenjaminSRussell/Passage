@@ -43,8 +43,9 @@ func TestRealmPatchFollowsTheProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hipaa.Set["eventsExpiration"] != 2190*86400 || hipaa.Set["adminEventsExpiration"] != 2190*86400 {
-		t.Errorf("hipaa keeps events six years, got %v / %v", hipaa.Set["eventsExpiration"], hipaa.Set["adminEventsExpiration"])
+	adminRetention := hipaa.Set["attributes"].(map[string]any)["adminEventsExpiration"]
+	if hipaa.Set["eventsExpiration"] != 2190*86400 || adminRetention != "189216000" {
+		t.Errorf("hipaa keeps events six years, got %v / %v", hipaa.Set["eventsExpiration"], adminRetention)
 	}
 	if hipaa.Set["ssoSessionIdleTimeout"] != 15*60 {
 		t.Errorf("hipaa SSO idle timeout = %v", hipaa.Set["ssoSessionIdleTimeout"])
@@ -136,4 +137,68 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// knownRealmFields are the top-level properties Keycloak 26.0.8 accepts in a realm import.
+func knownRealmFields(t *testing.T) map[string]bool {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/keycloak-26.0.8-realm-representation.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			known[line] = true
+		}
+	}
+	return known
+}
+
+// TestEveryPatchedRealmImportsIntoKeycloak: Keycloak refuses the whole import when the realm has a top-level key its
+// RealmRepresentation does not know (CI caught adminEventsExpiration, which is a realm attribute, not a property). Every
+// profile and overlay, with and without the IdP MFA trust, must produce only known keys, and string attribute values.
+func TestEveryPatchedRealmImportsIntoKeycloak(t *testing.T) {
+	known := knownRealmFields(t)
+	for key := range loadRealm(t) {
+		if !known[key] {
+			t.Errorf("realm-passage.json has %q, which Keycloak 26.0.8 does not accept", key)
+		}
+	}
+	for _, sel := range [][]string{{"commercial"}, {"gcc"}, {"gcc-high"}, {"dod"}, {"commercial", "hipaa"}, {"gcc-high", "hipaa"}, {"commercial", "eu-data-boundary"}} {
+		for _, trust := range []bool{false, true} {
+			patch, err := RenderRealmPatch(mustResolve(t, sel[0], sel[1:]...), RealmOptions{TrustIdPMFA: trust})
+			if err != nil {
+				t.Fatal(err)
+			}
+			realm := loadRealm(t)
+			ApplyRealmPatch(realm, patch)
+			for key := range realm {
+				if !known[key] {
+					t.Errorf("%v trust=%v: the patched realm has %q, which Keycloak 26.0.8 does not accept", sel, trust, key)
+				}
+			}
+			if attrs, ok := realm["attributes"].(map[string]any); ok {
+				for k, v := range attrs {
+					if _, isString := v.(string); !isString {
+						t.Errorf("%v: realm attribute %s = %v (%T); Keycloak realm attributes are strings", sel, k, v, v)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestAdminEventRetentionIsARealmAttributeMergedIntoExistingOnes(t *testing.T) {
+	realm := loadRealm(t)
+	realm["attributes"] = map[string]any{"frontendUrl": "https://id.example"}
+	patch, _ := RenderRealmPatch(mustResolve(t, "commercial", "hipaa"), RealmOptions{})
+	ApplyRealmPatch(realm, patch)
+	attrs, _ := realm["attributes"].(map[string]any)
+	if attrs["adminEventsExpiration"] != "189216000" || attrs["frontendUrl"] != "https://id.example" {
+		t.Fatalf("attributes = %v; want adminEventsExpiration 189216000 (six years) next to the existing attribute", attrs)
+	}
+	if _, top := realm["adminEventsExpiration"]; top {
+		t.Fatal("adminEventsExpiration must not be a top-level realm key")
+	}
 }

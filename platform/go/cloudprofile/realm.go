@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 )
 
 const (
@@ -48,11 +49,13 @@ func RenderRealmPatch(p *Profile, opts RealmOptions) (*RealmPatch, error) {
 	}
 	seconds := k.EventRetentionDays * 24 * 60 * 60
 	patch := &RealmPatch{Set: map[string]any{
-		"passwordPolicy":        fmt.Sprintf("hashAlgorithm(%s) and length(%d) and notUsername", k.PasswordHash, k.PasswordMinLength),
-		"eventsEnabled":         true,
-		"adminEventsEnabled":    true,
-		"eventsExpiration":      seconds,
-		"adminEventsExpiration": seconds,
+		"passwordPolicy":     fmt.Sprintf("hashAlgorithm(%s) and length(%d) and notUsername", k.PasswordHash, k.PasswordMinLength),
+		"eventsEnabled":      true,
+		"adminEventsEnabled": true,
+		"eventsExpiration":   seconds,
+		// Admin event retention is not a RealmRepresentation property: Keycloak stores it as the realm attribute
+		// adminEventsExpiration (RealmAttributes.ADMIN_EVENTS_EXPIRATION), a string, and refuses the import otherwise.
+		"attributes": map[string]any{"adminEventsExpiration": strconv.Itoa(seconds)},
 	}}
 	if p.IdleTimeoutMinutes > 0 {
 		// The browser signs out on its own idle timer (apps/web); the SSO session must not outlive it, or the next
@@ -117,6 +120,18 @@ func TrustIdPMFAMappers() []map[string]any {
 // providers named EntraAlias (and the placeholder providers) are pointed at the patch's post-broker flow when it has one.
 func ApplyRealmPatch(realm map[string]any, patch *RealmPatch) {
 	for key, v := range patch.Set {
+		if attrs, ok := v.(map[string]any); ok && key == "attributes" {
+			// Realm attributes are merged, so the patch never drops one the export already has.
+			merged, _ := realm["attributes"].(map[string]any)
+			if merged == nil {
+				merged = map[string]any{}
+			}
+			for k, a := range attrs {
+				merged[k] = a
+			}
+			realm[key] = merged
+			continue
+		}
 		realm[key] = v
 	}
 	flows, _ := realm["authenticationFlows"].([]any)
