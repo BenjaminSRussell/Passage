@@ -874,7 +874,7 @@ components:
         account: { type: string }
         recognized: { type: string }
         creditNotes: { type: string, description: "Cumulative deferred amounts of the credit notes revrec reversed (billing's debits to 2400)." }
-        modificationCredits: { type: string, description: "Cumulative price decreases of contract modifications, which billing credits and debits to 2400." }
+        modificationCredits: { type: string, description: "Cumulative allocation decreases of the products contract modifications lowered, which billing credits and debits to 2400." }
         reversed: { type: string, description: "Cumulative recognized revenue reversed by credit notes (revrec's credits to 2400)." }
         glDebit: { type: string }
         difference: { type: string }

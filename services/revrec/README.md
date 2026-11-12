@@ -291,7 +291,7 @@ standalone price is a separate contract: `:allocate`.
   for the products whose allocation rose and a credit note (by amount, on the order's invoice line) for those whose allocation fell.
   An outage backs off (30 s doubling, at most an hour), a refusal parks the request (`POST /v1/revrec/modifications/{id}:retry-billing`,
   `revrec.post`, puts it back). billing's `creditnote.booked` for such a credit note carries `contract_modification_id` and the
-  credit-note consumer skips it. The GL reconciliation adds the modifications' price decreases (`modificationCredits`) to the 2400
+  credit-note consumer skips it. The GL reconciliation adds what billing credits for modifications (the per-product allocation decreases, `modificationCredits`) to the 2400
   debits it expects. A pure SSP revision (no price change) is not billed.
 - Each modification stores a `contract_modification` row and an `allocation_delta` per obligation, dated at the effective date. The
   deferred revenue roll-forward adds the delta in the period of the effective date, not in the contract's, so the roll-forward closes

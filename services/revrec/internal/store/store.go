@@ -505,9 +505,13 @@ func rollForward(ctx context.Context, tx pgx.Tx, legalEntityID, contractID, curr
 	opening := v[0].Sub(v[2]).Add(v[6]).Sub(v[4])
 	out := domain.NewRollForward(opening, v[1], v[3]).WithCredits(v[7], v[5].Neg())
 	var decreases string
-	if err := tx.QueryRow(ctx, `select coalesce(sum(m.price_before - m.price_after), 0)::text from contract_modification m
+	// Billing credits each product whose allocation fell (the negative lines of the billing request), not the net price change: a
+	// modification of -300 on one product and +100 on another is a 300 credit note and a 100 invoice.
+	if err := tx.QueryRow(ctx, `select coalesce(sum(-(l ->> 'amount')::numeric), 0)::text from contract_modification m
+		join modification_billing b on b.tenant_id = m.tenant_id and b.modification_id = m.id
 		join revenue_contract c on c.tenant_id = m.tenant_id and c.id = m.contract_id
-		where c.legal_entity_id = $1::uuid and c.currency = $2 and m.price_after < m.price_before and m.effective_date <= $3::date
+		cross join lateral jsonb_array_elements(b.body -> 'lines') l
+		where c.legal_entity_id = $1::uuid and c.currency = $2 and (l ->> 'amount')::numeric < 0 and m.effective_date <= $3::date
 		  and ($4 = '' or c.id = nullif($4, '')::uuid)`, legalEntityID, currency, to, contractID).Scan(&decreases); err != nil {
 		return domain.RollForward{}, err
 	}

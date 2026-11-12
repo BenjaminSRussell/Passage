@@ -294,3 +294,29 @@ func TestModifyContract_CatchUpOnACreditedContractMeasuresProgressBeforeTheCredi
 		t.Fatalf("modification %+v", mod)
 	}
 }
+
+// Billing credits per product: a modification that takes 300.00 off support and adds 100.00 to the licence (net -200.00) is a 300.00
+// credit note, so the reconciliation expects 300.00 of modification credits, not the net 200.00.
+func TestRollForward_ModificationCreditsArePerProductDecreases(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := tenantCtx(1, "")
+	le := ids.New()
+	c, err := s.CreateContract(ctx, supportAndLicence(t, le))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lic := c.Obligations[0]
+	if _, err := s.SatisfyMilestone(ctx, lic.ID, day(2027, time.January, 15), 0); err != nil {
+		t.Fatal(err)
+	}
+	recognizeThrough(t, s, ctx, le, 3)
+	// Pool 1,800.00 over SSPs 1,200 : 1,200 gives 900.00 each: licence +100.00, support -300.00.
+	if _, _, err := s.ModifyContract(ctx, c.ID, ModificationRequest{Type: domain.ModCatchUp, EffectiveDate: day(2027, time.March, 31),
+		PriceChange: decimal.RequireFromString("-200.00"), NewSSP: map[string]decimal.Decimal{lic.ID: decimal.RequireFromString("1200")}}); err != nil {
+		t.Fatal(err)
+	}
+	year, err := s.RollForward(ctx, le, "USD", day(2027, time.January, 1), day(2027, time.December, 31))
+	if err != nil || !year.ModificationCredits.Equal(decimal.RequireFromString("300.00")) {
+		t.Fatalf("modification credits %s (%v)", year.ModificationCredits, err)
+	}
+}

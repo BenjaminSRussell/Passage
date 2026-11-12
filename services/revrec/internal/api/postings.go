@@ -335,7 +335,7 @@ type glReconciliationOut struct {
 	GLDebit       string `json:"glDebit"`
 	Difference    string `json:"difference"`
 	CreditNotes   string `json:"creditNotes"`
-	// ModificationCredits is the price decreases of contract modifications, which billing credits and debits to 2400.
+	// ModificationCredits is the per-product allocation decreases of contract modifications, which billing credits and debits to 2400.
 	ModificationCredits string `json:"modificationCredits"`
 	Reversed            string `json:"reversed"`
 	Deferred            string `json:"deferred"`
@@ -392,7 +392,7 @@ func (a *API) glReconciliation(w http.ResponseWriter, r *http.Request) {
 	}
 	// 2400 is debited by revrec's recognition postings and by billing's credit notes for their deferred part, which revrec
 	// mirrors as negative adjustments when it consumes creditnote.booked; a credit note revrec has not reversed shows here.
-	// A modification's price decrease is credited by billing to 2400 too (its revenue part is revrec's modification reversal, on
+	// What billing credits for a modification (the products whose allocation fell) is debited to 2400 too (its revenue part is revrec's modification reversal, on
 	// the credit side).
 	creditNotes := rf.Adjustments.Neg()
 	diff := rf.Recognized.Add(creditNotes).Add(rf.ModificationCredits).Sub(bal.Debit)
