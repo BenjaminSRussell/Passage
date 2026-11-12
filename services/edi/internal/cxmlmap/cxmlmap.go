@@ -1,10 +1,11 @@
 // Package cxmlmap puts an inbound cXML document of a partner's network onto the services that own the objects (#35, 35-4): a
-// ConfirmationRequest that accepts an order as it was sent confirms the purchase order in purchasing, and a ShipNoticeRequest becomes
-// an advance ship notice in receiving. Both run under the service principal edi-cxml in the legal entity of the order, with the
-// narrow duties of the grants edi -> purchasing and edi -> receiving.
+// ConfirmationRequest that accepts an order as it was sent confirms the purchase order in purchasing, a ShipNoticeRequest becomes
+// an advance ship notice in receiving, and an InvoiceDetailRequest of one purchase order lands in payables' vendor-invoice intake for
+// the order's vendor. They run under the service principal edi-cxml in the legal entity of the order, with the narrow duties of the
+// grants edi -> purchasing, edi -> receiving and edi -> payables.
 //
-// An InvoiceDetailRequest is recorded and published but not put onto payables: payables posts a vendor invoice against receipt lines
-// (GR/IR), which a cXML invoice does not name; it is parked with EDI-0038 for matching by an AP clerk.
+// The intake posts nothing: payables posts a vendor invoice against receipt lines (GR/IR), which a cXML invoice does not name, so an
+// AP clerk matches it. An invoice of several orders, or of none, is parked with EDI-0038.
 //
 // A document that cannot be mapped (an unknown order, a rejected line, a quantity over what is open) is parked: the message is FAILED
 // with the park code and detail, and POST /messages/{id}:post tries it again once the cause is fixed. A transient failure (an outage)
@@ -38,6 +39,11 @@ type Receiving interface {
 	CreateASN(ctx context.Context, legalEntityID, key string, body sources.ASNRequest) (sources.ASNRef, error)
 }
 
+// Payables takes inbound invoices into its vendor-invoice intake; sources.Client implements it. Nil parks invoices with EDI-0038.
+type Payables interface {
+	ReceiveVendorInvoice(ctx context.Context, legalEntityID, key string, body sources.VendorInvoiceRequest) (sources.VendorInvoiceRef, error)
+}
+
 var ErrNotConfigured = errors.New("purchasing and receiving are not configured")
 
 // NotMappableError says the message is not a cXML document this package maps.
@@ -59,6 +65,7 @@ type Mapper struct {
 	Store      *store.Store
 	Purchasing Purchasing
 	Receiving  Receiving
+	Payables   Payables
 }
 
 func asPrincipal(ctx context.Context, legalEntityID string) (context.Context, error) {
@@ -103,8 +110,7 @@ func (m *Mapper) Map(ctx context.Context, id string) (Result, error) {
 	case "ShipNoticeRequest":
 		return m.shipNotice(ctx, st, c)
 	case "InvoiceDetailRequest":
-		return Result{}, m.park(ctx, id, domain.Park{Code: domain.CodeCXMLInvoiceTarget,
-			Detail: "invoice " + c.Number + " is recorded; payables posts vendor invoices against receipt lines, which a cXML invoice does not name, so it is matched by an AP clerk"})
+		return m.invoice(ctx, st, c)
 	}
 	return Result{}, &NotMappableError{c.DocType + " is not put onto a service"}
 }
@@ -186,6 +192,50 @@ func (m *Mapper) shipNotice(ctx context.Context, st store.PostState, c domain.CX
 		return Result{}, err
 	}
 	return m.done(ctx, st.ID, "ASN", ref.ID)
+}
+
+func (m *Mapper) invoice(ctx context.Context, st store.PostState, c domain.CXMLCanonical) (Result, error) {
+	if m.Payables == nil {
+		return Result{}, m.park(ctx, st.ID, domain.Park{Code: domain.CodeCXMLInvoiceTarget,
+			Detail: "invoice " + c.Number + " is recorded; payables is not configured (EDI_PAYABLES_URL), so it is matched by an AP clerk"})
+	}
+	plan, park := domain.PlanInvoice(c)
+	if park != nil {
+		return Result{}, m.park(ctx, st.ID, *park)
+	}
+	o, err := m.order(ctx, st, plan.OrderID)
+	if err != nil {
+		return Result{}, err
+	}
+	cctx, err := asPrincipal(ctx, o.LegalEntityID)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %v", sources.ErrForbidden, err)
+	}
+	po, err := m.Purchasing.PurchaseOrder(cctx, o.LegalEntityID, o.PurchaseOrderID)
+	if errors.Is(err, sources.ErrNotFound) {
+		return Result{}, m.park(ctx, st.ID, domain.Park{Code: domain.CodeCXMLUnknownOrder, Detail: "purchase order " + plan.OrderID + " no longer exists in purchasing"})
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	if po.VendorID == "" {
+		return Result{}, m.park(ctx, st.ID, domain.Park{Code: domain.CodeCXMLInvoiceTarget, Detail: "purchase order " + plan.OrderID + " names no vendor"})
+	}
+	req := sources.VendorInvoiceRequest{LegalEntityID: o.LegalEntityID, Source: "CXML", SourceRef: st.ID, VendorID: po.VendorID,
+		InvoiceNumber: plan.Number, InvoiceDate: plan.Date, Purpose: plan.Purpose, PurchaseOrderID: o.PurchaseOrderID, PurchaseOrderNumber: po.Number,
+		Currency: plan.Currency, Gross: plan.Gross}
+	for _, l := range plan.Lines {
+		req.Lines = append(req.Lines, sources.VendorInvoiceLine{LineNo: l.LineNo, Item: l.Item, Quantity: l.Quantity, Unit: l.Unit, UnitPrice: l.UnitPrice})
+	}
+	ref, err := m.Payables.ReceiveVendorInvoice(cctx, o.LegalEntityID, st.ID, req)
+	var refused *sources.DownstreamRefusedError
+	if errors.As(err, &refused) {
+		return Result{}, m.park(ctx, st.ID, domain.Park{Code: domain.CodeCXMLDownstream, Detail: "payables " + refused.Code + ": " + refused.Detail})
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	return m.done(ctx, st.ID, "VENDOR_INVOICE", ref.ID)
 }
 
 func (m *Mapper) done(ctx context.Context, id, kind, ref string) (Result, error) {

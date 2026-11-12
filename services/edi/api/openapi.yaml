@@ -823,12 +823,14 @@ paths:
   /edi/v1/messages/{id}:post:
     post:
       operationId: postMessage
-      summary: Post an inbound 850 or ORDERS to sales as an order, or put an inbound cXML document onto purchasing or receiving
+      summary: Post an inbound 850 or ORDERS to sales as an order, or put an inbound cXML document onto purchasing, receiving or payables
       description: >
         For an inbound cXML document (35-4) the route puts it onto the service that owns the object, as service:edi-cxml: a ConfirmationRequest that accepts
-        the order as sent confirms the purchase order in purchasing, and a ShipNoticeRequest becomes the ASN of the purchase order in receiving; the order is
+        the order as sent confirms the purchase order in purchasing, a ShipNoticeRequest becomes the ASN of the purchase order in receiving, and an
+        InvoiceDetailRequest of one order lands in payables' vendor-invoice intake for the order's vendor (downstreamKind VENDOR_INVOICE); the order is
         found by the orderID the OrderRequest was sent under. The message becomes POSTED. A rejected or changed line (EDI-0037), an orderID nothing was sent
-        under (EDI-0036), an invoice (EDI-0038: payables matches it against receipts) or a refusal by the service (EDI-0039) parks the message with that code
+        under (EDI-0036), an invoice of several orders or with payables not configured (EDI-0038: an AP clerk matches it) or a refusal by the service
+        (EDI-0039) parks the message with that code
         (422) and the route posts it again once the cause is fixed. The same mapping runs right after receipt on the public listener.
         Builds the sales intake order (channel EDI) from the stored canonical order, the partner's
         item cross-references and sales defaults, and places it with sales under the service grant

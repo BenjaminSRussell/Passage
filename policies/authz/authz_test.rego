@@ -765,6 +765,7 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 		"sales": ["sales.order.lookup", "sales.channel.intake"],
 		"purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
 		"receiving": ["receiving.asn.maintain"],
+		"payables": ["payables.vendor-invoice.intake"],
 	}
 	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
@@ -2753,7 +2754,7 @@ test_edi_b2b_routes_belong_to_their_duties if {
 
 test_edi_cxml_grants_are_narrow if {
 	data.service_grants.edi.receiving == ["receiving.asn.maintain"]
-	data.service_principals["edi-cxml"] == ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"]
+	data.service_principals["edi-cxml"] == ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain", "payables.vendor-invoice.intake"]
 	every duty in ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"] {
 		data.duties[duty].service_only
 	}
@@ -3142,4 +3143,15 @@ test_warehouse_shipment_shipped_confirmation if {
 	not allowed("warehouse.inquiry.view", "POST", "/v1/warehouse/shipments/s1:ship")
 	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/shipments/s1/shipped")
 	not allowed("warehouse.shipment.confirm", "GET", "/v1/warehouse/shipments/s1/shipped")
+}
+
+# #35 (35-4): edi puts an inbound cXML invoice into payables' vendor-invoice intake with a service-only duty; an AP clerk reads it.
+test_payables_vendor_invoice_intake if {
+	allowed("payables.vendor-invoice.intake", "POST", "/v1/payables/vendor-invoice-intake")
+	not allowed("open-item.read", "POST", "/v1/payables/vendor-invoice-intake")
+	allowed("open-item.read", "GET", "/v1/payables/vendor-invoice-intake")
+	allowed("open-item.read", "GET", "/v1/payables/vendor-invoice-intake/i1")
+	not allowed("payables.vendor-invoice.intake", "GET", "/v1/payables/vendor-invoice-intake/i1")
+	"payables.vendor-invoice.intake" in data.service_grants.edi.payables
+	"payables.vendor-invoice.intake" in data.service_principals["edi-cxml"]
 }

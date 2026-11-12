@@ -72,6 +72,10 @@ spec:
             - name: EDI_RECEIVING_URL
               value: {{ .Values.sources.receivingUrl | quote }}
             {{- end }}
+            {{- if .Values.sources.payablesUrl }}
+            - name: EDI_PAYABLES_URL
+              value: {{ .Values.sources.payablesUrl | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.allowBodyOutbound }}
             - name: EDI_ALLOW_BODY_OUTBOUND

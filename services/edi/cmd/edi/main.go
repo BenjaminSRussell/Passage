@@ -120,6 +120,10 @@ func run() error {
 		if purchasingURL != "" && receivingURL != "" {
 			src.WithReceiving(receivingURL)
 			a.CXMLMapper = &cxmlmap.Mapper{Store: st, Purchasing: src, Receiving: src}
+			// An inbound cXML invoice lands in payables' vendor-invoice intake when its URL is set; otherwise it is parked (EDI-0040).
+			if payablesURL := os.Getenv("EDI_PAYABLES_URL"); payablesURL != "" {
+				a.CXMLMapper.Payables = src.WithPayables(payablesURL)
+			}
 		}
 	}
 	tc, err := loadTransportConfig(os.Getenv, addr)

@@ -855,6 +855,8 @@
     "open-item.read": {"permissions": [
       {"resource": "/v1/payables/open-items", "methods": ["GET"]},
       {"resource": "/v1/payables/open-items/*", "methods": ["GET"]},
+      {"resource": "/v1/payables/vendor-invoice-intake", "methods": ["GET"]},
+      {"resource": "/v1/payables/vendor-invoice-intake/*", "methods": ["GET"]},
       {"resource": "/v1/payables/vendor-blocks", "methods": ["GET"]}
     ]},
     "payment-proposal.write": {"permissions": [{"resource": "/v1/payables/payment-proposals", "methods": ["POST"]}, {"resource": "/v1/payables/payment-proposals/*:cancel", "methods": ["POST"]}]},
@@ -871,6 +873,7 @@
       {"resource": "/v1/payables/employee-vendors/*", "methods": ["PUT"]}
     ]},
     "opening-item.import": {"service_only": true, "permissions": [{"resource": "/v1/payables/opening-batches", "methods": ["POST"]}]},
+    "payables.vendor-invoice.intake": {"service_only": true, "permissions": [{"resource": "/v1/payables/vendor-invoice-intake", "methods": ["POST"]}]},
     "opening-item.import.read": {"service_only": true, "permissions": [{"resource": "/v1/payables/opening-batches", "methods": ["GET"]}]},
     "vendor-block.manage": {"permissions": [
       {"resource": "/v1/payables/vendors/*:block", "methods": ["POST"]},
@@ -4104,7 +4107,8 @@
       "billing": ["billing.invoice.read"],
       "sales": ["sales.order.lookup", "sales.channel.intake"],
       "purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
-      "receiving": ["receiving.asn.maintain"]
+      "receiving": ["receiving.asn.maintain"],
+      "payables": ["payables.vendor-invoice.intake"]
     },
     "fieldservice": {
       "dispatch": ["dispatch.run.create", "dispatch.run.read"]
@@ -4131,7 +4135,7 @@
     }
   },
   "service_principals": {
-    "edi-cxml": ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"],
+    "edi-cxml": ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain", "payables.vendor-invoice.intake"],
     "edi-outbound": ["edi.outbound.from-event"],
     "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],

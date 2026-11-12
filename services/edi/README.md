@@ -487,6 +487,13 @@ Sample files: `testdata/cxml/` (the three network documents, a punchout cart and
   warehouse's ship time as the ship date, its carrier when it named one, and only the containers that left (a named pallet takes its
   cartons along). A shipment fulfillment already shipped by a packing slip, a container already on a slip, or an SSCC the shipment does not
   hold is skipped with EDI-0007: the slip's `asn.issued` sends those notices.
+- **35-4 cXML invoices into payables.** An inbound InvoiceDetailRequest of exactly one purchase order is put into payables'
+  vendor-invoice intake (`POST /v1/payables/vendor-invoice-intake`, grant edi -> payables `payables.vendor-invoice.intake`, principal
+  `edi-cxml`) for the vendor of that purchase order (read from purchasing), with the invoice number, date, purpose, currency, gross and
+  lines as sent, keyed by the message id; the message becomes POSTED with downstream kind `VENDOR_INVOICE` (migration 0016). The intake
+  posts nothing: an AP clerk matches it to receipts. An invoice of several orders, or with `EDI_PAYABLES_URL` (chart
+  `sources.payablesUrl`) unset, is parked with EDI-0038; a refusal by payables (a changed resend, the vendor's invoice number taken)
+  with EDI-0039. The payables chart must list edi's public key.
 
 ## Wave 35 proof
 
