@@ -236,9 +236,9 @@ duties in step.
 | `REV-0201` | 502 | The general ledger did not answer, refused a balance read, or reported another currency |
 | `REV-0202` | 422 | The legal entity has no ledger in `REVREC_LEDGER_IDS` |
 | `REV-0401` | 422 | A modification's effective date is before the contract date |
-| `REV-0402` | 422 | A modification would take revenue back out of what is already recognized (use a credit note) |
+| `REV-0402` | 422 | A modification would take back more than the ratable and milestone obligations recognized: the price falls below what point-in-time and usage obligations were billed at (credit the invoice) |
 | `REV-0404` | 422 | A prospective modification has no obligation with performance left, or an obligation has revenue left but no line to carry it |
-| `REV-0405` | 409 | Credit notes already changed the contract's schedule; it cannot be re-allocated |
+| `REV-0405` | 409 | No longer returned (contracts credit notes touched are modified on their net amounts); kept so it is not reused |
 | `REV-0100` | 404 | Contract or obligation not found |
 | `REV-0103` | 412 | If-Match names a contract version that is no longer current |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different body |
@@ -267,12 +267,35 @@ standalone price is a separate contract: `:allocate`.
   the effective date that the next recognition run takes. The rest is spread over the future lines. Worked example (the domain tests):
   a 1,200.00 plan 25% transferred, price +120.00: allocation 1,320.00, revenue to date 330.00 against 300.00 recognized, catch-up
   30.00, 990.00 over the nine months left.
-- A change that would cut revenue already recognized is refused with REV-0402: revenue is not taken back out by a modification
-  (billing's credit note and the credit-note consumer reverse it). SSPs are not re-estimated outside a modification; `obligations`
-  gives the SSP at the modification date. A contract that credit notes touched (`credit_note_reversal`) is refused (REV-0405).
+- **Removing or reducing obligations** (migration 0012): `obligations[].remainingScope` is the share of an obligation's remaining,
+  not yet transferred performance that stays promised (0 removes it, 0.5 halves it). Without a revised `ssp` its SSP scales to what
+  stays promised (SSP x (share transferred + scope x share left)). PROSPECTIVE weighs the remaining consideration by SSP x share left x
+  scope; CATCH_UP measures progress as transferred / (transferred + scope x left). A removed obligation's open lines are cancelled
+  (REVERSED with amount 0, like a credit note) and it keeps what it recognized.
+- **Below recognized revenue** (IFRS 15 / ASC 606): CATCH_UP may give a negative cumulative catch-up: the earned lines are not
+  recognized and the rest comes back out of recognized revenue at the effective date. PROSPECTIVE with a new price below what is
+  recognized treats the shortfall as a price concession on performance already transferred (IFRS 15.88, ASC 606-10-32-43): it is
+  allocated over the ratable and milestone obligations in proportion to their recognized revenue, taken out of revenue at the
+  effective date, and the remaining performance is delivered for nothing. Both are stored as `modification_reversal` rows and posted
+  Dr 4000 / Cr 2400 by `POST /journal-postings` with the credit-note reversals (same back-off and parking, key `revrec-modrev-<id>`);
+  the roll-forward reports them as `reversed`. Worked examples 4 to 8 in `domain/modification_test.go` (and 8 through Postgres). Only a
+  price below what point-in-time and usage obligations were billed at is refused (REV-0402: credit the invoice). A later credit note
+  can no longer reverse revenue a modification already took back.
+- **Contracts credit notes touched** are modified on their net amounts: each obligation's allocation less what credit notes reduced
+  and reversed on it, the price less all of that, and recognized revenue less every reversal (credit notes and earlier
+  modifications). The stored allocation and price add the credit notes back, so the roll-forward still ties. REV-0405 is no longer
+  returned.
+- **Billing**: a modification with a price change queues a `modification_billing` request with the per-product allocation change.
+  The reporter (`BILLING_URL`, every `REVREC_BILLING_INTERVAL`, default 30s; service principal `revrec-billing`, duty
+  `billing.contract-modification.bill`) sends it to billing's `POST /v1/billing/contract-modifications`, which proposes an invoice
+  for the products whose allocation rose and a credit note (by amount, on the order's invoice line) for those whose allocation fell.
+  An outage backs off (30 s doubling, at most an hour), a refusal parks the request (`POST /v1/revrec/modifications/{id}:retry-billing`,
+  `revrec.post`, puts it back). billing's `creditnote.booked` for such a credit note carries `contract_modification_id` and the
+  credit-note consumer skips it. The GL reconciliation adds what billing credits for modifications (the per-product allocation decreases, `modificationCredits`) to the 2400
+  debits it expects. A pure SSP revision (no price change) is not billed.
 - Each modification stores a `contract_modification` row and an `allocation_delta` per obligation, dated at the effective date. The
   deferred revenue roll-forward adds the delta in the period of the effective date, not in the contract's, so the roll-forward closes
-  at zero when the new price is recognized. The new price is invoiced or credited by billing; the modification does not change billing.
+  at zero when the new price is recognized.
 
 ## Notes
 

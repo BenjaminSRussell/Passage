@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -264,6 +265,25 @@ func (s *Postgres) ListGLJournals(ctx context.Context, f GLJournalFilter) ([]GLJ
 	return out, err
 }
 
+// JournalsParked counts the journals this process parked after a ledger refusal (receivables_gl_journals_parked_total), and
+// ParkedJournals is the number of parked journals the journal sweep last counted across its tenants
+// (receivables_gl_journals_parked, the gauge the ReceivablesGLJournalsParked alert watches). Like ReservationAttention, they are
+// process counters the metrics handler reads.
+var (
+	JournalsParked atomic.Int64
+	ParkedJournals atomic.Int64
+)
+
+// CountParkedJournals counts the tenant's parked journals still owed to the ledger (every legal entity of the caller's scope).
+func (s *Postgres) CountParkedJournals(ctx context.Context) (int64, error) {
+	p, _ := tenant.FromContext(ctx)
+	var n int64
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select count(*) from gl_journal where tenant_id = $1 and status = 'PENDING' and parked`, p.TenantID).Scan(&n)
+	})
+	return n, err
+}
+
 // GLJournalLegalEntities lists the legal entities with journals due to post, so a tenant-wide worker can run
 // PostDueJournals once per legal entity under a principal scoped to it.
 func (s *Postgres) GLJournalLegalEntities(ctx context.Context) ([]string, error) {
@@ -350,6 +370,7 @@ func (s *Postgres) postJournal(ctx context.Context, tenantID string, v GLJournal
 		slog.ErrorContext(ctx, "receivables journal not posted", "journal", v.ID, "source", v.SourceType, "attempts", v.Attempts+1, "parked", parked, "err", err, "correlationId", middleware.GetReqID(ctx))
 		s.recordJournalFailure(ctx, tenantID, v, now, parked, err.Error())
 		if parked {
+			JournalsParked.Add(1)
 			return errJournalParked
 		}
 		return err

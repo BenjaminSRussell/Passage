@@ -23,6 +23,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/payables/internal/party"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/tax"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/withholdingreport"
 )
 
 const (
@@ -105,20 +106,50 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rates).WithPaymentRuns(items, poster, profiles).
 		WithVendorBanks(banks, keys).WithWithholding(withholding, items, profiles).WithVendorGroupDimension(groupDim).WithEmployeeVendors(items).WithOpeningItems(items).WithVendorPayments(items)
-	if rec, ok := withholding.(api.WithholdingRecorder); ok && withholding != nil {
+	var reporter *withholdingreport.Reporter
+	if rec, ok := withholding.(*tax.Client); ok && withholding != nil {
 		a.WithWithholdingRecorder(rec)
+		reporter = &withholdingreport.Reporter{Store: items, Tax: rec}
+	}
+	interval, err := withholdingInterval(getenv)
+	if err != nil {
+		return err
 	}
 	router := httpx.NewRouter()
 	a.Register(router)
+	metrics := a.Metrics()
+	if reporter != nil {
+		metrics = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			a.Metrics().ServeHTTP(w, r)
+			reporter.WriteMetrics(w)
+		})
+	}
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", httpx.WithMetrics(a.Metrics()))
+	admin.Handle("/metrics", httpx.WithMetrics(metrics))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if reporter != nil {
+		// The withheld tax of payment runs is queued by post-journal and sent here (#13), with back-off and parking.
+		go withholdingreport.Run(ctx, interval, reporter.RunOnce)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), a.Instrument(router)) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+// withholdingInterval is how often the withholding reporter sends due reports: PAYABLES_WITHHOLDING_REPORT_INTERVAL, default 30s.
+func withholdingInterval(getenv func(string) string) (time.Duration, error) {
+	v := getenv("PAYABLES_WITHHOLDING_REPORT_INTERVAL")
+	if v == "" {
+		return withholdingreport.DefaultInterval, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < time.Second {
+		return 0, fmt.Errorf("PAYABLES_WITHHOLDING_REPORT_INTERVAL must be a duration of at least 1s, got %q", v)
+	}
+	return d, nil
 }
 
 var dimensionAttrRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,19}$`)

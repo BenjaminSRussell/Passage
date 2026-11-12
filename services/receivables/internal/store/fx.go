@@ -36,6 +36,14 @@ type FXSetting struct {
 	FunctionalCurrency   string `json:"functionalCurrency"`
 	GainAccount          string `json:"gainAccount"`
 	LossAccount          string `json:"lossAccount"`
+	// ToleranceAmount and TolerancePercent are the entity's FX tolerance (domain.FXTolerance); both empty keep BR-30.4's 5.00 and 0.5%.
+	ToleranceAmount  *decimal.Decimal `json:"toleranceAmount,omitempty"`
+	TolerancePercent *decimal.Decimal `json:"tolerancePercent,omitempty"`
+}
+
+// Tolerance is the entity's FX tolerance for an item amount.
+func (f FXSetting) Tolerance(itemAmount decimal.Decimal) decimal.Decimal {
+	return domain.FXTolerance(itemAmount, f.ToleranceAmount, f.TolerancePercent)
 }
 
 // DefaultFXSetting is what an entity with no stored setting has: no cross-currency settlement, accounts 7100 and 7200.
@@ -60,6 +68,10 @@ func ValidateFXSetting(f *FXSetting) error {
 		return fxFieldError("gainAccount", "must be a ledger account number of at most 20 letters, digits, dots, dashes or underscores")
 	case !glAccountPattern.MatchString(f.LossAccount):
 		return fxFieldError("lossAccount", "must be a ledger account number of at most 20 letters, digits, dots, dashes or underscores")
+	case f.ToleranceAmount != nil && (f.ToleranceAmount.IsNegative() || f.ToleranceAmount.Exponent() < -6 || f.ToleranceAmount.GreaterThan(decimal.NewFromInt(1_000_000))):
+		return fxFieldError("toleranceAmount", "must be an amount from 0 to 1000000 with at most 6 decimals")
+	case f.TolerancePercent != nil && (f.TolerancePercent.IsNegative() || f.TolerancePercent.Exponent() < -4 || f.TolerancePercent.GreaterThan(decimal.NewFromInt(100))):
+		return fxFieldError("tolerancePercent", "must be a percentage from 0 to 100 with at most 4 decimals")
 	}
 	return nil
 }
@@ -78,9 +90,10 @@ func (s *Postgres) WithRates(r fxclient.Rates) *Postgres {
 
 func loadFXSetting(ctx context.Context, tx pgx.Tx, legalEntityID string) (FXSetting, error) {
 	f := DefaultFXSetting(legalEntityID)
-	var fc *string
-	err := tx.QueryRow(ctx, `select cross_currency_enabled, functional_currency::text, gain_account, loss_account from ar_fx_setting
-		where legal_entity_id = $1`, legalEntityID).Scan(&f.CrossCurrencyEnabled, &fc, &f.GainAccount, &f.LossAccount)
+	var fc, tolAmount, tolPct *string
+	err := tx.QueryRow(ctx, `select cross_currency_enabled, functional_currency::text, gain_account, loss_account, tolerance_amount::text,
+		tolerance_percent::text from ar_fx_setting where legal_entity_id = $1`, legalEntityID).
+		Scan(&f.CrossCurrencyEnabled, &fc, &f.GainAccount, &f.LossAccount, &tolAmount, &tolPct)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, nil
 	}
@@ -88,6 +101,15 @@ func loadFXSetting(ctx context.Context, tx pgx.Tx, legalEntityID string) (FXSett
 		return f, err
 	}
 	f.FunctionalCurrency = deref(fc)
+	for dst, src := range map[**decimal.Decimal]*string{&f.ToleranceAmount: tolAmount, &f.TolerancePercent: tolPct} {
+		if src != nil {
+			d, err := decimal.NewFromString(*src)
+			if err != nil {
+				return f, err
+			}
+			*dst = &d
+		}
+	}
 	return f, nil
 }
 
@@ -113,11 +135,20 @@ func (s *Postgres) PutFXSetting(ctx context.Context, f FXSetting) (FXSetting, er
 		fc = &f.FunctionalCurrency
 	}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `insert into ar_fx_setting (tenant_id, legal_entity_id, cross_currency_enabled, functional_currency, gain_account, loss_account)
-			values ($1, $2, $3, $4, $5, $6)
+		var tolAmount, tolPct any
+		if f.ToleranceAmount != nil {
+			tolAmount = f.ToleranceAmount.String()
+		}
+		if f.TolerancePercent != nil {
+			tolPct = f.TolerancePercent.String()
+		}
+		_, err := tx.Exec(ctx, `insert into ar_fx_setting (tenant_id, legal_entity_id, cross_currency_enabled, functional_currency, gain_account, loss_account,
+			  tolerance_amount, tolerance_percent)
+			values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric)
 			on conflict (tenant_id, legal_entity_id) do update set cross_currency_enabled = excluded.cross_currency_enabled,
-			  functional_currency = excluded.functional_currency, gain_account = excluded.gain_account, loss_account = excluded.loss_account, updated_at = now()`,
-			p.TenantID, f.LegalEntityID, f.CrossCurrencyEnabled, fc, f.GainAccount, f.LossAccount)
+			  functional_currency = excluded.functional_currency, gain_account = excluded.gain_account, loss_account = excluded.loss_account,
+			  tolerance_amount = excluded.tolerance_amount, tolerance_percent = excluded.tolerance_percent, updated_at = now()`,
+			p.TenantID, f.LegalEntityID, f.CrossCurrencyEnabled, fc, f.GainAccount, f.LossAccount, tolAmount, tolPct)
 		return err
 	})
 	return f, mapWriteErr(err)
@@ -179,6 +210,9 @@ func (s *Postgres) prefetchRates(ctx context.Context, id string, req ApplyReques
 	items := map[string]itemRef{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
+		if len(req.Allocations) == 0 {
+			return nil
+		}
 		if pay, err = scanPayment(tx.QueryRow(ctx, `select `+paymentColumns+` from payment where id = $1`, id)); err != nil {
 			return nil
 		}
@@ -198,7 +232,7 @@ func (s *Postgres) prefetchRates(ctx context.Context, id string, req ApplyReques
 	}
 	for _, a := range req.Allocations {
 		it, ok := items[a.OpenItemID]
-		if !ok || it.currency == pay.Currency || !a.ItemCurrencyAmount.IsPositive() {
+		if !ok || it.currency == pay.Currency {
 			continue
 		}
 		value := parseDay(pay.ValueDate)
@@ -221,8 +255,9 @@ func (s *Postgres) prefetchRates(ctx context.Context, id string, req ApplyReques
 
 // priceCrossCurrency prices one cross-currency allocation: the cash at the rate of the payment's value date and the settled part of the
 // item at the rate of its document date, both into the functional currency. It first checks the item amount against what the cash is
-// worth in the item's currency at the value date: a difference above the write-off tolerance of BR-30.4 (the larger of 5.00 and 0.5% of the
-// item amount, in the item's currency) is refused, so a small payment cannot close a large invoice into a realized loss.
+// worth in the item's currency at the value date: a difference above the entity's FX tolerance (FXSetting.Tolerance; by default BR-30.4's
+// larger of 5.00 and 0.5% of the item amount, in the item's currency) is refused, so a small payment cannot close a large invoice into a
+// realized loss.
 func (s *Postgres) priceCrossCurrency(ctx context.Context, book rateBook, set FXSetting, pay Payment, item OpenItem, a domain.Allocation) (settlementPricing, error) {
 	value, le := parseDay(pay.ValueDate), pay.LegalEntityID
 	pr, err := s.rateFor(ctx, book, le, pay.Currency, set.FunctionalCurrency, value)
@@ -238,7 +273,7 @@ func (s *Postgres) priceCrossCurrency(ctx context.Context, book rateBook, set FX
 		return settlementPricing{}, err
 	}
 	worth := a.Amount.Mul(cross).Round(money.MinorUnits(item.Currency))
-	if gap, tol := a.ItemCurrencyAmount.Sub(worth).Abs(), domain.WriteOffTolerance(a.ItemCurrencyAmount); gap.GreaterThan(tol) {
+	if gap, tol := a.ItemCurrencyAmount.Sub(worth).Abs(), set.Tolerance(a.ItemCurrencyAmount); gap.GreaterThan(tol) {
 		return settlementPricing{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeFXTolerance,
 			"the cash of "+a.Amount.String()+" "+pay.Currency+" is worth about "+worth.String()+" "+item.Currency+" on the value date, but "+a.ItemCurrencyAmount.String()+" is taken off the item; the difference is more than the "+tol.String()+" allowed")
 	}
@@ -250,12 +285,21 @@ func (s *Postgres) priceCrossCurrency(ctx context.Context, book rateBook, set FX
 // functional currency: gains Dr 1200 / Cr the gain account, losses Dr the loss account / Cr 1200. A payment whose settlements
 // net to nothing owes none.
 func realizedFXJournal(ctx context.Context, tx pgx.Tx, tenantID string, set FXSetting, pay Payment, prices []settlementPricing) error {
+	diffs := make([]decimal.Decimal, len(prices))
+	for i, p := range prices {
+		diffs[i] = p.fx.Difference
+	}
+	return fxJournal(ctx, tx, tenantID, set, pay.LegalEntityID, pay.ID, "fx:"+pay.ID+":"+strconv.Itoa(pay.Version), "PAY-"+pay.ID, diffs)
+}
+
+// fxJournal owes the ledger realized exchange differences (positive a gain) as one journal in the functional currency.
+func fxJournal(ctx context.Context, tx pgx.Tx, tenantID string, set FXSetting, legalEntityID, sourceID, sourceKey, documentID string, diffs []decimal.Decimal) error {
 	gain, loss := decimal.Zero, decimal.Zero
-	for _, p := range prices {
-		if p.fx.Difference.IsPositive() {
-			gain = gain.Add(p.fx.Difference)
+	for _, d := range diffs {
+		if d.IsPositive() {
+			gain = gain.Add(d)
 		} else {
-			loss = loss.Add(p.fx.Difference.Neg())
+			loss = loss.Add(d.Neg())
 		}
 	}
 	var lines []journalLine
@@ -265,8 +309,8 @@ func realizedFXJournal(ctx context.Context, tx pgx.Tx, tenantID string, set FXSe
 	if loss.IsPositive() {
 		lines = append(lines, debit(set.LossAccount, loss, "Realized exchange loss"), credit(domain.AccountReceivable, loss, "Realized exchange loss"))
 	}
-	return enqueueJournal(ctx, tx, tenantID, journalSpec{LegalEntityID: pay.LegalEntityID, SourceType: JournalRealizedFX, SourceID: pay.ID,
-		SourceKey: "fx:" + pay.ID + ":" + strconv.Itoa(pay.Version), DocumentID: "PAY-" + pay.ID, PostingDate: today(), Currency: set.FunctionalCurrency, Lines: lines})
+	return enqueueJournal(ctx, tx, tenantID, journalSpec{LegalEntityID: legalEntityID, SourceType: JournalRealizedFX, SourceID: sourceID,
+		SourceKey: sourceKey, DocumentID: documentID, PostingDate: today(), Currency: set.FunctionalCurrency, Lines: lines})
 }
 
 // ReversePayment undoes the cash receipt of a payment that was never applied: the payment becomes REVERSED and the ledger is owed
@@ -286,7 +330,8 @@ func (s *Postgres) ReversePayment(ctx context.Context, id string, version int) (
 			return httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, "payment changed since it was read")
 		}
 		var settlements int
-		if err := tx.QueryRow(ctx, `select count(*) from settlement where tenant_id = $1 and payment_id = $2`, p.TenantID, pay.ID).Scan(&settlements); err != nil {
+		if err := tx.QueryRow(ctx, `select count(*) from settlement s where s.tenant_id = $1 and s.payment_id = $2 and s.reversal_of_id is null
+			and not exists (select 1 from settlement r where r.tenant_id = s.tenant_id and r.reversal_of_id = s.id)`, p.TenantID, pay.ID).Scan(&settlements); err != nil {
 			return err
 		}
 		if !appliable(pay.Status) || settlements > 0 || !pay.UnappliedAmount.Equal(pay.Amount) {

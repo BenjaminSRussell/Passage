@@ -80,6 +80,8 @@ type Store interface {
 	FindByIdempotencyKey(ctx context.Context, key string) (store.Invoice, bool, error)
 	CreateProposal(ctx context.Context, inv store.Invoice) (store.Invoice, error)
 	CreateCreditNote(ctx context.Context, cn store.Invoice) (store.Invoice, error)
+	CreateCreditNotes(ctx context.Context, cns []store.Invoice) ([]store.Invoice, error)
+	FindByIdempotencyPrefix(ctx context.Context, prefix string) ([]store.Invoice, error)
 	FindProposalBatch(ctx context.Context, key string) (store.ProposalBatch, []store.Invoice, bool, error)
 	CreateShipmentProposals(ctx context.Context, b store.ProposalBatch, invs []store.Invoice) ([]store.Invoice, error)
 	GetInvoice(ctx context.Context, id string) (store.Invoice, error)
@@ -136,6 +138,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/invoices/{id}:post", a.postInvoice)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/gl-postings", a.postGL)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/credit-notes", a.createCreditNote)
+	r.With(authz.RequireDuty(dutyModificationBill)).Post("/v1/billing/contract-modifications", a.billModification)
 	r.With(authz.RequireDuty(dutyCreditPost)).Post("/v1/billing/credit-notes/{id}:post", a.postCreditNote)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/billing/invoices/{id}/credit-reservations", a.createCreditReservation)
 	r.With(authz.RequireDuty(dutyReserve)).Post("/v1/billing/credit-reservations/{id}:commit", a.commitCreditReservation)
@@ -347,7 +350,7 @@ func toDTO(inv store.Invoice) invoiceDTO {
 func fixed(v decimal.Decimal, exp int32) string { return v.StringFixed(exp) }
 
 func invalidIdempotencyKey(key string) bool {
-	return key == "" || len(key) > 255 || strings.HasPrefix(key, subscriptionKeyPrefix)
+	return key == "" || len(key) > 255 || strings.HasPrefix(key, subscriptionKeyPrefix) || strings.HasPrefix(key, store.ModificationKeyPrefix)
 }
 
 func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {

@@ -248,7 +248,8 @@ func enqueueCreditNoteBooked(ctx context.Context, tx pgx.Tx, id, entryID string,
 	data := billingevents.CreditNoteBookedData{
 		CreditNoteID: cn.ID, Number: cn.Number, OriginalInvoiceID: cn.OriginalInvoiceID, OriginalNumber: cn.OriginalNumber,
 		LegalEntityID: cn.LegalEntityID, Currency: cn.Currency, PostingDate: cn.PostingDate.Format(dateLayout), JournalEntryID: entryID,
-		Lines: make([]billingevents.CreditNoteBookedLine, 0, len(lines)),
+		ContractModificationID: ModificationOfKey(cn.IdempotencyKey),
+		Lines:                  make([]billingevents.CreditNoteBookedLine, 0, len(lines)),
 	}
 	for _, l := range lines {
 		share, ok := shares[l.No]

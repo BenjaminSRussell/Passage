@@ -53,3 +53,15 @@ func requireInsufficientPrivilege(t *testing.T, err error, msg string) {
 		t.Fatalf("%s: got %v, want SQLSTATE 42501", msg, err)
 	}
 }
+
+func TestModificationOfKey(t *testing.T) {
+	for key, want := range map[string]string{
+		ModificationKeyPrefix + "m1:credit:i1": "m1",
+		ModificationKeyPrefix + "m2:invoice":   "m2",
+		"post-key-1":                           "",
+	} {
+		if got := ModificationOfKey(key); got != want {
+			t.Errorf("ModificationOfKey(%q) = %q, want %q", key, got, want)
+		}
+	}
+}

@@ -27,6 +27,26 @@ func (f *fakeStore) ReversePayment(_ context.Context, id string, version int) (s
 	return store.Payment{ID: id, Status: "REVERSED", Version: version + 1}, nil
 }
 
+func (f *fakeStore) UnapplyPayment(_ context.Context, id string, version int, reason string) (store.UnapplyResult, error) {
+	f.reversed, f.lastVersion = id, version
+	return store.UnapplyResult{Payment: store.Payment{ID: id, Status: "RECEIVED", Version: version + 1}}, nil
+}
+
+func TestUnapplyPayment_NeedsTheReverseDutyAndAVersion(t *testing.T) {
+	f := &fakeStore{}
+	h := router(f)
+	path := "/v1/receivables/payments/" + testLE + ":unapply"
+	if code := do(h, http.MethodPost, path, `{}`, "receivables.payment.write", map[string]string{"If-Match": `"3"`}).Code; code != http.StatusForbidden {
+		t.Errorf("payment write may not unapply: %d", code)
+	}
+	if code := do(h, http.MethodPost, path, `{}`, "receivables.payment.reverse", nil).Code; code == http.StatusOK {
+		t.Errorf("unapply without If-Match: %d", code)
+	}
+	if rec := do(h, http.MethodPost, path, `{"reason":"applied to the wrong invoice"}`, "receivables.payment.reverse", map[string]string{"If-Match": `"3"`}); rec.Code != http.StatusOK || f.lastVersion != 3 {
+		t.Errorf("unapply: %d %s (version %d)", rec.Code, rec.Body.String(), f.lastVersion)
+	}
+}
+
 func TestFXSettingRoutes(t *testing.T) {
 	f := &fakeStore{}
 	h := router(f)

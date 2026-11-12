@@ -50,10 +50,14 @@ var servicePrincipals = map[string][]string{
 	"receiving-erasure":        {"compliance.legal-hold.check"},
 	"receivables-billing":      {"receivables.openitem.from-billing"},
 	"revrec-creditnotes":       {"revrec.creditnote.reverse", "revrec.contract.from-invoice"},
-	"receiving-ers":            {"receiving.vendor-invoice.post"},
-	"scheduling-downtime":      {"scheduling.downtime.apply"},
-	"scheduling-order-import":  {"scheduling.order.import"},
-	"shopfloor-production":     {"shopfloor.job.sync"},
+	// The reporter of contract modification price changes to billing (#29): it signs POST /v1/billing/contract-modifications only.
+	"revrec-billing": {"billing.contract-modification.bill"},
+	// The reporter of the tax payment runs withheld (#13): it signs POST /v1/tax/withholding/entries only.
+	"payables-withholding":    {"tax.withholding.record"},
+	"receiving-ers":           {"receiving.vendor-invoice.post"},
+	"scheduling-downtime":     {"scheduling.downtime.apply"},
+	"scheduling-order-import": {"scheduling.order.import"},
+	"shopfloor-production":    {"shopfloor.job.sync"},
 }
 
 // servicePrincipalIssuers names the services whose signing key may present each
@@ -84,6 +88,8 @@ var servicePrincipalIssuers = map[string][]string{
 	"receiving-erasure":       {"receiving"},
 	"receiving-ers":           {"receiving"},
 	"revrec-creditnotes":      {"revrec"},
+	"revrec-billing":          {"revrec"},
+	"payables-withholding":    {"payables"},
 	"scheduling-downtime":     {"scheduling"},
 	"scheduling-order-import": {"scheduling"},
 	"shopfloor-production":    {"shopfloor"},
