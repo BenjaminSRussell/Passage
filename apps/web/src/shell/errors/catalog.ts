@@ -240,6 +240,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "INV-OPB-001": { message: "Some opening stock rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
   "INV-OPB-002": { message: "This opening stock batch was already loaded with different content.", action: "Use a new batch name, or send exactly what was loaded before." },
   "INV-OPB-003": { message: "Opening stock can't be loaded here because the import is not switched on.", action: "Ask your administrator to turn on the opening stock import." },
+  "INV-OPB-005": { message: "Some opening stock rows were already loaded by another batch, so nothing of this batch was loaded.", action: "Remove the rows listed from this batch and send it again." },
   "INV-OPB-004": { message: "The opening stock journal for this batch can't be posted in its current state.", action: "Open the journal in inventory to see why, then send the batch again." },
   "TRS-0601": { message: "Some opening bank balances can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
   "TRS-0602": { message: "Some opening bank balances name an account that doesn't exist in this company or has another currency.", action: "Correct the account or currency of the rows listed, then send the batch again." },

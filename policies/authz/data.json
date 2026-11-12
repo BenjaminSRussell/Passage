@@ -4091,7 +4091,7 @@
     "migration-factory": {
       "receivables": ["receivables.import.write", "receivables.view"],
       "payables": ["opening-item.import", "opening-item.import.read"],
-      "inventory": ["inventory.import.write", "inventory.import.read"],
+      "inventory": ["inventory.import.write", "inventory.import.read", "inventory.read"],
       "treasury": ["treasury.import.write", "treasury.import.read"],
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },

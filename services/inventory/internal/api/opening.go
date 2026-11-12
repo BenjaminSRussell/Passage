@@ -34,6 +34,8 @@ const (
 	maxOpeningBatchPage   = 200
 
 	codeOpeningInvalid = "INV-OPB-001"
+	// codeOpeningReferenceHeld is a reference another batch of the legal entity already opened.
+	codeOpeningReferenceHeld = "INV-OPB-005"
 	openingKeyPrefix   = "opening-batch:"
 )
 
@@ -41,6 +43,7 @@ const (
 type OpeningBatches interface {
 	FindOpeningBatch(ctx context.Context, key string) (store.OpeningBatch, bool, error)
 	RecordOpeningBatch(ctx context.Context, b store.OpeningBatch) error
+	ReserveOpeningReferences(ctx context.Context, legalEntityID, batchKey string, refs []string) (map[string]string, error)
 	ListOpeningBatches(ctx context.Context, legalEntityID, afterKey string, limit int) ([]store.OpeningBatch, error)
 }
 
@@ -219,6 +222,28 @@ func (a *API) importOpeningBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Idempotent-Replayed", "true")
 		httpx.JSON(w, http.StatusOK, openingResponse(held))
+		return
+	}
+	// A reference opens stock once per legal entity across batches: reserve them under the key before the journal exists, so two
+	// batches holding the same line can never both post it. The refused rows are named like any other bad row.
+	refs := make([]string, len(lines))
+	for i, l := range lines {
+		refs[i] = l.ClientKey
+	}
+	held, err := a.opening.ReserveOpeningReferences(ctx, req.LegalEntityID, req.BatchKey, refs)
+	if err != nil {
+		a.failed(w, r, "reserve opening references", err)
+		return
+	}
+	if len(held) > 0 {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, codeOpeningReferenceHeld, "one or more rows were already opened by another batch of the legal entity")
+		p.Errors = map[string]string{}
+		for i, ref := range refs {
+			if key, ok := held[ref]; ok {
+				p.Errors[fmt.Sprintf("items[%d].reference", i+1)] = "was already opened by batch " + key
+			}
+		}
+		httpx.Fail(w, r, p)
 		return
 	}
 	j, inserted, err := a.store.CreateJournal(ctx, domain.Journal{LegalEntityID: req.LegalEntityID, Type: domain.JournalOpeningBalance, PostingDate: date, Currency: req.Currency},

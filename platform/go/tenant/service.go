@@ -250,8 +250,9 @@ var serviceGrants = map[string]map[string][]string{
 	"migration-factory": {
 		"receivables": {"receivables.import.write", "receivables.view"},
 		"payables":    {"opening-item.import", "opening-item.import.read"},
-		"inventory":   {"inventory.import.write", "inventory.import.read"},
-		"treasury":    {"treasury.import.write", "treasury.import.read"},
+		// inventory.read: the on-hand read-back after the opening load (H-S9-2).
+		"inventory": {"inventory.import.write", "inventory.import.read", "inventory.read"},
+		"treasury":  {"treasury.import.write", "treasury.import.read"},
 		// Parallel-run replay and ROLLED_BACK compensating journals (#484).
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},

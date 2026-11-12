@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -112,6 +113,7 @@ type Store interface {
 	RecordOpeningBatch(ctx context.Context, runID, legalEntityID string, lease time.Duration, b store.OpeningBatchSent) error
 	RejectOpeningRows(ctx context.Context, runID, legalEntityID string, lease time.Duration, rejects []store.OpeningReject) error
 	ListOpeningRejects(ctx context.Context, runID string, limit int) ([]store.OpeningRejectRow, error)
+	OpeningOnHandExpected(ctx context.Context, legalEntityID string) (map[string]decimal.Decimal, error)
 	FinishOpeningLoad(ctx context.Context, runID string, fin store.OpeningFinish) (domain.OpeningLoad, []domain.ControlTotal, error)
 }
 
