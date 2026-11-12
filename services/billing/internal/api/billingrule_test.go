@@ -96,3 +96,31 @@ func TestBillingRule_Validation(t *testing.T) {
 		t.Fatalf("duty: %d", rec.Code)
 	}
 }
+
+// #35 (35-5): the self-billing check reads each packing slip's own date, not the invoice date the caller sends, and a batch created
+// before the agreement still replays.
+func TestBillingRule_SlipDatesDecideAndEarlierBatchesReplay(t *testing.T) {
+	s := newFakeStore()
+	h := setup(t, s, &fakeTax{perLine: "19.00"})
+	early := do(h, http.MethodPost, "/v1/billing/proposals", "ship-before", shipmentBody(false, slipA))
+	if early.Code != http.StatusCreated {
+		t.Fatalf("before the rule: %d %s", early.Code, early.Body)
+	}
+	path := "/v1/billing/customers/" + custID + "/billing-rule"
+	if rec := do(h, http.MethodPut, path, "", `{"legalEntityId":"`+leID+`","rule":"SELF_BILLED","agreementRef":"SBA-9","validFrom":"2027-03-09"}`); rec.Code != http.StatusOK {
+		t.Fatalf("put: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodPost, "/v1/billing/proposals", "ship-before", shipmentBody(false, slipA)); rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("a batch created before the agreement must replay: %d %s", rec.Code, rec.Body)
+	}
+	// slipA is dated 2027-03-08, before the agreement: it is invoiced although the invoice date (2027-03-10) is within it.
+	if rec := do(h, http.MethodPost, "/v1/billing/proposals", "ship-old-slip", shipmentBody(false, testSlip{id: uuid(111), order: uuid(211), date: "2027-03-08", lines: []int{5}})); rec.Code != http.StatusCreated {
+		t.Fatalf("a slip shipped before the agreement: %d %s", rec.Code, rec.Body)
+	}
+	// A slip dated within the agreement is refused even with an invoice date before it.
+	backdated := strings.Replace(shipmentBody(false, testSlip{id: uuid(112), order: uuid(212), date: "2027-03-09", lines: []int{6}}), `"invoiceDate":"2027-03-10"`, `"invoiceDate":"2027-03-01"`, 1)
+	rec := do(h, http.MethodPost, "/v1/billing/proposals", "ship-backdated", backdated)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), CodeSelfBilled) {
+		t.Fatalf("a backdated invoice of a self-billed slip: %d %s", rec.Code, rec.Body)
+	}
+}

@@ -1131,8 +1131,9 @@ paths:
       x-passage-duty: billing.invoice.maintain
       description: >
         SELF_BILLED means the customer issues the invoice for our deliveries under a self-billing agreement (EU VAT Directive
-        art. 224): from `validFrom` to `validTo` (inclusive; open-ended without it) POST /v1/billing/proposals refuses that
-        customer's packing slips with 409 BIL-0150, because the customer's self-billed document (received by the EDI engine) is
+        art. 224): a packing slip of that customer posted from `validFrom` to `validTo` (inclusive; open-ended without it, by the
+        slip's own date, not the invoice date) is refused by POST /v1/billing/proposals with 409 BIL-0150 (a batch created before
+        still replays), because the customer's self-billed document (received by the EDI engine) is
         the invoice. SELF_BILLED needs `agreementRef` and `validFrom`. If-Match carries the version last read (none for a customer
         without a rule); a stale version is 409 BIL-0151. The ETag is the new version.
       parameters:

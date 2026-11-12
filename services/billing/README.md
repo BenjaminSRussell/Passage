@@ -231,8 +231,9 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 
 `PUT /v1/billing/customers/{customerId}/billing-rule` (duty `billing.invoice.maintain`, If-Match the version read) sets how a customer
 of a legal entity is invoiced: `STANDARD`, or `SELF_BILLED` with the self-billing agreement reference and its validity
-(`validFrom`, optional `validTo`; EU VAT Directive art. 224). While the agreement is valid on the invoice date, `POST
-/v1/billing/proposals` refuses that customer's packing slips with 409 `BIL-0150`: the customer's self-billed document, received and
+(`validFrom`, optional `validTo`; EU VAT Directive art. 224). `POST /v1/billing/proposals` refuses that customer's packing slips
+posted while the agreement is valid (by each slip's own date, not the invoice date; a batch created earlier still replays) with
+409 `BIL-0150`: the customer's self-billed document, received and
 matched by the EDI engine, is the invoice. `GET` the same path with `legalEntityId` reads it (duty `billing.invoice.view`; STANDARD
 when none is set). A stale If-Match is 409 `BIL-0151`. Migration 0018. Not built: posting the matched self-billed document as the
 legal invoice with the customer's number.

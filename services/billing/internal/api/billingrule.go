@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/billing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/billing/internal/store"
 )
 
@@ -161,16 +162,23 @@ func (a *API) getBillingRule(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// refuseSelfBilled is the problem for invoice proposals of a customer that self-bills on the invoice date; nil otherwise.
-func (a *API) refuseSelfBilled(ctx context.Context, legalEntityID, customerID string, invoiceDate time.Time) error {
+// refuseSelfBilled is the problem for invoice proposals of packing slips the customer self-bills: a slip whose own posting date
+// falls within the self-billing agreement. The caller's invoice date does not decide it, so backdating the invoice cannot bill a
+// slip the customer self-bills, and a slip shipped before the agreement is still invoiced. nil otherwise.
+func (a *API) refuseSelfBilled(ctx context.Context, legalEntityID, customerID string, slips []domain.Slip) error {
 	rs := a.rules()
 	if rs == nil {
 		return nil
 	}
 	rule, found, err := rs.GetBillingRule(ctx, strings.ToLower(legalEntityID), strings.ToLower(customerID))
-	if err != nil || !found || !rule.SelfBilledOn(invoiceDate) {
+	if err != nil || !found {
 		return err
 	}
-	return httpx.NewProblem(http.StatusConflict, CodeSelfBilled, "the customer self-bills under agreement "+rule.AgreementRef+
-		": its self-billed document is the invoice for these shipments, so billing proposes none")
+	for _, sl := range slips {
+		if rule.SelfBilledOn(sl.Date) {
+			return httpx.NewProblem(http.StatusConflict, CodeSelfBilled, "the packing slip posted "+sl.Date.Format(dateLayout)+" falls under the customer's self-billing agreement "+
+				rule.AgreementRef+": its self-billed document is the invoice for that shipment, so billing proposes none")
+		}
+	}
+	return nil
 }

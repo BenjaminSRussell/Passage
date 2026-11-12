@@ -106,10 +106,6 @@ func (a *API) createShipmentProposals(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller is scoped to another legal entity"))
 		return
 	}
-	if err := a.refuseSelfBilled(r.Context(), req.LegalEntityID, req.CustomerID, invoiceDate); err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
 	raw, _ := json.Marshal(req)
 	sum := sha256.Sum256(raw)
 	hash := hex.EncodeToString(sum[:])
@@ -123,6 +119,11 @@ func (a *API) createShipmentProposals(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Idempotent-Replayed", "true")
 		httpx.JSON(w, http.StatusOK, batchDTO(existing))
+		return
+	}
+	// After the replay lookup, so a batch created before the customer's self-billing agreement still replays.
+	if err := a.refuseSelfBilled(r.Context(), req.LegalEntityID, req.CustomerID, slips); err != nil {
+		httpx.Fail(w, r, err)
 		return
 	}
 	plans, err := domain.PlanProposals(slips, req.Consolidate, invoiceDate, a.maxLines)
