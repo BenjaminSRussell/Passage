@@ -28,7 +28,8 @@ jobs:
       warehouse: ${{ steps.filter.outputs.warehouse }}
       agents: ${{ steps.filter.outputs.agents }}
       connect: ${{ steps.filter.outputs.connect }}
-      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.warehouse == 'true' || steps.filter.outputs.charts == 'true' || steps.filter.outputs.agents == 'true' || steps.filter.outputs.connect == 'true' }}
+      portals: ${{ steps.filter.outputs.portals }}
+      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.warehouse == 'true' || steps.filter.outputs.charts == 'true' || steps.filter.outputs.agents == 'true' || steps.filter.outputs.connect == 'true' || steps.filter.outputs.portals == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - id: filter
@@ -65,6 +66,12 @@ jobs:
             connect:
               - 'deploy/kafka-connect/**'
               - '.github/workflows/**'
+            portals:
+              - 'services/customer-portal-ts/**'
+              - 'apps/customer-portal/**'
+              - 'services/supplier-portal-ts/**'
+              - 'apps/supplier-portal/**'
+              - '.github/workflows/**'
 
   ci:
     needs: changes
@@ -77,6 +84,7 @@ jobs:
       warehouse: ${{ needs.changes.outputs.warehouse == 'true' }}
       agents: ${{ needs.changes.outputs.agents == 'true' }}
       connect: ${{ needs.changes.outputs.connect == 'true' }}
+      portals: ${{ needs.changes.outputs.portals == 'true' }}
     permissions:
       contents: read
       packages: write

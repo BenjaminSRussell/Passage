@@ -44,6 +44,12 @@
   value: /var/run/passage/keycloak
 - name: IDENTITY_KEYCLOAK_DEPROVISION_INTERVAL
   value: {{ .Values.keycloakDeprovision.interval | quote }}
+- name: IDENTITY_CUSTOMER_PORTAL_CLIENT_ID
+  value: {{ .Values.customerPortal.clientId | quote }}
+{{- with .Values.customerPortal.redirectUri }}
+- name: IDENTITY_CUSTOMER_PORTAL_REDIRECT_URI
+  value: {{ . | quote }}
+{{- end }}
 {{- end }}
 {{- if .Values.bundle.enabled }}
 - name: IDENTITY_BUNDLE_TOKEN

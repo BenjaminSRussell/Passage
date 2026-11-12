@@ -31,6 +31,12 @@ keycloakDeprovision:
     pathPrefix: passage/{env}/identity/keycloak
     refreshInterval: 1h
     realms: []
+# Customer portal contact invitations (#30) use the same Keycloak admin client as the deprovisioning worker, so they are on when
+# keycloakDeprovision.enabled is. The invitation email leads to the portal client's redirect once the contact has verified the
+# address, chosen a password and registered an authenticator; without a redirectUri Keycloak shows its own confirmation page.
+customerPortal:
+  clientId: passage-portal-customer
+  redirectUri: ""
 bundle:
   enabled: false
   secret: identity-bundle

@@ -365,6 +365,55 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: 'PTY-CUSTOMER-NOT-FOUND (unknown id, another tenant or legal entity).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/customers/{id}/portal-access:
+    put:
+      operationId: setCustomerPortalAccess
+      x-passage-duty: party.write
+      summary: Let contacts of a ship-to customer also act for its bill-to account in the customer portal.
+      description: Off by default. A bill-to contact always reaches the accounts that bill to it; a ship-to contact reaches its bill-to account only when billToAccess is true.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [billToAccess], properties: { billToAccess: { type: boolean } } }
+      responses:
+        '200': { description: The new setting., content: { application/json: { schema: { type: object, properties: { billToAccess: { type: boolean } } } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-CUSTOMER-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/customer-portal/accounts:
+    get:
+      operationId: customerPortalAccounts
+      summary: The accounts a customer portal contact may act for.
+      x-passage-duty: party.customer-portal.read
+      description: |
+        For the customer portal only (#30): the service-only duty, and the customer is the signed `cus` claim of the customer-portal
+        service token (a staff caller is 403 PTY-CUS-001). Answers the customer itself ("self") and the accounts that bill to it
+        ("ship-to") in the same legal entity and customer group and not blocked for all transactions; its own bill-to account
+        ("bill-to") only when portal-access is set on it. A shared customer group alone relates nothing.
+      responses:
+        '200':
+          description: The accounts, the customer first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        accountNumber: { type: string }
+                        name: { type: string }
+                        relation: { type: string, enum: [self, bill-to, ship-to] }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-CUSTOMER-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/party/vendors/{id}/bank-accounts:
     parameters:
       - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }

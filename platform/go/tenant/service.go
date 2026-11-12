@@ -177,7 +177,7 @@ var serviceGrants = map[string]map[string][]string{
 		"receivables": {"receivables.forecast.read"},
 	},
 	"sales": {
-		"product":     {"product.configuration.read"},
+		"product":     {"product.configuration.read", "product.names.read"},
 		"production":  {"production.order.create-from-sales"},
 		"billing":     {"billing.invoice.read"},
 		"fulfillment": {"fulfillment.packing-slip.read"},
@@ -274,11 +274,13 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	// The customer portal BFF acts for one customer contact at a time (#30). Every token it signs carries the customer id (cus)
 	// from the contact's verified session, and the target service scopes every read to that customer. Only customer-portal
-	// duties, which no human role holds and which are read-only, are granted.
+	// duties, which no human role holds, are granted: reads, and the two writes a customer makes for itself (an order and a return).
 	"customer-portal": {
 		"receivables": {"receivables.customer-portal.read"},
 		"billing":     {"billing.customer-portal.read"},
-		"sales":       {"sales.customer-portal.read"},
+		"sales":       {"sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"},
+		"party":       {"party.customer-portal.read"},
+		"identity":    {"identity.customer-portal.read"},
 	},
 }
 

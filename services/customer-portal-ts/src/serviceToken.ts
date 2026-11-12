@@ -15,7 +15,9 @@ export const SERVICE_NAME = "customer-portal";
 export const SERVICE_GRANTS = {
   receivables: ["receivables.customer-portal.read"],
   billing: ["billing.customer-portal.read"],
-  sales: ["sales.customer-portal.read"],
+  sales: ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"],
+  party: ["party.customer-portal.read"],
+  identity: ["identity.customer-portal.read"],
 } as const;
 
 export type Audience = keyof typeof SERVICE_GRANTS;
@@ -29,7 +31,11 @@ export interface Caller {
 }
 
 export interface ServiceTokenSigner {
-  mint(audience: Audience, caller: Caller): string;
+  /**
+   * Signs a token for one call. `duties` is the subset of the audience's grant the call needs (a read carries only the read duty,
+   * a write only its own); absent, the whole grant is carried. A duty outside the grant is refused here, before anything is signed.
+   */
+  mint(audience: Audience, caller: Caller, duties?: readonly string[]): string;
 }
 
 export interface SignerOptions {
@@ -46,7 +52,11 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
   const now = options.now ?? Date.now;
   const newJti = options.newJti ?? (() => randomBytes(16).toString("hex"));
   return {
-    mint(audience, caller) {
+    mint(audience, caller, duties) {
+      const granted: readonly string[] = SERVICE_GRANTS[audience];
+      if (duties !== undefined && (duties.length === 0 || duties.some((d) => !granted.includes(d)))) {
+        throw new TypeError(`a duty outside the ${audience} grant cannot be signed`);
+      }
       if (!caller.tenantId || !caller.legalEntityId || !caller.userId || !caller.customerId) {
         throw new TypeError("a service token needs a tenant, one legal entity, the acting user and the customer");
       }
@@ -59,7 +69,7 @@ export function createServiceTokenSigner(options: SignerOptions): ServiceTokenSi
         le: caller.legalEntityId,
         act: caller.userId,
         cus: caller.customerId,
-        duties: [...SERVICE_GRANTS[audience]],
+        duties: [...(duties ?? granted)],
         iat,
         exp: iat + TOKEN_TTL_SECONDS,
         jti: newJti(),

@@ -2,13 +2,17 @@
 
 | Item | Status | Reason |
 |---|---|---|
-| Session BFF, OIDC with PKCE, customer-scoped service tokens, read-only `/api/v1` proxy for invoices, open items, payments, statement, orders, returns | built | |
-| Keycloak client `passage-portal-customer` and role `customer-user` | JSON in `deploy/keycloak/realm-passage.json`; not applied | live infra, tracked on #213: import the realm, set the client secret from the secret store, give each customer contact the attributes `tenant_id`, `legal_entity_id` and `customer_id` and the role `customer-user`, publish the key (`customer-portal=...`) in `PASSAGE_SERVICE_PUBLIC_KEYS` of receivables, billing and sales |
+| Session BFF, OIDC with PKCE, customer-scoped service tokens, `/api/v1` proxy for invoices, open items, payments, statement, orders, returns | built | |
+| Placing an order and requesting a return (FR-30.14): `POST /api/v1/orders`, `POST /api/v1/returns` | built | one call to sales each, with its own duty, CSRF, same-origin and `Idempotency-Key` checks; sales prices a portal order from the customer's own order history (it holds no price list), so a product never bought cannot be ordered online |
+| Bill-to and ship-to accounts of the same customer group (`X-Customer`, `GET /api/v1/accounts`) | built | party lists the accounts tied to the contact's customer by the invoice-account relation in the same group; the BFF signs another account only when party lists it |
+| Customer-facing legal-entity names (`GET /api/v1/companies`) | built | identity answers the display name of the token's own legal entity; the app falls back to "Company 2" when identity cannot |
+| Product names on order and return lines | built | sales reads them from the product service (`product.names.read`); a failed read leaves the names out, never the line |
+| Shared session store, more than one replica | built | `SESSION_STORE_URL` (a Valkey or Redis server, `redis://` or `rediss://`, optional password); without it sessions are in memory and the chart refuses more than one replica. The per-session rate limit stays per pod |
+| Logout at Keycloak (end-session) | built | `POST /bff/logout` answers the end-session URL with the ID token as hint; the client's `post.logout.redirect.uris` must hold the app origin (it does in `deploy/keycloak/realm-passage.json`) |
+| Contact invitation, MFA enrolment, contact to customer mapping | built in identity | `POST /v1/identity/customer-contacts` creates the Keycloak user with the portal's claims, the role `customer-user` and the required actions including `CONFIGURE_TOTP`; the admin screen is in apps/web (Admin, Portal contacts). Needs a live Keycloak with the `passage-portal-customer` client and the admin client's secret: tracked on #213 |
+| Keycloak client `passage-portal-customer` and role `customer-user` | JSON in `deploy/keycloak/realm-passage.json`; not applied | live infra, tracked on #213: import the realm, set the client secret from the secret store, publish the key (`customer-portal=...`) in `PASSAGE_SERVICE_PUBLIC_KEYS` of receivables, billing, sales, party and identity, set `PARTY_URL`, `IDENTITY_URL` and the session store in the chart values |
 | Envoy route for `customer.<env>.passage.dev` with rate limiting and WAF, image build | not built | deploy/ and edge are live infra; the chart is `charts/customer-portal` and the dev values are in `deploy/envs/dev/values/customer-portal.yaml` |
-| Contact invitation, MFA enrolment, contact to customer mapping | not built | Keycloak user administration; the realm is separate from supplier users by role only (assumption A8, as for the supplier portal) |
-| Placing orders, requesting a return, paying by card or ACH (FR-30.14, FR-30.25, FR-30.26) | not built | the portal reads only; writes need their own service routes and duties, and payments need the payments gateway (separate service) |
-| Invoice and statement PDF download, shipment tracking, documents | not built | need the document store (#512) and the carrier read API |
-| Product names on order and return lines | not built | sales lines hold a product id only; the portal shows line number, quantity and amounts until a customer-facing product read exists |
-| Bill-to customers (invoices whose invoice account is another party) | not built | an invoice is the contact's when its customer is; the invoice-account relation is not read |
-| Shared session store, more than one replica | not built | sessions are in memory; the chart runs one pod and `Recreate` |
-| Logout at Keycloak (end-session), refresh of the identity | not built | the session ends locally; the contact signs in again after 8 h |
+| Paying by card or ACH (FR-30.25) | not built | needs the payments gateway (a separate service) that does not exist |
+| Invoice and statement PDF download, shipment tracking, documents (FR-30.26) | not built | need the document store (#512) and a carrier read API |
+| Orders for a product the customer has not bought before, or at a negotiated price | not built | needs a price list and customer listings read by sales; today a staff member enters the first order |
+| A shared rate limit across pods | not built | the limiter is in memory per pod; with N pods the limit is N times higher. A Redis counter is the next step |

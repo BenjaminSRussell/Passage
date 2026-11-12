@@ -1081,21 +1081,83 @@ test_party_vendor_requests_are_decided_by_their_own_duty if {
 	not allowed("party.read", "POST", "/v1/party/vendor-questionnaires")
 }
 
-# The customer portal service (#30) acts for one customer, holds only read-only service-only customer-portal duties, and each
-# duty opens only its own customer-portal routes: no staff route, no other service's route, and no write.
-test_customer_portal_holds_only_service_only_read_duties if {
+# The customer portal service (#30) acts for one customer and holds only service-only customer-portal duties (plus the
+# service-only name and legal-entity reads below), each opening only its own customer-portal routes: no staff route and no
+# other service's route. Every duty is a read except the two writes a customer makes for itself, an order and a return.
+customer_portal_writes := {"sales.customer-portal.order", "sales.customer-portal.return"}
+
+portal_method_ok(_, perm) if perm.methods == ["GET"]
+
+portal_method_ok(duty, _) if duty in customer_portal_writes
+
+test_customer_portal_holds_only_service_only_customer_duties if {
 	every _, duties in data.service_grants["customer-portal"] {
 		every duty in duties {
 			data.duties[duty].service_only
 			contains(duty, "customer-portal")
 			every perm in data.duties[duty].permissions {
-				perm.methods == ["GET"]
+				portal_method_ok(duty, perm)
 			}
 		}
 	}
 	data.service_grants["customer-portal"].receivables == ["receivables.customer-portal.read"]
 	data.service_grants["customer-portal"].billing == ["billing.customer-portal.read"]
-	data.service_grants["customer-portal"].sales == ["sales.customer-portal.read"]
+	data.service_grants["customer-portal"].sales == ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"]
+	data.service_grants["customer-portal"].party == ["party.customer-portal.read"]
+	data.service_grants["customer-portal"].identity == ["identity.customer-portal.read"]
+}
+
+# A write duty of the portal is one POST on one route and nothing else.
+test_customer_portal_write_duties_are_one_post_each if {
+	every duty in customer_portal_writes {
+		data.duties[duty].service_only
+		count(data.duties[duty].permissions) == 1
+		every perm in data.duties[duty].permissions {
+			perm.methods == ["POST"]
+		}
+	}
+}
+
+test_sales_customer_portal_write_duties_open_only_their_own_post if {
+	allowed("sales.customer-portal.order", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.order", "POST", "/v1/sales/customer-portal/returns")
+	not allowed("sales.customer-portal.order", "POST", "/v1/sales/orders")
+	not allowed("sales.customer-portal.order", "GET", "/v1/sales/customer-portal/orders")
+	allowed("sales.customer-portal.return", "POST", "/v1/sales/customer-portal/returns")
+	not allowed("sales.customer-portal.return", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.return", "POST", "/v1/sales/return-orders")
+	not allowed("sales.customer-portal.read", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.read", "POST", "/v1/sales/customer-portal/returns")
+	allowed("sales.customer-portal.read", "GET", "/v1/sales/customer-portal/products")
+	not allowed("sales.order.write", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.order.write", "POST", "/v1/sales/customer-portal/returns")
+}
+
+test_party_write_sets_portal_access_and_the_portal_cannot if {
+	allowed("party.write", "PUT", "/v1/party/customers/c1/portal-access")
+	not allowed("party.customer-portal.read", "PUT", "/v1/party/customers/c1/portal-access")
+	not allowed("party.read", "PUT", "/v1/party/customers/c1/portal-access")
+}
+
+test_customer_portal_party_and_identity_reads_are_their_own_route_only if {
+	allowed("party.customer-portal.read", "GET", "/v1/party/customer-portal/accounts")
+	not allowed("party.customer-portal.read", "GET", "/v1/party/customers/c1")
+	not allowed("party.customer-portal.read", "POST", "/v1/party/customer-portal/accounts")
+	not allowed("party.read", "GET", "/v1/party/customer-portal/accounts")
+	allowed("identity.customer-portal.read", "GET", "/v1/identity/customer-portal/legal-entity")
+	not allowed("identity.customer-portal.read", "GET", "/v1/legal-entities")
+	not allowed("identity.customer-portal.read", "GET", "/v1/identity/customer-contacts")
+	not allowed("identity.legal-entity.maintain", "GET", "/v1/identity/customer-portal/legal-entity")
+}
+
+# Sales labels the portal's lines with product names and can read nothing else of a product with that duty.
+test_product_names_duty_reads_only_names if {
+	data.duties["product.names.read"].service_only
+	"product.names.read" in data.service_grants.sales.product
+	allowed("product.names.read", "GET", "/v1/product/products:names")
+	not allowed("product.names.read", "GET", "/v1/product/products/p1")
+	not allowed("product.names.read", "GET", "/v1/product/products")
+	not allowed("product.names.read", "POST", "/v1/product/products")
 }
 
 test_receivables_customer_portal_duty_opens_only_customer_routes if {

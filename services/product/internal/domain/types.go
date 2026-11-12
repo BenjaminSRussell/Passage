@@ -28,6 +28,13 @@ const (
 const ProductNumberPattern = `^[A-Z0-9][A-Z0-9._-]{0,39}$`
 
 // Product is the shared tenant-level item, master or variant.
+// ProductName is what a customer-facing screen shows for a product: its number and name, nothing else.
+type ProductName struct {
+	ID            string `json:"id"`
+	ProductNumber string `json:"productNumber"`
+	Name          string `json:"name"`
+}
+
 type Product struct {
 	ID                       string             `json:"id"`
 	ProductNumber            string             `json:"productNumber"`

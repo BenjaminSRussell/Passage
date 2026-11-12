@@ -2,6 +2,7 @@
   "assignments": {},
   "duties": {
     "identity.user.maintain": {"permissions": [{"resource": "/v1/identity/users{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "identity.customer-contact.maintain": {"permissions": [{"resource": "/v1/identity/customer-contacts{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.user.provision": {"permissions": [{"resource": "/scim/v2{,/**}", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"]}]},
     "identity.effective-permission.view": {"permissions": [{"resource": "/v1/identity/users/*/effective-permissions", "methods": ["GET"]}]},
     "identity.security-role.maintain": {"permissions": [
@@ -893,6 +894,7 @@
       {"resource": "/v1/party/parties", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
+      {"resource": "/v1/party/customers/*/portal-access", "methods": ["PUT"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]},
@@ -987,7 +989,23 @@
       {"resource": "/v1/sales/customer-portal/orders", "methods": ["GET"]},
       {"resource": "/v1/sales/customer-portal/orders/*", "methods": ["GET"]},
       {"resource": "/v1/sales/customer-portal/returns", "methods": ["GET"]},
-      {"resource": "/v1/sales/customer-portal/returns/*", "methods": ["GET"]}
+      {"resource": "/v1/sales/customer-portal/returns/*", "methods": ["GET"]},
+      {"resource": "/v1/sales/customer-portal/products", "methods": ["GET"]}
+    ]},
+    "sales.customer-portal.order": {"service_only": true, "permissions": [
+      {"resource": "/v1/sales/customer-portal/orders", "methods": ["POST"]}
+    ]},
+    "sales.customer-portal.return": {"service_only": true, "permissions": [
+      {"resource": "/v1/sales/customer-portal/returns", "methods": ["POST"]}
+    ]},
+    "party.customer-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/customer-portal/accounts", "methods": ["GET"]}
+    ]},
+    "identity.customer-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/identity/customer-portal/legal-entity", "methods": ["GET"]}
+    ]},
+    "product.names.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/product/products:names", "methods": ["GET"]}
     ]},
     "party.vendor-portal.read": {"service_only": true, "permissions": [
       {"resource": "/v1/party/vendor-portal/requests", "methods": ["GET"]},
@@ -3966,7 +3984,7 @@
       "receivables": ["receivables.forecast.read"]
     },
     "sales": {
-      "product": ["product.configuration.read"],
+      "product": ["product.configuration.read", "product.names.read"],
       "production": ["production.order.create-from-sales"],
       "billing": ["billing.invoice.read"],
       "fulfillment": ["fulfillment.packing-slip.read"],
@@ -4065,7 +4083,9 @@
     "customer-portal": {
       "receivables": ["receivables.customer-portal.read"],
       "billing": ["billing.customer-portal.read"],
-      "sales": ["sales.customer-portal.read"]
+      "sales": ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"],
+      "party": ["party.customer-portal.read"],
+      "identity": ["identity.customer-portal.read"]
     }
   },
   "service_principals": {

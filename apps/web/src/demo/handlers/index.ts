@@ -13,6 +13,7 @@ import "./importSetup";
 import "./finance";
 import "./hr";
 import "./shell";
+import "./identity";
 import "./fx";
 import "./print";
 import "./docdesign";
