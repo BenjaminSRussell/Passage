@@ -1,8 +1,10 @@
+import { ProblemMessage } from "../../shell/errors";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { badgeLogin, describeProblem, newKey, type KioskSession, type Problem, type RegistrationInput } from "./api/client";
 import { formatDateTime } from "./format";
 import { KIOSK_DEVICE_ID, KioskJobs } from "./KioskJobs";
+import { KioskPiList } from "./KioskPiList";
 import { KioskSyncStatus } from "./KioskSyncStatus";
 import { kioskQueue, OfflineQueueFullError, submitOrQueue } from "./offlineQueue";
 import styles from "./pages.module.css";
@@ -111,7 +113,7 @@ export function KioskPage() {
       ) : null}
       {failure ? (
         <Alert tone="danger" title={session ? "The punch was not recorded" : "Could not sign in"} live="alert">
-          {failure.message} ({failure.code}){session ? " Press the button again to retry the same punch." : ""}
+          <ProblemMessage problem={failure} />{session ? " Press the button again to retry the same punch." : ""}
         </Alert>
       ) : null}
       <div className={`${styles.kiosk} ${styles.stack}`}>
@@ -163,6 +165,7 @@ export function KioskPage() {
             onOpenJobsChange={(openJobs) => setSession((s) => (s ? { ...s, openJobs } : s))}
           />
         ) : null}
+        {session?.clockedInAt ? <KioskPiList key={`pi-${session.workerId}`} resourceId={session.defaultResourceId ?? null} /> : null}
       </div>
     </div>
   );

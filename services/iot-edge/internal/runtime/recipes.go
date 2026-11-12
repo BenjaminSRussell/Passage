@@ -25,6 +25,8 @@ type Recipe struct {
 	OrderID     string
 	Destination string
 	Status      string
+	Topic       string          // pcs-mqtt: the topic the recipe document is published to
+	Document    json.RawMessage // the recipe document as the server holds it
 	Setpoints   []Setpoint
 }
 
@@ -59,11 +61,47 @@ type RecipePlane interface {
 	ReportRecipe(ctx context.Context, id string, rep RecipeReport) error
 }
 
-// Writer writes and reads the nodes of a process control system. The OPC-UA adapter is one; Sim is the
-// stand-in used for the demo plant and tests.
+// Writer writes and reads the nodes of a process control system. The OPC-UA adapter and the MQTT publisher
+// are two; Sim is the stand-in used for the demo plant and tests.
 type Writer interface {
 	Write(ctx context.Context, node string, value float64) error
 	Read(ctx context.Context, node string) (float64, error)
+}
+
+// RecipePublisher is implemented by a Writer whose destination also takes the recipe document itself: the
+// MQTT writer publishes it to the recipe's topic before the setpoints.
+type RecipePublisher interface {
+	PublishRecipe(ctx context.Context, topic string, doc []byte) error
+}
+
+// Destinations of control recipes that run on a connector.
+const (
+	DestOPCUA = "pcs-opcua"
+	DestMQTT  = "pcs-mqtt"
+)
+
+// writerFor returns the writer for a destination: the one registered for it, or the default Writer for
+// pcs-opcua (the option's first form).
+func (r *Runtime) writerFor(dest string) Writer {
+	if w := r.o.Writers[dest]; w != nil {
+		return w
+	}
+	if dest == DestOPCUA {
+		return r.o.Writer
+	}
+	return nil
+}
+
+func (r *Runtime) hasWriters() bool {
+	if r.o.Writer != nil {
+		return true
+	}
+	for _, w := range r.o.Writers {
+		if w != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // SimWriter is an in-memory process control system: it keeps what was written, can read back a different
@@ -115,11 +153,11 @@ const readbackTolerance = 0.001
 
 // ExecuteRecipes pulls the node's recipes and works each: it acknowledges a sent recipe (received), starts
 // it (in-execution) and, once, writes its setpoints under BR-25.15 and reports the writes. A recipe for
-// pcs-mqtt is reported as an error: this connector has no MQTT publisher. With AutoComplete the recipe is
+// a destination with no writer is reported as an error. With AutoComplete the recipe is
 // reported completed after its writes (the demo plant); otherwise it stays in-execution until the process
 // control system's own messages end it. It returns the number of recipes it advanced.
 func (r *Runtime) ExecuteRecipes(ctx context.Context) (int, error) {
-	if r.o.Recipes == nil || r.o.Writer == nil {
+	if r.o.Recipes == nil || !r.hasWriters() {
 		return 0, nil
 	}
 	recipes, err := r.o.Recipes.PullRecipes(ctx)
@@ -141,9 +179,10 @@ func (r *Runtime) ExecuteRecipes(ctx context.Context) (int, error) {
 }
 
 func (r *Runtime) executeRecipe(ctx context.Context, rc Recipe) (bool, error) {
-	if rc.Destination != "pcs-opcua" {
+	writer := r.writerFor(rc.Destination)
+	if writer == nil {
 		return true, r.o.Recipes.ReportRecipe(ctx, rc.ID, RecipeReport{Status: "error",
-			Error: "this connector build has no publisher for destination " + rc.Destination})
+			Error: "this connector is not configured for destination " + rc.Destination})
 	}
 	status := rc.Status
 	if status == "sent" {
@@ -167,18 +206,32 @@ func (r *Runtime) executeRecipe(ctx context.Context, rc Recipe) (bool, error) {
 	}
 	rep := RecipeReport{}
 	refused := 0
+	if pub, ok := writer.(RecipePublisher); ok && rc.Topic != "" && len(rc.Document) > 0 {
+		if err := pub.PublishRecipe(ctx, rc.Topic, rc.Document); err != nil {
+			rep.Status, rep.Error = "error", "the recipe was not published to "+rc.Topic+": "+err.Error()
+			if err := r.o.Recipes.ReportRecipe(ctx, rc.ID, rep); err != nil {
+				return false, err
+			}
+			r.mu.Lock()
+			r.written[rc.ID] = true
+			r.mu.Unlock()
+			return true, nil
+		}
+	}
 	for _, sp := range rc.Setpoints {
 		wr := WriteReport{PhasePath: sp.PhasePath, Node: sp.Node, Value: sp.Value, At: r.o.Now().UTC()}
 		// The recipe is in-execution here: the server accepts a write only in that state.
 		if err := cfg.CheckWrite(domain.WriteRequest{Node: sp.Node, Value: sp.Value, RecipeInExecution: true}); err != nil {
 			wr.Reason = err.Error()
 			refused++
-		} else if err := r.o.Writer.Write(ctx, sp.Node, sp.Value); err != nil {
+		} else if err := writer.Write(ctx, sp.Node, sp.Value); err != nil {
 			wr.Reason = "write failed: " + err.Error()
 			refused++
 		} else {
 			wr.Written = true
-			if back, err := r.o.Writer.Read(ctx, sp.Node); err != nil {
+			if back, err := writer.Read(ctx, sp.Node); errors.Is(err, ErrNoReadback) {
+				wr.Reason = "no readback: " + err.Error()
+			} else if err != nil {
 				wr.Reason = "readback failed: " + err.Error()
 			} else {
 				wr.Readback = &back
@@ -226,6 +279,7 @@ type wireRecipe struct {
 	OrderID     string          `json:"orderId"`
 	Destination string          `json:"destination"`
 	Status      string          `json:"status"`
+	Topic       *string         `json:"topic"`
 	Recipe      json.RawMessage `json:"recipe"`
 }
 
@@ -289,7 +343,11 @@ func (c *Client) PullRecipes(ctx context.Context) ([]Recipe, error) {
 		if err != nil {
 			return nil, fmt.Errorf("control recipe %s: %w", w.ID, err)
 		}
-		recipes = append(recipes, Recipe{ID: w.ID, OrderID: w.OrderID, Destination: w.Destination, Status: w.Status, Setpoints: sp})
+		rc := Recipe{ID: w.ID, OrderID: w.OrderID, Destination: w.Destination, Status: w.Status, Document: w.Recipe, Setpoints: sp}
+		if w.Topic != nil {
+			rc.Topic = *w.Topic
+		}
+		recipes = append(recipes, rc)
 	}
 	return recipes, nil
 }

@@ -57,6 +57,10 @@ spec:
             - name: RECEIVABLES_RMA_RESERVATION_TTL
               value: {{ .Values.rmaSweep.reservationTtl | quote }}
             {{- end }}
+            {{- if .Values.fxUrl }}
+            - name: FX_URL
+              value: {{ .Values.fxUrl | quote }}
+            {{- end }}
             {{- if .Values.autoApply.tenantIds }}
             - name: RECEIVABLES_AUTO_APPLY_TENANT_IDS
               value: {{ join "," .Values.autoApply.tenantIds | quote }}

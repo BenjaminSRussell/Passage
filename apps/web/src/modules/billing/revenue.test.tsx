@@ -134,13 +134,14 @@ describe("Revenue contracts list", () => {
     renderAt("/billing/revenue-contracts");
     expect(await screen.findByText("No revenue contracts yet")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "COMPLETE" } });
-    expect(await screen.findByText("No contracts match these filters")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No revenue contracts match these filters")).toBeInTheDocument();
     expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("COMPLETE");
     const calls = server.calls.length;
     fill("Customer", "0190f0a0");
-    expect(screen.queryByText("Enter a full customer id (a UUID) to filter.")).toBeNull();
     expect(server.calls.length).toBe(calls);
     fill("Customer", CUST);
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("customerId")).toBe(CUST));
   });
 
@@ -152,20 +153,21 @@ describe("Revenue contracts list", () => {
     const table = await findTable({ name: "Revenue contracts" });
     await waitFor(() => expect(table).toHaveTextContent("10800.00 USD"));
     fireEvent.change(screen.getByLabelText("Obligation method"), { target: { value: "RATABLE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("method")).toBe("RATABLE"));
-    fireEvent.click(await screen.findByRole("button", { name: "Load more contracts" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more revenue contracts" }));
     await waitFor(() => expect(table).toHaveTextContent("500.00 USD"));
     const more = server.calls.at(-1)!.url.searchParams;
     expect(more.get("cursor")).toBe("next");
     expect(more.get("method")).toBe("RATABLE");
-    expect(screen.queryByRole("button", { name: "Load more contracts" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more revenue contracts" })).not.toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
 
   it("shows the error state with a retry", async () => {
-    server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty revrec.view" });
+    server.handler = () => json(500, { code: "COM-0500", detail: "store unavailable" });
     renderAt("/billing/revenue-contracts");
-    expect(await findAlert()).toHaveTextContent("missing duty revrec.view");
+    expect(await findAlert()).toHaveTextContent("Could not load revenue contracts");
     server.handler = () => json(200, { items: [contract] });
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await findTable({ name: "Revenue contracts" })).toHaveTextContent("10800.00 USD");
@@ -322,7 +324,7 @@ describe("New revenue contract", () => {
     };
     const { container } = renderAt("/billing/revenue-contracts/new");
     fill("Legal entity", LE);
-    fill("Sales order id", ORDER);
+    fill("Sales order", ORDER);
     fill("Customer", CUST);
     fill("Contract price", "10800.00");
     fill("Product", PRODUCT);
@@ -346,7 +348,7 @@ describe("New revenue contract", () => {
     };
     const { container } = renderAt("/billing/revenue-contracts/new");
     fill("Legal entity", LE);
-    fill("Sales order id", ORDER);
+    fill("Sales order", ORDER);
     fill("Customer", CUST);
     fill("Contract price", "10800.00");
     fill("Contract date", "2027-03-10");
@@ -379,7 +381,7 @@ describe("New revenue contract", () => {
     };
     renderAt("/billing/revenue-contracts/new");
     fill("Legal entity", LE);
-    fill("Sales order id", ORDER);
+    fill("Sales order", ORDER);
     fill("Customer", CUST);
     fill("Contract price", "2250");
     fill("Product", PRODUCT);
@@ -403,7 +405,7 @@ describe("New revenue contract", () => {
     };
     renderAt("/billing/revenue-contracts/new");
     fill("Legal entity", LE);
-    fill("Sales order id", ORDER);
+    fill("Sales order", ORDER);
     fill("Customer", CUST);
     fill("Contract price", "100");
     fill("Product", PRODUCT);

@@ -165,7 +165,7 @@ func TestEnroll_RefusedTokenInstallsNothing(t *testing.T) {
 func TestCertStore_ActionFollowsBR2514(t *testing.T) {
 	ca := newTestCA(t)
 	ca.life = 40 * 24 * time.Hour
-	keyPEM, csr, _ := NewKeyAndCSR()
+	keyPEM, csr, _ := NewKeyAndCSR("")
 	issued := ca.sign(t, csr, "edge:x")
 	store := &CertStore{Dir: t.TempDir()}
 	if err := store.Install(issued.Certificate, issued.CAChain, keyPEM); err != nil {
@@ -200,7 +200,7 @@ func TestCertStore_ActionFollowsBR2514(t *testing.T) {
 func TestBeat_RenewsDueCertificateAndExpiryStopsPublishing(t *testing.T) {
 	ca := newTestCA(t)
 	ca.life = 20 * 24 * time.Hour // inside the renewal window from the start
-	keyPEM, csr, _ := NewKeyAndCSR()
+	keyPEM, csr, _ := NewKeyAndCSR("")
 	first := ca.sign(t, csr, "edge:x")
 	store := &CertStore{Dir: t.TempDir()}
 	if err := store.Install(first.Certificate, first.CAChain, keyPEM); err != nil {
@@ -216,7 +216,7 @@ func TestBeat_RenewsDueCertificateAndExpiryStopsPublishing(t *testing.T) {
 		if renewErr != nil {
 			return renewErr
 		}
-		k, c, _ := NewKeyAndCSR()
+		k, c, _ := NewKeyAndCSR("")
 		n := ca.sign(t, c, "edge:x")
 		return store.Install(n.Certificate, n.CAChain, k)
 	}})
@@ -238,7 +238,7 @@ func TestBeat_RenewsDueCertificateAndExpiryStopsPublishing(t *testing.T) {
 	// An expired certificate: events keep buffering, nothing is sent.
 	expired := &CertStore{Dir: t.TempDir()}
 	ca.life = -time.Hour
-	k, c, _ := NewKeyAndCSR()
+	k, c, _ := NewKeyAndCSR("")
 	old := ca.sign(t, c, "edge:x")
 	if err := expired.Install(old.Certificate, old.CAChain, k); err != nil {
 		t.Fatal(err)
@@ -248,5 +248,17 @@ func TestBeat_RenewsDueCertificateAndExpiryStopsPublishing(t *testing.T) {
 	r2.Ingest(Reading{Address: "sim/1/state", TS: time.Now(), Text: "RUNNING"})
 	if _, err := r2.Flush(context.Background()); err == nil || srv2.batches != 0 || r2.Stats().BufferLen != 1 {
 		t.Fatalf("flush with an expired certificate: %v batches %d stats %+v", err, srv2.batches, r2.Stats())
+	}
+}
+
+func TestNewKeyAndCSRNamesTheBoundIdentity(t *testing.T) {
+	_, csrPEM, err := NewKeyAndCSR("0195F0A0-0000-7000-8000-0000000000A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blk, _ := pem.Decode([]byte(csrPEM))
+	csr, err := x509.ParseCertificateRequest(blk.Bytes)
+	if err != nil || csr.Subject.CommonName != "edge:0195f0a0-0000-7000-8000-0000000000a1" {
+		t.Fatalf("subject %q, %v", csr.Subject.CommonName, err)
 	}
 }

@@ -28,7 +28,7 @@ var scimTables = []string{"identity_scim_groups", "identity_scim_group_members"}
 
 var identityTables = []string{"identity_tenants", "identity_users", "identity_legal_entities", "identity_role_assignments"}
 
-var rlsTables = append(append([]string{}, identityTables...), "identity_scim_groups", "identity_scim_group_members", "identity_keycloak_deprovisions", "identity_audit", "outbox")
+var rlsTables = append(append([]string{}, identityTables...), "identity_scim_groups", "identity_scim_group_members", "identity_keycloak_deprovisions", "identity_customer_contacts", "identity_audit", "outbox")
 
 func inScope(ctx context.Context, tenantID, legalEntityID string) context.Context {
 	p := tenant.Principal{TenantID: tenantID, UserID: "test-user", LegalEntityID: legalEntityID, Duties: map[string]struct{}{}}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
@@ -21,6 +22,30 @@ func (a *API) WithCustomers(customers store.CustomerStore) *API {
 func (a *API) registerCustomers(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyWrite, dutyImport)).Post("/v1/party/parties/{id}/customer", a.createCustomer)
 	r.With(authz.RequireAnyDuty(dutyRead, dutyImportRead)).Get("/v1/party/customers/{id}", a.getCustomer)
+	r.With(authz.RequireDuty(dutyWrite)).Put("/v1/party/customers/{id}/portal-access", a.setPortalAccess)
+	r.With(authz.RequireDuty(dutyPortalAccountsRead)).Get("/v1/party/customer-portal/accounts", a.portalAccounts)
+}
+
+// dutyPortalAccountsRead is the customer portal's service-only duty to list the accounts its contact may act for.
+const dutyPortalAccountsRead = "party.customer-portal.read"
+
+// portalAccounts lists the signed-in contact's customer and its bill-to and ship-to accounts of the same customer group. The
+// customer is the verified customer-portal token's; no query parameter names one.
+func (a *API) portalAccounts(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	customer, ok := tenant.PortalCustomer(r.Context())
+	if !ok || !ids.Valid(customer) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "PTY-CUS-001", "this account is not a customer account"))
+		return
+	}
+	items, err := a.customers.PortalAccounts(r.Context(), customer)
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 // getCustomer reads one customer role in the caller's legal entities.
@@ -65,4 +90,23 @@ func (a *API) createCustomer(w http.ResponseWriter, r *http.Request) {
 		a.customersCreated.Add(1)
 	}
 	httpx.JSON(w, http.StatusCreated, customer)
+}
+
+// setPortalAccess says whether contacts of a ship-to customer may also act for its bill-to account in the customer portal. Off by default.
+func (a *API) setPortalAccess(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req struct {
+		BillToAccess bool `json:"billToAccess"`
+	}
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := a.customers.SetPortalBillToAccess(r.Context(), chi.URLParam(r, "id"), req.BillToAccess); err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"billToAccess": req.BillToAccess})
 }

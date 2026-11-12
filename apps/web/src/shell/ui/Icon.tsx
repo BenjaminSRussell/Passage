@@ -9,6 +9,7 @@ const glyphs = {
   ),
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   close: <path d="M6 6l12 12M18 6 6 18" />,
+  plus: <path d="M12 5v14M5 12h14" />,
   chevronRight: <path d="m9 6 6 6-6 6" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   home: <path d="M4 10.5 12 4l8 6.5V20H4zM10 20v-5h4v5" />,

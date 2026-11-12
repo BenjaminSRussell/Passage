@@ -89,7 +89,7 @@ export function LedgerSettingsPage() {
       <PageHeader title="Ledger settings" description="Settings of one ledger that change how entries are reversed." />
       <LedgerPicker id="ls-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its settings.</p>
+        <p className={styles.note}>Choose a ledger to see its settings.</p>
       ) : result.isError ? (
         <Alert tone="danger" title="Could not load the ledger" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
           {(result.error as Error).message}

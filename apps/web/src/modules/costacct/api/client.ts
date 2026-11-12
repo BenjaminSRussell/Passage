@@ -1,3 +1,4 @@
+import { problemSummary } from "../../../shell/errors";
 import { apiFetch } from "../../../shell/api/http";
 // API client for the costacct service (services/costacct/api/openapi.yaml).
 // Browser calls use /api/v1/controlling/... which the web BFF rewrites to the service's /v1/controlling/... paths.
@@ -220,7 +221,7 @@ export class CostAcctApiError extends Error {
 
 /** One readable sentence for a failed call: the stable code and the detail. */
 export function describeError(err: unknown, fallback: string): string {
-  return err instanceof CostAcctApiError ? `${err.problem.code}: ${err.message}` : fallback;
+  return err instanceof CostAcctApiError ? problemSummary(err, err.message) : fallback;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

@@ -185,7 +185,7 @@ paths:
           description: PMF-0102
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '409':
-          description: PMF-0104 when the version is stale; PMF-0105 when the order has started.
+          description: PMF-0104 when the version is stale; PMF-0105 when the order has started; PMF-0506 when the order's control recipe is already on the shop floor (it would keep the old quantities).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: idempotency_key_reuse.
@@ -1003,6 +1003,7 @@ paths:
       parameters:
         - { name: itemId, in: query, schema: { type: string, format: uuid } }
         - { name: disposition, in: query, schema: { $ref: '#/components/schemas/Disposition' } }
+        - { name: q, in: query, description: "Only batches whose number contains it, ignoring case.", schema: { type: string, maxLength: 100 } }
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -1472,6 +1473,83 @@ paths:
           description: idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/production/recipe-targets/{itemId}:
+    put:
+      operationId: putRecipeTarget
+      summary: Say where the control recipes of an item's released batch orders go (#25)
+      x-passage-duty: production.formula.write
+      parameters:
+        - { name: itemId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RecipeTargetRequest' } } }
+      responses:
+        '200':
+          description: The target, replacing the one the item had.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecipeTarget' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteRecipeTarget
+      summary: Stop generating control recipes for an item (#25)
+      x-passage-duty: production.formula.write
+      parameters:
+        - { name: itemId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: legalEntityId, in: query, required: false, description: Defaults to the caller's legal entity., schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removed. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/recipe-targets:
+    get:
+      operationId: listRecipeTargets
+      summary: List the recipe targets (#25)
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The targets by legal entity and item.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/RecipeTarget' } } } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}/control-recipe:
+    get:
+      operationId: getBatchOrderControlRecipe
+      summary: The control recipe generated when the order was released, or why it was not (#25)
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: controlRecipeId when a recipe was generated; error when the shopfloor service refused it or could not be reached; both null when the item has no recipe target.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ControlRecipeLink' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}:send-recipe:
+    post:
+      operationId: sendBatchOrderRecipe
+      summary: Generate the control recipe of a released or started batch order again (#25)
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The link after the attempt. An order whose control recipe is already made answers with it and sends nothing; a recipe in error is sent again by the shopfloor service (:resend). The Idempotency-Key sent to shopfloor is the order and a hash of the request, so a retry of the same request replays the one recipe.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ControlRecipeLink' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: PMF-0504, the order is not released or started.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0505, the item has no recipe target.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '503':
+          description: PMF-0503, this deployment has no SHOPFLOOR_URL.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Id:
@@ -1490,6 +1568,33 @@ components:
       in: query
       schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
   schemas:
+    RecipeTargetRequest:
+      type: object
+      required: [resourceId, destination]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        resourceId: { type: string, format: uuid, description: The shop floor resource that runs the batches. }
+        destination: { type: string, enum: [kiosk, pcs-opcua, pcs-mqtt] }
+        edgeId: { type: string, format: uuid, description: The edge node of a process control destination; absent for a kiosk. }
+        topic: { type: string, description: pcs-mqtt only: the topic the recipe document is published to. }
+    RecipeTarget:
+      type: object
+      required: [legalEntityId, itemId, resourceId, destination, updatedBy, updatedAt]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        destination: { type: string, enum: [kiosk, pcs-opcua, pcs-mqtt] }
+        edgeId: { type: string, format: uuid }
+        topic: { type: string }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    ControlRecipeLink:
+      type: object
+      required: [controlRecipeId, error]
+      properties:
+        controlRecipeId: { type: [string, 'null'], format: uuid }
+        error: { type: [string, 'null'] }
     AttributeKind:
       type: string
       enum: [numeric, text, enum, date]

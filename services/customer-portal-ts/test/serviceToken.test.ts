@@ -24,6 +24,15 @@ describe("service tokens", () => {
     });
   });
 
+  it("carries only the duties a call asks for, and refuses one outside the grant", () => {
+    const signer = createServiceTokenSigner({ seedBase64: randomBytes(32).toString("base64") });
+    const caller = { tenantId: TENANT, legalEntityId: LE_1, userId: "u", customerId: CUSTOMER_A };
+    expect(tokenClaims(signer.mint("sales", caller, ["sales.customer-portal.order"]))["duties"]).toEqual(["sales.customer-portal.order"]);
+    expect(tokenClaims(signer.mint("sales", caller))["duties"]).toEqual([...SERVICE_GRANTS.sales]);
+    for (const bad of [["sales.order.write"], ["billing.customer-portal.read"], []]) expect(() => signer.mint("sales", caller, bad)).toThrow(TypeError);
+    expect(() => signer.mint("party", caller, ["party.read"])).toThrow(TypeError);
+  });
+
   it("never carries a vendor", () => {
     const signer = createServiceTokenSigner({ seedBase64: randomBytes(32).toString("base64") });
     const token = signer.mint("sales", { tenantId: TENANT, legalEntityId: LE_1, userId: "u", customerId: CUSTOMER_A });
@@ -40,7 +49,7 @@ describe("service tokens", () => {
 });
 
 describe("grants", () => {
-  it("match policies/authz/data.json and the Go table, and hold only read-only service-only customer-portal duties", () => {
+  it("match policies/authz/data.json and the Go table, and hold only service-only customer-portal duties, with no write but an order and a return", () => {
     expect(data.service_grants[SERVICE_NAME]).toEqual(SERVICE_GRANTS);
     const src = readFileSync(new URL("platform/go/tenant/service.go", root), "utf8");
     const block = src.slice(src.indexOf(`"${SERVICE_NAME}": {`), src.indexOf("}\n}\n", src.indexOf(`"${SERVICE_NAME}": {`)));
@@ -50,7 +59,8 @@ describe("grants", () => {
       for (const d of duties) {
         expect(data.duties[d]?.service_only, d).toBe(true);
         expect(d).toContain("customer-portal");
-        for (const perm of data.duties[d]?.permissions ?? []) expect(perm.methods, d).toEqual(["GET"]);
+        const write = d === "sales.customer-portal.order" || d === "sales.customer-portal.return";
+        for (const perm of data.duties[d]?.permissions ?? []) expect(perm.methods, d).toEqual(write ? ["POST"] : ["GET"]);
       }
     }
   });

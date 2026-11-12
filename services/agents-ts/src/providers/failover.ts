@@ -1,4 +1,4 @@
-import type { ModelProvider, ModelResponse } from "../runtime/engine.js";
+import type { ModelProvider, ModelRequest, ModelResponse } from "../runtime/engine.js";
 import { ProviderError } from "./wire.js";
 
 /** A provider adapter together with the region its endpoint is hosted in. */
@@ -71,7 +71,8 @@ export function createFailoverProvider(opts: FailoverOptions): FailoverProvider 
   const failedOver = (now: number): boolean => outageSince !== undefined && now - outageSince >= windowMs;
   // `primaryError` is the outage the primary just raised in this call, if it was tried. The pause
   // is unbilled only when no provider was asked, or the primary's own failure was unbilled.
-  const viaSecondary = async (req: Parameters<ModelProvider["complete"]>[0], primaryError?: ProviderError): Promise<ModelResponse> => {
+  type Call = (p: ModelProvider) => Promise<ModelResponse>;
+  const viaSecondary = async (call: Call, primaryError?: ProviderError): Promise<ModelResponse> => {
     const secondary = secondaryUsable();
     if (!secondary) {
       throw new ProviderError(
@@ -81,7 +82,26 @@ export function createFailoverProvider(opts: FailoverOptions): FailoverProvider 
       );
     }
     servedBy = secondary.name;
-    return secondary.provider.complete(req);
+    return call(secondary.provider);
+  };
+
+  const run = async (call: Call, emitted: () => boolean): Promise<ModelResponse> => {
+    const now = opts.nowMs();
+    const primaryDue = lastPrimaryAttempt === undefined || now - lastPrimaryAttempt >= retryMs;
+    if (failedOver(now) && !primaryDue) return viaSecondary(call);
+    try {
+      lastPrimaryAttempt = now;
+      const response = await call(opts.primary.provider);
+      outageSince = undefined;
+      servedBy = opts.primary.name;
+      return response;
+    } catch (err) {
+      if (!isOutage(err)) throw err;
+      outageSince ??= now;
+      // A stream that broke after some text went out cannot be replayed on another provider: the reader would see the answer twice.
+      if (failedOver(now) && !emitted()) return viaSecondary(call, err);
+      throw err;
+    }
   };
 
   return {
@@ -89,22 +109,15 @@ export function createFailoverProvider(opts: FailoverOptions): FailoverProvider 
     reportPrimaryHealthy: () => {
       outageSince = undefined;
     },
-    async complete(req): Promise<ModelResponse> {
-      const now = opts.nowMs();
-      const primaryDue = lastPrimaryAttempt === undefined || now - lastPrimaryAttempt >= retryMs;
-      if (failedOver(now) && !primaryDue) return viaSecondary(req);
-      try {
-        lastPrimaryAttempt = now;
-        const response = await opts.primary.provider.complete(req);
-        outageSince = undefined;
-        servedBy = opts.primary.name;
-        return response;
-      } catch (err) {
-        if (!isOutage(err)) throw err;
-        outageSince ??= now;
-        if (failedOver(now)) return viaSecondary(req, err);
-        throw err;
-      }
+    complete: (req: ModelRequest): Promise<ModelResponse> => run((p) => p.complete(req), () => false),
+    // Streams when the endpoint can, and otherwise answers whole: the caller shows it when it is complete.
+    stream: (req: ModelRequest, onText: (delta: string) => void): Promise<ModelResponse> => {
+      let sent = false;
+      const tee = (d: string): void => {
+        sent = true;
+        onText(d);
+      };
+      return run((p) => (p.stream !== undefined ? p.stream(req, tee) : p.complete(req)), () => sent);
     },
   };
 }

@@ -245,3 +245,49 @@ export function listDuties(q?: string, serviceOnly?: boolean, fetchImpl: FetchLi
   });
   return send(`/api/v1/authz/duties${query}`, GET, z.object({ items: z.array(dutySummarySchema) }), fetchImpl).then((r) => r.items);
 }
+
+const customerContactSchema = z.object({
+  contactId: z.string(),
+  email: z.string(),
+  displayName: z.string(),
+  customerId: z.string(),
+  legalEntityIds: z.array(z.string()),
+  status: z.enum(["enabled", "disabled"]),
+  invitationSent: z.boolean(),
+  invitedAt: z.string().optional(),
+  lastInvitationSentAt: z.string().optional(),
+});
+export type CustomerContact = z.infer<typeof customerContactSchema>;
+
+const customerContactPageSchema = z.object({ items: z.array(customerContactSchema), next: z.string().optional() });
+
+export interface CustomerContactMapping {
+  customerId: string;
+  legalEntityIds: string[];
+}
+
+export interface InviteCustomerContactInput extends CustomerContactMapping {
+  email: string;
+  givenName?: string;
+  familyName?: string;
+}
+
+export function listCustomerContacts(after?: string, fetchImpl: FetchLike = defaultFetch): Promise<z.infer<typeof customerContactPageSchema>> {
+  return send(`/api/v1/identity/customer-contacts${filterQuery({ after })}`, GET, customerContactPageSchema, fetchImpl);
+}
+
+export function inviteCustomerContact(input: InviteCustomerContactInput, fetchImpl: FetchLike = defaultFetch): Promise<CustomerContact> {
+  return send("/api/v1/identity/customer-contacts", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) }, customerContactSchema, fetchImpl);
+}
+
+export function remapCustomerContact(contactId: string, input: CustomerContactMapping, fetchImpl: FetchLike = defaultFetch): Promise<CustomerContact> {
+  return send(`/api/v1/identity/customer-contacts/${encodeURIComponent(contactId)}`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(input) }, customerContactSchema, fetchImpl);
+}
+
+export function resendCustomerContactInvitation(contactId: string, fetchImpl: FetchLike = defaultFetch): Promise<CustomerContact> {
+  return send(`/api/v1/identity/customer-contacts/${encodeURIComponent(contactId)}:resend`, { method: "POST", headers: GET.headers }, customerContactSchema, fetchImpl);
+}
+
+export function disableCustomerContact(contactId: string, fetchImpl: FetchLike = defaultFetch): Promise<CustomerContact> {
+  return send(`/api/v1/identity/customer-contacts/${encodeURIComponent(contactId)}:disable`, { method: "POST", headers: GET.headers }, customerContactSchema, fetchImpl);
+}

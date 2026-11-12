@@ -109,7 +109,7 @@ describe("dashboards", () => {
     expect(screen.getByText("Choose a published governed metric.")).toBeInTheDocument();
     expect(server.calls.filter((c) => c.method === "PUT")).toHaveLength(0);
 
-    fireEvent.change(screen.getByLabelText(/^Dashboard id/), { target: { value: "sales" } });
+    fireEvent.change(screen.getByLabelText(/^Dashboard key/), { target: { value: "sales" } });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: " Sales " } });
     fireEvent.change(screen.getByLabelText("Tile title"), { target: { value: "Revenue" } });
     fireEvent.change(metric, { target: { value: "revenue" } });
@@ -147,7 +147,7 @@ describe("dashboards", () => {
     expect(within(tiles).getByRole("link", { name: "Revenue" })).toHaveAttribute("href", "/analytics/metrics/revenue");
     expect(within(tiles).getByText("Year to date")).toBeInTheDocument();
     expect(within(tiles).getByText(revenue.formula)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^Dashboard id/)).toHaveAttribute("readonly");
+    expect(screen.getByLabelText(/^Dashboard key/)).toHaveAttribute("readonly");
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Finance" } });
@@ -156,6 +156,87 @@ describe("dashboards", () => {
     const put = server.calls.find((c) => c.method === "PUT");
     expect(new Headers(put?.init.headers).get("If-Match")).toBe('"3"');
     expect(screen.getByRole("heading", { name: "Finance", level: 2 })).toBeInTheDocument();
+  });
+
+  it("shows each tile's value, and why a tile has none", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/analytics/metrics") return json(200, catalog);
+      if (url.pathname === "/api/v1/analytics/dashboards/finance_overview/values") {
+        return json(200, {
+          dashboardId: "finance_overview",
+          title: "Finance overview",
+          refreshSeconds: 60,
+          computedAt: "2026-11-11T09:00:00Z",
+          tiles: [
+            { title: "Revenue this month", metric: "revenue", metricName: "Revenue", period: "MTD", from: "2026-11-01", to: "2026-11-11", status: "OK", value: "1250500.5", currency: "USD" },
+            { title: "COGS this year", metric: "cogs", metricName: "Cost of goods sold", period: "YTD", from: "2026-01-01", to: "2026-11-11", status: "NOT_MODELLED", value: null },
+          ],
+        });
+      }
+      return json(200, finance);
+    };
+    const { container } = render("/analytics/dashboards/finance_overview");
+    const tiles = await screen.findByLabelText("Tiles");
+    expect(await within(tiles).findByText("1,250,500.50 USD")).toBeInTheDocument();
+    expect(within(tiles).getByText("Not modelled yet")).toBeInTheDocument();
+    expect(within(tiles).getByText(/does not calculate it yet/)).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("shows several currencies as such, never a total", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/analytics/metrics") return json(200, catalog);
+      if (url.pathname.endsWith("/values")) {
+        return json(200, {
+          dashboardId: "finance_overview", title: "Finance overview", refreshSeconds: 60, computedAt: "2026-11-11T09:00:00Z",
+          tiles: [
+            { title: "Revenue this month", metric: "revenue", metricName: "Revenue", period: "MTD", from: "2026-11-01", to: "2026-11-11", status: "MIXED_CURRENCY", value: null },
+            { title: "COGS this year", metric: "cogs", metricName: "Cost of goods sold", period: "YTD", from: "2026-01-01", to: "2026-11-11", status: "OK", value: "10.00", currency: "EUR" },
+          ],
+        });
+      }
+      return json(200, finance);
+    };
+    render("/analytics/dashboards/finance_overview");
+    const tiles = await screen.findByLabelText("Tiles");
+    expect(await within(tiles).findByText("Several currencies")).toBeInTheDocument();
+    expect(within(tiles).getByText(/never added across currencies/)).toBeInTheDocument();
+    expect(within(tiles).getByText("10.00 EUR")).toBeInTheDocument();
+  });
+
+  it("keeps the last tile values on screen when a refresh fails", async () => {
+    let calls = 0;
+    const values = {
+      dashboardId: "finance_overview", title: "Finance overview", refreshSeconds: 60, computedAt: "2026-11-11T09:00:00Z",
+      tiles: [
+        { title: "Revenue this month", metric: "revenue", metricName: "Revenue", period: "MTD", from: "2026-11-01", to: "2026-11-11", status: "OK", value: "5.00", currency: "USD" },
+        { title: "COGS this year", metric: "cogs", metricName: "Cost of goods sold", period: "YTD", from: "2026-01-01", to: "2026-11-11", status: "OK", value: "3.00", currency: "USD" },
+      ],
+    };
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/analytics/metrics") return json(200, catalog);
+      if (url.pathname.endsWith("/values")) return ++calls === 1 ? json(200, values) : json(503, { code: "ANA-0120", detail: "the semantic layer did not answer" });
+      return json(200, finance);
+    };
+    render("/analytics/dashboards/finance_overview");
+    const tiles = await screen.findByLabelText("Tiles");
+    expect(await within(tiles).findByText("5.00 USD")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh values" }));
+    expect(await screen.findByText("Could not load the tile values")).toBeInTheDocument();
+    expect(within(tiles).getByText("5.00 USD")).toBeInTheDocument();
+    expect(screen.getByText(/The values below are from/)).toBeInTheDocument();
+  });
+
+  it("keeps the dashboard usable when the tile values cannot be loaded", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/analytics/metrics") return json(200, catalog);
+      if (url.pathname.endsWith("/values")) return json(503, { code: "ANA-0120", detail: "the semantic layer did not answer" });
+      return json(200, finance);
+    };
+    render("/analytics/dashboards/finance_overview");
+    expect(await screen.findByText("Could not load the tile values")).toBeInTheDocument();
+    const tiles = await screen.findByLabelText("Tiles");
+    expect(within(tiles).getByRole("heading", { name: "Revenue this month" })).toBeInTheDocument();
   });
 
   it("explains a concurrent change (ANA-0113) and maps server field errors onto the tiles", async () => {
@@ -174,7 +255,7 @@ describe("dashboards", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save dashboard" }));
     const alert = await findAlert();
     expect(alert).toHaveTextContent("Someone else changed this dashboard");
-    expect(alert).toHaveTextContent("(ANA-0113)");
+    expect(alert).toHaveTextContent("Reload the page to see the current version");
     fireEvent.click(screen.getByRole("button", { name: "Save dashboard" }));
     expect(await screen.findByText("MTD, QTD, YTD or TRAILING_12M")).toBeInTheDocument();
   });

@@ -89,6 +89,9 @@ type API struct {
 	configs    ConfigurationChecker
 	production LinePlanner
 	groups     CustomerGroupSource
+	names      ProductNamer
+
+	portalWindowDays int
 }
 
 // New returns the API over s.

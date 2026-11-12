@@ -26,6 +26,10 @@ type fakeTax struct {
 	tokens   []string
 	status   int
 	body     string
+	// entries are the withholding entries recorded through POST /v1/tax/withholding/entries, one slice per request;
+	// entriesStatus, when set, answers those requests with it.
+	entries       [][]map[string]any
+	entriesStatus int
 }
 
 func newFakeTax() *fakeTax { return &fakeTax{} }
@@ -33,6 +37,21 @@ func newFakeTax() *fakeTax { return &fakeTax{} }
 func (f *fakeTax) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if r.URL.Path == "/v1/tax/withholding/entries" {
+		var in struct {
+			Entries []map[string]any `json:"entries"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		f.tokens = append(f.tokens, r.Header.Get(tenant.HeaderServiceToken))
+		f.entries = append(f.entries, in.Entries)
+		if f.entriesStatus != 0 {
+			w.WriteHeader(f.entriesStatus)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]int{"recorded": len(in.Entries), "duplicates": 0})
+		return
+	}
 	var req struct {
 		Currency    string     `json:"currency"`
 		PartyType   string     `json:"party_type"`
@@ -276,4 +295,75 @@ func TestWithholding_SecondDraftForTheSameVendorIsRefusedAtApprovalAfterTheFirst
 	secondID := decode(t, second)["id"].(string)
 	f.approve()
 	wantProblem(t, f.bob.send(f.router, http.MethodPost, "/v1/payables/payment-proposals/"+secondID+":approve", ""), http.StatusConflict, "AP-PRP-001")
+}
+
+// #13: the tax withheld by a payment run is recorded with the tax service, one entry per invoice, so its remittance runs and certificates
+// cover it. The entry ids are stable, so a retry after a failed recording sends the same entries again.
+func TestWithholding_RunRecordsTheWithheldTaxWithTheTaxServiceAndRetriesIdempotently(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{withholdingCodes: map[string]string{vendorOne: "WHT30"}})
+	f.approve()
+	runID := f.start()["id"].(string)
+	if rec := f.step(f.erin, runID, "generate-file"); rec.Code != http.StatusOK {
+		t.Fatalf("generate-file: %d %s", rec.Code, rec.Body)
+	}
+	f.tax.mu.Lock()
+	f.tax.entriesStatus = http.StatusServiceUnavailable
+	f.tax.mu.Unlock()
+	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusBadGateway {
+		t.Fatalf("post-journal while tax is down: %d %s, want 502", rec.Code, rec.Body)
+	}
+	if len(f.ledger.bodies) != 1 {
+		t.Fatalf("the ledger journal was posted %d times", len(f.ledger.bodies))
+	}
+	f.tax.mu.Lock()
+	f.tax.entriesStatus = 0
+	f.tax.mu.Unlock()
+	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK {
+		t.Fatalf("post-journal retry: %d %s", rec.Code, rec.Body)
+	}
+	f.tax.mu.Lock()
+	defer f.tax.mu.Unlock()
+	if len(f.tax.entries) != 2 || len(f.tax.entries[1]) != 2 {
+		t.Fatalf("tax received %v, want the two withheld lines twice", f.tax.entries)
+	}
+	for i, e := range f.tax.entries[1] {
+		if e["id"] != f.tax.entries[0][i]["id"] || e["party_type"] != "vendor" || e["party_ref"] != vendorOne || e["code"] != "WHT30" || e["currency"] != "USD" {
+			t.Errorf("entry %d = %v (first attempt %v)", i, e, f.tax.entries[0][i])
+		}
+	}
+	first := f.tax.entries[1][0]
+	if first["gross_amount"] != "98" || first["taxable_base"] != "98" || first["withholding_amount"] != "29.4" {
+		t.Errorf("first entry = %v, want gross 98, base 98, tax 29.4", first)
+	}
+	if f.tax.entries[1][0]["id"] == f.tax.entries[1][1]["id"] {
+		t.Error("two invoices share an entry id")
+	}
+}
+
+// A refusal from tax that retrying cannot fix parks the run with a reason an operator sees, instead of an endless 502.
+func TestWithholding_PermanentTaxRefusalParksTheRun(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{withholdingCodes: map[string]string{vendorOne: "WHT30"}})
+	f.approve()
+	runID := f.start()["id"].(string)
+	if rec := f.step(f.erin, runID, "generate-file"); rec.Code != http.StatusOK {
+		t.Fatalf("generate-file: %d %s", rec.Code, rec.Body)
+	}
+	f.tax.mu.Lock()
+	f.tax.entriesStatus = http.StatusForbidden
+	f.tax.mu.Unlock()
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusUnprocessableEntity, "AP-RUN-019")
+	got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, ""))
+	if got["withholdingRecordError"] == nil || got["journalPostedAt"] == nil {
+		t.Fatalf("run = %v, want the journal posted and the park reason shown", got)
+	}
+	f.tax.mu.Lock()
+	f.tax.entriesStatus = 0
+	f.tax.mu.Unlock()
+	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK {
+		t.Fatalf("retry: %d %s", rec.Code, rec.Body)
+	}
+	got = decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, ""))
+	if got["withholdingRecordError"] != nil {
+		t.Errorf("the park was not cleared: %v", got["withholdingRecordError"])
+	}
 }

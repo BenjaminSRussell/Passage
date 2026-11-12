@@ -1,0 +1,40 @@
+# Client side of the plant edge. The listener takes a client certificate but does not require one: a connector that
+# redeems its enrollment token has none yet, and the token is that call's credential. Where a certificate is presented
+# it must chain to the edge CA (Secret passage-edge-ca-trust, key ca.crt: the CA certificate of the shop floor service's
+# edgePki issuer). Envoy then forwards it as X-Forwarded-Client-Cert with its subject (SanitizeSet: the header is built
+# from the verified certificate, and any value the client sent is dropped), and the shop floor service reads the common
+# name, edge:<node id>, as the caller and matches it to the node's bound connector subject. A call without a certificate
+# has no identity, and the service answers it 401. The Passage identity headers are removed before anything else runs.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: passage-edge-client
+  namespace: hello-ledger
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: passage-edge
+  tls:
+    minVersion: "1.2"
+    clientValidation:
+      optional: true
+      caCertificateRefs:
+        - group: ""
+          kind: Secret
+          name: passage-edge-ca-trust
+  headers:
+    xForwardedClientCert:
+      mode: SanitizeSet
+      certDetailsToAdd:
+        - Subject
+    earlyRequestHeaders:
+      remove:
+        - X-Passage-Tenant
+        - X-Passage-Legal-Entity
+        - X-Passage-User
+        - X-Passage-Duties
+        - X-Passage-Tier
+        - X-Passage-LegalEntity
+        - X-Passage-LegalEntity-Scope
+        - X-Passage-Service-Token

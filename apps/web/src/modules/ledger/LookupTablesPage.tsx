@@ -36,7 +36,7 @@ export function LookupTablesPage() {
       />
       <LedgerPicker id="lt-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its lookup tables.</p>
+        <p className={styles.note}>Choose a ledger to see its lookup tables.</p>
       ) : result.isError ? (
         <Alert tone="danger" title="Could not load the lookup tables" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
           {errorText(result.error)}

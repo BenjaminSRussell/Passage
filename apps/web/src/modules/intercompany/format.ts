@@ -49,3 +49,9 @@ export function isDate(value: string): boolean {
 export function isCount(value: string): boolean {
   return /^\d{1,6}$/.test(value.trim());
 }
+
+/** The entities a set of journal legs post in, in order of first appearance: "A and B", or "A, B and C". */
+export function legEntities(legs: { entity: string }[]): string {
+  const names = [...new Set(legs.map((leg) => leg.entity))];
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : (names[0] ?? "the entity");
+}

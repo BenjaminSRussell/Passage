@@ -38,6 +38,7 @@ paths:
         - {name: status, in: query, schema: {type: string, enum: [DRAFT, OPEN, CONFIRMED, PARTIALLY_SHIPPED, SHIPPED, INVOICED, CLOSED, CANCELLED]}}
         - {name: customerId, in: query, schema: {type: string, format: uuid}}
         - {name: hold, in: query, description: only orders with an ACTIVE hold of this type, schema: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}}
+        - {name: q, in: query, description: "only orders whose number contains it, ignoring case", schema: {type: string, maxLength: 100}}
         - {name: cursor, in: query, description: nextCursor of the previous page, schema: {type: string, format: uuid}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:
@@ -3053,6 +3054,56 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
   /v1/sales/customer-portal/orders:
+    post:
+      operationId: customerPortalPlaceOrder
+      summary: The signed-in customer places an order (customer portal, FR-30.14).
+      description: |
+        For the customer portal only (#30). The customer and legal entity are the token's; a body that names a customer, price, site or
+        warehouse is refused (400). The sales service holds no price list, so every line is a reorder: its unit price, discount, unit,
+        site and warehouse are those of the customer's own last committed order of that product, and a product the customer never
+        bought is 422 SAL-CUS-002. The order is stored on channel `PORTAL-<customer>` and committed through the normal confirm, so the
+        credit check runs and a CREDIT hold may be placed (the answer then shows the order's status). A repeat of the Idempotency-Key
+        returns the stored order with 200.
+      x-passage-duty: sales.customer-portal.order
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestedShipDate, lines]
+              properties:
+                requestedShipDate: { type: string, format: date }
+                externalRef: { type: string, maxLength: 100, description: The customer's own purchase order number. }
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [productId, quantity]
+                    properties:
+                      productId: { type: string, format: uuid }
+                      quantity: { type: string }
+                      unit: { type: string }
+      responses:
+        "201":
+          description: The order was placed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrder"
+        "200":
+          description: A repeat of the Idempotency-Key; the stored order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrder"
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
     get:
       operationId: customerPortalListOrders
       summary: The signed-in customer's own orders (customer portal).
@@ -3094,7 +3145,80 @@ paths:
                 $ref: "#/components/schemas/PortalOrder"
         "404": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/sales/customer-portal/products:
+    get:
+      operationId: customerPortalListProducts
+      summary: The products the signed-in customer can reorder (customer portal).
+      description: The products of the customer's own committed orders, one row per product and unit, with the price paid last (discount applied) and its currency, newest first.
+      x-passage-duty: sales.customer-portal.read
+      responses:
+        "200":
+          description: The answer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        productId: { type: string, format: uuid }
+                        productName: { type: string }
+                        unit: { type: string }
+                        unitPrice: { type: string }
+                        currency: { type: string }
+                        lastOrderedAt: { type: string, format: date-time }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/sales/customer-portal/returns:
+    post:
+      operationId: customerPortalRequestReturn
+      summary: The signed-in customer requests a return of its own invoice (customer portal, FR-30.14).
+      description: |
+        For the customer portal only (#30). The customer is the token's and is checked against the invoice's customer by the return-order
+        flow; an invoice that is unknown, another customer's or not returnable is one answer, 422 SAL-CUS-003. A product the customer
+        never bought is 422 SAL-CUS-002. The return is created REQUESTED, returning to the site and warehouse of the customer's last
+        order of the product, valued at current cost; staff authorize, receive and inspect it as any return order.
+      x-passage-duty: sales.customer-portal.return
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [originalInvoiceId, returnReasonCode, lines]
+              properties:
+                originalInvoiceId: { type: string, format: uuid }
+                returnReasonCode: { type: string, maxLength: 40 }
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [productId, quantity]
+                    properties:
+                      productId: { type: string, format: uuid }
+                      quantity: { type: string }
+      responses:
+        "201":
+          description: The return was requested.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalReturn"
+        "200":
+          description: A repeat of the Idempotency-Key; the stored return.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalReturn"
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
     get:
       operationId: customerPortalListReturns
       summary: The signed-in customer's own return orders (customer portal).
@@ -3466,7 +3590,10 @@ components:
         netTotal: { type: string }
         lineCount: { type: integer }
         createdAt: { type: string, format: date-time }
-        lines: { type: array, items: { type: object } }
+        lines:
+          type: array
+          description: Each line carries productId and the product's display name (productName, absent when the product service cannot answer).
+          items: { type: object }
     PortalReturn:
       type: object
       description: The customer's view of a return order; no costs, products' warehouses, journal or user ids.

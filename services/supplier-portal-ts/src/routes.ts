@@ -16,11 +16,18 @@ export interface Route {
   injectLegalEntity?: boolean;
   /** The answer is a file, streamed with its headers. */
   binary?: boolean;
+  /** Only a vendor administrator (the `supplier-admin` role) may call it. */
+  adminOnly?: boolean;
+  /** The body field holding a base64 upload; it is scanned for viruses before the request goes on. */
+  scan?: string;
+  /** The answer carries an invitation token; the portal adds the link to accept it. */
+  inviteLink?: boolean;
 }
 
 const P = "/v1/procurement/vendor";
 const R = "/v1/receiving/vendor";
 const Y = "/v1/party/vendor-portal";
+const A = "/v1/payables/vendor";
 
 export const ROUTES: readonly Route[] = [
   { method: "GET", path: "/api/v1/purchase-orders", audience: "purchasing", upstream: `${P}/purchase-orders` },
@@ -32,9 +39,15 @@ export const ROUTES: readonly Route[] = [
   { method: "POST", path: "/api/v1/asns", audience: "receiving", upstream: `${R}/asns`, body: "json", injectLegalEntity: true },
   { method: "GET", path: "/api/v1/invoices", audience: "receiving", upstream: `${R}/invoices` },
   { method: "GET", path: "/api/v1/invoices/:id", audience: "receiving", upstream: `${R}/invoices/:id` },
+  { method: "GET", path: "/api/v1/invoiceable-lines", audience: "receiving", upstream: `${R}/invoiceable-lines` },
+  { method: "GET", path: "/api/v1/invoice-submissions", audience: "receiving", upstream: `${R}/invoice-submissions` },
+  { method: "GET", path: "/api/v1/invoice-submissions/:id", audience: "receiving", upstream: `${R}/invoice-submissions/:id` },
+  { method: "POST", path: "/api/v1/invoice-submissions", audience: "receiving", upstream: `${R}/invoice-submissions`, body: "json", injectLegalEntity: true },
+  { method: "POST", path: "/api/v1/invoice-submissions/:id/withdraw", audience: "receiving", upstream: `${R}/invoice-submissions/:id:withdraw` },
+  { method: "GET", path: "/api/v1/payments", audience: "payables", upstream: `${A}/payments` },
   { method: "GET", path: "/api/v1/invoice-documents", audience: "receiving", upstream: `${R}/invoice-captures` },
   { method: "GET", path: "/api/v1/invoice-documents/:id", audience: "receiving", upstream: `${R}/invoice-captures/:id` },
-  { method: "POST", path: "/api/v1/invoice-documents", audience: "receiving", upstream: `${R}/invoice-captures`, body: "json", injectLegalEntity: true },
+  { method: "POST", path: "/api/v1/invoice-documents", audience: "receiving", upstream: `${R}/invoice-captures`, body: "json", injectLegalEntity: true, scan: "content" },
 
   { method: "GET", path: "/api/v1/requests", audience: "party", upstream: `${Y}/requests` },
   { method: "GET", path: "/api/v1/requests/:id", audience: "party", upstream: `${Y}/requests/:id` },
@@ -43,10 +56,14 @@ export const ROUTES: readonly Route[] = [
   { method: "POST", path: "/api/v1/requests/:id/withdraw", audience: "party", upstream: `${Y}/requests/:id:withdraw` },
   { method: "GET", path: "/api/v1/documents", audience: "party", upstream: `${Y}/documents` },
   { method: "GET", path: "/api/v1/documents/:id/content", audience: "party", upstream: `${Y}/documents/:id/content`, binary: true },
-  { method: "POST", path: "/api/v1/documents", audience: "party", upstream: `${Y}/documents`, body: "json" },
+  { method: "POST", path: "/api/v1/documents", audience: "party", upstream: `${Y}/documents`, body: "json", scan: "contentBase64" },
   { method: "GET", path: "/api/v1/distributions", audience: "party", upstream: `${Y}/distributions` },
   { method: "GET", path: "/api/v1/distributions/:id/content", audience: "party", upstream: `${Y}/distributions/:id/content`, binary: true },
   { method: "POST", path: "/api/v1/distributions/:id/acknowledge", audience: "party", upstream: `${Y}/distributions/:id:acknowledge` },
+
+  { method: "GET", path: "/api/v1/invites", audience: "party", upstream: `${Y}/invites`, adminOnly: true },
+  { method: "POST", path: "/api/v1/invites", audience: "party", upstream: `${Y}/invites`, body: "json", adminOnly: true, inviteLink: true },
+  { method: "POST", path: "/api/v1/invites/:id/revoke", audience: "party", upstream: `${Y}/invites/:id:revoke`, adminOnly: true },
 ];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

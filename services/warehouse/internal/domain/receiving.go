@@ -54,9 +54,15 @@ const (
 // once received, what arrived. Weight and volume are for the expected
 // quantity; the put-away line scales them to the received quantity.
 type ReceiptLine struct {
-	LineNo      int               `json:"lineNo"`
-	ItemID      string            `json:"itemId"`
-	LPID        string            `json:"lpId"`
+	LineNo int    `json:"lineNo"`
+	ItemID string `json:"itemId"`
+	LPID   string `json:"lpId"`
+	// SSCC is the pallet's 18-digit serial shipping container code: the license plate id when the ASN named an SSCC,
+	// else generated when the pallet is received (#32). Empty before that when the ASN gave none.
+	SSCC string `json:"sscc,omitempty"`
+	// Lot and ExpiryDate are what the pallet's label shows besides the item.
+	Lot         string            `json:"lot,omitempty"`
+	ExpiryDate  string            `json:"expiryDate,omitempty"`
 	POLineRef   string            `json:"poLineRef,omitempty"`
 	ExpectedQty decimal.Decimal   `json:"expectedQty"`
 	Weight      decimal.Decimal   `json:"weight"`
@@ -202,6 +208,9 @@ func (l ReceiptLine) PutAwayLine(receiptID string) NewLine {
 			"lpId":      l.LPID,
 			"receiptId": receiptID,
 			"asnLine":   strconv.Itoa(l.LineNo),
+			"sscc":      l.SSCC,
+			"lot":       l.Lot,
+			"expiry":    l.ExpiryDate,
 		},
 	}
 }

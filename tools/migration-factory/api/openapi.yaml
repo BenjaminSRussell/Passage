@@ -547,6 +547,90 @@ paths:
           $ref: "#/components/responses/Problem"
         "409":
           $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/opening-load:
+    post:
+      operationId: loadPackRunOpening
+      summary: Load a reconciled onhand run into the inventory ledger, or a bank_balances run into treasury, and reconcile
+      description: |
+        For a RECONCILED onhand run: sends its staged stock to the inventory ledger, POST /v1/inventory/opening-batches, as
+        one OPENING_BALANCE batch per currency and 1000 lines (posting date `postingDate`, unit cost = value over quantity
+        at six decimals); for a RECONCILED bank_balances run: sends its staged balances to treasury,
+        POST /v1/treasury/opening-balances, in batches of at most 1000 accounts (`asOf`, whole minor units). `products` maps
+        a legacy item to the Passage product id and `bankAccounts` a legacy bank account to the treasury bank account id; an id
+        that is already a UUID needs no entry, and a balance with no mapping is REJECTED (MIG-REF-UNRESOLVED) until it has one.
+        The batch key is derived from the pack, system, company, currency and rows (`mf-<pack>-<system>-<hash>-<currency>-<hash>`),
+        so the same rows are the same request on every try and the target answers a repeat as a replay. A refusal that names rows
+        (422 INV-OPB-001, TRS-0601, TRS-0602) stores those rows as REJECTED with the target's reason and sends the rest of the batch
+        again at once. A 5xx, a 429 or a timeout is retried with backoff and then leaves the rows pending (PARTIAL; call again to
+        resume). A refusal of the whole request stops the load as FAILED with 502 MIG-1562 and the rows stay pending; a refused
+        service token is 502 MIG-1561. Once no row is pending, the target's batches for the legal entity (every page) are summed for the
+        factory's keys of the pack and company and compared with what the factory loaded: item count and, per currency, the quantity
+        and value (`target.onhand.*`) or the balance in minor units (`target.bank_balances.*`), exactly. A difference is MISMATCH;
+        totals that cannot be read are UNRECONCILED. A RECONCILED load with no row rejected counts the pack as posted in the go/no-go.
+        Without INVENTORY_URL or TREASURY_URL and a service signing key the answer is 503 MIG-1560. A run that is not an onhand or
+        bank_balances run, or not RECONCILED, is 409 MIG-1564; one load runs at a time per pack and company (409 MIG-1522).
+        Writes dev.passage.migration.pack.loaded.v1 with target `inventory` or `treasury`.
+      x-passage-duty: migration.factory.run
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId]
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                postingDate: {type: string, format: date}
+                asOf: {type: string, format: date}
+                products: {type: object, additionalProperties: {type: string, format: uuid}}
+                bankAccounts: {type: object, additionalProperties: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The load after this pass.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningLoad"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: getPackRunOpeningLoad
+      summary: Status, reconciliation lines and first rejects of a run's opening load
+      description: |
+        `reconciliation` holds the run's `target.onhand.*` or `target.bank_balances.*` control totals (factory side as source,
+        the target as target). `rejects` lists up to 50 REJECTED balances with their legacy id. 409 MIG-1563 before the first load.
+      x-passage-duty: migration.factory.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The opening load.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpeningLoadDetail"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
   /api/v1/migration/runs/{id}/target-load:
     get:
       operationId: getTargetLoad
@@ -2513,6 +2597,45 @@ components:
         startedAt: {type: string, format: date-time}
         finishedAt: {type: string, format: date-time}
         version: {type: integer}
+    OpeningLoad:
+      type: object
+      required: [runId, target, legalEntityId, status, clean, staged, loaded, rejected, pending, attempts, version]
+      properties:
+        runId: {type: string, format: uuid}
+        target: {type: string, enum: [inventory, treasury]}
+        legalEntityId: {type: string, format: uuid}
+        status:
+          type: string
+          enum: [STAGED, LOADING, PARTIAL, UNRECONCILED, MISMATCH, RECONCILED, FAILED]
+        clean: {type: boolean, description: RECONCILED with no balance pending or rejected.}
+        staged: {type: integer}
+        loaded: {type: integer}
+        rejected: {type: integer}
+        pending: {type: integer}
+        attempts: {type: integer}
+        lastError: {type: string}
+        startedAt: {type: string, format: date-time}
+        finishedAt: {type: string, format: date-time}
+        version: {type: integer}
+    OpeningLoadDetail:
+      allOf:
+        - $ref: "#/components/schemas/OpeningLoad"
+        - type: object
+          required: [reconciliation, rejects]
+          properties:
+            reconciliation:
+              type: array
+              items:
+                $ref: "#/components/schemas/ControlTotal"
+            rejects:
+              type: array
+              items:
+                type: object
+                required: [legacyId, code, detail]
+                properties:
+                  legacyId: {type: string}
+                  code: {type: string}
+                  detail: {type: string}
     PayablesLoadDetail:
       allOf:
         - $ref: "#/components/schemas/PayablesLoad"

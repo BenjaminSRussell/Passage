@@ -23,6 +23,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
+	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 )
 
@@ -44,7 +45,7 @@ const (
 
 // Sender generates the outbound document of one source document for one partner. API.SendFromSource implements it.
 type Sender interface {
-	SendFromSource(ctx context.Context, partnerID, transactionSet, sourceID string) (store.OutboundResult, bool, error)
+	SendFromSource(ctx context.Context, partnerID, transactionSet, sourceID string, slip *domain.SlipRef) (store.OutboundResult, bool, error)
 }
 
 // Partners finds the partners of a legal entity that receive the given sets automatically.
@@ -53,13 +54,48 @@ type Partners interface {
 }
 
 type asnData struct {
-	ShipmentID    string `json:"shipment_id"`
-	LegalEntityID string `json:"legal_entity_id"`
+	ShipmentID        string `json:"shipment_id"`
+	LegalEntityID     string `json:"legal_entity_id"`
+	PackingSlipID     string `json:"packing_slip_id"`
+	PackingSlipNumber string `json:"packing_slip_number"`
+	Containers        []struct {
+		SSCC string `json:"sscc"`
+	} `json:"containers"`
+}
+
+// slip is the packing slip the notice is for. An event that names a slip always gets a notice for that slip and never the whole
+// shipment's (which would send a slip's containers twice, once per slip): the SSCCs it lists are the notice's containers. ok is false
+// when the event names a slip that lists no container, which has nothing to notify; a nil slip with ok true is a legacy event that names
+// no slip at all, sent as the whole shipment.
+func (d asnData) slip() (slip *domain.SlipRef, ok bool, err error) {
+	if d.PackingSlipID == "" {
+		return nil, true, nil
+	}
+	if !ids.Valid(d.PackingSlipID) {
+		return nil, false, fmt.Errorf("asn.issued names the packing slip %q, which is not an id", d.PackingSlipID)
+	}
+	s := &domain.SlipRef{ID: d.PackingSlipID, Number: d.PackingSlipNumber}
+	for _, c := range d.Containers {
+		if c.SSCC != "" {
+			s.SSCCs = append(s.SSCCs, c.SSCC)
+		}
+	}
+	if len(s.SSCCs) == 0 {
+		return nil, false, nil
+	}
+	return s, true, nil
 }
 
 type invoiceData struct {
 	InvoiceID     string `json:"invoice_id"`
 	LegalEntityID string `json:"legal_entity_id"`
+	Customer      string `json:"customer"`
+}
+
+// EInvoicer builds (and where registered submits) the e-invoices of a posted invoice. API.AutoEInvoice implements it; a Sender that
+// also implements it makes the consumer e-invoice the customers registered under a mandate (35-2).
+type EInvoicer interface {
+	AutoEInvoice(ctx context.Context, legalEntityID, customerID, invoiceID string) error
 }
 
 // Handlers returns the consumer's handlers by event type. Register them with a consumer named ConsumerName with Idempotent set.
@@ -70,19 +106,30 @@ func Handlers(p Partners, s Sender) map[string]eventing.Handler {
 			if err := json.Unmarshal(evt.Data, &d); err != nil {
 				return eventing.Permanent(fmt.Errorf("asn.issued data: %w", err))
 			}
-			return send(ctx, p, s, evt, FulfillmentSource, d.LegalEntityID, d.ShipmentID, []string{"856", "DESADV"})
+			slip, ok, err := d.slip()
+			if err != nil {
+				return eventing.Permanent(err)
+			}
+			if !ok {
+				slog.InfoContext(ctx, "edi outbound skipped: the packing slip lists no container", "shipment", d.ShipmentID, "slip", d.PackingSlipID)
+				return nil
+			}
+			return send(ctx, p, s, evt, FulfillmentSource, d.LegalEntityID, d.ShipmentID, slip, []string{"856", "DESADV"})
 		}),
 		InvoicePostedType: eventing.HandlerFunc(func(ctx context.Context, _ pgx.Tx, evt events.Event) error {
 			var d invoiceData
 			if err := json.Unmarshal(evt.Data, &d); err != nil {
 				return eventing.Permanent(fmt.Errorf("invoice.posted data: %w", err))
 			}
-			return send(ctx, p, s, evt, BillingSource, d.LegalEntityID, d.InvoiceID, []string{"810", "INVOIC"})
+			if err := send(ctx, p, s, evt, BillingSource, d.LegalEntityID, d.InvoiceID, nil, []string{"810", "INVOIC"}); err != nil {
+				return err
+			}
+			return autoEInvoice(ctx, s, evt, d)
 		}),
 	}
 }
 
-func send(ctx context.Context, p Partners, s Sender, evt events.Event, source, legalEntityID, sourceID string, sets []string) error {
+func send(ctx context.Context, p Partners, s Sender, evt events.Event, source, legalEntityID, sourceID string, slip *domain.SlipRef, sets []string) error {
 	actor, ok := tenant.FromContext(ctx)
 	if !ok || !actor.HasDuty(Duty) {
 		return eventing.Permanent(errors.New("outbound consumer has no principal with " + Duty))
@@ -108,7 +155,7 @@ func send(ctx context.Context, p Partners, s Sender, evt events.Event, source, l
 	var retry error
 	for _, ap := range partners {
 		for _, set := range ap.TransactionSets {
-			_, created, err := s.SendFromSource(ctx, ap.PartnerID, set, sourceID)
+			_, created, err := s.SendFromSource(ctx, ap.PartnerID, set, sourceID, slip)
 			switch kind := classify(err); kind {
 			case outcomeSent:
 				slog.InfoContext(ctx, "edi outbound sent from event", "type", evt.Type, "partner", ap.PartnerID, "set", set, "source", sourceID, "created", created)
@@ -127,6 +174,28 @@ func send(ctx context.Context, p Partners, s Sender, evt events.Event, source, l
 	return retry
 }
 
+// autoEInvoice builds the e-invoices of the posted invoice for the mandates its customer is registered under.
+func autoEInvoice(ctx context.Context, s Sender, evt events.Event, d invoiceData) error {
+	ei, ok := s.(EInvoicer)
+	if !ok || !ids.Valid(d.Customer) {
+		return nil
+	}
+	actor, ok := tenant.FromContext(ctx)
+	if !ok {
+		return eventing.Permanent(errors.New("outbound consumer has no principal"))
+	}
+	scoped, err := tenant.ServicePrincipal(ConsumerName, actor.TenantID, d.LegalEntityID)
+	if err != nil {
+		return eventing.Permanent(err)
+	}
+	err = ei.AutoEInvoice(tenant.With(ctx, scoped), d.LegalEntityID, d.Customer, d.InvoiceID)
+	if classify(err) == outcomeSkip {
+		slog.WarnContext(ctx, "e-invoice skipped", "type", evt.Type, "invoice", d.InvoiceID, "reason", err.Error())
+		return nil
+	}
+	return err
+}
+
 type outcome int
 
 const (
@@ -138,7 +207,8 @@ const (
 // SkipCodes are the problem codes that mean this document is not sendable to this partner, whatever the retries: the document
 // belongs to another customer (EDI-0011), the partner has no trade profile or EDIFACT identity (EDI-0012, EDI-0017), the
 // document cannot be mapped (EDI-0007), the partner is inactive (EDI-0008) or a body was sent under the key before (idempotency).
-var SkipCodes = map[string]bool{"EDI-0007": true, "EDI-0008": true, "EDI-0011": true, "EDI-0012": true, "EDI-0017": true, "idempotency_key_reuse": true}
+var SkipCodes = map[string]bool{"EDI-0007": true, "EDI-0008": true, "EDI-0011": true, "EDI-0012": true, "EDI-0017": true, "idempotency_key_reuse": true,
+	"EDI-0027": true, "EDI-0030": true, "EDI-0031": true}
 
 func classify(err error) outcome {
 	if err == nil {

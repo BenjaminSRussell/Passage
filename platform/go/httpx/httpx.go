@@ -59,6 +59,9 @@ func newRouter(extra ...func(http.Handler) http.Handler) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, recordMetrics, TrustedRealIP(trustedProxiesFromEnv()), middleware.Recoverer, middleware.Timeout(RequestTimeout))
 	r.Use(logRequests)
+	// The fence comes after metrics and logging, so a fenced 503 is counted and logged, and before tenant extraction, so a
+	// fenced region refuses before authentication does any work.
+	r.Use(processFenceMiddleware)
 	r.Use(extra...)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -135,6 +138,7 @@ func Serve(ctx context.Context, addr string, h http.Handler) error {
 	if err := cloudprofile.CheckFIPS(os.Getenv); err != nil {
 		return err
 	}
+	defer stopProcessFence()
 	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()

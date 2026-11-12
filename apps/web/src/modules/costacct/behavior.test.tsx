@@ -154,7 +154,7 @@ describe("CreateBehaviorRulePage (FR-38.16)", () => {
     fireEvent.change(screen.getByLabelText("Behavior"), { target: { value: "Variable" } });
     fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2026-01-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Save behavior rule" }));
-    expect(await screen.findByText("CST-0020: a behavior rule already exists for this element, object kind and date")).toBeInTheDocument();
+    expect(await screen.findByText("a behavior rule already exists for this element, object kind and date")).toBeInTheDocument();
     expect(JSON.parse(posts(fetchMock)[0][1].body as string)).toEqual({ legalEntityId: LE, costElementId: PRI, behavior: "Variable", effectiveFrom: "2026-01-01" });
   });
 });

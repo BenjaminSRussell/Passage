@@ -57,7 +57,7 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 		h.WithLedger(ledger)
 	}
 	logger.Info("listening", "addr", addr)
-	return httpx.Serve(ctx, addr, h.Routes())
+	return httpx.ServeWithMetrics(ctx, addr, h.Routes())
 }
 
 func serviceName(getenv func(string) string) string {

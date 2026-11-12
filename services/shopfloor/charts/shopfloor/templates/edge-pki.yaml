@@ -1,0 +1,86 @@
+{{- if eq .Values.edgePki.mode "cert-manager" }}
+{{- $issuer := default (printf "%s-edge-ca" .Release.Name) .Values.edgePki.issuerName }}
+# The platform issuer of edge connector client certificates (#25, 25-4, BR-25.14): cert-manager signs the
+# connector's request, 90 days of life, through a CertificateRequest the service creates with its own service
+# account. With createIssuer the chart makes the CA too: a self-signed bootstrap issuer, a CA certificate, and the
+# CA issuer the service names. With createIssuer false, issuerName (and issuerKind) must name an issuer that
+# exists: the plant's own CA or a ClusterIssuer.
+{{- if .Values.edgePki.createIssuer }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ .Release.Name }}-edge-bootstrap
+  labels:
+    app.kubernetes.io/name: shopfloor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Release.Name }}-edge-ca
+  labels:
+    app.kubernetes.io/name: shopfloor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  isCA: true
+  commonName: Passage edge connector CA ({{ .Release.Name }})
+  secretName: {{ .Release.Name }}-edge-ca-keypair
+  duration: {{ .Values.edgePki.caDuration | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ .Release.Name }}-edge-bootstrap
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuer }}
+  labels:
+    app.kubernetes.io/name: shopfloor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  ca:
+    secretName: {{ .Release.Name }}-edge-ca-keypair
+---
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-shopfloor
+  labels:
+    app.kubernetes.io/name: shopfloor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+# The service creates, reads and deletes its own certificate requests, and nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-shopfloor-edge-pki
+  labels:
+    app.kubernetes.io/name: shopfloor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+rules:
+  - apiGroups: [cert-manager.io]
+    resources: [certificaterequests]
+    verbs: [create, get, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-shopfloor-edge-pki
+  labels:
+    app.kubernetes.io/name: shopfloor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-shopfloor-edge-pki
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-shopfloor
+{{- end }}

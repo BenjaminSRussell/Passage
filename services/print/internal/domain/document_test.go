@@ -190,6 +190,9 @@ func shows(pdf []byte, s string) bool {
 
 func TestRenderDocument_ShowsEntityNumberTitleAndCounterparty(t *testing.T) {
 	for docType, title := range docTitles {
+		if IsCorrespondence(docType) {
+			continue // letters have their own test (docgen_test.go)
+		}
 		pdf, err := RenderDocument(sampleDocument(docType))
 		if err != nil {
 			t.Fatal(err)

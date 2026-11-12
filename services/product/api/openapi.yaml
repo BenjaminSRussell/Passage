@@ -263,6 +263,17 @@ paths:
       responses:
         '200': { description: Up to 10 matching products. }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/product/products:names:
+    get:
+      operationId: productNames
+      summary: Number and name of up to 200 products by id
+      description: 'Also accepted with the service-only duty product.names.read (sales labels the customer portal lines with it). Unknown ids are left out.'
+      x-passage-duty: product.read
+      parameters:
+        - { name: ids, in: query, required: true, schema: { type: string }, description: Comma-separated product ids. }
+      responses:
+        '200': { description: 'items: id, productNumber and name of each product found.' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/product/products/{id}/attributes:
     post:
       operationId: setProductAttributes

@@ -107,8 +107,8 @@ describe("provider parity (FR-47.13, AC-47.10)", () => {
     expect(o.tool_choice).toEqual({ type: "function", function: { name: "propose_action" } });
     const aSchema = (a.tools as Array<{ input_schema: { properties: { tool: { enum: string[] } } } }>)[0]?.input_schema;
     const oSchema = (o.tools as Array<{ function: { parameters: { properties: { tool: { enum: string[] } } } } }>)[0]?.function.parameters;
-    expect(aSchema?.properties.tool.enum).toEqual(ALLOWED);
-    expect(oSchema?.properties.tool.enum).toEqual(ALLOWED);
+    expect(aSchema?.properties.tool.enum).toEqual(["", ...ALLOWED]);
+    expect(oSchema?.properties.tool.enum).toEqual(["", ...ALLOWED]);
   });
 
   it("every adapter caps generated tokens at the run's remaining hold, never above its own configured limit", async () => {

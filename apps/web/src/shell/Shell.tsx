@@ -4,6 +4,7 @@ import type { PassageModule } from "../modules/registry";
 import { CommandPalette, type PaletteEntry } from "./CommandPalette";
 import { copy } from "./copy";
 import { holdsDuty, requiredDuty, visibleModules } from "./dutyGate";
+import { newActions } from "./search/newActions";
 import { InboxProvider } from "./inbox/InboxProvider";
 import { RecentProvider, useRecentPages } from "./recent";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
@@ -118,8 +119,16 @@ export function Shell({ modules: allModules, duties, identity, workspaceConfig, 
           };
         }),
       ),
+      ...newActions(modules, allModules, principalDuties).map((a) => ({
+        id: a.id,
+        group: copy.palette.create,
+        label: a.label,
+        to: a.to,
+        icon: "plus" as const,
+        keywords: `create add ${a.moduleTitle}`,
+      })),
     ],
-    [modules, navEntryByTo],
+    [modules, allModules, principalDuties, navEntryByTo],
   );
 
   const announce = useCallback((message: string, visual = false) => {

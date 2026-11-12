@@ -6,6 +6,7 @@ import { ChargeLinesEditor, cleanLines, validateLines } from "./ChargeLinesEdito
 import { CURRENCY, DATE, UUID } from "./format";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 interface Values {
   carrierId: string;
@@ -20,7 +21,7 @@ interface Values {
 /** Checks that mirror ValidateCarrierInvoice in the service, and the request the form sends. */
 export function validateInvoice(v: Values): { errors: Record<string, string>; input?: NewCarrierInvoice } {
   const errors = validateLines(v.lines, "lines");
-  if (!UUID.test(v.carrierId.trim())) errors.carrierId = "Enter the carrier id as a lower-case UUID.";
+  if (!UUID.test(v.carrierId.trim())) errors.carrierId = "Choose the carrier.";
   const number = v.invoiceNo.trim();
   if (number.length < 1 || number.length > 40) errors.invoiceNo = "Enter the carrier's invoice number, up to 40 characters.";
   if (!DATE.test(v.invoiceDate)) errors.invoiceDate = "Enter the invoice date.";
@@ -105,7 +106,7 @@ export function NewCarrierInvoicePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          {text("carrierId", "Carrier id", undefined, false, { className: styles.mono })}
+          <LookupFormField id="invoice-carrierId" label="Carrier" entity="vendor" value={values.carrierId} error={errors.carrierId} onChange={(carrierId) => setValues({ ...values, carrierId })} />
           {text("invoiceNo", "Invoice number", undefined, false, { maxLength: 40, className: styles.mono })}
           {text("invoiceDate", "Invoice date", undefined, false, { type: "date" })}
           <FormField id="invoice-source" label="Source">

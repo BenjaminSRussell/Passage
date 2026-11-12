@@ -30,19 +30,49 @@ resources:
 shopfloor:
   url: ""              # https://... of the shopfloor service
   nodeId: ""           # the edge node id (UUID) registered under /shopfloor/edge-nodes
-  source: simulator    # the only source built; OPC-UA and MQTT adapters are open
+  source: simulator    # simulator | opcua | mqtt (see the opcua and mqtt blocks below)
   tokenSecret: ""      # optional Secret with key token (dev, until enrollment issues certificates)
   # mTLS (25-4): the connector enrolls on first start with the token in this Secret (key token, minted
   # on the edge node's page) and keeps its certificate under /var/lib/iot-edge/certs, so state.claimName
   # must be a claim. serverCaSecret holds the CA of the shopfloor server (key ca.crt) when it is private.
   enrollmentSecret: ""
   serverCaSecret: ""
-  # Control recipes (25-5): `simulator` runs them against an in-memory process control system (the demo
-  # plant). An OPC-UA writer is not built. recipeAutoComplete reports a recipe completed after its writes.
+  # Control recipes (25-5): a comma-separated list of `simulator` (an in-memory process control system, the
+  # demo plant), `opcua` (pcs-opcua recipes) and `mqtt` (pcs-mqtt recipes). recipeAutoComplete reports a
+  # recipe completed after its writes.
   writer: ""
   recipeAutoComplete: false
   simMachines: 2
   bufferCapacity: 200000
+  # Keep unsent events across a restart in /var/lib/iot-edge/buffer.log. Needs state.claimName, like the
+  # sequence state: with an emptyDir a rescheduled pod forgets its buffer.
+  bufferPersistent: false
+
+# OPC-UA server of the plant (source opcua, or writer opcua). A secured channel (securityPolicy and
+# securityMode other than None) needs `secret` with client.crt and client.key; a user name also needs
+# `password` in it. None is accepted only with config.env dev, and never with a user name.
+opcua:
+  endpoint: ""            # opc.tcp://host:4840
+  securityPolicy: None    # None | Basic256Sha256 | Aes128_Sha256_RsaOaep | ...
+  securityMode: None      # None | Sign | SignAndEncrypt
+  intervalMs: 1000
+  secret: ""
+  username: ""
+
+# MQTT broker of the plant (source mqtt, or writer mqtt). With `secret` (keys password and ca.crt) the
+# connector authenticates as `username` and trusts the broker's CA.
+mqtt:
+  broker: ""              # host:port
+  tls: true
+  secret: ""
+  username: ""
+
+# Warehouse automation (wave 32): the connector dials a PLC, sends the warehouse's transport orders as MOVE
+# telegrams and forwards the PLC's events. addr is host:port, or `simulator` for a simulated PLC (demo).
+plc:
+  addr: ""
+  station: PLC            # the PLC's station name, at most 8 characters
+  warehouseUrl: ""        # https://... of the warehouse service
 
 # Where the connector keeps its sequence state (/var/lib/iot-edge/seq.json). Use a claim in a real
 # plant: with the default emptyDir a rescheduled pod forgets its sequence numbers, restarts from 1,

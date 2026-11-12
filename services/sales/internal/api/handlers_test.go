@@ -184,17 +184,17 @@ func TestRejectHold(t *testing.T) {
 func TestListOrders_ValidatesAndPassesFilters(t *testing.T) {
 	customer := ids.New()
 	f := &fakeStore{}
-	rec := serve(t, f, http.MethodGet, orders+"?status=DRAFT&hold=CREDIT&customerId="+customer+"&limit=10", principal(dutyRead), nil)
+	rec := serve(t, f, http.MethodGet, orders+"?status=DRAFT&hold=CREDIT&customerId="+customer+"&limit=10&q=+so-12+", principal(dutyRead), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
-	if f.filter != (store.OrderFilter{Status: "DRAFT", HoldType: "CREDIT", CustomerID: customer, Limit: 10}) {
+	if f.filter != (store.OrderFilter{Status: "DRAFT", HoldType: "CREDIT", CustomerID: customer, Limit: 10, Q: "so-12"}) {
 		t.Fatalf("filter %+v", f.filter)
 	}
 	if !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("empty list must be an empty array: %s", rec.Body.String())
 	}
-	for _, q := range []string{"status=SHIPPING", "hold=LEGAL", "customerId=x", "limit=0", "limit=201", "cursor=abc"} {
+	for _, q := range []string{"status=SHIPPING", "hold=LEGAL", "customerId=x", "limit=0", "limit=201", "cursor=abc", "q=" + strings.Repeat("x", 101)} {
 		if rec := serve(t, &fakeStore{}, http.MethodGet, orders+"?"+q, principal(dutyRead), nil); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s: status %d", q, rec.Code)
 		}

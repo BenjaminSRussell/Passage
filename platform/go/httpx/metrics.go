@@ -1,9 +1,11 @@
 package httpx
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -162,6 +164,41 @@ func WithMetrics(h http.Handler) http.Handler {
 		h.ServeHTTP(w, r)
 		WriteMetrics(w)
 	})
+}
+
+// DefaultAdminAddr is where ServeWithMetrics serves /metrics unless ADMIN_ADDR says otherwise.
+const DefaultAdminAddr = ":9090"
+
+// ServeWithMetrics serves h on addr like Serve and the shared HTTP series on the admin address (ADMIN_ADDR, default :9090,
+// path /metrics only) for a service that has no admin listener of its own. Both listeners drain on shutdown and it returns
+// only when both have stopped: when one fails, the other is cancelled and still drains its in-flight requests. The first
+// non-nil error is returned.
+func ServeWithMetrics(ctx context.Context, addr string, h http.Handler) error {
+	adminAddr := os.Getenv("ADMIN_ADDR")
+	if adminAddr == "" {
+		adminAddr = DefaultAdminAddr
+	}
+	admin := http.NewServeMux()
+	admin.Handle("/metrics", MetricsHandler())
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, 2)
+	for _, l := range []struct {
+		addr string
+		h    http.Handler
+	}{{addr, h}, {adminAddr, admin}} {
+		go func() {
+			err := Serve(ctx, l.addr, l.h)
+			cancel()
+			errs <- err
+		}()
+	}
+	first := <-errs
+	second := <-errs
+	if first != nil {
+		return first
+	}
+	return second
 }
 
 // MetricsHandler serves only the shared HTTP series, for a service with no metrics of its own.

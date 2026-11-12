@@ -34,10 +34,19 @@ ops_operator_routes := [
 	["ops.failover.execute", "POST", "/v1/ops/failover"],
 	["ops.failover.execute", "POST", "/v1/ops/regions/us-east:rejoin"],
 	["ops.failover.execute", "POST", "/v1/ops/failover-requests/r1:approve"],
+	["ops.region.view", "GET", "/v1/ops/failovers/evt-1"],
+	["ops.region.view", "GET", "/v1/ops/break-glass"],
+	["ops.failover.execute", "PUT", "/v1/ops/failovers/evt-1/steps/flip-dns"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass/g1:revoke"],
+	["ops.breakglass.review", "POST", "/v1/ops/break-glass/g1:review"],
+	["ops.region.view", "GET", "/v1/ops/failovers/evt-1/scorecard"],
+	["ops.region.view", "GET", "/v1/ops/tenants/t1/license"],
+	["ops.license.install", "PUT", "/v1/ops/tenants/t1/license"],
 ]
 
 test_operator_only_duties_are_the_ops_duties if {
-	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute"}
+	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute", "ops.breakglass.request", "ops.breakglass.review", "ops.license.install"}
 }
 
 test_operator_only_duties_grant_in_the_operator_tenant if {
@@ -163,6 +172,16 @@ segregation_denials := [
 	["ops.region.view", "POST", "/v1/ops/failover-requests/r1:approve"],
 	["ops.region.report", "POST", "/v1/ops/failover-requests/r1:approve"],
 	["ops.region.report", "GET", "/v1/ops/failover-requests/r1"],
+	["ops.region.view", "PUT", "/v1/ops/failovers/evt-1/steps/flip-dns"],
+	["ops.failover.execute", "GET", "/v1/ops/failovers/evt-1"],
+	["ops.failover.execute", "POST", "/v1/ops/break-glass"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass/g1:review"],
+	["ops.breakglass.review", "POST", "/v1/ops/break-glass"],
+	["ops.region.view", "PUT", "/v1/ops/tenants/t1/license"],
+	["ops.license.install", "GET", "/v1/ops/tenants/t1/license"],
+	["ops.failover.execute", "PUT", "/v1/ops/tenants/t1/license"],
+	["ops.breakglass.review", "POST", "/v1/ops/failover"],
+	["ops.breakglass.request", "POST", "/v1/ops/failover"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
 	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],
@@ -223,6 +242,7 @@ segregation_grants := [
 	["procurement.purchase-order.confirm", "POST", "/v1/procurement/purchase-orders/p1:approve"],
 	["procurement.rfq.award", "POST", "/v1/procurement/rfqs/q1:award"],
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
+	["ledger.journal.read", "GET", "/v1/ledger/ledgers"],
 	["reporting.definition.maintain", "GET", "/v1/reporting/definitions/d1/export"],
 	["platform.promotion.approve", "POST", "/v1/platform/releases"],
 	["platform.environment.rollback", "POST", "/v1/platform/releases"],
@@ -743,7 +763,8 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 		"fulfillment": ["fulfillment.shipment.read"],
 		"billing": ["billing.invoice.read"],
 		"sales": ["sales.order.lookup", "sales.channel.intake"],
-		"purchasing": ["procurement.requisition.create"],
+		"purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
+		"receiving": ["receiving.asn.maintain"],
 	}
 	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
@@ -958,7 +979,65 @@ test_supplier_portal_holds_only_service_only_vendor_duties if {
 	}
 	data.service_grants["supplier-portal"].purchasing == ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"]
 	data.service_grants["supplier-portal"].receiving == ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"]
-	data.service_grants["supplier-portal"].party == ["party.vendor-portal.read", "party.vendor-portal.write"]
+	data.service_grants["supplier-portal"].party == ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept", "party.vendor-portal.admin"]
+	data.service_grants["supplier-portal"].payables == ["payables.vendor-portal.read"]
+}
+
+# Invoice by received line, payment status, prospect registration and vendor-admin invites (#511 remainders).
+test_receiving_vendor_invoice_submissions_are_vendor_routes_and_buyer_routes_are_separate if {
+	allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/vendor/invoiceable-lines")
+	allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/vendor/invoice-submissions")
+	allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/vendor/invoice-submissions/s1")
+	allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/vendor/invoice-submissions/s1:withdraw")
+	not allowed("receiving.vendor-portal.invoice", "GET", "/v1/receiving/invoice-submissions")
+	not allowed("receiving.vendor-portal.invoice", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	not allowed("receiving.vendor-portal.asn", "POST", "/v1/receiving/vendor/invoice-submissions")
+	allowed("receiving.ap.inquire", "GET", "/v1/receiving/invoice-submissions/s1")
+	allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/invoice-submissions/s1:resolve")
+	not allowed("receiving.ap.inquire", "POST", "/v1/receiving/invoice-submissions/s1:reject")
+	not allowed("receiving.vendor-invoice.post", "POST", "/v1/receiving/vendor/invoice-submissions")
+}
+
+test_payables_vendor_portal_read_opens_only_the_vendor_payment_list if {
+	data.duties["payables.vendor-portal.read"].service_only
+	allowed("payables.vendor-portal.read", "GET", "/v1/payables/vendor/payments")
+	not allowed("payables.vendor-portal.read", "POST", "/v1/payables/vendor/payments")
+	not allowed("payables.vendor-portal.read", "GET", "/v1/payables/open-items")
+	not allowed("open-item.read", "GET", "/v1/payables/vendor/payments")
+}
+
+test_party_prospects_invites_and_registration_have_their_own_duties if {
+	data.duties["party.vendor-portal.register"].service_only
+	data.duties["party.vendor-portal.invite-accept"].service_only
+	allowed("party.vendor-portal.register", "POST", "/v1/party/vendor-portal/prospects")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/prospects")
+	not allowed("party.vendor-portal.register", "GET", "/v1/party/vendor-portal/requests")
+	allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites/i1:verify")
+	allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites/i1:accept")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites/i1:accept")
+	not allowed("party.vendor-portal.invite-accept", "POST", "/v1/party/vendor-portal/invites")
+	not allowed("party.vendor-portal.admin", "POST", "/v1/party/vendor-portal/invites/i1:accept")
+	allowed("party.read", "GET", "/v1/party/vendor-prospects")
+	allowed("party.write", "POST", "/v1/party/vendor-prospects/p1:accept")
+	allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-prospects/p1:reject")
+	not allowed("party.vendor-request.decide", "POST", "/v1/party/vendor-prospects/p1:accept")
+	not allowed("party.write", "POST", "/v1/party/vendor-prospects/p1:reject")
+}
+
+# Every signed-in supplier user's token carries party.vendor-portal.read and .write; only the vendor administrator's
+# (the supplier-admin role) carries party.vendor-portal.admin, which alone opens the invitation list, create and revoke.
+test_party_vendor_portal_invites_need_the_admin_duty if {
+	data.duties["party.vendor-portal.admin"].service_only
+	allowed("party.vendor-portal.admin", "GET", "/v1/party/vendor-portal/invites")
+	allowed("party.vendor-portal.admin", "POST", "/v1/party/vendor-portal/invites")
+	allowed("party.vendor-portal.admin", "POST", "/v1/party/vendor-portal/invites/i1:revoke")
+	not allowed("party.vendor-portal.read", "GET", "/v1/party/vendor-portal/invites")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites")
+	not allowed("party.vendor-portal.write", "POST", "/v1/party/vendor-portal/invites/i1:revoke")
+	not allowed("party.vendor-portal.admin", "GET", "/v1/party/vendor-portal/requests")
+	not allowed("party.vendor-portal.admin", "POST", "/v1/party/vendor-portal/requests")
+	not allowed("party.vendor-portal.admin", "POST", "/v1/party/vendor-portal/prospects")
 }
 
 test_receiving_vendor_portal_duties_open_only_vendor_routes if {
@@ -1002,21 +1081,83 @@ test_party_vendor_requests_are_decided_by_their_own_duty if {
 	not allowed("party.read", "POST", "/v1/party/vendor-questionnaires")
 }
 
-# The customer portal service (#30) acts for one customer, holds only read-only service-only customer-portal duties, and each
-# duty opens only its own customer-portal routes: no staff route, no other service's route, and no write.
-test_customer_portal_holds_only_service_only_read_duties if {
+# The customer portal service (#30) acts for one customer and holds only service-only customer-portal duties (plus the
+# service-only name and legal-entity reads below), each opening only its own customer-portal routes: no staff route and no
+# other service's route. Every duty is a read except the two writes a customer makes for itself, an order and a return.
+customer_portal_writes := {"sales.customer-portal.order", "sales.customer-portal.return"}
+
+portal_method_ok(_, perm) if perm.methods == ["GET"]
+
+portal_method_ok(duty, _) if duty in customer_portal_writes
+
+test_customer_portal_holds_only_service_only_customer_duties if {
 	every _, duties in data.service_grants["customer-portal"] {
 		every duty in duties {
 			data.duties[duty].service_only
 			contains(duty, "customer-portal")
 			every perm in data.duties[duty].permissions {
-				perm.methods == ["GET"]
+				portal_method_ok(duty, perm)
 			}
 		}
 	}
 	data.service_grants["customer-portal"].receivables == ["receivables.customer-portal.read"]
 	data.service_grants["customer-portal"].billing == ["billing.customer-portal.read"]
-	data.service_grants["customer-portal"].sales == ["sales.customer-portal.read"]
+	data.service_grants["customer-portal"].sales == ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"]
+	data.service_grants["customer-portal"].party == ["party.customer-portal.read"]
+	data.service_grants["customer-portal"].identity == ["identity.customer-portal.read"]
+}
+
+# A write duty of the portal is one POST on one route and nothing else.
+test_customer_portal_write_duties_are_one_post_each if {
+	every duty in customer_portal_writes {
+		data.duties[duty].service_only
+		count(data.duties[duty].permissions) == 1
+		every perm in data.duties[duty].permissions {
+			perm.methods == ["POST"]
+		}
+	}
+}
+
+test_sales_customer_portal_write_duties_open_only_their_own_post if {
+	allowed("sales.customer-portal.order", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.order", "POST", "/v1/sales/customer-portal/returns")
+	not allowed("sales.customer-portal.order", "POST", "/v1/sales/orders")
+	not allowed("sales.customer-portal.order", "GET", "/v1/sales/customer-portal/orders")
+	allowed("sales.customer-portal.return", "POST", "/v1/sales/customer-portal/returns")
+	not allowed("sales.customer-portal.return", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.return", "POST", "/v1/sales/return-orders")
+	not allowed("sales.customer-portal.read", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.read", "POST", "/v1/sales/customer-portal/returns")
+	allowed("sales.customer-portal.read", "GET", "/v1/sales/customer-portal/products")
+	not allowed("sales.order.write", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.order.write", "POST", "/v1/sales/customer-portal/returns")
+}
+
+test_party_write_sets_portal_access_and_the_portal_cannot if {
+	allowed("party.write", "PUT", "/v1/party/customers/c1/portal-access")
+	not allowed("party.customer-portal.read", "PUT", "/v1/party/customers/c1/portal-access")
+	not allowed("party.read", "PUT", "/v1/party/customers/c1/portal-access")
+}
+
+test_customer_portal_party_and_identity_reads_are_their_own_route_only if {
+	allowed("party.customer-portal.read", "GET", "/v1/party/customer-portal/accounts")
+	not allowed("party.customer-portal.read", "GET", "/v1/party/customers/c1")
+	not allowed("party.customer-portal.read", "POST", "/v1/party/customer-portal/accounts")
+	not allowed("party.read", "GET", "/v1/party/customer-portal/accounts")
+	allowed("identity.customer-portal.read", "GET", "/v1/identity/customer-portal/legal-entity")
+	not allowed("identity.customer-portal.read", "GET", "/v1/legal-entities")
+	not allowed("identity.customer-portal.read", "GET", "/v1/identity/customer-contacts")
+	not allowed("identity.legal-entity.maintain", "GET", "/v1/identity/customer-portal/legal-entity")
+}
+
+# Sales labels the portal's lines with product names and can read nothing else of a product with that duty.
+test_product_names_duty_reads_only_names if {
+	data.duties["product.names.read"].service_only
+	"product.names.read" in data.service_grants.sales.product
+	allowed("product.names.read", "GET", "/v1/product/products:names")
+	not allowed("product.names.read", "GET", "/v1/product/products/p1")
+	not allowed("product.names.read", "GET", "/v1/product/products")
+	not allowed("product.names.read", "POST", "/v1/product/products")
 }
 
 test_receivables_customer_portal_duty_opens_only_customer_routes if {
@@ -1547,7 +1688,7 @@ test_integration_hub_reaches_only_render_and_xref_record if {
 }
 
 test_migration_factory_grant_reaches_only_the_receivables_import if {
-	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "payables": ["opening-item.import", "opening-item.import.read"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
+	data.service_grants["migration-factory"] == {"receivables": ["receivables.import.write", "receivables.view"], "payables": ["opening-item.import", "opening-item.import.read"], "inventory": ["inventory.import.write", "inventory.import.read"], "treasury": ["treasury.import.write", "treasury.import.read"], "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]}
 	allowed("receivables.import.write", "POST", "/v1/receivables/open-items:batch")
 	allowed("receivables.view", "GET", "/v1/receivables/open-item-imports")
 	not allowed("receivables.view", "POST", "/v1/receivables/open-items:batch")
@@ -1820,6 +1961,9 @@ test_revrec_allocate_belongs_to_maintain_only if {
 	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:allocate")
 	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:allocate")
 	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:allocate")
+	allowed("revrec.maintain", "POST", "/v1/revrec/contracts/c1:modify")
+	not allowed("revrec.view", "POST", "/v1/revrec/contracts/c1:modify")
+	not allowed("revrec.post", "POST", "/v1/revrec/contracts/c1:modify")
 }
 
 test_tax_duties_reach_only_their_routes if {
@@ -2495,8 +2639,8 @@ test_dev_seed_every_user_reads_features_but_cannot_change_them if {
 	not dev_seed_decision("clerk", "PUT", "/v1/tenant/features").allow
 }
 
-test_processmfg_service_grant_reads_features_only if {
-	data.service_grants.processmfg == {"identity": ["identity.feature.view"]}
+test_processmfg_service_grant_reads_features_and_creates_recipes if {
+	data.service_grants.processmfg == {"identity": ["identity.feature.view"], "shopfloor": ["shopfloor.controlrecipe.create"]}
 	allowed("identity.feature.view", "GET", "/v1/tenant/features")
 	not allowed("identity.feature.view", "PUT", "/v1/tenant/features")
 	not allowed("identity.feature.view", "GET", "/v1/tenants")
@@ -2583,11 +2727,22 @@ test_edi_b2b_routes_belong_to_their_duties if {
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/self-billing")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/punchout")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml/outbound")
+	allowed("edi.admin", "GET", "/edi/v1/partners/p1/cxml/outbound")
+	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/cxml/outbound")
+	allowed("edi.operate", "POST", "/edi/v1/partners/p1/cxml:send")
+	not allowed("edi.einvoice.operate", "POST", "/edi/v1/partners/p1/cxml:send")
 	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/auto-outbound")
 	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices")
 	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
 	allowed("edi.einvoice.operate", "PUT", "/edi/v1/einvoice/parties/SELLER/s1")
 	not allowed("edi.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
+	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices/e1:validate")
+	allowed("edi.einvoice.operate", "GET", "/edi/v1/einvoice/invoices/e1/facturx.pdf")
+	allowed("edi.einvoice.operate", "GET", "/edi/v1/einvoice/mandates")
+	allowed("edi.einvoice.operate", "PUT", "/edi/v1/einvoice/mandates/c1/PEPPOL")
+	allowed("edi.einvoice.operate", "DELETE", "/edi/v1/einvoice/mandates/c1/PEPPOL")
+	not allowed("edi.operate", "PUT", "/edi/v1/einvoice/mandates/c1/PEPPOL")
 	allowed("edi.requisition.create", "POST", "/edi/v1/punchout/sessions")
 	allowed("edi.requisition.create", "POST", "/edi/v1/punchout/sessions/s1:create-requisition")
 	not allowed("edi.self-billing.reconcile", "POST", "/edi/v1/punchout/sessions")
@@ -2596,8 +2751,30 @@ test_edi_b2b_routes_belong_to_their_duties if {
 	not allowed("edi.operate", "POST", "/edi/v1/self-billing/disputes/d1:resolve")
 }
 
+test_edi_cxml_grants_are_narrow if {
+	data.service_grants.edi.receiving == ["receiving.asn.maintain"]
+	data.service_principals["edi-cxml"] == ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"]
+	every duty in ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"] {
+		data.duties[duty].service_only
+	}
+	allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:confirm")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:approve")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:reject")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders:reprice")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/acknowledgements/a1:approve")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/acknowledgements/a1:decline")
+	allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders/o1")
+	not allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders")
+	not allowed("procurement.purchase-order.lookup", "POST", "/v1/procurement/purchase-orders/o1:confirm")
+	# edi's grants and principal hold none of the duties that approve, reject or reprice.
+	every duty in ["procurement.purchase-order.confirm", "procurement.purchase-order.inquire", "procurement.purchase-order.maintain"] {
+		not duty in data.service_grants.edi.purchasing
+		not duty in data.service_principals["edi-cxml"]
+	}
+}
+
 test_edi_requisition_grant_is_the_requester_duty_only if {
-	data.service_grants.edi.purchasing == ["procurement.requisition.create"]
+	"procurement.requisition.create" in data.service_grants.edi.purchasing
 	not allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r1:approve")
 }
 
@@ -2647,6 +2824,24 @@ test_bank_account_mappings_are_read_by_view_and_written_by_their_own_duty if {
 	not allowed("receivables.bankaccount.manage", "GET", "/v1/receivables/bank-accounts")
 }
 
+test_receivables_fx_settings_and_payment_reversal_have_their_own_duties if {
+	allowed("receivables.view", "GET", "/v1/receivables/fx-settings")
+	allowed("receivables.fxsetting.manage", "PUT", "/v1/receivables/fx-settings")
+	not allowed("receivables.view", "PUT", "/v1/receivables/fx-settings")
+	not allowed("receivables.bankaccount.manage", "PUT", "/v1/receivables/fx-settings")
+	allowed("receivables.payment.reverse", "POST", "/v1/receivables/payments/p1:reverse")
+	not allowed("receivables.payment.post", "POST", "/v1/receivables/payments/p1:reverse")
+	not allowed("receivables.payment.reverse", "POST", "/v1/receivables/payments/p1:apply")
+	data.service_grants.receivables.fx == ["fx.rate.lookup"]
+}
+
+test_payables_records_withholding_with_tax_under_its_own_service_duty if {
+	data.service_grants.payables.tax == ["tax.withholding.calculate", "tax.withholding.record"]
+	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.calculate", "POST", "/v1/tax/withholding/entries")
+	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/calculate")
+}
+
 test_asn_duties_do_not_cross if {
 	not allowed("receiving.asn.maintain", "POST", "/v1/receiving/asns/a1:start-receipt")
 	not allowed("receiving.asn.receive", "POST", "/v1/receiving/asns")
@@ -2685,11 +2880,102 @@ test_print_queue_management_is_admin_only if {
 	not allowed("print.job.submit", "POST", "/print/v1/jobs:sweep")
 }
 
+test_analytics_view_executes_queries_and_reads_tile_values if {
+	allowed("analytics.view", "POST", "/v1/analytics/query:execute")
+	allowed("analytics.view", "GET", "/v1/analytics/dashboards/controller_kpis/values")
+	not allowed("analytics.author", "POST", "/v1/analytics/query:execute")
+	not allowed("analytics.export", "GET", "/v1/analytics/dashboards/controller_kpis/values")
+	not allowed("analytics.view", "PUT", "/v1/analytics/dashboards/controller_kpis/values")
+}
+
+test_print_docgen_reads_and_admin_writes if {
+	allowed("print.job.submit", "GET", "/print/v1/document-templates")
+	allowed("print.job.submit", "GET", "/print/v1/document-templates/INV-STD")
+	allowed("print.job.submit", "GET", "/print/v1/text-blocks")
+	allowed("print.job.submit", "GET", "/print/v1/output-rules")
+	allowed("print.job.submit", "GET", "/print/v1/output-plan")
+	allowed("print.admin", "PUT", "/print/v1/document-templates/INV-STD")
+	allowed("print.admin", "PUT", "/print/v1/text-blocks/PAY-TERMS/de")
+	allowed("print.admin", "POST", "/print/v1/output-rules")
+	allowed("print.admin", "DELETE", "/print/v1/output-rules/r-1")
+	not allowed("print.job.submit", "PUT", "/print/v1/document-templates/INV-STD")
+	not allowed("print.job.submit", "PUT", "/print/v1/text-blocks/PAY-TERMS/de")
+	not allowed("print.job.submit", "POST", "/print/v1/output-rules")
+	not allowed("print.job.submit", "DELETE", "/print/v1/output-rules/r-1")
+	not allowed("print.document.render", "GET", "/print/v1/output-plan")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}
+
 test_receiving_document_flow_is_read_only_and_separate if {
 	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "GET", "/v1/receiving/invoices")
 	not allowed("receiving.ap.inquire", "GET", "/v1/receiving/related-documents")
+}
+
+# The shopfloor sweeper reads the registry of active tenants and nothing else of identity (#25).
+test_shopfloor_service_grant_reads_the_tenant_registry_only if {
+	data.service_grants.shopfloor == {"identity": ["identity.tenant-registry.read"]}
+	allowed("identity.tenant-registry.read", "GET", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "POST", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "PATCH", "/v1/tenants")
+	not allowed("identity.tenant-registry.read", "GET", "/v1/tenants/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("identity.tenant-registry.read", "GET", "/v1/legal-entities")
+}
+
+# A released batch order may create control recipes and nothing else of the shop floor (#25).
+test_processmfg_may_create_control_recipes_only if {
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes")
+	not allowed("shopfloor.controlrecipe.create", "GET", "/v1/shopfloor/edge-nodes/e1/control-recipes")
+	not allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/edge-nodes/e1/control-recipes/r1:report")
+}
+
+# Recipe targets and the control recipe of a released batch order (#25): the targets are set with the formula
+# duty, read with the batch order read duty, and sending the recipe again needs the batch order write duty.
+test_recipe_target_duties if {
+	allowed("production.formula.write", "PUT", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("production.formula.write", "DELETE", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("production.batch-order.read", "PUT", "/v1/production/recipe-targets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("production.batch-order.read", "GET", "/v1/production/recipe-targets")
+	allowed("production.batch-order.read", "GET", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/control-recipe")
+	allowed("production.batch-order.write", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
+	not allowed("production.batch-order.read", "POST", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1:send-recipe")
+}
+
+# The PI sheet designer (#25, FR-25.16): designing and releasing needs the maintain duty, reading the view duty, and a
+# control recipe made from a released sheet the control recipe create duty.
+test_pi_sheet_duties if {
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.pisheet.maintain", "PUT", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:release")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:new-version")
+	allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1:obsolete")
+	not allowed("shopfloor.pisheet.maintain", "GET", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/pi-sheets")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/pi-sheets")
+	not allowed("shopfloor.view", "PUT", "/v1/shopfloor/pi-sheets/0195f0a0-0000-7000-8000-0000000000a1")
+	allowed("shopfloor.controlrecipe.create", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
+	not allowed("shopfloor.pisheet.maintain", "POST", "/v1/shopfloor/control-recipes:from-pi-sheet")
+}
+
+# RFID ingest and warehouse automation (#32): readers and the PLC connector hold their own duties, people read, and
+# a supervisor gives transport work to a PLC.
+test_warehouse_rfid_and_automation_duties if {
+	allowed("warehouse.rfid.ingest", "POST", "/v1/warehouse/rfid-reads:ingest")
+	not allowed("warehouse.rfid.ingest", "GET", "/v1/warehouse/rfid-reads")
+	not allowed("warehouse.inquiry.view", "POST", "/v1/warehouse/rfid-reads:ingest")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/rfid-reads")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.automation.execute", "GET", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:report")
+	allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/events")
+	not allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders")
+	allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/transport-orders")
+	not allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/events")
+	allowed("warehouse.setup.maintain", "PUT", "/v1/warehouse/gs1-settings")
+	allowed("warehouse.setup.view", "GET", "/v1/warehouse/gs1-settings")
+	not allowed("warehouse.setup.view", "PUT", "/v1/warehouse/gs1-settings")
 }
 
 test_consolidation_unit_edit_terms_and_mapping_versions_follow_configure_and_view if {
@@ -2744,6 +3030,35 @@ test_agent_run_duties_open_only_their_routes if {
 	allowed("mcp.copilot.use", "POST", "/api/v1/copilot/chat")
 	not allowed("agents.run.read", "POST", "/api/v1/copilot/chat")
 	not allowed("mcp.copilot.use", "POST", "/api/v1/agents/ap_coding/runs")
+	allowed("mcp.copilot.use", "POST", "/api/v1/knowledge/search")
+	not allowed("mcp.copilot.use", "POST", "/api/v1/knowledge/chunks")
+	allowed("knowledge.write", "POST", "/api/v1/knowledge/chunks")
+	not allowed("knowledge.write", "POST", "/api/v1/knowledge/search")
+	not allowed("knowledge.write", "POST", "/api/v1/copilot/chat")
+}
+
+test_opening_stock_and_bank_import_duties_are_service_only_and_cover_only_their_route if {
+	data.duties["inventory.import.write"].service_only
+	data.duties["inventory.import.read"].service_only
+	data.duties["treasury.import.write"].service_only
+	data.duties["treasury.import.read"].service_only
+	allowed("inventory.import.write", "POST", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.write", "GET", "/v1/inventory/opening-batches")
+	allowed("inventory.import.read", "GET", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.read", "POST", "/v1/inventory/opening-batches")
+	not allowed("inventory.import.write", "POST", "/v1/inventory/journals")
+	allowed("treasury.import.write", "POST", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.write", "GET", "/v1/treasury/opening-balances")
+	allowed("treasury.import.read", "GET", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.read", "POST", "/v1/treasury/opening-balances")
+	not allowed("treasury.import.write", "POST", "/v1/treasury/bank-accounts")
+}
+
+test_migration_opening_load_routes_need_run_and_view_duties if {
+	allowed("migration.factory.run", "POST", "/api/v1/migration/runs/r1/opening-load")
+	not allowed("migration.factory.run", "GET", "/api/v1/migration/runs/r1/opening-load")
+	allowed("migration.factory.view", "GET", "/api/v1/migration/runs/r1/opening-load")
+	not allowed("migration.factory.view", "POST", "/api/v1/migration/runs/r1/opening-load")
 }
 
 # #548/#552: any role can resolve user ids to display names without holding the user-maintenance duty, and user administrators can too.

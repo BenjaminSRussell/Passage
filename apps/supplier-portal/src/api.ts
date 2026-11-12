@@ -67,6 +67,26 @@ export async function request<T>(method: "GET" | "POST", path: string, body?: un
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+/** A call that needs no session (the registration page, accepting an invitation): no CSRF token, and a 401 is just an answer. */
+export async function publicPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, { method: "POST", credentials: "same-origin", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) {
+    let code = `HTTP-${res.status}`;
+    let message = res.statusText || "Request failed";
+    let fields: Record<string, string> = {};
+    try {
+      const p = (await res.json()) as { code?: string; detail?: string; title?: string; errors?: Record<string, string> };
+      code = p.code ?? code;
+      message = p.detail ?? p.title ?? message;
+      fields = p.errors ?? {};
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(res.status, code, message, fields);
+  }
+  return (await res.json()) as T;
+}
+
 export const get = <T>(path: string): Promise<T> => request<T>("GET", path);
 export const post = <T>(path: string, body?: unknown): Promise<T> => request<T>("POST", path, body ?? {});
 

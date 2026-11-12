@@ -47,6 +47,11 @@ func (f *fakeSuppliers) DecideRequest(_ context.Context, id string, approve bool
 	return store.VendorRequest{ID: id}, nil
 }
 
+func (f *fakeSuppliers) CreateRequest(_ context.Context, vendorID, kind, _, _ string, changes map[string]string) (store.VendorRequest, error) {
+	f.vendors = append(f.vendors, vendorID)
+	return store.VendorRequest{ID: knownID, Kind: kind, Status: domain.RequestSubmitted, Changes: changes}, nil
+}
+
 func (f *fakeSuppliers) CreateQuestionnaire(_ context.Context, name string, qs []domain.Question) (store.Questionnaire, error) {
 	return store.Questionnaire{ID: knownID, Name: name, Version: 1, Questions: qs}, nil
 }

@@ -98,6 +98,7 @@ type SourceOrderLine struct {
 	LineNo    int             `json:"lineNo"`
 	Unit      string          `json:"unit"`
 	UnitPrice decimal.Decimal `json:"unitPrice"`
+	Quantity  decimal.Decimal `json:"quantity"`
 }
 
 type SourceOrder struct {
@@ -171,13 +172,67 @@ func orderFor(p TradeProfile, o SourceOrder, orderID string) error {
 	return nil
 }
 
+// SlipRef names one packing slip of a shipment and the SSCCs of the containers that left with it. An 856 or DESADV built for a
+// slip lists only those containers and is recorded under the shipment and slip, so a second slip of the same shipment sends its
+// own notice instead of replaying the first.
+type SlipRef struct {
+	ID string
+	// Number is the slip's number; the notice's delivery note is the shipment number and the slip number, so each slip has its own.
+	Number string
+	SSCCs  []string
+}
+
+func (s *SlipRef) perSlip() bool { return s != nil && len(s.SSCCs) > 0 }
+
+// DeliveryNote is the number the notice carries as the delivery note (BSN02, BGM 1004): the shipment number, and for a slip
+// notice the slip number after it.
+func DeliveryNote(sh SourceShipment, slip *SlipRef) string {
+	if slip.perSlip() && slip.Number != "" {
+		return sh.ShipmentNumber + "-" + slip.Number
+	}
+	return sh.ShipmentNumber
+}
+
+// OnlySlip returns the shipment with only the containers of the slip (all of it when slip is nil or lists none).
+func OnlySlip(sh SourceShipment, slip *SlipRef) SourceShipment {
+	if slip == nil || len(slip.SSCCs) == 0 {
+		return sh
+	}
+	in := make(map[string]bool, len(slip.SSCCs))
+	for _, s := range slip.SSCCs {
+		in[s] = true
+	}
+	kept := make([]SourceContainer, 0, len(sh.Containers))
+	for _, c := range sh.Containers {
+		if in[c.SSCC] {
+			kept = append(kept, c)
+		}
+	}
+	sh.Containers = kept
+	return sh
+}
+
+// ValidateShipmentSlip checks the shipment for a slip notice (nil slip: for the whole-shipment notice).
+func ValidateShipmentSlip(p TradeProfile, sh SourceShipment, slip *SlipRef) error {
+	return validateShipmentSource(p, sh, slip.perSlip())
+}
+
 func ValidateShipmentSource(p TradeProfile, sh SourceShipment) error {
+	return validateShipmentSource(p, sh, false)
+}
+
+// validateShipmentSource checks a shipment; with perSlip a partially shipped shipment is accepted because the notice covers one
+// slip, not the whole shipment.
+func validateShipmentSource(p TradeProfile, sh SourceShipment, perSlip bool) error {
 	if err := checkScope(p, sh.LegalEntityID, sh.CustomerID); err != nil {
 		return err
 	}
 	switch sh.Status {
 	case "SHIPPED", "DELIVERED":
 	case "PARTIALLY_SHIPPED":
+		if perSlip {
+			break
+		}
 		return outboundf("shipment %s is partially shipped; one 856 is sent per shipment once it is fully shipped", sh.ShipmentNumber)
 	default:
 		return fmt.Errorf("%w: shipment %s is %s, not shipped", ErrSourceNotReady, sh.ShipmentNumber, sh.Status)
@@ -217,7 +272,20 @@ func compactDate(t time.Time) string { return t.UTC().Format("20060102") }
 // and its sales order. Only SHIPPED containers become packs; each pack's items
 // use the sales order line number and the product id as the vendor part (VP).
 func ASNFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder) (ASN, error) {
-	if err := ValidateShipmentSource(p, sh); err != nil {
+	return asnFromShipment(p, sh, o, false)
+}
+
+// ASNFromSlip builds the notice of one slip: the containers of the slip, whatever the state of the rest of the shipment.
+func ASNFromSlip(p TradeProfile, sh SourceShipment, o SourceOrder, slip *SlipRef) (ASN, error) {
+	a, err := asnFromShipment(p, OnlySlip(sh, slip), o, slip.perSlip())
+	if err == nil {
+		a.ShipmentID = DeliveryNote(sh, slip)
+	}
+	return a, err
+}
+
+func asnFromShipment(p TradeProfile, sh SourceShipment, o SourceOrder, perSlip bool) (ASN, error) {
+	if err := validateShipmentSource(p, sh, perSlip); err != nil {
 		return ASN{}, err
 	}
 	if err := orderFor(p, o, sh.OrderID); err != nil {

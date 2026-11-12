@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { LE_1, LE_2, signIn, startRig, type Rig } from "./helpers.ts";
+import { APP, ISSUER, LE_1, LE_2, signIn, startRig, type Rig } from "./helpers.ts";
 
 let rig: Rig;
 afterEach(() => rig.close());
@@ -95,7 +95,14 @@ describe("sign-in", () => {
     const s = await signIn(rig);
     expect((await fetch(`${rig.base}/bff/me`, { headers: { cookie: s.cookie } })).status).toBe(200);
     expect((await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie } })).status).toBe(403);
-    expect((await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie, "x-csrf-token": s.csrf } })).status).toBe(204);
+    const out = await fetch(`${rig.base}/bff/logout`, { method: "POST", headers: { cookie: s.cookie, "x-csrf-token": s.csrf } });
+    expect(out.status).toBe(200);
+    expect(out.headers.get("set-cookie")).toContain("Max-Age=0");
+    // The browser is sent on to Keycloak's end-session endpoint with the ID token of this sign-in as the hint.
+    const logout = new URL(((await out.json()) as { logoutUrl: string }).logoutUrl);
+    expect(logout.origin + logout.pathname).toBe(`${ISSUER}/protocol/openid-connect/logout`);
+    expect(logout.searchParams.get("id_token_hint")).toBe(rig.idTokens.at(-1));
+    expect(logout.searchParams.get("post_logout_redirect_uri")).toBe(`${APP}/`);
     expect((await fetch(`${rig.base}/bff/me`, { headers: { cookie: s.cookie } })).status).toBe(401);
 
     const again = await signIn(rig);

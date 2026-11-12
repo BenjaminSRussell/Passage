@@ -86,7 +86,7 @@ function Upload({ onSent }: { onSent: () => void }) {
     <form onSubmit={submit} noValidate>
       <h2>Send a document</h2>
       <Field label="Title">{(id) => <input id={id} value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />}</Field>
-      <Field label="File" hint="PDF, PNG, JPEG, text, CSV or ZIP. Up to 5 MB.">{(id) => <input id={id} type="file" aria-describedby={`${id}-hint`} onChange={(e) => setFile(e.target.files?.[0])} />}</Field>
+      <Field label="File" hint="PDF, PNG, JPEG, text, CSV or ZIP. Up to 5 MB. Files are checked for viruses and refused if one is found.">{(id) => <input id={id} type="file" aria-describedby={`${id}-hint`} onChange={(e) => setFile(e.target.files?.[0])} />}</Field>
       {error ? <Notice kind="error">{error}</Notice> : null}
       {done ? <Notice kind="ok">Your document was sent.</Notice> : null}
       <button type="submit">Send document</button>

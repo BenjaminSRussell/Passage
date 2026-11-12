@@ -217,7 +217,7 @@ export function CategoriesPage() {
       )}
       <Card title={editing ? `Edit category ${editing.id}` : "Add a category"}>
         <form className={styles.form} onSubmit={save} noValidate aria-label={editing ? "Edit category" : "New category"}>
-          <FormField id="cat-id" label="Category id" error={errors.id}>
+          <FormField id="cat-id" label="Category code" error={errors.id}>
             {(control) => (
               <Input
                 {...control}

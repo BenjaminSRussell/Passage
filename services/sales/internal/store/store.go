@@ -245,6 +245,8 @@ type OrderFilter struct {
 	Limit      int
 	// ExcludeDraft leaves out orders still in DRAFT, which are internal until committed (the customer portal reads this way).
 	ExcludeDraft bool
+	// Q keeps the orders whose number contains it, ignoring case.
+	Q string
 }
 
 // OrderPage is one page of orders, newest first. NextCursor is set when more
@@ -277,6 +279,7 @@ type Store interface {
 	CreateOrder(ctx context.Context, in NewOrder) (Order, bool, error)
 	GetOrder(ctx context.Context, id string) (Order, error)
 	ListOrders(ctx context.Context, f OrderFilter) (OrderPage, error)
+	PortalProducts(ctx context.Context, f PortalProductFilter) ([]PortalProduct, error)
 	ConfirmOrder(ctx context.Context, id string, version int, actor string, now time.Time) (ConfirmResult, error)
 	ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error)
 	RejectHold(ctx context.Context, orderID, holdID string, version int, comment, actor string, now time.Time) (Order, error)
@@ -1354,8 +1357,9 @@ func (s *Postgres) ListOrders(ctx context.Context, f OrderFilter) (OrderPage, er
 					and h.status = 'ACTIVE' and h.hold_type = $4))
 				and ($5 = '' or (o.created_at, o.id) < (select c.created_at, c.id from sales_order c where c.tenant_id = $1 and c.id::text = $5))
 				and (not $7::bool or o.status <> 'DRAFT')
+				and ($8 = '' or strpos(lower(o.order_number), lower($8)) > 0)
 			order by o.created_at desc, o.id desc
-			limit $6`, p.TenantID, f.Status, f.CustomerID, f.HoldType, f.Before, f.Limit+1, f.ExcludeDraft)
+			limit $6`, p.TenantID, f.Status, f.CustomerID, f.HoldType, f.Before, f.Limit+1, f.ExcludeDraft, f.Q)
 		if err != nil {
 			return err
 		}

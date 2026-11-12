@@ -94,14 +94,8 @@ describe("account structures list", () => {
   it("asks for a valid ledger id before loading anything", async () => {
     structureServer();
     renderAt("/ledger/structures");
-    expect(screen.getByText("Enter a ledger id to see its account structures.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: "not-a-uuid" } });
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
-    expect(await screen.findByText("Enter the ledger id as a UUID.")).toBeInTheDocument();
-    expect(server.calls).toHaveLength(0);
-
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
-    fireEvent.click(screen.getByRole("button", { name: "Show ledger" }));
+    expect(screen.getByText("Choose a ledger to see its account structures.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     expect(await screen.findByRole("button", { name: "PL" })).toBeInTheDocument();
   });
 

@@ -86,7 +86,11 @@ func TestConfigFromRejectsIncompleteOrMalformedSettings(t *testing.T) {
 		if err != nil || !cfg.keycloakDeprovisionEnabled() || cfg.keycloakClientID != defaultKeycloakClientID || cfg.deprovisionInterval != identity.DefaultDeprovisionInterval {
 			t.Fatalf("defaults: cfg = %+v err = %v", cfg, err)
 		}
-		if worker, err := newDeprovisioner(nil, cfg); err != nil || worker == nil {
+		admin, err := newKeycloakAdmin(cfg)
+		if err != nil || admin == nil {
+			t.Fatalf("admin = %v, %v", admin, err)
+		}
+		if worker, err := newDeprovisioner(nil, cfg, admin); err != nil || worker == nil {
 			t.Fatalf("worker = %v, %v", worker, err)
 		}
 		kc["IDENTITY_KEYCLOAK_CLIENT_ID"], kc["IDENTITY_KEYCLOAK_DEPROVISION_INTERVAL"] = "custom", "2m"
@@ -95,7 +99,7 @@ func TestConfigFromRejectsIncompleteOrMalformedSettings(t *testing.T) {
 		}
 		kc["IDENTITY_KEYCLOAK_ADMIN_URL"] = "http://keycloak.hello-ledger.svc:8080"
 		cfg, _ = configFrom(env(with(kc)))
-		if _, err := newDeprovisioner(nil, cfg); err == nil {
+		if _, err := newKeycloakAdmin(cfg); err == nil {
 			t.Fatal("a plain-http Keycloak admin URL off loopback was accepted")
 		}
 		if cfg, err := configFrom(env(base)); err != nil || cfg.keycloakDeprovisionEnabled() {
@@ -136,7 +140,7 @@ func testRouter(t *testing.T, withSCIM bool) http.Handler {
 		}
 		scim = identity.NewSCIMAPI(nil, verifiers, opa)
 	}
-	return newRouter(nil, cat, operatorID, scim)
+	return newRouter(nil, cat, operatorID, scim, identity.NewCustomerContactsAPI(nil, nil, identity.Invitation{}))
 }
 
 func get(router http.Handler, path string, headers map[string]string) *httptest.ResponseRecorder {

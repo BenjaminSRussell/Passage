@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { describeProblem, getTender, respondTender, type Problem, type Tender, type TenderAttempt } from "./api/client";
 import { Details } from "./Details";
 import { dash, formatDateTime, money, stateTone, statusLabel, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const attemptColumns = (currency: string): DataTableColumn<TenderAttempt>[] => [
   { key: "rank", header: "Rank", align: "end" },
@@ -28,7 +29,7 @@ function RespondCard({ tender, onDone }: { tender: Tender; onDone(t: Tender): vo
     const id = carrierId.trim();
     setFailure(null);
     if (!UUID.test(id)) {
-      setError("Enter the carrier id as a lower-case UUID.");
+      setError("Choose the carrier.");
       return;
     }
     setError(undefined);
@@ -53,9 +54,7 @@ function RespondCard({ tender, onDone }: { tender: Tender; onDone(t: Tender): vo
             : `Waiting on rank ${tender.attempts.length} until ${formatDateTime(tender.pendingExpiresAt)}.`}
         </p>
         <div className={styles.inlineForm}>
-          <FormField id="respond-carrier" label="Responding carrier id" error={error}>
-            {(control) => <Input {...control} className={styles.mono} value={carrierId} onChange={(e) => setCarrierId(e.target.value)} invalid={Boolean(error)} />}
-          </FormField>
+          <LookupFormField id="respond-carrier" label="Responding carrier" entity="vendor" value={carrierId} error={error} onChange={setCarrierId} />
           <Button variant="primary" loading={busy === "accept"} onClick={() => answer(true)}>
             Record acceptance
           </Button>

@@ -1327,3 +1327,14 @@ and unchanged. Both specs report no FAIL line on the doc gates.
 | COMPLETE_ONLY versus ONE_SHIPMENT in sales | not built | Both ask only for the whole quantity on one date at promise time. ONE_SHIPMENT's "cancel the rest of a short line" and COMPLETE_ONLY's "hold the whole order until every line can ship" act at the warehouse release and shipping (wave 28); an order-level hold across lines is not built in sales. |
 | Customer-level default from the party master | not built | PRD scopes `partial_delivery_default` to the customer (w7) with an entity default; the w7 customer master has no such field, so the order is: product and customer rule, rule for every customer, the legal entity default. |
 | Backorder run honouring the policy | not built | `backorder-runs` splits supply across lines by its own strategy; applying COMPLETE_ONLY lines there (skip a line that cannot be filled whole) is a later slice. |
+
+## Customer portal writes (#30, FR-30.14)
+
+| Item | Status | Reason |
+|---|---|---|
+| `POST /v1/sales/customer-portal/orders`, `POST .../returns`, `GET .../products` | built | service-only duties `sales.customer-portal.order`, `.return` and `.read`; the customer is the verified customer-portal token's and a body that names one is refused (400). Channel of a portal order is `PORTAL-<customer id without hyphens>` and the idempotency key is prefixed the same way, so another customer's intake dedup can never match |
+| Price, site and warehouse of a portal order | from the customer's own history | the service holds no price list: every line takes unit, price, discount, site and warehouse from the customer's last committed order of that product (`store.PortalProducts`), and a product never bought is 422 `SAL-CUS-002`. Negotiated prices, listings and agreements for a first order are not read; a staff member enters it |
+| Credit check of a portal order | uses the normal confirm | the order is created and confirmed in one request; a CREDIT hold may result and shows as the order's status |
+| Portal returns | uses the return-order flow | goods return to the site and warehouse of the customer's last order of the product, at current cost; an unknown, foreign or unreturnable invoice is one answer (422 `SAL-CUS-003`). Staff authorize, receive and inspect as for any return |
+| Product names on portal lines | built | product service `GET /v1/product/products:names` (duty `product.names.read`); a failed read leaves `productName` out |
+| Catch-weight and configured products on a portal order | not built | the form sends a quantity only; a catch-weight or configured line is entered by staff |
