@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -48,6 +49,20 @@ const (
 	// slipLineIndex is the unique index that enforces BR-29.5.
 	slipLineIndex = "invoice_line_slip_line_unique"
 )
+
+// ModificationKeyPrefix starts the Idempotency-Key of the documents billing creates for a revrec contract modification
+// (modification id, then ":invoice" or ":credit:<original invoice>"); a person's request may not use it.
+const ModificationKeyPrefix = "revrec-modification:"
+
+// ModificationOfKey returns the contract modification id a document key names, or "".
+func ModificationOfKey(key string) string {
+	rest, ok := strings.CutPrefix(key, ModificationKeyPrefix)
+	if !ok {
+		return ""
+	}
+	id, _, _ := strings.Cut(rest, ":")
+	return id
+}
 
 // postedStatuses are the states in which a credit note counts against its
 // original's remaining creditable amount.

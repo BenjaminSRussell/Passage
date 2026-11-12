@@ -183,6 +183,7 @@ components:
           currency: { type: string, pattern: "^[A-Z]{3}$" }
           posting_date: { type: string, format: date, description: "The credit note's posting date, the date of its journal." }
           journal_entry_id: { type: string, description: "The ledger entry of the credit note's journal (invoice.journal_posting_id)." }
+          contract_modification_id: { type: string, format: uuid, description: "Set on a credit note billing issued for a revrec contract modification's price decrease; revrec does not apply it again." }
           lines:
             type: array
             items:

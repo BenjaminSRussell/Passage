@@ -599,6 +599,73 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
+  /v1/billing/contract-modifications:
+    post:
+      operationId: billContractModification
+      summary: Bill the price change of a revrec contract modification (#29).
+      description: >
+        Called by revrec's modification billing reporter (service principal revrec-billing). `lines` are the allocation change of
+        each product and must add up to `priceChange` (422 BIL-0141). Products whose allocation rose are invoiced on one FREE_TEXT
+        invoice proposal, one line per product carrying the order and product of the order's latest posted invoice line for it
+        (its tax code and revenue account; tax is quoted), so the journal books it on the order's revrec allocation. Products whose
+        allocation fell are credited by amount on that invoice line, one credit note proposal per original invoice (quantity and tax
+        in proportion). A product the order never invoiced is 422 BIL-0140. Documents stay proposals for a person to post. Each is
+        keyed by the modification, so a retry returns what exists (200) and creates only what is missing (201). A booked credit note
+        of a modification carries contract_modification_id on creditnote.booked, and revrec does not apply it again.
+      x-passage-duty: billing.contract-modification.bill (service only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [modificationId, contractId, legalEntityId, orderId, customerId, currency, priceChange, effectiveDate, lines]
+              properties:
+                modificationId: { type: string, format: uuid }
+                contractId: { type: string, format: uuid }
+                legalEntityId: { type: string, format: uuid }
+                orderId: { type: string, format: uuid }
+                customerId: { type: string, format: uuid }
+                currency: { type: string, pattern: "^[A-Z]{3}$" }
+                priceChange: { type: string, description: Signed, non-zero. }
+                effectiveDate: { type: string, format: date }
+                reason: { type: string }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [productId, amount]
+                    properties:
+                      productId: { type: string, format: uuid }
+                      amount: { type: string, description: Signed allocation change of the product. }
+      responses:
+        "201":
+          description: At least one document was created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [modificationId, documents]
+                properties:
+                  modificationId: { type: string, format: uuid }
+                  documents: { type: array, items: { $ref: "#/components/schemas/Invoice" } }
+        "200":
+          description: Every document already existed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  modificationId: { type: string, format: uuid }
+                  documents: { type: array, items: { $ref: "#/components/schemas/Invoice" } }
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
   /v1/billing/credit-notes:
     post:
       operationId: createCreditNote

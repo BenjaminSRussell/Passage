@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,8 +87,8 @@ func TestModifyContract_CatchUpRecognizesTheCatchUpAndTheRollForwardTiesOut(t *t
 		t.Fatalf("before the contract date: %v", err)
 	}
 	if _, _, err := s.ModifyContract(ctx, c.ID, ModificationRequest{Type: domain.ModCatchUp, EffectiveDate: day(2027, time.March, 31),
-		PriceChange: decimal.RequireFromString("-1900.00")}); problemCode(err) != domain.CodeModBelowRecognized {
-		t.Fatalf("a cut below recognized revenue: %v", err)
+		PriceChange: decimal.RequireFromString("-100.00"), Scope: map[string]decimal.Decimal{ids.New(): decimal.Zero}}); problemCode(err) != "REV-0001" {
+		t.Fatalf("a scope for an obligation of another contract: %v", err)
 	}
 
 	got, mod, err := s.ModifyContract(ctx, c.ID, req)
@@ -162,15 +163,102 @@ func TestModifyContract_ProspectiveLeavesRecognizedRevenueAndRefusesCreditedCont
 	if sup.Schedule[0].Status != domain.ScheduleRecognized || !sup.Schedule[0].Amount.Equal(decimal.RequireFromString("100.00")) {
 		t.Errorf("a recognized line changed: %+v", sup.Schedule[0])
 	}
-	// A contract that a credit note already moved is refused.
-	if _, err := pool.Exec(context.Background(), `insert into credit_note_reversal (tenant_id, id, legal_entity_id, contract_id, credit_note_id, credit_note_number,
-		line_no, original_line_no, product_id, currency, posting_date, deferred_amount, deferred_reduced, revenue_reversed, obligations, event_id)
-		values ($1, $2, $3, $4, $5, 'CN-1', 1, 1, $6, 'USD', '2027-04-02', 10, 10, 0, '[]', 'e1')`,
-		testkit.TenantID(1), ids.New(), le, c.ID, ids.New(), ids.New()); err != nil {
+	// A contract that a credit note already moved is modified on its amounts net of the credit note: April's 90.00 was credited
+	// (the line is REVERSED). Net price 1,820.00 + 80.00 = 1,900.00; the licence's 800.00 and support's 300.00 are recognized, so
+	// 800.00 spreads over the eight months left (100.00 each). Stored amounts add the credit back: support 1,190.00, price 1,990.00.
+	if _, err := pool.Exec(context.Background(), `update revenue_schedule set amount = 0, credited_amount = 90, status = 'REVERSED' where id = $1`,
+		sup.Schedule[3].ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.ModifyContract(ctx, c.ID, ModificationRequest{Type: domain.ModProspective, EffectiveDate: day(2027, time.April, 30),
-		PriceChange: decimal.RequireFromString("10.00")}); problemCode(err) != CodeModificationAfterCredit {
+	if _, err := pool.Exec(context.Background(), `insert into credit_note_reversal (tenant_id, id, legal_entity_id, contract_id, credit_note_id, credit_note_number,
+		line_no, original_line_no, product_id, currency, posting_date, deferred_amount, deferred_reduced, revenue_reversed, obligations, event_id)
+		values ($1, $2, $3, $4, $5, 'CN-1', 1, 1, $6, 'USD', '2027-04-02', 90, 90, 0, $7::jsonb, 'e1')`,
+		testkit.TenantID(1), ids.New(), le, c.ID, ids.New(), ids.New(),
+		`[{"obligationId":"`+sup.ID+`","share":"90","reduced":"90","reversed":"0"}]`); err != nil {
+		t.Fatal(err)
+	}
+	after, mod2, err := s.ModifyContract(ctx, c.ID, ModificationRequest{Type: domain.ModProspective, EffectiveDate: day(2027, time.April, 30),
+		PriceChange: decimal.RequireFromString("80.00")})
+	if err != nil {
 		t.Fatalf("credited contract: %v", err)
+	}
+	sup2 := after.Obligations[1]
+	if !after.TransactionPrice.Equal(decimal.RequireFromString("1990.00")) || !sup2.Allocated.Equal(decimal.RequireFromString("1190.00")) ||
+		!mod2.PriceBefore.Equal(decimal.RequireFromString("1820.00")) {
+		t.Fatalf("credited contract price %s support %s before %s", after.TransactionPrice, sup2.Allocated, mod2.PriceBefore)
+	}
+	if !sup2.Schedule[4].Amount.Equal(decimal.RequireFromString("100.00")) || sup2.Schedule[3].Status != domain.ScheduleReversed || !sup2.Schedule[3].Amount.IsZero() {
+		t.Fatalf("credited support schedule %+v", sup2.Schedule)
+	}
+}
+
+// Worked example 8 through Postgres: support is removed from April (scope 0) with the price cut by 1,200.00 to 800.00, a catch-up. The
+// licence keeps 581.82 and 218.18 of its revenue comes back out; support keeps 218.18 of the 300.00 it recognized (81.82 back out) and
+// its nine lines are cancelled, so the contract completes. The reversals are posted Dr 4000 / Cr 2400 with the credit-note ones, the
+// year's roll-forward closes at zero, and the price decrease is queued for billing.
+func TestModifyContract_RemovalBelowRecognizedReversesRevenueAndQueuesBilling(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := tenantCtx(1, "")
+	le := ids.New()
+	c, err := s.CreateContract(ctx, supportAndLicence(t, le))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lic, sup := c.Obligations[0], c.Obligations[1]
+	if _, err := s.SatisfyMilestone(ctx, lic.ID, day(2027, time.January, 15), 0); err != nil {
+		t.Fatal(err)
+	}
+	recognizeThrough(t, s, ctx, le, 3)
+	got, mod, err := s.ModifyContract(ctx, c.ID, ModificationRequest{Type: domain.ModCatchUp, EffectiveDate: day(2027, time.March, 31),
+		PriceChange: decimal.RequireFromString("-1200.00"), Scope: map[string]decimal.Decimal{sup.ID: decimal.Zero}, Reason: "support cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mod.Reversal.Equal(decimal.RequireFromString("300.00")) || mod.BillingID == "" || got.Status != domain.ContractComplete {
+		t.Fatalf("modification %+v status %s", mod, got.Status)
+	}
+	if !got.Obligations[0].Allocated.Equal(decimal.RequireFromString("581.82")) || !got.Obligations[1].Allocated.Equal(decimal.RequireFromString("218.18")) {
+		t.Fatalf("allocation %s / %s", got.Obligations[0].Allocated, got.Obligations[1].Allocated)
+	}
+	for _, l := range got.Obligations[1].Schedule[3:] {
+		if l.Status != domain.ScheduleReversed || !l.Amount.IsZero() {
+			t.Fatalf("removed support line %+v", l)
+		}
+	}
+	var body string
+	if err := pool.QueryRow(context.Background(), `select body::text from modification_billing where modification_id = $1`, mod.ID).Scan(&body); err != nil ||
+		!strings.Contains(body, `"priceChange": "-1200.00"`) || !strings.Contains(body, got.OrderID) || !strings.Contains(body, `"amount": "-981.82"`) {
+		t.Fatalf("billing request %s (%v)", body, err)
+	}
+	ledger := ids.New()
+	due, other, err := s.DueReversals(ctx, le, ledger, time.Now(), false)
+	if err != nil || len(due) != 2 || len(other) != 0 {
+		t.Fatalf("due reversals %+v (%v)", due, err)
+	}
+	total := decimal.Zero
+	for _, rp := range due {
+		if rp.ModificationID != mod.ID || rp.CreditNoteID != "" || rp.PostingDate.Format(dateLayout) != "2027-03-31" {
+			t.Fatalf("reversal %+v", rp)
+		}
+		total = total.Add(rp.Amount)
+		if err := s.CompleteReversal(ctx, rp.ID, "entry-"+rp.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !total.Equal(decimal.RequireFromString("300.00")) {
+		t.Fatalf("reversed %s", total)
+	}
+	if again, _, _ := s.DueReversals(ctx, le, ledger, time.Now(), false); len(again) != 0 {
+		t.Fatalf("posted reversals offered again: %+v", again)
+	}
+	year, err := s.RollForward(ctx, le, "USD", day(2027, time.January, 1), day(2027, time.December, 31))
+	if err != nil || !year.Additions.Equal(decimal.RequireFromString("800.00")) || !year.Reversed.Equal(decimal.RequireFromString("300.00")) ||
+		!year.Closing.IsZero() || !year.ModificationCredits.Equal(decimal.RequireFromString("1200.00")) {
+		t.Fatalf("year roll-forward %+v (%v)", year, err)
+	}
+	// A credit note on the reduced support can no longer reverse the revenue the modification took back.
+	var left string
+	if err := pool.QueryRow(context.Background(), `select 300 - coalesce(sum(revenue_reversed), 0) from modification_reversal where obligation_id = $1`, sup.ID).Scan(&left); err != nil || left != "218.180000" {
+		t.Fatalf("support revenue left %s (%v)", left, err)
 	}
 }

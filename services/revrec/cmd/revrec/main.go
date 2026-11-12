@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/revrec/internal/api"
+	"github.com/BenjaminSRussell/passage/services/revrec/internal/modbilling"
 	"github.com/BenjaminSRussell/passage/services/revrec/internal/store"
 	"github.com/BenjaminSRussell/passage/services/revrec/migrations"
 )
@@ -89,15 +91,47 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	router := httpx.NewRouter()
 	a.Register(router)
+	reporter, interval, err := billingReporter(getenv, st)
+	if err != nil {
+		return err
+	}
+	metrics := a.Metrics()
+	if reporter != nil {
+		metrics = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			a.Metrics().ServeHTTP(w, r)
+			reporter.WriteMetrics(w)
+		})
+	}
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", httpx.WithMetrics(a.Metrics()))
+	admin.Handle("/metrics", httpx.WithMetrics(metrics))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if reporter != nil {
+		go modbilling.Run(ctx, interval, reporter.RunOnce)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+// billingReporter builds the reporter that sends modification price changes to billing (BILLING_URL, every
+// REVREC_BILLING_INTERVAL, default 30s). Without BILLING_URL it returns nil and the requests wait, PENDING.
+func billingReporter(getenv func(string) string, st *store.Postgres) (*modbilling.Reporter, time.Duration, error) {
+	client, err := modbilling.FromEnv(getenv)
+	if err != nil || client == nil {
+		return nil, 0, err
+	}
+	interval := modbilling.DefaultInterval
+	if v := getenv("REVREC_BILLING_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < time.Second {
+			return nil, 0, fmt.Errorf("REVREC_BILLING_INTERVAL must be a duration of at least 1s, got %q", v)
+		}
+		interval = d
+	}
+	return &modbilling.Reporter{Store: st, Billing: client}, interval, nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

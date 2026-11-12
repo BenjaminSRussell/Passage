@@ -124,17 +124,144 @@ func TestModify_CatchUpAcrossABundleCatchesUpTheSatisfiedMilestone(t *testing.T)
 	}
 }
 
-// A change that would take revenue back out of what is already recognized is a credit note, not a modification.
-func TestModify_ACutBelowRecognizedRevenueIsRefused(t *testing.T) {
-	_, err := Modify(ModificationInput{Type: ModCatchUp, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("1200.00"),
+// Worked example 4 (ASC 606-10-25-13(b), IFRS 15.21(b)): a 12-month subscription of 1,200.00 with six months recognized (600.00)
+// is cut by 700.00 to 500.00 on 2027-06-30, and the remaining months are not distinct. Revenue to date at the new price is 500.00 x
+// 6/12 = 250.00 against 600.00 recognized: a negative cumulative catch-up of 350.00 comes back out of revenue at the date, and the six
+// months left carry the other 250.00 (41.67 five times, 41.65 last). 600.00 - 350.00 + 250.00 = 500.00.
+func TestModify_CatchUpBelowRecognizedReversesRevenue(t *testing.T) {
+	res, err := Modify(ModificationInput{Type: ModCatchUp, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("1200.00"),
 		PriceChange: dec("-700.00"), Obligations: []ModObligation{ratable12("a", 6)}})
-	if e, ok := err.(*Error); !ok || e.Code != CodeModBelowRecognized {
-		t.Fatalf("catch-up cut: %v", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, err = Modify(ModificationInput{Type: ModProspective, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("1200.00"),
+	c := res.Obligations[0]
+	if !c.Reversal.Equal(dec("350.00")) || !res.Reversal.Equal(dec("350.00")) || !c.CatchUp.Equal(dec("-350.00")) || c.NewLine != nil {
+		t.Fatalf("reversal %s catch-up %s new line %+v", c.Reversal, c.CatchUp, c.NewLine)
+	}
+	got := amounts(c)
+	if len(got) != 6 || got["a-07"] != "41.67" || got["a-12"] != "41.65" {
+		t.Fatalf("future lines = %v", got)
+	}
+	if !c.AllocatedAfter.Equal(dec("500.00")) {
+		t.Fatalf("allocated after = %s", c.AllocatedAfter)
+	}
+}
+
+// Worked example 5 (IFRS 15.88, ASC 606-10-32-43): the same cut accounted for prospectively. The remaining consideration would be
+// 500.00 - 600.00 = -100.00: the 100.00 is a price concession on the six months already transferred and is taken out of revenue at the
+// date; the six months left are delivered for nothing. 600.00 - 100.00 = 500.00.
+func TestModify_ProspectiveBelowRecognizedIsAConcessionOnTransferredPerformance(t *testing.T) {
+	res, err := Modify(ModificationInput{Type: ModProspective, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("1200.00"),
 		PriceChange: dec("-700.00"), Obligations: []ModObligation{ratable12("a", 6)}})
-	if e, ok := err.(*Error); !ok || e.Code != CodeModBelowRecognized {
-		t.Fatalf("prospective cut: %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := res.Obligations[0]
+	if !c.Reversal.Equal(dec("100.00")) || !c.AllocatedAfter.Equal(dec("500.00")) {
+		t.Fatalf("reversal %s allocated %s", c.Reversal, c.AllocatedAfter)
+	}
+	for id, amt := range amounts(c) {
+		if amt != "0.00" {
+			t.Errorf("line %s = %s, want 0.00", id, amt)
+		}
+	}
+}
+
+// Worked example 6 (ASC 606-10-25-13(a), partial termination): two 12-month services of 1,200.00 each, three months recognized on both.
+// Service b is removed from April and the price falls by 900.00 to 1,500.00. The 900.00 still to recognize (1,500.00 - 600.00) goes to a
+// alone (b has nothing left promised): 100.00 a month as before; b keeps the 300.00 it recognized and its nine lines are cancelled.
+func TestModify_ProspectiveRemovesAnObligation(t *testing.T) {
+	res, err := Modify(ModificationInput{Type: ModProspective, EffectiveDate: *day("2027-03-31"), Currency: "USD", TransactionPrice: dec("2400.00"),
+		PriceChange: dec("-900.00"), Scope: map[string]decimal.Decimal{"b": decimal.Zero}, Obligations: []ModObligation{ratable12("a", 3), ratable12("b", 3)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := res.Obligations[0], res.Obligations[1]
+	if !a.AllocatedAfter.Equal(dec("1200.00")) || amounts(a)["a-04"] != "100.00" {
+		t.Fatalf("a = %+v", a)
+	}
+	if !b.Removed || !b.AllocatedAfter.Equal(dec("300.00")) || !b.Reversal.IsZero() || !b.SSPAfter.Equal(dec("300.00")) {
+		t.Fatalf("b = %+v", b)
+	}
+	for id, amt := range amounts(b) {
+		if amt != "0.00" {
+			t.Errorf("removed line %s = %s", id, amt)
+		}
+	}
+}
+
+// Worked example 7 (reduction, catch-up): the remaining nine months of a 1,200.00 service are halved in scope and the price falls by
+// 450.00 to 750.00. The SSP scales to what stays promised (1,200.00 x 750/1,200 = 750.00) and progress becomes 300/750 = 0.4: revenue to
+// date 300.00 equals what is recognized, so there is no catch-up, and the nine months left carry 50.00 each.
+func TestModify_CatchUpReducesTheRemainingScope(t *testing.T) {
+	res, err := Modify(ModificationInput{Type: ModCatchUp, EffectiveDate: *day("2027-03-31"), Currency: "USD", TransactionPrice: dec("1200.00"),
+		PriceChange: dec("-450.00"), Scope: map[string]decimal.Decimal{"a": dec("0.5")}, Obligations: []ModObligation{ratable12("a", 3)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := res.Obligations[0]
+	if !c.Progress.Equal(dec("0.4")) || !c.CatchUp.IsZero() || !c.Reversal.IsZero() || !c.SSPAfter.Equal(dec("750.00")) {
+		t.Fatalf("change = %+v", c)
+	}
+	if got := amounts(c); got["a-04"] != "50.00" || got["a-12"] != "50.00" {
+		t.Fatalf("lines = %v", got)
+	}
+}
+
+// Worked example 8 (removal, catch-up across a bundle): a satisfied licence (SSP 800.00) and a support plan (1,200.00, three months
+// recognized). Support is removed from April and the price falls by 1,200.00 to 800.00. Support's SSP scales to the 300.00 delivered;
+// 800.00 over 800 : 300 gives 581.82 and 218.18. The licence recognized 800.00, so 218.18 comes back out; support recognized 300.00
+// against 218.18, so 81.82 comes back out and its nine lines are cancelled. Revenue ends at 800.00.
+func TestModify_CatchUpRemovalReallocatesAcrossTheBundle(t *testing.T) {
+	licence := ModObligation{ID: "lic", Method: MethodMilestone, SSP: dec("800.00"), SSPSource: "EXPLICIT", Allocated: dec("800.00"),
+		Lines: []ModLine{{ID: "lic-1", Date: day("2027-01-15"), Amount: dec("800.00"), Status: ScheduleRecognized}}}
+	res, err := Modify(ModificationInput{Type: ModCatchUp, EffectiveDate: *day("2027-03-31"), Currency: "USD", TransactionPrice: dec("2000.00"),
+		PriceChange: dec("-1200.00"), Scope: map[string]decimal.Decimal{"sup": decimal.Zero}, Obligations: []ModObligation{licence, ratable12("sup", 3)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lic, sup := res.Obligations[0], res.Obligations[1]
+	if !lic.AllocatedAfter.Equal(dec("581.82")) || !lic.Reversal.Equal(dec("218.18")) {
+		t.Fatalf("licence = %+v", lic)
+	}
+	if !sup.AllocatedAfter.Equal(dec("218.18")) || !sup.Reversal.Equal(dec("81.82")) || !sup.Removed {
+		t.Fatalf("support = %+v", sup)
+	}
+	if !res.Reversal.Equal(dec("300.00")) {
+		t.Fatalf("total reversal = %s", res.Reversal)
+	}
+}
+
+// What revrec cannot take back: a price below what the point-in-time goods were billed at is a credit note (REV-0402), and a scope
+// outside 0..1 is refused.
+func TestModify_ACutBelowPointInTimeRevenueIsRefused(t *testing.T) {
+	goods := ModObligation{ID: "g", Method: MethodPointInTime, SSP: dec("500.00"), SSPSource: "EXPLICIT", Allocated: dec("500.00"),
+		Lines: []ModLine{{ID: "g-1", Date: day("2027-01-05"), Amount: dec("500.00"), Status: ScheduleRecognized}}}
+	for _, typ := range []string{ModCatchUp, ModProspective} {
+		_, err := Modify(ModificationInput{Type: typ, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("1700.00"),
+			PriceChange: dec("-1300.00"), Obligations: []ModObligation{goods, ratable12("a", 6)}})
+		if e, ok := err.(*Error); !ok || e.Code != CodeModBelowRecognized {
+			t.Fatalf("%s cut: %v", typ, err)
+		}
+	}
+	if _, err := Modify(ModificationInput{Type: ModCatchUp, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("1200.00"),
+		PriceChange: dec("-1"), Scope: map[string]decimal.Decimal{"a": dec("1.5")}, Obligations: []ModObligation{ratable12("a", 6)}}); err == nil {
+		t.Fatal("scope 1.5 accepted")
+	}
+}
+
+// A credited contract: 200.00 of recognized revenue was reversed by a credit note, so the obligation holds 400.00 net of six months. A
+// catch-up to 1,000.00 at 6/12 gives 500.00 to date: a catch-up of 100.00 on the net figure.
+func TestModify_CatchUpNetsCreditNoteReversals(t *testing.T) {
+	o := ratable12("a", 6)
+	o.Reversed, o.Allocated = dec("200.00"), dec("1000.00")
+	res, err := Modify(ModificationInput{Type: ModCatchUp, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("1000.00"),
+		PriceChange: dec("0"), NewSSP: map[string]decimal.Decimal{"a": dec("1000.00")}, Obligations: []ModObligation{o}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := res.Obligations[0]; !c.CatchUp.Equal(dec("100.00")) || !c.Reversal.IsZero() {
+		t.Fatalf("change = %+v", c)
 	}
 }
 

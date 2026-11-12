@@ -248,7 +248,8 @@ func applyShare(ctx context.Context, tx pgx.Tx, contractID, obligationID string,
 	var recognizedText string
 	if err := tx.QueryRow(ctx, `select (coalesce((select sum(amount) from revenue_schedule where obligation_id = $1::uuid and status = $2), 0)
 		- coalesce((select sum((o ->> 'reversed')::numeric) from credit_note_reversal r cross join lateral jsonb_array_elements(r.obligations) o
-		  where r.contract_id = $3::uuid and (o ->> 'obligationId')::uuid = $1::uuid), 0))::text`, obligationID, domain.ScheduleRecognized, contractID).Scan(&recognizedText); err != nil {
+		  where r.contract_id = $3::uuid and (o ->> 'obligationId')::uuid = $1::uuid), 0)
+		- coalesce((select sum(m.revenue_reversed) from modification_reversal m where m.obligation_id = $1::uuid), 0))::text`, obligationID, domain.ScheduleRecognized, contractID).Scan(&recognizedText); err != nil {
 		return out, err
 	}
 	recognized, err := decimal.NewFromString(recognizedText)

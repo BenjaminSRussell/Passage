@@ -40,6 +40,7 @@ type Store interface {
 	CreateContract(ctx context.Context, c store.Contract) (store.Contract, error)
 	AddObligations(ctx context.Context, contractID string, increase decimal.Decimal, add []store.Obligation, expectedVersion int) (store.Contract, error)
 	ModifyContract(ctx context.Context, contractID string, req store.ModificationRequest) (store.Contract, store.Modification, error)
+	RetryBilling(ctx context.Context, modificationID string) (store.ModificationBilling, error)
 	GetContract(ctx context.Context, id string) (store.Contract, error)
 	ListContracts(ctx context.Context, f store.ContractFilter) (store.ContractPage, error)
 	SatisfyMilestone(ctx context.Context, obligationID string, on time.Time, expectedVersion int) (store.Satisfaction, error)

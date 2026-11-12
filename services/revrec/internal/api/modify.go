@@ -18,10 +18,15 @@ import (
 
 var signedDecimalText = regexp.MustCompile(`^-?[0-9]{1,14}(\.[0-9]{1,6})?$`)
 
+// modifyObligationDTO revises one obligation: its SSP, its remaining scope (the share of the performance not yet transferred that
+// stays promised: 0 removes the obligation, between 0 and 1 reduces it), or both.
 type modifyObligationDTO struct {
-	ObligationID string `json:"obligationId"`
-	SSP          string `json:"ssp"`
+	ObligationID   string `json:"obligationId"`
+	SSP            string `json:"ssp,omitempty"`
+	RemainingScope string `json:"remainingScope,omitempty"`
 }
+
+var scopeText = regexp.MustCompile(`^(0(\.[0-9]{1,6})?|1(\.0{1,6})?)$`)
 
 // modifyRequest is POST /v1/revrec/contracts/{id}:modify.
 type modifyRequest struct {
@@ -41,15 +46,20 @@ type modificationLineOut struct {
 	SSPAfter        string  `json:"sspAfter"`
 	Progress        *string `json:"progress,omitempty"`
 	CatchUp         string  `json:"catchUp"`
+	Reversal        string  `json:"reversal"`
+	Removed         bool    `json:"removed,omitempty"`
 }
 
 type modificationOut struct {
-	ID            string                `json:"id"`
-	Type          string                `json:"type"`
-	EffectiveDate string                `json:"effectiveDate"`
-	PriceBefore   string                `json:"priceBefore"`
-	PriceAfter    string                `json:"priceAfter"`
-	CatchUp       string                `json:"catchUp"`
+	ID            string `json:"id"`
+	Type          string `json:"type"`
+	EffectiveDate string `json:"effectiveDate"`
+	PriceBefore   string `json:"priceBefore"`
+	PriceAfter    string `json:"priceAfter"`
+	CatchUp       string `json:"catchUp"`
+	Reversal      string `json:"reversal"`
+	// BillingStatus is PENDING when the price change was queued for billing to invoice or credit, NONE without a price change.
+	BillingStatus string                `json:"billingStatus"`
 	Obligations   []modificationLineOut `json:"obligations"`
 }
 
@@ -99,27 +109,43 @@ func (a *API) modifyContract(w http.ResponseWriter, r *http.Request) {
 		change = decimal.RequireFromString(req.TransactionPriceChange)
 	}
 	ssps := map[string]decimal.Decimal{}
+	scopes := map[string]decimal.Decimal{}
+	seen := map[string]bool{}
 	for i, o := range req.Obligations {
 		prefix := "obligations[" + strconv.Itoa(i) + "]."
 		if !ids.Valid(o.ObligationID) {
 			fields[prefix+"obligationId"] = "must be an obligation id of the contract"
 			continue
 		}
-		if !decimalText.MatchString(o.SSP) || !decimal.RequireFromString(o.SSP).IsPositive() {
-			fields[prefix+"ssp"] = "must be a positive decimal with at most 6 fraction digits"
-			continue
-		}
-		if _, dup := ssps[o.ObligationID]; dup {
+		if seen[o.ObligationID] {
 			fields[prefix+"obligationId"] = "appears twice"
 			continue
 		}
-		ssps[o.ObligationID] = decimal.RequireFromString(o.SSP)
+		seen[o.ObligationID] = true
+		if o.SSP == "" && o.RemainingScope == "" {
+			fields[prefix+"ssp"] = "give a standalone selling price, a remaining scope or both"
+			continue
+		}
+		if o.SSP != "" {
+			if !decimalText.MatchString(o.SSP) || !decimal.RequireFromString(o.SSP).IsPositive() {
+				fields[prefix+"ssp"] = "must be a positive decimal with at most 6 fraction digits"
+				continue
+			}
+			ssps[o.ObligationID] = decimal.RequireFromString(o.SSP)
+		}
+		if o.RemainingScope != "" {
+			if !scopeText.MatchString(o.RemainingScope) {
+				fields[prefix+"remainingScope"] = "must be a decimal from 0 (remove) to 1 (unchanged) with at most 6 fraction digits"
+				continue
+			}
+			scopes[o.ObligationID] = decimal.RequireFromString(o.RemainingScope)
+		}
 	}
 	if len(req.Reason) > 500 {
 		fields["reason"] = "must be at most 500 characters"
 	}
-	if change.IsZero() && len(ssps) == 0 && len(fields) == 0 {
-		fields["transactionPriceChange"] = "change the price or revise at least one standalone selling price"
+	if change.IsZero() && len(ssps) == 0 && len(scopes) == 0 && len(fields) == 0 {
+		fields["transactionPriceChange"] = "change the price, revise a standalone selling price or reduce an obligation"
 	}
 	if len(fields) > 0 {
 		writeFields(w, r, fields)
@@ -135,17 +161,22 @@ func (a *API) modifyContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, mod, err := a.store.ModifyContract(r.Context(), id, store.ModificationRequest{Type: req.Type, EffectiveDate: effective, PriceChange: change,
-		NewSSP: ssps, Reason: strings.TrimSpace(req.Reason), ExpectedVersion: expected})
+		NewSSP: ssps, Scope: scopes, Reason: strings.TrimSpace(req.Reason), ExpectedVersion: expected})
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 	a.contractsModified.Add(1)
 	out := modificationOut{ID: mod.ID, Type: mod.Type, EffectiveDate: mod.EffectiveDate.Format(dateLayout), PriceBefore: fixed(mod.PriceBefore, c.Currency),
-		PriceAfter: fixed(mod.PriceAfter, c.Currency), CatchUp: fixed(mod.CatchUp, c.Currency), Obligations: []modificationLineOut{}}
+		PriceAfter: fixed(mod.PriceAfter, c.Currency), CatchUp: fixed(mod.CatchUp, c.Currency), Reversal: fixed(mod.Reversal, c.Currency),
+		BillingStatus: "NONE", Obligations: []modificationLineOut{}}
+	if mod.BillingID != "" {
+		out.BillingStatus = "PENDING"
+	}
 	for _, o := range mod.Obligations {
 		line := modificationLineOut{ObligationID: o.ID, AllocatedBefore: fixed(o.AllocatedBefore, c.Currency), AllocatedAfter: fixed(o.AllocatedAfter, c.Currency),
-			SSPBefore: sspText(o.SSPBefore, c.Currency), SSPAfter: sspText(o.SSPAfter, c.Currency), CatchUp: fixed(o.CatchUp, c.Currency)}
+			SSPBefore: sspText(o.SSPBefore, c.Currency), SSPAfter: sspText(o.SSPAfter, c.Currency), CatchUp: fixed(o.CatchUp, c.Currency),
+			Reversal: fixed(o.Reversal, c.Currency), Removed: o.Removed}
 		if mod.Type == domain.ModCatchUp {
 			p := o.Progress.Round(6).String()
 			line.Progress = &p
@@ -154,4 +185,29 @@ func (a *API) modifyContract(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", etag(c.Version))
 	httpx.JSON(w, http.StatusOK, modifyResponse{contractOut: toContractOut(c), Modification: out})
+}
+
+type billingOut struct {
+	ID             string     `json:"id"`
+	ModificationID string     `json:"modificationId"`
+	Status         string     `json:"status"`
+	Attempts       int        `json:"attempts"`
+	LastError      *string    `json:"lastError,omitempty"`
+	BilledAt       *time.Time `json:"billedAt,omitempty"`
+}
+
+// retryBilling puts a parked billing request of a modification back in the queue (the reporter sends it on its next run); a
+// pending or billed one is returned as it is.
+func (a *API) retryBilling(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "modification billing not found"))
+		return
+	}
+	b, err := a.store.RetryBilling(r.Context(), id)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, billingOut{ID: b.ID, ModificationID: b.ModificationID, Status: b.Status, Attempts: b.Attempts, LastError: b.LastError, BilledAt: b.BilledAt})
 }

@@ -501,7 +501,16 @@ func rollForward(ctx context.Context, tx pgx.Tx, legalEntityID, contractID, curr
 	}
 	// Opening: allocated before the window, less recognized, plus reversed, less the credit notes' deferred amounts.
 	opening := v[0].Sub(v[2]).Add(v[6]).Sub(v[4])
-	return domain.NewRollForward(opening, v[1], v[3]).WithCredits(v[7], v[5].Neg()), nil
+	out := domain.NewRollForward(opening, v[1], v[3]).WithCredits(v[7], v[5].Neg())
+	var decreases string
+	if err := tx.QueryRow(ctx, `select coalesce(sum(m.price_before - m.price_after), 0)::text from contract_modification m
+		join revenue_contract c on c.tenant_id = m.tenant_id and c.id = m.contract_id
+		where c.legal_entity_id = $1::uuid and c.currency = $2 and m.price_after < m.price_before and m.effective_date <= $3::date
+		  and ($4 = '' or c.id = nullif($4, '')::uuid)`, legalEntityID, currency, to, contractID).Scan(&decreases); err != nil {
+		return domain.RollForward{}, err
+	}
+	out.ModificationCredits = decimal.RequireFromString(decreases)
+	return out, nil
 }
 
 // rollForwardAdditions sums the deferred allocations: each obligation's original allocation (what is allocated now less the changes
@@ -528,12 +537,15 @@ where c.legal_entity_id = $1::uuid and c.currency = $2 and o.method = any($5::te
   and ($6 = '' or c.id = nullif($6, '')::uuid)`
 
 // rollForwardCredits sums the credit-note reversals: the deferred amounts billing debited to 2400 (adjustments) and the
-// recognized revenue reversed, before and within the window, by the credit note's posting date.
+// recognized revenue reversed, before and within the window, by the credit note's posting date; and the revenue contract
+// modifications took back (reversed, no adjustment: the modification's allocation change is in the additions), by effective date.
 const rollForwardCredits = `select coalesce(sum(r.deferred_amount) filter (where r.posting_date < $3::date), 0)::text,
        coalesce(sum(r.deferred_amount) filter (where r.posting_date between $3::date and $4::date), 0)::text,
        coalesce(sum(r.revenue_reversed) filter (where r.posting_date < $3::date), 0)::text,
        coalesce(sum(r.revenue_reversed) filter (where r.posting_date between $3::date and $4::date), 0)::text
-from credit_note_reversal r
+from (select tenant_id, contract_id, posting_date, deferred_amount, revenue_reversed from credit_note_reversal
+      union all
+      select tenant_id, contract_id, posting_date, 0, revenue_reversed from modification_reversal) r
 join revenue_contract c on c.tenant_id = r.tenant_id and c.id = r.contract_id
 where c.legal_entity_id = $1::uuid and c.currency = $2 and ($5 = '' or c.id = nullif($5, '')::uuid)`
 
