@@ -38,3 +38,4 @@ spec:
         - X-Passage-LegalEntity
         - X-Passage-LegalEntity-Scope
         - X-Passage-Service-Token
+        - X-Passage-Gateway-Secret
