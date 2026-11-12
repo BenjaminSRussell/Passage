@@ -146,7 +146,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if taxClient != nil {
 		taxReporter = &taxreport.Reporter{Store: st, Tax: taxClient}
 	}
-	admin.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+	admin.Handle("/metrics", httpx.WithMetrics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.Metrics().ServeHTTP(w, r)
 		if reporter != nil {
 			reporter.WriteMetrics(w)
@@ -154,7 +154,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		if taxReporter != nil {
 			taxReporter.WriteMetrics(w)
 		}
-	})
+	})))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

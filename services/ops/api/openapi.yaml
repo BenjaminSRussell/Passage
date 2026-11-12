@@ -3,7 +3,7 @@ info:
   title: ops
   version: 0.1.0
   description: >
-    Ops control plane, part 1 (PSG-50, FR-50.5): the active/passive region topology, a guarded failover that fences the old
+    Ops control plane, parts 1 and 2 (PSG-50, FR-50.5): the active/passive region topology, a guarded failover that fences the old
     primary and promotes the target, the capacity model, and the region health check DNS reads. The failover records the plan
     and the state change; the infrastructure steps are carried out by runners that read the plan.
 servers:
@@ -139,20 +139,167 @@ paths:
           description: Pods, nodes, Postgres storage, Kafka brokers and, with rates, the monthly cost.
           content: { application/json: { schema: { $ref: '#/components/schemas/CapacityEstimate' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failovers/{eventId}:
+    get:
+      operationId: getFailover
+      summary: Read a failover with the steps recorded so far
+      description: complete is true when every step of the plan is DONE. A runner that crashed resumes at the first step not DONE.
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: eventId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The failover, its recorded steps and whether it is complete.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FailoverDetail' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failovers/{eventId}/steps/{action}:
+    put:
+      operationId: recordFailoverStep
+      summary: Record the result of one failover step
+      description: >
+        The runner (passage-ops failover) reports each step as it finishes. The reporter is the verified caller. A step recorded DONE
+        is kept; a FAILED step is replaced by a later result, which is how a retry shows its success.
+      x-passage-duty: ops.failover.execute
+      parameters:
+        - { name: eventId, in: path, required: true, schema: { type: string } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [fence-old-primary, promote-cnpg, switch-mirrormaker, activate-temporal, flip-dns, verify-ledger-hash-chain] } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/StepReport' } } }
+      responses:
+        '200':
+          description: The failover with its steps after this report.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FailoverDetail' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/break-glass:
+    post:
+      operationId: openBreakGlass
+      summary: Open a break-glass window for ops.failover.execute
+      description: >
+        A named operator opens a time-boxed window for themselves (15 to 120 minutes, default 60) with a reason code and a ticket. While it
+        lasts the failover, rejoin, approve and step routes accept them without the ops.failover.execute duty; each use is logged. One window
+        at a time per operator (OPS-1717). Another operator reviews it after it ends.
+      x-passage-duty: ops.breakglass.request
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BreakGlassRequest' } } }
+      responses:
+        '201':
+          description: The open window.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BreakGlass' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listBreakGlass
+      summary: List break-glass windows, newest first
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: unreviewed, in: query, required: false, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Windows with the number of requests each authorised.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/BreakGlass' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/break-glass/{id}:revoke:
+    post:
+      operationId: revokeBreakGlass
+      summary: End a break-glass window early
+      description: Only the operator who opened the window can revoke it (OPS-1720).
+      x-passage-duty: ops.breakglass.request
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The window, now revoked.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BreakGlass' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/break-glass/{id}:review:
+    post:
+      operationId: reviewBreakGlass
+      summary: Review a break-glass window after it ended
+      description: >
+        APPROVED or FLAGGED (a flag needs a note). The reviewer is the verified caller and not the operator who used the window; a window is
+        reviewed once and only after it ended or was revoked (OPS-1718). The review is due 3 days after the window ends; the
+        ops_break_glass_review_overdue metric counts the late ones.
+      x-passage-duty: ops.breakglass.review
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BreakGlassReview' } } }
+      responses:
+        '200':
+          description: The reviewed window.
+          content: { application/json: { schema: { $ref: '#/components/schemas/BreakGlass' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/failovers/{eventId}/scorecard:
+    get:
+      operationId: getFailoverScorecard
+      summary: Measure a failover against the RTO and RPO targets
+      description: >
+        RTO runs from the start of the fence step to the end of the DNS flip; RPO is the replication lag at the fence (AC-50.3, the
+        same measures as deploy/multi-region/gameday/score.py). The targets are RTO_TARGET_MIN (60) and RPO_TARGET_S (300). passed needs
+        every step DONE, both targets met, the ledger hash chain verified and no data loss accepted.
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: eventId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The scorecard.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Scorecard' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/tenants/{id}/license:
+    put:
+      operationId: installTenantLicense
+      summary: Install a signed tenant licence
+      description: >
+        payload is the base64 of the licence JSON exactly as signed offline by Passage commercial operations; signature is the base64
+        Ed25519 signature over those bytes (LIC-1804 when it does not verify, or no key is configured). If-Match carries the installed version,
+        0 when none is installed (412 LIC-1806 when it changed). The licence must name this tenant (LIC-1805).
+      x-passage-duty: ops.license.install
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LicenseInstall' } } }
+      responses:
+        '200':
+          description: The installed licence with its state today. The ETag is the new version.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LicenseView' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getTenantLicense
+      summary: Read a tenant licence and its state
+      description: >
+        VALID, GRACE or EXPIRED by the rules of BR-50.8 (grace 30 days by default, 0 to 60). The ops service does not hold the tenant's user counts:
+        activeFull is the caller's count of active full users; without it only the date rules apply. Admin sign-in and data export are never blocked.
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: activeFull, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: The licence, its version, state and catalogue messages.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LicenseView' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /healthz/region:
     get:
       operationId: regionHealth
       summary: Region health for DNS checks
-      description: 200 only while the region this replica runs in is PRIMARY; 503 with Retry-After 30 otherwise, and when the role cannot be read.
+      description: >
+        200 only while the region this replica runs in is PRIMARY; 503 with Retry-After 30 and the role otherwise. When the role cannot be read (database
+        unreadable, region not registered) the 503 is a problem with no role, so a consumer never mistakes it for a role: the services' fence keeps its last state.
       x-passage-duty: public
       responses:
         '200':
           description: This region is PRIMARY.
           content: { application/json: { schema: { $ref: '#/components/schemas/RegionHealth' } } }
         '503':
-          description: This region is not PRIMARY.
+          description: This region is not PRIMARY (a RegionHealth body), or its role cannot be read (a problem body with no role).
           headers: { Retry-After: { schema: { type: integer } } }
-          content: { application/json: { schema: { $ref: '#/components/schemas/RegionHealth' } } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/RegionHealth' } }
+            application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } }
   /healthz:
     get:
       operationId: liveness
@@ -175,6 +322,7 @@ components:
         name: { type: string }
         role: { type: string, enum: [PRIMARY, PASSIVE, FENCED] }
         lagSeconds: { type: integer, minimum: 0 }
+        lagStale: { type: boolean, description: "True when no lag report arrived within OPS_LAG_STALE_S (or none ever, with OPS_REQUIRE_LAG_REPORTS); lagSeconds is then 1073741824 (unknown)." }
         version: { type: integer }
     RegionList:
       type: object
@@ -244,12 +392,131 @@ components:
         requestedBy: { type: string }
         approvedBy: { type: string }
         createdAt: { type: string, format: date-time }
+    RecordedStep:
+      type: object
+      required: [order, action, region, status, startedAt, finishedAt, reportedBy]
+      properties:
+        order: { type: integer }
+        action: { type: string }
+        region: { type: string }
+        status: { type: string, enum: [DONE, FAILED] }
+        detail: { type: string }
+        forced: { type: boolean }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        reportedBy: { type: string }
+    FailoverDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Failover' }
+        - type: object
+          required: [steps, complete]
+          properties:
+            steps: { type: array, items: { $ref: '#/components/schemas/RecordedStep' } }
+            complete: { type: boolean }
+    StepReport:
+      type: object
+      additionalProperties: false
+      required: [order, region, status, startedAt, finishedAt]
+      properties:
+        order: { type: integer, minimum: 1 }
+        region: { type: string }
+        status: { type: string, enum: [DONE, FAILED] }
+        detail: { type: string, maxLength: 2000 }
+        forced: { type: boolean, description: "Only for a DONE fence-old-primary step: the old region could not be reached and an operator recorded the fence anyway. Needs a failover a second operator approved (OPS-1702) and a detail with the reason." }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    BreakGlassRequest:
+      type: object
+      additionalProperties: false
+      required: [reasonCode, ticketRef]
+      properties:
+        reasonCode: { type: string, enum: [INCIDENT_RESPONSE, PRODUCTION_OUTAGE, REGION_LOSS, APPROVER_UNAVAILABLE, AUDIT_EVIDENCE_REQUEST] }
+        ticketRef: { type: string, maxLength: 128 }
+        minutes: { type: integer, minimum: 15, maximum: 120, default: 60 }
+    BreakGlassReview:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome: { type: string, enum: [APPROVED, FLAGGED] }
+        note: { type: string, maxLength: 2000 }
+    BreakGlass:
+      type: object
+      required: [id, userId, reasonCode, ticketRef, grantedAt, expiresAt, reviewDueAt, uses]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string }
+        reasonCode: { type: string }
+        ticketRef: { type: string }
+        grantedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+        reviewDueAt: { type: string, format: date-time }
+        reviewedBy: { type: string }
+        reviewedAt: { type: string, format: date-time }
+        reviewOutcome: { type: string, enum: [APPROVED, FLAGGED] }
+        reviewNote: { type: string }
+        uses: { type: integer }
+    Scorecard:
+      type: object
+      required: [complete, rtoTargetSeconds, rtoMet, rpoSeconds, rpoTargetSeconds, rpoMet, dataLossAccepted, ledgerHashChainVerified, fenceForced, passed, failures]
+      properties:
+        complete: { type: boolean }
+        rtoSeconds: { type: number }
+        rtoTargetSeconds: { type: integer }
+        rtoMet: { type: boolean }
+        rpoSeconds: { type: integer }
+        rpoTargetSeconds: { type: integer }
+        rpoMet: { type: boolean }
+        dataLossAccepted: { type: boolean }
+        ledgerHashChainVerified: { type: boolean }
+        fenceForced: { type: boolean }
+        passed: { type: boolean }
+        failures: { type: array, items: { type: string } }
+    LicenseInstall:
+      type: object
+      additionalProperties: false
+      required: [payload, signature]
+      properties:
+        payload: { type: string, format: byte, description: Base64 of the licence JSON exactly as signed. }
+        signature: { type: string, format: byte, description: Base64 Ed25519 signature over the payload bytes. }
+    LicenseTerms:
+      type: object
+      required: [tenantId, issuedAt, expiresAt, fullUsers, operationalUsers, selfserviceUsers]
+      properties:
+        tenantId: { type: string, format: uuid }
+        issuedAt: { type: string, format: date }
+        expiresAt: { type: string, format: date }
+        fullUsers: { type: integer, minimum: 0 }
+        operationalUsers: { type: integer, minimum: 0 }
+        selfserviceUsers: { type: integer, minimum: 0 }
+        graceDays: { type: integer, minimum: 0, maximum: 60 }
+    LicenseView:
+      type: object
+      required: [license, version, installedBy, installedAt, status, messages]
+      properties:
+        license: { $ref: '#/components/schemas/LicenseTerms' }
+        version: { type: integer }
+        installedBy: { type: string }
+        installedAt: { type: string, format: date-time }
+        status:
+          type: object
+          required: [state, daysToExpiry, loginAllowed, adminLoginAllowed, exportAllowed, banner, codes]
+          properties:
+            state: { type: string, enum: [VALID, GRACE, EXPIRED] }
+            daysToExpiry: { type: integer }
+            loginAllowed: { type: boolean }
+            adminLoginAllowed: { type: boolean }
+            exportAllowed: { type: boolean }
+            banner: { type: boolean }
+            codes: { type: array, items: { type: string } }
+        messages: { type: array, items: { type: string } }
     RegionHealth:
       type: object
       required: [region, role]
       properties:
         region: { type: string }
-        role: { type: string, enum: [PRIMARY, PASSIVE, FENCED, UNKNOWN] }
+        role: { type: string, enum: [PRIMARY, PASSIVE, FENCED] }
     CapacityEstimate:
       type: object
       required: [modelVersion, derived, pods, nodes, postgres, kafka]

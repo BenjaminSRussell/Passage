@@ -16,8 +16,9 @@ import (
 
 func newStore(t *testing.T) *Postgres {
 	t.Helper()
-	pool := testkit.DB(t)
-	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+	// Migrations run as the admin role; the store runs as passage_app, so a missing grant fails here, not in production.
+	admin, pool := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	s := New(pool)

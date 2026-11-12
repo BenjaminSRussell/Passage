@@ -9,3 +9,4 @@ spec:
     app.kubernetes.io/name: processmfg
   ports:
     - { name: http, port: 8080, targetPort: http }
+    - { name: admin, port: 9090, targetPort: admin }

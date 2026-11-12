@@ -82,7 +82,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Info("semantic layer not configured; query:execute and dashboard tile values answer ANA-0120")
 	}
 	a.Register(router)
-	return httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), tenant.Middleware(router))
+	return httpx.ServeWithMetrics(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), tenant.Middleware(router))
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

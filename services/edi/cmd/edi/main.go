@@ -147,7 +147,7 @@ func run() error {
 			go delivery.Run(ctx, "sales poster", tc.interval, sp.RunOnce)
 		}
 	}
-	go func() { errCh <- httpx.Serve(ctx, addr, a.Routes()) }()
+	go func() { errCh <- httpx.ServeWithMetrics(ctx, addr, a.Routes()) }()
 	err = <-errCh
 	stop()
 	return err

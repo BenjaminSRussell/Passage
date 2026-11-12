@@ -43,6 +43,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
+            - name: admin
+              containerPort: 9090
           env:
             {{- include "passage.cloudEnv" $ | nindent 12 }}
             - name: SERVICE_NAME

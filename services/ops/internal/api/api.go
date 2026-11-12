@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -31,7 +32,12 @@ const (
 	DutyView     = "ops.region.view"
 	DutyFailover = "ops.failover.execute"
 	DutyReport   = "ops.region.report"
-	maxLagS      = 1 << 30
+	// DutyBreakGlassRequest opens a break-glass window for the caller; DutyBreakGlassReview reviews one after it ends.
+	DutyBreakGlassRequest = "ops.breakglass.request"
+	// DutyLicenseInstall installs a signed tenant licence.
+	DutyLicenseInstall   = "ops.license.install"
+	DutyBreakGlassReview = "ops.breakglass.review"
+	maxLagS              = 1 << 30
 )
 
 // Config is the process's settings.
@@ -43,6 +49,13 @@ type Config struct {
 	// OperatorTenantID is the platform operator's tenant (OPS_OPERATOR_TENANT_ID). The ops routes act on platform-wide
 	// state, so they serve only principals of this tenant, whatever duties another tenant's role holds. Empty serves no one.
 	OperatorTenantID string
+	// LicensePublicKey verifies licence signatures (OPS_LICENSE_PUBLIC_KEY, base64 Ed25519); empty refuses every install (LIC-1804).
+	LicensePublicKey ed25519.PublicKey
+	// RTOTargetMinutes and RPOTargetSeconds are the game-day targets (RTO_TARGET_MIN 60, RPO_TARGET_S 300).
+	RTOTargetMinutes int
+	RPOTargetSeconds int
+	// Now is the clock for licence evaluation; nil means time.Now.
+	Now func() time.Time
 }
 
 // API is the ops HTTP surface.
@@ -51,6 +64,9 @@ type API struct {
 	cfg       Config
 	failovers atomic.Int64
 	rejected  atomic.Int64
+
+	breakGlassOpened atomic.Int64
+	breakGlassUses   atomic.Int64
 }
 
 // New builds the API.
@@ -72,10 +88,19 @@ func (a *API) Register(r chi.Router) {
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/regions", a.regions)
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/capacity/estimate", a.capacity)
 		g.With(authz.RequireDuty(DutyReport)).Put("/v1/ops/regions/{name}/lag", a.reportLag)
-		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/failover", a.failover)
-		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/regions/{name}:rejoin", a.rejoin)
+		g.With(a.requireFailover).Post("/v1/ops/failover", a.failover)
+		g.With(a.requireFailover).Post("/v1/ops/regions/{name}:rejoin", a.rejoin)
 		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/failover-requests/{id}", a.request)
-		g.With(authz.RequireDuty(DutyFailover)).Post("/v1/ops/failover-requests/{id}:approve", a.approve)
+		g.With(a.requireFailover).Post("/v1/ops/failover-requests/{id}:approve", a.approve)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/failovers/{eventId}", a.failoverDetail)
+		g.With(a.requireFailover).Put("/v1/ops/failovers/{eventId}/steps/{action}", a.recordStep)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/failovers/{eventId}/scorecard", a.scorecard)
+		g.With(authz.RequireDuty(DutyLicenseInstall)).Put("/v1/ops/tenants/{id}/license", a.installLicense)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/tenants/{id}/license", a.getLicense)
+		g.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/ops/break-glass", a.openBreakGlass)
+		g.With(authz.RequireDuty(DutyView)).Get("/v1/ops/break-glass", a.listBreakGlass)
+		g.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/ops/break-glass/{id}:revoke", a.revokeBreakGlass)
+		g.With(authz.RequireDuty(DutyBreakGlassReview)).Post("/v1/ops/break-glass/{id}:review", a.reviewBreakGlass)
 	})
 }
 
@@ -94,10 +119,11 @@ func (a *API) operatorOnly(next http.Handler) http.Handler {
 
 // Metrics renders Prometheus text.
 func (a *API) Metrics() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		tenant.WriteReplayMetrics(w)
 		_, _ = fmt.Fprintf(w, "# HELP ops_failovers_total Failovers applied.\n# TYPE ops_failovers_total counter\nops_failovers_total %d\n", a.failovers.Load())
+		a.writeGauges(w, r)
 		_, _ = fmt.Fprintf(w, "# HELP ops_failovers_rejected_total Failover requests refused by a rule.\n# TYPE ops_failovers_rejected_total counter\nops_failovers_rejected_total %d\n", a.rejected.Load())
 	})
 }
@@ -113,25 +139,33 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-// regionHealth is what DNS health checks read: 200 only while this region is PRIMARY, 503 with Retry-After otherwise
-// (FENCED and PASSIVE regions serve no writes, BR-50.2). A store error is 503 too, so DNS never routes to a region
-// that cannot say what it is.
+// regionHealth is what DNS health checks and every service's fence read: 200 with {"region","role":"PRIMARY"} while this region is
+// PRIMARY, 503 with the role for PASSIVE and FENCED regions (they serve no writes, BR-50.2). When this service cannot say what
+// the region is (its database is unreadable, or REGION_NAME names no registered region) it answers a 503 problem with no role,
+// never a made-up one: DNS still sees a failing region, and the fence of the services reads it as "cannot tell" and keeps its
+// last state instead of unfencing a region whose database was just fenced.
 func (a *API) regionHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Retry-After", "30")
 	regions, err := a.store.Regions(r.Context())
-	role := domain.Role("UNKNOWN")
-	if err == nil {
-		for _, reg := range regions {
-			if reg.Name == a.cfg.Region {
-				role = reg.Role
-			}
+	if err != nil {
+		slog.Error("region health: cannot read the regions", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "this region's role cannot be read"))
+		return
+	}
+	for _, reg := range regions {
+		if reg.Name != a.cfg.Region {
+			continue
 		}
+		status := http.StatusOK
+		if reg.Role != domain.Primary {
+			status = http.StatusServiceUnavailable
+		} else {
+			w.Header().Del("Retry-After")
+		}
+		httpx.JSON(w, status, map[string]string{"region": a.cfg.Region, "role": string(reg.Role)})
+		return
 	}
-	status := http.StatusOK
-	if role != domain.Primary {
-		status = http.StatusServiceUnavailable
-		w.Header().Set("Retry-After", "30")
-	}
-	httpx.JSON(w, status, map[string]string{"region": a.cfg.Region, "role": string(role)})
+	httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "region "+a.cfg.Region+" is not registered"))
 }
 
 func (a *API) regions(w http.ResponseWriter, r *http.Request) {

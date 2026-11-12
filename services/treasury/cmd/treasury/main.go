@@ -112,7 +112,7 @@ func run() error {
 	root.Handle("/readyz", a.Ready())
 	root.Handle("/", router)
 
-	admin := &http.Server{Addr: envOr("ADMIN_ADDR", ":9090"), Handler: a.Metrics(), ReadHeaderTimeout: 5 * time.Second}
+	admin := &http.Server{Addr: envOr("ADMIN_ADDR", ":9090"), Handler: httpx.WithMetrics(a.Metrics()), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := admin.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("admin listener stopped", "err", err)

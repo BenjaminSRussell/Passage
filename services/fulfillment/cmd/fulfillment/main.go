@@ -118,7 +118,7 @@ func run() error {
 		addr = ":8080"
 	}
 	slog.Info("fulfillment listening", "addr", addr)
-	return httpx.Serve(ctx, addr, r)
+	return httpx.ServeWithMetrics(ctx, addr, r)
 }
 
 func intEnv(name string, def, lo, hi int) (int, error) {
