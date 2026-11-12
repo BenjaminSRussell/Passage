@@ -504,10 +504,18 @@ func rollForward(ctx context.Context, tx pgx.Tx, legalEntityID, contractID, curr
 	return domain.NewRollForward(opening, v[1], v[3]).WithCredits(v[7], v[5].Neg()), nil
 }
 
-const rollForwardAdditions = `select coalesce(sum(o.allocated_amount) filter (where c.contract_date < $3::date), 0)::text,
-       coalesce(sum(o.allocated_amount) filter (where c.contract_date between $3::date and $4::date), 0)::text
+// rollForwardAdditions sums the deferred allocations: each obligation's original allocation (what is allocated now less the changes
+// of contract modifications) on the contract date, and each modification's change on its effective date.
+const rollForwardAdditions = `select (coalesce(sum(o.allocated_amount - d.total) filter (where c.contract_date < $3::date), 0)
+         + coalesce(sum(d.before_window), 0))::text,
+       (coalesce(sum(o.allocated_amount - d.total) filter (where c.contract_date between $3::date and $4::date), 0)
+         + coalesce(sum(d.in_window), 0))::text
 from performance_obligation o
 join revenue_contract c on c.tenant_id = o.tenant_id and c.id = o.contract_id
+left join lateral (select coalesce(sum(x.delta), 0) as total,
+         coalesce(sum(x.delta) filter (where x.effective_date < $3::date), 0) as before_window,
+         coalesce(sum(x.delta) filter (where x.effective_date between $3::date and $4::date), 0) as in_window
+       from allocation_delta x where x.tenant_id = o.tenant_id and x.obligation_id = o.id) d on true
 where c.legal_entity_id = $1::uuid and c.currency = $2 and o.method = any($5::text[])
   and ($6 = '' or c.id = nullif($6, '')::uuid)`
 

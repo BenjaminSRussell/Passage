@@ -110,6 +110,14 @@ type Store interface {
 	ListEdgeConfigs(ctx context.Context, edgeID string, limit int) ([]store.EdgeConfigVersion, error)
 	CurrentEdgeConfig(ctx context.Context, edgeID, subject string) (store.EdgeConfigVersion, error)
 	Heartbeat(ctx context.Context, edgeID, subject string, in store.HeartbeatInput) (store.HeartbeatResult, error)
+	CreatePISheet(ctx context.Context, code, name string, doc domain.RecipeDoc, by string) (store.PISheet, error)
+	ListPISheets(ctx context.Context, f store.PISheetFilter) ([]store.PISheet, error)
+	GetPISheet(ctx context.Context, id string) (store.PISheet, error)
+	UpdatePISheet(ctx context.Context, id string, rev int, name string, doc domain.RecipeDoc, by string) (store.PISheet, error)
+	ReleasePISheet(ctx context.Context, id string, rev int, by string) (store.PISheet, error)
+	NewPISheetVersion(ctx context.Context, id string, by string) (store.PISheet, error)
+	ObsoletePISheet(ctx context.Context, id string, rev int, by string) (store.PISheet, error)
+	CreateControlRecipeFromPISheet(ctx context.Context, piSheetID string, in store.ControlRecipeInput, by string, idem store.Idem) (store.ControlRecipe, error)
 	CreateControlRecipe(ctx context.Context, in store.ControlRecipeInput, createdBy string, idem store.Idem) (store.ControlRecipe, error)
 	ListControlRecipes(ctx context.Context, f store.RecipeFilter) ([]store.ControlRecipe, error)
 	GetControlRecipe(ctx context.Context, id string) (store.ControlRecipeDetail, error)
@@ -291,6 +299,8 @@ type workerRequest struct {
 	UserID   *string `json:"userId"`
 	CostRate string  `json:"costRate"`
 	Currency string  `json:"currency"`
+	// TimeZone is the IANA zone of the worker's site (default UTC).
+	TimeZone string `json:"timeZone"`
 }
 
 type itemsResponse[T any] struct {
@@ -309,6 +319,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerEdge(r)
 	a.registerEnrollment(r)
 	a.registerControlRecipes(r)
+	a.registerPISheets(r)
 	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/workers", a.createWorker)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers", a.listWorkers)
 	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/workers/{id}", a.getWorker)
@@ -475,6 +486,9 @@ func (a *API) createWorker(w http.ResponseWriter, r *http.Request) {
 	if !currencyRe.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
 	}
+	if req.TimeZone != "" && !validZone(req.TimeZone) {
+		fields["timeZone"] = "must be an IANA time zone name such as America/Chicago"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -483,7 +497,7 @@ func (a *API) createWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.store.CreateWorker(r.Context(), store.Worker{PartyID: req.PartyID, Name: name, BadgeID: req.BadgeID, UserID: req.UserID,
-		CostRate: rate, Currency: req.Currency}, idem)
+		CostRate: rate, Currency: req.Currency, TimeZone: req.TimeZone}, idem)
 	if err != nil {
 		a.fail(w, r, "create worker", err)
 		return

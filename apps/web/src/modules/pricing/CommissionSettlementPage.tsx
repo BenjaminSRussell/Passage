@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { RepName } from "./RepName";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
@@ -49,7 +50,7 @@ export function validateSettlement(v: SettlementDraft): Errors {
 }
 
 const columns: DataTableColumn<SettlementRow>[] = [
-  { key: "repId", header: "Rep", mono: true },
+  { key: "repId", header: "Rep", render: (r) => <RepName id={r.repId} /> },
   { key: "currency", header: "Currency", mono: true },
   { key: "transactions", header: "Transactions", mono: true, align: "end" },
   { key: "amount", header: "Commission", mono: true, align: "end", render: (r) => `${r.amount} ${r.currency}` },

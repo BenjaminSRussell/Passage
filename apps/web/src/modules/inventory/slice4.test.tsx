@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { validateTagCount } from "./CountTagsPage";
 import inventory from "./module";
+import { rememberOption } from "../../shell/lookup/entities";
 
 const PRODUCT_ID = "5f2c1e7a-0000-4000-8000-000000000002";
 const ENTITY_ID = "9e8d7c6b-0000-4000-8000-000000000003";
@@ -269,6 +270,11 @@ const reversal = journal({
 });
 
 describe("Journal reversal", () => {
+  beforeEach(() => {
+    rememberOption("inventoryJournal", { id: JOURNAL_ID, name: "IJ-000001" });
+    rememberOption("inventoryJournal", { id: REVERSAL_ID, name: "IJ-000002" });
+  });
+
   it("reverses a posted journal and opens the reversal draft", async () => {
     handler = (url, init) => {
       if (init.method === "POST") return json(201, reversal);
@@ -283,7 +289,7 @@ describe("Journal reversal", () => {
     const post = sent("POST")[0];
     expect(post.url.pathname).toBe(`/api/v1/inventory/journals/${JOURNAL_ID}:reverse`);
     expect(bodyOf(post)).toEqual({ postingDate: "2026-09-30" });
-    expect(screen.getByRole("link", { name: "1a2b3c4d" })).toHaveAttribute("href", `/inventory/journals/${JOURNAL_ID}`);
+    expect(await screen.findByRole("link", { name: "IJ-000001" })).toHaveAttribute("href", `/inventory/journals/${JOURNAL_ID}`);
     expect(screen.queryByRole("heading", { name: "Add line" })).toBeNull();
     expect(screen.getByRole("table", { name: "Journal lines" })).toHaveTextContent("-10");
   });
@@ -291,7 +297,7 @@ describe("Journal reversal", () => {
   it("links a reversed journal to its reversal and offers no second reversal", async () => {
     handler = () => json(200, journal({ reversedByJournalId: REVERSAL_ID }));
     renderAt(`/inventory/journals/${JOURNAL_ID}`);
-    expect(await screen.findByRole("link", { name: "6f6f6f6f" })).toHaveAttribute("href", `/inventory/journals/${REVERSAL_ID}`);
+    expect(await screen.findByRole("link", { name: "IJ-000002" })).toHaveAttribute("href", `/inventory/journals/${REVERSAL_ID}`);
     expect(screen.queryByRole("button", { name: "Reverse journal" })).toBeNull();
   });
 

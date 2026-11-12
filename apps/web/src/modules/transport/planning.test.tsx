@@ -264,10 +264,10 @@ describe("route plans", () => {
       return undefined;
     };
     renderAt("/transport/routes/new");
-    fill("Stop 1 stop id", "S1");
+    fill("Stop 1 stop reference", "S1");
     fill("Stop 1 x km", "5");
     fill("Stop 1 y km", "0");
-    fill("Vehicle 1 vehicle id", "V1");
+    fill("Vehicle 1 vehicle reference", "V1");
     fill("Vehicle 1 capacity kg", "1000");
     fireEvent.click(screen.getByRole("button", { name: "Optimize routes" }));
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(`/transport/routes/${PLAN}`));
@@ -277,10 +277,10 @@ describe("route plans", () => {
 
     handler = () => problem(503, "TMS-0123", "the route optimizer is not configured (TMS_OPTIMIZER_URL)");
     renderAt("/transport/routes/new");
-    fill("Stop 1 stop id", "S1");
+    fill("Stop 1 stop reference", "S1");
     fill("Stop 1 x km", "5");
     fill("Stop 1 y km", "0");
-    fill("Vehicle 1 vehicle id", "V1");
+    fill("Vehicle 1 vehicle reference", "V1");
     fill("Vehicle 1 capacity kg", "1000");
     fireEvent.click(screen.getByRole("button", { name: "Optimize routes" }));
     expect(await screen.findByText("The route optimizer is unavailable")).toBeInTheDocument();
@@ -344,7 +344,7 @@ describe("load plan", () => {
     };
     handler = (url) => (url.pathname.endsWith("/load-plans:stack") ? json(200, result) : undefined);
     const { container } = renderAt("/transport/load-plans");
-    fill("Pallet 1 pallet id", "P1");
+    fill("Pallet 1 pallet reference", "P1");
     fill("Pallet 1 height mm", "900");
     fill("Pallet 1 weight kg", "500");
     fireEvent.click(screen.getByRole("button", { name: "Plan the load" }));
@@ -361,7 +361,7 @@ describe("load plan", () => {
   it("explains an unavailable planner", async () => {
     handler = () => problem(503, "TMS-0123", "the load planner is not configured (TMS_OPTIMIZER_URL)");
     renderAt("/transport/load-plans");
-    fill("Pallet 1 pallet id", "P1");
+    fill("Pallet 1 pallet reference", "P1");
     fill("Pallet 1 height mm", "900");
     fill("Pallet 1 weight kg", "500");
     fireEvent.click(screen.getByRole("button", { name: "Plan the load" }));

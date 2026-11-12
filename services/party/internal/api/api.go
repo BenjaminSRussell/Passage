@@ -33,7 +33,7 @@ const (
 	dutyImportRead = "party.import.read"
 	// dutyVendorLookup is the one read a vendor-checking service (payables) needs: a vendor role by id, nothing else.
 	dutyVendorLookup = "party.vendor.lookup"
-	codeInvalid    = "PTY-0001"
+	codeInvalid      = "PTY-0001"
 )
 
 var reportedStatuses = []domain.Status{domain.StatusValid, domain.StatusInvalid, domain.StatusUnverified, domain.StatusFormatOnly}
@@ -51,6 +51,8 @@ type API struct {
 	vendors   store.VendorStore
 	customers store.CustomerStore
 	suppliers store.SupplierStore
+	portal    store.PortalStore
+	setup     store.SetupStore
 	merges    MergeStore
 	search    store.SearchStore
 	sequence  Sequencer
@@ -120,6 +122,12 @@ func (a *API) Register(r chi.Router) {
 	}
 	if a.suppliers != nil {
 		a.registerSuppliers(r)
+	}
+	if a.setup != nil {
+		a.registerSetup(r)
+	}
+	if a.portal != nil {
+		a.registerPortal(r)
 	}
 	if a.merges != nil {
 		a.registerMerge(r)

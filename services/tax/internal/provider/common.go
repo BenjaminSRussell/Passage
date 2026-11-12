@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -33,9 +35,30 @@ type client struct {
 	http *http.Client
 }
 
+// requireHTTPS refuses a provider URL that would send credentials and tax data in the clear: it must be an absolute
+// https URL with a host. http is accepted only for a loopback host (a local stub or a test server), never for a name.
+func requireHTTPS(what, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("%s must be an absolute https URL", what)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if ip := net.ParseIP(u.Hostname()); u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback()) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s must use https (got %q)", what, u.Scheme)
+}
+
 func newClient(base string, hc *http.Client) (client, error) {
 	if base == "" {
 		return client{}, errors.New("provider needs a base URL")
+	}
+	if err := requireHTTPS("the provider base URL", base); err != nil {
+		return client{}, err
 	}
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

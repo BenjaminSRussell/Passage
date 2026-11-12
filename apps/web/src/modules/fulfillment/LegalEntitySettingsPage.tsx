@@ -2,13 +2,12 @@ import { useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Badge, Button, Card, FormField, Input, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
 import { describeProblem, DUTY_COGS_POLICY, listLegalEntitySettings, saveLegalEntitySetting, type LegalEntitySetting, type Problem } from "./api/client";
 import { formatDateTime, UUID, dash } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { PlainName } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<LegalEntitySetting>[] = [
@@ -123,25 +122,17 @@ export function LegalEntitySettingsPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader
+      <ListPage
+        id="fulfillment-legal-entity-settings"
         title="Posting settings"
         description="Per legal entity: the cost of goods sold policy every packing slip follows (at shipment, or delivered not invoiced until the invoice), whether a post sends the advance ship notice, the GS1 company prefix its containers' SSCCs are issued under, whether billing charges its packaging fees, and how its returnable packaging is tracked and when a held balance becomes chargeable. A poster cannot change the policy; the ASN is a default the poster can turn off."
+        noun="posting settings"
+        columns={columns}
+        useRows={() => loadedRows(state)}
+        getRowKey={(row) => row.legalEntityId}
+        onRowOpen={open}
+        empty={{ title: "No legal entities yet", description: "A legal entity appears here once an order is released under it. Until then you can enter its id below." }}
       />
-      {state.error ? (
-        <Alert tone="danger" title="Could not load the posting settings" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Posting settings"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.legalEntityId}
-          loading={state.loading}
-          onRowOpen={open}
-          empty={{ title: "No legal entities yet", description: "A legal entity appears here once an order is released under it. Until then you can enter its id below." }}
-        />
-      )}
       <Card title="Change the posting settings">
         <form className={styles.form} onSubmit={submit} noValidate>
           <FormField id="le-id" label="Legal entity" error={error}>

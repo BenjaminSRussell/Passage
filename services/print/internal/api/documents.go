@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -22,19 +21,19 @@ func (a *API) renderDocument(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return
 	}
-	var req domain.DocumentRequest
+	var req renderRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	doc, err := domain.RenderDocumentReport(req)
-	var de *domain.Error
-	if errors.As(err, &de) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail))
+	composed, err := a.compose(r, req)
+	if err != nil {
+		httpx.Fail(w, r, domainProblem(err))
 		return
 	}
+	doc, err := domain.RenderDocumentReport(composed)
 	if err != nil {
-		httpx.Fail(w, r, err)
+		httpx.Fail(w, r, domainProblem(err))
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")

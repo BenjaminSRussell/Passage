@@ -338,6 +338,32 @@ describe("lookup adapters", () => {
     expect(calls).toContain("/api/v1/hr/positions?limit=100&cursor=c2");
   });
 
+  it("sends the typed text to the document lists, which search on the server, and keeps the legal entity in scope", async () => {
+    // The service answers only the documents matching q: a document past the first pages is found by its number.
+    const rows: Record<string, Record<string, string>[]> = {
+      "/api/v1/procurement/purchase-orders": [{ id: "po-1", number: "PO-00000731", currency: "USD", documentStatus: "CONFIRMED", legalEntityId: "le-1" }, { id: "po-2", number: "PO-00007310", legalEntityId: "le-2" }],
+      "/api/v1/sales/orders": [{ id: "so-1", orderNumber: "SO-731", orderType: "ORDER", status: "OPEN", legalEntityId: "le-1" }],
+      "/api/v1/receivables/open-items": [{ id: "oi-1", documentNumber: "INV-731", openAmount: "10.00", currency: "USD", legalEntityId: "le-1" }],
+      "/api/v1/receivables/payments": [{ id: "pay-1", amount: "731.00", currency: "USD", payerName: "Contoso", legalEntityId: "le-1" }],
+      "/api/v1/fulfillment/packing-slips": [{ id: "ps-1", packingSlipNumber: "PS-731", status: "POSTED" }],
+      "/api/v1/production/batches": [{ id: "b-1", batchNumber: "B-731", disposition: "available", legalEntityId: "le-1" }],
+    };
+    handler = (url) => json({ items: url.searchParams.get("q") === "731" ? (rows[url.pathname] ?? []) : [] });
+    const scope = { legalEntityId: "le-1" };
+    expect((await lookupDefs.purchaseOrder.search(" 731 ", scope)).map((entry) => entry.id)).toEqual(["po-1"]);
+    expect((await lookupDefs.salesOrder.search("731", scope)).map((entry) => entry.id)).toEqual(["so-1"]);
+    expect((await lookupDefs.openItem.search("731", scope)).map((entry) => entry.id)).toEqual(["oi-1"]);
+    expect((await lookupDefs.arPayment.search("731", scope)).map((entry) => entry.id)).toEqual(["pay-1"]);
+    expect((await lookupDefs.packingSlip.search("731", scope)).map((entry) => entry.id)).toEqual(["ps-1"]);
+    expect((await lookupDefs.batch.search("731", scope)).map((entry) => entry.id)).toEqual(["b-1"]);
+    expect(calls).toContain("/api/v1/procurement/purchase-orders?limit=100&q=731");
+    expect(calls).toContain("/api/v1/receivables/open-items?status=open&limit=100&q=731");
+    expect((await lookupDefs.purchaseOrder.search("731", {})).map((entry) => entry.id)).toEqual(["po-1", "po-2"]);
+    calls = [];
+    await lookupDefs.salesOrder.search("", scope);
+    expect(calls).toEqual(["/api/v1/sales/orders?limit=100"]);
+  });
+
   it("names a load by where and when it goes, and a user by display name", async () => {
     handler = (url) =>
       url.pathname === "/api/v1/transport/loads"
@@ -347,6 +373,14 @@ describe("lookup adapters", () => {
     expect(await lookupDefs.load.search("", { siteId: "s-2" })).toEqual([]);
     expect((await lookupDefs.user.search("ada", {})).map(formatOption)).toEqual(["Ada Lovelace (ada@example.com)"]);
     expect(calls).toContain("/api/v1/identity/users?q=ada&status=active&limit=20");
+  });
+
+  it("resolves a user through the name-only route every role can read", async () => {
+    handler = () => json({ items: [{ userId: "u-1", displayName: "Ada Lovelace" }] });
+    expect(await lookupDefs.user.resolve("u-1")).toEqual({ id: "u-1", name: "Ada Lovelace", number: undefined });
+    expect(calls).toContain("/api/v1/identity/user-names?ids=u-1");
+    handler = () => json({ items: [] });
+    expect(await lookupDefs.user.resolve("u-2")).toBeNull();
   });
 
   it("resolves a customer through its party for the display name", async () => {

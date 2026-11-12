@@ -285,7 +285,7 @@ describe("convert a planned order (FR-22.10, FR-22.18)", () => {
     vi.unstubAllGlobals();
     stubFetch(() => problem(404, "PRODUCTION_INTAKE_NOT_FOUND", "planned order intake not found"));
     renderAt(path);
-    expect(await screen.findByText("planned order intake not found (PRODUCTION_INTAKE_NOT_FOUND)")).toBeInTheDocument();
+    expect(await screen.findByText("planned order intake not found")).toBeInTheDocument();
   });
 
   it("is on the production menu behind the read duty", () => {

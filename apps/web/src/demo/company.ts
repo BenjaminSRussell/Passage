@@ -100,6 +100,25 @@ export const ITEMS: Item[] = [
   item(30, "RM-SS316-BAR", "Stainless 316 round bar, 1.25 in", "raw", "ft", 18.2, 12, 940, 400, { vendor: 4 }),
   item(31, "RM-EPOXY-BLU", "Epoxy coating, Cedar blue", "raw", "gal", 64, 9, 38, 20, { vendor: 4 }),
 ];
+/**
+ * Services sold with the pumps (commissioning, installation, service plans and warranties). They are products in the
+ * product service but not stocked items, so they are not in ITEMS: only the revenue contracts name them, and the product
+ * lookup resolves them by id.
+ */
+export interface ServiceProduct {
+  id: string;
+  number: string;
+  name: string;
+  price: number;
+}
+export const SERVICES: ServiceProduct[] = [
+  { id: uid(KIND.item, 101), number: "SVC-COMM", name: "Commissioning and start-up, on site", price: 6500 },
+  { id: uid(KIND.item, 102), number: "SVC-INST", name: "Installation and alignment", price: 1800 },
+  { id: uid(KIND.item, 103), number: "SVC-PLAN-24", name: "Preventive service plan, 24 months", price: 9600 },
+  { id: uid(KIND.item, 104), number: "SVC-WTY-12", name: "Extended warranty, 12 months", price: 2400 },
+  { id: uid(KIND.item, 105), number: "SVC-PLAN-36", name: "Preventive service plan, 36 months", price: 13800 },
+];
+
 export const itemByNumber = (number: string): Item => {
   const found = ITEMS.find((i) => i.number === number);
   if (!found) throw new Error(`demo item ${number} not in company.ts`);

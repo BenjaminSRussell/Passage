@@ -419,13 +419,15 @@ func indexProductionOrder(ctx context.Context, s Applier, evt events.Event) erro
 
 // indexWorker indexes a worker by personnel number. A worker is tenant-wide in
 // HR (its worker list is not legal-entity scoped), so it is here too. HR events
-// carry no personal data, so worker.created has no name: a worker is found by
-// number, and the person by name through its party record.
+// carry no personal data, so worker.created has no name; it names the party
+// person, and the store titles the worker with that party's name, so a worker
+// is found by number or by its person's name.
 func indexWorker(ctx context.Context, s Applier, evt events.Event) error {
 	var d struct {
 		ID              string `json:"id"`
 		PersonnelNumber string `json:"personnel_number"`
 		WorkerType      string `json:"worker_type"`
+		PartyPersonID   string `json:"party_person_id"`
 	}
 	if err := decode(evt, hrSource, &d); err != nil {
 		return err
@@ -433,6 +435,9 @@ func indexWorker(ctx context.Context, s Applier, evt events.Event) error {
 	if !ids.Valid(d.ID) || d.PersonnelNumber == "" {
 		return eventing.Permanent(fmt.Errorf("%s needs id and personnel_number", evt.Type))
 	}
+	if d.PartyPersonID != "" && !ids.Valid(d.PartyPersonID) {
+		return eventing.Permanent(fmt.Errorf("%s names party person %q, not an id", evt.Type, d.PartyPersonID))
+	}
 	return apply(ctx, s, evt, store.Record{Type: store.TypeWorker, ID: d.ID, Number: d.PersonnelNumber, Title: d.PersonnelNumber,
-		Subtitle: strings.ToLower(d.WorkerType)})
+		Subtitle: strings.ToLower(d.WorkerType), PartyID: strings.ToLower(d.PartyPersonID)})
 }

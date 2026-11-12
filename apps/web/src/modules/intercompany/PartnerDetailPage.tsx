@@ -39,7 +39,7 @@ function policyOf(p: Partner): PolicyValues {
 }
 
 function ConflictNote({ failure, onReload }: { failure: Problem; onReload(): void }) {
-  if (failure.code !== versionConflict) return <>{failure.message} ({failure.code})</>;
+  if (failure.code !== versionConflict) return <ProblemMessage problem={failure} />;
   return (
     <>
       Someone changed this pairing since you opened it. Reload it to see the latest version, then make your change again.{" "}

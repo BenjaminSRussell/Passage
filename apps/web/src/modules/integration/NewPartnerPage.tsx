@@ -101,7 +101,7 @@ export function NewPartnerPage() {
         <form className={styles.form} onSubmit={submit} noValidate>
           {text("name", "Partner name", undefined, false, { maxLength: 120 })}
           {text("isaQualifier", "ISA qualifier", "ISA05, two characters, such as ZZ (mutually defined) or 01 (DUNS).", false, { maxLength: 2 })}
-          {text("isaId", "ISA sender id", "ISA06 without the trailing spaces.", false, { maxLength: 15 })}
+          {text("isaId", "ISA sender identifier", "ISA06 without the trailing spaces.", false, { maxLength: 15 })}
           <FormField id="partner-environment" label="Environment" hint="TEST profiles only receive interchanges sent to the TEST environment.">
             {(control) => (
               <Select {...control} value={values.environment} onChange={(event) => update({ environment: event.target.value as Environment })}>

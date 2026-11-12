@@ -50,9 +50,9 @@ function Done({ children }: { children?: ReactNode }) {
   return <div role="status">{children ? <Alert tone="success">{children}</Alert> : null}</div>;
 }
 
-function requireUuid(errors: Errors, key: string, value: string, label: string, optional = false) {
+function requireChoice(errors: Errors, key: string, value: string, label: string, optional = false) {
   if (optional && value.trim() === "") return;
-  if (!isUuid(value)) errors[key] = `Enter the ${label} (a UUID).`;
+  if (!isUuid(value)) errors[key] = `Choose the ${label}.`;
 }
 
 function requireCommon(errors: Errors, accountNumber: string, currencyCode: string) {
@@ -186,7 +186,7 @@ export function VendorRoleCard({ partyId, onCreated }: { partyId: string; onCrea
       const errors: Errors = {};
       requireCommon(errors, values.accountNumber, values.currencyCode);
       if (!isUuid(values.vendorGroupId)) errors.vendorGroupId = "Choose a vendor group.";
-      requireUuid(errors, "paymentTermId", values.paymentTermId, "payment term id", true);
+      requireChoice(errors, "paymentTermId", values.paymentTermId, "payment term", true);
       return errors;
     },
     async (values, key) => {
@@ -226,14 +226,14 @@ export function VendorRoleCard({ partyId, onCreated }: { partyId: string; onCrea
           error={form.errors.vendorGroupId}
           onChange={(v) => form.set("vendorGroupId", v)}
         />
-        <Text
+        <LookupFormField
           id="vendor-term"
-          label="Vendor payment term id"
+          label="Vendor payment term"
+          entity="paymentTerm"
           optional
+          prefill={false}
           value={form.values.paymentTermId}
           error={form.errors.paymentTermId}
-          maxLength={36}
-          mono
           onChange={(v) => form.set("paymentTermId", v)}
         />
         <Text
@@ -273,9 +273,9 @@ export function CustomerRoleCard({ partyId, onCreated }: { partyId: string; onCr
     (values) => {
       const errors: Errors = {};
       requireCommon(errors, values.accountNumber, values.currencyCode);
-      requireUuid(errors, "customerGroupId", values.customerGroupId, "customer group id");
-      requireUuid(errors, "paymentTermId", values.paymentTermId, "payment term id");
-      requireUuid(errors, "postingProfileId", values.postingProfileId, "posting profile id");
+      requireChoice(errors, "customerGroupId", values.customerGroupId, "customer group");
+      requireChoice(errors, "paymentTermId", values.paymentTermId, "payment term");
+      requireChoice(errors, "postingProfileId", values.postingProfileId, "posting profile");
       return errors;
     },
     async (values, key) => {
@@ -311,31 +311,29 @@ export function CustomerRoleCard({ partyId, onCreated }: { partyId: string; onCr
           mono
           onChange={(v) => form.set("accountNumber", v)}
         />
-        <Text
+        <LookupFormField
           id="customer-group"
-          label="Customer group id"
+          label="Customer group"
+          entity="customerGroup"
+          hint="A group that is not registered yet can be pasted by its id."
           value={form.values.customerGroupId}
           error={form.errors.customerGroupId}
-          maxLength={36}
-          mono
           onChange={(v) => form.set("customerGroupId", v)}
         />
-        <Text
+        <LookupFormField
           id="customer-term"
-          label="Customer payment term id"
+          label="Customer payment term"
+          entity="paymentTerm"
           value={form.values.paymentTermId}
           error={form.errors.paymentTermId}
-          maxLength={36}
-          mono
           onChange={(v) => form.set("paymentTermId", v)}
         />
-        <Text
+        <LookupFormField
           id="customer-posting"
-          label="Posting profile id"
+          label="Posting profile"
+          entity="postingProfile"
           value={form.values.postingProfileId}
           error={form.errors.postingProfileId}
-          maxLength={36}
-          mono
           onChange={(v) => form.set("postingProfileId", v)}
         />
         <Text
@@ -371,7 +369,7 @@ export function CreditLimitCard({ initialCustomerId = "" }: { initialCustomerId?
     { customerId: initialCustomerId, creditLimit: "" },
     (values) => {
       const errors: Errors = {};
-      requireUuid(errors, "customerId", values.customerId, "customer role id");
+      if (!isUuid(values.customerId)) errors.customerId = "Choose the customer.";
       if (!AMOUNT.test(values.creditLimit.trim()))
         errors.creditLimit = "Enter a non-negative amount with at most 2 decimals, for example 25000.00.";
       return errors;
@@ -402,14 +400,13 @@ export function CreditLimitCard({ initialCustomerId = "" }: { initialCustomerId?
         noValidate
         aria-label="Request a credit limit"
       >
-        <Text
+        <LookupFormField
           id="credit-customer"
-          label="Customer role id"
-          hint="The id of the customer role, not the party."
+          label="Customer"
+          entity="customer"
+          hint="The customer role in your legal entity, not the party."
           value={form.values.customerId}
           error={form.errors.customerId}
-          maxLength={36}
-          mono
           onChange={(v) => form.set("customerId", v)}
         />
         <Text

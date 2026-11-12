@@ -5,6 +5,8 @@ import type { CommissionStatement, CommissionTransaction } from "./api/client";
 import { validateStatement } from "./CommissionStatementPage";
 import { json, pageViolations, renderAt, server, text, useFakeServer } from "./testServer";
 
+const R1 = "0190c000-0000-7000-8000-0000000000a1";
+
 useFakeServer();
 
 const LE = "0190f0a0-0000-7000-8000-000000000001";
@@ -21,7 +23,7 @@ function txn(patch: Partial<CommissionTransaction>): CommissionTransaction {
     customerGroup: "",
     itemGroup: "",
     salesGroupId: SG,
-    repId: "R1",
+    repId: R1,
     sharePct: "60",
     basis: "REVENUE",
     lineNet: "10000",
@@ -38,7 +40,7 @@ function txn(patch: Partial<CommissionTransaction>): CommissionTransaction {
 
 const statement: CommissionStatement = {
   legalEntityId: LE,
-  repId: "R1",
+  repId: R1,
   period: "2027-03",
   lineCount: 2,
   linesTruncated: false,
@@ -50,9 +52,9 @@ function fill(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 
-function ask(rep = "R1", month = "2027-03") {
+function ask(rep = R1, month = "2027-03") {
   fill("Legal entity", LE);
-  fill("Rep id", rep);
+  fill("Sales rep", rep);
   fill("Invoice month", month);
   fireEvent.click(screen.getByRole("button", { name: "Show statement" }));
 }
@@ -61,17 +63,17 @@ describe("Commission statement", () => {
   it("checks the form before calling the service", () => {
     expect(validateStatement({ legalEntityId: "x", repId: "", period: "2027-13" })).toEqual({
       legalEntityId: "Choose a legal entity.",
-      repId: "Enter the rep id (up to 64 characters).",
+      repId: "Choose the sales rep.",
       period: "Use a month such as 2027-03.",
     });
-    expect(validateStatement({ legalEntityId: LE, repId: "R1", period: "2027-03" })).toEqual({});
+    expect(validateStatement({ legalEntityId: LE, repId: R1, period: "2027-03" })).toEqual({});
     for (const repId of ["EU/R1", "worker:7", ".."]) {
-      expect(validateStatement({ legalEntityId: LE, repId, period: "2027-03" }).repId).toBe("A rep id has no / or : and is not . or ..");
+      expect(validateStatement({ legalEntityId: LE, repId, period: "2027-03" }).repId).toBe("Choose the sales rep from the list.");
     }
   });
 
   it("shows the lines and the exact totals of the rep's month", async () => {
-    server.handler = (url) => (url.pathname.endsWith("/commission/reps/R1/statement") ? json(200, statement) : undefined);
+    server.handler = (url) => (url.pathname.endsWith(`/commission/reps/${R1}/statement`) ? json(200, statement) : undefined);
     const { container } = renderAt("/pricing/commission/statement");
     expect(screen.getByText(/Choose a rep and a month/)).toBeInTheDocument();
     ask();
@@ -91,10 +93,10 @@ describe("Commission statement", () => {
     server.handler = (url) =>
       url.pathname.endsWith("/statement") ? json(200, { ...statement, lineCount: 0, totals: [], lines: [] }) : undefined;
     renderAt("/pricing/commission/statement");
-    ask("R1", "2027-13");
+    ask(R1, "2027-13");
     expect(await screen.findByText("Use a month such as 2027-03.")).toBeInTheDocument();
     expect(server.calls.filter((c) => c.url.pathname.endsWith("/statement"))).toHaveLength(0);
-    ask("R1", "2027-04");
+    ask(R1, "2027-04");
     expect(await screen.findByText("No commission in this month")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download CSV" })).toBeDisabled();
   });

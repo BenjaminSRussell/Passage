@@ -6,6 +6,8 @@ import { PartyDetailPage } from "./PartyDetailPage";
 import { NewPartyPage } from "./NewPartyPage";
 import { PendingChangeDetailPage } from "./PendingChangeDetailPage";
 import { PendingChangesPage } from "./PendingChangesPage";
+import { ProspectDetailPage } from "./ProspectDetailPage";
+import { ProspectsPage } from "./ProspectsPage";
 import { SearchPage } from "./SearchPage";
 import { TaxRegistrationsPage } from "./TaxRegistrationsPage";
 
@@ -13,7 +15,7 @@ const party: PassageModule = {
   id: "party",
   title: "Parties",
   description:
-    "Organizations and people: create and edit, vendor and customer roles, credit-limit requests and approval, tax-registration checks, and duplicate review.",
+    "Organizations and people: create and edit, vendor and customer roles, credit-limit requests and approval, tax-registration checks, duplicate review, and supplier registrations from the portal.",
   routes: [
     {
       path: "/party",
@@ -46,6 +48,16 @@ const party: PassageModule = {
       handle: { title: "Credit limit change", duty: DUTY_READ },
     },
     {
+      path: "/party/vendor-prospects",
+      element: createElement(ProspectsPage),
+      handle: { title: "Supplier registrations", duty: DUTY_READ },
+    },
+    {
+      path: "/party/vendor-prospects/:id",
+      element: createElement(ProspectDetailPage),
+      handle: { title: "Supplier registration", duty: DUTY_READ },
+    },
+    {
       path: "/party/:id",
       element: createElement(PartyDetailPage),
       handle: { title: "Party", duty: DUTY_READ },
@@ -63,6 +75,11 @@ const party: PassageModule = {
     {
       label: "Credit limit approvals",
       to: "/party/pending-changes",
+      duty: DUTY_READ,
+    },
+    {
+      label: "Supplier registrations",
+      to: "/party/vendor-prospects",
       duty: DUTY_READ,
     },
   ],

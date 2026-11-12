@@ -9,6 +9,8 @@ import { createProviderFactory, loadConfig, type Config } from "./config.js";
 import { CopilotAnswerCache } from "./domain/copilot.js";
 import { KillSwitchRegistry } from "./domain/killswitch.js";
 import { createCopilotService } from "./runtime/copilot.js";
+import { createKnowledgeService } from "./runtime/knowledge.js";
+import { PgKeywordIndex } from "./store/knowledge.js";
 import { createMcpConnector } from "./runtime/mcp.js";
 import { createRunService } from "./runtime/service.js";
 import { createAdminServer, createRequestHandler, listen, Metrics } from "./server.js";
@@ -55,7 +57,10 @@ async function main(): Promise<void> {
       pseudonymTtlMs: 24 * 3_600_000,
     },
   });
+  // Keyword half of the hybrid search only until an embedding port and a vector index are configured (NOT-IMPLEMENTED.md).
+  const knowledge = createKnowledgeService({ keywords: new PgKeywordIndex(store) });
   const copilot = createCopilotService({
+    knowledge,
     providerFor,
     mcp,
     store,
@@ -88,6 +93,7 @@ async function main(): Promise<void> {
     },
     runs,
     copilot,
+    knowledge,
   };
   const metrics = new Metrics();
   const handler = createRequestHandler({

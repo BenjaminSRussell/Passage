@@ -33,6 +33,10 @@ const (
 	// CustomerPortalIssuer is the one service whose tokens name a customer (cus).
 	CustomerPortalIssuer = "customer-portal"
 
+	// DutyPortalRegister is the one duty a supplier portal token may carry without a vendor: the public prospect registration (#511),
+	// where no vendor exists yet. Such a token carries no other duty, and every vendor route refuses a token without a vendor.
+	DutyPortalRegister = "party.vendor-portal.register"
+
 	ServiceTokenMaxTTL = 60 * time.Second
 
 	EnvServiceName        = "PASSAGE_SERVICE_NAME"
@@ -60,13 +64,21 @@ var (
 // Each grant holds only the narrow duties its caller signs (#333, #341).
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
-	// Consolidation collects each unit's trial balance from its ledger.
+	// Consolidation collects each unit's trial balance from its ledger, translates it at the rate tables' average and closing
+	// rates and reads each unit's fiscal year from the org service's fiscal calendar.
 	"consolidation": {
 		"ledger": {"ledger.balance.read"},
+		"fx":     {"fx.rate.lookup"},
+		"org":    {"org.read"},
 	},
-	// Intercompany posts both sides of a journal and reverses the first when the second fails.
+	// Intercompany posts both sides of a journal and reverses the first when the second fails; it reads the due-to and due-from
+	// balances of both sides to reconcile them, converts them at the rate tables' rates, reads the fiscal calendar to find the
+	// first open period after a closed one, and has the tax service price a cross-border charge.
 	"intercompany": {
-		"ledger": {"ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup"},
+		"ledger": {"ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup", "ledger.balance.read"},
+		"fx":     {"fx.rate.lookup"},
+		"org":    {"org.read"},
+		"tax":    {"tax.tax.calculate", "tax.transaction.record"},
 	},
 	"finreport": {"ledger": {"ledger.entry.lookup", "ledger.balance.read"}},
 	"billing": {
@@ -113,7 +125,7 @@ var serviceGrants = map[string]map[string][]string{
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
 		"fx":     {"fx.rate.lookup"},
-		"tax":    {"tax.withholding.calculate"},
+		"tax":    {"tax.withholding.calculate", "tax.withholding.record"},
 		"party":  {"party.vendor-bank.reveal", "party.vendor.lookup"},
 	},
 	"close": {
@@ -129,8 +141,14 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory":   {"inventory.read"},
 		"engineering": {"engineering.read"},
 	},
+	// budgeting reads the actuals a plan is generated from, and the drivers of a generated plan: the depreciation schedules of the
+	// fixed assets, HR's positions, project forecasts and the demand forecast (FR-38.14).
 	"budgeting": {
-		"ledger": {"ledger.balance.read"},
+		"ledger":   {"ledger.balance.read"},
+		"assets":   {"assets.asset.view"},
+		"hr":       {"hr.org.inquire"},
+		"projects": {"projects.inquire"},
+		"planning": {"planning.read"},
 	},
 	"costing": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
@@ -173,7 +191,7 @@ var serviceGrants = map[string]map[string][]string{
 		"receivables": {"receivables.forecast.read"},
 	},
 	"sales": {
-		"product":     {"product.configuration.read"},
+		"product":     {"product.configuration.read", "product.names.read"},
 		"production":  {"production.order.create-from-sales"},
 		"billing":     {"billing.invoice.read"},
 		"fulfillment": {"fulfillment.packing-slip.read"},
@@ -185,6 +203,7 @@ var serviceGrants = map[string]map[string][]string{
 		"ledger":  {"ledger.entry.post", "ledger.ledger.lookup"},
 		"tax":     {"tax.transaction.record"},
 		"billing": {"billing.invoice.read", "billing.credit-reservation.write"},
+		"fx":      {"fx.rate.lookup"},
 	},
 	"ledger": {
 		"close": {"period.check"},
@@ -229,6 +248,8 @@ var serviceGrants = map[string]map[string][]string{
 	"migration-factory": {
 		"receivables": {"receivables.import.write", "receivables.view"},
 		"payables":    {"opening-item.import", "opening-item.import.read"},
+		"inventory":   {"inventory.import.write", "inventory.import.read"},
+		"treasury":    {"treasury.import.write", "treasury.import.read"},
 		// Parallel-run replay and ROLLED_BACK compensating journals (#484).
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
 	},
@@ -240,13 +261,21 @@ var serviceGrants = map[string]map[string][]string{
 		"billing":     {"billing.invoice.read"},
 		"sales":       {"sales.order.lookup", "sales.channel.intake"},
 		// A returned punchout cart becomes a requisition of the requester (#35, 35-3): the token carries the requester as act.
-		"purchasing": {"procurement.requisition.create"},
+		"purchasing": {"procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"},
+		// An inbound ship notice of a cXML network becomes the receiving ASN of the purchase order it names (#35, 35-4).
+		"receiving": {"receiving.asn.maintain"},
 	},
 	"fieldservice": {
 		"dispatch": {"dispatch.run.create", "dispatch.run.read"},
 	},
 	"processmfg": {
 		"identity": {"identity.feature.view"},
+		// A released batch order generates its control recipe (#25, 25-5): the token carries the releasing user as act.
+		"shopfloor": {"shopfloor.controlrecipe.create"},
+	},
+	// The shopfloor sweeper reads the active tenants from the identity registry instead of a configured list (#25).
+	"shopfloor": {
+		"identity": {"identity.tenant-registry.read"},
 	},
 	// The supplier portal BFF acts for one vendor user at a time (#511). Every token it signs carries the vendor id (vnd) from the
 	// user's verified session, and the target service scopes every read and write to that vendor. Only vendor-portal duties,
@@ -254,15 +283,18 @@ var serviceGrants = map[string]map[string][]string{
 	"supplier-portal": {
 		"purchasing": {"procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"},
 		"receiving":  {"receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"},
-		"party":      {"party.vendor-portal.read", "party.vendor-portal.write"},
+		"party":      {"party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept", "party.vendor-portal.admin"},
+		"payables":   {"payables.vendor-portal.read"},
 	},
 	// The customer portal BFF acts for one customer contact at a time (#30). Every token it signs carries the customer id (cus)
 	// from the contact's verified session, and the target service scopes every read to that customer. Only customer-portal
-	// duties, which no human role holds and which are read-only, are granted.
+	// duties, which no human role holds, are granted: reads, and the two writes a customer makes for itself (an order and a return).
 	"customer-portal": {
 		"receivables": {"receivables.customer-portal.read"},
 		"billing":     {"billing.customer-portal.read"},
-		"sales":       {"sales.customer-portal.read"},
+		"sales":       {"sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"},
+		"party":       {"party.customer-portal.read"},
+		"identity":    {"identity.customer-portal.read"},
 	},
 }
 
@@ -284,11 +316,11 @@ func serviceGrant(iss, aud string) []string { return serviceGrants[iss][aud] }
 // (a party merge moves roles in every entity). A token carrying one names no
 // legal entity and carries no other duty, and every other token names one
 // entity, so a tenant-level duty never rides in an entity-scoped token (#450).
-var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}}
+var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}, "identity.tenant-registry.read": {}}
 
 // tenantReadDuties are tenant-level duties that only read tenant settings, so any signed-in user's service call may
 // carry them; the rest of tenantLevelDuties need a tenant administrator.
-var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}}
+var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}, "identity.tenant-registry.read": {}}
 
 func tenantLevelToken(duties []string) (tenantLevel, mixed bool) {
 	n := 0
@@ -398,8 +430,8 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 // grant. A nil duties means the whole grant less its tenant-level duties, which
 // are signed only when asked for by name.
 func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, only []string) (string, error) {
-	if s.name == VendorPortalIssuer && p.VendorID == "" {
-		return "", errors.New("the supplier portal signs tokens for a vendor only")
+	if s.name == VendorPortalIssuer && p.VendorID == "" && (len(only) != 1 || only[0] != DutyPortalRegister) {
+		return "", errors.New("the supplier portal signs tokens for a vendor only, except the prospect registration")
 	}
 	if s.name == CustomerPortalIssuer && p.CustomerID == "" {
 		return "", errors.New("the customer portal signs tokens for a customer only")
@@ -475,7 +507,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 
 var readDuties = map[string]struct{}{
 	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.account.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
-	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal-hold.check": {},
+	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal-hold.check": {}, "org.read": {},
 }
 
 func onlyReads(duties []string) bool {
@@ -662,7 +694,7 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 		if vnd, ok := canonicalUUID(c.Vnd); !ok || vnd != c.Vnd || vnd == ids.Nil || c.Iss != VendorPortalIssuer {
 			return ServiceClaims{}, ErrServiceToken
 		}
-	} else if c.Iss == VendorPortalIssuer {
+	} else if c.Iss == VendorPortalIssuer && (len(c.Duties) != 1 || c.Duties[0] != DutyPortalRegister) {
 		return ServiceClaims{}, ErrServiceToken
 	}
 	if c.Cus != "" {

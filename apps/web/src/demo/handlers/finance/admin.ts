@@ -82,6 +82,10 @@ route("GET", "/api/v1/identity/users/{id}/effective-permissions", ({ params, que
   );
   return { userId: user.userId, ...(query.get("legalEntityId") ? { legalEntityId: query.get("legalEntityId")! } : {}), duties, ignoredRoles: [], permissions };
 });
+route("GET", "/api/v1/identity/user-names", ({ query }) => {
+  const wanted = (query.get("ids") ?? "").split(",").filter((id) => id !== "");
+  return { items: users.all().filter((u) => wanted.includes(u.userId)).map((u) => ({ userId: u.userId, displayName: u.displayName })) };
+});
 route("GET", "/api/v1/identity/users/{id}", ({ params }) => {
   const u = users.get(params.id);
   return u ? userOf(u) : reply.problem(404, "IAM-0404", "user not found");

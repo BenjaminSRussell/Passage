@@ -1,6 +1,16 @@
 image: { repository: ghcr.io/benjaminsrussell/passage-customer-portal, digest: "", tag: "", pullPolicy: IfNotPresent }
-# One replica: sessions and the rate limiter are in memory (NOT-IMPLEMENTED.md). A second replica would not know the first one's sessions.
+# One replica unless sessionStore.url is set: without a shared store sessions live in the pod's memory, a restart signs everyone out and a
+# second replica would not know the first one's sessions, so the chart refuses replicaCount > 1 then. The rate limiter stays per pod.
 replicaCount: 1
+sessionStore:
+  # redis:// or rediss:// (TLS) URL of a Valkey or Redis server in the cluster, e.g. redis://valkey.valkey.svc:6379. Empty: in memory.
+  url: ""
+  # Secret holding the server's password under passwordSecretKey; empty when the server has none.
+  passwordSecretName: ""
+  passwordSecretKey: password
+  # The namespace and port the network policy opens egress to when url is set.
+  namespace: valkey
+  port: 6379
 oidc:
   # The Keycloak realm URL, e.g. https://keycloak.<env>.passage.dev/realms/passage. Required.
   issuer: ""
@@ -16,8 +26,10 @@ upstreams:
   receivables: http://receivables.receivables.svc:8080
   billing: http://billing.billing.svc:8080
   sales: http://sales.sales.svc:8080
+  party: http://party.party.svc:8080
+  identity: http://identity.identity.svc:8080
 # Secret holding this service's Ed25519 seed under the key "signing-key". Its public key is added to
-# PASSAGE_SERVICE_PUBLIC_KEYS of receivables, billing and sales as customer-portal=...
+# PASSAGE_SERVICE_PUBLIC_KEYS of receivables, billing, sales, party and identity as customer-portal=...
 serviceSigningSecretName: customer-portal-signing
 resources:
   requests: { cpu: 25m, memory: 96Mi }
@@ -27,6 +39,6 @@ networkPolicy:
   dnsNamespace: kube-system
   # The edge (Envoy) namespace, the only caller.
   edgeNamespace: envoy-gateway-system
-  upstreamNamespaces: [receivables, billing, sales]
+  upstreamNamespaces: [receivables, billing, sales, party, identity]
   # Keycloak is reached on 443.
   identityProviderCidr: 0.0.0.0/0

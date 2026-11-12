@@ -151,7 +151,10 @@ func (l JournalLine) sameDestination(o JournalLine) bool {
 // Journal is an inventory journal with its lines. ReversesJournalID is set on
 // a reversal journal; ReversedByJournalID on a journal that has one (BR-16.12).
 type Journal struct {
-	ID                  string
+	ID string
+	// Number is the journal's document number (IJ-000123), per legal entity,
+	// assigned on insert (migration 0042).
+	Number              string
 	LegalEntityID       string
 	ReversesJournalID   string
 	ReversedByJournalID string

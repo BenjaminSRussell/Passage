@@ -236,6 +236,9 @@ func scanPartner(row pgx.Row) (domain.PartnerRecord, error) {
 
 // wrap adds context to infrastructure errors and passes rule violations through.
 func wrap(op string, err error) error {
+	if err == nil {
+		return nil
+	}
 	var de *domain.Error
 	if errors.As(err, &de) {
 		return de

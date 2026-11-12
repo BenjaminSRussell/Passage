@@ -213,6 +213,14 @@ written as a COUNT journal (gains valued at the running average) and posted thro
 journal path, so the negative policy, GL entry (inventory against the adjustment account)
 and events are those of any journal.
 
+## Journal numbers (#500, migration `0042`)
+
+Every journal gets a document number `IJ-000001`, `IJ-000002`, ... per legal entity on insert, whichever path creates it
+(journals, copies, count postings, blocking scrap, opening balances), from a counter row the insert trigger takes under a
+row lock. Migration `0042` numbers the existing journals in creation order (under a role that bypasses row-level security
+only) and the counter continues after them. Journals carry `number`; `GET /v1/inventory/journals?q=` keeps the journals
+whose number starts with `q` (ignoring case, LIKE wildcards escaped).
+
 ## Journal reversal (BR-16.12)
 
 `:reverse` on a POSTED journal creates a DRAFT journal of the same type, legal entity,

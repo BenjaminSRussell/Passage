@@ -184,7 +184,7 @@ describe("NewRunPage", () => {
     expect(validateRun(values)).toEqual({});
     expect(validateRun({ ...values, ledgerId: "L1", period: "13", definition: "" })).toEqual({
       definition: "Choose a published definition.",
-      ledgerId: "Enter the ledger id (a UUID).",
+      ledgerId: "Choose the ledger.",
       period: "Enter a period from 0 to 12.",
     });
     expect(validateRun({ ...values, firstYear: "2027" }).firstYear).toBeDefined();
@@ -217,7 +217,7 @@ describe("NewRunPage", () => {
     await waitFor(() => expect(within(select).getAllByRole("option")).toHaveLength(2));
     expect(within(select).queryByText(/DRAFT-ONLY/)).toBeNull();
     fireEvent.change(select, { target: { value: "PL-STD" } });
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.change(screen.getByLabelText("Fiscal year"), { target: { value: "2026" } });
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("Calendar starts in"), { target: { value: "2025" } });
@@ -240,13 +240,13 @@ describe("NewRunPage", () => {
     renderAt("/finreport/runs/new");
     fireEvent.click(await screen.findByRole("button", { name: "Run statement" }));
     expect(await screen.findByText("Choose a published definition.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the ledger id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByText("Choose the ledger.")).toBeInTheDocument();
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
 
     const select = screen.getByLabelText("Definition");
     await waitFor(() => expect(within(select).getAllByRole("option")).toHaveLength(2));
     fireEvent.change(select, { target: { value: "PL-STD" } });
-    fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER } });
+    fireEvent.change(screen.getByLabelText("Ledger"), { target: { value: LEDGER } });
     fireEvent.click(screen.getByRole("button", { name: "Run statement" }));
     expect(await screen.findByText("The statement did not run")).toBeInTheDocument();
     expect(screen.getByText(/has no published version/)).toBeInTheDocument();

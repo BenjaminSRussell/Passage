@@ -25,6 +25,7 @@ paths:
         - { name: customer, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [open, all], default: open } }
         - { name: importSource, in: query, description: Only items loaded by this opening-item import source, schema: { type: string } }
+        - { name: q, in: query, description: "Only items whose document number contains it, ignoring case.", schema: { type: string, maxLength: 100 } }
         - { name: due_from, in: query, description: Only items due on or after this date, schema: { type: string, format: date } }
         - { name: due_to, in: query, description: Only items due on or before this date, schema: { type: string, format: date } }
         - { name: cursor, in: query, description: The nextCursor of the previous page; the list is ordered by due date, then id, schema: { type: string } }
@@ -179,6 +180,7 @@ paths:
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [RECEIVED, SUGGESTED, APPLIED, ON_ACCOUNT, REVERSED, ADVISED, CONFIRMED] } }
         - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { name: q, in: query, description: "Only payments whose payer name, source reference or amount contains it, ignoring case.", schema: { type: string, maxLength: 100 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
       responses:
         "200":
@@ -285,6 +287,31 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/payments/{id}:reverse:
+    post:
+      operationId: reversePayment
+      summary: Reverse the cash receipt of a payment that was never applied; requires If-Match
+      description: |
+        The payment becomes REVERSED and the ledger is owed the mirror image of the receipt's own journal, so the credit goes back
+        to the bank account the receipt was booked to even if the bank account mapping changed since. A payment with an
+        application is refused with 409 AR-PAYMENT-STATE.
+      x-passage-duty: receivables.payment.reverse
+      parameters:
+        - { $ref: "#/components/parameters/PaymentId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Payment reversed
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
   /v1/receivables/open-items:batch:
     post:
@@ -1682,6 +1709,42 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/receivables/fx-settings:
+    get:
+      operationId: getFXSetting
+      summary: The realized-FX profile of a legal entity (the default when none is stored)
+      x-passage-duty: receivables.view
+      parameters:
+        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The setting
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FXSetting" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: putFXSetting
+      summary: Set whether a legal entity settles across currencies, its functional currency and the realized gain and loss accounts
+      description: |
+        A settlement of an item in another currency than the payment needs `crossCurrencyEnabled`. Its realized exchange difference
+        is booked as its own single-currency journal in the functional currency, at the spot rates of the fx service on the payment's
+        value date and on the item's document date, to the gain account (default 7100) or the loss account (default 7200).
+      x-passage-duty: receivables.fxsetting.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FXSetting" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FXSetting" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/receivables/bank-accounts:
     get:
       operationId: listBankAccounts
@@ -1806,6 +1869,10 @@ paths:
                   applications: { type: integer }
                   openingItems: { type: integer }
                   openingAlreadyQueued: { type: integer }
+                  dunningFees: { type: integer }
+                  interest: { type: integer }
+                  downPayments: { type: integer }
+                  deductions: { type: integer }
                   more: { type: boolean }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -2351,6 +2418,16 @@ components:
         dunningLevel: { type: integer, minimum: 0, maximum: 4 }
         riskScore: { type: integer, minimum: 0, maximum: 100 }
         takenAt: { type: string, format: date-time }
+    FXSetting:
+      type: object
+      required: [legalEntityId]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        crossCurrencyEnabled: { type: boolean, default: false }
+        functionalCurrency: { type: string, pattern: "^[A-Z]{3}$", description: Required once cross-currency settlement is enabled. }
+        gainAccount: { type: string, maxLength: 20, default: "7100" }
+        lossAccount: { type: string, maxLength: 20, default: "7200" }
     BankAccount:
       type: object
       required: [legalEntityId, currency, glAccount]
@@ -2574,6 +2651,9 @@ components:
               amount: { $ref: "#/components/schemas/Money" }
               cashDiscount: { $ref: "#/components/schemas/Money" }
               writeOff: { $ref: "#/components/schemas/Money" }
+              itemAmount:
+                $ref: "#/components/schemas/Money"
+                description: What the settlement takes off the item in the item's currency, with at most the currency's decimals; required for an item in another currency than the payment (and then `amount` is the cash in the payment currency, with no discount or write-off). It must be within the BR-30.4 write-off tolerance (the larger of 5.00 and 0.5% of it) of what the cash is worth in the item's currency at the value-date rate, else 422 AR-FX-TOLERANCE.
         onAccount: { $ref: "#/components/schemas/Money" }
     ApplyResult:
       type: object
@@ -2590,6 +2670,9 @@ components:
               writeOff: { $ref: "#/components/schemas/Money" }
               openAfter: { $ref: "#/components/schemas/Money" }
               itemStatus: { type: string }
+              itemCurrency: { type: string, description: Set for a cross-currency settlement. }
+              itemAmount: { $ref: "#/components/schemas/Money" }
+              realizedFx: { $ref: "#/components/schemas/Money", description: "Realized exchange difference in the functional currency, positive for a gain." }
     AutoApplyResult:
       type: object
       required: [applied, suggested, onAccount, failed, appliedPaymentIds]

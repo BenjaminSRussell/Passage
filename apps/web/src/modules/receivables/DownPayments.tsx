@@ -250,7 +250,7 @@ export function NewDownPaymentPage() {
           </FormField>
           {text("nd-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
           {text("nd-customer", "customerId", "Customer", { entity: "customer" })}
-          {text("nd-order", "salesOrderId", "Sales order id", { optional: true })}
+          {text("nd-order", "salesOrderId", "Sales order", { entity: "salesOrder", optional: true })}
           {text("nd-currency", "currency", "Currency")}
           {text("nd-amount", "amount", "Amount", { decimal: true })}
           {failure ? (
@@ -428,8 +428,8 @@ export function DownPaymentDetailPage() {
         <Card title={dp.kind === "DOWN_PAYMENT" ? "Clear against the final invoice" : "Offset against an open item"} headingLevel={3}>
           <div className={styles.stack}>
             <form className={styles.form} onSubmit={clear} noValidate>
-              <FormField id="dd-item" label="Open item id" error={errors.openItemId} hint={dp.kind === "DOWN_PAYMENT" ? "The invoice of the same customer and currency." : "An invoice, fee or interest item of the same customer."}>
-                {(c) => <Input {...c} className={styles.mono} value={openItemId} onChange={(e) => setOpenItemId(e.target.value)} invalid={Boolean(errors.openItemId)} />}
+              <FormField id="dd-item" label="Open item" error={errors.openItemId} hint={dp.kind === "DOWN_PAYMENT" ? "The invoice of the same customer and currency." : "An invoice, fee or interest item of the same customer."}>
+                {(c) => <EntityLookup entity="openItem" {...c} value={openItemId} onChange={(e) => setOpenItemId(e.target.value)} invalid={Boolean(errors.openItemId)} />}
               </FormField>
               <FormField id="dd-amount" label="Amount" optional error={errors.amount} hint="Empty clears the most possible: what remains, or the item's open amount if smaller.">
                 {(c) => <Input {...c} className={styles.mono} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} invalid={Boolean(errors.amount)} />}

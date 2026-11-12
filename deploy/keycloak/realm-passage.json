@@ -398,7 +398,9 @@
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "access.token.lifespan": "300",
-        "post.logout.redirect.uris": "https://customer.passage.example.invalid/"
+        "post.logout.redirect.uris": "https://customer.passage.example.invalid/",
+    "backchannel.logout.url": "https://customer.passage.example.invalid/bff/backchannel-logout",
+    "backchannel.logout.session.required": "true"
       },
       "protocolMappers": [
         {

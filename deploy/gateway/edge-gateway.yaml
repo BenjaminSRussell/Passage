@@ -1,0 +1,28 @@
+# The plant edge (#25, 25-4). iot-edge connectors redeem a one-time enrollment token without a session, then call the
+# shop floor service with the mTLS client certificate they were issued. They carry no Passage JWT, so this is a Gateway of
+# its own, like passage-as2: SecurityPolicy/passage-api-jwt (which targets Gateway passage-api) can never apply to it, and
+# its only route is HTTPRoute/shopfloor-edge, five operations of the connector and nothing else. HTTPS only; the hostname
+# is per environment (edge.<env>.passage.dev). deploy/scripts/test_gateway.py checks the rest.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: passage-edge
+  namespace: hello-ledger
+spec:
+  gatewayClassName: passage-envoy
+  listeners:
+    - name: edge-https
+      protocol: HTTPS
+      port: 443
+      hostname: edge.dev.passage.dev
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: passage-edge-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+        kinds:
+          - kind: HTTPRoute

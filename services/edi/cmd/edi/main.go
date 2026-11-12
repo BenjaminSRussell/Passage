@@ -26,9 +26,11 @@ import (
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/api"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/certtrust"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/cxmlmap"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/delivery"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/poster"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/safenet"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -110,8 +112,14 @@ func run() error {
 		src := sources.New(signer, fulfillmentURL, billingURL, salesURL, nil)
 		a.Sources, a.Intake = src, src
 		// A returned punchout cart becomes a requisition in purchasing when its URL is set (35-3).
-		if purchasingURL := os.Getenv("EDI_PURCHASING_URL"); purchasingURL != "" {
+		purchasingURL, receivingURL := os.Getenv("EDI_PURCHASING_URL"), os.Getenv("EDI_RECEIVING_URL")
+		if purchasingURL != "" {
 			a.Requisitions = src.WithPurchasing(purchasingURL)
+		}
+		// The cXML exchange (35-4) reads and confirms purchase orders in purchasing and creates ASNs in receiving.
+		if purchasingURL != "" && receivingURL != "" {
+			src.WithReceiving(receivingURL)
+			a.CXMLMapper = &cxmlmap.Mapper{Store: st, Purchasing: src, Receiving: src}
 		}
 	}
 	tc, err := loadTransportConfig(os.Getenv, addr)
@@ -132,12 +140,14 @@ func run() error {
 		p := &delivery.Poller{Store: st, Secrets: tc.secrets, Receive: a.ReceiveFromTransport}
 		go delivery.Run(ctx, "delivery dispatcher", tc.interval, d.RunOnce)
 		go delivery.Run(ctx, "sftp poller", tc.interval, p.RunOnce)
+		// The self-billing sweep (35-5): match pending self-billed documents and open the unbilled disputes, on its own schedule.
+		go delivery.Run(ctx, "self-billing sweep", tc.sweepInterval, a.RunSelfBillSweep)
 		if a.Intake != nil {
 			sp := &poster.Poster{Store: st, Intake: a.Intake, PlaceAs: poster.AsServicePrincipal}
 			go delivery.Run(ctx, "sales poster", tc.interval, sp.RunOnce)
 		}
 	}
-	go func() { errCh <- httpx.Serve(ctx, addr, a.Routes()) }()
+	go func() { errCh <- httpx.ServeWithMetrics(ctx, addr, a.Routes()) }()
 	err = <-errCh
 	stop()
 	return err
@@ -151,7 +161,9 @@ type transportConfig struct {
 	as2Addr   string
 	workers   bool
 	interval  time.Duration
-	http      *http.Client
+	// sweepInterval is how often the self-billing sweep runs (EDI_SELFBILL_SWEEP_MINUTES, default 60).
+	sweepInterval time.Duration
+	http          *http.Client
 	// ratePerMinute and rateBurst are the AS2 listener's limit per endpoint
 	// (0 per minute: off); mdnTimeout bounds the wait for an asynchronous MDN.
 	ratePerMinute int
@@ -207,6 +219,14 @@ func loadTransportConfig(getenv func(string) string, httpAddr string) (transport
 		return c, errors.New("EDI_TRANSPORT_INTERVAL_SECONDS must be 1 to 3600")
 	}
 	c.interval = time.Duration(seconds) * time.Second
+	sweepMinutes, err := envIntFrom(getenv, "EDI_SELFBILL_SWEEP_MINUTES", 60)
+	if err != nil {
+		return c, err
+	}
+	if sweepMinutes < 1 || sweepMinutes > 1440 {
+		return c, errors.New("EDI_SELFBILL_SWEEP_MINUTES must be 1 to 1440")
+	}
+	c.sweepInterval = time.Duration(sweepMinutes) * time.Minute
 	if c.ratePerMinute, err = envIntFrom(getenv, "EDI_AS2_RATE_PER_MINUTE", 120); err != nil {
 		return c, err
 	}
@@ -229,7 +249,8 @@ func loadTransportConfig(getenv func(string) string, httpAddr string) (transport
 	c.mdnTimeout = time.Duration(minutes) * time.Minute
 	// Partner URLs are configured by an administrator; redirects are not
 	// followed so a partner endpoint cannot bounce the service elsewhere.
-	c.http = &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// Partner AS2 URLs are dialed only at public addresses; EDI_AS2_ALLOW_HTTP (development) also allows private ones.
+	c.http = safenet.Client(2*time.Minute, c.allowHTTP)
 	return c, nil
 }
 

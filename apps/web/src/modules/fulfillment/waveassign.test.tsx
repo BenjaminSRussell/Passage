@@ -175,10 +175,10 @@ describe("pick list and wave filters", () => {
     expect(await screen.findByText("anna")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "OPEN" } });
     fireEvent.change(screen.getByLabelText("Picker"), { target: { value: "anna" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.search.includes("status=OPEN") && c.url.search.includes("picker=anna"))).toBe(true));
     fireEvent.change(screen.getByLabelText("Picker"), { target: { value: "-" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.search.includes("unassigned=true") && !c.url.search.includes("picker="))).toBe(true));
   });
 
@@ -186,7 +186,7 @@ describe("pick list and wave filters", () => {
     server.handler = () => json(200, { items: [] });
     renderAt("/fulfillment/waves");
     fireEvent.change(await screen.findByLabelText("Status"), { target: { value: "CLOSED" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    expect(await screen.findByText("No waves match")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("No pick waves match these filters")).toBeInTheDocument();
   });
 });

@@ -486,3 +486,26 @@ func TestVariantsInheritTheMastersItemGroupAndTrackingFlags(t *testing.T) {
 		t.Fatalf("variant must copy the master's group and flags: %v %+v", err, v)
 	}
 }
+
+// ProductNames answers number and name of the tenant's own products only.
+func TestPostgres_ProductNames(t *testing.T) {
+	s, _ := appStore(t)
+	one := tenant.With(context.Background(), principal(1))
+	two := tenant.With(context.Background(), principal(2))
+	mk := func(ctx context.Context, id, number, name string) {
+		t.Helper()
+		if _, err := s.CreateProduct(ctx, domain.Product{ID: id, ProductNumber: number, Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: name, BaseUOM: "EA"}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := testkit.TenantID(91), testkit.TenantID(92)
+	mk(one, a, "NAME-1", "Pump")
+	mk(two, b, "NAME-2", "Other tenant's valve")
+	got, err := s.ProductNames(one, []string{a, b, testkit.TenantID(93)})
+	if err != nil || len(got) != 1 || got[0].ID != a || got[0].Name != "Pump" || got[0].ProductNumber != "NAME-1" {
+		t.Fatalf("names for tenant one: %+v %v", got, err)
+	}
+	if none, err := s.ProductNames(one, nil); err != nil || len(none) != 0 {
+		t.Fatalf("no ids: %+v %v", none, err)
+	}
+}

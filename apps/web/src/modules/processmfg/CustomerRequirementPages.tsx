@@ -247,8 +247,8 @@ export function NewCustomerRequirementPage() {
             )}
           </FormField>
           {scope !== "item" ? (
-            <FormField id="req-party" label={scope === "group" ? "Customer group id" : "Customer id"} error={errors.partyId}>
-              {(c) => <Input {...c} value={partyId} onChange={(e) => on(setPartyId)(e.target.value)} invalid={Boolean(errors.partyId)} />}
+            <FormField id="req-party" label={scope === "group" ? "Customer group" : "Customer"} error={errors.partyId}>
+              {(c) => <EntityLookup key={scope} entity={scope === "group" ? "customerGroup" : "customer"} {...c} value={partyId} onChange={(e) => on(setPartyId)(e.target.value)} invalid={Boolean(errors.partyId)} />}
             </FormField>
           ) : null}
           <FormField id="req-days" label="Sellable days" hint="Minimum shelf life left at shipment, in days." error={errors.days}>
@@ -410,7 +410,7 @@ export function StoredRequirementCheckPage({ check = defaultCheck, list = defaul
     const found: Record<string, string> = {};
     if (!itemValid) found.itemId = "Enter the item id as a UUID.";
     if (customerId.trim() !== "" && !UUID.test(customerId.trim())) found.customerId = "Choose a customer.";
-    if (groupId.trim() !== "" && !UUID.test(groupId.trim())) found.groupId = "Enter the customer group id as a UUID.";
+    if (groupId.trim() !== "" && !UUID.test(groupId.trim())) found.groupId = "Choose the customer group.";
     if (!DATE.test(shipDate.trim())) found.shipDate = "Enter the ship date as yyyy-mm-dd.";
     if (!QUANTITY.test(qty.trim()) || Number(qty) === 0) found.qty = "Enter the line quantity above zero.";
     const chosen = Object.entries(onHand).filter(([, v]) => v.trim() !== "");
@@ -474,8 +474,8 @@ export function StoredRequirementCheckPage({ check = defaultCheck, list = defaul
             <FormField id="rc-customer" label="Customer" hint="Leave empty to apply the item default only." error={errors.customerId}>
               {(c) => <EntityLookup entity="customer" {...c} value={customerId} onChange={(e) => setCustomerId(e.target.value)} invalid={Boolean(errors.customerId)} />}
             </FormField>
-            <FormField id="rc-group" label="Customer group id" error={errors.groupId}>
-              {(c) => <Input {...c} value={groupId} onChange={(e) => setGroupId(e.target.value)} invalid={Boolean(errors.groupId)} />}
+            <FormField id="rc-group" label="Customer group" optional error={errors.groupId}>
+              {(c) => <EntityLookup entity="customerGroup" {...c} value={groupId} onChange={(e) => setGroupId(e.target.value)} invalid={Boolean(errors.groupId)} />}
             </FormField>
             <FormField id="rc-ship" label="Ship date" hint="yyyy-mm-dd" error={errors.shipDate}>
               {(c) => <Input {...c} value={shipDate} onChange={(e) => setShipDate(e.target.value)} invalid={Boolean(errors.shipDate)} />}

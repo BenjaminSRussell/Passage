@@ -155,7 +155,7 @@ describe("Cost rate history", () => {
     await screen.findByText("No dated cost rates");
     fill("New rate per hour (USD)", "30");
     fireEvent.click(screen.getByRole("button", { name: "Add cost rate" }));
-    expect(await screen.findByText(/set the new rate from a later date. \(SF-0170\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/set the new rate from a later date./)).toBeInTheDocument();
     code = "SF-0106";
     fireEvent.click(screen.getByRole("button", { name: "Add cost rate" }));
     expect(await screen.findByText(/You can't set your own cost rate/)).toBeInTheDocument();

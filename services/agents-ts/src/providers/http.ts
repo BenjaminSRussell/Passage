@@ -3,6 +3,8 @@ import { parseJsonBody, providerRejected, providerUnavailable } from "./wire.js"
 export interface PostOptions {
   fetchFn: typeof fetch;
   timeoutMs: number;
+  /** Aborts the request when the caller is gone (a client that disconnected), alongside the timeout. */
+  signal?: AbortSignal;
 }
 
 /** Connection errors that mean the request never reached the provider, so nothing was billed. */
@@ -30,13 +32,40 @@ function errorMarks(err: unknown, depth = 0): string[] {
  * message never includes the request, the key or the body.
  */
 export async function postJson(url: string, headers: Record<string, string>, body: unknown, opts: PostOptions): Promise<unknown> {
-  let res: Response;
+  const res = await send(url, headers, body, opts);
+  let text: string;
   try {
-    res = await opts.fetchFn(url, {
+    text = await res.text();
+  } catch {
+    throw providerUnavailable("provider connection dropped while reading the response");
+  }
+  checkStatus(res.status);
+  return parseJsonBody(text);
+}
+
+/**
+ * POSTs JSON and returns the response with its body unread, for a streamed answer. The status is judged like postJson
+ * does before any byte is read; `timeoutMs` bounds the whole stream, not just the first byte.
+ */
+export async function postStream(url: string, headers: Record<string, string>, body: unknown, opts: PostOptions): Promise<ReadableStream<Uint8Array>> {
+  const res = await send(url, headers, body, opts);
+  try {
+    checkStatus(res.status);
+  } catch (err) {
+    await res.body?.cancel().catch(() => undefined);
+    throw err;
+  }
+  if (res.body === null) throw providerRejected("provider answered without a body", true);
+  return res.body;
+}
+
+async function send(url: string, headers: Record<string, string>, body: unknown, opts: PostOptions): Promise<Response> {
+  try {
+    return await opts.fetchFn(url, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(opts.timeoutMs),
+      signal: opts.signal === undefined ? AbortSignal.timeout(opts.timeoutMs) : AbortSignal.any([AbortSignal.timeout(opts.timeoutMs), opts.signal]),
     });
   } catch (err) {
     const marks = errorMarks(err);
@@ -45,14 +74,10 @@ export async function postJson(url: string, headers: Record<string, string>, bod
     if (notConnected !== undefined) throw providerUnavailable(`provider connection failed (${notConnected})`, true);
     throw providerUnavailable("provider request failed before a response");
   }
-  let text: string;
-  try {
-    text = await res.text();
-  } catch {
-    throw providerUnavailable("provider connection dropped while reading the response");
-  }
-  if (res.status >= 500) throw providerUnavailable(`provider returned ${res.status}`, true);
-  if (res.status === 429) throw providerRejected("provider rate-limited the request (429)", true);
-  if (res.status >= 400) throw providerRejected(`provider rejected the request with ${res.status}`, true);
-  return parseJsonBody(text);
+}
+
+function checkStatus(status: number): void {
+  if (status >= 500) throw providerUnavailable(`provider returned ${status}`, true);
+  if (status === 429) throw providerRejected("provider rate-limited the request (429)", true);
+  if (status >= 400) throw providerRejected(`provider rejected the request with ${status}`, true);
 }

@@ -146,7 +146,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	s := store.New(pool).WithRules(cfg.rules)
-	a := api.New(s, cfg.post).WithTruckStock(s)
+	a := api.New(s, cfg.post).WithTruckStock(s).WithOpeningBatches(s)
 	// Optional: without LEDGER_URL the GL sweep answers 503 INV-GL-005; with it, a signing key is required.
 	ledger, err := ledgerclient.FromEnv(getenv, "inventory")
 	if err != nil {
@@ -171,6 +171,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	replenish, err := newReplenishJob(getenv, s)
+	if err != nil {
+		return err
+	}
+	if replenish != nil {
+		go replenish.loop(ctx)
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

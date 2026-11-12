@@ -8,6 +8,7 @@ import { DECIMAL, UUID, type InvoiceNavState } from "./parts";
 import styles from "../../shell/pageLayout.module.css";
 import { ProblemMessage } from "../../shell/errors";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const MAX_LINES = 500;
 
@@ -59,7 +60,7 @@ export function validateInvoice(v: InvoiceDraft): Errors {
   if (v.lines.length < 1 || v.lines.length > MAX_LINES) errors.lines = `Enter 1 to ${MAX_LINES} lines.`;
   v.lines.forEach((l, i) => {
     const at = (field: string) => `lines[${i}].${field}`;
-    if (!UUID.test(l.receiptId)) errors[at("receiptId")] = "Enter a receipt UUID.";
+    if (!UUID.test(l.receiptId)) errors[at("receiptId")] = "Choose the receipt.";
     if (!/^\d+$/.test(l.receiptLineNo) || Number(l.receiptLineNo) < 1) errors[at("receiptLineNo")] = "Enter a line number from 1.";
     if (!DECIMAL.test(l.qty) || Number(l.qty) <= 0) errors[at("qty")] = "Enter a quantity above zero.";
     if (!DECIMAL.test(l.unitPrice)) errors[at("unitPrice")] = "Enter a price of zero or more.";
@@ -83,8 +84,12 @@ export function toInvoiceInput(v: InvoiceDraft): InvoiceInput {
 function initialDraft(state: InvoiceNavState | null): InvoiceDraft {
   const items = state?.items ?? [];
   if (items.length === 0) return emptyInvoice;
+  const header = state?.header ?? {};
   return {
     ...emptyInvoice,
+    ...(header.legalEntityId ? { legalEntityId: header.legalEntityId } : {}),
+    ...(header.invoiceNumber ? { invoiceNumber: header.invoiceNumber } : {}),
+    ...(header.invoiceDate ? { invoiceDate: header.invoiceDate } : {}),
     vendorId: items[0].vendorId,
     currency: items[0].currency,
     lines: items.map((i) => ({ receiptId: i.receiptId, receiptLineNo: String(i.receiptLineNo), qty: i.qty, unitPrice: i.unitPrice, standardCost: false })),
@@ -178,7 +183,7 @@ export function PostInvoicePage() {
           {text("invoiceDate", "Invoice date", { type: "date" })}
           {text("postingDate", "Posting date", { type: "date", hint: "Sets the fiscal period; it must be an open AP period." })}
           {text("currency", "Currency", { hint: "Must match the receipt currency." })}
-          {text("ledgerId", "Ledger ID", { mono: true })}
+          <LookupFormField id="invoice-ledgerId" label="Ledger" entity="ledger" scope={{ legalEntityId: values.legalEntityId || undefined }} value={values.ledgerId} error={errors.ledgerId} onChange={(ledgerId) => update({ ledgerId })} />
           {errors.lines ? (
             <div className={styles.formActions}>
               <Alert tone="danger" live="alert">
@@ -197,7 +202,15 @@ export function PostInvoicePage() {
             return (
               <fieldset key={i} className={styles.group}>
                 <legend className={styles.legend}>Line {n}</legend>
-                {field("receiptId", "receipt ID", true)}
+                <LookupFormField
+                  id={`inv-line-${i}-receiptId`}
+                  label={`Line ${n} receipt`}
+                  entity="receipt"
+                  scope={{ legalEntityId: values.legalEntityId || undefined }}
+                  value={line.receiptId}
+                  error={errors[at("receiptId")]}
+                  onChange={(receiptId) => updateLine(i, { receiptId })}
+                />
                 {field("receiptLineNo", "receipt line")}
                 {field("qty", "quantity")}
                 {field("unitPrice", "unit price")}

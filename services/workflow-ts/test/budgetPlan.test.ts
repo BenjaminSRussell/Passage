@@ -168,6 +168,64 @@ describe("budget plan approval workflow", () => {
     expect(fake.calls["sign-off"]).toBeGreaterThan(1);
   }, 60_000);
 
+  it("keeps the record of a dropped decision when the workflow restarts its history (continue-as-new)", async () => {
+    const fake = new FakeBudgeting();
+    // Budgeting never answers: the activity's one-hour retry window runs out and the decision is dropped, not refused.
+    fake.refuse("sign-off", 503, "BUD-9999");
+    let firstRun = "";
+    let sameWorkflow = "";
+    const result = await run(fake, async (handle) => {
+      firstRun = handle.firstExecutionRunId;
+      sameWorkflow = handle.workflowId;
+      await review(handle, "rev-a", UNIT_A);
+      await environment.sleep("2 hours");
+      for (let i = 0; i < 200; i += 1) {
+        if ((await handle.query(budgetPlanStateQuery)).droppedDecisions.length === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect((await handle.query(budgetPlanStateQuery)).droppedDecisions).toHaveLength(1);
+
+      // Budgeting is back. A run of refused decisions makes the workflow continue as new; the dropped one must come along.
+      fake.refuse("sign-off", 503, "BUD-9999", 0);
+      for (let i = 0; i < REFUSED_DECISIONS_BEFORE_RESTART; i += 1)
+        await review(handle, "mallory", UNIT_A);
+      let restarted = false;
+      for (let i = 0; i < 400 && !restarted; i += 1) {
+        const described = await environment.client.workflow
+          .getHandle(sameWorkflow)
+          .describe();
+        const state = await handle.query(budgetPlanStateQuery);
+        restarted =
+          described.runId !== firstRun && state.refusedDecisions === 0;
+        if (!restarted)
+          await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(restarted).toBe(true);
+      const carried = await handle.query(budgetPlanStateQuery);
+      expect(carried.status).toBe("awaiting_review");
+      expect(carried.droppedDecisions).toEqual([
+        {
+          decision: "sign-off",
+          stage: "review",
+          orgUnitId: UNIT_A,
+          actor: "rev-a",
+          failure: expect.any(String),
+        },
+      ]);
+
+      // The plan still completes in the new run, and the record is still there at the end.
+      await review(handle, "rev-a", UNIT_A);
+      await review(handle, "rev-b", UNIT_B);
+      await approve(handle, "boss");
+    });
+    expect(result).toMatchObject({
+      status: "approved",
+      refusedDecisions: 0,
+      droppedDecisions: [{ decision: "sign-off", actor: "rev-a" }],
+    });
+    expect(fake.effects).toBe(1);
+  }, 180_000);
+
   it("carries the plan through review by every org unit and approval, and the approved scenario becomes the register", async () => {
     const fake = new FakeBudgeting();
     const result = await run(fake, async (handle) => {

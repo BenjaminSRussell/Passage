@@ -417,10 +417,10 @@ Migration `0012_b2b_exchange.sql`. Every table is tenant-scoped with the legal-e
   yield one interchange. A document that is not this partner's (another customer, EDI-0011), cannot be mapped (a partly shipped
   shipment, EDI-0007), or a partner without a profile or EDIFACT identity is logged and skipped; a source outage is retried by the
   consumer (2 s doubling, 10 attempts) and then dead-lettered. One 856 per shipment: a second packing slip of a shipment replays the
-  first.
+  first. (Now keyed by shipment and slip, see Slice 11.)
 - **35-2 E-invoice store and mandate framework.** `POST /einvoice/invoices {legalEntityId, invoiceId, mandate}` reads the posted
-  billing invoice (or credit note), maps it (`EInvoiceFromBilling`: the VAT rate is derived from billing's tax amounts, one rate per
-  invoice, EINV-0113 for mixed rates; line discounts become one document allowance, header charges one charge; payable must equal
+  billing invoice (or credit note), maps it (`EInvoiceFromBilling`: the VAT rate is derived per line from billing's tax amounts (several
+  rates per invoice give one VAT breakdown per rate); line discounts become one document allowance per rate, header charges one charge; payable must equal
   billing's gross, EINV-0112), builds it with the mandate and stores it VALID with its XML or INVALID with the blocking issues, one
   per (invoice, mandate); a repeat returns the stored one and a repeat of an INVALID one builds again. Seller and buyer profiles
   (address, VAT id, endpoint, IBAN, buyer reference) come from `PUT /einvoice/parties/{role}/{subjectId}`. Mandates
@@ -454,6 +454,30 @@ Migration `0012_b2b_exchange.sql`. Every table is tenant-scoped with the legal-e
 
 Sample files: `testdata/cxml/` (the three network documents, a punchout cart and setup response) and
 `testdata/edifact/invoic-389-selfbilled.edi`. Tests run against fakes (in-test supplier and access point, fake sources and purchasing).
+
+## Slice 11 scope: B2B round 2 (#35)
+
+- **35-1 per packing slip.** The `asn.issued` event names its packing slip and the SSCCs of the containers that left with it. The consumer
+  generates one 856 or DESADV per shipment and slip (idempotency key `source:partner:set:shipment:slip`), listing only that slip's
+  containers, with the delivery note `<shipment number>-<slip number>`; a partly shipped shipment is accepted for a slip notice. The route
+  `outbound:from-source` still sends the whole shipment under the shipment's key. Self-billing lines are registered per delivery note.
+- **35-2.** `POST /einvoice/invoices/{id}:submit` claims the e-invoice (VALID or REJECTED to SUBMITTING in one statement; a concurrent submit
+  gets 409 EDI-0030), calls the access point, then records SUBMITTED; a failure releases the claim, and a claim older than ten minutes can
+  be taken over. An invoice may carry several VAT rates (the rate is derived per line from billing's tax and snapped to the nearest half
+  percent when that reproduces the tax; discounts are allowed per rate, header charges at the rate billing's tax total implies).
+  `POST /einvoice/invoices/{id}:validate` runs the Go-native Peppol rule subset (`CheckPeppolRules`), which also gates every Peppol build.
+  The mandate `FACTURX` stores the EN 16931 CII XML; `GET /einvoice/invoices/{id}/facturx.pdf` serves a PDF with it embedded. A customer
+  registered under a mandate (`PUT /einvoice/mandates/{customerId}/{mandate}`, optional `autoSubmit`) is e-invoiced by `edi consume` when
+  its invoice posts. Web: `/integration/einvoices` and its detail.
+- **35-4.** `POST /partners/{id}/cxml:send` builds OrderRequest (from a purchase order read from purchasing; orderID is the PO number, kept in
+  `cxml_order`), ConfirmationRequest, ShipNoticeRequest and InvoiceDetailRequest, records them as OUT interchanges and posts them to the
+  network of `PUT /partners/{id}/cxml/outbound` (https only, our identity, the secret by reference). Inbound confirmations and ship notices
+  are put onto purchasing (`:confirm`) and receiving (`POST /v1/receiving/asns`) as `service:edi-cxml`, right after receipt and with
+  `POST /messages/{id}:post`; what cannot be mapped is parked with EDI-0036 to EDI-0039 and EDI-0042. A FAILED cXML message is reprocessed
+  with `:reprocess` like any inbound interchange.
+- Review fixes: the SUBMITTING claim has an owner (release and the answer need the claim's token; the access point call is bounded to two minutes); the stored copy of an outbound cXML document has every SharedSecret emptied; partner URLs (cXML outbound, punchout, AS2 from `main`) are dialed only at public addresses (`internal/safenet`; `EDI_AS2_ALLOW_HTTP` allows private ones for development); a confirmation is accepted only when every status of every item accepts the ordered quantity and every open order line is listed; an `asn.issued` event that names a slip never falls back to the whole shipment; the Factur-X PDF paginates.
+- **35-5.** The self-billing sweep runs on a schedule with the transport workers (`EDI_SELFBILL_SWEEP_MINUTES`). Web:
+  `/integration/self-billing/disputes`.
 
 ## Wave 35 proof
 
@@ -647,7 +671,6 @@ signing uses the standard library only.
 | EDI-0034 | 422 | Purchasing refused the requisition of a returned cart |
 | EDI-0035 | 409 | The punchout session is not open, or its cart was not accepted |
 | EINV-0112 | (in issues) | The e-invoice payable differs from billing's gross |
-| EINV-0113 | (in issues) | The invoice implies more than one VAT rate; billing carries none per line |
 | EINV-0150 | (in issues) | The mandate is a hook and no generator is installed |
 | EDI-0133 | (in 200 punchout result) | Punchout line dropped: missing part id, quantity, price, price unit, allowed currency or mapped unit |
 | EDI-0134 | (in 200 punchout result) | Punchout cart total differs from the line sum by more than 0.01; the cart is rejected |

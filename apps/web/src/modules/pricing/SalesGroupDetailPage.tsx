@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { RepName } from "./RepName";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
 import {
@@ -39,7 +40,7 @@ export function validateRule(v: RuleDraft): Errors {
 }
 
 const repColumns: DataTableColumn<RepShare>[] = [
-  { key: "repId", header: "Rep", mono: true },
+  { key: "repId", header: "Rep", render: (r) => <RepName id={r.repId} /> },
   { key: "sharePct", header: "Share", mono: true, align: "end", render: (r) => `${r.sharePct}%` },
 ];
 

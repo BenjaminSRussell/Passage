@@ -1,5 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
-# Ingress: only the edge gateway. Egress: DNS, the three owning services, and Keycloak over 443.
+# Ingress: only the edge gateway. Egress: DNS, the owning services, the session store when one is set, and Keycloak over 443.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -34,6 +34,14 @@ spec:
         {{- end }}
       ports:
         - { protocol: TCP, port: 8080 }
+    {{- if .Values.sessionStore.url }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.sessionStore.namespace | quote }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.sessionStore.port }} }
+    {{- end }}
     - to:
         - ipBlock: { cidr: {{ .Values.networkPolicy.identityProviderCidr | quote }} }
       ports:

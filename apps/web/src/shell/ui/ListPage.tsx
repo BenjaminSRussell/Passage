@@ -1,6 +1,7 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { copy } from "../copy";
 import { ProblemMessage } from "../errors";
+import { filterBySearch, type SearchText } from "../search/match";
 import { formatOption, resolveOption, type LookupEntityKey } from "../lookup/entities";
 import { useWorkContext } from "../lookup/workContextState";
 import { localPreferenceStorage, noPreferenceStorage, type PreferenceStorage } from "../preferenceStorage";
@@ -9,6 +10,7 @@ import { Button } from "./Button";
 import { downloadCsv, toCsv } from "./csv";
 import { DataTable, type DataTableColumn } from "./DataTable";
 import { EmptyState } from "./EmptyState";
+import { Input } from "./Input";
 import { ColumnChooser, FilterBar, FilterChips, ViewsMenu } from "./ListControls";
 import styles from "./ListPage.module.css";
 import {
@@ -63,6 +65,12 @@ export interface ListPageProps<T> {
   onRowOpen?(row: T): void;
   empty: { title: string; description?: string; action?: ReactNode };
   serverSort?: string[];
+  /**
+   * Adds a search box over the rows loaded so far. It matches the way the record search service does
+   * (shell/search/match.ts): a number by its start, a name by what it contains, a typo forgiven. Say what a row is
+   * searched by; a row without a name is searched by its number alone.
+   */
+  search?(row: T): SearchText;
   storage?: PreferenceStorage;
 }
 
@@ -71,6 +79,41 @@ interface Start {
   query: ListQuery;
   visible: string[];
   activeId: string | null;
+}
+
+/** What a page that loads its whole list itself (one request, no paging) hands to ListPage. */
+export interface LoadedList<T> {
+  data: T[] | null | undefined;
+  loading: boolean;
+  error?: unknown;
+  reload(): void;
+}
+
+/**
+ * Whether a load failed for want of access: an HTTP 403, which the module clients carry as a status or as the problem
+ * code (AUTH-0003 from the duty check, or HTTP-403 when the body had none).
+ */
+export function isForbidden(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { status, code } = error as { status?: unknown; code?: unknown };
+  return status === 403 || code === "AUTH-0003" || code === "HTTP-403";
+}
+
+/**
+ * ListData for a list the page already loaded in full, such as a setup list it also reloads after a save. Pass it as
+ * `useRows={() => loadedRows(state)}`; filters and sort then work on the loaded rows. A 403 shows the no-access message.
+ */
+export function loadedRows<T>(state: LoadedList<T>, forbidden = isForbidden(state.error)): ListData<T> {
+  return {
+    rows: state.error ? [] : (state.data ?? []),
+    loading: state.loading && !state.data,
+    loadingMore: false,
+    error: state.error ? state.error : undefined,
+    forbidden,
+    hasMore: false,
+    loadMore: () => undefined,
+    retry: state.reload,
+  };
 }
 
 export async function entityText(entity: LookupEntityKey, id: string): Promise<string> {
@@ -99,6 +142,7 @@ export function ListPage<T>({
   onRowOpen,
   empty,
   serverSort = NO_SORTS,
+  search,
   storage: preferred = localPreferenceStorage,
 }: ListPageProps<T>) {
   const { identity } = useWorkContext();
@@ -122,6 +166,7 @@ export function ListPage<T>({
   const [visible, setVisible] = useState(start.visible);
   const [activeId, setActiveId] = useState(start.activeId);
   const [message, setMessage] = useState("");
+  const [searchText, setSearchText] = useState("");
   const [undo, setUndo] = useState<{ view: SavedView; index: number; wasDefault: boolean; wasActive: boolean } | null>(null);
 
   const data = useRows(query);
@@ -130,7 +175,7 @@ export function ListPage<T>({
   const shownColumns = columns.filter((c) => shownKeys.includes(c.key));
   const tableColumns = shownColumns.map((c) => ({ ...c, sortable: c.sortable !== false }));
   const localSort = query.sort !== null && !serverSort.includes(query.sort.key);
-  const rows = useMemo(() => {
+  const sorted = useMemo(() => {
     if (!localSort) {
       return data.rows;
     }
@@ -139,6 +184,8 @@ export function ListPage<T>({
     const group = column?.csvWith;
     return sortRows(data.rows, query.sort, (row, key) => (column?.sortValue ? column.sortValue(row) : rawValue(row, key)), group ? (row) => rawValue(row, group) : undefined);
   }, [data.rows, localSort, query.sort, columns]);
+  const searching = search !== undefined && searchText.trim() !== "";
+  const rows = useMemo(() => (search && searching ? filterBySearch(sorted, searchText, search) : sorted), [sorted, search, searching, searchText]);
 
   const active = store.views.find((v) => v.id === activeId);
   const filtered = Object.keys(query.filters).length > 0;
@@ -269,6 +316,7 @@ export function ListPage<T>({
     setMessage(data.hasMore ? copy.lists.exportedPartial(rows.length, exportedNoun) : copy.lists.exported(rows.length, exportedNoun));
   }
 
+  const searchNote = searching && data.hasMore && data.rows.length > 0 ? copy.lists.searchLoadedOnly(data.rows.length) : "";
   const blocked = data.forbidden === true;
   const sortNote = localSort && data.hasMore && rows.length > 0 ? copy.lists.sortedLoadedOnly(rows.length) : "";
   const failed = data.error !== undefined && data.error !== null && !blocked;
@@ -279,6 +327,27 @@ export function ListPage<T>({
       <PageHeader title={title} description={description} actions={actions} />
       {blocked ? null : (
         <>
+          {search ? (
+            <div className={styles.searchBox} role="search" aria-label={copy.lists.searchLabel(noun)}>
+              <label htmlFor={`${id}-search`} className="visually-hidden">
+                {copy.lists.searchLabel(noun)}
+              </label>
+              <Input
+                id={`${id}-search`}
+                type="search"
+                value={searchText}
+                placeholder={copy.lists.searchPlaceholder}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(e) => setSearchText(e.target.value)}
+              />
+              {searching ? (
+                <Button size="sm" onClick={() => setSearchText("")}>
+                  {copy.lists.clearSearch}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           {filters.length > 0 ? (
             <div ref={filterRef}>
               <FilterBar
@@ -301,6 +370,7 @@ export function ListPage<T>({
                   <span id={sortNoteId}>{sortNote}</span>
                 </>
               ) : null}
+              {searchNote ? ` ${searchNote}` : null}
             </p>
             <span className={styles.grow} />
             <div className={styles.toolsGroup}>
@@ -351,7 +421,13 @@ export function ListPage<T>({
           sortDescribedBy={sortNote ? sortNoteId : undefined}
         />
       ) : !blocked && !failed ? (
-        filtered ? (
+        searching && data.rows.length > 0 ? (
+          <EmptyState
+            title={copy.lists.noSearchMatchTitle(noun)}
+            description={copy.lists.noSearchMatchBody}
+            action={<Button onClick={() => setSearchText("")}>{copy.lists.clearSearch}</Button>}
+          />
+        ) : filtered ? (
           <EmptyState
             title={copy.lists.noMatchTitle(noun)}
             description={copy.lists.noMatchBody}

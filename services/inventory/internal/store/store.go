@@ -252,14 +252,14 @@ const journalColumns = `id::text, legal_entity_id::text, journal_type, status, t
 	(select count(*) from inventory_journal_line l where l.tenant_id = j.tenant_id and l.journal_id = j.id),
 	coalesce(reverses_journal_id::text, ''),
 	coalesce((select r.id::text from inventory_journal r where r.tenant_id = j.tenant_id and r.reverses_journal_id = j.id), ''),
-	coalesce(journal_name_id::text, '')`
+	coalesce(journal_name_id::text, ''), coalesce(number, '')`
 
 func scanJournal(row pgx.Row) (domain.Journal, error) {
 	var j domain.Journal
 	var jt, st, dateText string
 	var gl []byte
 	err := row.Scan(&j.ID, &j.LegalEntityID, &jt, &st, &dateText, &j.OffsetAccountID, &j.Currency, &j.Version, &gl, &j.CreatedAt, &j.PostedAt, &j.LineCount,
-		&j.ReversesJournalID, &j.ReversedByJournalID, &j.JournalNameID)
+		&j.ReversesJournalID, &j.ReversedByJournalID, &j.JournalNameID, &j.Number)
 	if err != nil {
 		return j, err
 	}
@@ -516,6 +516,8 @@ func (s *Postgres) GetJournal(ctx context.Context, id string) (domain.Journal, e
 type JournalFilter struct {
 	Status domain.JournalStatus
 	Type   domain.JournalType
+	// Number keeps the journals whose number starts with it (ignoring case).
+	Number string
 	Limit  int
 	Cursor string
 }
@@ -568,8 +570,10 @@ func (s *Postgres) ListJournals(ctx context.Context, f JournalFilter) (JournalPa
 		rows, err := tx.Query(ctx, `select `+journalColumns+` from inventory_journal j
 			where tenant_id = $1 and ($2 = '' or status = $2) and ($3 = '' or journal_type = $3)
 			and ($4::timestamptz is null or (created_at, id) < ($4, $5::uuid))
+			and ($7 = '' or upper(number) like $7 || '%')
 			order by created_at desc, id desc limit $6`,
-			p.TenantID, string(f.Status), string(f.Type), after, afterID, limit+1)
+			p.TenantID, string(f.Status), string(f.Type), after, afterID, limit+1,
+			strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.ToUpper(strings.TrimSpace(f.Number))))
 		if err != nil {
 			return err
 		}

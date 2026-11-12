@@ -192,7 +192,7 @@ describe("check in", () => {
     fill("Carrier SCAC", "abcd");
     fill("Trailer or container", "tr-1001");
     fill("Driver name", "Dana Driver");
-    fill("Driver license id", "D1234567");
+    fill("Driver licence number", "D1234567");
     fireEvent.click(screen.getByRole("button", { name: "Check in" }));
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(`/transport/gate/${VISIT}`));
     const [call] = posts("/gate/check-in");
@@ -207,7 +207,7 @@ describe("check in", () => {
     fill("Carrier SCAC", "ABCD");
     fill("Trailer or container", "TR-1001");
     fill("Driver name", "Dana");
-    fill("Driver license id", "L1");
+    fill("Driver licence number", "L1");
     fireEvent.click(screen.getByRole("button", { name: "Check in" }));
     expect(await screen.findByText(/already in the yard/)).toBeInTheDocument();
 
@@ -341,7 +341,6 @@ describe("goods in transit", () => {
       return undefined;
     };
     renderAt(`/transport/goods-in-transit/new?voyageId=${VOYAGE}`);
-    expect(screen.getByLabelText("Voyage id")).toHaveValue(VOYAGE);
     fill("Destination site", SITE);
     fill("Receipt lines", "1");
     fireEvent.click(screen.getByRole("button", { name: "Open order" }));

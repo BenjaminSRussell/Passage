@@ -338,7 +338,7 @@ describe("requisitions, candidates, offers and compensation cycles", () => {
     expect(api.posts("/hire")).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Personnel number"), { target: { value: "wrk-9" } });
     fireEvent.change(screen.getByLabelText("Party"), { target: { value: id(8) } });
-    fireEvent.change(screen.getByLabelText("National id"), { target: { value: "123-45-6789" } });
+    fireEvent.change(screen.getByLabelText("National identification number"), { target: { value: "123-45-6789" } });
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: id(5) } });
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Hire from offer" }));

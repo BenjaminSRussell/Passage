@@ -62,7 +62,7 @@ export function TreeRevisionsCard({ code }: { code: string }) {
         <p className={styles.note}>Every save keeps its revision, so a statement run made on an older revision can still show its units.</p>
         {list.error ? (
           <p className={styles.note}>
-            Revisions are unavailable: {list.error.message} ({list.error.code}){" "}
+            Revisions are unavailable: <ProblemMessage problem={list.error} />{" "}
             <Button size="sm" onClick={list.reload}>
               Try again
             </Button>

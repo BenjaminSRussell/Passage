@@ -230,7 +230,7 @@ export function OpenItemsPage() {
       />
       <LedgerPicker id="oi-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={(id) => { setSelected(new Set()); setLedgerId(id); }} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its open items.</p>
+        <p className={styles.note}>Choose a ledger to see its open items.</p>
       ) : (
         <>
           <Card>

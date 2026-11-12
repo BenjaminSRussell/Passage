@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
 import { Alert, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   addCashDeskEntry,
@@ -31,6 +32,11 @@ import { CURRENCY, DAY, money, SIGNED_DECIMAL, today, UUID } from "./format";
 import { CommandFailure, Detail, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
+
+/** A user id shown as the user's name (the shell user lookup), never as the id. */
+function UserName({ id }: { id: string }) {
+  return <EntityName entity="user" id={id} fallback="A user who is no longer listed" />;
+}
 
 type Errors = Record<string, string>;
 
@@ -168,7 +174,7 @@ function NewDeskCard({ legalEntityId, onCreated }: { legalEntityId: string; onCr
     if (!/^[A-Z0-9-]{1,20}$/.test(v.code.trim())) found.code = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
     if (v.name.trim() === "") found.name = "Give the desk a name.";
     if (!CURRENCY.test(v.currency.trim())) found.currency = "Enter an ISO 4217 code such as USD.";
-    if (!UUID.test(v.mainAccountId.trim())) found.mainAccountId = "Enter the general ledger cash account (a UUID).";
+    if (!UUID.test(v.mainAccountId.trim())) found.mainAccountId = "Choose the general ledger cash account.";
     if (!POSITIVE.test(v.maxBalance.trim()) || Number(v.maxBalance) <= 0) found.maxBalance = "Enter the most cash the desk may hold, such as 5000.00.";
     setErrors(found);
     setFailure(null);
@@ -197,8 +203,8 @@ function NewDeskCard({ legalEntityId, onCreated }: { legalEntityId: string; onCr
         <FormField id="nd-currency" label="Currency" error={errors.currency}>
           {(c) => <Input {...c} className={styles.mono} value={v.currency} onChange={set("currency")} invalid={Boolean(errors.currency)} />}
         </FormField>
-        <FormField id="nd-account" label="General ledger account id" hint="The cash account the desk belongs to." error={errors.mainAccountId}>
-          {(c) => <Input {...c} className={styles.mono} value={v.mainAccountId} onChange={set("mainAccountId")} invalid={Boolean(errors.mainAccountId)} />}
+        <FormField id="nd-account" label="General ledger account" hint="The cash account the desk belongs to." error={errors.mainAccountId}>
+          {(c) => <EntityLookup {...c} entity="mainAccount" scope={{ legalEntityId }} value={v.mainAccountId} onChange={(e) => setV((prev) => ({ ...prev, mainAccountId: e.target.value }))} invalid={Boolean(errors.mainAccountId)} />}
         </FormField>
         <FormField id="nd-max" label="Most cash the desk may hold" error={errors.maxBalance}>
           {(c) => <Input {...c} className={styles.mono} inputMode="decimal" value={v.maxBalance} onChange={set("maxBalance")} invalid={Boolean(errors.maxBalance)} />}
@@ -298,7 +304,7 @@ function CashDeskDetail({ id }: { id: string }) {
     { key: "bookBalance", header: "Books", mono: true, align: "end", render: (d) => money(d.bookBalance, desk.currency) },
     { key: "countedBalance", header: "Counted", mono: true, align: "end", render: (d) => (d.countedBalance === undefined ? "Not counted" : money(d.countedBalance, desk.currency)) },
     { key: "difference", header: "Difference", mono: true, align: "end", render: (d) => (d.difference === undefined ? "None" : money(d.difference, desk.currency)) },
-    { key: "signed", header: "Signed by", render: (d) => (d.approvedBy ? `${d.closedBy} and ${d.approvedBy}` : (d.closedBy ?? "")) },
+    { key: "signed", header: "Signed by", render: (d) => (d.closedBy ? (d.approvedBy ? <><UserName id={d.closedBy} /> and <UserName id={d.approvedBy} /></> : <UserName id={d.closedBy} />) : "") },
     {
       key: "view",
       header: "Journal",
@@ -317,7 +323,7 @@ function CashDeskDetail({ id }: { id: string }) {
     { key: "amount", header: "Amount", mono: true, align: "end", render: (e) => money(e.kind === "payment" ? `-${e.amount}` : e.amount, desk.currency) },
     { key: "balanceAfter", header: "Cash after", mono: true, align: "end", render: (e) => money(e.balanceAfter, desk.currency) },
     { key: "posting", header: "Ledger", render: (e) => (e.postingStatus === "posted" ? <StatusPill status="posted" /> : e.postingStatus === "pending" ? <StatusPill status="pending" /> : "Not posted") },
-    { key: "createdBy", header: "By" },
+    { key: "createdBy", header: "By", render: (e) => <UserName id={e.createdBy} /> },
   ];
 
   return (
@@ -400,7 +406,10 @@ function CashDeskDetail({ id }: { id: string }) {
       ) : null}
       {open && counted && openDay ? (
         <Card title="Second signature" headingLevel={3}>
-          <p className={styles.note}>{`${openDay.closedBy ?? "Someone"} counted ${money(openDay.countedBalance ?? "0", desk.currency)} against books of ${money(openDay.bookBalance, desk.currency)}${openDay.differenceReason ? ` (${openDay.differenceReason})` : ""}. Another person approves the count to close the day, or sends it back to be recounted.`}</p>
+          <p className={styles.note}>
+            {openDay.closedBy ? <UserName id={openDay.closedBy} /> : "Someone"}
+            {` counted ${money(openDay.countedBalance ?? "0", desk.currency)} against books of ${money(openDay.bookBalance, desk.currency)}${openDay.differenceReason ? ` (${openDay.differenceReason})` : ""}. Another person approves the count to close the day, or sends it back to be recounted.`}
+          </p>
           <div className={styles.actions}>
             <Button variant="primary" loading={busy} onClick={() => void run(() => approveCashDeskDay(id, open), "Day closed.")}>
               Approve and close the day

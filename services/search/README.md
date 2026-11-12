@@ -29,9 +29,12 @@ its AsyncAPI document and the one scheduling reads. A test ties that topic to th
 other types use (`ReportedAsFinished` becomes `REPORTED_AS_FINISHED`). A production order has no subtitle: its delivery
 date and quantity change with `order.updated`, which the index does not read.
 
-A worker is indexed from `worker.created` by personnel number and worker type only. HR events carry no personal data
-(the worker's name is not on the bus), so a worker is found by number, not by name; the person's name is found through
-the party record. Workers are tenant-wide, as HR's worker list is.
+A worker is indexed from `worker.created` by personnel number and worker type. HR events carry no personal data (the
+worker's name is not on the bus), but `worker.created` names the party person the worker was created for
+(`party_person_id`). The index keeps that id on the worker row (migration `0005`) and titles the worker with the person's
+name from the party record: from the indexed party row when the worker arrives after it, and from every newer party event
+otherwise (an older party event renames nothing). So a worker is found by personnel number or by name. Workers are
+tenant-wide, as HR's worker list is.
 
 `deploy/kafka/search-consumer.yaml` grants the consumer's Kafka user a literal read on each subscribed topic; a test in
 `cmd/search` fails when a topic is subscribed without one.

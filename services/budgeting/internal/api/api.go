@@ -87,9 +87,10 @@ type Store interface {
 
 // API holds the handlers.
 type API struct {
-	store  Store
-	plans  PlanStore
-	ledger PriorActuals
+	store   Store
+	plans   PlanStore
+	ledger  PriorActuals
+	sources PlanSources
 }
 
 // New returns the API over st.

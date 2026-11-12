@@ -83,7 +83,7 @@ describe("VendorGroupsPage", () => {
     await screen.findByText("No vendor groups");
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "DOM" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Domestic" } });
-    fireEvent.change(screen.getByLabelText("Existing group ID"), { target: { value: ` ${GROUP.id} ` } });
+    fireEvent.change(screen.getByLabelText("Existing group UUID"), { target: { value: ` ${GROUP.id} ` } });
     fireEvent.click(screen.getByRole("button", { name: "Add vendor group" }));
     await waitFor(() => expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ id: GROUP.id, code: "DOM", name: "Domestic" }));
   });

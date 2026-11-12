@@ -276,6 +276,20 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "ap-clerk.md#enter-a-vendor-invoice",
   },
   {
+    patterns: ["/ap-invoices/submissions"],
+    title: "Invoice submissions",
+    purpose: "Invoices vendors submitted in the supplier portal against goods you received.",
+    howTo: ["Filter by vendor or status.", "Open a submission waiting for review."],
+    guide: "ap-clerk.md#enter-a-vendor-invoice",
+  },
+  {
+    patterns: ["/ap-invoices/submissions/:id"],
+    title: "Invoice submission",
+    purpose: "One invoice a vendor submitted, with the received lines it bills.",
+    howTo: ["Select Post as vendor invoice; the form opens filled in.", "After posting, record the posted invoice.", "Or reject it with a reason the vendor reads."],
+    guide: "ap-clerk.md#enter-a-vendor-invoice",
+  },
+  {
     patterns: ["/ap-invoices/:id"],
     title: "Vendor invoice",
     purpose: "One posted vendor invoice, with links to its receipt and purchase order.",
@@ -896,6 +910,13 @@ export const routeHelp: readonly RouteHelp[] = [
     title: "Ledger journals",
     purpose: "What receivables owes the general ledger. Waiting journals post automatically; a parked one needs a retry.",
     howTo: ["Select Post due journals to post the waiting ones now.", "Open a parked journal and read the last problem.", "Select Retry posting, with a new posting date if the period is closed."],
+    guide: "ar-clerk.md#check-the-journals-posted-to-the-ledger",
+  },
+  {
+    patterns: ["/receivables/ledger-setup"],
+    title: "Ledger setup",
+    purpose: "Which ledger account each bank account's cash goes to, how exchange differences are booked, and the journals still owed for earlier activity.",
+    howTo: ["Choose the legal entity.", "Map each bank account to its ledger account, or leave cash on account 1000.", "To let a payment settle invoices in another currency, turn it on and name the functional currency and the gain and loss accounts.", "Queue the journals for earlier activity once, after the first set-up."],
     guide: "ar-clerk.md#check-the-journals-posted-to-the-ledger",
   },
   {

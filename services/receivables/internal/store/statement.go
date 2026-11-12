@@ -24,7 +24,7 @@ import (
 const statementQuery = `with debits as (
 	select o.source_type, o.document_number, o.document_date, o.due_date, o.currency, o.amount,
 		o.amount
-		- coalesce((select sum(st.settled_amount + st.cash_discount_taken + st.write_off_amount) from settlement st
+		- coalesce((select sum(coalesce(st.item_amount, st.settled_amount + st.cash_discount_taken + st.write_off_amount)) from settlement st
 			where st.tenant_id = o.tenant_id and st.open_item_id = o.id and st.settled_at::date <= $3::date), 0)
 		- coalesce((select sum(cs.amount) from credit_settlement cs
 			where cs.tenant_id = o.tenant_id and cs.debit_item_id = o.id and cs.settled_at::date <= $3::date), 0)

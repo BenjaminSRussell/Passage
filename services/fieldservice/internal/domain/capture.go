@@ -23,6 +23,10 @@ const (
 	CodeCaptureUnknown = "SVC-CAP-002"
 	// CodeCaptureState refuses an upload for a work order that is not being worked on.
 	CodeCaptureState = "SVC-CAP-003"
+	// CodeCaptureGone answers a read of an image the retention job has deleted (410).
+	CodeCaptureGone = "SVC-CAP-004"
+	// CodeCaptureStoreDown is the 503 when the object store did not take or give the image; the upload can be repeated.
+	CodeCaptureStoreDown = "SVC-CAP-005"
 )
 
 // CaptureRefPrefix starts the reference a capture is known by in the action log and on

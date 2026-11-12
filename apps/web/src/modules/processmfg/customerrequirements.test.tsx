@@ -128,7 +128,7 @@ describe("define a customer batch requirement (slice 14)", () => {
     };
     renderAt("/processmfg/customer-requirements/new");
     fill("Item", ITEM);
-    fill("Customer id", CUSTOMER);
+    fill("Customer", CUSTOMER);
     fill("Sellable days", "60");
     fill("Attribute", "potency");
     fill("Attribute minimum", "40");
@@ -159,7 +159,7 @@ describe("define a customer batch requirement (slice 14)", () => {
     expect(screen.getByText("Choose a customer.")).toBeInTheDocument();
     expect(screen.getByText("Set the sellable days, an attribute range or the same-batch flag.")).toBeInTheDocument();
     fill("Item", ITEM);
-    fill("Customer id", CUSTOMER);
+    fill("Customer", CUSTOMER);
     fill("Sellable days", "4000");
     fill("Attribute", "potency");
     fill("Valid from", "01/02/2027");
@@ -174,7 +174,7 @@ describe("define a customer batch requirement (slice 14)", () => {
     handler = () => ({ status: 400, body: { code: "COM-0001", detail: "request failed validation" } });
     renderAt("/processmfg/customer-requirements/new");
     fill("Item", ITEM);
-    fill("Customer id", CUSTOMER);
+    fill("Customer", CUSTOMER);
     fill("Sellable days", "30");
     fireEvent.click(screen.getByRole("button", { name: "Define requirement" }));
     expect(await findAlert()).toHaveTextContent("COM-0001");

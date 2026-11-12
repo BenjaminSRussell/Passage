@@ -32,6 +32,67 @@ func (a *UsersAPI) Register(r chi.Router) {
 	guard := requireAnyDuty(dutyMaintainUsers)
 	r.With(guard).Get("/v1/identity/users", a.list)
 	r.With(guard).Get("/v1/identity/users/{id}", a.get)
+	r.With(requireAnyDuty(dutyReadUserNames, dutyMaintainUsers)).Get("/v1/identity/user-names", a.names)
+}
+
+// dutyReadUserNames lets an ordinary user see who did something: it returns display names only, never e-mail addresses,
+// subjects or status, so it is safe to grant to every role (#548/#552).
+const dutyReadUserNames = "identity.user-name.read"
+
+// maxUserNameIDs bounds one batch lookup.
+const maxUserNameIDs = 50
+
+type userNameResource struct {
+	UserID      string `json:"userId"`
+	DisplayName string `json:"displayName"`
+}
+
+// names resolves up to 50 user ids (`ids`, comma separated) of the caller's tenant to display names. Unknown ids are
+// left out; deprovisioned users still resolve, because the page that names them is history.
+func (a *UsersAPI) names(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	var wanted []string
+	seen := map[string]bool{}
+	for _, raw := range strings.Split(r.URL.Query().Get("ids"), ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		id, ok := canonicalUUID(raw)
+		if !ok {
+			invalidFields(w, r, "invalid user ids", map[string]string{"ids": "must be a comma-separated list of UUIDs"})
+			return
+		}
+		if !seen[id] {
+			seen[id] = true
+			wanted = append(wanted, id)
+		}
+	}
+	if len(wanted) == 0 || len(wanted) > maxUserNameIDs {
+		invalidFields(w, r, "invalid user ids", map[string]string{"ids": "must list between 1 and 50 user ids"})
+		return
+	}
+	items := []userNameResource{}
+	err := dbx.WithTenantTx(r.Context(), a.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(r.Context(), `select u.user_id::text, u.display_name from identity_users u
+where u.tenant_id = $1 and u.user_id = any($2::uuid[]) order by u.user_id`, p.TenantID, wanted)
+		if err != nil {
+			return err
+		}
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (userNameResource, error) {
+			var n userNameResource
+			return n, row.Scan(&n.UserID, &n.DisplayName)
+		})
+		return err
+	})
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 type userResource struct {

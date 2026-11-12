@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -402,8 +404,11 @@ func (a *API) listOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.OrderFilter{Status: q.Get("status"), CustomerID: q.Get("customerId"), HoldType: q.Get("hold"), Before: q.Get("cursor")}
+	f := store.OrderFilter{Status: q.Get("status"), CustomerID: q.Get("customerId"), HoldType: q.Get("hold"), Before: q.Get("cursor"), Q: strings.TrimSpace(q.Get("q"))}
 	fields := map[string]string{}
+	if utf8.RuneCountInString(f.Q) > 100 {
+		fields["q"] = "must be at most 100 characters"
+	}
 	if f.Status != "" && !orderStatuses[f.Status] {
 		fields["status"] = "must be an order status such as OPEN or CONFIRMED"
 	}

@@ -31,6 +31,8 @@ export type OnHandGroup = (typeof ON_HAND_GROUPS)[number];
 
 export interface JournalSummary {
   id: string;
+  /** Document number IJ-000123; absent on an older journal that was not backfilled. */
+  number?: string;
   legalEntityId: string;
   journalType: JournalType;
   status: JournalStatus;
@@ -1755,4 +1757,40 @@ export async function getWorkspaceSummary(legalEntityId = "", signal?: AbortSign
     activeReservations: body.activeReservations ?? 0,
     transferOrdersByStatus: body.transferOrdersByStatus ?? {},
   };
+}
+
+// --- Truck stock (FR-45.9, BR-45.7) ---
+
+/** One product's level on one technician's truck, with what the truck holds and what is on its way. */
+export interface TruckStockLevel {
+  legalEntityId: string;
+  siteId: string;
+  warehouseId: string;
+  /** The warehouse the truck is refilled from, as a code. */
+  sourceSiteId: string;
+  sourceWarehouseId: string;
+  productId: string;
+  unit: string;
+  minQty: string;
+  maxQty: string;
+  onHandQty: string;
+  inboundQty: string;
+  /** True when the stock plus what is on its way is below the minimum. */
+  short: boolean;
+}
+
+export async function listTruckStockLevels(legalEntityId: string, warehouseId = "", signal?: AbortSignal): Promise<TruckStockLevel[]> {
+  const { body } = await send<{ items?: TruckStockLevel[] }>(`/truck-stock-levels${query({ legalEntityId, warehouseId })}`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Creates a draft transfer order for each truck of the legal entity (or the one truck named) that is below its minimum. */
+export async function replenishTrucks(legalEntityId: string, truck?: { siteId: string; warehouseId: string }): Promise<TransferOrder[]> {
+  const input: Record<string, string> = { legalEntityId };
+  if (truck) {
+    input.siteId = truck.siteId;
+    input.warehouseId = truck.warehouseId;
+  }
+  const { body } = await send<{ orders?: TransferOrder[] }>("/truck-stock:replenish", { method: "POST", body: JSON.stringify(input) });
+  return body.orders ?? [];
 }

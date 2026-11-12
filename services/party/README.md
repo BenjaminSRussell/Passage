@@ -49,11 +49,29 @@ Protected fields per legal entity (FR-7.10, `party.protected_fields`): `GET /v1/
 
 A caller holding only `party.import.write` (no `party.read` or `party.write`) gets a write receipt (`id`, `partyNumber`, `partyType`, `status`, `version`) from `POST` and `PATCH /v1/party/parties`, not the party record, because that duty opens no read route; role creates answer with the role, which carries no personal data.
 
+## Setup records of a customer role (#500, migration `0017`)
+
+`GET /v1/party/payment-terms[/{id}]` and `GET /v1/party/posting-profiles[/{id}]` (`?legalEntityId=`, row security keeps the
+caller's legal entities) read the terms and profiles a customer role names, and `/v1/party/customer-groups` registers and reads
+customer groups (code and name, the same rules as vendor groups; `POST` with `party.write` or `party.import.write`, an optional
+`id` registers a group id roles already carry). Migration `0017` creates `customer_group` and backfills a group for every
+`customer_group_id` already on a customer role (`CG` + the first 8 hex digits, the vendor group collision rule), under a role
+that bypasses row-level security only. The web forms pick these records by name. Payment terms and posting profiles have no
+create route yet: they are loaded with the master data.
+
 ## Vendor master
 
 `vendor_role` (`0008`) is the vendor side of a party, one row per party and legal entity, with tenant and legal-entity RLS. It carries `vendor_group_id` (the vendor group other services reconcile against, for example payables aging and `invoice.posted` in receiving), `account_number`, `payment_term_id`, `currency_code` and `blocked`. Routes: `POST /v1/party/parties/{id}/vendor` (`party.write` or `party.import.write`; the caller must carry exactly one legal entity, 409 `PTY-VENDOR-EXISTS` for a second role or a taken account number; `Idempotency-Key` replays the original role, scoped to the legal entity and party, column `vendor_role.idempotency_key` from `0010`), `GET /v1/party/vendors/{id}` and `GET /v1/party/parties/{id}/vendors` (`party.read`; the lookup receiving calls at invoice posting).
 
 Bank details live in `vendor_bank_account`. Account and routing numbers are sealed with `platform/go/fieldcrypt` under the tenant key, with tenant and field name (`vendor_bank_account.account_number`, `vendor_bank_account.routing_number`) as additional data, so a value moved to another field or tenant does not open. `POST /v1/party/vendors/{id}/bank-accounts` (`party.vendor-bank.write`, needs a user) stores one; `GET .../bank-accounts` (`party.read`) returns holder, country, currency and `accountLast4` only; `GET .../bank-accounts:reveal` (`party.vendor-bank.reveal`, for the payments service identity) returns the numbers and logs the reveal with the user and vendor id. With no `FIELDCRYPT_KEYS` the service starts, but bank writes and reveals return 503 `PTY-BANK-ENCRYPTION-UNAVAILABLE`. Bank accounts are insert-only; a bank change approval flow is not built. Merge moves vendor roles (and so their bank accounts) to the survivor, rejects the same legal entity on both sides, and `Audit` counts vendor roles still owned by a merged party.
+
+## Supplier portal remainders (#511, migration `0015`)
+
+Profile changes. A vendor's `PROFILE_CHANGE` request (`POST /v1/party/vendor-portal/requests`) now carries `changes`: the party fields it asks for, from `legalName`, `tradeName`, `registrationNumber`, `industryCode`, `languageCode`, `timeZone` (an empty value clears a field, except `legalName`). Bank details, tax registrations, the vendor group and payment terms are never part of it. `POST /v1/party/vendor-requests/{id}:approve` (duty `party.vendor-request.decide`, and for a profile change that carries changes also `party.write`, because the party is tenant-wide and can be a customer in another legal entity; without it the approval is refused with 403 `PTY-SUP-PARTY-WRITE` and the request stays `SUBMITTED`) writes the changes to the vendor's party in the approval's own transaction: the party row (version bumped, name and search name recomputed), `dev.passage.party.party.updated.v1`, the audit entry `profile.applied` naming the fields, and `applied_at` on the request. A change the party cannot take (it was merged, or the values no longer validate) fails the approval with the party's problem and leaves the request `SUBMITTED` for the buyer to reject with a note. Reject, withdraw and approving an `OTHER` request touch nothing.
+
+Prospect registration. `POST /v1/party/vendor-portal/prospects` is the one portal route that carries no vendor: the supplier portal signs a token with no `vnd` and the single duty `party.vendor-portal.register` (`platform/go/tenant` refuses any other vendorless supplier-portal token). It stores a `vendor_prospect` (company, contact, email, country, optional phone, tax id, website, message; at most 2000 waiting per legal entity, else 429 `PTY-PROSPECT-LIMIT`) and answers 202 whether or not the address was already waiting. Nothing is in the master data until a buyer acts: `GET /v1/party/vendor-prospects[/{id}]` (`party.read`), `POST .../{id}:accept` (`party.write`; body `accountNumber`, `vendorGroupId`, `currencyCode`, optional `paymentTermId`, plus `questionnaireId`) first claims the registration (it turns `ACCEPTED`, decided by the caller, with no links yet, so a second buyer accepting at the same time gets 409 `PTY-PROSPECT-STATE`), then creates the party, a vendor role blocked until the onboarding is approved, and the existing `ONBOARDING` request, each step idempotent on the registration id, and links them. An accept that stopped part-way is finished by the same buyer repeating it (or by another buyer after 10 minutes), and a repeat that finds the onboarding already open links that request; `POST .../{id}:reject` (`party.vendor-request.decide`, a note) rejects it. The questionnaire and its approval by someone other than the buyer who accepted are the existing onboarding flow.
+
+Vendor-admin invitations. `POST /v1/party/vendor-portal/invites` (`party.vendor-portal.admin`; `email`, optional `displayName`) stores an invitation for the verified vendor and returns its token once: `inv1.<tenant>.<legal entity>.<vendor>.<invite>.<secret>`; only the SHA-256 of the secret is stored, it expires after 7 days, and a new invitation to the same address replaces the open one. `GET .../invites` lists, `POST .../invites/{id}:revoke` revokes, both also `party.vendor-portal.admin`. Every signed-in supplier user's token carries `party.vendor-portal.read` and `.write`, so those duties do not open these three routes: the supplier portal signs `party.vendor-portal.admin` only for a session holding the `supplier-admin` role and only for these routes (its signer refuses the duty for anyone else), and also checks the role before it calls them. A token with the duty is still refused unless it is a supplier portal token naming a vendor (403 `PTY-SUP-SCOPE`). `POST .../invites/{id}:verify` and `:accept` (duty `party.vendor-portal.invite-accept`, signed only for these two calls) take `{"token"}`; the token must name the vendor of the verified caller and the invitation in the path and its secret must match, and every failure (unknown, wrong secret, expired, revoked, used) is the same 404 `PTY-INVITE-INVALID`. `verify` changes nothing so the portal can create the identity-provider user first; `accept` spends the invitation. The role an invitation grants is always `supplier-user`. `dev.passage.party.vendorinvite.created.v1` and `.accepted.v1` carry the address and expiry and never the token: no notification service exists yet, so the vendor administrator hands the link over.
 
 ## Duties
 
@@ -62,6 +80,7 @@ Bank details live in `vendor_bank_account`. Account and routing numbers are seal
 | `party.approve` | (PRD name: Approve master data changes) `POST /v1/party/pending-changes/{id}:approve`, `:reject`; seeded in `policies/authz/data.json` |
 | `party.write` | `POST /v1/party/tax-registrations:validate`, `POST /v1/party/parties`, `POST /v1/party/parties/{id}/customer`, `POST /v1/party/customers/{id}/credit-limit`, `POST /v1/party/parties/{id}/vendor`, `PATCH /v1/party/parties/{id}` |
 | `party.approval-policy.write` | `PUT /v1/party/legal-entities/{id}/protected-fields`; seeded in `policies/authz/data.json` |
+| `party.vendor-portal.admin` | `GET` and `POST /v1/party/vendor-portal/invites`, `POST /v1/party/vendor-portal/invites/{id}:revoke`; `service_only`, granted to `supplier-portal` in `platform/go/tenant` and `policies/authz/data.json`, and signed by it only for a vendor administrator (`supplier-admin`) |
 | `party.vendor-bank.write` | `POST /v1/party/vendors/{id}/bank-accounts` |
 | `party.vendor-bank.reveal` | `GET /v1/party/vendors/{id}/bank-accounts:reveal` |
 | `party.read` | `GET /v1/party/vendors/{id}`, `GET /v1/party/parties/{id}/vendors`, `GET /v1/party/vendors/{id}/bank-accounts` (masked), `GET /v1/party/parties/{id}`, `GET /v1/party/pending-changes/{id}`, `GET /v1/party/legal-entities/{id}/protected-fields`; seeded in `policies/authz/data.json` |
@@ -76,6 +95,15 @@ Bank details live in `vendor_bank_account`. Account and routing numbers are seal
 | `COM-0500` | 500 | internal error, detail hidden |
 | `AUTH-0001` | 401 | missing or malformed tenant |
 | `AUTH-0003` | 403 | missing duty |
+| `PTY-PAYMENT-TERM-NOT-FOUND` | 404 | unknown payment term, another tenant's, or a malformed id |
+| `PTY-POSTING-PROFILE-NOT-FOUND` | 404 | unknown posting profile, outside the caller's legal entities, or a malformed id |
+| `PTY-CUSTOMER-GROUP-NOT-FOUND` | 404 | unknown customer group, another tenant's, or a malformed id |
+| `PTY-CUSTOMER-GROUP-INVALID` | 422 | customer group body failed validation; `errors` names the field |
+| `PTY-CUSTOMER-GROUP-EXISTS` | 409 | the customer group code or id is taken in the tenant |
+| `PTY-PROSPECT-NOT-FOUND` | 404 | no such registration |
+| `PTY-PROSPECT-STATE` | 409 | the registration was already accepted or rejected |
+| `PTY-PROSPECT-LIMIT` | 429 | too many registrations are waiting in the legal entity |
+| `PTY-INVITE-INVALID` | 404 | an invitation token is unknown, wrong, expired, revoked or used |
 | `PTY-0001` | 422 | tax registration failed format validation; `errors` names the field |
 | `PTY-PARTY-INVALID` | 422 | party body failed validation, or `partyType` changed; `errors` names the field |
 | `PTY-PARTY-NOT-FOUND` | 404 | unknown party id, another tenant's id, or a malformed id |

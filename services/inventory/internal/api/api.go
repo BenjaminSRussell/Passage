@@ -64,6 +64,8 @@ type API struct {
 	glBooked atomic.Int64
 	// truck serves the truck stock routes (WithTruckStock); nil answers 503.
 	truck TruckStock
+	// opening serves the opening stock import (WithOpeningBatches); nil answers 503.
+	opening OpeningBatches
 }
 
 // New builds the API with the posting parameters from configuration.
@@ -98,6 +100,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerReturnReceipts(r)
 	a.registerGL(r)
 	a.registerTruck(r)
+	a.registerOpening(r)
 }
 
 // Metrics serves the counters for the admin port.
@@ -156,6 +159,7 @@ type glEntryResponse struct {
 
 type journalSummary struct {
 	ID              string     `json:"id"`
+	Number          string     `json:"number,omitempty"`
 	LegalEntityID   string     `json:"legalEntityId"`
 	JournalType     string     `json:"journalType"`
 	Status          string     `json:"status"`
@@ -344,7 +348,7 @@ func (a *API) listJournals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.JournalFilter{Status: domain.JournalStatus(q.Get("status")), Type: domain.JournalType(q.Get("type")), Cursor: q.Get("cursor"), Limit: 50}
+	f := store.JournalFilter{Status: domain.JournalStatus(q.Get("status")), Type: domain.JournalType(q.Get("type")), Number: q.Get("q"), Cursor: q.Get("cursor"), Limit: 50}
 	if ownershipChangeOnly(r) {
 		if f.Type != "" && f.Type != domain.JournalOwnershipChange {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing duty: "+dutyRead))
@@ -358,6 +362,9 @@ func (a *API) listJournals(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.Type != "" && !slices.Contains(domain.JournalTypes, f.Type) {
 		fields["type"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT or OWNERSHIP_CHANGE"
+	}
+	if len(f.Number) > 40 {
+		fields["q"] = "must be at most 40 characters"
 	}
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -517,7 +524,7 @@ func splitList(raw string) []string {
 }
 
 func summaryOf(j domain.Journal) journalSummary {
-	return journalSummary{ID: j.ID, LegalEntityID: j.LegalEntityID, JournalType: string(j.Type), Status: string(j.Status),
+	return journalSummary{ID: j.ID, Number: j.Number, LegalEntityID: j.LegalEntityID, JournalType: string(j.Type), Status: string(j.Status),
 		PostingDate: j.PostingDate.Format("2006-01-02"), OffsetAccountID: j.OffsetAccountID, Currency: j.Currency, JournalNameID: j.JournalNameID, Version: j.Version,
 		LineCount: j.LineCount, CreatedAt: j.CreatedAt, PostedAt: j.PostedAt, ReversesJournalID: j.ReversesJournalID, ReversedByJournalID: j.ReversedByJournalID}
 }

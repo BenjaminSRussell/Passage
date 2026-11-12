@@ -399,7 +399,7 @@ describe("Worker pay setup", () => {
     await screen.findByRole("option", { name: "DAY - Day shift" });
     fireEvent.change(select, { target: { value: PROFILE } });
     fireEvent.click(screen.getByRole("button", { name: "Save pay setup" }));
-    expect(await screen.findByText(/changed by someone else. Reload the page and try again. \(SF-0143\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/changed by someone else. Reload the page and try again./)).toBeInTheDocument();
   });
 
   it("shows an error loading the choices and retries", async () => {
@@ -460,7 +460,7 @@ describe("Worker home resource", () => {
     await screen.findByRole("option", { name: /PRESS-1/ });
     fireEvent.change(select, { target: { value: RESOURCE } });
     fireEvent.click(screen.getByRole("button", { name: "Save home resource" }));
-    expect(await screen.findByText(/changed by someone else. Reload the page and try again. \(SF-0143\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/changed by someone else. Reload the page and try again./)).toBeInTheDocument();
   });
 
   it("offers a work centre that only has dispatch jobs, and still offers the machines without the dispatch duty", async () => {
@@ -483,7 +483,7 @@ describe("Worker home resource", () => {
     await screen.findByRole("option", { name: /PRESS-1/ });
     fireEvent.change(select, { target: { value: RESOURCE } });
     fireEvent.click(screen.getByRole("button", { name: "Save home resource" }));
-    expect(await screen.findByText(/no registered machine and no dispatched jobs\. \(SF-0156\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/no registered machine and no dispatched jobs\./)).toBeInTheDocument();
   });
 
   it("shows an error loading the resources and retries", async () => {

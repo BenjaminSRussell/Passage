@@ -35,10 +35,14 @@ type BackfillResult struct {
 	Applications  int  `json:"applications"`
 	OpeningItems  int  `json:"openingItems"`
 	OpeningQueued int  `json:"openingAlreadyQueued"`
+	DunningFees   int  `json:"dunningFees"`
+	Interest      int  `json:"interest"`
+	DownPayments  int  `json:"downPayments"`
+	Deductions    int  `json:"deductions"`
 	More          bool `json:"more"`
 }
 
-// BackfillGLJournals queues the missing journals of a legal entity in one transaction (30-2 backfill): for each payment recorded
+// BackfillGLJournals queues the missing journals of a legal entity in one transaction (30-2 backfill): the collection-side postings (dunning fees, interest, down payments, deductions; see backfillCollections), for each payment recorded
 // before the journals existed, its cash receipt (Dr bank / Cr 1205), and for each such payment applied before then, one journal for
 // its applications (Dr 1205, Dr 4100, Dr 6100 / Cr 1200); and, when asked, the opening-item journals. A payment that already has any
 // application journal is left to them, an ADVISED or CONFIRMED payment books no cash, and every journal has its own key, so a
@@ -81,6 +85,11 @@ func (s *Postgres) BackfillGLJournals(ctx context.Context, req BackfillRequest) 
 			return err
 		}
 		out.Applications = n
+		more, err := backfillCollections(ctx, tx, p.TenantID, req.LegalEntityID)
+		if err != nil {
+			return err
+		}
+		out.DunningFees, out.Interest, out.DownPayments, out.Deductions = more.DunningFees, more.Interest, more.DownPayments, more.Deductions
 		if req.OpeningAccount != "" {
 			queued, existing, err := backfillOpening(ctx, tx, p.TenantID, req)
 			if err != nil {

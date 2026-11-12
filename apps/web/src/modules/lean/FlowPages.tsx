@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -46,7 +47,7 @@ const listColumns: DataTableColumn<Flow>[] = [
   { key: "activityCount", header: "Activities", align: "end" },
   { key: "taktTimeS", header: "Takt (s)", align: "end", render: (f) => f.taktTimeS ?? dash },
   { key: "activeFrom", header: "Active from", render: (f) => f.activeFrom ?? dash },
-  { key: "valueStreamId", header: "Value stream", mono: true, render: (f) => shortId(f.valueStreamId) },
+  { key: "valueStreamId", header: "Value stream", render: (f) => <EntityName entity="operatingUnit" id={f.valueStreamId} fallback="Value stream" /> },
 ];
 
 /** Production flows of the value streams (FR-24.8). */
@@ -218,8 +219,8 @@ export function NewFlowPage() {
             <FormField id="flow-name" label="Name" error={errors.name}>
               {(c) => <Input {...c} value={values.name} maxLength={120} onChange={(e) => update({ name: e.target.value })} invalid={Boolean(errors.name)} />}
             </FormField>
-            <FormField id="flow-stream" label="Value stream id" hint="An operating unit of type value stream." error={errors.valueStreamId}>
-              {(c) => <Input {...c} className={styles.mono} value={values.valueStreamId} onChange={(e) => update({ valueStreamId: e.target.value })} invalid={Boolean(errors.valueStreamId)} />}
+            <FormField id="flow-stream" label="Value stream" hint="An operating unit of type value stream." error={errors.valueStreamId}>
+              {(c) => <EntityLookup entity="operatingUnit" {...c} value={values.valueStreamId} onChange={(e) => update({ valueStreamId: e.target.value })} invalid={Boolean(errors.valueStreamId)} />}
             </FormField>
             <FormField id="flow-site" label="Site" error={errors.siteId}>
               {(c) => <EntityLookup entity="site" {...c} value={values.siteId} onChange={(e) => update({ siteId: e.target.value })} invalid={Boolean(errors.siteId)} />}
@@ -485,7 +486,10 @@ export function FlowDetailPage() {
           Replaces <Link to={`/lean/flows/${flow.previousFlowId}`}>the previous version</Link>.
         </p>
       ) : null}
-      <p className={styles.muted}>{`Value stream ${flow.valueStreamId} · site ${flow.siteId} · created ${formatDateTime(flow.createdAt)} · version ${flow.version}`}</p>
+      <p className={styles.muted}>
+        Value stream <EntityName entity="operatingUnit" id={flow.valueStreamId} fallback="not available" /> · site <EntityName entity="site" id={flow.siteId} fallback="not available" />
+        {` · created ${formatDateTime(flow.createdAt)} · version ${flow.version}`}
+      </p>
     </div>
   );
 }

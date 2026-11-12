@@ -18,7 +18,7 @@ func TestCDCMigrationsPublishTheOutboxAndRerunSafely(t *testing.T) {
 		t.Fatal(err)
 	}
 	var published bool
-	if err := pool.QueryRow(ctx, `select exists(select 1 from pg_publication_tables where pubname = 'passage_outbox_billing' and schemaname = current_schema() and tablename = 'outbox')`).Scan(&published); err != nil || !published {
+	if err := pool.QueryRow(ctx, `select exists(select 1 from pg_publication_rel pr join pg_publication p on p.oid = pr.prpubid where p.pubname = 'passage_outbox_billing' and pr.prrelid = to_regclass(current_schema() || '.outbox'))`).Scan(&published); err != nil || !published {
 		t.Fatalf("outbox published = %v, %v", published, err)
 	}
 	for _, name := range []string{"0012_cdc_publication.sql", "0013_cdc_role_grants.sql"} {

@@ -140,6 +140,9 @@ type NewReturnLine struct {
 	Disposition      string
 	ReturnCostMethod string
 	RestockingPct    *decimal.Decimal
+	// FromOrderLine takes unit, site and warehouse from the sales order line the invoice line was billed from (the customer portal
+	// names a product and a quantity only); the values in SiteID, WarehouseID and Unit are then ignored.
+	FromOrderLine bool
 }
 
 // NewReturnOrder is a validated create request.
@@ -402,6 +405,11 @@ func (s *Postgres) priceReturnLines(ctx context.Context, in NewReturnOrder, invo
 			return nil, problem(http.StatusUnprocessableEntity, CodeRMAInvoice, fmt.Sprintf("line %d: the product is not on the original invoice", l.LineNo))
 		}
 		pl := pricedLine{NewReturnLine: l, unitPrice: net.Div(qty).Round(6), orderLineID: orderLine}
+		if l.FromOrderLine {
+			if err := s.fillFromOrderLine(ctx, &pl); err != nil {
+				return nil, err
+			}
+		}
 		if pl.Unit == "" {
 			pl.Unit = "EA"
 		}
@@ -1079,4 +1087,20 @@ func decOrZero(s *string) decimal.Decimal {
 		return decimal.Zero
 	}
 	return d
+}
+
+// fillFromOrderLine sets unit, site and warehouse of a portal return line from the order line its invoice line came from.
+func (s *Postgres) fillFromOrderLine(ctx context.Context, pl *pricedLine) error {
+	p, _ := tenant.FromContext(ctx)
+	if !ids.Valid(pl.orderLineID) {
+		return problem(http.StatusUnprocessableEntity, CodeRMAInvoice, fmt.Sprintf("line %d: the goods cannot be traced to an order line; contact us to return them", pl.LineNo))
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select unit, site_id::text, warehouse_id::text from sales_order_line where tenant_id = $1 and id = $2`, p.TenantID, pl.orderLineID).
+			Scan(&pl.Unit, &pl.SiteID, &pl.WarehouseID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return problem(http.StatusUnprocessableEntity, CodeRMAInvoice, fmt.Sprintf("line %d: the goods cannot be traced to an order line; contact us to return them", pl.LineNo))
+		}
+		return err
+	})
 }

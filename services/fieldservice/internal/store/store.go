@@ -22,6 +22,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/objectstore"
 )
 
 // Problem codes returned by the store. Each is listed in the service README.
@@ -56,10 +57,19 @@ const (
 // Postgres is the store backed by a pgx pool.
 type Postgres struct {
 	pool *pgxpool.Pool
+	// objects holds the bytes of captures; nil keeps them in Postgres.
+	objects objectstore.Store
 }
 
 // New returns a store over pool.
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+
+// WithObjects keeps the bytes of new captures in an object store instead of Postgres (#45). Captures already in Postgres
+// stay readable and move over with OffloadCaptures.
+func (s *Postgres) WithObjects(o objectstore.Store) *Postgres {
+	s.objects = o
+	return s
+}
 
 // Ping checks the database for the readiness probe.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }

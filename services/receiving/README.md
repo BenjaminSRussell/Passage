@@ -79,6 +79,12 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 - Settlement runs settle at most 100 sources (`hasMore`) and stop on the first failure; settled sources stay settled and a repeat continues.
 - The invoice endpoint lives here until wave 19 owns payables; its event uses the `payables` context the PRD names.
 
+## Invoice submissions by received line (#511)
+
+A supplier bills received goods without keying an invoice document. `GET /v1/receiving/vendor/invoiceable-lines` lists the posted receipt lines of the vendor's own purchase orders that still have quantity to invoice (received less invoiced less held by an open submission; optional `purchaseOrderId`). `POST /v1/receiving/vendor/invoice-submissions` (`Idempotency-Key` required; `legalEntityId`, `invoiceNumber`, `invoiceDate`, `currency`, `lines[{receiptId, receiptLineNo, qty, unitPrice}]`) records a submission in status `SUBMITTED` and holds the quantities. Every line is checked under row locks on its GR/IR item: the receipt must be the vendor's and posted, the currency must match, and the quantity must fit; a line that does not exist, belongs to another vendor or is not posted answers the same 422 `SUP-INV-002`, so nothing is learned about other vendors. A vendor can read and withdraw only its own submissions (`GET .../invoice-submissions[/{id}]`, `POST .../{id}:withdraw`); the vendor's answers carry no vendor id. The invoice number is unique per vendor while a submission is `SUBMITTED` or `POSTED`.
+
+Accounts payable reads submissions at `GET /v1/receiving/invoice-submissions[/{id}]` (`receiving.ap.inquire`, filters `vendorId`, `status`), rejects one with a reason the vendor sees (`POST .../{id}:reject`) or closes it with the invoice it keyed (`POST .../{id}:resolve`, body `invoiceId`, which must be a posted invoice of the same vendor); both need `receiving.vendor-invoice.post`. A rejected or withdrawn submission frees its quantities.
+
 ## Error codes
 
 | Code | Status | Meaning |
@@ -90,6 +96,14 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | COM-0500 | 500 | internal error, detail hidden |
 | AUTH-0001 | 401 | missing or malformed tenant |
 | AUTH-0003 | 403 | missing duty |
+| SUP-INV-001 | 422 | the invoice named in a resolve is not a posted invoice of the vendor |
+| SUP-INV-002 | 422 | an invoice line is not received goods of the vendor that can be invoiced (unknown, another vendor's, not posted, another currency) |
+| SUP-INV-003 | 422 | an invoice line asks for more than is left to invoice |
+| SUP-INV-004 | 409 | an invoice with this number is already submitted or posted for the vendor |
+| SUP-INV-005 | 409 | the submission is already decided or withdrawn |
+| SUP-INV-006 | 422 | `:resolve` names an invoice that already closes another submission (also a unique index, migration `0029`) |
+| SUP-INV-007 | 422 | `:resolve` names an invoice of another legal entity, or one rejected after audit |
+| RCV-NF-011 | 404 | invoice submission not found (also another vendor's) |
 | RCV-OVR-001 | domain | receipt quantity above the over-delivery allowance |
 | RCV-CW-001 | 422 | catch weight outside min × cases to max × cases (BR-24.5), on registration and on a correction |
 | RCV-CW-002 | 422 | catch-weight line received in a unit that is not a mass unit |

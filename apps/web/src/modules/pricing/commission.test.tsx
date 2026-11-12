@@ -1,11 +1,21 @@
 import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { CommissionRule, CommissionTransaction, SalesGroup } from "./api/client";
-import { describeReps, ruleLevel } from "./commissionFormat";
+import { ruleLevel } from "./commissionFormat";
 import { emptySalesGroup, toSalesGroupInput, validateSalesGroup } from "./NewSalesGroupPage";
 import { validateRule } from "./SalesGroupDetailPage";
 import { idempotencyKey, json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
+
+import { rememberOption } from "../../shell/lookup/entities";
+
+beforeEach(() => {
+  rememberOption("worker", { id: "0190c000-0000-7000-8000-0000000000a1", name: "Ana Ortiz" });
+  rememberOption("worker", { id: "0190c000-0000-7000-8000-0000000000a2", name: "Ben Cole" });
+});
+
+const R1 = "0190c000-0000-7000-8000-0000000000a1";
+const R2 = "0190c000-0000-7000-8000-0000000000a2";
 
 useFakeServer();
 
@@ -17,8 +27,8 @@ const group: SalesGroup = {
   legalEntityId: LE,
   name: "SG-East",
   reps: [
-    { repId: "R1", sharePct: "60" },
-    { repId: "R2", sharePct: "40" },
+    { repId: R1, sharePct: "60" },
+    { repId: R2, sharePct: "40" },
   ],
 };
 
@@ -35,7 +45,7 @@ function txn(patch: Partial<CommissionTransaction>): CommissionTransaction {
     customerGroup: "",
     itemGroup: "",
     salesGroupId: SG,
-    repId: "R1",
+    repId: R1,
     sharePct: "60",
     basis: "REVENUE",
     lineNet: "10000",
@@ -65,7 +75,7 @@ describe("Sales groups", () => {
     const { container } = renderAt("/pricing/commission/sales-groups");
     const table = await findTable({ name: "Sales groups" });
     await waitFor(() => expect(table).toHaveTextContent("SG-East"));
-    expect(table).toHaveTextContent("R1 60% · R2 40%");
+    await waitFor(() => expect(table).toHaveTextContent(/Ana Ortiz.*60%.*Ben Cole.*40%/));
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "SG-East" }));
     expect(await screen.findByRole("heading", { name: "SG-East" })).toBeInTheDocument();
@@ -86,7 +96,7 @@ describe("New sales group", () => {
   it("checks the reps before calling the service", async () => {
     const { container } = renderAt("/pricing/commission/sales-groups/new");
     fireEvent.click(screen.getByRole("button", { name: "Save sales group" }));
-    expect(await screen.findByText("Enter the rep's worker id (up to 64 characters).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the sales rep.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
   });
@@ -101,10 +111,10 @@ describe("New sales group", () => {
     renderAt("/pricing/commission/sales-groups/new");
     fill("Legal entity", LE);
     fill("Sales group name", "SG-East");
-    fill("Rep id", "R1");
+    fill("Sales rep", R1);
     fill("Share %", "60");
     fireEvent.click(screen.getByRole("button", { name: "Add rep" }));
-    fireEvent.change(screen.getAllByLabelText("Rep id")[1], { target: { value: "R2" } });
+    fireEvent.change(screen.getAllByLabelText("Sales rep")[1], { target: { value: R2 } });
     fireEvent.change(screen.getAllByLabelText("Share %")[1], { target: { value: "40" } });
     expect(screen.getByText("Shares add up to 100%.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save sales group" }));
@@ -119,7 +129,7 @@ describe("New sales group", () => {
     renderAt("/pricing/commission/sales-groups/new");
     fill("Legal entity", LE);
     fill("Sales group name", "x");
-    fill("Rep id", "R1");
+    fill("Sales rep", R1);
     fill("Share %", "60");
     fireEvent.click(screen.getByRole("button", { name: "Save sales group" }));
     expect(await screen.findByText("The shares add up to 60%; they must add up to 100%.")).toBeInTheDocument();
@@ -143,7 +153,7 @@ describe("Sales group detail", () => {
     const { container } = renderAt(`/pricing/commission/sales-groups/${SG}`);
     expect(await screen.findByRole("heading", { name: "SG-East" })).toBeInTheDocument();
     const reps = screen.getByRole("table", { name: "Reps and shares" });
-    expect(within(reps).getAllByRole("row").map((r) => r.textContent)).toEqual(["RepShare", "R160%", "R240%"]);
+    await waitFor(() => expect(within(reps).getAllByRole("row").map((r) => (r.textContent ?? "").replace("⋯Copy id", ""))).toEqual(["RepShare", "Ana Ortiz60%", "Ben Cole40%"]));
     const ruleTable = await findTable({ name: "Commission rules" });
     await waitFor(() => expect(ruleTable).toHaveTextContent("All customers"));
     expect(server.calls.find((c) => c.url.pathname.endsWith("/commission/rules"))?.url.searchParams.get("salesGroupId")).toBe(SG);
@@ -187,11 +197,11 @@ describe("Commission transactions", () => {
     server.handler = (url) => {
       if (url.pathname.endsWith("/commission/sales-groups")) return json(200, { items: [group] });
       if (url.pathname.endsWith("/commission/transactions")) {
-        if (url.searchParams.get("repId") === "R9") return json(200, { items: [] });
+        if (url.searchParams.get("repId") === "0190c000-0000-7000-8000-0000000000a9") return json(200, { items: [] });
         return json(200, {
           items: [
             txn({}),
-            txn({ id: "t-2", repId: "R2", sharePct: "40", amount: "200" }),
+            txn({ id: "t-2", repId: R2, sharePct: "40", amount: "200" }),
             txn({ id: "t-3", invoiceLineId: "CN-1/1", reversesInvoiceLineId: "INV-1/1", lineNet: "-1000", basisAmount: "-1000", amount: "-30" }),
           ],
         });
@@ -212,11 +222,11 @@ describe("Commission transactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show transactions" }));
     expect(await screen.findByText("Use a month such as 2027-03.")).toBeInTheDocument();
     fill("Month", "2027-03");
-    fill("Rep", "R9");
+    fill("Rep", "0190c000-0000-7000-8000-0000000000a9");
     fireEvent.click(screen.getByRole("button", { name: "Show transactions" }));
     expect(await screen.findByText("No commission transactions")).toBeInTheDocument();
     const last = server.calls.filter((c) => c.url.pathname.endsWith("/commission/transactions")).at(-1);
-    expect(last?.url.searchParams.get("repId")).toBe("R9");
+    expect(last?.url.searchParams.get("repId")).toBe("0190c000-0000-7000-8000-0000000000a9");
     expect(last?.url.searchParams.get("period")).toBe("2027-03");
   });
 
@@ -233,11 +243,11 @@ describe("Commission transactions", () => {
 
 describe("commission form rules", () => {
   it("mirrors the service rules for shares and rules", () => {
-    const ok = { ...emptySalesGroup, legalEntityId: LE, name: "SG", reps: [{ repId: "R1", sharePct: "33.333333" }, { repId: "R2", sharePct: "66.666667" }] };
+    const ok = { ...emptySalesGroup, legalEntityId: LE, name: "SG", reps: [{ repId: R1, sharePct: "33.333333" }, { repId: R2, sharePct: "66.666667" }] };
     expect(validateSalesGroup(ok)).toEqual({});
-    expect(validateSalesGroup({ ...ok, reps: [{ repId: "R1", sharePct: "50" }, { repId: "R1", sharePct: "50" }] })["reps[1].repId"]).toBe("Each rep appears once.");
-    expect(validateSalesGroup({ ...ok, reps: [{ repId: "R1", sharePct: "0" }] })["reps[0].sharePct"]).toBeDefined();
-    expect(validateSalesGroup({ ...ok, reps: [{ repId: "EU/R1", sharePct: "100" }] })["reps[0].repId"]).toMatch(/no \/ or :/);
+    expect(validateSalesGroup({ ...ok, reps: [{ repId: R1, sharePct: "50" }, { repId: R1, sharePct: "50" }] })["reps[1].repId"]).toBe("Each rep appears once.");
+    expect(validateSalesGroup({ ...ok, reps: [{ repId: R1, sharePct: "0" }] })["reps[0].sharePct"]).toBeDefined();
+    expect(validateSalesGroup({ ...ok, reps: [{ repId: "EU/R1", sharePct: "100" }] })["reps[0].repId"]).toBe("Choose the sales rep from the list.");
     expect(toSalesGroupInput({ ...ok, name: " SG " }).name).toBe("SG");
     expect(validateRule({ customerGroup: "", itemGroup: "", basis: "REVENUE", ratePct: "101" }).ratePct).toBeDefined();
     expect(validateRule({ customerGroup: "", itemGroup: "", basis: "REVENUE", ratePct: "0" })).toEqual({});
@@ -248,6 +258,5 @@ describe("commission form rules", () => {
     expect(ruleLevel({ customerGroup: "A", itemGroup: "" })).toBe(2);
     expect(ruleLevel({ customerGroup: "", itemGroup: "B" })).toBe(3);
     expect(ruleLevel({ customerGroup: "", itemGroup: "" })).toBe(4);
-    expect(describeReps(group.reps)).toBe("R1 60% · R2 40%");
   });
 });

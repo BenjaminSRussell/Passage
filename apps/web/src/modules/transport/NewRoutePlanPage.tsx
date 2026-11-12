@@ -17,7 +17,7 @@ export interface RouteValues {
 }
 
 const stopFields: RowField[] = [
-  { key: "id", label: "Stop id", hint: "Your reference, such as a customer or dock." },
+  { key: "id", label: "Stop reference", hint: "Your own name for the stop, such as a customer or dock (up to 64 characters)." },
   { key: "x", label: "X km", decimal: true, hint: "Position east of the origin." },
   { key: "y", label: "Y km", decimal: true, hint: "Position north of the origin." },
   { key: "earliest", label: "Earliest min", hint: "Window start, minutes after route start." },
@@ -29,7 +29,7 @@ const stopFields: RowField[] = [
 ];
 
 const vehicleFields: RowField[] = [
-  { key: "id", label: "Vehicle id" },
+  { key: "id", label: "Vehicle reference", hint: "Your own name for the vehicle, such as its plate or fleet number." },
   { key: "capacityKg", label: "Capacity kg" },
   { key: "capacityL", label: "Capacity L" },
   { key: "pallets", label: "Pallets" },

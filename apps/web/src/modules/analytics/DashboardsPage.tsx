@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -19,6 +19,7 @@ import {
   DASHBOARD_ID,
   describeProblem,
   getDashboard,
+  getDashboardValues,
   listDashboards,
   listMetrics,
   MAX_REFRESH_SECONDS,
@@ -27,11 +28,12 @@ import {
   putDashboard,
   TILE_PERIODS,
   type Dashboard,
+  type DashboardValues,
   type Metric,
   type Problem,
   type Tile,
 } from "./api/client";
-import { dateTime } from "./format";
+import { dateTime, tileStatusHint, tileValueText } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -168,7 +170,7 @@ function DashboardForm({
   return (
     <Card title={existing ? "Dashboard definition" : "New dashboard"}>
       <form className={styles.form} onSubmit={(e) => void submit(e)} noValidate aria-label="Dashboard">
-        <FormField id="dashboard-id" label="Dashboard id" error={errors.dashboardId} hint={existing ? "A dashboard id cannot change." : "Used in the workspace URL, for example sales_overview."}>
+        <FormField id="dashboard-id" label="Dashboard key" error={errors.dashboardId} hint={existing ? "A dashboard key cannot change." : "Used in the workspace URL, for example sales_overview."}>
           {(control) => (
             <Input
               {...control}
@@ -243,7 +245,7 @@ function DashboardForm({
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title={conflict ? "Someone else changed this dashboard" : "The dashboard was not saved"} live="alert">
-              {conflict ? "Reload the page to see the current version, then make your change again." : failure.message} ({failure.code})
+              <ProblemMessage problem={failure} message={conflict ? "Reload the page to see the current version, then make your change again." : undefined} />
             </Alert>
           </div>
         ) : null}
@@ -324,6 +326,18 @@ export function DashboardDetailPage() {
     },
     `dashboard/${id}`,
   );
+  // Tile values refresh on the dashboard's own interval (FR-46.8); a failed refresh keeps the last values.
+  const values = useLoad((signal) => getDashboardValues(id, undefined, signal), `dashboard-values/${id}`);
+  // A refresh that fails keeps the last values on screen (useLoad drops its data on a failure).
+  const lastValues = useRef<DashboardValues | null>(null);
+  if (values.data) lastValues.current = values.data;
+  const shownValues = values.data ?? lastValues.current;
+  const refreshMs = (state.data?.dashboard.refreshSeconds ?? 60) * 1000;
+  const reloadValues = values.reload;
+  useEffect(() => {
+    const timer = setInterval(reloadValues, refreshMs);
+    return () => clearInterval(timer);
+  }, [reloadValues, refreshMs]);
 
   if (state.loading && !state.data) return <Loading title="Dashboard" text={`Loading dashboard ${id}…`} />;
   if (state.error?.code === "ANA-0112") {
@@ -357,14 +371,29 @@ export function DashboardDetailPage() {
       <p role="status" className={styles.muted}>
         {saved ? `Dashboard saved as version ${saved.version}.` : ""}
       </p>
-      <Alert tone="info" title="Tile values are not shown yet">
-        Tiles show the governed metric they are bound to. Values, sparklines and the freshness badge appear once the semantic layer runs queries.
-      </Alert>
+      {values.error ? (
+        <Alert tone="warning" title="Could not load the tile values" live="status" action={<Button size="sm" onClick={values.reload}>Try again</Button>}>
+          <ProblemMessage problem={values.error} />
+          {shownValues ? ` The values below are from ${dateTime(shownValues.computedAt)}.` : null}
+        </Alert>
+      ) : (
+        <div className={styles.formActions}>
+          <Button size="sm" onClick={values.reload} loading={values.loading && shownValues !== null}>
+            Refresh values
+          </Button>
+          {shownValues ? <span className={styles.muted}>Values from {dateTime(shownValues.computedAt)}.</span> : null}
+        </div>
+      )}
       <CardGrid label="Tiles">
         {dashboard.tiles.map((t, i) => {
           const metric = metricOf(t.metric);
+          const tv = shownValues?.tiles[i]?.metric === t.metric ? shownValues.tiles[i] : undefined;
           return (
             <Card key={`${i}-${t.metric}`} title={t.title}>
+              <p className={styles.tileValue} aria-live="off">
+                {tv ? tileValueText(tv) : values.loading ? "Loading…" : "Unavailable"}
+              </p>
+              {tv ? <p className={styles.muted}>{tileStatusHint(tv)}{tv.status === "OK" ? `, ${tv.from} to ${tv.to}` : ""}</p> : null}
               <dl className={styles.details}>
                 <div className={styles.entry}>
                   <dt className={styles.term}>Metric</dt>

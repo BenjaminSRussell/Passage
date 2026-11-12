@@ -92,6 +92,15 @@ func (f *fakeStore) GetProduct(_ context.Context, id string) (domain.Product, er
 	}
 	return p, nil
 }
+func (f *fakeStore) ProductNames(_ context.Context, productIDs []string) ([]domain.ProductName, error) {
+	out := []domain.ProductName{}
+	for _, id := range productIDs {
+		if p, ok := f.products[id]; ok {
+			out = append(out, domain.ProductName{ID: p.ID, ProductNumber: p.ProductNumber, Name: p.Name})
+		}
+	}
+	return out, nil
+}
 func (f *fakeStore) UpdateProduct(_ context.Context, id string, patch domain.ProductPatch, version int) (domain.Product, error) {
 	p, ok := f.products[id]
 	if !ok {
@@ -694,5 +703,35 @@ func TestProductItemGroupAndTrackingFlagsCreateReadPatchAndListGroups(t *testing
 	}
 	if denied := do(r, http.MethodGet, "/v1/product/setup/item-groups", "", "product.write"); denied.Code != http.StatusForbidden {
 		t.Fatalf("list groups without product.read %d", denied.Code)
+	}
+}
+
+// The product-name read is open to product.read and to the service-only product.names.read, and answers number and name only.
+func TestProductNamesRoute(t *testing.T) {
+	f := newFake()
+	r := newRouter(f)
+	id := "0195f0a0-0000-7000-8000-0000000000a1"
+	f.products[id] = domain.Product{ID: id, ProductNumber: "PUMP-1", Name: "Centrifugal pump", Description: "internal", Version: 3}
+	for _, duty := range []string{"product.names.read", "product.read"} {
+		rec := do(r, http.MethodGet, "/v1/product/products:names?ids="+id+",0195f0a0-0000-7000-8000-0000000000ff", "", duty)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Centrifugal pump") {
+			t.Fatalf("%s: %d %s", duty, rec.Code, rec.Body)
+		}
+		for _, hidden := range []string{"internal", "version", "baseUom", "0195f0a0-0000-7000-8000-0000000000ff"} {
+			if strings.Contains(rec.Body.String(), hidden) {
+				t.Errorf("%s: the answer carries %q: %s", duty, hidden, rec.Body)
+			}
+		}
+	}
+	if rec := do(r, http.MethodGet, "/v1/product/products:names?ids="+id, "", "product.uom.convert"); rec.Code != http.StatusForbidden {
+		t.Errorf("another service duty: %d", rec.Code)
+	}
+	if rec := do(r, http.MethodGet, "/v1/product/products/"+id, "", "product.names.read"); rec.Code != http.StatusForbidden {
+		t.Errorf("product.names.read must not read a whole product: %d", rec.Code)
+	}
+	for _, q := range []string{"", "?ids=", "?ids=not-an-id"} {
+		if rec := do(r, http.MethodGet, "/v1/product/products:names"+q, "", "product.names.read"); rec.Code != http.StatusBadRequest {
+			t.Errorf("query %q: %d", q, rec.Code)
+		}
 	}
 }

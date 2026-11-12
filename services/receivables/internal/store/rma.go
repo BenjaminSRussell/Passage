@@ -611,7 +611,7 @@ func (s *Postgres) RMASweepLegalEntities(ctx context.Context) ([]string, error) 
 	var out []string
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select distinct legal_entity_id::text from rma_credit where tenant_id = $1
-			and ((status = 'PENDING' and not gl_parked) or (status = 'POSTED' and billing_reservation_id is not null and not reservation_committed and needs_attention is null))`, p.TenantID)
+			and (status = 'PENDING' or (status = 'POSTED' and billing_reservation_id is not null and not reservation_committed and needs_attention is null))`, p.TenantID)
 		if err != nil {
 			return err
 		}

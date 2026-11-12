@@ -596,3 +596,60 @@ describe("ListPage accessibility", () => {
     expect(screen.getByRole("group", { name: "List tools" })).toBeInTheDocument();
   });
 });
+
+describe("ListPage search box", () => {
+  const search = (row: Row) => ({ number: row.number, name: row.status });
+
+  it("offers no search box unless the page says what a row is searched by", () => {
+    renderList();
+    expect(screen.queryByRole("searchbox", { name: "Search invoices" })).toBeNull();
+  });
+
+  it("finds a number by its start and a name by what it holds, the way the record search does", async () => {
+    const user = userEvent.setup();
+    renderList(memory(), { search });
+    const box = screen.getByRole("searchbox", { name: "Search invoices" });
+    await user.type(box, "INV-1");
+    expect(bodyNumbers()).toEqual(["INV-10"]);
+    await user.clear(box);
+    await user.type(box, "paid");
+    expect(bodyNumbers()).toEqual(["INV-9"]);
+    await user.clear(box);
+    expect(bodyNumbers()).toEqual(["INV-10", "INV-9", "=EVIL()"]);
+  });
+
+  it("says so when nothing matches, and clears the search from the empty state", async () => {
+    const user = userEvent.setup();
+    renderList(memory(), { search });
+    await user.type(screen.getByRole("searchbox", { name: "Search invoices" }), "INV-77");
+    expect(screen.getByRole("heading", { name: "No invoices match this search" })).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Clear search" })[0]);
+    expect(bodyNumbers()).toEqual(["INV-10", "INV-9", "=EVIL()"]);
+  });
+
+  it("says the search covers the rows loaded so far when more are available", async () => {
+    const user = userEvent.setup();
+    source = { hasMore: true };
+    renderList(memory(), { search });
+    await user.type(screen.getByRole("searchbox", { name: "Search invoices" }), "INV-1");
+    expect(screen.getByText(/Searching the 3 rows loaded so far/)).toBeInTheDocument();
+  });
+
+  it("has no accessibility violations with the search box", () => {
+    const { container } = renderList(memory(), { search });
+    expect(pageViolations(container)).toEqual([]);
+  });
+});
+
+
+describe("loadedRows", () => {
+  it("reads a 403 as no access, whichever way the client carries it", async () => {
+    const { loadedRows, isForbidden } = await import("./ListPage");
+    expect(isForbidden({ status: 403 })).toBe(true);
+    expect(isForbidden({ code: "AUTH-0003", message: "missing duty" })).toBe(true);
+    expect(isForbidden({ code: "HTTP-403" })).toBe(true);
+    expect(isForbidden({ code: "COM-0500" })).toBe(false);
+    expect(loadedRows({ data: null, loading: false, error: { code: "AUTH-0003" }, reload: () => undefined }).forbidden).toBe(true);
+    expect(loadedRows({ data: [1], loading: false, reload: () => undefined })).toMatchObject({ rows: [1], forbidden: false, hasMore: false });
+  });
+});

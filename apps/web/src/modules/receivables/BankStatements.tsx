@@ -1,10 +1,10 @@
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
 import { describeProblem, importBankStatement, listBankStatementImports, type BankStatementBatch, type Payment, type Problem } from "./api/client";
 import { dateTime, money, STATUS_LABELS, UUID } from "./format";
-import { CommandFailure, LoadFailure } from "./parts";
+import { CommandFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { EntityName } from "../../shell/lookup/EntityName";
@@ -26,7 +26,8 @@ export function BankStatementsPage() {
   const state = useLoad((signal) => listBankStatementImports(signal), "statements");
   return (
     <div className={styles.stack}>
-      <PageHeader
+      <ListPage
+        id="receivables-bank-statements"
         title="Bank statements"
         description="camt.053 statements from the bank, newest first. Each booked customer credit becomes a Received payment to match and apply."
         actions={
@@ -39,19 +40,12 @@ export function BankStatementsPage() {
             </Link>
           </div>
         }
+        noun="bank statement imports"
+        columns={batchColumns}
+        useRows={() => loadedRows(state)}
+        getRowKey={(row) => row.id}
+        empty={{ title: "No statements", description: "Import the bank's camt.053 file to create one payment per customer credit." }}
       />
-      {state.error ? (
-        <LoadFailure title="Could not load the bank statement imports" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Bank statement imports"
-          columns={batchColumns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No statements", description: "Import the bank's camt.053 file to create one payment per customer credit." }}
-        />
-      )}
     </div>
   );
 }

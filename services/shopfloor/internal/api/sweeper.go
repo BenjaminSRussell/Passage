@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -36,9 +37,17 @@ const (
 	rollupBucketSize = 15 * time.Minute
 )
 
-// SweepConfig configures the sweeper. A zero interval switches that job off.
+// TenantRegistry lists the tenants to sweep, for a deployment that keeps them in the identity service
+// instead of in configuration.
+type TenantRegistry interface {
+	Tenants(ctx context.Context) ([]string, error)
+}
+
+// SweepConfig configures the sweeper. A zero interval switches that job off. The tenants swept are
+// TenantIDs plus, when Registry is set, the tenants it lists at the start of every run.
 type SweepConfig struct {
 	TenantIDs          []string
+	Registry           TenantRegistry
 	AndonEvery         time.Duration
 	RollupEvery        time.Duration
 	AutoClockEvery     time.Duration
@@ -75,7 +84,7 @@ func ParseSweepTenants(raw string) ([]string, error) {
 
 // Validate checks the schedule.
 func (c SweepConfig) Validate() error {
-	if len(c.TenantIDs) == 0 {
+	if len(c.TenantIDs) == 0 && c.Registry == nil {
 		return errors.New("no tenants to sweep")
 	}
 	for name, d := range map[string]time.Duration{"andon": c.AndonEvery, "oee rollup": c.RollupEvery,
@@ -101,6 +110,10 @@ type Sweeper struct {
 	cfg      SweepConfig
 	runs     map[string]*atomic.Int64
 	failures map[string]*atomic.Int64
+
+	mu            sync.Mutex
+	lastRegistry  []string // the registry's last good answer, used while it is unreachable
+	registryFails atomic.Int64
 }
 
 // NewSweeper returns a sweeper over the API's store and counters.
@@ -148,10 +161,51 @@ func (s *Sweeper) Run(ctx context.Context) {
 	}
 }
 
+// Tenants is the list a run sweeps: the configured tenants and the registry's. A registry that cannot be
+// read does not stop the run: the last list it gave is used (and the failure counted and logged), so a
+// short identity outage does not stop the shop floor's clocks.
+func (s *Sweeper) Tenants(ctx context.Context) ([]string, error) {
+	out := append([]string(nil), s.cfg.TenantIDs...)
+	if s.cfg.Registry == nil {
+		return out, nil
+	}
+	listed, err := s.cfg.Registry.Tenants(ctx)
+	s.mu.Lock()
+	if err == nil {
+		s.lastRegistry = listed
+	} else {
+		listed = s.lastRegistry
+	}
+	s.mu.Unlock()
+	if err != nil {
+		s.registryFails.Add(1)
+		slog.Error("shopfloor sweep: tenant registry not read", "err", err, "usingLastList", len(listed))
+		if len(listed) == 0 && len(out) == 0 {
+			return nil, err
+		}
+	}
+	seen := map[string]bool{}
+	for _, id := range out {
+		seen[id] = true
+	}
+	for _, id := range listed {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 // RunJob runs one job once for every tenant, in order, and returns the number of tenants that failed.
 func (s *Sweeper) RunJob(ctx context.Context, job string) int {
 	failed := 0
-	for _, tenantID := range s.cfg.TenantIDs {
+	tenants, err := s.Tenants(ctx)
+	if err != nil {
+		s.failures[job].Add(1)
+		return 1
+	}
+	for _, tenantID := range tenants {
 		if ctx.Err() != nil {
 			return failed
 		}
@@ -213,6 +267,7 @@ func (s *Sweeper) WriteMetrics(w io.Writer) {
 	for _, j := range sweepJobs {
 		fmt.Fprintf(w, "shopfloor_sweep_runs_total{job=%q} %d\n", j, s.runs[j].Load())
 	}
+	fmt.Fprintf(w, "# HELP shopfloor_sweep_registry_failures_total Reads of the tenant registry that failed.\n# TYPE shopfloor_sweep_registry_failures_total counter\nshopfloor_sweep_registry_failures_total %d\n", s.registryFails.Load())
 	fmt.Fprint(w, "# HELP shopfloor_sweep_failures_total Sweep runs that failed, per job.\n# TYPE shopfloor_sweep_failures_total counter\n")
 	for _, j := range sweepJobs {
 		fmt.Fprintf(w, "shopfloor_sweep_failures_total{job=%q} %d\n", j, s.failures[j].Load())

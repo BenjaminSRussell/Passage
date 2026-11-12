@@ -27,6 +27,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/safenet"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
 )
@@ -163,7 +164,8 @@ func (a *API) punchoutClient() *http.Client {
 	if a.PunchoutHTTP != nil {
 		return a.PunchoutHTTP
 	}
-	return &http.Client{Timeout: punchoutSetupTTL, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// The supplier's and the network's URLs come from partner settings: only public addresses are dialed (safenet).
+	return safenet.Client(punchoutSetupTTL, a.AllowInsecureAS2)
 }
 
 func randomHex(n int) (string, error) {

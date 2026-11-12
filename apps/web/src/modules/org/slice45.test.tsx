@@ -125,7 +125,7 @@ describe("site fiscal calendar and warehouse site", () => {
     const table = await findTable({ name: "Sites" });
     await user.click(within(table).getByRole("button", { name: "Edit site DET" }));
     const form = await screen.findByRole("form", { name: "Edit site DET" });
-    expect(await within(form).findByText("Fiscal calendars could not be loaded (COM-0500).")).toBeInTheDocument();
+    expect(await within(form).findByText(/^Fiscal calendars could not be loaded\./)).toBeInTheDocument();
   });
 
   it("does not load fiscal calendars for a read-only caller", async () => {
