@@ -135,8 +135,8 @@ func (r *Reporter) RunOnce(ctx context.Context) (int, error) {
 	return n, errors.Join(failed...)
 }
 
-// attempt sends one report: REPORTED on success; PARKED when tax refuses the entries (a 4xx other than a timeout or throttling: a
-// refused grant needs an operator, as before) or the body cannot be read; otherwise PENDING with a back-off, and PARKED once the attempts run out.
+// attempt sends one report: REPORTED on success; PARKED when tax refuses the entries (a 4xx other than a refused token, a timeout or
+// throttling, which pass once the deployment is fixed or the load falls) or the body cannot be read; otherwise PENDING with a back-off, and PARKED once the attempts run out.
 func (r *Reporter) attempt(ctx context.Context, tid string, c store.ClaimedWithholdingReport) store.WithholdingOutcome {
 	var entries []tax.Entry
 	if err := json.Unmarshal(c.Body, &entries); err != nil {
@@ -169,7 +169,11 @@ func refused(status int) bool {
 	if status < 400 || status >= 500 {
 		return false
 	}
-	return status != http.StatusRequestTimeout && status != http.StatusTooManyRequests
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return true
 }
 
 // Run calls once every interval until ctx ends.

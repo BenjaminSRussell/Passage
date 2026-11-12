@@ -53,6 +53,7 @@ type RunStore interface {
 	VendorGroupCodes(ctx context.Context, proposalID string) (map[string]string, error)
 	SaveRunFile(ctx context.Context, id string, f store.RunFile) (store.PaymentRun, error)
 	RecordJournal(ctx context.Context, id, entryID string) (store.PaymentRun, error)
+	RecordJournalWithWithholding(ctx context.Context, id, entryID, legalEntityID string, withholding []byte) (store.PaymentRun, error)
 	SettleRun(ctx context.Context, id string) (store.PaymentRun, error)
 	CompleteRun(ctx context.Context, id string) (store.PaymentRun, error)
 	FailRun(ctx context.Context, id, reason string) (store.PaymentRun, error)
@@ -516,10 +517,12 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if existing != "" {
-				recorded, recordErr := a.runs.store.RecordJournal(ctx, id, existing)
-				if recordErr == nil && !a.recordRunWithholding(w, r, recorded) {
+				body, berr := a.withholdingBody(run, proposal)
+				if berr != nil {
+					a.fault(w, r, "withholding entries not encoded", berr)
 					return
 				}
+				recorded, recordErr := a.runs.store.RecordJournalWithWithholding(ctx, id, existing, run.LegalEntityID, body)
 				a.runResult(w, r, "post-journal", recorded, recordErr)
 				return
 			}
@@ -533,10 +536,13 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 		a.runLedgerFailure(w, r, err)
 		return
 	}
-	recorded, err := a.runs.store.RecordJournal(ctx, id, entryID)
-	if err == nil && !a.recordRunWithholding(w, r, recorded) {
+	// The withholding report is queued in the journal's own transaction, so a posted journal never lacks it.
+	body, err := a.withholdingBody(run, proposal)
+	if err != nil {
+		a.fault(w, r, "withholding entries not encoded", err)
 		return
 	}
+	recorded, err := a.runs.store.RecordJournalWithWithholding(ctx, id, entryID, run.LegalEntityID, body)
 	a.runResult(w, r, "post-journal", recorded, err)
 }
 
@@ -550,20 +556,13 @@ func withholdingEntryID(runID, openItemID string) string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// recordRunWithholding queues the tax the run withheld for the tax service, one entry per invoice with withholding (the vendor, the
-// withholding code, the payment date, the pay amount, the base and the tax), so its remittance runs and certificates cover the
-// payment. The withholding reporter (cmd/payables) sends the queued report outside the request with back-off; a refusal parks it and
-// puts the reason on the run (AP-RUN-019), and repeating post-journal queues it again. The entry ids are stable, so the tax service
-// records each entry once. It returns false after answering the request with a failure.
-func (a *API) recordRunWithholding(w http.ResponseWriter, r *http.Request, run store.PaymentRun) bool {
+// withholdingBody is the run's withholding report for the tax service (JSON), or nil when nothing is recorded (no tax recorder, or no
+// line withheld): one entry per invoice with withholding (the vendor, the withholding code, the payment date, the pay amount, the base
+// and the tax). The entry ids are stable, so the tax service records each entry once. The withholding reporter (cmd/payables) sends
+// the queued report outside the request with back-off; a refusal parks it and puts the reason on the run (AP-RUN-019).
+func (a *API) withholdingBody(run store.PaymentRun, proposal store.Proposal) ([]byte, error) {
 	if a.withholdingRecorder == nil {
-		return true
-	}
-	ctx := r.Context()
-	proposal, err := a.runs.store.GetProposal(ctx, run.ProposalID)
-	if err != nil {
-		a.fault(w, r, "payment proposal get failed", err)
-		return false
+		return nil, nil
 	}
 	var entries []tax.Entry
 	for _, g := range proposal.Groups {
@@ -580,14 +579,28 @@ func (a *API) recordRunWithholding(w http.ResponseWriter, r *http.Request, run s
 		}
 	}
 	if len(entries) == 0 {
-		return true
+		return nil, nil
 	}
-	body, err := json.Marshal(entries)
+	return json.Marshal(entries)
+}
+
+// recordRunWithholding queues the withholding report of a run whose journal is already posted: a repeated post-journal re-queues a
+// report that was parked (after its cause was fixed). It returns false after answering the request with a failure.
+func (a *API) recordRunWithholding(w http.ResponseWriter, r *http.Request, run store.PaymentRun) bool {
+	proposal, err := a.runs.store.GetProposal(r.Context(), run.ProposalID)
+	if err != nil {
+		a.fault(w, r, "payment proposal get failed", err)
+		return false
+	}
+	body, err := a.withholdingBody(run, proposal)
 	if err != nil {
 		a.fault(w, r, "withholding entries not encoded", err)
 		return false
 	}
-	if err := a.runs.store.QueueWithholdingReport(ctx, run.ID, run.LegalEntityID, body); err != nil {
+	if body == nil {
+		return true
+	}
+	if err := a.runs.store.QueueWithholdingReport(r.Context(), run.ID, run.LegalEntityID, body); err != nil {
 		a.fault(w, r, "withholding report not queued", err)
 		return false
 	}

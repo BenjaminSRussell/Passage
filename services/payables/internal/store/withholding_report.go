@@ -45,20 +45,24 @@ type WithholdingOutcome struct {
 // or REPORTED is left as it is; a PARKED one is queued again with the entries given (a repeated post-journal after the cause was
 // fixed), and the run's park reason is cleared.
 func (s *Postgres) QueueWithholdingReport(ctx context.Context, runID, legalEntityID string, body []byte) error {
-	p, _ := tenant.FromContext(ctx)
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `insert into ap_withholding_report (tenant_id, id, legal_entity_id, run_id, body) values ($1, $2, $3, $4, $5)
-			on conflict (tenant_id, run_id) do update set body = excluded.body, status = 'PENDING', attempts = 0, next_attempt_at = now(),
-			  last_error = null, last_status = null, updated_at = now()
-			where ap_withholding_report.status = 'PARKED'`, p.TenantID, ids.New(), legalEntityID, runID, body)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() > 0 {
-			_, err = tx.Exec(ctx, `update ap_payment_run set withholding_record_error = null where id = $1::uuid`, runID)
-		}
-		return err
+		return queueWithholding(ctx, tx, runID, legalEntityID, body)
 	})
+}
+
+func queueWithholding(ctx context.Context, tx pgx.Tx, runID, legalEntityID string, body []byte) error {
+	p, _ := tenant.FromContext(ctx)
+	tag, err := tx.Exec(ctx, `insert into ap_withholding_report (tenant_id, id, legal_entity_id, run_id, body) values ($1, $2, $3, $4, $5)
+		on conflict (tenant_id, run_id) do update set body = excluded.body, status = 'PENDING', attempts = 0, next_attempt_at = now(),
+		  last_error = null, last_status = null, updated_at = now()
+		where ap_withholding_report.status = 'PARKED'`, p.TenantID, ids.New(), legalEntityID, runID, body)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		_, err = tx.Exec(ctx, `update ap_payment_run set withholding_record_error = null where id = $1::uuid`, runID)
+	}
+	return err
 }
 
 // WithholdingSystemContext is the principal the reporter reads and writes one tenant's reports under: no user, every legal entity.

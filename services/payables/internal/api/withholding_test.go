@@ -361,7 +361,7 @@ func TestWithholding_PermanentTaxRefusalParksTheRun(t *testing.T) {
 		t.Fatalf("generate-file: %d %s", rec.Code, rec.Body)
 	}
 	f.tax.mu.Lock()
-	f.tax.entriesStatus = http.StatusForbidden
+	f.tax.entriesStatus = http.StatusUnprocessableEntity
 	f.tax.mu.Unlock()
 	if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK {
 		t.Fatalf("post-journal: %d %s", rec.Code, rec.Body)

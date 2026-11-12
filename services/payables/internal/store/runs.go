@@ -441,17 +441,28 @@ func (s *Postgres) VerifyRunLines(ctx context.Context, id string) (PaymentRun, e
 }
 
 func (s *Postgres) RecordJournal(ctx context.Context, id, entryID string) (PaymentRun, error) {
+	return s.RecordJournalWithWithholding(ctx, id, entryID, "", nil)
+}
+
+// RecordJournalWithWithholding records the run's journal entry and, in the same transaction, queues the run's withholding entries
+// (JSON, for legalEntityID) for the tax service when withholding is not nil, so a posted journal never lacks its withholding report.
+func (s *Postgres) RecordJournalWithWithholding(ctx context.Context, id, entryID, legalEntityID string, withholding []byte) (PaymentRun, error) {
 	return s.step(ctx, id, func(tx pgx.Tx, l runLock) error {
 		switch {
 		case l.journalDone:
-			return nil
 		case l.status != domain.RunRunning:
 			return ErrRunState
 		case !l.journalRequested:
 			return ErrRunOutOfOrder
+		default:
+			if _, err := tx.Exec(ctx, `update ap_payment_run set journal_entry_id = $2, journal_posted_at = now() where id = $1::uuid`, id, entryID); err != nil {
+				return err
+			}
 		}
-		_, err := tx.Exec(ctx, `update ap_payment_run set journal_entry_id = $2, journal_posted_at = now() where id = $1::uuid`, id, entryID)
-		return err
+		if withholding == nil {
+			return nil
+		}
+		return queueWithholding(ctx, tx, id, legalEntityID, withholding)
 	})
 }
 
