@@ -3174,6 +3174,7 @@ test_audit_read_log_review_opens_only_the_break_glass_queue if {
 	not allowed("audit.read-log.review", "POST", "/v1/audit/reads")
 	not allowed("audit.read-log.view", "GET", "/v1/audit/reads:break-glass")
 	not allowed("audit.read-log.export", "POST", "/v1/audit/reads/0b7f4c1e-1d2a-4c55-9a0e-5f3f1c2d9e10:review")
+}
 
 test_revrec_billing_holds_only_the_service_only_modification_duty if {
 	data.service_principals["revrec-billing"] == ["billing.contract-modification.bill"]
