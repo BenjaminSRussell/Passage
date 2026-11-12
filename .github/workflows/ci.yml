@@ -388,7 +388,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e
       - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org services/identity/charts/identity services/batch/charts/batch services/edi/charts/edi
       - run: bash services/receiving/charts/receiving/test-env.sh
       - run: bash services/identity/charts/identity/test-networkpolicy.sh
@@ -410,7 +410,7 @@ jobs:
         with:
           go-version: '1.26'
           cache-dependency-path: '**/go.sum'
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4
         with:
           tofu_version: 1.13.2
@@ -457,7 +457,7 @@ jobs:
           cache: false
       - run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
       - run: pip install pyyaml==6.0.2 && PATH="$(go env GOPATH)/bin:$PATH" make -C deploy test-gateway
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e
       - run: make -C deploy test-argocd
       - name: Install Kyverno CLI
         env:
