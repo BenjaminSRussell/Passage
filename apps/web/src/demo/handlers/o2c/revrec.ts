@@ -8,6 +8,10 @@ import type {
   AllocationPreviewInput,
   ContractObligation,
   ContractStatus,
+  Modification,
+  ModificationLine,
+  ModifyContractInput,
+  ModifyContractResult,
   RecognitionMethod,
   RecognitionRun,
   RevenueContract,
@@ -350,4 +354,77 @@ route("POST", `${BASE}/allocations:preview`, ({ body }) => {
   });
   const preview: AllocationPreview = { currency: input.currency, transactionPrice: dec(price), residualRule: input.residualRule, ratableBasis: input.ratableBasis, obligations };
   return preview;
+});
+
+// Contract modifications (#29): the demo re-allocates prospectively for both types (the service also does the cumulative
+// catch-up); a price below recognized revenue takes the difference back out of revenue in proportion to what each obligation
+// recognized. A removed obligation's open lines are cancelled.
+route("POST", `${BASE}/contracts/{id}:modify`, ({ params, body, headers }) => {
+  const at0 = contracts.findIndex((c) => c.id === params.id);
+  if (at0 < 0) return reply.problem(404, "REV-0100", "revenue contract not found");
+  const c = contracts[at0];
+  const expected = (headers.get("If-Match") ?? "").replace(/"/g, "");
+  if (!expected) return reply.problem(428, "COM-0428", "If-Match with the contract version is required to modify a contract");
+  if (expected !== String(c.version)) return reply.problem(412, "REV-0103", "the contract changed since it was read; reload and review it");
+  const input = body as ModifyContractInput;
+  const change = Number(input.transactionPriceChange);
+  if (!Number.isFinite(change)) return reply.problem(400, "COM-0001", "request failed validation", { transactionPriceChange: "must be a signed decimal" });
+  if (input.effectiveDate < c.contractDate) return reply.problem(422, "REV-0401", `the effective date is before the contract date ${c.contractDate}`);
+  const revised = new Map((input.obligations ?? []).map((o) => [o.obligationId, o]));
+  const price = cents(Number(c.transactionPrice) + change);
+  const recognizedOf = (o: ContractObligation) => cents(o.schedule.filter((l) => l.status === "RECOGNIZED").reduce((s, l) => s + Number(l.amount), 0));
+  const open = (o: ContractObligation) => o.schedule.filter((l) => l.status === "SCHEDULED");
+  const deferred = c.obligations.filter((o) => o.method === "RATABLE" || o.method === "MILESTONE");
+  let left = price;
+  for (const o of c.obligations) left -= o.method === "RATABLE" || o.method === "MILESTONE" ? recognizedOf(o) : Number(o.allocated);
+  left = cents(left);
+  const recognizedTotal = deferred.reduce((s, o) => s + recognizedOf(o), 0);
+  if (left < 0 && -left > recognizedTotal) return reply.problem(422, "REV-0402", "the new price is below what the point-in-time obligations were billed at; credit the invoice instead");
+  const weights = deferred.map((o) => {
+    const total = o.schedule.reduce((s, l) => s + Number(l.amount), 0);
+    const share = total > 0 ? open(o).reduce((s, l) => s + Number(l.amount), 0) / total : 0;
+    const r = revised.get(o.id);
+    const scope = r?.remainingScope !== undefined ? Number(r.remainingScope) : 1;
+    return Number(r?.ssp ?? o.ssp) * share * scope;
+  });
+  const shares = left > 0 ? allocate(left, weights) : weights.map(() => 0);
+  const lines: ModificationLine[] = [];
+  let reversalTotal = 0;
+  const obligations = c.obligations.map((o) => {
+    const i = deferred.indexOf(o);
+    if (i < 0) return o;
+    const recognized = recognizedOf(o);
+    const reversal = left < 0 && recognizedTotal > 0 ? cents((-left * recognized) / recognizedTotal) : 0;
+    reversalTotal = cents(reversalTotal + reversal);
+    const r = revised.get(o.id);
+    const removed = r?.remainingScope !== undefined && Number(r.remainingScope) === 0;
+    const openLines = open(o);
+    const weight = openLines.reduce((s, l) => s + Number(l.amount), 0);
+    let given = 0;
+    const schedule = o.schedule.map((l) => {
+      if (l.status !== "SCHEDULED") return l;
+      const last = l.id === openLines[openLines.length - 1]?.id;
+      const amount = last ? cents(shares[i] - given) : weight > 0 ? cents((shares[i] * Number(l.amount)) / weight) : 0;
+      given = cents(given + amount);
+      return { ...l, amount: dec(amount), status: amount === 0 ? ("REVERSED" as const) : l.status };
+    });
+    const after = cents(recognized - reversal + shares[i]);
+    lines.push({ obligationId: o.id, allocatedBefore: o.allocated, allocatedAfter: dec(after), sspBefore: o.ssp, sspAfter: dec(Number(r?.ssp ?? o.ssp)), catchUp: "0.00", reversal: dec(reversal), ...(removed ? { removed: true } : {}) });
+    return { ...o, allocated: dec(after), ssp: dec(Number(r?.ssp ?? o.ssp)), schedule };
+  });
+  const updated = refresh({ ...c, transactionPrice: dec(price), version: c.version + 1, obligations });
+  contracts[at0] = updated;
+  const modification: Modification = {
+    id: newId(),
+    type: input.type,
+    effectiveDate: input.effectiveDate,
+    priceBefore: c.transactionPrice,
+    priceAfter: dec(price),
+    catchUp: "0.00",
+    reversal: dec(reversalTotal),
+    billingStatus: change !== 0 ? "PENDING" : "NONE",
+    obligations: lines,
+  };
+  const result: ModifyContractResult = { ...updated, modification };
+  return result;
 });

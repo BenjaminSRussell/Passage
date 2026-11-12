@@ -15,6 +15,8 @@ channels:
         $ref: "#/components/messages/PaymentReceived"
       paymentApplied:
         $ref: "#/components/messages/PaymentApplied"
+      paymentUnapplied:
+        $ref: "#/components/messages/PaymentUnapplied"
   disputeEvents:
     address: passage.receivables.dispute
     messages:
@@ -105,6 +107,12 @@ operations:
     channel: { $ref: "#/channels/paymentEvents" }
     messages:
       - { $ref: "#/channels/paymentEvents/messages/paymentApplied" }
+  publishPaymentUnapplied:
+    action: send
+    summary: Publish payment.unapplied.v1
+    channel: { $ref: "#/channels/paymentEvents" }
+    messages:
+      - { $ref: "#/channels/paymentEvents/messages/paymentUnapplied" }
   publishCaseOpened:
     action: send
     channel: { $ref: "#/channels/caseEvents" }
@@ -180,6 +188,12 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/PaymentAppliedData"
+    PaymentUnapplied:
+      name: dev.passage.receivables.payment.unapplied.v1
+      summary: A payment's applications were reversed (#30); the settlements listed are undone and the items are open again by those amounts. Consumers are credit exposure and the portal.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/PaymentUnappliedData"
     DisputeOpened:
       name: dev.passage.receivables.dispute.opened.v1
       summary: A customer dispute was opened on an open item; the item is held out of dunning. Consumers are sales and credit.
@@ -414,7 +428,9 @@ components:
             required: [open_item_id, amount]
             properties:
               open_item_id: { type: string, format: uuid }
-              amount: { type: string }
+              amount: { type: string, description: "What came off the credit, in its currency." }
+              item_currency: { type: string, pattern: "^[A-Z]{3}$", description: "Set for a cross-currency settlement: the debit's currency." }
+              item_amount: { type: string, description: "Set for a cross-currency settlement: what came off the debit, in item_currency." }
     DownPaymentData:
       type: object
       required: [downpayment_id, legal_entity_id, customer_id, sales_order_id, kind, amount, currency, remaining, open_item_id, postings]
@@ -523,6 +539,27 @@ components:
               item_amount: { type: string, description: "Set for a cross-currency settlement: what the settlement took off the open item, in item_currency." }
         residual: { type: string, description: "amount placed on account" }
         status: { type: string, enum: [APPLIED, ON_ACCOUNT] }
+    PaymentUnappliedData:
+      type: object
+      required: [payment_id, legal_entity_id, customer_id, currency, settlements]
+      properties:
+        payment_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: [string, "null"], format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        reason: { type: string }
+        settlements:
+          type: array
+          items:
+            type: object
+            required: [open_item_id, amount, cash_discount, write_off]
+            properties:
+              open_item_id: { type: string, format: uuid }
+              amount: { type: string }
+              cash_discount: { type: string }
+              write_off: { type: string }
+              item_currency: { type: string, pattern: "^[A-Z]{3}$" }
+              item_amount: { type: string }
     DeductionOpenedData:
       type: object
       required: [deduction_id, legal_entity_id, customer_id, open_item_id, payment_id, parent_id, type, reason_code, amount, currency]

@@ -81,6 +81,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/recognition-runs", a.listRuns)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/roll-forward", a.rollForward)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/revrec/journal-postings", a.postJournal)
+	r.With(authz.RequireDuty(dutyPost)).Post("/v1/revrec/modifications/{id}:retry-billing", a.retryBilling)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/revrec/gl-reconciliation", a.glReconciliation)
 }
 

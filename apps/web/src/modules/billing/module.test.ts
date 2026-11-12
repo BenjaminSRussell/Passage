@@ -17,6 +17,7 @@ describe("billing module", () => {
       "/billing/revenue-contracts",
       "/billing/revenue-contracts/new",
       "/billing/revenue-contracts/:id",
+      "/billing/revenue-contracts/:id/modify",
       "/billing/deferred-revenue",
     ]);
     expect(billing.nav.every((n) => n.to.startsWith("/billing"))).toBe(true);

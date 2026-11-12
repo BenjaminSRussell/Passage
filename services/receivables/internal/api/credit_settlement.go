@@ -19,6 +19,8 @@ func (a *API) creditSettlementRoutes(r chi.Router) {
 type creditDebitRequest struct {
 	OpenItemID string          `json:"openItemId"`
 	Amount     decimal.Decimal `json:"amount"`
+	// ItemAmount is what comes off a debit in another currency than the credit, in the debit's currency; omitted, it is priced.
+	ItemAmount decimal.Decimal `json:"itemAmount"`
 }
 
 type settleCreditRequest struct {
@@ -58,10 +60,10 @@ func (a *API) settleCredit(w http.ResponseWriter, r *http.Request) {
 	}
 	debits := make([]store.CreditDebit, len(req.Debits))
 	for i, d := range req.Debits {
-		if !ids.Valid(d.OpenItemID) || !d.Amount.IsPositive() {
-			fields["debits"] = "every debit needs an openItemId and an amount greater than 0"
+		if !ids.Valid(d.OpenItemID) || !d.Amount.IsPositive() || d.ItemAmount.IsNegative() {
+			fields["debits"] = "every debit needs an openItemId and an amount greater than 0 (itemAmount, when given, too)"
 		}
-		debits[i] = store.CreditDebit{OpenItemID: d.OpenItemID, Amount: d.Amount}
+		debits[i] = store.CreditDebit{OpenItemID: d.OpenItemID, Amount: d.Amount, ItemAmount: d.ItemAmount}
 	}
 	if len(fields) > 0 {
 		p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)

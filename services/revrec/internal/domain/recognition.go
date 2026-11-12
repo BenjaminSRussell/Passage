@@ -53,6 +53,10 @@ type RollForward struct {
 	Reversed    decimal.Decimal
 	Adjustments decimal.Decimal
 	Closing     decimal.Decimal
+	// ModificationCredits is not part of the movement: what billing credits for contract modifications effective on or before the
+	// end, the allocation decrease of each product that fell (debited to 2400; the products that rose are invoiced, a 2400 credit).
+	// The GL reconciliation adds it to the debits revrec expects.
+	ModificationCredits decimal.Decimal
 }
 
 // NewRollForward closes a period without credit notes.

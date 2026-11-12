@@ -103,3 +103,31 @@ func TestRMASweep_ExpiresAbandonedCreditsPerLegalEntityWhenATTLIsSet(t *testing.
 		t.Fatalf("expired %+v ttl %v", f.expired, f.ttl)
 	}
 }
+
+type fakeJournalSweeper struct {
+	fakeSweeper
+	parked map[string]int64
+}
+
+func (f *fakeJournalSweeper) GLJournalLegalEntities(context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeJournalSweeper) PostDueJournals(context.Context, time.Time, int) (store.JournalSweepResult, error) {
+	return store.JournalSweepResult{}, nil
+}
+
+func (f *fakeJournalSweeper) CountParkedJournals(ctx context.Context) (int64, error) {
+	p, _ := tenant.FromContext(ctx)
+	return f.parked[p.TenantID], nil
+}
+
+// The journal pass sets the parked-journal gauge to the parked journals of every tenant it sweeps.
+func TestJournalPass_SetsTheParkedJournalGauge(t *testing.T) {
+	f := &fakeJournalSweeper{parked: map[string]int64{"00000000-0000-0000-0000-000000000001": 2, "00000000-0000-0000-0000-000000000002": 3}}
+	s := &rmaSweep{tenants: []string{"00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"}, store: f}
+	s.journalPass(context.Background())
+	if got := store.ParkedJournals.Load(); got != 5 {
+		t.Fatalf("parked gauge = %d, want 5", got)
+	}
+}

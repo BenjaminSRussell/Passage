@@ -158,6 +158,11 @@ export function RevenueContractDetailPage() {
         meta={<StatusPill status={CONTRACT_STATUS_LABELS[contract.status] ?? contract.status} />}
         actions={
           <div className={styles.actions}>
+            {contract.status !== "CANCELLED" ? (
+              <Link className={buttonClassName("primary")} to={`/billing/revenue-contracts/${contract.id}/modify`}>
+                Modify
+              </Link>
+            ) : null}
             <Link className={buttonClassName("secondary")} to="/billing/deferred-revenue">
               Deferred revenue
             </Link>

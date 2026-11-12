@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -48,6 +49,20 @@ const (
 	// slipLineIndex is the unique index that enforces BR-29.5.
 	slipLineIndex = "invoice_line_slip_line_unique"
 )
+
+// ModificationKeyPrefix starts the Idempotency-Key of the documents billing creates for a revrec contract modification
+// (modification id, then ":invoice" or ":credit:<original invoice>"); a person's request may not use it.
+const ModificationKeyPrefix = "revrec-modification:"
+
+// ModificationOfKey returns the contract modification id a document key names, or "".
+func ModificationOfKey(key string) string {
+	rest, ok := strings.CutPrefix(key, ModificationKeyPrefix)
+	if !ok {
+		return ""
+	}
+	id, _, _ := strings.Cut(rest, ":")
+	return id
+}
 
 // postedStatuses are the states in which a credit note counts against its
 // original's remaining creditable amount.
@@ -775,4 +790,57 @@ func notFoundOr(err error) error {
 		return httpx.NewProblem(http.StatusNotFound, CodeNotFound, "invoice not found")
 	}
 	return err
+}
+
+// FindByIdempotencyPrefix returns the documents whose Idempotency-Key starts with prefix, oldest first (the credit notes of one
+// contract modification).
+func (s *Postgres) FindByIdempotencyPrefix(ctx context.Context, prefix string) ([]Invoice, error) {
+	var out []Invoice
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text from invoice where starts_with(idempotency_key, $1) order by created_at, id`, prefix)
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			inv, err := loadInvoice(ctx, tx, `where id = $1`, id)
+			if err != nil {
+				return err
+			}
+			out = append(out, inv)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// CreateCreditNotes stores several credit note proposals in one transaction (all or none), each checked against its original under
+// the original's row lock like CreateCreditNote.
+func (s *Postgres) CreateCreditNotes(ctx context.Context, cns []Invoice) ([]Invoice, error) {
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		for _, cn := range cns {
+			if cn.Type != domain.TypeCreditNote || cn.OriginalInvoiceID == "" {
+				return errors.New("store: CreateCreditNotes needs CREDIT_NOTEs with their original invoices")
+			}
+			if _, err := lockOriginal(ctx, tx, cn); err != nil {
+				return err
+			}
+			if err := writeProposal(ctx, tx, cn); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, writeProblem(err)
+	}
+	out := make([]Invoice, len(cns))
+	for i, cn := range cns {
+		cn.Version, cn.Status = 1, domain.StatusProposal
+		out[i] = cn
+	}
+	return out, nil
 }
