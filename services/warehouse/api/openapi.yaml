@@ -864,7 +864,7 @@ paths:
   /v1/warehouse/automation/events:
     post:
       operationId: ingestAutomationEvents
-      summary: The PLC's events: arrived, diverted, fault (FR-32.12)
+      summary: "The PLC's events: arrived, diverted, fault (FR-32.12)"
       description: >
         Each event is stored once by station, link session and sequence: the PLC numbers its telegrams per session
         (from 1 again after the connector dials it again, wrapping after 99999), so a telegram the PLC repeats within

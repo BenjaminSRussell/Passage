@@ -1576,7 +1576,7 @@ components:
         resourceId: { type: string, format: uuid, description: The shop floor resource that runs the batches. }
         destination: { type: string, enum: [kiosk, pcs-opcua, pcs-mqtt] }
         edgeId: { type: string, format: uuid, description: The edge node of a process control destination; absent for a kiosk. }
-        topic: { type: string, description: pcs-mqtt only: the topic the recipe document is published to. }
+        topic: { type: string, description: "pcs-mqtt only: the topic the recipe document is published to." }
     RecipeTarget:
       type: object
       required: [legalEntityId, itemId, resourceId, destination, updatedBy, updatedAt]
