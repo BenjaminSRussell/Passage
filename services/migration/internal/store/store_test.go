@@ -433,6 +433,10 @@ func TestPostgres_XrefBrowseKeysetFiltersAndSummary(t *testing.T) {
 	if got, _ := s.ListXref(principalContext(2), store.XrefFilter{TargetID: survivor}); len(got) != 0 {
 		t.Fatalf("another tenant finds the survivor: %+v", got)
 	}
+	// Resolving follows the merge to the survivor and leaves unknown keys out (H-S8-6).
+	if got, err := s.ResolveXref(ctx, "ax2012", "customer", []string{"C3_3", "NOPE"}); err != nil || len(got) != 1 || got["C3_3"] != survivor {
+		t.Fatalf("resolve = %+v, %v", got, err)
+	}
 
 	scoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
 	if got, err := s.ListXref(scoped, store.XrefFilter{}); err != nil || len(got) != 0 {

@@ -255,6 +255,8 @@ var serviceGrants = map[string]map[string][]string{
 		"treasury":  {"treasury.import.write", "treasury.import.read"},
 		// Parallel-run replay and ROLLED_BACK compensating journals (#484).
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
+		// Legacy customers of open items resolved through the party migration's cross-reference (H-S8-6).
+		"migration": {"migration.xref.read"},
 	},
 	"integration-hub": {
 		"migration": {"migration.outbound.render", "migration.xref.record"},

@@ -163,6 +163,7 @@ type Store interface {
 	UpdateEntityBinding(ctx context.Context, id string, version int, edit func(*EntityBinding) error) (EntityBinding, error)
 	// ListXref browses the legacy-key cross-reference in keyset order; XrefSummary counts keys per source system and entity.
 	ListXref(ctx context.Context, f XrefFilter) ([]XrefRow, error)
+	ResolveXref(ctx context.Context, system, entity string, keys []string) (map[string]string, error)
 	XrefSummary(ctx context.Context) ([]XrefCount, error)
 	// Tenant settings (FR-10.16): defaults until the tenant writes them.
 	GetTenantSettings(ctx context.Context) (TenantSettings, error)

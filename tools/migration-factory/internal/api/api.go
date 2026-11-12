@@ -127,6 +127,7 @@ type Server struct {
 	// inventory and treasury are the targets of the staged opening stock and opening bank balances (H-S9-1, H-S10-1).
 	inventory StockTarget
 	treasury  BankTarget
+	xref      XrefResolver
 	ledger    ledgerclient.Ledger
 	// subledgers post the subledger documents of a parallel-run replay (49-4).
 	subledgers replay.Ports

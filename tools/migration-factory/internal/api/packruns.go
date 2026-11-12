@@ -308,6 +308,10 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	if err := s.resolveCustomers(r.Context(), p.TenantID, loadCfg, records, extras, sys, company); err != nil {
+		fail(w, r, err)
+		return
+	}
 	partyIDs := splitIDs(req.Parties)
 	parties := make(map[string]struct{}, len(partyIDs))
 	for _, id := range partyIDs {

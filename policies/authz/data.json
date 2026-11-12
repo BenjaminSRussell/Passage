@@ -3155,6 +3155,9 @@
     "migration.xref.record": {"service_only": true, "permissions": [
       {"resource": "/v1/integration/xref:record", "methods": ["POST"]}
     ]},
+    "migration.xref.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/integration/xref:resolve", "methods": ["GET"]}
+    ]},
     "receivables.import.write": {"service_only": true, "permissions": [
       {"resource": "/v1/receivables/open-items:batch", "methods": ["POST"]}
     ]},
@@ -4093,7 +4096,8 @@
       "payables": ["opening-item.import", "opening-item.import.read"],
       "inventory": ["inventory.import.write", "inventory.import.read", "inventory.read"],
       "treasury": ["treasury.import.write", "treasury.import.read"],
-      "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
+      "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"],
+      "migration": ["migration.xref.read"]
     },
     "integration-hub": {
       "migration": ["migration.outbound.render", "migration.xref.record"]

@@ -254,6 +254,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "MIG-1562": { message: "The inventory or treasury service refused the batch, so the balances stay pending.", action: "Read the message, fix what it names, then load again." },
   "MIG-1563": { message: "This run has not been loaded into inventory or treasury yet.", action: "Start the opening load for the run." },
   "MIG-1564": { message: "Only a reconciled stock or bank balance run can be loaded into inventory or treasury.", action: "Reconcile the run first, then load it." },
+  "MIG-1565": { message: "The legacy customers of this run could not be looked up in the party migration.", action: "Try again in a moment, or name the customers in the run's customer map." },
   "AP-OPB-001": { message: "Some opening balance rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
   "AP-OPB-002": { message: "This opening balance batch was already loaded with different content.", action: "Use a new batch name, or send exactly what was loaded before." },
   "AP-OPB-003": { message: "The opening balance rows don't add up to the total you gave for the batch.", action: "Check the rows and the total for each currency, then send the batch again." },
