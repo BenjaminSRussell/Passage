@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { recordError } from "../telemetry";
 import {
   fetchFeatures,
+  fetchInstallation,
   fetchSetup,
   fetchWorkspaceOverride,
   FEATURE_VIEW_DUTY,
@@ -10,7 +11,10 @@ import {
   type TenantFeatures,
   type TenantSetup,
 } from "./api";
-import { featureStateOf, isFeatureOn, type FeatureState } from "./featureRules";
+import { featureStateOf, isFeatureOn, withInstallation, type FeatureState } from "./featureRules";
+
+// Set by the Windows build (windows-msi workflow): the app is served by passage-server, which reports the installed MSI features.
+const SERVED_BY_PASSAGE_SERVER = import.meta.env.VITE_PASSAGE_SERVER === "1";
 
 export interface TenantSettings {
   /** On/off by feature key; undefined until it is known, or when the person may not read it. */
@@ -60,14 +64,31 @@ function failOpen(error: unknown): undefined {
 }
 
 /** Reads the tenant's features, onboarding progress and workspace override, each only if the duties allow it. */
-export function useTenantSettingsLoader(duties: readonly string[], fixed?: TenantSettingsLoad["features"]): TenantSettings {
+export function useTenantSettingsLoader(
+  duties: readonly string[],
+  fixed?: TenantSettingsLoad["features"],
+  readInstallation: boolean = SERVED_BY_PASSAGE_SERVER,
+): TenantSettings {
   const [catalog, setCatalog] = useState<TenantFeatures>();
+  const [installation, setInstallation] = useState<Record<string, boolean>>();
   const [setup, setSetup] = useState<TenantSetup>();
   const [override, setOverride] = useState<unknown>();
   const [attempt, setAttempt] = useState(0);
   const canFeatures = fixed === undefined && duties.includes(FEATURE_VIEW_DUTY);
   const canWorkspaces = duties.includes(SETUP_VIEW_DUTY);
   const canSetup = duties.includes(SETUP_MAINTAIN_DUTY);
+  const canInstallation = fixed === undefined && readInstallation;
+
+  // An installation that cannot be read leaves every screen on, like the tenant features.
+  useEffect(() => {
+    if (!canInstallation) return;
+    const controller = new AbortController();
+    void fetchInstallation(controller.signal).then(
+      (i) => setInstallation(i.features),
+      (e: unknown) => (controller.signal.aborted ? undefined : failOpen(e)),
+    );
+    return () => controller.abort();
+  }, [canInstallation]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,7 +100,10 @@ export function useTenantSettingsLoader(duties: readonly string[], fixed?: Tenan
   }, [canFeatures, canWorkspaces, canSetup, attempt]);
 
   const refresh = useCallback(() => setAttempt((n) => n + 1), []);
-  const features = useMemo<FeatureState>(() => fixed ?? (catalog === undefined ? undefined : featureStateOf(catalog.features)), [fixed, catalog]);
+  const features = useMemo<FeatureState>(
+    () => fixed ?? withInstallation(catalog === undefined ? undefined : featureStateOf(catalog.features), installation),
+    [fixed, catalog, installation],
+  );
   return useMemo(() => ({ features, catalog, setup, workspaceOverride: override, refresh }), [features, catalog, setup, override, refresh]);
 }
 
