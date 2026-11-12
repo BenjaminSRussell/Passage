@@ -3134,3 +3134,24 @@ test_consolidation_ic_layers_and_investments_register if {
 	allowed("consolidation.view", "GET", "/v1/consol/runs/r1/investments")
 	not allowed("consolidation.configure", "GET", "/v1/consol/runs/r1/investments")
 }
+
+test_lookup_reads_reach_the_form_fillers if {
+	allowed("hr.action.maintain", "GET", "/v1/hr/checklist-templates")
+	allowed("hr.action.maintain", "GET", "/v1/hr/employments/e1")
+	allowed("hr.action.maintain", "GET", "/v1/hr/workers/w1/employments")
+	allowed("hr.worker.inquire", "GET", "/v1/hr/employments/e1")
+	allowed("hr.questionnaire.admin", "GET", "/v1/hr/questionnaires/schedules")
+	allowed("hr.questionnaire.admin", "GET", "/v1/hr/questionnaires/schedules/s1")
+	allowed("transport.gate.operate", "GET", "/v1/warehouse/dock-appointments")
+	allowed("transport.gate.operate", "GET", "/v1/warehouse/dock-appointments/a1")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/dock-appointments/a1")
+	allowed("lean.kanban.work", "GET", "/v1/engineering/resources")
+	allowed("eam.work-order.execute", "GET", "/v1/engineering/resources/r1")
+	allowed("eam.work.plan", "GET", "/v1/engineering/resources")
+	allowed("fulfillment.packing-slip.post", "GET", "/v1/costing/products/p1/cost")
+	allowed("fulfillment.packing-slip.post", "GET", "/v1/costing/versions/v1")
+	not allowed("hr.action.maintain", "POST", "/v1/hr/checklist-templates")
+	not allowed("transport.gate.operate", "POST", "/v1/warehouse/dock-appointments")
+	not allowed("lean.kanban.work", "POST", "/v1/engineering/resources")
+	not allowed("fulfillment.packing-slip.post", "GET", "/v1/costing/valuation-ledgers")
+}

@@ -53,6 +53,8 @@ func TestReceivingRoutes_Refusals(t *testing.T) {
 			body: `{"warehouseId":"` + wh + `","doorId":"D1","direction":"INBOUND","reference":"A",` + window + `}`}, 400, "doorId"},
 		{"appointments list rejects a bad time", req{method: "GET", path: "/v1/warehouse/dock-appointments?warehouseId=" + wh + "&from=today", duties: dutyInquiry}, 400, "from"},
 		{"appointments list to after from", req{method: "GET", path: "/v1/warehouse/dock-appointments?warehouseId=" + wh + "&from=2026-10-27T10:00:00Z&to=2026-10-27T09:00:00Z", duties: dutyInquiry}, 400, "to"},
+		{"one appointment needs an inquiry or gate duty", req{method: "GET", path: "/v1/warehouse/dock-appointments/" + wh, duties: dutyReceive}, 403, ""},
+		{"one appointment needs a uuid", req{method: "GET", path: "/v1/warehouse/dock-appointments/D1", duties: dutyInquiry}, 404, ""},
 		{"asn needs the receive duty", req{method: "POST", path: "/v1/warehouse/receipts:from-asn", duties: dutyWorkExecute, key: "k", body: asn(pallet)}, 403, ""},
 		{"asn needs pallets", req{method: "POST", path: "/v1/warehouse/receipts:from-asn", duties: dutyReceive, key: "k", body: asn("")}, 400, "lines"},
 		{"asn needs a reference", req{method: "POST", path: "/v1/warehouse/receipts:from-asn", duties: dutyReceive, key: "k",
@@ -230,5 +232,17 @@ func TestReceivingRoutes_DockAndASNFlow(t *testing.T) {
 	rec = call(h, req{method: "GET", path: "/v1/warehouse/receipts/" + r.ID, duties: all})
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"PARTIALLY_RECEIVED"`) {
 		t.Fatalf("receipt: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// The gate guard picks the dock appointment at check-in, so the gate duty reads the list and one appointment.
+func TestDockAppointments_TheGateGuardReadsThem(t *testing.T) {
+	wh := ids.New()
+	for _, path := range []string{"/v1/warehouse/dock-appointments?warehouseId=" + wh, "/v1/warehouse/dock-appointments/" + wh} {
+		fake := &fakeStore{}
+		rec := call(persistedRouter(fake), req{method: "GET", path: path, duties: dutyGateOperate})
+		if rec.Code != 200 || fake.calls != 1 {
+			t.Fatalf("%s: status = %d calls = %d; body %s", path, rec.Code, fake.calls, rec.Body.String())
+		}
 	}
 }

@@ -169,11 +169,31 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
+  /v1/hr/employments/{id}:
+    get:
+      operationId: getEmployment
+      summary: One employment with status as-of now (the employment lookup)
+      x-passage-duty: hr.worker.inquire
+      x-passage-also-duty: hr.action.maintain
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: The employment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employment"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /v1/hr/workers/{id}/employments:
     get:
       operationId: listEmployments
       summary: Every employment of a worker, oldest first, with status as-of now
       x-passage-duty: hr.worker.inquire
+      x-passage-also-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/WorkerId"
       responses:
@@ -2832,6 +2852,7 @@ paths:
       operationId: listChecklistTemplates
       summary: Checklist templates, optionally of one kind
       x-passage-duty: hr.setup.admin
+      x-passage-also-duty: hr.action.maintain
       parameters:
         - $ref: "#/components/parameters/TemplateKind"
       responses:
@@ -3091,6 +3112,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
   /v1/hr/questionnaires/schedules:
+    get:
+      operationId: listSchedules
+      summary: Every schedule with its questionnaire's code and name, newest opening first (at most 200)
+      x-passage-duty: hr.questionnaire.admin
+      parameters:
+        - name: questionnaireId
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleSummaryList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
     post:
       operationId: createSchedule
       summary: Schedule a questionnaire to a CEL population; the invited count is snapshotted
@@ -3151,6 +3194,7 @@ paths:
       operationId: getSchedule
       summary: A schedule with the questionnaire to fill in
       x-passage-duty: hr.questionnaire.self
+      x-passage-also-duty: hr.questionnaire.admin
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
@@ -7360,6 +7404,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/QuestionnaireSchedule"
+    ScheduleSummaryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/QuestionnaireSchedule"
+              - type: object
+                required: [questionnaireCode, questionnaireName]
+                properties:
+                  questionnaireCode: {type: string}
+                  questionnaireName: {type: string}
     ScheduleView:
       allOf:
         - $ref: "#/components/schemas/QuestionnaireSchedule"

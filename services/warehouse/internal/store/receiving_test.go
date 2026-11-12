@@ -62,6 +62,13 @@ func TestStore_DockAppointments(t *testing.T) {
 	if err != nil || len(list) != 2 || list[1].Reference != "ASN-3" {
 		t.Fatalf("door D1 = %+v err=%v", list, err)
 	}
+	one, err := st.GetAppointment(ctx, list[0].ID)
+	if err != nil || one.ID != list[0].ID || one.DoorCode != "D1" || one.Reference != list[0].Reference {
+		t.Fatalf("get appointment = %+v err=%v", one, err)
+	}
+	if _, err := st.GetAppointment(ctx, ids.New()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown appointment: err = %v, want ErrNotFound", err)
+	}
 	doors, err := st.ListDoors(ctx, wh)
 	if err != nil || len(doors) != 2 || doors[0].Code != "D1" {
 		t.Fatalf("doors = %+v err=%v", doors, err)
