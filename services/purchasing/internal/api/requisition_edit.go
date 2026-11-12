@@ -89,7 +89,12 @@ func (a *API) patchRequisition(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if cur.Status == store.RequisitionDraft && cur.Version == version {
-		full := requisitionBody{LegalEntityID: cur.LegalEntityID, OperatingUnitID: edit.OperatingUnitID, Currency: cur.Currency, Lines: *body.Lines}
+		lines, err := keepPunchoutFields(cur, *body.Lines)
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		full := requisitionBody{LegalEntityID: cur.LegalEntityID, OperatingUnitID: edit.OperatingUnitID, Currency: cur.Currency, Lines: lines}
 		if body.Currency != nil {
 			full.Currency = *body.Currency
 		}

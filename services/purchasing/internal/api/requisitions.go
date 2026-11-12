@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
@@ -74,6 +75,10 @@ func (a *API) createRequisition(w http.ResponseWriter, r *http.Request) {
 			fail(w, r, err)
 			return
 		}
+	}
+	if err := punchoutFieldsAllowed(p, body.Lines); err != nil {
+		fail(w, r, err)
+		return
 	}
 	resolved, err := a.applyCatalogEntries(r, body)
 	if err != nil {
@@ -422,9 +427,72 @@ func (a *API) approvalChain(r store.Requisition) []string {
 			chain = c
 		}
 	}
-	// A punchout line priced above its catalog price plus tolerance (BR-35.13) is never approved automatically.
-	if len(chain) == 0 && slices.ContainsFunc(r.Lines, func(l store.RequisitionLine) bool { return l.NeedsApproval }) {
+	// A punchout line priced above its catalog price plus tolerance (BR-35.13) is never approved automatically, nor is a requisition
+	// that held one when it was created (an edit cannot drop the approval).
+	if len(chain) == 0 && (r.NeedsApproval || slices.ContainsFunc(r.Lines, func(l store.RequisitionLine) bool { return l.NeedsApproval })) {
 		chain = []string{domain.RoleManager}
 	}
 	return chain
+}
+
+// punchoutIssuer is the service whose token may create punchout lines: the EDI engine turning a returned cart into a requisition.
+const punchoutIssuer = "edi"
+
+func hasPunchoutFields(l requisitionLineBody) bool {
+	return l.CatalogSource != "" || strings.TrimSpace(l.SupplierPartID) != "" || l.NeedsApproval
+}
+
+// punchoutFieldsAllowed refuses punchout fields from anyone but the EDI engine: only a returned punchout cart says a line came from
+// a supplier's catalog and whether its price needs approval (#35, 35-3).
+func punchoutFieldsAllowed(p tenant.Principal, lines []requisitionLineBody) error {
+	if p.Service == punchoutIssuer {
+		return nil
+	}
+	for i, l := range lines {
+		if hasPunchoutFields(l) {
+			return invalid("lines["+strconv.Itoa(i)+"].catalogSource", "is set by the punchout return only")
+		}
+	}
+	return nil
+}
+
+// keepPunchoutFields makes the punchout fields of an edited requisition sticky: an edited line that is a punchout line of the
+// requisition (by supplierPartId when given, else by description and unit) takes the catalog source, supplier part and approval
+// flag from it, whatever the edit sent, and an edit may not mark any other line as a punchout line.
+func keepPunchoutFields(cur store.Requisition, lines []requisitionLineBody) ([]requisitionLineBody, error) {
+	byPart := map[string]store.RequisitionLine{}
+	byText := map[string]store.RequisitionLine{}
+	textKey := func(desc, unit string) string {
+		return strings.ToLower(strings.TrimSpace(desc)) + "|" + strings.ToLower(strings.TrimSpace(unit))
+	}
+	for _, l := range cur.Lines {
+		if l.CatalogSource != store.CatalogSourcePunchout {
+			continue
+		}
+		if l.SupplierPartID != "" {
+			byPart[l.SupplierPartID] = l
+		}
+		byText[textKey(l.Description, l.Unit)] = l
+	}
+	out := make([]requisitionLineBody, len(lines))
+	for i, l := range lines {
+		var (
+			src store.RequisitionLine
+			ok  bool
+		)
+		if part := strings.TrimSpace(l.SupplierPartID); part != "" {
+			if src, ok = byPart[part]; !ok {
+				return nil, invalid("lines["+strconv.Itoa(i)+"].supplierPartId", "names no punchout line of this requisition; only the punchout return adds punchout lines")
+			}
+		} else if hasPunchoutFields(l) {
+			return nil, invalid("lines["+strconv.Itoa(i)+"].catalogSource", "is set by the punchout return only")
+		} else {
+			src, ok = byText[textKey(l.Description, l.Unit)]
+		}
+		if ok {
+			l.CatalogSource, l.SupplierPartID, l.NeedsApproval = src.CatalogSource, src.SupplierPartID, src.NeedsApproval
+		}
+		out[i] = l
+	}
+	return out, nil
 }

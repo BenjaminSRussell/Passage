@@ -40,9 +40,12 @@ type Requisition struct {
 	ApproverChain   []string        `json:"approverChain"`
 	// ApprovedSteps is how many levels of ApproverChain have approved in this round; NextApprover is the role
 	// that decides next while the requisition is IN_REVIEW (BR-17.1).
-	ApprovedSteps int               `json:"approvedSteps"`
-	NextApprover  string            `json:"nextApprover,omitempty"`
-	PolicyVersion string            `json:"policyVersion,omitempty"`
+	ApprovedSteps int    `json:"approvedSteps"`
+	NextApprover  string `json:"nextApprover,omitempty"`
+	PolicyVersion string `json:"policyVersion,omitempty"`
+	// NeedsApproval is set when the requisition was created with a flagged punchout line (BR-35.13); edits never clear it, so the
+	// requisition is never approved automatically on submit.
+	NeedsApproval bool              `json:"needsApproval,omitempty"`
 	Version       int               `json:"version"`
 	Lines         []RequisitionLine `json:"lines"`
 	// History is the requisition's audit trail, oldest first.
@@ -143,11 +146,15 @@ func (s *Postgres) CreateRequisition(ctx context.Context, in Requisition, idem I
 		}
 		in.Number = fmt.Sprintf("PR-%08d", seq)
 		in.Status, in.Version = RequisitionDraft, 1
+		flagged := in.NeedsApproval
+		for _, l := range in.Lines {
+			flagged = flagged || l.NeedsApproval
+		}
 		if _, err := tx.Exec(ctx, `insert into purchase_requisition (tenant_id, id, legal_entity_id, operating_unit_id, number, requester_id,
-			status, currency, total, version)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			status, currency, total, version, needs_approval)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 			p.TenantID, in.ID, in.LegalEntityID, nullable(in.OperatingUnitID), in.Number, in.RequesterID, in.Status, in.Currency,
-			in.Total, in.Version); err != nil {
+			in.Total, in.Version, flagged); err != nil {
 			return err
 		}
 		for _, l := range in.Lines {
@@ -286,10 +293,10 @@ func loadRequisition(ctx context.Context, tx pgx.Tx, id string) (Requisition, er
 	p, _ := tenant.FromContext(ctx)
 	var r Requisition
 	err := tx.QueryRow(ctx, `select id, legal_entity_id, coalesce(operating_unit_id::text, ''), number, requester_id, status, currency,
-		total, approver_chain, coalesce(policy_version, ''), approved_steps, version, created_at, updated_at
+		total, approver_chain, coalesce(policy_version, ''), approved_steps, version, created_at, updated_at, needs_approval
 		from purchase_requisition where tenant_id = $1 and id = $2`, p.TenantID, id).
 		Scan(&r.ID, &r.LegalEntityID, &r.OperatingUnitID, &r.Number, &r.RequesterID, &r.Status, &r.Currency, &r.Total, &r.ApproverChain,
-			&r.PolicyVersion, &r.ApprovedSteps, &r.Version, &r.CreatedAt, &r.UpdatedAt)
+			&r.PolicyVersion, &r.ApprovedSteps, &r.Version, &r.CreatedAt, &r.UpdatedAt, &r.NeedsApproval)
 	if err != nil {
 		return Requisition{}, notFound(err, CodeRequisitionNotFound, "requisition not found")
 	}
