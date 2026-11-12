@@ -159,7 +159,14 @@ def resolve_digest(ref: str, runner: Runner) -> str:
     digest = runner(["skopeo", "inspect", "--format", "{{.Digest}}", f"docker://{ref}"]).strip()
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
         raise RuntimeError(f"skopeo returned no digest for {ref}: {digest!r}")
-    return f"{ref.split('@')[0]}@{digest}"
+    return f"{repository(ref)}@{digest}"
+
+
+def repository(ref: str) -> str:
+    """The reference without its tag or digest. skopeo refuses a reference that has both a tag and a digest."""
+    name = ref.split("@")[0]
+    head, sep, last = name.rpartition("/")
+    return f"{head}{sep}{last.split(':')[0]}"
 
 
 def build(out: Path, key: str, runner: Runner = run, now: Callable[[], str] | None = None) -> Path:
@@ -210,12 +217,17 @@ def extract(archive: Path, dest: Path) -> Path:
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
+    base = dest.resolve()
     with tarfile.open(archive, "r:gz") as tar:
         for m in tar.getmembers():
             target = (dest / m.name).resolve()
-            if not str(target).startswith(str(dest.resolve())) or m.issym() or m.islnk():
+            if not target.is_relative_to(base) or m.issym() or m.islnk() or not (m.isfile() or m.isdir()):
                 raise RuntimeError(f"unsafe path in archive: {m.name}")
-        tar.extractall(dest)
+        # the "data" filter (Python 3.12+, backported to 3.11.4) refuses the same things again and drops modes and owners
+        if hasattr(tarfile, "data_filter"):
+            tar.extractall(dest, filter="data")
+        else:  # pragma: no cover - Python before 3.11.4; every member was checked above
+            tar.extractall(dest)
     return dest / "passage-offline"
 
 
@@ -269,12 +281,16 @@ def install(archive: Path, registry: str, git_url: str, key: str, runner: Runner
         runner(["helm", "push", str(chart), f"oci://{registry}/charts"])
     out = root / "argocd"
     render_argocd(git_url, registry, out)
+    # The offline Kyverno policy needs the same public key the archive was verified with. A KMS or HSM URI cannot be
+    # read here: then the operator renders the policy with `render-policies` and the exported PEM.
+    if Path(key).is_file():
+        render_policies(Path(key).read_text(encoding="utf-8"), registry, out / "policies")
     return out
 
 
 def mirrored_path(ref: str) -> str:
     """Path of an image in the enclave registry: the original registry host dropped, repository and digest kept."""
-    name = ref.split("@")[0]
+    name = repository(ref) if "@" in ref else ref
     first, _, rest = name.partition("/")
     path = rest if rest and ("." in first or ":" in first) else name
     digest = ref.split("@", 1)[1] if "@" in ref else ""
@@ -343,6 +359,10 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--registry", required=True)
     i.add_argument("--git-url", required=True)
     i.add_argument("--key", required=True)
+    rp = sub.add_parser("render-policies", help="write the offline Kyverno policies for the enclave registry and public key")
+    rp.add_argument("--key", type=Path, required=True, help="cosign public key (PEM file)")
+    rp.add_argument("--registry", required=True)
+    rp.add_argument("--out", type=Path, required=True)
     r = sub.add_parser("render-argocd", help="rewrite the Argo CD sources for the in-enclave Git mirror and registry")
     r.add_argument("--git-url", required=True)
     r.add_argument("--registry", required=True)
@@ -359,6 +379,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"bundle verified: {root}")
         elif args.cmd == "install":
             print(install(args.archive, args.registry, args.git_url, args.key))
+        elif args.cmd == "render-policies":
+            for p in render_policies(args.key.read_text(encoding="utf-8"), args.registry, args.out):
+                print(p)
         elif args.cmd == "render-argocd":
             for p in render_argocd(args.git_url, args.registry, args.out):
                 print(p)
