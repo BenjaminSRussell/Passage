@@ -17,7 +17,7 @@ interface Call {
 }
 
 /** A fake Keycloak: the token endpoint, the users it holds, the supplier-user role and the role mappings it was asked for. */
-function fakeKeycloak(existing: Record<string, unknown> | null, existingRoles: { name: string }[] = []) {
+function fakeKeycloak(existing: Record<string, unknown> | null, existingRoles: { name: string }[] = [], opts: { credentials?: unknown[]; conflictOnCreate?: boolean } = {}) {
   const calls: Call[] = [];
   let users = existing ? [existing] : [];
   const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
@@ -25,7 +25,13 @@ function fakeKeycloak(existing: Record<string, unknown> | null, existingRoles: {
     const body = typeof init?.body === "string" && init.body.startsWith("[") || typeof init?.body === "string" && init.body.startsWith("{") ? JSON.parse(init.body as string) : init?.body;
     calls.push({ method, url, body });
     if (url.endsWith("/protocol/openid-connect/token")) return Response.json({ access_token: "admin-token", expires_in: 300 });
-    if (method === "GET" && url.startsWith(`${ADMIN}/users?`)) return Response.json(users);
+    if (method === "GET" && url.startsWith(`${ADMIN}/users?`)) {
+      const q = new URL(url).searchParams;
+      const [field, value] = q.has("email") ? ["email", q.get("email")] : ["username", q.get("username")];
+      return Response.json(users.filter((u) => String(u[field] ?? "").toLowerCase() === value));
+    }
+    if (method === "GET" && url.endsWith("/credentials")) return Response.json(opts.credentials ?? []);
+    if (method === "POST" && url === `${ADMIN}/users` && opts.conflictOnCreate) return new Response(null, { status: 409 });
     if (method === "POST" && url === `${ADMIN}/users`) {
       users = [{ id: "kc-new", ...(body as object) }];
       return new Response(null, { status: 201 });
@@ -60,11 +66,18 @@ describe("Keycloak provisioner", () => {
   });
 
   it("adopts its own leftover of an earlier attempt, and nothing else", async () => {
-    const leftover = { id: "kc-old", username: "sam@vendor.example", enabled: true, attributes: { tenant_id: [TENANT], vendor_id: [VENDOR], legal_entity_id: [LE], portal_contact: ["supplier"] } };
+    // Mid-onboarding: the required actions are still pending. Its legal-entity list is kept, never replaced.
+    const leftover = { id: "kc-old", username: "sam@vendor.example", email: "sam@vendor.example", enabled: true, requiredActions: ["UPDATE_PASSWORD"], attributes: { tenant_id: [TENANT], vendor_id: [VENDOR], legal_entity_id: ["le-earlier"], portal_contact: ["supplier"] } };
     const kc = fakeKeycloak(leftover, [{ name: "default-roles-passage" }]);
     expect(await kc.provisioner.createUser(user)).toEqual({ created: true });
-    expect(kc.calls.some((c) => c.method === "PUT" && c.url === `${ADMIN}/users/kc-old`)).toBe(true);
+    expect(kc.calls.some((c) => c.method === "PUT" && c.url === `${ADMIN}/users/kc-old`)).toBe(false);
     expect(kc.calls.some((c) => c.method === "POST" && c.url === `${ADMIN}/users`)).toBe(false);
+    // Unverified with no credential is mid-onboarding too; a missing attribute is added, the others stay.
+    const unverified = { id: "kc-u", username: "sam@vendor.example", email: "sam@vendor.example", enabled: true, emailVerified: false, requiredActions: [], attributes: { tenant_id: [TENANT], vendor_id: [VENDOR], portal_contact: ["supplier"] } };
+    const kc2 = fakeKeycloak(unverified, [{ name: "supplier-user" }]);
+    expect(await kc2.provisioner.createUser(user)).toEqual({ created: true });
+    const put = kc2.calls.find((c) => c.method === "PUT" && c.url === `${ADMIN}/users/kc-u`);
+    expect((put?.body as { attributes: Record<string, string[]> }).attributes).toEqual({ tenant_id: [TENANT], vendor_id: [VENDOR], portal_contact: ["supplier"], legal_entity_id: [LE] });
   });
 
   it("leaves a staff, disabled or other vendor's account untouched and answers pending", async () => {
@@ -80,6 +93,27 @@ describe("Keycloak provisioner", () => {
     const admin = { id: "kc-a", username: "sam@vendor.example", enabled: true, attributes: { tenant_id: [TENANT], vendor_id: [VENDOR], portal_contact: ["supplier"] } };
     const kc = fakeKeycloak(admin, [{ name: "supplier-admin" }]);
     expect((await kc.provisioner.createUser(user)).created).toBe(false);
+  });
+
+  it("never adopts an active colleague: onboarding done means pending, with Keycloak untouched", async () => {
+    const attrs = { tenant_id: [TENANT], vendor_id: [VENDOR], legal_entity_id: [LE], portal_contact: ["supplier"] };
+    const active = { id: "kc-act", username: "sam@vendor.example", email: "sam@vendor.example", enabled: true, emailVerified: true, requiredActions: [], attributes: attrs };
+    const withPassword = { ...active, id: "kc-pw", emailVerified: false };
+    for (const [existing, credentials] of [[active, []], [withPassword, [{ type: "password" }]]] as const) {
+      const kc = fakeKeycloak(existing, [{ name: "supplier-user" }], { credentials: [...credentials] });
+      expect((await kc.provisioner.createUser(user)).created).toBe(false);
+      expect(kc.calls.filter((c) => c.method !== "GET" && !c.url.endsWith("/token"))).toEqual([]);
+    }
+  });
+
+  it("answers pending for an address held under another username, or a create Keycloak refuses with 409", async () => {
+    const other = { id: "kc-x", username: "sam.s", email: "sam@vendor.example", enabled: true, attributes: {} };
+    const kc = fakeKeycloak(other);
+    expect((await kc.provisioner.createUser(user)).created).toBe(false);
+    expect(kc.calls.some((c) => c.method === "POST" && c.url === `${ADMIN}/users`)).toBe(false);
+    const raced = fakeKeycloak(null, [], { conflictOnCreate: true });
+    expect((await raced.provisioner.createUser(user)).created).toBe(false);
+    expect(raced.calls.some((c) => c.url.includes("/execute-actions-email"))).toBe(false);
   });
 
   it("fails when Keycloak refuses, so the invitation is not accepted", async () => {

@@ -94,20 +94,32 @@ export class KeycloakProvisioner implements UserProvisioner {
       vendor_id: [user.vendorId.toLowerCase()],
       [MARKER]: ["supplier"],
     };
-    const existing = await this.findUser(email);
+    const pending = (): ProvisionResult => {
+      this.cfg.log?.({ msg: "invitation accepted; an account with this address already exists and is not this flow's", vendorId: user.vendorId });
+      return { created: false, pending: "an account with this address already exists; an administrator links it" };
+    };
+    const byName = await this.findUser("username", email);
+    const byEmail = await this.findUser("email", email);
+    // An account that holds the address under another username is someone else's: it is never adopted.
+    if (byEmail && (!byName || String(byEmail["id"] ?? "") !== String(byName["id"] ?? ""))) return pending();
+    const existing = byName;
     let id: string;
     if (existing) {
       id = String(existing["id"] ?? "");
-      if (!(await this.adoptable(existing, user))) {
-        this.cfg.log?.({ msg: "invitation accepted; an account with this address already exists and is not this flow's", vendorId: user.vendorId });
-        return { created: false, pending: "an account with this address already exists; an administrator links it" };
+      if (!(await this.adoptable(existing, user))) return pending();
+      // Only the attributes the leftover lacks are added: an existing legal-entity list (or any other value) is never replaced.
+      const current = (existing["attributes"] as Record<string, unknown[]> | undefined) ?? {};
+      const missing = Object.fromEntries(Object.entries(attributes).filter(([name]) => !(Array.isArray(current[name]) && current[name].length > 0 && String(current[name][0]) !== "")));
+      if (Object.keys(missing).length > 0) {
+        await this.expect("update user", await this.call("PUT", `/users/${encodeURIComponent(id)}`, { ...existing, attributes: { ...current, ...missing } }), [200, 204]);
       }
-      const merged = { ...existing, attributes: { ...((existing["attributes"] as Record<string, unknown>) ?? {}), ...attributes } };
-      await this.expect("update user", await this.call("PUT", `/users/${encodeURIComponent(id)}`, merged), [200, 204]);
     } else {
       const rep = { username: email, email, firstName: user.displayName, enabled: true, emailVerified: false, requiredActions: REQUIRED_ACTIONS, attributes };
-      await this.expect("create user", await this.call("POST", "/users", rep), [200, 201]);
-      const created = await this.findUser(email);
+      const res = await this.call("POST", "/users", rep);
+      // 409: Keycloak holds the username or the address already (created meanwhile, or under another username).
+      if (res.status === 409) return pending();
+      await this.expect("create user", res, [200, 201]);
+      const created = await this.findUser("username", email);
       id = String(created?.["id"] ?? "");
       if (!id) throw new KeycloakProvisionError("create user: the created user cannot be found");
     }
@@ -119,6 +131,11 @@ export class KeycloakProvisioner implements UserProvisioner {
     return { created: true };
   }
 
+  /**
+   * A leftover of this flow that is still mid-onboarding: enabled, the marker and only portal attributes, the same tenant and
+   * vendor, no realm role beyond supplier-user and Keycloak's defaults, and onboarding not finished (required actions still
+   * pending, or the address unverified and no credential set). An active colleague's account is never adopted.
+   */
   private async adoptable(existing: Record<string, unknown>, user: NewPortalUser): Promise<boolean> {
     if (existing["enabled"] !== true) return false;
     const attrs = (existing["attributes"] as Record<string, unknown[]> | undefined) ?? {};
@@ -126,14 +143,19 @@ export class KeycloakProvisioner implements UserProvisioner {
     if (names.length === 0 || !names.every((n) => PORTAL_ATTRIBUTES.has(n)) || !(MARKER in attrs)) return false;
     const first = (n: string) => String(attrs[n]?.[0] ?? "").toLowerCase();
     if (first("tenant_id") !== user.tenantId.toLowerCase() || first("vendor_id") !== user.vendorId.toLowerCase()) return false;
-    const id = String(existing["id"] ?? "");
-    const roles = (await this.json("get user roles", await this.call("GET", `/users/${encodeURIComponent(id)}/role-mappings/realm`))) as { name?: string }[];
-    return roles.every((r) => r.name === SUPPLIER_USER_ROLE || KEYCLOAK_DEFAULT_ROLES(r.name ?? ""));
+    const id = encodeURIComponent(String(existing["id"] ?? ""));
+    const roles = (await this.json("get user roles", await this.call("GET", `/users/${id}/role-mappings/realm`))) as { name?: string }[];
+    if (!roles.every((r) => r.name === SUPPLIER_USER_ROLE || KEYCLOAK_DEFAULT_ROLES(r.name ?? ""))) return false;
+    const actions = existing["requiredActions"];
+    if (Array.isArray(actions) && actions.length > 0) return true;
+    if (existing["emailVerified"] === true) return false;
+    const credentials = (await this.json("get user credentials", await this.call("GET", `/users/${id}/credentials`))) as unknown[];
+    return Array.isArray(credentials) && credentials.length === 0;
   }
 
-  private async findUser(email: string): Promise<Record<string, unknown> | undefined> {
-    const found = (await this.json("find user", await this.call("GET", `/users?${new URLSearchParams({ username: email, exact: "true" })}`))) as Record<string, unknown>[];
-    return Array.isArray(found) ? found.find((u) => String(u["username"] ?? "").toLowerCase() === email) : undefined;
+  private async findUser(by: "username" | "email", email: string): Promise<Record<string, unknown> | undefined> {
+    const found = (await this.json("find user", await this.call("GET", `/users?${new URLSearchParams({ [by]: email, exact: "true" })}`))) as Record<string, unknown>[];
+    return Array.isArray(found) ? found.find((u) => String(u[by] ?? "").toLowerCase() === email) : undefined;
   }
 
   private async accessToken(): Promise<string> {
