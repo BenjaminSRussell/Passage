@@ -3,7 +3,7 @@
 import type { ActualRow, Balance, Rule } from "../../modules/budgeting/api/client";
 import type { Comparison, Plan, PlanCell, PlanScenario, StageOwner } from "../../modules/budgeting/api/plans";
 import { LEGAL_ENTITY } from "../company";
-import { reply, route } from "../backend";
+import { DemoResponse, reply, route } from "../backend";
 import { at, newId, table, uid } from "../store";
 
 const BASE = "/api/v1/budget";
@@ -327,6 +327,27 @@ route("POST", `${BASE}/plans/{id}/scenarios/{sid}:generate`, ({ params, body, he
     for (const c of lastYear) byMonth.set(`${c.account}|${c.period.slice(5)}`, (byMonth.get(`${c.account}|${c.period.slice(5)}`) ?? 0) + units(c.amount));
     return upsert(existing, [...byMonth.entries()].flatMap(([k, total]) => centers.map((c) => ({ account: k.split("|")[0], costCenter: c.costCenter, period: `${YEAR}-${k.split("|")[1]}`, amount: dec(Math.round((total * factor * Number(c.weight)) / sum)) }))));
   });
+});
+
+// The workbook round trip. The demo cannot build or read a real .xlsx, so the export is a small placeholder file and an import only
+// says the workbook is valid (a dry run) or leaves the grid as it is.
+route("GET", `${BASE}/plans/{id}/scenarios/{sid}:export`, ({ params }) => {
+  const p = plan(params.id);
+  const sc = p?.scenarios.find((s) => s.id === params.sid);
+  if (!p || !sc) return notFound("budget plan");
+  return new DemoResponse(200, new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), {
+    "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "Content-Disposition": `attachment; filename="budget-plan-${p.fiscalYear}.xlsx"`,
+    ETag: `"${sc.version}"`,
+  });
+});
+
+route("POST", `${BASE}/plans/{id}/scenarios/{sid}:import`, ({ params, query, headers }) => {
+  if (query.get("dryRun") === "true") {
+    const rows = (cells.get(params.sid) ?? []).filter((c) => c.period === periods[0]).length;
+    return { valid: true, dryRun: true, rows, cells: rows * 12, total: scenarioTotal(params.sid) };
+  }
+  return write(params.id, params.sid, headers, (existing) => existing);
 });
 
 route("POST", `${BASE}/plans/{id}:submit`, ({ params }) => {

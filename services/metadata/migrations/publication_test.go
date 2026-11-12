@@ -24,8 +24,8 @@ func TestCDCPublicationCoversOutbox(t *testing.T) {
 		t.Fatalf("rerun: %v", err)
 	}
 	var tables int
-	err := pool.QueryRow(ctx, `select count(*) from pg_publication_tables
-		where pubname = 'passage_outbox_metadata' and schemaname = current_schema() and tablename = 'outbox'`).Scan(&tables)
+	err := pool.QueryRow(ctx, `select count(*) from pg_publication_rel pr join pg_publication p on p.oid = pr.prpubid
+		where p.pubname = 'passage_outbox_metadata' and pr.prrelid = to_regclass(current_schema() || '.outbox')`).Scan(&tables)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -47,7 +47,10 @@ alerts:
   errorRatio: 0.01
   p99LatencySeconds: 4
 
+# publicKeys: the services that call receiving with a signed service token, as name[:kid]=base64 Ed25519 key, comma separated (not
+# secret). List edi's key as edi=<key>: an inbound cXML ship notice becomes an ASN (receiving.asn.maintain, #35).
 serviceIdentity:
+  publicKeys: ""
   signingKeySecret: ""
   keyId: ""
 

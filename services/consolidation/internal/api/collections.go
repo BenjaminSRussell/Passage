@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -10,10 +11,13 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/fxclient"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/orgclient"
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/consolidation/internal/store"
 )
 
 // LedgerBalances reads a ledger's trial balance. ledgerclient.Client and
@@ -26,6 +30,100 @@ type LedgerBalances interface {
 func (a *API) WithLedger(l LedgerBalances) *API {
 	a.ledger = l
 	return a
+}
+
+// Default rate types of the fx rate tables the collection translates at (IAS 21.39): the period's average rate for income and the
+// closing rate for the balance sheet. A deployment names its own with FX_AVERAGE_RATE_TYPE and FX_CLOSING_RATE_TYPE.
+const (
+	DefaultAverageRateType = "average"
+	DefaultClosingRateType = "closing"
+)
+
+// WithRates gives the API the fx rate tables. A collection then reads each foreign unit's average and closing rate for the period
+// from them unless the request names the rate; empty type names use the defaults.
+func (a *API) WithRates(r fxclient.Rater, averageType, closingType string) *API {
+	a.rates = r
+	a.averageType, a.closingType = averageType, closingType
+	if a.averageType == "" {
+		a.averageType = DefaultAverageRateType
+	}
+	if a.closingType == "" {
+		a.closingType = DefaultClosingRateType
+	}
+	return a
+}
+
+// WithFiscalCalendar gives the API the org fiscal calendars. A unit whose legal entity has a calendar then takes its fiscal year
+// from it; a unit without one keeps the start month it was set up with.
+func (a *API) WithFiscalCalendar(c orgclient.Calendars) *API {
+	a.fiscal = orgclient.NewYears(c)
+	return a
+}
+
+// fiscalStart is the first month (YYYY-MM) of the unit's fiscal year that period falls in: the org calendar's year when the
+// legal entity has one, else the unit's start month.
+func (a *API) fiscalStart(ctx context.Context, u domain.Unit, period string) (string, error) {
+	if a.fiscal != nil {
+		start, err := a.fiscal.FiscalYearStart(ctx, u.LegalEntityID, period)
+		switch {
+		case err == nil:
+			return start, nil
+		case !errors.Is(err, orgclient.ErrNoCalendar):
+			return "", &domain.Error{Code: domain.CodeCollectionError, Detail: fmt.Sprintf("the fiscal calendar of unit %s could not be read: %v", u.ID, err)}
+		}
+	}
+	return u.FiscalStart(period), nil
+}
+
+// previousYearEnd is the last month (YYYY-MM) of the fiscal year before the one period falls in, by the same calendar.
+func (a *API) previousYearEnd(ctx context.Context, u domain.Unit, period string) (string, error) {
+	start, err := a.fiscalStart(ctx, u, period)
+	if err != nil {
+		return "", err
+	}
+	first, perr := time.Parse("2006-01", start)
+	if perr != nil {
+		return "", &domain.Error{Code: domain.CodeCollectionError, Detail: "the fiscal year start " + start + " is not YYYY-MM"}
+	}
+	return first.AddDate(0, -1, 0).Format("2006-01"), nil
+}
+
+// tableRates reads the average and closing rate of every foreign unit currency that the request did not name, at the last day of
+// the period, from the rate tables. A missing rate is CNS-0927 and names the currency pair.
+func (a *API) tableRates(ctx context.Context, group store.GroupDetail, units []domain.Unit, period string, have map[string]domain.CollectRate) error {
+	first, err := time.Parse("2006-01", period)
+	if err != nil {
+		return err
+	}
+	date := first.AddDate(0, 1, -1)
+	for _, u := range units {
+		if u.Currency == group.Currency {
+			continue
+		}
+		if _, ok := have[u.Currency]; ok {
+			continue
+		}
+		if a.rates == nil {
+			return &domain.Error{Code: domain.CodeCollectionError, Detail: fmt.Sprintf("unit %s is in %s: name its average and closing rate, or configure the rate tables", u.ID, u.Currency)}
+		}
+		avg, err := a.rates.Rate(ctx, u.LegalEntityID, a.averageType, u.Currency, group.Currency, date)
+		if err != nil {
+			return rateProblem(err, a.averageType, u.Currency, group.Currency, period)
+		}
+		closing, err := a.rates.Rate(ctx, u.LegalEntityID, a.closingType, u.Currency, group.Currency, date)
+		if err != nil {
+			return rateProblem(err, a.closingType, u.Currency, group.Currency, period)
+		}
+		have[u.Currency] = domain.CollectRate{Average: avg, Closing: closing}
+	}
+	return nil
+}
+
+func rateProblem(err error, rateType, from, to, period string) error {
+	if errors.Is(err, fxclient.ErrRateMissing) {
+		return &domain.Error{Code: domain.CodeCollectionError, Detail: fmt.Sprintf("the rate tables have no %s rate from %s to %s for %s", rateType, from, to, period)}
+	}
+	return &domain.Error{Code: domain.CodeCollectionError, Detail: fmt.Sprintf("the %s rate from %s to %s could not be read: %v", rateType, from, to, err)}
 }
 
 // MaxCollectRates bounds the rates of one collection request.
@@ -151,9 +249,15 @@ func (a *API) collect(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
+	// Income accounts and the dividends account run from the start of the unit's fiscal year: what a unit declared in earlier years is
+	// not part of this year's dividend (E6, the equity method).
 	income := map[string]bool{}
 	for _, m := range mapping {
-		income[m.MainAccount] = m.Type == domain.AccountIncome
+		income[m.MainAccount] = m.Type == domain.AccountIncome || m.Role == domain.RoleDividendPaid
+	}
+	if err := a.tableRates(r.Context(), group, group.Units, body.Period, rates); err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
 	}
 	ledgers := make([]domain.UnitLedger, 0, len(group.Units))
 	for _, u := range group.Units {
@@ -220,7 +324,11 @@ func (a *API) readUnit(ctx context.Context, u domain.Unit, period string, income
 		hasIncome = hasIncome || v
 	}
 	if hasIncome {
-		query.PeriodFrom = u.FiscalStart(period)
+		from, err := a.fiscalStart(ctx, u, period)
+		if err != nil {
+			return domain.UnitLedger{}, err
+		}
+		query.PeriodFrom = from
 		ytd, err := a.ledger.Balances(ctx, query)
 		if err != nil {
 			return domain.UnitLedger{}, &domain.Error{Code: domain.CodeNoLedger, Detail: fmt.Sprintf("the ledger of unit %s could not be read: %v", u.ID, err)}

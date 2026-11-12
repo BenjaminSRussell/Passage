@@ -245,3 +245,23 @@ func TestSelfBilling_SecondRunOverTheSameMessageIsANoOp(t *testing.T) {
 		t.Fatalf("documents %d, parked messages %d; want 1 and 0", docs, failed)
 	}
 }
+
+// The scheduled sweep finds the tenant with an overdue shipment through the cross-tenant function and opens its dispute once.
+func TestSelfBilling_ScheduledSweepOpensTheUnbilledDisputeOnce(t *testing.T) {
+	f := newFake()
+	a, h, pool, partner, _ := autoSetup(t, f)
+	do(t, h, http.MethodPut, "/edi/v1/partners/"+partner+"/self-billing", `{"waitDays":30}`, "edi.admin", srcScope)
+	sendShipment(t, f, h, partner, srcShipment, "SHP-0001", time.Now().UTC().AddDate(0, 0, -45))
+	for i := 0; i < 2; i++ {
+		if _, err := a.RunSelfBillSweep(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(), `select count(*) from self_billing_dispute where kind = 'UNBILLED'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("unbilled disputes: %d %v", n, err)
+	}
+	if tenants, err := a.store.SelfBillDueTenants(context.Background()); err != nil || len(tenants) != 0 {
+		t.Fatalf("nothing is due after the sweep: %v %v", tenants, err)
+	}
+}

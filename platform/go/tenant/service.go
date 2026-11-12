@@ -64,13 +64,21 @@ var (
 // Each grant holds only the narrow duties its caller signs (#333, #341).
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
-	// Consolidation collects each unit's trial balance from its ledger.
+	// Consolidation collects each unit's trial balance from its ledger, translates it at the rate tables' average and closing
+	// rates and reads each unit's fiscal year from the org service's fiscal calendar.
 	"consolidation": {
 		"ledger": {"ledger.balance.read"},
+		"fx":     {"fx.rate.lookup"},
+		"org":    {"org.read"},
 	},
-	// Intercompany posts both sides of a journal and reverses the first when the second fails.
+	// Intercompany posts both sides of a journal and reverses the first when the second fails; it reads the due-to and due-from
+	// balances of both sides to reconcile them, converts them at the rate tables' rates, reads the fiscal calendar to find the
+	// first open period after a closed one, and has the tax service price a cross-border charge.
 	"intercompany": {
-		"ledger": {"ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup"},
+		"ledger": {"ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup", "ledger.balance.read"},
+		"fx":     {"fx.rate.lookup"},
+		"org":    {"org.read"},
+		"tax":    {"tax.tax.calculate", "tax.transaction.record"},
 	},
 	"finreport": {"ledger": {"ledger.entry.lookup", "ledger.balance.read"}},
 	"billing": {
@@ -133,8 +141,14 @@ var serviceGrants = map[string]map[string][]string{
 		"inventory":   {"inventory.read"},
 		"engineering": {"engineering.read"},
 	},
+	// budgeting reads the actuals a plan is generated from, and the drivers of a generated plan: the depreciation schedules of the
+	// fixed assets, HR's positions, project forecasts and the demand forecast (FR-38.14).
 	"budgeting": {
-		"ledger": {"ledger.balance.read"},
+		"ledger":   {"ledger.balance.read"},
+		"assets":   {"assets.asset.view"},
+		"hr":       {"hr.org.inquire"},
+		"projects": {"projects.inquire"},
+		"planning": {"planning.read"},
 	},
 	"costing": {
 		"ledger": {"ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"},
@@ -177,7 +191,7 @@ var serviceGrants = map[string]map[string][]string{
 		"receivables": {"receivables.forecast.read"},
 	},
 	"sales": {
-		"product":     {"product.configuration.read"},
+		"product":     {"product.configuration.read", "product.names.read"},
 		"production":  {"production.order.create-from-sales"},
 		"billing":     {"billing.invoice.read"},
 		"fulfillment": {"fulfillment.packing-slip.read"},
@@ -247,7 +261,9 @@ var serviceGrants = map[string]map[string][]string{
 		"billing":     {"billing.invoice.read"},
 		"sales":       {"sales.order.lookup", "sales.channel.intake"},
 		// A returned punchout cart becomes a requisition of the requester (#35, 35-3): the token carries the requester as act.
-		"purchasing": {"procurement.requisition.create"},
+		"purchasing": {"procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"},
+		// An inbound ship notice of a cXML network becomes the receiving ASN of the purchase order it names (#35, 35-4).
+		"receiving": {"receiving.asn.maintain"},
 	},
 	"fieldservice": {
 		"dispatch": {"dispatch.run.create", "dispatch.run.read"},
@@ -272,11 +288,13 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	// The customer portal BFF acts for one customer contact at a time (#30). Every token it signs carries the customer id (cus)
 	// from the contact's verified session, and the target service scopes every read to that customer. Only customer-portal
-	// duties, which no human role holds and which are read-only, are granted.
+	// duties, which no human role holds, are granted: reads, and the two writes a customer makes for itself (an order and a return).
 	"customer-portal": {
 		"receivables": {"receivables.customer-portal.read"},
 		"billing":     {"billing.customer-portal.read"},
-		"sales":       {"sales.customer-portal.read"},
+		"sales":       {"sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"},
+		"party":       {"party.customer-portal.read"},
+		"identity":    {"identity.customer-portal.read"},
 	},
 }
 
@@ -489,7 +507,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 
 var readDuties = map[string]struct{}{
 	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.account.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
-	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal-hold.check": {},
+	"inventory.ownership-change.read": {}, "fx.rate.lookup": {}, "compliance.legal-hold.check": {}, "org.read": {},
 }
 
 func onlyReads(duties []string) bool {

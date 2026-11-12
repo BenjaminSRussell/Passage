@@ -8,6 +8,7 @@ useFakeServer();
 
 beforeEach(() => {
   rememberOption("vendor", { id: "11111111-1111-4111-8111-111111111111", name: "Acme Supply", number: "V-100" });
+  rememberOption("user", { id: "44444444-4444-4444-8444-444444444444", name: "Ana Ortiz" });
 });
 
 const VENDOR = "11111111-1111-4111-8111-111111111111";
@@ -205,11 +206,13 @@ describe("vendor invoice detail", () => {
   });
 
   it("explains a rejection", async () => {
-    api(() => ({ items: [invoice({ status: "AUDIT_REJECTED", rejectReason: "Duplicate of INV-0", rejectedBy: "ana", rejectedAt: "2026-10-28T09:00:00Z" })] }));
+    api(() => ({ items: [invoice({ status: "AUDIT_REJECTED", rejectReason: "Duplicate of INV-0", rejectedBy: "44444444-4444-4444-8444-444444444444", rejectedAt: "2026-10-28T09:00:00Z" })] }));
     renderAt(`/ap-invoices/${INVOICE}`);
     expect(await screen.findByText(/Duplicate of INV-0/)).toBeInTheDocument();
-    expect(screen.getByText(/Rejected by another user on 2026-10-28/)).toBeInTheDocument();
-    expect(screen.queryByText(/ana/)).toBeNull();
+    expect(await screen.findByText("Ana Ortiz")).toBeInTheDocument();
+    expect(screen.getByText(/Rejected by/)).toBeInTheDocument();
+    expect(screen.getByText(/2026-10-28/)).toBeInTheDocument();
+    expect(screen.queryByText(/another user/)).toBeNull();
   });
 
   it("shows a loading state", () => {

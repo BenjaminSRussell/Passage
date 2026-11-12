@@ -1,0 +1,53 @@
+{{- if .Values.lagReporter.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-lag-reporter
+  labels:
+    app.kubernetes.io/name: ops-lag-reporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ops-lag-reporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ops-lag-reporter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lag-reporter
+          image: {{ include "ops.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/passage-ops", "lag-report", "--region", {{ required "lagReporter.region is required" .Values.lagReporter.region | quote }}, "--interval", "{{ .Values.lagReporter.intervalSeconds }}s", "--unknown-lag-s", {{ .Values.lagReporter.unknownLagSeconds | quote }}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            {{- include "passage.cloudEnv" $ | nindent 12 }}
+            - name: OPS_API_URL
+              value: {{ required "lagReporter.apiUrl is required" .Values.lagReporter.apiUrl | quote }}
+            - name: OPS_LAG_MODE
+              value: {{ .Values.lagReporter.mode | quote }}
+            - name: OPS_LAG_APPLICATION_NAME
+              value: {{ .Values.lagReporter.applicationName | quote }}
+            - name: OPS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.lagReporter.secret }}
+                  key: OPS_TOKEN
+            - name: OPS_LAG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.lagReporter.secret }}
+                  key: OPS_LAG_DATABASE_URL
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+{{- end }}

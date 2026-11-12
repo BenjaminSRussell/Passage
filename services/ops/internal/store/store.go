@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -68,13 +69,36 @@ type Store interface {
 	Request(ctx context.Context, requestID string) (Request, error)
 	Rejoin(ctx context.Context, region string, resyncVerified bool) (domain.Region, error)
 	Ping(ctx context.Context) error
+	// RecordStep stores one executed step of a failover (part 2); FailoverByEvent reads a failover with its steps.
+	RecordStep(ctx context.Context, eventID string, st Step, reportedBy string) error
+	FailoverByEvent(ctx context.Context, eventID string) (FailoverDetail, error)
+	// Break-glass for ops.failover.execute: a time-boxed, logged window that someone else reviews.
+	OpenBreakGlass(ctx context.Context, w domain.BreakGlassWindow) (BreakGlass, error)
+	ListBreakGlass(ctx context.Context, unreviewedOnly bool) ([]BreakGlass, error)
+	RevokeBreakGlass(ctx context.Context, id, user string) (BreakGlass, error)
+	ReviewBreakGlass(ctx context.Context, id, reviewer, outcome, note string) (BreakGlass, error)
+	AuthoriseBreakGlass(ctx context.Context, user, method, path string) (bool, error)
+	Gauges(ctx context.Context) (Gauges, error)
+	// Tenant licences (FR-50.12): a verified licence is installed under an If-Match version, read back and listed for metrics.
+	InstallLicense(ctx context.Context, l domain.License, payload, signature []byte, user string, ifMatch int64) (LicenseRecord, error)
+	License(ctx context.Context, tenantID string) (LicenseRecord, error)
+	Licenses(ctx context.Context) ([]LicenseRecord, error)
 }
 
 // Postgres implements Store.
-type Postgres struct{ pool *pgxpool.Pool }
+type Postgres struct {
+	pool *pgxpool.Pool
+	lag  LagPolicy
+}
 
 // New wraps pool.
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+
+// WithLagPolicy sets when lag readings count as stale.
+func (s *Postgres) WithLagPolicy(p LagPolicy) *Postgres {
+	s.lag = p
+	return s
+}
 
 // Ping checks the pool.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
@@ -87,8 +111,12 @@ func Problem(err error) error {
 	}
 	status := http.StatusConflict
 	switch rule.Code {
-	case domain.CodeRegionUnknown, domain.CodeRequestUnknown:
+	case domain.CodeRegionUnknown, domain.CodeRequestUnknown, domain.CodeBreakGlassUnknown, CodeLicenseNone:
 		status = http.StatusNotFound
+	case domain.CodeBreakGlassInvalid, domain.CodeBreakGlassReview, domain.CodeLicenseSignature, domain.CodeLicenseInvalid:
+		status = http.StatusUnprocessableEntity
+	case domain.CodeLicenseStale:
+		status = http.StatusPreconditionFailed
 	case domain.CodeLagExceeded, domain.CodeApprovalRequired:
 		status = http.StatusUnprocessableEntity
 	}
@@ -99,12 +127,22 @@ type queryer interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-func listRegions(ctx context.Context, q queryer, lock bool) ([]domain.Region, error) {
-	sql := `select name, role, lag_seconds, version from ops_region order by name`
+// LagPolicy decides when a lag reading is too old to trust.
+type LagPolicy struct {
+	// StaleAfter: a reading older than this is unknown. Zero turns the check off.
+	StaleAfter time.Duration
+	// RequireReports: a region that never reported is unknown too (set when a lag reporter runs). Off, a never-reported region keeps its seeded 0.
+	RequireReports bool
+}
+
+const staleExpr = `((lag_reported_at is null and $2::boolean) or (lag_reported_at is not null and $1::float8 > 0 and now() - lag_reported_at > make_interval(secs => $1::float8)))`
+
+func listRegions(ctx context.Context, q queryer, lock bool, p LagPolicy) ([]domain.Region, error) {
+	sql := `select name, role, case when ` + staleExpr + ` then ` + strconv.Itoa(domain.UnknownLagSeconds) + ` else lag_seconds end, version, ` + staleExpr + ` from ops_region order by name`
 	if lock {
 		sql += ` for update`
 	}
-	rows, err := q.Query(ctx, sql)
+	rows, err := q.Query(ctx, sql, p.StaleAfter.Seconds(), p.RequireReports)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +151,7 @@ func listRegions(ctx context.Context, q queryer, lock bool) ([]domain.Region, er
 	for rows.Next() {
 		var r domain.Region
 		var role string
-		if err := rows.Scan(&r.Name, &role, &r.LagSeconds, &r.Version); err != nil {
+		if err := rows.Scan(&r.Name, &role, &r.LagSeconds, &r.Version, &r.LagStale); err != nil {
 			return nil, err
 		}
 		r.Role = domain.Role(role)
@@ -124,7 +162,7 @@ func listRegions(ctx context.Context, q queryer, lock bool) ([]domain.Region, er
 
 // Regions lists every region by name.
 func (s *Postgres) Regions(ctx context.Context) ([]domain.Region, error) {
-	return listRegions(ctx, s.pool, false)
+	return listRegions(ctx, s.pool, false, s.lag)
 }
 
 // Seed inserts regions only into an empty table.
@@ -153,7 +191,7 @@ func (s *Postgres) Seed(ctx context.Context, regions []domain.Region) error {
 func (s *Postgres) ReportLag(ctx context.Context, region string, lagSeconds int) (domain.Region, error) {
 	var r domain.Region
 	var role string
-	err := s.pool.QueryRow(ctx, `update ops_region set lag_seconds = $2, version = version + 1, updated_at = now() where name = $1
+	err := s.pool.QueryRow(ctx, `update ops_region set lag_seconds = $2, lag_reported_at = now(), version = version + 1, updated_at = now() where name = $1
 		returning name, role, lag_seconds, version`, region, lagSeconds).Scan(&r.Name, &role, &r.LagSeconds, &r.Version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, Problem(&domain.Error{Code: domain.CodeRegionUnknown, Detail: "region " + region + " is not registered"})
@@ -169,7 +207,7 @@ func (s *Postgres) Failover(ctx context.Context, eventID string, req domain.Fail
 	var out Outcome
 	req.Approver = ""
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		regions, err := listRegions(ctx, tx, true)
+		regions, err := listRegions(ctx, tx, true, s.lag)
 		if err != nil {
 			return err
 		}
@@ -202,7 +240,7 @@ func (s *Postgres) Approve(ctx context.Context, requestID, approver string, maxL
 	var rec Failover
 	var replay bool
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		regions, err := listRegions(ctx, tx, true)
+		regions, err := listRegions(ctx, tx, true, s.lag)
 		if err != nil {
 			return err
 		}
@@ -327,7 +365,7 @@ func apply(ctx context.Context, tx pgx.Tx, eventID string, plan domain.Plan, req
 func (s *Postgres) Rejoin(ctx context.Context, region string, resyncVerified bool) (domain.Region, error) {
 	var out domain.Region
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		regions, err := listRegions(ctx, tx, true)
+		regions, err := listRegions(ctx, tx, true, s.lag)
 		if err != nil {
 			return err
 		}

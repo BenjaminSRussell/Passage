@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
@@ -137,11 +138,25 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 	var journals []domain.OpeningJournal
 	var held map[string]OpeningPosting
 	pinned := false
+	lease := ids.New()
+	leaseTaken := false
+	// The lease is released when the call ends, however it ends; a crash leaves it to expire.
+	defer func() {
+		if leaseTaken {
+			s.releasePostingLease(ctx, run, lease)
+		}
+	}()
 	if err := s.tx(ctx, func(tx pgx.Tx) error {
 		var err error
 		if run, err = openingRun(ctx, tx, in.RunID); err != nil {
 			return err
 		}
+		// Under the company's lock, before the pin is read: a release that ran first has deleted the pin and this call
+		// pins again; one that runs later sees the lease and refuses.
+		if err := takePostingLease(ctx, tx, run, in, lease); err != nil {
+			return err
+		}
+		leaseTaken = true
 		rows, err := readOpeningBalances(ctx, tx, string(run.SourceSystem), run.SourceCompany)
 		if err != nil {
 			return err
@@ -187,6 +202,7 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 		}
 		return nil
 	}); err != nil {
+		leaseTaken = false // the transaction rolled back with its lease row
 		return OpeningJournalResult{}, err
 	}
 	res := OpeningJournalResult{RunID: run.RunID, LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, PostingDate: in.PostingDate}
@@ -197,6 +213,9 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 		}
 	}
 	if pending {
+		if err := s.renewPostingLease(ctx, run, lease); err != nil {
+			return OpeningJournalResult{}, err
+		}
 		owner, err := ledger.LegalEntity(ctx, in.LegalEntityID, in.LedgerID)
 		if err != nil {
 			if ledgerclient.Rejected(err) {
@@ -223,6 +242,9 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 			res.Journals = append(res.Journals, p)
 			continue
 		}
+		if err := s.renewPostingLease(ctx, run, lease); err != nil {
+			return res, err
+		}
 		entryID, err := ledger.Post(ctx, j.Entry)
 		if err != nil {
 			slog.ErrorContext(ctx, "opening journal not posted", "run", in.RunID, "legalEntity", in.LegalEntityID, "currency", j.Currency, "key", j.Key, "err", err)
@@ -247,6 +269,60 @@ func (s *Postgres) PostOpeningJournal(ctx context.Context, ledger ledgerclient.L
 		res.Journals = append(res.Journals, p)
 	}
 	return res, nil
+}
+
+// postingLeaseTTL bounds how long a posting call can block the release of the company's pin: longer than any ledger call, short
+// enough that a crashed process does not leave the pin stuck.
+const postingLeaseTTL = 10 * time.Minute
+
+func takePostingLease(ctx context.Context, tx pgx.Tx, run domain.PackRun, in OpeningJournalRequest, holder string) error {
+	if err := lockOpeningCompany(ctx, tx, string(run.SourceSystem), run.SourceCompany); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `delete from gl_opening_posting_lease where tenant_id = current_setting('passage.tenant_id', true)::uuid
+		and source_system = $1 and source_company = $2 and expires_at <= now()`, string(run.SourceSystem), run.SourceCompany); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `insert into gl_opening_posting_lease (tenant_id, source_system, source_company, holder, taken_by, expires_at)
+		values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, now() + make_interval(secs => $5))`,
+		string(run.SourceSystem), run.SourceCompany, holder, in.By, postingLeaseTTL.Seconds())
+	return err
+}
+
+// ErrPostingLeaseLost is returned when the lease expired (another process may have released the pin) before the next ledger call.
+var ErrPostingLeaseLost = errors.New("opening posting lease lost")
+
+// renewPostingLease extends the call's lease before a ledger call and fails when the lease is gone: an expired lease no longer
+// protects the pin from a release, so the call stops before it books anything more.
+func (s *Postgres) renewPostingLease(ctx context.Context, run domain.PackRun, holder string) error {
+	var renewed int64
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `update gl_opening_posting_lease set expires_at = now() + make_interval(secs => $4)
+			where tenant_id = current_setting('passage.tenant_id', true)::uuid and source_system = $1 and source_company = $2 and holder = $3 and expires_at > now()`,
+			string(run.SourceSystem), run.SourceCompany, holder, postingLeaseTTL.Seconds())
+		renewed = tag.RowsAffected()
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if renewed != 1 {
+		return fmt.Errorf("%w: the posting of %s took longer than its lease; call again, the ledger books each journal once", ErrPostingLeaseLost, run.SourceCompany)
+	}
+	return nil
+}
+
+// releasePostingLease gives the lease back; it uses its own context so a cancelled request still releases it.
+func (s *Postgres) releasePostingLease(ctx context.Context, run domain.PackRun, holder string) {
+	ctx = context.WithoutCancel(ctx)
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `delete from gl_opening_posting_lease where tenant_id = current_setting('passage.tenant_id', true)::uuid
+			and source_system = $1 and source_company = $2 and holder = $3`, string(run.SourceSystem), run.SourceCompany, holder)
+		return err
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "opening posting lease not released; it expires", "company", run.SourceCompany, "err", err)
+	}
 }
 
 // releaseOpeningTarget drops the company's pin when no posting row exists (the database refuses otherwise).

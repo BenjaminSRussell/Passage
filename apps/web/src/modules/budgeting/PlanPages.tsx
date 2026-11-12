@@ -8,9 +8,11 @@ import {
   compareScenarios,
   createPlan,
   createScenario,
+  exportWorkbook,
   generateGrid,
   getGrid,
   getPlan,
+  importWorkbook,
   listOrgUnits,
   listPlans,
   putGrid,
@@ -20,6 +22,7 @@ import {
   submitPlan,
   type CompareGroup,
   type Plan,
+  type WorkbookCheck,
   type PlanScenario,
   type ScenarioKind,
   type StageOwner,
@@ -577,6 +580,9 @@ function PlanGrid({ planId, scenarioId }: { planId: string; scenarioId: string }
   const [stale, setStale] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [workbook, setWorkbook] = useState<File | null>(null);
+  const [workbookCheck, setWorkbookCheck] = useState<WorkbookCheck | null>(null);
+  const [workbookProblems, setWorkbookProblems] = useState<string[]>([]);
   const writeKey = useRef(key());
 
   if (grid.error || plan.error) {
@@ -649,6 +655,59 @@ function PlanGrid({ planId, scenarioId }: { planId: string; scenarioId: string }
     setSpreadErrors(found);
     if (Object.keys(found).length > 0) return;
     void attempt(() => spreadGrid(planId, scenarioId, g!.scenario.version, toSpreadInput(spread), writeKey.current), "Amounts spread.");
+  }
+
+  async function downloadWorkbook() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const { blob } = await exportWorkbook(planId, scenarioId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `budget-plan-${p!.fiscalYear}-${g!.scenario.name.replace(/[^A-Za-z0-9._-]+/g, "-")}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice("The workbook was downloaded. Edit the amounts on the Plan sheet, then check and import it here.");
+    } catch (error) {
+      setFailure(describeError(error, "The budgeting service could not be reached."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendWorkbook(dryRun: boolean) {
+    if (!workbook) return;
+    setBusy(true);
+    setFailure(null);
+    setWorkbookProblems([]);
+    setWorkbookCheck(null);
+    try {
+      const out = await importWorkbook(planId, scenarioId, g!.scenario.version, workbook, writeKey.current, dryRun);
+      if (dryRun) {
+        setWorkbookCheck(out as WorkbookCheck);
+        return;
+      }
+      writeKey.current = key();
+      setWorkbook(null);
+      setEdits(new Map());
+      setExtra([]);
+      setStale(false);
+      setNotice("The workbook was imported.");
+      grid.reload();
+      plan.reload();
+    } catch (error) {
+      if (error instanceof BudgetApiError && (error.problem.status === 412 || error.problem.status === 428)) setStale(true);
+      else if (error instanceof BudgetApiError && error.problem.status < 500) writeKey.current = key();
+      if (error instanceof BudgetApiError && error.problem.errors) {
+        setWorkbookProblems(Object.entries(error.problem.errors).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([cell, msg]) => `${cell.replace("Plan!", "Cell ")}: ${msg}`));
+        setFailure("The workbook has problems. Fix the cells below and import it again; nothing was written.");
+      } else {
+        setFailure(describeError(error, "The budgeting service could not be reached."));
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -810,6 +869,50 @@ function PlanGrid({ planId, scenarioId }: { planId: string; scenarioId: string }
               </div>
               <p className={styles.note}>The amounts replace those of the same account, cost center and month. Save any grid edits first.</p>
             </form>
+          </Card>
+          <Card title="Edit in a spreadsheet" headingLevel={3}>
+            <div className={styles.form}>
+              <p className={styles.note}>Download the grid as an .xlsx workbook, change the amounts in Excel, then check it and import it back. Add a row for a new account and cost center; a blank amount counts as 0.</p>
+              <div className={styles.formActions}>
+                <Button type="button" variant="secondary" onClick={() => void downloadWorkbook()} loading={busy}>
+                  Download as spreadsheet
+                </Button>
+              </div>
+              <FormField id="wb-file" label="Edited workbook">
+                {(c) => (
+                  <input
+                    {...c}
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    onChange={(e) => {
+                      setWorkbook(e.target.files?.[0] ?? null);
+                      setWorkbookCheck(null);
+                      setWorkbookProblems([]);
+                    }}
+                  />
+                )}
+              </FormField>
+              <div className={styles.formActions}>
+                <Button type="button" variant="secondary" disabled={!workbook} onClick={() => void sendWorkbook(true)} loading={busy}>
+                  Check the workbook
+                </Button>
+                <Button type="button" disabled={!workbook} onClick={() => void sendWorkbook(false)} loading={busy}>
+                  Import the workbook
+                </Button>
+              </div>
+              {workbookCheck ? (
+                <Alert tone="success" title="The workbook is valid" live="status">
+                  {workbookCheck.rows} rows and {workbookCheck.cells} amounts, {formatAmount(workbookCheck.total)} {p.currency} in all. Nothing was written yet.
+                </Alert>
+              ) : null}
+              {workbookProblems.length > 0 ? (
+                <ul aria-label="Problems in the workbook">
+                  {workbookProblems.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           </Card>
           <Card title="Spread a yearly total" headingLevel={3}>
             <form className={styles.form} onSubmit={runSpread} noValidate>

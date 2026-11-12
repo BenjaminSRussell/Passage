@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -278,4 +279,29 @@ func (a *API) resolveDispute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, d)
+}
+
+// RunSelfBillSweep is the scheduled sweep (35-5): for each tenant with work it matches the pending self-billed documents and opens
+// the unbilled disputes, as POST /self-billing:sweep does for the caller's tenant. It returns how many documents it matched and
+// disputes it opened; a failing tenant does not stop the others.
+func (a *API) RunSelfBillSweep(ctx context.Context) (int, error) {
+	tenants, err := a.store.SelfBillDueTenants(ctx)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	var failed []error
+	for _, tid := range tenants {
+		sys := store.SystemContext(ctx, tid)
+		done, err := a.ReconcileSelfBilled(sys, 200)
+		if err != nil {
+			failed = append(failed, fmt.Errorf("tenant %s: %w", tid, err))
+		}
+		opened, err := a.store.SweepUnbilled(sys, a.now().UTC())
+		if err != nil {
+			failed = append(failed, fmt.Errorf("tenant %s: %w", tid, err))
+		}
+		total += done + len(opened)
+	}
+	return total, errors.Join(failed...)
 }

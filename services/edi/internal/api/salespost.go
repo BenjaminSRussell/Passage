@@ -179,6 +179,10 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	if rec, err := a.store.GetMessage(ctx, id); err == nil && rec.Standard == "CXML" && rec.Direction == "IN" {
+		a.postCXMLMessage(w, r, id)
+		return
+	}
 	res, err := (&poster.Poster{Store: a.store, Intake: a.Intake}).Post(ctx, id)
 	var parked *poster.ParkedError
 	var notPostable *poster.NotPostableError

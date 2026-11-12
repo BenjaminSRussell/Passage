@@ -144,7 +144,7 @@ func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventTy
 }
 
 // enqueuePosted writes registration.posted with the job's order and the worker's
-// cost rate effective on the UTC date the work started (D2a'), when those rows exist, so w21 can
+// cost rate effective on the local date the work started, in the worker's time zone (D2a', #543), when those rows exist, so w21 can
 // post the job-card (FR-25.4, BR-25.9).
 func enqueuePosted(ctx context.Context, tx pgx.Tx, tenantID string, data sfevents.RegistrationPostedData) error {
 	if data.JobID != nil {
@@ -159,7 +159,7 @@ func enqueuePosted(ctx context.Context, tx pgx.Tx, tenantID string, data sfevent
 		if data.Kind == KindJobStop && data.Hours != nil {
 			var rate, currency string
 			err = tx.QueryRow(ctx, `select coalesce((select cr.cost_rate from worker_cost_rate cr
-					where cr.tenant_id = w.tenant_id and cr.worker_id = w.id and cr.effective_from <= (t.started_at at time zone 'UTC')::date
+					where cr.tenant_id = w.tenant_id and cr.worker_id = w.id and cr.effective_from <= (t.started_at at time zone w.time_zone)::date
 					order by cr.effective_from desc limit 1), w.cost_rate)::text, w.currency
 				from worker w join time_registration t on t.tenant_id = w.tenant_id and t.id = $3
 				where w.tenant_id = $1 and w.id = $2`, tenantID, data.WorkerID, data.RegistrationID).Scan(&rate, &currency)

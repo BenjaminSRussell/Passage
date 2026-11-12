@@ -28,6 +28,11 @@ from a mirror (global.imageRegistryRequired) fails the render when none is set.
 - name: FIELDCRYPT_AZURE_KEY_ID
   value: {{ . | quote }}
 {{- end }}
+{{- /* global.regionFenceUrl: the ops /healthz/region of this region; a fenced region answers 503 Retry-After (OPS-1703). Empty: no fence. */}}
+{{- with $g.regionFenceUrl }}
+- name: PASSAGE_REGION_FENCE_URL
+  value: {{ . | quote }}
+{{- end }}
 {{- end -}}
 
 {{/*

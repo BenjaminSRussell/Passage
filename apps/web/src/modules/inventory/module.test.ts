@@ -27,6 +27,7 @@ describe("inventory module", () => {
       "/inventory/transfer-orders": "inventory.read",
       "/inventory/transfer-lines": "inventory.read",
       "/inventory/in-transit": "inventory.read",
+      "/inventory/truck-stock": "inventory.read",
       "/inventory/abc-runs": "inventory.read",
       "/inventory/consignment-orders": "inventory.read",
       "/inventory/consignment/stock": "inventory.read",

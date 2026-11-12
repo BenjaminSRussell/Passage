@@ -49,6 +49,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.secretName }}
                   key: {{ .Values.database.secretKey }}
+            {{- if .Values.rmaSweep.tenantIds }}
+            - name: RECEIVABLES_RMA_SWEEP_TENANT_IDS
+              value: {{ join "," .Values.rmaSweep.tenantIds | quote }}
+            - name: RECEIVABLES_RMA_SWEEP_INTERVAL
+              value: {{ .Values.rmaSweep.interval | quote }}
+            - name: RECEIVABLES_RMA_RESERVATION_TTL
+              value: {{ .Values.rmaSweep.reservationTtl | quote }}
+            {{- end }}
             {{- if .Values.fxUrl }}
             - name: FX_URL
               value: {{ .Values.fxUrl | quote }}

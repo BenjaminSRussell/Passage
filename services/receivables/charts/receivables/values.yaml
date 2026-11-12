@@ -29,6 +29,14 @@ resources:
     cpu: "1"
     memory: 512Mi
 
+# With tenantIds set, every replica runs the RMA credit sweep (RECEIVABLES_RMA_SWEEP_*): it posts PENDING RMA credits the request path
+# left behind and commits their billing reservations. reservationTtl (>= 1h, "0" = never) cancels a PENDING credit the ledger
+# refused (or never tried) once it is that old, releasing the invoice room billing holds for the abandoned RMA (#557).
+rmaSweep:
+  tenantIds: []
+  interval: 5m
+  reservationTtl: 720h
+
 # Where cross-currency settlements read their exchange rates (FX_URL, the fx service; needs the service signing key and the receivables
 # public key in the fx service's serviceIdentity.publicKeys). Without it a settlement across currencies answers 503 AR-FX-UNAVAILABLE.
 fxUrl: ""

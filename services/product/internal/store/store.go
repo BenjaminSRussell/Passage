@@ -35,6 +35,8 @@ type Store interface {
 	CreateItemModelGroup(ctx context.Context, in domain.ItemModelGroup) (domain.ItemModelGroup, error)
 	CreateProduct(ctx context.Context, in domain.Product, idem string) (domain.Product, error)
 	GetProduct(ctx context.Context, id string) (domain.Product, error)
+	// ProductNames returns the number and name of each product that exists in the caller's tenant (unknown ids are left out).
+	ProductNames(ctx context.Context, ids []string) ([]domain.ProductName, error)
 	UpdateProduct(ctx context.Context, id string, patch domain.ProductPatch, version int) (domain.Product, error)
 	GetSavedConfiguration(ctx context.Context, id, productID string) (domain.ConfigurationRef, error)
 	ListProducts(ctx context.Context, q, after string, limit int) ([]domain.Product, error)
@@ -1089,4 +1091,33 @@ func (s *Postgres) SeedLifecycle(ctx context.Context) error {
 		}
 		return nil
 	})
+}
+
+// ProductNames answers the display name of each id, for the customer portal's order and return lines. An id that is not a
+// product of the tenant is left out; the answer is in product-number order.
+func (s *Postgres) ProductNames(ctx context.Context, productIDs []string) ([]domain.ProductName, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.ProductName{}
+	if len(productIDs) == 0 {
+		return out, nil
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text, product_number, name from product where tenant_id = $1 and id = any($2::uuid[]) order by product_number`, p.TenantID, productIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n domain.ProductName
+			if err := rows.Scan(&n.ID, &n.ProductNumber, &n.Name); err != nil {
+				return err
+			}
+			out = append(out, n)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

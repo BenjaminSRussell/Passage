@@ -43,6 +43,7 @@ func dbAPI(t *testing.T, opt Optimizer) (*API, http.Handler, context.Context) {
 		a.WithOptimizer(opt)
 	}
 	a.Register(r)
+	a.RegisterStreams(r)
 	return a, r, ctx
 }
 

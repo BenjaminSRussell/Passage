@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/routefeed"
 )
 
 // CodeNoTechnician answers a day request from a user who is not a technician's worker.
@@ -133,6 +134,54 @@ func viewingFor(ctx context.Context, t Technician) error {
 		return nil
 	}
 	return httpx.NewProblem(http.StatusForbidden, domain.CodeActionTechnician, "a technician's day can be read only by the technician's own worker or by office staff")
+}
+
+// notifyRoute wakes the open route streams of a technician when the transaction commits (a Postgres NOTIFY is delivered on
+// commit and dropped on rollback), so their device reads the day again instead of waiting for its next poll.
+func notifyRoute(ctx context.Context, tx pgx.Tx, tenantID string, technicianIDs ...*string) error {
+	seen := map[string]bool{}
+	for _, id := range technicianIDs {
+		if id == nil || *id == "" || seen[*id] {
+			continue
+		}
+		seen[*id] = true
+		if _, err := tx.Exec(ctx, `select pg_notify($1, $2)`, routefeed.Channel, routefeed.Payload(tenantID, *id)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ViewableTechnician resolves "me" or a technician id to the technician's id for a route stream, with the same rule as
+// TechnicianDay: the technician's own worker, or office staff.
+func (s *Postgres) ViewableTechnician(ctx context.Context, technicianID string) (string, error) {
+	tid := tenantOf(ctx)
+	var found string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var t Technician
+		var err error
+		if technicianID == "me" {
+			p := caller(ctx)
+			if p.UserID == "" {
+				return httpx.NewProblem(http.StatusNotFound, CodeNoTechnician, "no technician is linked to this user")
+			}
+			t, err = scanTechnician(tx.QueryRow(ctx, `select `+technicianColumns+` from service_technician where tenant_id = $1 and worker_id::text = lower($2) and active order by created_at limit 1`, tid, p.UserID))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.NewProblem(http.StatusNotFound, CodeNoTechnician, "no technician is linked to this user")
+			}
+		} else {
+			t, err = getTechnician(ctx, tx, tid, technicianID, false)
+		}
+		if err != nil {
+			return err
+		}
+		if err := viewingFor(ctx, t); err != nil {
+			return err
+		}
+		found = t.ID
+		return nil
+	})
+	return found, err
 }
 
 // TechnicianDay returns the route of the technician on a local date (YYYY-MM-DD in the

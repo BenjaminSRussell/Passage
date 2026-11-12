@@ -28,6 +28,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/intercompany/internal/taxclient"
 )
 
 // Duties from PRD section 7.40.17.
@@ -67,9 +68,14 @@ type API struct {
 	charges  ChargeStore
 	recon    ReconStore
 
+	registry    RegistryStore
+	ledgerRecon LedgerReconciler
+	tax         taxclient.Tax
+
 	journalsPosted   atomic.Int64
 	chargesPosted    atomic.Int64
 	chargesSuspended atomic.Int64
+	chargesInvoiced  atomic.Int64
 	reconRuns        atomic.Int64
 	reconResolved    atomic.Int64
 
@@ -117,6 +123,15 @@ func (a *API) routes() []route {
 		{http.MethodGet, "/v1/interco/reconciliations", DutyView, a.listReconRuns},
 		{http.MethodGet, "/v1/interco/reconciliations/{id}", DutyView, a.getReconRun},
 		{http.MethodPost, "/v1/interco/reconciliations/items/{id}/resolve", DutyReconcile, a.resolveReconItem},
+		{http.MethodPost, "/v1/interco/reconciliations/items/{id}/fx-adjust", DutyReconcile, a.adjustFX},
+		{http.MethodGet, "/v1/interco/entities", DutyView, a.listEntities},
+		{http.MethodPut, "/v1/interco/entities/{entity}", DutyConfigure, a.putEntity},
+		{http.MethodGet, "/v1/interco/matrix", DutyView, a.getMatrix},
+		{http.MethodPut, "/v1/interco/matrix", DutyConfigure, a.putMatrix},
+		{http.MethodGet, "/v1/interco/transfer-prices", DutyView, a.listTransferPrices},
+		{http.MethodPost, "/v1/interco/transfer-prices", DutyConfigure, a.addTransferPrice},
+		{http.MethodGet, "/v1/interco/settings", DutyView, a.getSettings},
+		{http.MethodPut, "/v1/interco/settings", DutyConfigure, a.putSettings},
 		{http.MethodGet, "/v1/interco/partners", DutyView, a.listPartners},
 		{http.MethodPost, "/v1/interco/partners", DutyConfigure, a.createPartner},
 		{http.MethodGet, "/v1/interco/partners/{id}", DutyView, a.getPartner},
@@ -153,6 +168,7 @@ func (a *API) Metrics() http.Handler {
 		counter("intercompany_lines_priced_total", "IC lines priced from a stored pairing.", a.linesPriced.Load())
 		counter("intercompany_journals_posted_total", "IC journals posted to both ledgers.", a.journalsPosted.Load())
 		counter("intercompany_charges_posted_total", "IC charges posted to both ledgers.", a.chargesPosted.Load())
+		counter("intercompany_charges_invoiced_total", "IC charges handed to the invoice documents in Invoice settlement mode.", a.chargesInvoiced.Load())
 		counter("intercompany_charges_suspended_total", "IC charges kept on suspense for lack of a transfer price.", a.chargesSuspended.Load())
 		counter("intercompany_recon_runs_total", "Reconciliation runs stored.", a.reconRuns.Load())
 		counter("intercompany_recon_items_resolved_total", "Reconciliation items resolved.", a.reconResolved.Load())
@@ -493,8 +509,10 @@ func problemFrom(err error) error {
 			status = http.StatusBadRequest
 		case domain.CodePartnerNotFound, domain.CodePostingNotFound, domain.CodeChargeNotFound, domain.CodeReconRunNotFound, domain.CodeReconItemNotFound:
 			status = http.StatusNotFound
-		case domain.CodeReconNotOpen:
+		case domain.CodeReconNotOpen, domain.CodeTransferPriceExist:
 			status = http.StatusConflict
+		case domain.CodeLedgerUnavailable, domain.CodeTaxUnavailable, domain.CodeNotConfigured:
+			status = http.StatusServiceUnavailable
 		case domain.CodePairingExists:
 			status = http.StatusConflict
 		case domain.CodeVersionConflict:

@@ -30,8 +30,14 @@ func main() {
 	run := run
 	if len(os.Args) > 1 && os.Args[1] == "consume" {
 		run = runConsume
+	} else if len(os.Args) > 1 && os.Args[1] == budgetRetryCommand {
+		if err := budgetCallsRetry(context.Background(), os.Getenv, os.Args[2:]); err != nil {
+			slog.Error("purchasing budget-calls-retry stopped", "err", err)
+			os.Exit(1)
+		}
+		return
 	} else if len(os.Args) > 1 {
-		slog.Error("purchasing stopped", "err", fmt.Errorf("unknown command %q (use no argument to serve or \"consume\" to follow fulfillment and planning events)", os.Args[1]))
+		slog.Error("purchasing stopped", "err", fmt.Errorf("unknown command %q (use no argument to serve, \"consume\" to follow fulfillment and planning events or \"budget-calls-retry\" to repeat the failed budget calls)", os.Args[1]))
 		os.Exit(1)
 	}
 	if err := run(context.Background(), os.Getenv); err != nil {

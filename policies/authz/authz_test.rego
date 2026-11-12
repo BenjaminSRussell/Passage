@@ -34,10 +34,19 @@ ops_operator_routes := [
 	["ops.failover.execute", "POST", "/v1/ops/failover"],
 	["ops.failover.execute", "POST", "/v1/ops/regions/us-east:rejoin"],
 	["ops.failover.execute", "POST", "/v1/ops/failover-requests/r1:approve"],
+	["ops.region.view", "GET", "/v1/ops/failovers/evt-1"],
+	["ops.region.view", "GET", "/v1/ops/break-glass"],
+	["ops.failover.execute", "PUT", "/v1/ops/failovers/evt-1/steps/flip-dns"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass/g1:revoke"],
+	["ops.breakglass.review", "POST", "/v1/ops/break-glass/g1:review"],
+	["ops.region.view", "GET", "/v1/ops/failovers/evt-1/scorecard"],
+	["ops.region.view", "GET", "/v1/ops/tenants/t1/license"],
+	["ops.license.install", "PUT", "/v1/ops/tenants/t1/license"],
 ]
 
 test_operator_only_duties_are_the_ops_duties if {
-	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute"}
+	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute", "ops.breakglass.request", "ops.breakglass.review", "ops.license.install"}
 }
 
 test_operator_only_duties_grant_in_the_operator_tenant if {
@@ -163,6 +172,16 @@ segregation_denials := [
 	["ops.region.view", "POST", "/v1/ops/failover-requests/r1:approve"],
 	["ops.region.report", "POST", "/v1/ops/failover-requests/r1:approve"],
 	["ops.region.report", "GET", "/v1/ops/failover-requests/r1"],
+	["ops.region.view", "PUT", "/v1/ops/failovers/evt-1/steps/flip-dns"],
+	["ops.failover.execute", "GET", "/v1/ops/failovers/evt-1"],
+	["ops.failover.execute", "POST", "/v1/ops/break-glass"],
+	["ops.breakglass.request", "POST", "/v1/ops/break-glass/g1:review"],
+	["ops.breakglass.review", "POST", "/v1/ops/break-glass"],
+	["ops.region.view", "PUT", "/v1/ops/tenants/t1/license"],
+	["ops.license.install", "GET", "/v1/ops/tenants/t1/license"],
+	["ops.failover.execute", "PUT", "/v1/ops/tenants/t1/license"],
+	["ops.breakglass.review", "POST", "/v1/ops/failover"],
+	["ops.breakglass.request", "POST", "/v1/ops/failover"],
 	["platform.promotion.approve", "GET", "/v1/platform/releases"],
 	["platform.environment.rollback", "DELETE", "/v1/platform/releases/r1"],
 	["receiving.receipt.maintain", "GET", "/v1/receiving/invoices/i1"],
@@ -744,7 +763,8 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 		"fulfillment": ["fulfillment.shipment.read"],
 		"billing": ["billing.invoice.read"],
 		"sales": ["sales.order.lookup", "sales.channel.intake"],
-		"purchasing": ["procurement.requisition.create"],
+		"purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
+		"receiving": ["receiving.asn.maintain"],
 	}
 	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
@@ -1061,21 +1081,83 @@ test_party_vendor_requests_are_decided_by_their_own_duty if {
 	not allowed("party.read", "POST", "/v1/party/vendor-questionnaires")
 }
 
-# The customer portal service (#30) acts for one customer, holds only read-only service-only customer-portal duties, and each
-# duty opens only its own customer-portal routes: no staff route, no other service's route, and no write.
-test_customer_portal_holds_only_service_only_read_duties if {
+# The customer portal service (#30) acts for one customer and holds only service-only customer-portal duties (plus the
+# service-only name and legal-entity reads below), each opening only its own customer-portal routes: no staff route and no
+# other service's route. Every duty is a read except the two writes a customer makes for itself, an order and a return.
+customer_portal_writes := {"sales.customer-portal.order", "sales.customer-portal.return"}
+
+portal_method_ok(_, perm) if perm.methods == ["GET"]
+
+portal_method_ok(duty, _) if duty in customer_portal_writes
+
+test_customer_portal_holds_only_service_only_customer_duties if {
 	every _, duties in data.service_grants["customer-portal"] {
 		every duty in duties {
 			data.duties[duty].service_only
 			contains(duty, "customer-portal")
 			every perm in data.duties[duty].permissions {
-				perm.methods == ["GET"]
+				portal_method_ok(duty, perm)
 			}
 		}
 	}
 	data.service_grants["customer-portal"].receivables == ["receivables.customer-portal.read"]
 	data.service_grants["customer-portal"].billing == ["billing.customer-portal.read"]
-	data.service_grants["customer-portal"].sales == ["sales.customer-portal.read"]
+	data.service_grants["customer-portal"].sales == ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"]
+	data.service_grants["customer-portal"].party == ["party.customer-portal.read"]
+	data.service_grants["customer-portal"].identity == ["identity.customer-portal.read"]
+}
+
+# A write duty of the portal is one POST on one route and nothing else.
+test_customer_portal_write_duties_are_one_post_each if {
+	every duty in customer_portal_writes {
+		data.duties[duty].service_only
+		count(data.duties[duty].permissions) == 1
+		every perm in data.duties[duty].permissions {
+			perm.methods == ["POST"]
+		}
+	}
+}
+
+test_sales_customer_portal_write_duties_open_only_their_own_post if {
+	allowed("sales.customer-portal.order", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.order", "POST", "/v1/sales/customer-portal/returns")
+	not allowed("sales.customer-portal.order", "POST", "/v1/sales/orders")
+	not allowed("sales.customer-portal.order", "GET", "/v1/sales/customer-portal/orders")
+	allowed("sales.customer-portal.return", "POST", "/v1/sales/customer-portal/returns")
+	not allowed("sales.customer-portal.return", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.return", "POST", "/v1/sales/return-orders")
+	not allowed("sales.customer-portal.read", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.customer-portal.read", "POST", "/v1/sales/customer-portal/returns")
+	allowed("sales.customer-portal.read", "GET", "/v1/sales/customer-portal/products")
+	not allowed("sales.order.write", "POST", "/v1/sales/customer-portal/orders")
+	not allowed("sales.order.write", "POST", "/v1/sales/customer-portal/returns")
+}
+
+test_party_write_sets_portal_access_and_the_portal_cannot if {
+	allowed("party.write", "PUT", "/v1/party/customers/c1/portal-access")
+	not allowed("party.customer-portal.read", "PUT", "/v1/party/customers/c1/portal-access")
+	not allowed("party.read", "PUT", "/v1/party/customers/c1/portal-access")
+}
+
+test_customer_portal_party_and_identity_reads_are_their_own_route_only if {
+	allowed("party.customer-portal.read", "GET", "/v1/party/customer-portal/accounts")
+	not allowed("party.customer-portal.read", "GET", "/v1/party/customers/c1")
+	not allowed("party.customer-portal.read", "POST", "/v1/party/customer-portal/accounts")
+	not allowed("party.read", "GET", "/v1/party/customer-portal/accounts")
+	allowed("identity.customer-portal.read", "GET", "/v1/identity/customer-portal/legal-entity")
+	not allowed("identity.customer-portal.read", "GET", "/v1/legal-entities")
+	not allowed("identity.customer-portal.read", "GET", "/v1/identity/customer-contacts")
+	not allowed("identity.legal-entity.maintain", "GET", "/v1/identity/customer-portal/legal-entity")
+}
+
+# Sales labels the portal's lines with product names and can read nothing else of a product with that duty.
+test_product_names_duty_reads_only_names if {
+	data.duties["product.names.read"].service_only
+	"product.names.read" in data.service_grants.sales.product
+	allowed("product.names.read", "GET", "/v1/product/products:names")
+	not allowed("product.names.read", "GET", "/v1/product/products/p1")
+	not allowed("product.names.read", "GET", "/v1/product/products")
+	not allowed("product.names.read", "POST", "/v1/product/products")
 }
 
 test_receivables_customer_portal_duty_opens_only_customer_routes if {
@@ -2645,11 +2727,22 @@ test_edi_b2b_routes_belong_to_their_duties if {
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/self-billing")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/punchout")
 	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml")
+	allowed("edi.admin", "PUT", "/edi/v1/partners/p1/cxml/outbound")
+	allowed("edi.admin", "GET", "/edi/v1/partners/p1/cxml/outbound")
+	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/cxml/outbound")
+	allowed("edi.operate", "POST", "/edi/v1/partners/p1/cxml:send")
+	not allowed("edi.einvoice.operate", "POST", "/edi/v1/partners/p1/cxml:send")
 	not allowed("edi.operate", "PUT", "/edi/v1/partners/p1/auto-outbound")
 	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices")
 	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
 	allowed("edi.einvoice.operate", "PUT", "/edi/v1/einvoice/parties/SELLER/s1")
 	not allowed("edi.operate", "POST", "/edi/v1/einvoice/invoices/e1:submit")
+	allowed("edi.einvoice.operate", "POST", "/edi/v1/einvoice/invoices/e1:validate")
+	allowed("edi.einvoice.operate", "GET", "/edi/v1/einvoice/invoices/e1/facturx.pdf")
+	allowed("edi.einvoice.operate", "GET", "/edi/v1/einvoice/mandates")
+	allowed("edi.einvoice.operate", "PUT", "/edi/v1/einvoice/mandates/c1/PEPPOL")
+	allowed("edi.einvoice.operate", "DELETE", "/edi/v1/einvoice/mandates/c1/PEPPOL")
+	not allowed("edi.operate", "PUT", "/edi/v1/einvoice/mandates/c1/PEPPOL")
 	allowed("edi.requisition.create", "POST", "/edi/v1/punchout/sessions")
 	allowed("edi.requisition.create", "POST", "/edi/v1/punchout/sessions/s1:create-requisition")
 	not allowed("edi.self-billing.reconcile", "POST", "/edi/v1/punchout/sessions")
@@ -2658,8 +2751,30 @@ test_edi_b2b_routes_belong_to_their_duties if {
 	not allowed("edi.operate", "POST", "/edi/v1/self-billing/disputes/d1:resolve")
 }
 
+test_edi_cxml_grants_are_narrow if {
+	data.service_grants.edi.receiving == ["receiving.asn.maintain"]
+	data.service_principals["edi-cxml"] == ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"]
+	every duty in ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"] {
+		data.duties[duty].service_only
+	}
+	allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:confirm")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:approve")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders/o1:reject")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/purchase-orders:reprice")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/acknowledgements/a1:approve")
+	not allowed("procurement.purchase-order.vendor-confirm", "POST", "/v1/procurement/acknowledgements/a1:decline")
+	allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders/o1")
+	not allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders")
+	not allowed("procurement.purchase-order.lookup", "POST", "/v1/procurement/purchase-orders/o1:confirm")
+	# edi's grants and principal hold none of the duties that approve, reject or reprice.
+	every duty in ["procurement.purchase-order.confirm", "procurement.purchase-order.inquire", "procurement.purchase-order.maintain"] {
+		not duty in data.service_grants.edi.purchasing
+		not duty in data.service_principals["edi-cxml"]
+	}
+}
+
 test_edi_requisition_grant_is_the_requester_duty_only if {
-	data.service_grants.edi.purchasing == ["procurement.requisition.create"]
+	"procurement.requisition.create" in data.service_grants.edi.purchasing
 	not allowed("procurement.requisition.create", "POST", "/v1/procurement/requisitions/r1:approve")
 }
 
@@ -2765,6 +2880,32 @@ test_print_queue_management_is_admin_only if {
 	not allowed("print.job.submit", "POST", "/print/v1/jobs:sweep")
 }
 
+test_analytics_view_executes_queries_and_reads_tile_values if {
+	allowed("analytics.view", "POST", "/v1/analytics/query:execute")
+	allowed("analytics.view", "GET", "/v1/analytics/dashboards/controller_kpis/values")
+	not allowed("analytics.author", "POST", "/v1/analytics/query:execute")
+	not allowed("analytics.export", "GET", "/v1/analytics/dashboards/controller_kpis/values")
+	not allowed("analytics.view", "PUT", "/v1/analytics/dashboards/controller_kpis/values")
+}
+
+test_print_docgen_reads_and_admin_writes if {
+	allowed("print.job.submit", "GET", "/print/v1/document-templates")
+	allowed("print.job.submit", "GET", "/print/v1/document-templates/INV-STD")
+	allowed("print.job.submit", "GET", "/print/v1/text-blocks")
+	allowed("print.job.submit", "GET", "/print/v1/output-rules")
+	allowed("print.job.submit", "GET", "/print/v1/output-plan")
+	allowed("print.admin", "PUT", "/print/v1/document-templates/INV-STD")
+	allowed("print.admin", "PUT", "/print/v1/text-blocks/PAY-TERMS/de")
+	allowed("print.admin", "POST", "/print/v1/output-rules")
+	allowed("print.admin", "DELETE", "/print/v1/output-rules/r-1")
+	not allowed("print.job.submit", "PUT", "/print/v1/document-templates/INV-STD")
+	not allowed("print.job.submit", "PUT", "/print/v1/text-blocks/PAY-TERMS/de")
+	not allowed("print.job.submit", "POST", "/print/v1/output-rules")
+	not allowed("print.job.submit", "DELETE", "/print/v1/output-rules/r-1")
+	not allowed("print.document.render", "GET", "/print/v1/output-plan")
+	not allowed("print.admin", "POST", "/print/v1/documents:render")
+}
+
 test_receiving_document_flow_is_read_only_and_separate if {
 	allowed("receiving.document-flow.read", "GET", "/v1/receiving/related-documents")
 	not allowed("receiving.document-flow.read", "POST", "/v1/receiving/related-documents")
@@ -2854,6 +2995,9 @@ test_consolidation_unit_edit_terms_and_mapping_versions_follow_configure_and_vie
 test_fieldservice_technician_day_and_captures if {
 	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/me/day")
 	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/t1/day")
+	allowed("fieldservice.work-order.execute", "GET", "/v1/service/technicians/me/day/events")
+	not allowed("fieldservice.work-order.execute", "POST", "/v1/service/technicians/me/day/events")
+	not allowed("fieldservice.inquire", "GET", "/v1/service/technicians/me/day/events")
 	allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/captures/c1")
 	not allowed("fieldservice.work-order.execute", "GET", "/v1/service/work-orders/w1/captures/c1")
 	not allowed("fieldservice.work-order.execute", "PUT", "/v1/service/work-orders/w1/checklist")
@@ -2928,4 +3072,65 @@ test_party_setup_lists_are_read_with_party_read if {
 	allowed("party.import.write", "POST", "/v1/party/customer-groups")
 	not allowed("party.read", "POST", "/v1/party/customer-groups")
 	not allowed("party.write", "POST", "/v1/party/payment-terms")
+}
+
+# #548/#552: any role can resolve user ids to display names without holding the user-maintenance duty, and user administrators can too.
+test_user_name_lookup if {
+	allowed("identity.user-name.read", "GET", "/v1/identity/user-names")
+	not allowed("identity.user-name.read", "GET", "/v1/identity/users")
+	not allowed("identity.user-name.read", "GET", "/v1/identity/users/u1")
+	not allowed("identity.user-name.read", "POST", "/v1/identity/user-names")
+	allowed("identity.user.maintain", "GET", "/v1/identity/user-names")
+	not allowed("identity.user.maintain", "POST", "/v1/identity/user-names")
+}
+
+# #40 round 3: the entity registry, accounting matrix, transfer prices and settings are configured with
+# intercompany.configure and read with intercompany.view; booking the FX difference of a pair needs the reconcile duty.
+test_intercompany_registry_matrix_prices_settings_and_fx_adjust if {
+	allowed("intercompany.configure", "PUT", "/v1/interco/entities/A")
+	allowed("intercompany.configure", "PUT", "/v1/interco/matrix")
+	allowed("intercompany.configure", "POST", "/v1/interco/transfer-prices")
+	allowed("intercompany.configure", "PUT", "/v1/interco/settings")
+	not allowed("intercompany.view", "PUT", "/v1/interco/entities/A")
+	not allowed("intercompany.view", "PUT", "/v1/interco/matrix")
+	not allowed("intercompany.view", "POST", "/v1/interco/transfer-prices")
+	not allowed("intercompany.post", "PUT", "/v1/interco/settings")
+	allowed("intercompany.view", "GET", "/v1/interco/entities")
+	allowed("intercompany.view", "GET", "/v1/interco/matrix")
+	allowed("intercompany.view", "GET", "/v1/interco/transfer-prices")
+	allowed("intercompany.view", "GET", "/v1/interco/settings")
+	not allowed("intercompany.configure", "GET", "/v1/interco/settings")
+	allowed("intercompany.reconcile", "POST", "/v1/interco/reconciliations/items/i1/fx-adjust")
+	not allowed("intercompany.post", "POST", "/v1/interco/reconciliations/items/i1/fx-adjust")
+	not allowed("intercompany.view", "POST", "/v1/interco/reconciliations/items/i1/fx-adjust")
+}
+
+# #40 round 3: consolidation and intercompany read rates, fiscal calendars and tax through service grants only.
+test_consolidation_and_intercompany_service_grants if {
+	"fx.rate.lookup" in data.service_grants.consolidation.fx
+	"org.read" in data.service_grants.consolidation.org
+	"tax.tax.calculate" in data.service_grants.intercompany.tax
+	"ledger.balance.read" in data.service_grants.intercompany.ledger
+	count([d | some d in data.service_grants.intercompany.ledger; d == "ledger.period.postclosed"]) == 0
+}
+
+# #38: the workbook round trip of a plan scenario: export is a read, import writes the grid and needs the maintain duty.
+test_budget_plan_workbook_export_and_import if {
+	allowed("budget.view", "GET", "/v1/budget/plans/p1/scenarios/s1:export")
+	not allowed("budget.plan.maintain", "GET", "/v1/budget/plans/p1/scenarios/s1:export")
+	allowed("budget.plan.maintain", "POST", "/v1/budget/plans/p1/scenarios/s1:import")
+	not allowed("budget.view", "POST", "/v1/budget/plans/p1/scenarios/s1:import")
+	not allowed("budget.plan.workflow", "POST", "/v1/budget/plans/p1/scenarios/s1:import")
+}
+
+# #40: IC inventory layers are configured with consolidation.configure and read with consolidation.view; the investments register of a
+# run or group is a read.
+test_consolidation_ic_layers_and_investments_register if {
+	allowed("consolidation.configure", "PUT", "/v1/consol/groups/g1/units/u1/layers/2026-03")
+	not allowed("consolidation.view", "PUT", "/v1/consol/groups/g1/units/u1/layers/2026-03")
+	not allowed("consolidation.run", "PUT", "/v1/consol/groups/g1/units/u1/layers/2026-03")
+	allowed("consolidation.view", "GET", "/v1/consol/groups/g1/layers/2026-03")
+	allowed("consolidation.view", "GET", "/v1/consol/groups/g1/investments")
+	allowed("consolidation.view", "GET", "/v1/consol/runs/r1/investments")
+	not allowed("consolidation.configure", "GET", "/v1/consol/runs/r1/investments")
 }

@@ -42,7 +42,7 @@ export interface GroupDetail extends Group {
 export type AccountType = "balance_sheet" | "income";
 
 /** What a run reads an account for: the balance sheet totals of a unit and its intercompany balances. */
-export type AccountRole = "asset" | "liability" | "equity" | "ic_sales" | "ic_cost" | "ic_receivable" | "ic_payable";
+export type AccountRole = "asset" | "liability" | "equity" | "ic_sales" | "ic_cost" | "ic_receivable" | "ic_payable" | "dividend_paid";
 
 export interface AccountMapRow {
   mainAccount: string;
@@ -60,6 +60,8 @@ export interface UnitTerms {
   sellerIsSubsidiary: boolean;
   icNetInvestment: boolean;
   fxGainLossAccount?: string;
+  /** full consolidates the unit line by line; equity takes an associate with the equity method. */
+  method?: "full" | "equity";
 }
 
 export interface MappingVersion {

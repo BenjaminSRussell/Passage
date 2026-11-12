@@ -17,12 +17,21 @@ not check it: the office completing by hand has no device log); work-order lines
 the truck levels and replenishment are in `services/inventory`). Migration 0012. The technician PWA is
 `apps/technician` with its code in `apps/web/src/modules/technician`.
 
-Still open after slice 10: object-store hosting of captures (they sit in Postgres, 2 MB each; a
-retention and purge job is not built), push of published routes to the device (the PWA polls), photo
-count per work order is not capped (per action only), the manual `:transition` completion does not
-check the checklist, a part action that arrives after the completion is still REJECTED (see BR-45.6),
-and the truck's location (`truckLocationId`) is carried but inventory books truck stock at site and
-warehouse level.
+Follow-up to slice 10 (#45): captures can live in an S3-compatible bucket or a directory (`FIELDSERVICE_CAPTURE_STORE`
+`s3` or `fs`; migration 0015 makes `data` optional and adds `object_key` and `purged_at`), `FIELDSERVICE_CAPTURE_JOB_TENANT_IDS`
+runs the offload of Postgres captures and, with `FIELDSERVICE_CAPTURE_RETENTION_DAYS`, the purge of the images of finished
+work orders (the row and hash stay, a read answers 410 `SVC-CAP-004`); a route stream
+(`GET /v1/service/technicians/{id}/day/events`, server-sent events woken by a Postgres NOTIFY raised in the transaction of an
+assignment, publication, checklist change or manual status move) replaces the PWA's one-minute poll; a manual `:transition`
+to COMPLETED refuses an open required checklist item (`SVC-WO-003`; have the technician tick it or replace the checklist
+first); the `outbox-fieldservice` Debezium connector delivers the events (migrations 0013 and 0014). The inventory truck
+consumer books at the truck's location, concurrent replenishment is serialized per truck, and a nightly job replenishes.
+
+Still open after slice 10: the object store write in `PutCapture` happens inside the work order's row-locked transaction (a slow bucket holds the lock; a failed commit leaves an orphaned object under its deterministic key, which a retry overwrites), the S3 adapter reads at most 8 MiB per object (captures are 2 MB, so this is a guard, not a limit anyone meets), photo count per work order is not capped (per action only), a part action that arrives after
+the completion is still REJECTED (see BR-45.6), the object store has no virus scan or server-side encryption setting of its
+own (use the bucket's), the route stream does not replay a notification sent while a pod reconnects (the device reads its day on
+every reconnect and polls every five minutes), and live checks of the connector, the bucket and the stream need real
+infrastructure (#213).
 
 Slice 9 (issue #45, optimizer) delivers: a CP-SAT optimizer and a run API in
 `services/dispatch-py` (`POST /v1/dispatch/runs`, `GET /v1/dispatch/runs/{id}`); here,

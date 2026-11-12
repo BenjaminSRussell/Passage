@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -20,12 +22,14 @@ import (
 type env struct {
 	router http.Handler
 	tenant string
+	pool   *pgxpool.Pool // passage_app
+	admin  *pgxpool.Pool // fixtures only
 }
 
 func newEnv(t *testing.T, region string) *env {
 	t.Helper()
-	pool := testkit.DB(t)
-	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+	admin, pool := testkit.DBWithApp(t) // the store runs as passage_app; admin only migrates and edits fixtures
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	st := store.New(pool)
@@ -35,7 +39,7 @@ func newEnv(t *testing.T, region string) *env {
 	r := httpx.NewRouterWithoutTenant()
 	operator := ids.New()
 	New(st, Config{Region: region, MaxLagSeconds: 300, OperatorTenantID: operator}).Register(r)
-	return &env{router: r, tenant: operator}
+	return &env{router: r, tenant: operator, pool: pool, admin: admin}
 }
 
 func (e *env) do(method, path, user, duties, key, body string) *httptest.ResponseRecorder {
@@ -53,6 +57,30 @@ func (e *env) do(method, path, user, duties, key, body string) *httptest.Respons
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
 	return rec
+}
+
+type httptestRecorder = httptest.ResponseRecorder
+
+// doWith is do with extra request headers.
+func (e *env) doWith(method, path, user, duties string, headers map[string]string, body string) *httptestRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("X-Passage-Tenant", e.tenant)
+	if user != "" {
+		req.Header.Set("X-Passage-User", user)
+	}
+	if duties != "" {
+		req.Header.Set("X-Passage-Duties", duties)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	e.router.ServeHTTP(rec, req)
+	return rec
+}
+
+func (e *env) get(path, user, duties string) *httptestRecorder {
+	return e.doWith("GET", path, user, duties, nil, "")
 }
 
 func code(t *testing.T, rec *httptest.ResponseRecorder) string {
@@ -255,7 +283,30 @@ func TestRegionHealthIsPublicAndFailsClosedForUnknownRegions(t *testing.T) {
 	req := httptest.NewRequest("GET", "/healthz/region", nil)
 	rec := httptest.NewRecorder()
 	e.router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "UNKNOWN") {
+	// a problem with no role: the services' fence reads that as "cannot tell", never as a role
+	if rec.Code != http.StatusServiceUnavailable || strings.Contains(rec.Body.String(), `"role"`) || rec.Header().Get("Retry-After") != "30" {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+// The fence source of the services reads the ops answer for every role, and refuses the problem body.
+func TestRegionHealthAnswersTheFenceSourceUnderstands(t *testing.T) {
+	e := newEnv(t, "us-east")
+	srv := httptest.NewServer(e.router)
+	defer srv.Close()
+	src := httpx.URLFenceSource(srv.Client(), srv.URL+"/healthz/region")
+	if fenced, err := src(context.Background()); err != nil || fenced {
+		t.Fatalf("PRIMARY: fenced=%v err=%v", fenced, err)
+	}
+	if rec := e.do("POST", "/v1/ops/failover", "alice", DutyFailover, "evt-f", `{"to":"eu-west"}`); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+	if fenced, err := src(context.Background()); err != nil || !fenced {
+		t.Fatalf("FENCED: fenced=%v err=%v", fenced, err)
+	}
+	// the database becomes unreadable: the answer has no role, which the fence source reports as an error
+	e.pool.Close()
+	if _, err := src(context.Background()); err == nil {
+		t.Fatal("an unreadable database must be a read error, not a role")
 	}
 }

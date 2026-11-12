@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -27,6 +28,8 @@ type workerUpdateRequest struct {
 	UserID   *string `json:"userId"`
 	CostRate string  `json:"costRate"`
 	Currency string  `json:"currency"`
+	// TimeZone replaces the worker's site zone when sent; omitted keeps it.
+	TimeZone string `json:"timeZone"`
 }
 
 type deactivateRequest struct {
@@ -80,6 +83,9 @@ func (a *API) updateWorker(w http.ResponseWriter, r *http.Request) {
 	if !currencyRe.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
 	}
+	if req.TimeZone != "" && !validZone(req.TimeZone) {
+		fields["timeZone"] = "must be an IANA time zone name such as America/Chicago"
+	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
@@ -87,7 +93,7 @@ func (a *API) updateWorker(w http.ResponseWriter, r *http.Request) {
 	if a.replayed(w, r, idem) {
 		return
 	}
-	out, err := a.store.UpdateWorker(r.Context(), id, version, store.WorkerInput{Name: name, BadgeID: req.BadgeID, UserID: req.UserID, CostRate: rate, Currency: req.Currency}, user, idem)
+	out, err := a.store.UpdateWorker(r.Context(), id, version, store.WorkerInput{Name: name, BadgeID: req.BadgeID, UserID: req.UserID, CostRate: rate, Currency: req.Currency, TimeZone: req.TimeZone}, user, idem)
 	if err != nil {
 		a.fail(w, r, "update worker", err)
 		return
@@ -138,4 +144,13 @@ func (a *API) reactivateWorker(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", etag(out.Version))
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// validZone reports whether name is an IANA time zone the service can load.
+func validZone(name string) bool {
+	if len(name) > 64 || name == "Local" {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
 }

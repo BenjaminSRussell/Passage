@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/objectstore"
 )
 
 // CaptureInput is an image a device uploads for a work order: a photo or the customer's
@@ -105,9 +107,21 @@ func (s *Postgres) PutCapture(ctx context.Context, in CaptureInput) (Capture, er
 		default:
 			return unprocessable(domain.CodeCaptureState, fmt.Sprintf("a %s work order takes no captures", wo.Status))
 		}
+		// With an object store the bytes go there under a key made of tenant, work order and capture id, so a retry after a
+		// failed commit writes the same object again; the row then carries the key and no bytes.
+		data := in.Data
+		var objectKey *string
+		if s.objects != nil {
+			key := objectstore.Key(tid, in.WorkOrderID, in.ID)
+			if err := s.objects.Put(ctx, key, in.ContentType, in.Data); err != nil {
+				slog.ErrorContext(ctx, "capture not written to the object store", "captureId", in.ID, "workOrderId", in.WorkOrderID, "err", err)
+				return httpx.NewProblem(http.StatusServiceUnavailable, domain.CodeCaptureStoreDown, "the image store did not take the image; repeat the upload")
+			}
+			data, objectKey = nil, &key
+		}
 		if _, err := tx.Exec(ctx, `insert into service_wo_capture (tenant_id, id, work_order_id, technician_id, legal_entity_id, kind, content_type, width_px, height_px,
-			byte_size, sha256, data, captured_at, lat, lon) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-			tid, in.ID, in.WorkOrderID, in.TechnicianID, wo.LegalEntityID, string(in.Kind), in.ContentType, in.Width, in.Height, len(in.Data), hash, in.Data,
+			byte_size, sha256, data, object_key, captured_at, lat, lon) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+			tid, in.ID, in.WorkOrderID, in.TechnicianID, wo.LegalEntityID, string(in.Kind), in.ContentType, in.Width, in.Height, len(in.Data), hash, data, objectKey,
 			in.CapturedAt, in.Latitude, in.Longitude); err != nil {
 			if isUnique(err) {
 				return unprocessable(domain.CodeActionReuse, fmt.Sprintf("the capture id %s was already used for another image", in.ID))
@@ -120,20 +134,51 @@ func (s *Postgres) PutCapture(ctx context.Context, in CaptureInput) (Capture, er
 	return out, err
 }
 
-// GetCapture returns the description and bytes of one capture of a work order.
+// GetCapture returns the description and bytes of one capture of a work order: from the object store when the capture was
+// stored there, else from Postgres. A capture the retention job has purged answers 410 (SVC-CAP-004).
 func (s *Postgres) GetCapture(ctx context.Context, workOrderID, id string) (Capture, []byte, error) {
 	tid := tenantOf(ctx)
 	var c Capture
 	var data []byte
+	var objectKey *string
+	var purgedAt *time.Time
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
-		c, err = scanCapture(tx.QueryRow(ctx, `select `+captureColumns+`, data from service_wo_capture where tenant_id = $1 and work_order_id = $2 and id = $3`,
-			tid, workOrderID, id), &data)
+		row := tx.QueryRow(ctx, `select `+captureColumns+`, data, object_key, purged_at from service_wo_capture where tenant_id = $1 and work_order_id = $2 and id = $3`,
+			tid, workOrderID, id)
+		c, err = scanCaptureWith(row, &data, &objectKey, &purgedAt)
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, nil, httpx.NewProblem(http.StatusNotFound, domain.CodeCaptureUnknown, "capture not found")
 	}
-	return c, data, err
+	if err != nil {
+		return c, nil, err
+	}
+	gone := httpx.NewProblem(http.StatusGone, domain.CodeCaptureGone, "the image was deleted after the retention period")
+	if purgedAt != nil {
+		return c, nil, gone
+	}
+	if objectKey != nil {
+		if s.objects == nil {
+			return c, nil, httpx.NewProblem(http.StatusServiceUnavailable, domain.CodeCaptureStoreDown, "the image is in the object store, which is not configured on this service")
+		}
+		data, err = s.objects.Get(ctx, *objectKey)
+		if errors.Is(err, objectstore.ErrNotFound) {
+			return c, nil, gone
+		}
+		if err != nil {
+			slog.ErrorContext(ctx, "capture not read from the object store", "captureId", id, "workOrderId", workOrderID, "err", err)
+			return c, nil, httpx.NewProblem(http.StatusServiceUnavailable, domain.CodeCaptureStoreDown, "the image store did not answer; try again")
+		}
+	}
+	return c, data, nil
+}
+
+func scanCaptureWith(row pgx.Row, data *[]byte, key **string, purged **time.Time) (Capture, error) {
+	var c Capture
+	err := row.Scan(&c.ID, &c.WorkOrderID, &c.TechnicianID, &c.Kind, &c.ContentType, &c.WidthPx, &c.HeightPx, &c.ByteSize, &c.SHA256, &c.CapturedAt, &c.Latitude, &c.Longitude, data, key, purged)
+	c.Ref = domain.CaptureRef(c.ID)
+	return c, err
 }
 
 // SetChecklist replaces the checklist of a work order that has not been completed. Items
@@ -161,7 +206,10 @@ func (s *Postgres) SetChecklist(ctx context.Context, id string, version int, ite
 			return err
 		}
 		wo, err = getWorkOrder(ctx, tx, tid, id)
-		return err
+		if err != nil {
+			return err
+		}
+		return notifyRoute(ctx, tx, tid, current.TechnicianID)
 	})
 	return wo, err
 }

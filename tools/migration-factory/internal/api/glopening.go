@@ -70,6 +70,8 @@ func failOpening(w http.ResponseWriter, r *http.Request, err error, posted []sto
 	switch {
 	case errors.Is(err, store.ErrOpeningTargetTaken):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeOpeningTarget, err.Error()))
+	case errors.Is(err, store.ErrPostingLeaseLost):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, CodeOpeningConflict, err.Error()+" ("+postedNote(posted)+")"))
 	case errors.Is(err, domain.ErrOpeningUnbalanced):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeOpeningUnbalanced, err.Error()))
 	case errors.As(err, &le) && le.Status == http.StatusConflict:

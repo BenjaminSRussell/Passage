@@ -4,7 +4,7 @@ import type { Server } from "node:http";
 import { Jwks, type OidcConfig } from "../src/oidc.ts";
 import { createHttpServer } from "../src/server.ts";
 import { createServiceTokenSigner } from "../src/serviceToken.ts";
-import { RateLimiter, SessionStore } from "../src/session.ts";
+import { MemorySessionStore, RateLimiter, type SessionStore } from "../src/session.ts";
 
 export const TENANT = "11111111-1111-4111-8111-111111111111";
 export const CUSTOMER_A = "0c1d2e3f-0000-4000-8000-0000000000aa";
@@ -23,6 +23,8 @@ export const oidc: OidcConfig = {
   authorizationEndpoint: `${ISSUER}/protocol/openid-connect/auth`,
   tokenEndpoint: `${ISSUER}/protocol/openid-connect/token`,
   jwksUri: `${ISSUER}/protocol/openid-connect/certs`,
+  endSessionEndpoint: `${ISSUER}/protocol/openid-connect/logout`,
+  postLogoutRedirectUri: `${APP}/`,
 };
 
 export interface Call {
@@ -36,8 +38,14 @@ export interface Rig {
   base: string;
   server: Server;
   calls: Call[];
-  /** What the next upstream call (receivables, billing, sales) answers; default 200 {}. */
+  /** What the next upstream call (receivables, billing, sales, party, identity) answers; default 200 {}. */
   answer: (r: Response) => void;
+  /** Answers every upstream call whose URL starts with prefix, ahead of `answer`; a later call for the same prefix replaces it, and the handler may return undefined to pass. */
+  on: (prefix: string, handler: (call: Call) => Response | undefined) => void;
+  /** Signs a token with the identity provider's key, as Keycloak signs a logout token. */
+  signToken: (claims: Record<string, unknown>) => string;
+  /** The IDs of the ID tokens the fake identity provider issued, in order. */
+  idTokens: string[];
   /** Claims the fake identity provider puts in the next ID token. */
   claims: Record<string, unknown>;
   seedBase64: string;
@@ -51,37 +59,52 @@ export function idToken(key: KeyObject, claims: Record<string, unknown>, kid = "
   return `${h}.${p}.${sign("RSA-SHA256", Buffer.from(`${h}.${p}`), key).toString("base64url")}`;
 }
 
-export async function startRig(opts: { limit?: number } = {}): Promise<Rig> {
+export async function startRig(opts: { limit?: number; sessions?: SessionStore } = {}): Promise<Rig> {
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const jwk = { ...publicKey.export({ format: "jwk" }), kid: "k1", use: "sig" };
   const seedBase64 = randomBytes(32).toString("base64");
   const now = { ms: Date.UTC(2026, 10, 10, 12) };
   const calls: Call[] = [];
   let next: Response | undefined;
-  const rig = { calls, now, seedBase64, claims: {} as Record<string, unknown> } as Rig;
+  const rig = { calls, now, seedBase64, claims: {} as Record<string, unknown>, idTokens: [] as string[] } as Rig;
   rig.answer = (r) => {
     next = r;
+  };
+  const handlers: Array<{ prefix: string; handler: (call: Call) => Response | undefined }> = [];
+  rig.signToken = (claims) => idToken(privateKey, claims);
+  rig.on = (prefix, handler) => {
+    const i = handlers.findIndex((h) => h.prefix === prefix);
+    if (i >= 0) handlers.splice(i, 1);
+    handlers.push({ prefix, handler });
   };
   let lastNonce = "";
   const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
     if (url === oidc.jwksUri) return Response.json({ keys: [jwk] });
     if (url === oidc.tokenEndpoint) {
       const claims = { iss: ISSUER, aud: oidc.clientId, exp: Math.floor(now.ms / 1000) + 300, iat: Math.floor(now.ms / 1000), nonce: lastNonce, ...rig.claims };
-      return Response.json({ id_token: idToken(privateKey, claims), access_token: "never-used" });
+      const token = idToken(privateKey, claims);
+      rig.idTokens.push(token);
+      return Response.json({ id_token: token, access_token: "never-used" });
     }
-    calls.push({ url, method: init?.method ?? "GET", headers: new Headers(init?.headers), body: typeof init?.body === "string" ? init.body : "" });
+    const call: Call = { url, method: init?.method ?? "GET", headers: new Headers(init?.headers), body: typeof init?.body === "string" ? init.body : "" };
+    calls.push(call);
+    for (const h of handlers) {
+      if (!url.startsWith(h.prefix)) continue;
+      const answered = h.handler(call);
+      if (answered) return answered;
+    }
     const r = next ?? Response.json({});
     next = undefined;
     return r;
   };
-  const sessions = new SessionStore();
+  const sessions = opts.sessions ?? new MemorySessionStore();
   const server = createHttpServer({
     oidc,
     jwks: new Jwks(oidc.jwksUri, fetcher),
     fetcher,
     sessions,
     signer: createServiceTokenSigner({ seedBase64, now: () => now.ms }),
-    upstreams: { receivables: "http://receivables.test", billing: "http://billing.test", sales: "http://sales.test" },
+    upstreams: { receivables: "http://receivables.test", billing: "http://billing.test", sales: "http://sales.test", party: "http://party.test", identity: "http://identity.test" },
     appOrigin: APP,
     cookieSecure: true,
     limiter: new RateLimiter(opts.limit ?? 1000, 60_000),
@@ -91,7 +114,7 @@ export async function startRig(opts: { limit?: number } = {}): Promise<Rig> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   rig.server = server;
   rig.base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  rig.claims = { sub: "user-1", tid: TENANT, customer_id: CUSTOMER_A, le: LE_1, roles: ["customer-user"], name: "Pat Buyer" };
+  rig.claims = { sub: "user-1", tid: TENANT, customer_id: CUSTOMER_A, le: LE_1, roles: ["customer-user"], name: "Pat Buyer", sid: "kc-sid-1" };
   rig.close = () => new Promise((resolve) => server.close(() => resolve()));
   (rig as Rig & { setNonce: (n: string) => void }).setNonce = (n) => {
     lastNonce = n;

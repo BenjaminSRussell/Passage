@@ -247,3 +247,38 @@ func TestUsersListIsTenantWideAndFiltersOnActiveAssignments(t *testing.T) {
 		}
 	})
 }
+
+func TestUserNames(t *testing.T) {
+	f := newAdminFixture(t)
+	ctx := context.Background()
+	other := "20000000-0000-0000-0000-000000000009"
+	if _, err := f.admin.Exec(ctx, `insert into identity_users (tenant_id, user_id, idp_subject, email, display_name, status) values ($1, $2, 'subject-gone', 'gone@example.test', 'Gina Gone', 'deprovisioned')`, f.tenantA, other); err != nil {
+		t.Fatal(err)
+	}
+	reader := caller{tenantID: f.tenantA, user: "plain-user", duties: []string{"identity.user-name.read"}}
+	type names struct {
+		Items []struct {
+			UserID      string `json:"userId"`
+			DisplayName string `json:"displayName"`
+			Email       string `json:"email"`
+		} `json:"items"`
+	}
+	got := decode[names](t, f.do(reader, http.MethodGet, "/v1/identity/user-names?ids="+userID+","+other+",30000000-0000-0000-0000-000000000001", nil), http.StatusOK)
+	if len(got.Items) != 2 {
+		t.Fatalf("an unknown id is left out, a deprovisioned user still resolves: %+v", got)
+	}
+	if got.Items[0].Email != "" || got.Items[0].UserID != userID || got.Items[1].DisplayName != "Gina Gone" {
+		t.Fatalf("names only: %+v", got)
+	}
+	if rec := f.do(caller{tenantID: f.tenantB, user: "x", duties: []string{"identity.user-name.read"}}, http.MethodGet, "/v1/identity/user-names?ids="+other, nil); rec.Code != http.StatusOK || len(decode[names](t, rec, http.StatusOK).Items) != 0 {
+		t.Fatalf("another tenant sees nothing: %s", rec.Body.String())
+	}
+	for _, q := range []string{"", "?ids=", "?ids=nope"} {
+		if rec := f.do(reader, http.MethodGet, "/v1/identity/user-names"+q, nil); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%q = %d", q, rec.Code)
+		}
+	}
+	if rec := f.do(caller{tenantID: f.tenantA, user: "nobody"}, http.MethodGet, "/v1/identity/user-names?ids="+userID, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("no duty = %d", rec.Code)
+	}
+}

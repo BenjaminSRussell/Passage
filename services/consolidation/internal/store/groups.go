@@ -580,12 +580,16 @@ func (s *Postgres) SetUnitTerms(ctx context.Context, groupID, unitID string, t d
 		} else if err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `insert into consolidation_unit_terms (tenant_id, unit_id, investment_cost, share_capital, pre_acquisition_re, historical_rate, seller_is_subsidiary, ic_net_investment, fx_gain_loss_account, updated_by)
-			values ($1, $2::uuid, $3::numeric, $4::numeric, $5::numeric, $6::numeric, $7, $8, nullif($9, ''), $10)
+		method := t.Method
+		if method == "" {
+			method = domain.MethodFull
+		}
+		return tx.QueryRow(ctx, `insert into consolidation_unit_terms (tenant_id, unit_id, investment_cost, share_capital, pre_acquisition_re, historical_rate, seller_is_subsidiary, ic_net_investment, fx_gain_loss_account, updated_by, method)
+			values ($1, $2::uuid, $3::numeric, $4::numeric, $5::numeric, $6::numeric, $7, $8, nullif($9, ''), $10, $11)
 			on conflict (tenant_id, unit_id) do update set investment_cost = excluded.investment_cost, share_capital = excluded.share_capital, pre_acquisition_re = excluded.pre_acquisition_re,
 				historical_rate = excluded.historical_rate, seller_is_subsidiary = excluded.seller_is_subsidiary, ic_net_investment = excluded.ic_net_investment,
-				fx_gain_loss_account = excluded.fx_gain_loss_account, updated_by = excluded.updated_by, updated_at = now() returning updated_at`,
-			tenantID, unitID, t.InvestmentCost.String(), t.ShareCapital.String(), t.PreAcquisitionRE.String(), t.HistoricalRate.String(), t.SellerIsSubsidiary, t.ICNetInvestment, t.FXGainLossAccount, by).Scan(&rec.UpdatedAt)
+				fx_gain_loss_account = excluded.fx_gain_loss_account, method = excluded.method, updated_by = excluded.updated_by, updated_at = now() returning updated_at`,
+			tenantID, unitID, t.InvestmentCost.String(), t.ShareCapital.String(), t.PreAcquisitionRE.String(), t.HistoricalRate.String(), t.SellerIsSubsidiary, t.ICNetInvestment, t.FXGainLossAccount, by, method).Scan(&rec.UpdatedAt)
 	})
 	if err != nil {
 		return UnitTermsRecord{}, wrap("set consolidation unit terms", err)
@@ -605,7 +609,7 @@ func (s *Postgres) GetUnitTerms(ctx context.Context, groupID string) (map[string
 			return err
 		}
 		rows, err := tx.Query(ctx, `select t.unit_id::text, t.investment_cost::text, t.share_capital::text, t.pre_acquisition_re::text, t.historical_rate::text,
-				t.seller_is_subsidiary, t.ic_net_investment, coalesce(t.fx_gain_loss_account, ''), t.updated_by, t.updated_at
+				t.seller_is_subsidiary, t.ic_net_investment, coalesce(t.fx_gain_loss_account, ''), t.updated_by, t.updated_at, t.method
 			from consolidation_unit_terms t join consolidation_unit u on u.tenant_id = t.tenant_id and u.id = t.unit_id
 			where t.tenant_id = $1 and u.group_id = $2::uuid`, pr.TenantID, groupID)
 		if err != nil {
@@ -615,7 +619,7 @@ func (s *Postgres) GetUnitTerms(ctx context.Context, groupID string) (map[string
 		for rows.Next() {
 			var r UnitTermsRecord
 			var inv, capital, re, rate string
-			if err := rows.Scan(&r.UnitID, &inv, &capital, &re, &rate, &r.SellerIsSubsidiary, &r.ICNetInvestment, &r.FXGainLossAccount, &r.UpdatedBy, &r.UpdatedAt); err != nil {
+			if err := rows.Scan(&r.UnitID, &inv, &capital, &re, &rate, &r.SellerIsSubsidiary, &r.ICNetInvestment, &r.FXGainLossAccount, &r.UpdatedBy, &r.UpdatedAt, &r.Method); err != nil {
 				return err
 			}
 			for _, f := range []struct {

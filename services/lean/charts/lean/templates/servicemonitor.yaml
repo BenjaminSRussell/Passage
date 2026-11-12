@@ -8,6 +8,6 @@ spec:
     matchLabels:
       app.kubernetes.io/name: lean
   endpoints:
-    - port: http
+    - port: admin
       path: /metrics
 {{- end }}

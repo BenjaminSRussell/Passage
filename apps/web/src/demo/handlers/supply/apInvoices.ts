@@ -5,6 +5,7 @@ import type { Capture, Invoice, Submission } from "../../../modules/ap-invoices/
 import { LEGAL_ENTITY, VENDORS, itemByNumber } from "../../company";
 import { reply, route } from "../../backend";
 import { at, day, dec, uid } from "../../store";
+import { byUsername } from "../finance/people";
 import { purchaseOrders } from "./purchasing";
 
 const BASE = "/api/v1/receiving";
@@ -66,9 +67,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const invoices: Invoice[] = [
   invoice(1, { number: "KSG-40391", receipt: 3, unitPrice: 52, invoiceAgo: 1, status: "AUDIT_BLOCKED", extra: { auditReason: "Unit price 7.2% above the purchase order, outside the 2% tolerance" } }),
   invoice(2, { number: "PBC-55120", receipt: 4, unitPrice: 7.4, invoiceAgo: 3, status: "POSTED", source: "ERS" }),
-  invoice(3, { number: "VMW-121044", receipt: 5, unitPrice: 395, invoiceAgo: 8, status: "POSTED", extra: { auditReason: "Invoice over 5,000.00 needs a second approval", releasedBy: "marcus.lee", releasedAt: at(-6.8) } }),
+  invoice(3, { number: "VMW-121044", receipt: 5, unitPrice: 395, invoiceAgo: 8, status: "POSTED", extra: { auditReason: "Invoice over 5,000.00 needs a second approval", releasedBy: byUsername("marcus.lee").id, releasedAt: at(-6.8) } }),
   invoice(4, { number: "AFS-74402", receipt: 6, unitPrice: 12.8, invoiceAgo: 28, status: "POSTED" }),
-  invoice(5, { number: "AFS-74402A", receipt: 6, unitPrice: 12.8, invoiceAgo: 21, status: "AUDIT_REJECTED", extra: { auditReason: "Possible duplicate", rejectedBy: "ana.ortiz", rejectedAt: at(-20), rejectReason: "Duplicate of AFS-74402, already posted" } }),
+  invoice(5, { number: "AFS-74402A", receipt: 6, unitPrice: 12.8, invoiceAgo: 21, status: "AUDIT_REJECTED", extra: { auditReason: "Possible duplicate", rejectedBy: byUsername("ana.ortiz").id, rejectedAt: at(-20), rejectReason: "Duplicate of AFS-74402, already posted" } }),
 ];
 
 const captures: Capture[] = [

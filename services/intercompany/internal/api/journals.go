@@ -34,7 +34,8 @@ type JournalStore interface {
 // ChargeStore persists IC charge requests (FR-40.13).
 type ChargeStore interface {
 	BeginCharge(ctx context.Context, c domain.ChargeRecord, hash string) (domain.ChargeRecord, bool, error)
-	FinishCharge(ctx context.Context, id string, status domain.ChargeStatus, method string, p domain.ChargePricing, journalID, failureCode string) (domain.ChargeRecord, error)
+	FinishCharge(ctx context.Context, id string, status domain.ChargeStatus, method string, p domain.ChargePricing, journalID, failureCode string, extra domain.ChargeExtra) (domain.ChargeRecord, error)
+	MarkTaxRecorded(ctx context.Context, id string) error
 	GetCharge(ctx context.Context, id string) (domain.ChargeRecord, error)
 	ListCharges(ctx context.Context, f store.ChargeFilter, after string, limit int) (store.ChargePage, error)
 }
@@ -77,6 +78,11 @@ type postedEntryBody struct {
 	Legs            []postedLegBody `json:"legs"`
 	LedgerEntryID   string          `json:"ledgerEntryId,omitempty"`
 	ReversalEntryID string          `json:"reversalEntryId,omitempty"`
+	// PostedOn is the date the ledger took the entry. When its own period was closed this is the first open period and
+	// DateShiftedFrom is the date it was meant for, with Note saying so.
+	PostedOn        string `json:"postedOn,omitempty"`
+	DateShiftedFrom string `json:"dateShiftedFrom,omitempty"`
+	Note            string `json:"note,omitempty"`
 }
 
 type journalResponse struct {
@@ -105,6 +111,13 @@ func toJournalResponse(r domain.JournalRecord) journalResponse {
 	for _, e := range r.Entries {
 		eb := postedEntryBody{Entity: e.Entity, LegalEntityID: e.Target.LegalEntityID, LedgerID: e.Target.LedgerID, Currency: e.Currency,
 			LedgerEntryID: e.LedgerEntryID, ReversalEntryID: e.ReversalEntryID, Legs: make([]postedLegBody, 0, len(e.Legs))}
+		if !e.PostedOn.IsZero() {
+			eb.PostedOn = e.PostedOn.Format(dateLayout)
+		}
+		if !e.ShiftedFrom.IsZero() {
+			eb.DateShiftedFrom = e.ShiftedFrom.Format(dateLayout)
+			eb.Note = posting.ShiftNote(r.PairID, e.ShiftedFrom, e.PostedOn)
+		}
 		for _, l := range e.Legs {
 			eb.Legs = append(eb.Legs, postedLegBody{Account: l.Account, Side: string(l.Side), Amount: l.Amount.Value.StringFixed(money.MinorUnits(e.Currency))})
 		}
@@ -213,8 +226,23 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 		f = fieldParser{}
 	}
 	date := f.date("postingDate", req.PostingDate)
-	targets := parseTargets(req.Entities, f)
-	if !validation(w, r, f) || !targetsInScope(w, r, targets) {
+	var targets map[string]domain.Target
+	if len(req.Entities) > 0 || a.registry == nil {
+		targets = parseTargets(req.Entities, f)
+	}
+	if !validation(w, r, f) {
+		return
+	}
+	targets, err := a.targetsFor(r.Context(), targets, req.Entity, req.OffsetEntity)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	if !targetsInScope(w, r, targets) {
+		return
+	}
+	if matrix, err = a.matrixFor(r.Context(), matrix); err != nil {
+		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
 	pairID := ids.New()

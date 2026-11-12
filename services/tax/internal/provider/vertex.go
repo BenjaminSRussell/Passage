@@ -46,6 +46,9 @@ func NewVertex(baseURL, tokenURL, clientID, clientSecret, username, password, co
 	if tokenURL == "" || clientID == "" || clientSecret == "" || username == "" || password == "" || company == "" {
 		return nil, errors.New("vertex needs a token URL, client id and secret, a user and password and a company")
 	}
+	if err := requireHTTPS("the Vertex token URL", tokenURL); err != nil {
+		return nil, err
+	}
 	return &Vertex{c: c, tokenURL: tokenURL, company: company, now: time.Now, form: url.Values{
 		"grant_type": {"password"}, "scope": {"calc-rest-api"}, "client_id": {clientID}, "client_secret": {clientSecret},
 		"username": {username}, "password": {password}}}, nil
