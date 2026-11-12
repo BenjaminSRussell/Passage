@@ -72,6 +72,9 @@ func moneyField(v decimal.Decimal) string {
 	if v.Sign() < 0 || v.Exponent() < -4 {
 		return "must not be negative and have at most 4 decimal places"
 	}
+	if v.GreaterThanOrEqual(maxPlanAmount) {
+		return "must be below 1,000,000,000,000,000"
+	}
 	return ""
 }
 

@@ -36,6 +36,9 @@ type GroupStore interface {
 	LatestCollection(ctx context.Context, groupID, period string) (store.CollectionDetail, bool, error)
 	ListCollections(ctx context.Context, groupID string) ([]store.Collection, error)
 	GetCollection(ctx context.Context, id string) (store.CollectionDetail, error)
+	SetLayers(ctx context.Context, groupID, unitID, period string, layers []domain.ICLayer) error
+	GetLayers(ctx context.Context, groupID, period string) (map[string][]domain.ICLayer, error)
+	LatestInvestments(ctx context.Context, groupID, period string) (map[string]store.InvestmentRecord, bool, error)
 }
 
 // WithGroups gives the API the group and collection store.
@@ -480,6 +483,9 @@ type termsBody struct {
 	SellerIsSubsidiary bool   `json:"sellerIsSubsidiary"`
 	ICNetInvestment    bool   `json:"icNetInvestment"`
 	FXGainLossAccount  string `json:"fxGainLossAccount"`
+	// Method is full (the default: consolidated line by line, E1 to E6) or equity (an associate or joint venture, up to 50 percent,
+	// taken with the equity method and shown in the investments register).
+	Method string `json:"method"`
 }
 
 type termsResponse struct {
@@ -493,7 +499,14 @@ func toTermsResponse(rec store.UnitTermsRecord) termsResponse {
 	t := rec.UnitTerms
 	return termsResponse{UnitID: rec.UnitID, UpdatedBy: rec.UpdatedBy, UpdatedAt: rec.UpdatedAt.UTC(), termsBody: termsBody{
 		InvestmentCost: t.InvestmentCost.String(), ShareCapital: t.ShareCapital.String(), PreAcquisitionRE: t.PreAcquisitionRE.String(), HistoricalRate: t.HistoricalRate.String(),
-		SellerIsSubsidiary: t.SellerIsSubsidiary, ICNetInvestment: t.ICNetInvestment, FXGainLossAccount: t.FXGainLossAccount}}
+		SellerIsSubsidiary: t.SellerIsSubsidiary, ICNetInvestment: t.ICNetInvestment, FXGainLossAccount: t.FXGainLossAccount, Method: methodOf(t.Method)}}
+}
+
+func methodOf(m string) string {
+	if m == "" {
+		return domain.MethodFull
+	}
+	return m
 }
 
 // setUnitTerms handles PUT /groups/{id}/units/{unitId}/terms: the stored investment of the group in the unit (its cost, the share
@@ -520,6 +533,10 @@ func (a *API) setUnitTerms(w http.ResponseWriter, r *http.Request) {
 		InvestmentCost: f.get("investmentCost", body.InvestmentCost, false), ShareCapital: f.get("shareCapital", body.ShareCapital, false),
 		PreAcquisitionRE: f.get("preAcquisitionRe", body.PreAcquisitionRE, false), HistoricalRate: f.get("historicalRate", body.HistoricalRate, true),
 		SellerIsSubsidiary: body.SellerIsSubsidiary, ICNetInvestment: body.ICNetInvestment, FXGainLossAccount: body.FXGainLossAccount,
+		Method: methodOf(body.Method),
+	}
+	if !domain.ValidMethod(body.Method) {
+		f["method"] = "must be full or equity"
 	}
 	if _, bad := f["historicalRate"]; !bad && !t.HistoricalRate.IsPositive() {
 		f["historicalRate"] = "must be above zero"

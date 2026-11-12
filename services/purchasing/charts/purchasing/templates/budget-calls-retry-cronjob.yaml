@@ -1,0 +1,83 @@
+{{- if .Values.budgetCallsRetry.enabled }}
+{{- if not .Values.budgetCallsRetry.tenantIds }}
+{{- fail "budgetCallsRetry.tenantIds must list at least one tenant UUID when budgetCallsRetry.enabled is true" }}
+{{- end }}
+{{- if not .Values.serviceUrls.budgeting }}
+{{- fail "serviceUrls.budgeting is required when budgetCallsRetry.enabled is true" }}
+{{- end }}
+{{- if not .Values.serviceIdentity.signingKeySecret }}
+{{- fail "serviceIdentity.signingKeySecret is required when budgetCallsRetry.enabled is true" }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-budget-calls-retry
+  labels:
+    app.kubernetes.io/name: purchasing-budget-calls-retry
+spec:
+  schedule: {{ .Values.budgetCallsRetry.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: purchasing-budget-calls-retry
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: service-identity
+              secret:
+                secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+                defaultMode: 0440
+          containers:
+            - name: budget-calls-retry
+              {{- if .Values.image.digest }}
+              image: "{{ (include "passage.imageRepository" $) }}@{{ .Values.image.digest }}"
+              {{- else }}
+              image: "{{ (include "passage.imageRepository" $) }}:{{ .Values.image.tag }}"
+              {{- end }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - budget-calls-retry
+                {{- range .Values.budgetCallsRetry.tenantIds }}
+                - {{ . | quote }}
+                {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              env:
+                {{- include "passage.cloudEnv" $ | nindent 16 }}
+                - name: SERVICE_NAME
+                  value: purchasing
+                - name: PASSAGE_SERVICE_NAME
+                  value: purchasing
+                - name: BUDGETING_URL
+                  value: {{ .Values.serviceUrls.budgeting | quote }}
+                - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+                  value: /var/run/passage/service-identity/signing-key
+                {{- if .Values.serviceIdentity.keyId }}
+                - name: PASSAGE_SERVICE_KEY_ID
+                  value: {{ .Values.serviceIdentity.keyId | quote }}
+                {{- end }}
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.database.secretName }}
+                      key: {{ .Values.database.secretKey }}
+              volumeMounts:
+                - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+{{- end }}

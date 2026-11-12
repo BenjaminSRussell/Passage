@@ -16,12 +16,12 @@ import (
 )
 
 const runColumns = `r.id::text, r.period, r.currency, r.fx_tolerance_pct::text, r.matched, r.timing, r.mismatch,
-	(select count(*) from ic_reconciliation_item i where i.tenant_id = r.tenant_id and i.run_id = r.id and i.resolution = 'open'), r.created_by, r.created_at`
+	(select count(*) from ic_reconciliation_item i where i.tenant_id = r.tenant_id and i.run_id = r.id and i.resolution = 'open'), r.source, r.created_by, r.created_at`
 
 func scanRun(row pgx.Row) (domain.ReconRun, error) {
 	var r domain.ReconRun
 	var tol string
-	if err := row.Scan(&r.ID, &r.Period, &r.Currency, &tol, &r.Matched, &r.Timing, &r.Mismatch, &r.Open, &r.CreatedBy, &r.CreatedAt); err != nil {
+	if err := row.Scan(&r.ID, &r.Period, &r.Currency, &tol, &r.Matched, &r.Timing, &r.Mismatch, &r.Open, &r.Source, &r.CreatedBy, &r.CreatedAt); err != nil {
 		return r, err
 	}
 	var err error
@@ -78,9 +78,13 @@ func (s *Postgres) CreateReconRun(ctx context.Context, run domain.ReconRun, item
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		create := func() (domain.ReconRun, error) {
 			id := ids.New()
-			if _, err := tx.Exec(ctx, `insert into ic_reconciliation_run (tenant_id, id, period, currency, fx_tolerance_pct, request_hash, matched, timing, mismatch, created_by)
-				values ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, $10)`,
-				pr.TenantID, id, run.Period, run.Currency, run.FXTolerancePct.String(), hash, run.Matched, run.Timing, run.Mismatch, by); err != nil {
+			source := run.Source
+			if source == "" {
+				source = "request"
+			}
+			if _, err := tx.Exec(ctx, `insert into ic_reconciliation_run (tenant_id, id, period, currency, fx_tolerance_pct, request_hash, matched, timing, mismatch, source, created_by)
+				values ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, $10, $11)`,
+				pr.TenantID, id, run.Period, run.Currency, run.FXTolerancePct.String(), hash, run.Matched, run.Timing, run.Mismatch, source, by); err != nil {
 				return domain.ReconRun{}, err
 			}
 			var batch pgx.Batch

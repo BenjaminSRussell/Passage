@@ -10,6 +10,13 @@ resources:
 serviceMonitor: { enabled: false }
 # The ledger the service reads balances from and posts journals to (LEDGER_URL). Empty turns those routes off.
 ledgerUrl: ""
+# The fx service whose rate tables a collection translates at (FX_URL) and the rate types it asks for. Empty fxUrl means every
+# foreign rate must come in the request.
+fxUrl: ""
+fxAverageRateType: average
+fxClosingRateType: closing
+# The org service whose fiscal calendars give each unit's fiscal year (ORG_URL). Empty keeps the per-unit start month.
+orgUrl: ""
 # Ed25519 seed (base64) in this secret signs the service-to-service tokens sent to the ledger.
 serviceIdentity:
   signingKeySecret: ""

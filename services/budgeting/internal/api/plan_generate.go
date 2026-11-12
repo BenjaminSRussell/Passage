@@ -14,6 +14,10 @@ import (
 const (
 	generatePriorPlan  = "prior-plan"
 	generateGLActuals  = "gl-actuals"
+	generateAssets     = "fixed-assets"
+	generatePositions  = "positions"
+	generateProjects   = "projects"
+	generateDemand     = "demand"
 	codeNoSourceData   = "BUD-0061"
 	codeTooManyCells   = "BUD-0062"
 	maxGenerateAccount = 50
@@ -27,11 +31,25 @@ type generateRequest struct {
 	AdjustmentPct *decimal.Decimal `json:"adjustmentPct"`
 	// Accounts limits a prior-plan generation to these accounts, and names the accounts of a gl-actuals generation.
 	Accounts []string `json:"accounts"`
-	// CostCenters is how a gl-actuals amount (per account in the ledger) is shared over cost centers, by weight.
+	// CostCenters is how a gl-actuals amount (per account in the ledger) is shared over cost centers, by weight. The fixed-assets
+	// and demand sources share their monthly amount the same way.
 	CostCenters []struct {
 		CostCenter string          `json:"costCenter"`
 		Weight     decimal.Decimal `json:"weight"`
 	} `json:"costCenters"`
+	// Account is the account the fixed-assets, positions, projects and demand amounts are planned on.
+	Account string `json:"account"`
+	// Book is the depreciation book of the fixed-assets source; empty takes the first open book of each asset.
+	Book string `json:"book"`
+	// Rates and Departments value the positions source: the monthly cost of a full-time position per job code, and the cost center of
+	// each HR department.
+	Rates       []sourceRate       `json:"rates"`
+	Departments []sourceDepartment `json:"departments"`
+	// Projects names the forecast model of each project the projects source reads, and the cost center it is planned on.
+	Projects []sourceProject `json:"projects"`
+	// ModelCode and UnitPrices value the demand source: the planning forecast model and the price of one unit of each item.
+	ModelCode  string            `json:"modelCode"`
+	UnitPrices []sourceUnitPrice `json:"unitPrices"`
 }
 
 // generateGrid fills a scenario from another source (FR-38.14): last year's approved plan or last year's posted
@@ -51,8 +69,14 @@ func (a *API) generateGrid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]string{}
-	if req.Source != generatePriorPlan && req.Source != generateGLActuals {
-		fields["source"] = "must be prior-plan or gl-actuals"
+	driver := isDriverSource(req.Source)
+	if req.Source != generatePriorPlan && req.Source != generateGLActuals && !driver {
+		fields["source"] = "must be prior-plan, gl-actuals, fixed-assets, positions, projects or demand"
+	}
+	if driver {
+		for k, v := range validateSourceParams(req) {
+			fields[k] = v
+		}
 	}
 	factor := decimal.NewFromInt(1)
 	if req.AdjustmentPct != nil {
@@ -77,8 +101,8 @@ func (a *API) generateGrid(w http.ResponseWriter, r *http.Request) {
 		fields["accounts"] = fmt.Sprintf("at most %d accounts", maxGenerateAccount)
 	}
 	weights := make([]decimal.Decimal, len(req.CostCenters))
-	if req.Source == generateGLActuals {
-		if len(req.Accounts) == 0 {
+	if req.Source == generateGLActuals || usesCostCenterWeights(req.Source) {
+		if req.Source == generateGLActuals && len(req.Accounts) == 0 {
 			fields["accounts"] = "name the accounts to read from the ledger"
 		}
 		weightSum := decimal.Zero
@@ -105,7 +129,7 @@ func (a *API) generateGrid(w http.ResponseWriter, r *http.Request) {
 			fields["costCenters"] = fmt.Sprintf("accounts times cost centers times 12 periods must not exceed %d cells", maxGridCells)
 		}
 	} else if len(req.CostCenters) > 0 {
-		fields["costCenters"] = "is only used with source gl-actuals"
+		fields["costCenters"] = "is only used with the sources gl-actuals, fixed-assets and demand"
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -129,6 +153,13 @@ func (a *API) generateGrid(w http.ResponseWriter, r *http.Request) {
 	var cells []domain.PlanCell
 	fallback := false
 	switch req.Source {
+	case generateAssets, generatePositions, generateProjects, generateDemand:
+		var ferr error
+		cells, ferr = a.driverCells(r.Context(), plan.Plan, req, factor, weights)
+		if ferr != nil {
+			httpx.Fail(w, r, ferr)
+			return
+		}
 	case generatePriorPlan:
 		prior, err := a.plans.PriorPlanCells(r.Context(), id, req.Accounts)
 		if err != nil {
@@ -174,6 +205,9 @@ func (a *API) generateGrid(w http.ResponseWriter, r *http.Request) {
 func noSourceDetail(source string, priorYear int) string {
 	if source == generatePriorPlan {
 		return fmt.Sprintf("no approved plan of fiscal year %d on this rule version holds amounts for these accounts", priorYear)
+	}
+	if isDriverSource(source) {
+		return fmt.Sprintf("the %s source holds no amounts for fiscal year %d", source, priorYear+1)
 	}
 	return strings.Join([]string{"the ledger holds no net debit posted to these accounts in fiscal year ", fmt.Sprint(priorYear)}, "")
 }

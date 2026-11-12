@@ -1028,6 +1028,11 @@ const treasury: Record<string, ProblemCatalogEntry> = {
   "BUD-0010": { message: "That budget reservation has nothing left to release: it is fully used or already released.", action: "No action needed." },
   "BUD-0061": { message: "There is nothing to fill the plan from: last year's plan or ledger holds no amounts for those accounts.", action: "Check the accounts, or enter the amounts by hand." },
   "BUD-0062": { message: "That would write more cells than one change can take.", action: "Name fewer accounts or cost centers and fill the grid in steps." },
+  "BUD-0063": { message: "This source is not connected to budgeting.", action: "Ask an administrator to connect the fixed assets, HR, projects or planning service, or enter the amounts by hand." },
+  "BUD-0064": { message: "The service holding that source did not give amounts the plan can use.", action: "Read the reason, correct the request or try again in a moment." },
+  "BUD-0065": { message: "A department has positions this year and no cost center in the request.", action: "Map every department named in the message to a cost center and generate again." },
+  "BUD-0066": { message: "That workbook was exported from another plan, scenario or year.", action: "Export this scenario again, edit that file and import it back." },
+  "BUD-0067": { message: "The grid holds more cells than one workbook carries.", action: "Export one account or cost center at a time." },
   "BUD-0070": { message: "This budget line is a requisition's pre-encumbrance, so it cannot be checked or relieved as a purchase order.", action: "Convert it to the purchase order line first." },
   "BUD-0071": { message: "This budget line is not a pre-encumbrance, or it was already converted.", action: "Nothing to convert; check the purchase order line instead." },
   "BUD-0072": { message: "The purchase order line already carries a budget reservation.", action: "Use that reservation; do not convert a second one onto the line." },
@@ -1075,6 +1080,15 @@ const groupFinance: Record<string, ProblemCatalogEntry> = {
   "IC-0850": { message: "We couldn't find that reconciliation run.", action: "Go back to the runs and open it again." },
   "IC-0851": { message: "We couldn't find that reconciliation pair.", action: "Reload the run and open the pair again." },
   "IC-0852": { message: "This pair has nothing left to resolve.", action: "Reload the run to see its current state." },
+  "IC-0853": { message: "One of the entities is not in the intercompany registry yet.", action: "Add the entity with its legal entity, ledger and currency in the registry, then try again." },
+  "IC-0854": { message: "A transfer price for the same pair, category and role is already in force from that date.", action: "Give the new price a later effective date; prices are not edited." },
+  "IC-0855": { message: "A cross-border charge needs a tax account on both entities, and one is missing.", action: "Set the output tax account of the lender and the input tax account of the borrower in the registry, then send the charge again." },
+  "IC-0856": { message: "The tax service could not price this cross-border charge, so nothing was posted.", action: "Send the same charge again in a moment; it continues where it stopped." },
+  "IC-0857": { message: "The entity has no account for FX differences.", action: "Set the FX-difference account of the entity in the registry, then book the difference again." },
+  "IC-0858": { message: "This pair has no FX difference to book.", action: "Only a pair in two currencies with a difference can be booked to the FX-difference account." },
+  "IC-0859": { message: "The rate tables have no rate to convert this pair.", action: "Publish the closing rate for the two currencies and the period end, then run the reconciliation again." },
+  "IC-0860": { message: "Intercompany is not fully set up for this step.", action: "Store the accounting matrix and the entities first, or ask an administrator to connect the ledger." },
+  "IC-0861": { message: "That difference is too large to be an exchange difference.", action: "Find the missing or wrong entry and post a correcting entry instead of booking it to the FX-difference account." },
 };
 
 /** Field service: the technician's day, captures, checklist and truck stock (#45). */

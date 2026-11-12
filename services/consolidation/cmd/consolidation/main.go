@@ -10,8 +10,10 @@ import (
 	"os"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fxclient"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
+	"github.com/BenjaminSRussell/passage/platform/orgclient"
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/api"
 	"github.com/BenjaminSRussell/passage/services/consolidation/internal/store"
 	"github.com/BenjaminSRussell/passage/services/consolidation/migrations"
@@ -44,7 +46,10 @@ func newLogger(w io.Writer) *slog.Logger {
 // run connects to DATABASE_URL, applies the migrations when MIGRATE_ON_START
 // is true (dev; stage and prod run them before the rollout), and serves the
 // API on HTTP_ADDR and /metrics on ADMIN_ADDR. LEDGER_URL, with the service
-// signing key, turns on collection of unit balances from the ledger.
+// signing key, turns on collection of unit balances from the ledger. FX_URL
+// (rate types FX_AVERAGE_RATE_TYPE and FX_CLOSING_RATE_TYPE, default average and
+// closing) lets a collection read its rates from the fx rate tables and ORG_URL
+// lets a unit take its fiscal year from the org fiscal calendar.
 func run(ctx context.Context, getenv func(string) string) error {
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -68,6 +73,20 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	if ledger != nil {
 		a.WithLedger(ledger)
+	}
+	rates, err := fxclient.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("fx client: %w", err)
+	}
+	if rates != nil {
+		a.WithRates(rates, getenv("FX_AVERAGE_RATE_TYPE"), getenv("FX_CLOSING_RATE_TYPE"))
+	}
+	calendars, err := orgclient.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("org client: %w", err)
+	}
+	if calendars != nil {
+		a.WithFiscalCalendar(calendars)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

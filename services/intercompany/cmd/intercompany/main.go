@@ -11,10 +11,9 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
-	"github.com/BenjaminSRussell/passage/platform/ledgerclient"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/api"
-	"github.com/BenjaminSRussell/passage/services/intercompany/internal/posting"
 	"github.com/BenjaminSRussell/passage/services/intercompany/internal/store"
+	"github.com/BenjaminSRussell/passage/services/intercompany/internal/taxclient"
 	"github.com/BenjaminSRussell/passage/services/intercompany/migrations"
 )
 
@@ -25,6 +24,13 @@ const (
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
+	if len(os.Args) > 1 && os.Args[1] == reconcileCommand {
+		if err := reconcileJob(context.Background(), os.Getenv, os.Args[2:]); err != nil {
+			slog.Error("intercompany reconcile stopped", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(context.Background(), os.Getenv); err != nil {
 		slog.Error("intercompany stopped", "err", err)
 		os.Exit(1)
@@ -45,7 +51,10 @@ func newLogger(w io.Writer) *slog.Logger {
 // run connects to DATABASE_URL, applies the migrations when MIGRATE_ON_START
 // is true (dev; stage and prod run them before the rollout), and serves the
 // API on HTTP_ADDR and /metrics on ADMIN_ADDR. LEDGER_URL, with the service
-// signing key, turns on posting of journals and charges to the ledgers.
+// signing key, turns on posting of journals and charges to the ledgers and the
+// reconciliation that reads them. FX_URL (rate type FX_RATE_TYPE, default
+// closing) converts pairs in two currencies, ORG_URL finds the first open period
+// after a closed one by the fiscal calendar and TAX_URL prices cross-border charges.
 func run(ctx context.Context, getenv func(string) string) error {
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -62,13 +71,21 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 	}
 	st := store.New(pool)
-	a := api.New(st).WithReconciliation(st)
-	ledger, err := ledgerclient.FromEnv(getenv, "intercompany")
+	a := api.New(st).WithReconciliation(st).WithRegistry(st)
+	rec, err := buildReconciler(getenv, st)
 	if err != nil {
-		return fmt.Errorf("ledger client: %w", err)
+		return err
 	}
-	if ledger != nil {
-		a.WithPosting(posting.New(ledger, st), st, st)
+	if rec.ledger != nil {
+		a.WithPosting(rec.poster, st, st)
+		a.WithLedgerReconciliation(rec.reconciler)
+	}
+	taxes, err := taxclient.FromEnv(getenv)
+	if err != nil {
+		return fmt.Errorf("tax client: %w", err)
+	}
+	if taxes != nil {
+		a.WithTax(taxes)
 	}
 	router := httpx.NewRouter()
 	a.Register(router)

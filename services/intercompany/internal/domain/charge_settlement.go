@@ -87,6 +87,13 @@ func PriceWithTransfer(tp TransferPrice, quantity, unitCost decimal.Decimal) (Ch
 // price below cost gives a negative margin, which posts as a debit (IC loss) on the
 // margin account rather than as a negative credit.
 func ChargeJournal(m Matrix, pairID, lender, borrower, costAccount, recoveryAccount, marginAccount string, p ChargePricing) (Journal, error) {
+	return ChargeJournalWithTax(m, pairID, lender, borrower, costAccount, recoveryAccount, marginAccount, p, ChargeTax{})
+}
+
+// ChargeJournalWithTax is ChargeJournal for a cross-border charge: the lender's Due from and the borrower's Due to carry the price
+// and the tax, the lender books the tax as output tax and the borrower as input tax, so each entity still balances. A zero tax
+// gives the plain journal.
+func ChargeJournalWithTax(m Matrix, pairID, lender, borrower, costAccount, recoveryAccount, marginAccount string, p ChargePricing, tax ChargeTax) (Journal, error) {
 	if lender == "" || borrower == "" || lender == borrower {
 		return Journal{}, invalid("lender and borrower must be different entities")
 	}
@@ -100,12 +107,29 @@ func ChargeJournal(m Matrix, pairID, lender, borrower, costAccount, recoveryAcco
 	if err != nil {
 		return Journal{}, err
 	}
+	gross := p.Price
+	var taxAmount money.Amount
+	if tax.Amount.IsPositive() {
+		if tax.LenderAccount == "" || tax.BorrowerAccount == "" {
+			return Journal{}, &Error{Code: CodeNoTaxAccount, Detail: "a cross-border charge needs the output tax account of the lender and the input tax account of the borrower"}
+		}
+		taxAmount = money.Amount{Value: tax.Amount, Currency: p.Price.Currency}.Round()
+		var err error
+		if gross, err = p.Price.Add(taxAmount); err != nil {
+			return Journal{}, err
+		}
+	}
 	j := Journal{PairID: pairID, Legs: []Leg{
 		{Entity: borrower, Account: costAccount, Side: Debit, Amount: p.Price},
-		{Entity: borrower, Account: row.DueTo, Side: Credit, Amount: p.Price},
-		{Entity: lender, Account: row.DueFrom, Side: Debit, Amount: p.Price},
+		{Entity: borrower, Account: row.DueTo, Side: Credit, Amount: gross},
+		{Entity: lender, Account: row.DueFrom, Side: Debit, Amount: gross},
 		{Entity: lender, Account: recoveryAccount, Side: Credit, Amount: p.Cost},
 	}}
+	if taxAmount.Value.IsPositive() {
+		j.Legs = append(j.Legs,
+			Leg{Entity: borrower, Account: tax.BorrowerAccount, Side: Debit, Amount: taxAmount},
+			Leg{Entity: lender, Account: tax.LenderAccount, Side: Credit, Amount: taxAmount})
+	}
 	switch {
 	case p.Margin.Value.IsPositive():
 		j.Legs = append(j.Legs, Leg{Entity: lender, Account: marginAccount, Side: Credit, Amount: p.Margin})
