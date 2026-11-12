@@ -1,9 +1,9 @@
 // Budgeting service (/api/v1/budget) for the demo: control rule versions and budget plans with scenarios, the plan grid,
 // spreading and scenario comparison. Typed against the module's own client types so shape drift fails `tsc`.
-import type { Balance, Rule } from "../../modules/budgeting/api/client";
+import type { ActualRow, Balance, Rule } from "../../modules/budgeting/api/client";
 import type { Comparison, Plan, PlanCell, PlanScenario, StageOwner } from "../../modules/budgeting/api/plans";
 import { LEGAL_ENTITY } from "../company";
-import { reply, route } from "../backend";
+import { DemoResponse, reply, route } from "../backend";
 import { at, newId, table, uid } from "../store";
 
 const BASE = "/api/v1/budget";
@@ -143,18 +143,43 @@ function balance(n: number, dimension: string, span: string, budget: number, act
 }
 
 const balances: Balance[] = [
-  balance(1, "CR-PLANT/6100 wages", "FY2026-Q3", 365_000, 351_200, 0, 0, 0),
-  balance(2, "CR-PLANT/6100 wages", "FY2026-Q4", 372_000, 148_600, 0, 0, 0),
-  balance(3, "CR-PLANT/6200 utilities", "FY2026-Q4", 64_500, 31_900, 18_400, 0, 0),
-  balance(4, "CR-PLANT/6300 maintenance", "FY2026-Q4", 42_750, 29_400, 9_800, 6_200, 0),
-  balance(5, "DAL-DC/6400 freight", "FY2026-Q3", 93_000, 96_450, 0, 0, 0),
-  balance(6, "DAL-DC/6400 freight", "FY2026-Q4", 93_000, 38_200, 41_000, 0, 12_000),
-  balance(7, "ADMIN/6500 office", "FY2026-Q4", 29_400, 11_100, 2_300, 0, 0),
+  balance(1, "6100|CR-PLANT", "FY2026-Q3", 365_000, 351_200, 0, 0, 0),
+  balance(2, "6100|CR-PLANT", "FY2026-Q4", 372_000, 148_600, 0, 0, 0),
+  balance(3, "6200|CR-PLANT", "FY2026-Q4", 64_500, 31_900, 18_400, 0, 0),
+  balance(4, "6300|CR-PLANT", "FY2026-Q4", 42_750, 29_400, 9_800, 6_200, 0),
+  balance(5, "6400|DAL-DC", "FY2026-Q3", 93_000, 96_450, 0, 0, 0),
+  balance(6, "6400|DAL-DC", "FY2026-Q4", 93_000, 38_200, 41_000, 0, 12_000),
+  balance(7, "6500|ADMIN", "FY2026-Q4", 29_400, 11_100, 2_300, 0, 0),
 ];
+
+// Cost-ledger actuals per cost center (cost accounting, /api/v1/controlling): a few cents off the budget register's actuals, as a
+// month's journal mirroring that is not yet complete would leave them, so the comparison has something to show.
+const ledgerActual = (code: string, period: string, total: number): ActualRow => ({
+  costObjectId: uid(373, code.length * 7 + period.length), kind: "CostCenter", code, name: code, period, currency: "USD",
+  primary: dec(total * 10_000), allocated: "0", total: dec(total * 10_000),
+});
+route("GET", "/api/v1/controlling/cost-actuals", ({ query }) => {
+  const from = query.get("from") ?? "";
+  const to = query.get("to") ?? "";
+  const rows = [
+    ledgerActual("CR-PLANT", `${YEAR - 1}-09`, 351_200 + 31_900 + 29_400),
+    ledgerActual("CR-PLANT", `${YEAR - 1}-11`, 148_600),
+    ledgerActual("DAL-DC", `${YEAR - 1}-08`, 96_450 + 1_250),
+    ledgerActual("DAL-DC", `${YEAR - 1}-11`, 38_200),
+    ledgerActual("ADMIN", `${YEAR - 1}-11`, 11_100),
+  ];
+  return { items: rows.filter((r) => r.period >= from && r.period <= to) };
+});
 
 route("GET", `${BASE}/available`, ({ query }) => ({ items: query.get("rule") === uid(K_RULE, 1) ? balances : [] }));
 
-route("GET", "/api/v1/org/operating-units", () => ({ items: orgUnits.map((u) => ({ ...u, type: "cost_center", status: "active", version: 1, defaultLegalEntityId: LEGAL_ENTITY.id })) }));
+// The cost centers, and the pump assembly value stream the lean flows belong to (handlers/mfg/lean.ts).
+const operatingUnits = [
+  ...orgUnits.map((u) => ({ ...u, type: "cost_center", status: "active", version: 1, defaultLegalEntityId: LEGAL_ENTITY.id })),
+  { id: uid(271, 1), code: "VS-PUMP", name: "Pump assembly value stream", type: "value_stream", status: "active", version: 1, defaultLegalEntityId: LEGAL_ENTITY.id },
+];
+route("GET", "/api/v1/org/operating-units", () => ({ items: operatingUnits }));
+route("GET", "/api/v1/org/operating-units/{id}", ({ params }) => operatingUnits.find((u) => u.id === params.id) ?? reply.problem(404, "ORG-0404", "No operating unit with that id"));
 
 route("GET", `${BASE}/plans`, ({ query }) => ({
   items: plans
@@ -302,6 +327,27 @@ route("POST", `${BASE}/plans/{id}/scenarios/{sid}:generate`, ({ params, body, he
     for (const c of lastYear) byMonth.set(`${c.account}|${c.period.slice(5)}`, (byMonth.get(`${c.account}|${c.period.slice(5)}`) ?? 0) + units(c.amount));
     return upsert(existing, [...byMonth.entries()].flatMap(([k, total]) => centers.map((c) => ({ account: k.split("|")[0], costCenter: c.costCenter, period: `${YEAR}-${k.split("|")[1]}`, amount: dec(Math.round((total * factor * Number(c.weight)) / sum)) }))));
   });
+});
+
+// The workbook round trip. The demo cannot build or read a real .xlsx, so the export is a small placeholder file and an import only
+// says the workbook is valid (a dry run) or leaves the grid as it is.
+route("GET", `${BASE}/plans/{id}/scenarios/{sid}:export`, ({ params }) => {
+  const p = plan(params.id);
+  const sc = p?.scenarios.find((s) => s.id === params.sid);
+  if (!p || !sc) return notFound("budget plan");
+  return new DemoResponse(200, new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), {
+    "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "Content-Disposition": `attachment; filename="budget-plan-${p.fiscalYear}.xlsx"`,
+    ETag: `"${sc.version}"`,
+  });
+});
+
+route("POST", `${BASE}/plans/{id}/scenarios/{sid}:import`, ({ params, query, headers }) => {
+  if (query.get("dryRun") === "true") {
+    const rows = (cells.get(params.sid) ?? []).filter((c) => c.period === periods[0]).length;
+    return { valid: true, dryRun: true, rows, cells: rows * 12, total: scenarioTotal(params.sid) };
+  }
+  return write(params.id, params.sid, headers, (existing) => existing);
 });
 
 route("POST", `${BASE}/plans/{id}:submit`, ({ params }) => {

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { InsideControl } from "../../shell/ui";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -32,7 +34,7 @@ import {
   type LineDimension,
   type Problem,
 } from "./api/client";
-import { dash, DECIMAL, describeDimensions, formatDateTime, isIsoDate, sentence, shortId, statusTone, today, typeLabels, UUID } from "./format";
+import { dash, DECIMAL, describeDimensions, formatDateTime, isIsoDate, sentence, statusTone, today, typeLabels, UUID } from "./format";
 import { ImportLinesForm } from "./ImportLines";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -550,13 +552,13 @@ export function JournalDetailPage() {
       {reversing ? <ReverseForm journal={journal} onCancel={() => setReversing(false)} /> : null}
       {journal.reversesJournalId ? (
         <Alert tone="info" title={draft ? "Reversal draft" : "Reversal"}>
-          This journal reverses journal <Link to={`/inventory/journals/${journal.reversesJournalId}`}>{shortId(journal.reversesJournalId)}</Link>.
+          This journal reverses journal <Link to={`/inventory/journals/${journal.reversesJournalId}`}><InsideControl.Provider value={true}><EntityName entity="inventoryJournal" id={journal.reversesJournalId} fallback="the original" /></InsideControl.Provider></Link>.
           {draft ? " It holds exactly the negated lines; post it to take the movement back out." : ""}
         </Alert>
       ) : null}
       {journal.reversedByJournalId ? (
         <Alert tone="info" title="Reversed">
-          Reversed by journal <Link to={`/inventory/journals/${journal.reversedByJournalId}`}>{shortId(journal.reversedByJournalId)}</Link>.
+          Reversed by journal <Link to={`/inventory/journals/${journal.reversedByJournalId}`}><InsideControl.Provider value={true}><EntityName entity="inventoryJournal" id={journal.reversedByJournalId} fallback="its reversal" /></InsideControl.Provider></Link>.
         </Alert>
       ) : null}
       <Card title="Details">

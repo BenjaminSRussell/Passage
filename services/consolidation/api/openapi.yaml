@@ -551,6 +551,206 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/units/{unitId}:
+    patch:
+      operationId: updateConsolidationUnit
+      summary: Change a unit's ledger, currency or fiscal year
+      description: >-
+        The currency of a unit that collections were made from cannot change (409 CNS-0931): its stored balances are in it.
+        fiscalYearStartMonth is the month the unit's fiscal year starts in; a collection takes the unit's income accounts from the start
+        of the fiscal year the period falls in.
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: unitId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                ledgerId: { type: string }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                fiscalYearStartMonth: { type: integer, minimum: 1, maximum: 12 }
+      responses:
+        '200':
+          description: The unit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Unit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: removeConsolidationUnit
+      summary: Remove a unit with its ownership history and terms
+      description: A unit that collections were made from, or that holds a share of another unit, stays (409 CNS-0931).
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: unitId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removed }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/units/{unitId}/terms:
+    put:
+      operationId: setConsolidationUnitTerms
+      summary: Store the group's investment in a unit (acquisition terms)
+      description: >-
+        What a run cannot read from a trial balance: the cost of the investment (group currency), the share capital and retained earnings at
+        acquisition (unit currency), the exchange rate of that day, which way the intercompany goods flow and whether the intercompany balance
+        is part of the net investment. Replaces the earlier terms.
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: unitId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UnitTermsRequest' }
+      responses:
+        '200':
+          description: The stored terms
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnitTerms' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/unit-terms:
+    get:
+      operationId: listConsolidationUnitTerms
+      summary: The stored acquisition terms of the group's units
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Terms by unit id
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/UnitTerms' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/units/{unitId}/layers/{period}:
+    put:
+      operationId: setConsolidationIcLayers
+      summary: Replace the IC receipt layers a subsidiary's goods still sit in at the end of a period
+      description: >-
+        The layers (FR-40.16) are the remaining quantity of each intercompany receipt held by the buyer, with its legal unit cost and,
+        when known, the group's unit cost. A run over the collection of that period sums the unrealized profit over them for E3
+        (quantity times legal cost less group cost; a layer without a group cost uses the seller's margin and the run answers a
+        CNS-0908 warning) instead of taking it from the unsold share. An empty list removes the layers.
+      x-passage-duty: consolidation.configure
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: unitId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: period, in: path, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IcLayers' }
+      responses:
+        '200':
+          description: The stored layers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IcLayers' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/layers/{period}:
+    get:
+      operationId: listConsolidationIcLayers
+      summary: The IC receipt layers of every unit of the group for a period
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: period, in: path, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: Layers by unit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/IcLayers' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/investments:
+    get:
+      operationId: listConsolidationInvestments
+      summary: The investments register of the group's newest run for a period
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: period, in: query, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: One line per unit, empty when the group has no run for the period
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investments' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/runs/{id}/investments:
+    get:
+      operationId: getConsolidationRunInvestments
+      summary: The investments register of a run
+      description: >-
+        One line per unit in the group currency: a consolidated subsidiary at cost, an equity-method unit (terms method equity, up to 50
+        percent held) with its opening carrying amount (the register of the previous fiscal year end, else the investment cost), the
+        group's share of its profit, the dividends received and the closing carrying amount.
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: The register
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investments' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/consol/groups/{id}/units/{unitId}/ownership:
     post:
       operationId: addConsolidationOwnership
@@ -581,7 +781,8 @@ paths:
   /v1/consol/groups/{id}/account-map:
     put:
       operationId: setConsolidationAccountMap
-      summary: Replace the chart mapping from main accounts to consolidation accounts
+      summary: Store a new version of the chart mapping from main accounts to consolidation accounts
+      description: Every PUT is a new version (the earlier ones are kept, so a collection keeps the mapping it was made with). An account may name the role a run reads it by.
       x-passage-duty: consolidation.configure
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
@@ -604,7 +805,26 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
     get:
       operationId: getConsolidationAccountMap
-      summary: The group's chart mapping
+      summary: The group's chart mapping (the latest version, or the one named)
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+        - { name: version, in: query, required: false, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: The mapping ordered by main account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountMap' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/groups/{id}/account-map/versions:
+    get:
+      operationId: listConsolidationAccountMapVersions
+      summary: The stored versions of the chart mapping, newest first
       x-passage-duty: consolidation.view
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
@@ -612,10 +832,23 @@ paths:
         - $ref: '#/components/parameters/RunID'
       responses:
         '200':
-          description: The mapping ordered by main account
+          description: The versions
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/AccountMap' }
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [version, createdBy, createdAt, accounts]
+                      properties:
+                        version: { type: integer }
+                        createdBy: { type: string }
+                        createdAt: { type: string, format: date-time }
+                        accounts: { type: integer }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
@@ -712,6 +945,50 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/consol/collections/{id}/validations:
+    get:
+      operationId: getCollectionValidations
+      summary: The balance sheet rule of the consolidation monitor over each unit's collected balances
+      description: >-
+        Assets less liabilities and equity (equity including the year's profit), in the unit's currency, must be within 0.01. The accounts are
+        read by role (asset, liability, equity in the chart mapping), so a unit with balance sheet accounts that carry no role shows the
+        difference they leave. blocked is true when any unit failed: the group translation must not run.
+      x-passage-duty: consolidation.view
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: One entry per unit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [units, blocked]
+                properties:
+                  blocked: { type: boolean }
+                  units:
+                    type: array
+                    items:
+                      type: object
+                      required: [unit, status, results]
+                      properties:
+                        unit: { type: string, format: uuid }
+                        status: { type: string }
+                        results:
+                          type: array
+                          items:
+                            type: object
+                            required: [rule, severity, difference, failed]
+                            properties:
+                              rule: { type: string }
+                              severity: { type: string }
+                              difference: { type: string }
+                              failed: { type: boolean }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     TenantHeader:
@@ -784,6 +1061,69 @@ components:
         legalEntityId: { type: string, format: uuid }
         ledgerId: { type: string, description: The ledger the unit's balances are collected from }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
+        fiscalYearStartMonth: { type: integer, minimum: 1, maximum: 12, description: The month the unit's fiscal year starts in; 1 when omitted }
+    UnitTermsRequest:
+      type: object
+      required: [historicalRate]
+      additionalProperties: false
+      properties:
+        investmentCost: { $ref: '#/components/schemas/Decimal' }
+        shareCapital: { $ref: '#/components/schemas/Decimal' }
+        preAcquisitionRe: { $ref: '#/components/schemas/Decimal' }
+        historicalRate: { $ref: '#/components/schemas/Decimal' }
+        sellerIsSubsidiary: { type: boolean }
+        icNetInvestment: { type: boolean }
+        fxGainLossAccount: { type: string }
+        method: { type: string, enum: [full, equity], default: full, description: 'full consolidates the unit line by line (E1 to E6); equity takes an associate or joint venture (up to 50 percent held) with the equity method into one line and the investments register, from investmentCost as its opening carrying amount in the first year.' }
+    IcLayers:
+      type: object
+      required: [layers]
+      properties:
+        unit: { type: string, format: uuid }
+        period: { type: string }
+        layers:
+          type: array
+          maxItems: 5000
+          items:
+            type: object
+            required: [ref, quantity, legalUnitCost]
+            properties:
+              ref: { type: string, maxLength: 128, description: The receipt layer, shown for drill }
+              quantity: { type: string }
+              legalUnitCost: { type: string }
+              groupUnitCost: { type: string, description: Without it E3 uses the seller's margin and the run warns CNS-0908 }
+    Investments:
+      type: object
+      required: [items]
+      properties:
+        runId: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        period: { type: string }
+        currency: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            required: [unit, method, ownershipPct, cost, openingCarrying, shareOfProfit, dividends, closingCarrying, unrecognizedLoss]
+            properties:
+              unit: { type: string, format: uuid }
+              method: { type: string, enum: [full, equity] }
+              ownershipPct: { type: string }
+              cost: { type: string }
+              openingCarrying: { type: string }
+              shareOfProfit: { type: string }
+              dividends: { type: string }
+              closingCarrying: { type: string }
+              unrecognizedLoss: { type: string, description: The part of a share of loss above the carrying amount that is not recognized (IAS 28.38) }
+    UnitTerms:
+      allOf:
+        - $ref: '#/components/schemas/UnitTermsRequest'
+        - type: object
+          required: [unitId, updatedBy, updatedAt]
+          properties:
+            unitId: { type: string, format: uuid }
+            updatedBy: { type: string }
+            updatedAt: { type: string, format: date-time }
     Holding:
       type: object
       required: [id, effectiveFrom, percent]
@@ -802,6 +1142,7 @@ components:
         ledgerId: { type: string }
         currency: { type: string }
         currentPercent: { type: string, description: Total held on today's date }
+        fiscalYearStartMonth: { type: integer, minimum: 1, maximum: 12 }
         ownership: { type: array, items: { $ref: '#/components/schemas/Holding' } }
     OwnershipRequest:
       type: object
@@ -815,6 +1156,7 @@ components:
       type: object
       required: [accounts]
       properties:
+        version: { type: integer, description: The stored version (set by the service) }
         accounts:
           type: array
           items:
@@ -824,12 +1166,14 @@ components:
               mainAccount: { type: string }
               consolidationAccount: { type: string }
               accountType: { type: string, enum: [balance_sheet, income] }
+              role: { type: string, enum: [asset, liability, equity, ic_sales, ic_cost, ic_receivable, ic_payable, dividend_paid], description: 'What a run reads the account for; asset, liability, equity, dividend_paid and the IC balances are balance_sheet accounts, ic_sales and ic_cost income accounts. dividend_paid is where a unit books the dividends it declared (a debit): they come off its net assets, give E6 for a consolidated subsidiary and the dividends received of an equity-method unit.' }
     CollectRequest:
       type: object
       required: [period]
       properties:
         period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
         rates:
+          description: Optional. A foreign unit currency named here is translated at these rates; every other one is read from the fx rate tables (the average and the closing rate type, valid on the last day of the period). A rate that is in neither place is 422 CNS-0927 naming the currency pair.
           type: array
           maxItems: 100
           items:
@@ -1314,11 +1658,40 @@ components:
     StartRunRequest:
       type: object
       additionalProperties: false
-      required: [groupId, period, currency, units]
+      description: >-
+        Either the units of the run (units) or collectionId, which derives them from a stored collection: the subsidiaries are the units the
+        group holds a share of on the last day of the period; each one's net income and net assets come from its collected balances by account
+        role (equity; income accounts), its rates from the collection and from the collection at the end of its previous fiscal year (opening
+        net assets and rate), its acquisition figures from its stored terms (422 CNS-0930 without), and its intercompany amounts from its
+        ic_sales, ic_cost and ic_receivable accounts with the ic overrides applied (the parent's payable and the unsold share cannot be read
+        from a trial balance). With collectionId, groupId, period and currency may be left out.
       properties:
         groupId: { type: string, minLength: 1, maxLength: 64 }
         period: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
         currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
+        collectionId: { type: string, format: uuid }
+        ic:
+          type: array
+          items:
+            type: object
+            required: [unit]
+            additionalProperties: false
+            properties:
+              unit: { type: string, format: uuid }
+              icSales: { $ref: '#/components/schemas/Decimal' }
+              icCost: { $ref: '#/components/schemas/Decimal' }
+              unsoldShare: { $ref: '#/components/schemas/Decimal' }
+              icReceivable: { $ref: '#/components/schemas/Decimal' }
+              payableGroup: { $ref: '#/components/schemas/Decimal' }
+        openingRates:
+          type: array
+          items:
+            type: object
+            required: [currency, rate]
+            additionalProperties: false
+            properties:
+              currency: { type: string, pattern: '^[A-Z]{3}$' }
+              rate: { $ref: '#/components/schemas/Decimal' }
         units:
           type: array
           minItems: 1
@@ -1343,6 +1716,7 @@ components:
         currency: { type: string }
         version: { type: integer, minimum: 1, description: Per group, period and currency }
         status: { type: string, enum: [completed] }
+        collectionId: { type: string, format: uuid, description: The collection the run was derived from; absent for a run computed from the units of the request }
         inputsHash: { type: string, description: SHA-256 of the run inputs }
         createdBy: { type: string }
         unitCount: { type: integer }

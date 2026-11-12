@@ -134,3 +134,62 @@ func TestWithholding_NeedsASignerAndNeverFollowsRedirects(t *testing.T) {
 		t.Fatalf("err=%v leaked=%v, want the 302 returned without following it", err, leaked)
 	}
 }
+
+func TestCalculate_ReturnsTheTaxableBaseAndFallsBackToTheGross(t *testing.T) {
+	signer, _ := signed(t)
+	for name, tc := range map[string]struct {
+		body, base string
+		bad        bool
+	}{
+		"with a base":     {body: `{"withholding_amount":"3","taxable_base":"10"}`, base: "10"},
+		"without a base":  {body: `{"withholding_amount":"3"}`, base: "98"},
+		"base over gross": {body: `{"withholding_amount":"3","taxable_base":"99"}`, bad: true},
+		"tax over base":   {body: `{"withholding_amount":"11","taxable_base":"10"}`, bad: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(tc.body)) }))
+			defer srv.Close()
+			res, err := tax.New(srv.URL, nil).WithSigner(signer).Calculate(ctx(), entity, request())
+			if tc.bad {
+				if err == nil {
+					t.Fatalf("an unusable base was accepted: %+v", res)
+				}
+				return
+			}
+			if err != nil || res.TaxableBase.String() != tc.base || res.Withheld.String() != "3" {
+				t.Fatalf("result %+v err %v", res, err)
+			}
+		})
+	}
+}
+
+func TestRecordWithholding_PostsTheEntriesWithTheRecordDutyOnly(t *testing.T) {
+	signer, verifier := signed(t)
+	var path string
+	var body struct {
+		Entries []map[string]any `json:"entries"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		if claims, err := verifier.Verify(r.Header.Get(tenant.HeaderServiceToken)); err != nil || len(claims.Duties) != 1 || claims.Duties[0] != "tax.withholding.record" {
+			t.Errorf("token claims %+v err %v", claims, err)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	e := tax.Entry{ID: "0190f0a0-0000-7000-8000-000000000001", PartyRef: "v1", Code: "WHT30", PaymentDate: "2026-01-10", Currency: "USD",
+		Gross: decimal.RequireFromString("98"), TaxableBase: decimal.RequireFromString("98"), Withheld: decimal.RequireFromString("29.4")}
+	if err := tax.New(srv.URL, nil).WithSigner(signer).RecordWithholding(ctx(), entity, []tax.Entry{e}); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/v1/tax/withholding/entries" || len(body.Entries) != 1 || body.Entries[0]["withholding_amount"] != "29.4" || body.Entries[0]["party_type"] != "vendor" {
+		t.Errorf("path %s body %v", path, body)
+	}
+	if err := tax.New(srv.URL, nil).RecordWithholding(ctx(), entity, []tax.Entry{e}); !errors.Is(err, tax.ErrUnsigned) {
+		t.Errorf("unsigned: %v", err)
+	}
+	if err := tax.New(srv.URL, nil).WithSigner(signer).RecordWithholding(ctx(), entity, nil); err != nil {
+		t.Errorf("nothing to record: %v", err)
+	}
+}

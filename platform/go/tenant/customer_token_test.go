@@ -3,6 +3,7 @@ package tenant_test
 import (
 	"context"
 	"crypto/ed25519"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,15 +110,28 @@ func TestPortalCustomerTrustsOnlyTheCustomerPortalToken(t *testing.T) {
 	}
 }
 
-func TestCustomerPortalGrantIsReadOnlyAndCustomerScoped(t *testing.T) {
+// The customer portal holds customer-portal duties only: reads, plus the two writes a customer makes for itself (an order and a
+// return), and the party and identity reads that name the customer's accounts and companies.
+func TestCustomerPortalGrantIsCustomerScoped(t *testing.T) {
 	grants := tenant.ServiceGrantTable()["customer-portal"]
-	want := map[string]string{"receivables": "receivables.customer-portal.read", "billing": "billing.customer-portal.read", "sales": "sales.customer-portal.read"}
+	want := map[string][]string{
+		"receivables": {"receivables.customer-portal.read"},
+		"billing":     {"billing.customer-portal.read"},
+		"sales":       {"sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"},
+		"party":       {"party.customer-portal.read"},
+		"identity":    {"identity.customer-portal.read"},
+	}
 	if len(grants) != len(want) {
 		t.Fatalf("grants %v", grants)
 	}
-	for aud, duty := range want {
-		if len(grants[aud]) != 1 || grants[aud][0] != duty {
-			t.Errorf("%s grant %v, want only %s", aud, grants[aud], duty)
+	for aud, duties := range want {
+		if strings.Join(grants[aud], ",") != strings.Join(duties, ",") {
+			t.Errorf("%s grant %v, want %v", aud, grants[aud], duties)
+		}
+		for _, d := range grants[aud] {
+			if !strings.Contains(d, "customer-portal") {
+				t.Errorf("%s grant %s is not a customer-portal duty", aud, d)
+			}
 		}
 	}
 }

@@ -227,6 +227,10 @@ the conventions allow), and `github.com/go-chi/chi/v5` and `github.com/jackc/pgx
 (both via the platform). The `shopspring/decimal` package is used for
 quantities and weights.
 
+## Pallet identity, RFID and automation (#32)
+
+`PUT/GET /v1/warehouse/gs1-settings` hold the tenant's GS1 company prefix; receiving a pallet whose ASN line names no license plate draws the next SSCC (under a row lock) and uses it as the plate. The put-away work line carries `lpId`, `sscc`, `lot` and `expiry`, and `GET /v1/warehouse/pallets/{sscc}/label` gives a device the same, so it prints the label with no second scan. `POST /v1/warehouse/rfid-reads:ingest` takes reader reads (EPC decoding in `internal/domain/epc.go`). `/v1/warehouse/automation/*` carries transport orders to a PLC's connector and the PLC's events back (an arrival confirms the work line). Duties `warehouse.rfid.ingest` and `warehouse.automation.execute`; migrations `0006` and `0007`.
+
 ## Error codes
 
 | Code | Status | Meaning |
@@ -239,6 +243,13 @@ quantities and weights.
 | WMS-0107 | 200 receive (`warnings`), and the pallet's `reason` | Received quantity beyond the receipt's ASN tolerance; the discrepancy is recorded and the quantity received (BR-31.10). |
 | WMS-0108 | 409 | The door is already booked for an overlapping window (AC-31.8 DOOR_SLOT_OVERLAP). |
 | WMS-RECEIPT-LINE-RECEIVED | 409 | The ASN pallet is already received (with another Idempotency-Key). |
+| WMS-GS1-NOT-SET | 422 / 404 | A pallet needs an SSCC or license plate id the warehouse must generate and no GS1 company prefix is set (422 on receive; 404 reading the settings). |
+| WMS-GS1-LOCKED | 409 | The GS1 company prefix cannot change once SSCCs were issued under it. |
+| WMS-GS1-EXHAUSTED | 409 | The prefix has no serial reference left. |
+| WMS-PALLET-NOT-FOUND | 404 | No pallet of this tenant has the SSCC. |
+| WMS-EPC-INVALID | (in `rejected`) | A tag read that is not a 96-bit EPC of a scheme the warehouse decodes. |
+| WMS-AUTO-ORDER-NOT-FOUND, WMS-AUTO-ORDER-EXISTS, WMS-AUTO-ORDER-STATE | 404, 409, 409 | Automation orders: unknown, a second order for the line, a report on an order past PENDING. |
+| WMS-AUTO-LOCATION, WMS-AUTO-LOAD-UNIT | 422 | A location a telegram cannot name (more than 12 characters, or missing), or a line with no pallet SSCC. |
 | WMS-0110 | 409 | Illegal work or line transition: confirming unassigned or finished work, a quantity below the open one (use a short pick), short picking a PUT line, cancelling after a confirmation, or a location status/stock that refuses the move. |
 | WMS-DUPLICATE | 409 | Location name or door code taken in the warehouse, directive sequence taken for the work type and direction, or the ASN already registered in the warehouse. |
 | WMS-VERSION-CONFLICT | 409 | `If-Match` is not the work's (or receipt's) current version. |

@@ -13,6 +13,8 @@ describe("party module", () => {
       "/party/duplicates",
       "/party/pending-changes",
       "/party/pending-changes/:id",
+      "/party/vendor-prospects",
+      "/party/vendor-prospects/:id",
       "/party/:id",
     ]);
     expect(party.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);
@@ -22,6 +24,7 @@ describe("party module", () => {
       { label: "Tax registrations", to: "/party/tax-registrations", duty: DUTY_WRITE },
       { label: "Duplicate candidates", to: "/party/duplicates", duty: DUTY_READ },
       { label: "Credit limit approvals", to: "/party/pending-changes", duty: DUTY_READ },
+      { label: "Supplier registrations", to: "/party/vendor-prospects", duty: DUTY_READ },
     ]);
   });
 

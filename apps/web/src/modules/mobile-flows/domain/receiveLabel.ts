@@ -66,3 +66,51 @@ export function lpLabelRequest(sscc: string, itemScan: string, where: { warehous
 export function labelKey(sscc: string, attempt = 0): string {
   return attempt === 0 ? `lp-label:${sscc}` : `lp-label:${sscc}:${attempt}`;
 }
+
+/** What the warehouse holds for a pallet's label (GET /warehouse/pallets/{sscc}/label, #32). */
+export interface PalletLabel {
+  sscc: string;
+  lpId: string;
+  itemId: string;
+  lot?: string;
+  /** YYYY-MM-DD. */
+  expiryDate?: string;
+  receiptId: string;
+  lineNo: number;
+  workId?: string;
+  received: boolean;
+}
+
+/** The GS1 date form of the label (AI 17, YYMMDD) of a YYYY-MM-DD date. */
+export function gs1Date(iso: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? `${m[1]!.slice(2)}${m[2]}${m[3]}` : null;
+}
+
+/**
+ * The LP label request from what the warehouse holds for the pallet, so the worker scans nothing a second time. The
+ * label needs the item, lot and expiry; a pallet whose receipt has no lot or expiry cannot be labelled this way, and
+ * the reason says which is missing (the worker then scans the item label as before).
+ */
+export function labelFromPallet(label: PalletLabel, where: { warehouseId?: string; zone?: string } = {}): LabelResult {
+  const missing = [
+    [label.itemId, "item"],
+    [label.lot, "lot"],
+    [label.expiryDate, "expiry date"],
+  ]
+    .filter(([v]) => !v)
+    .map(([, name]) => name);
+  if (missing.length > 0) return { ok: false, reason: `The receipt has no ${missing.join(" or ")} for this pallet, so the label cannot be printed from it.` };
+  const expiry = gs1Date(label.expiryDate!);
+  if (!expiry) return { ok: false, reason: "The expiry date on the receipt is not a date." };
+  return {
+    ok: true,
+    request: {
+      templateCode: "LP_LABEL",
+      documentType: "LP_LABEL",
+      ...(where.warehouseId ? { warehouseId: where.warehouseId } : {}),
+      ...(where.zone ? { zone: where.zone } : {}),
+      data: { lp: label.lpId || label.sscc, item: label.itemId, lot: label.lot!, expiry, sscc: label.sscc },
+    },
+  };
+}

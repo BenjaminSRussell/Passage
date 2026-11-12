@@ -29,8 +29,9 @@ const (
 
 	scimRealmCacheTTL = 30 * time.Second
 
-	defaultKeycloakClientID = "passage-identity-deprovision"
-	minDeprovisionInterval  = 5 * time.Second
+	defaultKeycloakClientID       = "passage-identity-deprovision"
+	defaultCustomerPortalClientID = "passage-portal-customer"
+	minDeprovisionInterval        = 5 * time.Second
 )
 
 func main() {
@@ -74,6 +75,11 @@ type config struct {
 	keycloakClientID    string
 	keycloakSecretsDir  string
 	deprovisionInterval time.Duration
+
+	// The customer portal's Keycloak client and redirect: where the link in a contact invitation leads once the required actions
+	// (verify email, set a password, enrol an authenticator) are done. Optional; without a redirect Keycloak shows its own page.
+	customerPortalClientID    string
+	customerPortalRedirectURI string
 }
 
 func (c config) scimEnabled() bool { return c.scimIssuerBase != "" }
@@ -105,6 +111,12 @@ func configFrom(getenv func(string) string) (config, error) {
 		keycloakAdminURL:   getenv("IDENTITY_KEYCLOAK_ADMIN_URL"),
 		keycloakClientID:   getenv("IDENTITY_KEYCLOAK_CLIENT_ID"),
 		keycloakSecretsDir: getenv("IDENTITY_KEYCLOAK_SECRETS_DIR"),
+
+		customerPortalClientID:    getenv("IDENTITY_CUSTOMER_PORTAL_CLIENT_ID"),
+		customerPortalRedirectURI: getenv("IDENTITY_CUSTOMER_PORTAL_REDIRECT_URI"),
+	}
+	if c.customerPortalClientID == "" {
+		c.customerPortalClientID = defaultCustomerPortalClientID
 	}
 	if c.databaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")
@@ -179,7 +191,7 @@ func loadCatalogue(path string) (*identity.Catalogue, error) {
 	return identity.LoadCatalogue(raw)
 }
 
-func newRouter(pool *pgxpool.Pool, catalogue *identity.Catalogue, operatorTenantID string, scim *identity.SCIMAPI) chi.Router {
+func newRouter(pool *pgxpool.Pool, catalogue *identity.Catalogue, operatorTenantID string, scim *identity.SCIMAPI, contacts *identity.CustomerContactsAPI) chi.Router {
 	router := httpx.NewRouterWithoutTenant()
 	router.Group(func(admin chi.Router) {
 		admin.Use(tenant.Middleware)
@@ -191,6 +203,9 @@ func newRouter(pool *pgxpool.Pool, catalogue *identity.Catalogue, operatorTenant
 		identity.NewEffectivePermissionsAPI(pool, catalogue).WithOperatorTenant(operatorTenantID).Register(admin)
 		identity.NewUsersAPI(pool).Register(admin)
 		identity.NewKeycloakDeprovisionsAPI(pool).Register(admin)
+		if contacts != nil {
+			contacts.Register(admin)
+		}
 		identity.NewCatalogueAPI(catalogue).Register(admin)
 	})
 	if scim != nil {
@@ -215,18 +230,35 @@ func newSCIM(pool *pgxpool.Pool, cfg config) (*identity.SCIMAPI, error) {
 	return identity.NewSCIMAPI(pool, verifiers, opa), nil
 }
 
+// newKeycloakAdmin builds the Admin REST client shared by the deprovisioning worker and the customer contact routes, or nil when
+// IDENTITY_KEYCLOAK_ADMIN_URL is not set.
+func newKeycloakAdmin(cfg config) (*identity.KeycloakAdmin, error) {
+	if !cfg.keycloakDeprovisionEnabled() {
+		return nil, nil
+	}
+	return identity.NewKeycloakAdmin(cfg.keycloakAdminURL, cfg.keycloakClientID, identity.SecretsDir(cfg.keycloakSecretsDir), nil)
+}
+
 // newDeprovisioner builds the worker that carries SCIM deprovisionings to Keycloak, or nil when it is off. The
 // rows are queued either way, so turning it on later processes what SCIM deprovisioned in the meantime.
-func newDeprovisioner(pool *pgxpool.Pool, cfg config) (*identity.KeycloakDeprovisioner, error) {
-	if !cfg.keycloakDeprovisionEnabled() {
+func newDeprovisioner(pool *pgxpool.Pool, cfg config, admin *identity.KeycloakAdmin) (*identity.KeycloakDeprovisioner, error) {
+	if admin == nil {
 		slog.Info("keycloak deprovisioning is disabled: IDENTITY_KEYCLOAK_ADMIN_URL is not set; SCIM deprovisionings stay queued")
 		return nil, nil
 	}
-	admin, err := identity.NewKeycloakAdmin(cfg.keycloakAdminURL, cfg.keycloakClientID, identity.SecretsDir(cfg.keycloakSecretsDir), nil)
-	if err != nil {
-		return nil, err
-	}
 	return identity.NewKeycloakDeprovisioner(pool, admin, cfg.operatorTenantID, cfg.deprovisionInterval)
+}
+
+// newContactsAPI builds the customer contact routes. Without Keycloak administration they serve the directory but create and change
+// nothing (503 IDN-CONTACT-KEYCLOAK-OFF).
+func newContactsAPI(pool *pgxpool.Pool, cfg config, admin *identity.KeycloakAdmin) *identity.CustomerContactsAPI {
+	var provisioner identity.ContactProvisioner
+	if admin != nil {
+		provisioner = admin
+	} else {
+		slog.Info("customer contact invitations are disabled: IDENTITY_KEYCLOAK_ADMIN_URL is not set")
+	}
+	return identity.NewCustomerContactsAPI(pool, provisioner, identity.Invitation{ClientID: cfg.customerPortalClientID, RedirectURI: cfg.customerPortalRedirectURI})
 }
 
 func newBundleAPI(pool *pgxpool.Pool, catalogue *identity.Catalogue, cfg config) (*identity.PolicyBundleAPI, error) {
@@ -330,11 +362,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	deprovisioner, err := newDeprovisioner(pool, cfg)
+	keycloakAdmin, err := newKeycloakAdmin(cfg)
 	if err != nil {
 		return err
 	}
-	router := newRouter(pool, catalogue, cfg.operatorTenantID, scim)
+	deprovisioner, err := newDeprovisioner(pool, cfg, keycloakAdmin)
+	if err != nil {
+		return err
+	}
+	router := newRouter(pool, catalogue, cfg.operatorTenantID, scim, newContactsAPI(pool, cfg, keycloakAdmin))
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	if deprovisioner != nil {

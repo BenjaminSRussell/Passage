@@ -1,10 +1,11 @@
 // Vendor invoices in the receiving service (/api/v1/receiving/invoices) for the demo: invoices posted against the
 // posted receipts of receiving.ts (matched, with a price variance, held for audit, self-billed and one rejected
 // duplicate), and the captured documents not yet posted. Typed against the module's client so drift fails tsc.
-import type { Capture, Invoice } from "../../../modules/ap-invoices/api/client";
+import type { Capture, Invoice, Submission } from "../../../modules/ap-invoices/api/client";
 import { LEGAL_ENTITY, VENDORS, itemByNumber } from "../../company";
 import { reply, route } from "../../backend";
 import { at, day, dec, uid } from "../../store";
+import { byUsername } from "../finance/people";
 import { purchaseOrders } from "./purchasing";
 
 const BASE = "/api/v1/receiving";
@@ -66,9 +67,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const invoices: Invoice[] = [
   invoice(1, { number: "KSG-40391", receipt: 3, unitPrice: 52, invoiceAgo: 1, status: "AUDIT_BLOCKED", extra: { auditReason: "Unit price 7.2% above the purchase order, outside the 2% tolerance" } }),
   invoice(2, { number: "PBC-55120", receipt: 4, unitPrice: 7.4, invoiceAgo: 3, status: "POSTED", source: "ERS" }),
-  invoice(3, { number: "VMW-121044", receipt: 5, unitPrice: 395, invoiceAgo: 8, status: "POSTED", extra: { auditReason: "Invoice over 5,000.00 needs a second approval", releasedBy: "marcus.lee", releasedAt: at(-6.8) } }),
+  invoice(3, { number: "VMW-121044", receipt: 5, unitPrice: 395, invoiceAgo: 8, status: "POSTED", extra: { auditReason: "Invoice over 5,000.00 needs a second approval", releasedBy: byUsername("marcus.lee").id, releasedAt: at(-6.8) } }),
   invoice(4, { number: "AFS-74402", receipt: 6, unitPrice: 12.8, invoiceAgo: 28, status: "POSTED" }),
-  invoice(5, { number: "AFS-74402A", receipt: 6, unitPrice: 12.8, invoiceAgo: 21, status: "AUDIT_REJECTED", extra: { auditReason: "Possible duplicate", rejectedBy: "ana.ortiz", rejectedAt: at(-20), rejectReason: "Duplicate of AFS-74402, already posted" } }),
+  invoice(5, { number: "AFS-74402A", receipt: 6, unitPrice: 12.8, invoiceAgo: 21, status: "AUDIT_REJECTED", extra: { auditReason: "Possible duplicate", rejectedBy: byUsername("ana.ortiz").id, rejectedAt: at(-20), rejectReason: "Duplicate of AFS-74402, already posted" } }),
 ];
 
 const captures: Capture[] = [
@@ -91,4 +92,63 @@ route("GET", `${BASE}/invoices/{id}`, ({ params }) => invoices.find((i) => i.id 
 route("GET", `${BASE}/invoice-captures`, ({ query }) => {
   const status = query.get("status");
   return { items: captures.filter((c) => !status || c.status === status).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) };
+});
+
+// Invoices vendors submitted in the supplier portal against the receipts above (#511), for accounts payable to post or
+// reject: two waiting, one rejected with a reason, one already posted as invoice AFS-74402.
+const K_SUBMISSION = 392;
+
+function submission(n: number, receipt: number, s: { number: string; qty: number; unitPrice: number; ago: number; status: Submission["status"]; extra?: Partial<Submission> }): Submission {
+  const amount = r2(s.qty * s.unitPrice);
+  return {
+    id: uid(K_SUBMISSION, n),
+    legalEntityId: LEGAL_ENTITY.id,
+    vendorId: vendorOf(receipt),
+    invoiceNumber: s.number,
+    invoiceDate: day(-s.ago),
+    currency: "USD",
+    total: dec(amount),
+    status: s.status,
+    lines: [{ receiptId: uid(K_RECEIPT, receipt), receiptLineNo: 1, qty: dec(s.qty, 0), unitPrice: dec(s.unitPrice), amount: dec(amount) }],
+    createdAt: at(Math.min(-0.1, -s.ago + 0.2)),
+    ...s.extra,
+  };
+}
+
+const submissions: Submission[] = [
+  submission(1, 4, { number: "PBC-55188", qty: 250, unitPrice: 7.4, ago: 0, status: "SUBMITTED", extra: { note: "Second delivery of the 6206 bearings, per your purchase order." } }),
+  submission(2, 5, { number: "VMW-121102", qty: 4, unitPrice: 395, ago: 1, status: "SUBMITTED" }),
+  submission(3, 3, { number: "KSG-40377", qty: 180, unitPrice: 55, ago: 6, status: "REJECTED", extra: { decidedAt: at(-5), decisionNote: "Unit price does not match the purchase order (48.50). Please resubmit at the agreed price." } }),
+  submission(4, 6, { number: "AFS-74402", qty: 400, unitPrice: 12.8, ago: 29, status: "POSTED", extra: { decidedAt: at(-27), invoiceId: uid(K_INVOICE, 4) } }),
+];
+
+route("GET", `${BASE}/invoice-submissions`, ({ query }) => {
+  const vendor = query.get("vendorId");
+  const status = query.get("status");
+  return { items: submissions.filter((s) => (!vendor || s.vendorId === vendor) && (!status || s.status === status)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) };
+});
+
+route("GET", `${BASE}/invoice-submissions/{id}`, ({ params }) => submissions.find((s) => s.id === params.id) ?? reply.problem(404, "RCV-NF-011", "Invoice submission not found"));
+
+function decide(id: string, patch: Partial<Submission>) {
+  const at0 = submissions.findIndex((s) => s.id === id);
+  if (at0 < 0) return reply.problem(404, "RCV-NF-011", "Invoice submission not found");
+  if (submissions[at0].status !== "SUBMITTED") return reply.problem(409, "SUP-INV-005", "The submission was already decided or withdrawn");
+  submissions[at0] = { ...submissions[at0], ...patch, decidedAt: at(0) };
+  return submissions[at0];
+}
+
+route("POST", `${BASE}/invoice-submissions/{id}:reject`, ({ params, body }) => {
+  const reason = String((body as { reason?: unknown } | undefined)?.reason ?? "").trim();
+  if (reason === "") return reply.problem(400, "COM-0001", "request failed validation", { reason: "is required, at most 1000 characters" });
+  return decide(params.id, { status: "REJECTED", decisionNote: reason });
+});
+
+route("POST", `${BASE}/invoice-submissions/{id}:resolve`, ({ params, body }) => {
+  const invoiceId = String((body as { invoiceId?: unknown } | undefined)?.invoiceId ?? "");
+  const chosen = invoices.find((i) => i.id === invoiceId);
+  if (!chosen) return reply.problem(400, "COM-0001", "request failed validation", { invoiceId: "must be the id of the posted invoice" });
+  if (chosen.status === "AUDIT_REJECTED") return reply.problem(422, "SUP-INV-007", "the invoice was rejected after audit");
+  if (submissions.some((s) => s.id !== params.id && s.invoiceId === invoiceId)) return reply.problem(422, "SUP-INV-006", "the invoice already closes another submission");
+  return decide(params.id, { status: "POSTED", invoiceId });
 });

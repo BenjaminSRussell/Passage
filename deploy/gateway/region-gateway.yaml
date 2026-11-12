@@ -1,0 +1,124 @@
+# The region health edge (PSG-50, OPS-1703, FR-50.5). DNS health checks and the fence of the other regions' services read
+# GET /healthz/region without a Passage token, so it cannot sit on Gateway passage-api (SecurityPolicy/passage-api-jwt
+# targets that whole Gateway). This is a Gateway of its own, like passage-as2: its only route is HTTPRoute/ops-region-health
+# (GET /healthz/region to the ops Service), nothing else of ops and no other service is reachable here, and the identity
+# headers are stripped. The answer names only the region and its role. HTTPS only; the hostname is per environment and
+# region (region.<env>.passage.dev). deploy/scripts/test_gateway.py checks that nothing else attaches here and that every
+# passage-api route stays behind the JWT policy.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: passage-region
+  namespace: hello-ledger
+spec:
+  gatewayClassName: passage-envoy
+  listeners:
+    - name: region-https
+      protocol: HTTPS
+      port: 443
+      hostname: region.dev.passage.dev
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: passage-region-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+        kinds:
+          - kind: HTTPRoute
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: passage-region-tls
+  namespace: hello-ledger
+spec:
+  secretName: passage-region-tls
+  dnsNames:
+    - region.dev.passage.dev
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    kind: ClusterIssuer
+    name: passage-local-ca
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ops-region-health
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-region
+      sectionName: region-https
+  hostnames:
+    - region.dev.passage.dev
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /healthz/region
+          method: GET
+      backendRefs:
+        - name: ops
+          port: 8080
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: passage-region-client
+  namespace: hello-ledger
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: passage-region
+  tls:
+    minVersion: "1.2"
+  headers:
+    earlyRequestHeaders:
+      remove:
+        - X-Passage-Tenant
+        - X-Passage-Legal-Entity
+        - X-Passage-User
+        - X-Passage-Duties
+        - X-Passage-Tier
+        - X-Passage-LegalEntity
+        - X-Passage-LegalEntity-Scope
+        - X-Passage-Service-Token
+        - X-Passage-Gateway-Secret
+---
+# The route is unauthenticated, so it is rate limited per client address (health checkers are few and fixed; 600 a minute
+# is generous for them and caps anything else).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: passage-region-limits
+  namespace: hello-ledger
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: ops-region-health
+  rateLimit:
+    type: Global
+    global:
+      rules:
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 600
+            unit: Minute
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: ::/0
+          limit:
+            requests: 600
+            unit: Minute

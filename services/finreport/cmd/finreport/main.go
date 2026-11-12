@@ -95,7 +95,7 @@ func runWith(ctx context.Context, getenv func(string) string, consume bool) erro
 		addr = ":8080"
 	}
 	st := store.New(pool)
-	return httpx.Serve(ctx, addr, newHandler(st, cfg, withVerifier(verifier(getenv, st))))
+	return httpx.ServeWithMetrics(ctx, addr, newHandler(st, cfg, withVerifier(verifier(getenv, st))))
 }
 
 // verifier builds the balance verification service when the ledger can be read
@@ -138,7 +138,7 @@ func newHandler(st api.Store, cfg config.Reporting, opts ...func(*api.API)) http
 		o(a)
 	}
 	a.Register(router)
-	public := a.PublicHandler(httpx.ParseTrustedProxies(os.Getenv(httpx.TrustedProxiesEnv)))
+	public := httpx.FenceMiddleware(a.PublicHandler(httpx.ParseTrustedProxies(os.Getenv(httpx.TrustedProxiesEnv))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, api.SharedPathPrefix) {
 			public.ServeHTTP(w, r)

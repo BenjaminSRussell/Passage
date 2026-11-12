@@ -283,6 +283,10 @@ paths:
         - name: siteId
           in: query
           schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          description: Keeps the orders whose number starts with this (ignoring case).
+          schema: { type: string, maxLength: 40 }
         - $ref: "#/components/parameters/Limit"
       responses:
         "200":
@@ -1431,6 +1435,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
+        number: { type: string, description: "Document number QO-000123, per tenant, assigned on create (migration 0008); absent on an older order that was not backfilled." }
         trigger: { type: string }
         sourceRef: { $ref: "#/components/schemas/SourceRef" }
         itemId: { type: string, format: uuid }

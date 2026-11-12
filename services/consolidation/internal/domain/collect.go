@@ -37,6 +37,7 @@ type CollectLine struct {
 	MainAccount          string
 	ConsolidationAccount string // empty when the account is not mapped
 	Type                 string // empty when the account is not mapped
+	Role                 string // the mapped account's role (asset, equity, ic_sales ...), empty when it has none
 	UnitCurrency         string
 	UnitAmount           decimal.Decimal
 	Rate                 decimal.Decimal
@@ -75,7 +76,7 @@ func Collect(groupCurrency string, mapping []AccountMapping, units []UnitLedger,
 		for _, row := range rows {
 			line := CollectLine{UnitID: u.UnitID, MainAccount: row.Account, UnitCurrency: u.Currency, UnitAmount: row.Net, Rate: rate.Closing}
 			if m, ok := byAccount[row.Account]; ok {
-				line.ConsolidationAccount, line.Type = m.ConsolidationAccount, m.Type
+				line.ConsolidationAccount, line.Type, line.Role = m.ConsolidationAccount, m.Type, m.Role
 				if m.Type == AccountIncome {
 					line.Rate = rate.Average
 				}

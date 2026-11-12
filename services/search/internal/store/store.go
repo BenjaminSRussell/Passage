@@ -45,14 +45,17 @@ type Record struct {
 	Type          string
 	ID            string
 	LegalEntityID string
-	Number        string
-	Title         string
-	Subtitle      string
-	Status        string
-	Removed       bool
-	UpdateOnly    bool
-	Version       int
-	At            time.Time
+	// PartyID is the party person a worker was created for. The worker is
+	// titled with that party's name (see Apply), so it is found by name.
+	PartyID    string
+	Number     string
+	Title      string
+	Subtitle   string
+	Status     string
+	Removed    bool
+	UpdateOnly bool
+	Version    int
+	At         time.Time
 }
 
 const removedVersion = math.MaxInt32
@@ -83,8 +86,9 @@ func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 // higher source version, then a later event time. Empty text fields keep what
 // the row holds, so a status-only event leaves the title alone. A removal
 // outranks every version, so it cannot be undone by a late event. UpdateOnly
-// changes an existing row and never creates one. It reports whether the row
-// changed.
+// changes an existing row and never creates one. A worker with a PartyID is
+// titled with that party's indexed name, and an applied party event renames
+// the workers created for the party. It reports whether the row changed.
 func (s *Store) Apply(ctx context.Context, r Record) (bool, error) {
 	p, ok := tenant.FromContext(ctx)
 	if !ok {
@@ -113,17 +117,33 @@ func (s *Store) Apply(ctx context.Context, r Record) (bool, error) {
 				columns, values = "legal_entity_id, ", "$11, "
 				args = append(args, r.LegalEntityID)
 			}
+			title, partySet := "$5", ""
+			if r.Type == TypeWorker && r.PartyID != "" {
+				// A replay over a worker indexed before the party id was kept fills it in.
+				partySet = "party_id = coalesce(excluded.party_id, t.party_id), "
+				// The worker takes its person's name when the party is already indexed; otherwise the
+				// party's own event names it later (below).
+				columns, values = "party_id, ", "$11::uuid, "
+				args = append(args, r.PartyID)
+				title = `coalesce((select p.title from search_record_tenant p where p.tenant_id = $1 and p.record_type = 'party'
+				  and p.record_id = $11::uuid and not p.removed and p.title <> ''), $5)`
+			}
 			tag, err = tx.Exec(ctx, fmt.Sprintf(`insert into %[1]s as t (tenant_id, %[2]srecord_type, record_id, number, title, subtitle, status, removed, source_at, source_version)
-				values ($1, %[3]s$2, $3, $4, $5, $6, $7, $8, $9, $10)
+				values ($1, %[3]s$2, $3, $4, %[4]s, $6, $7, $8, $9, $10)
 				on conflict (tenant_id, record_type, record_id) do update set
 				  number = coalesce(nullif(excluded.number, ''), t.number),
 				  title = coalesce(nullif(excluded.title, ''), t.title),
 				  subtitle = coalesce(nullif(excluded.subtitle, ''), t.subtitle),
 				  status = coalesce(nullif(excluded.status, ''), t.status),
-				  removed = excluded.removed, source_at = excluded.source_at, source_version = excluded.source_version, indexed_at = now()
-				where (t.source_version, t.source_at) <= (excluded.source_version, excluded.source_at)`, table, columns, values), args...)
+				  %[5]sremoved = excluded.removed, source_at = excluded.source_at, source_version = excluded.source_version, indexed_at = now()
+				where (t.source_version, t.source_at) <= (excluded.source_version, excluded.source_at)`, table, columns, values, title, partySet), args...)
 		}
 		applied = err == nil && tag.RowsAffected() == 1
+		if applied && r.Type == TypeParty && !r.Removed && r.Title != "" {
+			// A newer name of a party person renames the workers created for it.
+			_, err = tx.Exec(ctx, `update search_record_tenant set title = $3, indexed_at = now()
+				where tenant_id = $1 and record_type = 'worker' and party_id = $2::uuid and title <> $3`, p.TenantID, r.ID, r.Title)
+		}
 		return err
 	})
 	return applied, err

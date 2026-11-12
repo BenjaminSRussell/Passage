@@ -5,10 +5,15 @@ metadata:
   labels:
     app.kubernetes.io/name: customer-portal
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ if and (gt (int .Values.replicaCount) 1) (not .Values.sessionStore.url) }}{{ fail "replicaCount > 1 needs sessionStore.url: sessions are per pod without a shared store" }}{{ else }}{{ .Values.replicaCount }}{{ end }}
   strategy:
+    {{- if .Values.sessionStore.url }}
+    # Sessions are in the shared store, so a new pod can take over from an old one.
+    type: RollingUpdate
+    {{- else }}
     # Never two pods at once: sessions are per process.
     type: Recreate
+    {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: customer-portal
@@ -54,6 +59,18 @@ spec:
               value: {{ .Values.upstreams.billing | quote }}
             - name: SALES_URL
               value: {{ .Values.upstreams.sales | quote }}
+            - name: PARTY_URL
+              value: {{ .Values.upstreams.party | quote }}
+            - name: IDENTITY_URL
+              value: {{ .Values.upstreams.identity | quote }}
+            {{- if .Values.sessionStore.url }}
+            - name: SESSION_STORE_URL
+              value: {{ .Values.sessionStore.url | quote }}
+            {{- if .Values.sessionStore.passwordSecretName }}
+            - name: SESSION_STORE_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.sessionStore.passwordSecretName | quote }}, key: {{ .Values.sessionStore.passwordSecretKey | quote }} } }
+            {{- end }}
+            {{- end }}
             - name: PASSAGE_SERVICE_NAME
               value: customer-portal
             - name: PASSAGE_SERVICE_SIGNING_KEY

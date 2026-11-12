@@ -487,6 +487,15 @@ paths:
         net debit per month of each named account from the ledger and shares it over the cost centers by weight; an account with
         nothing posted adds no cells and the response says so with priorYearFallback. Every amount is scaled by adjustmentPct.
         Nothing to copy is 422 BUD-0061, more than 5000 cells 422 BUD-0062, zero cost center weights 422 BUD-0060.
+        Four sources read the drivers from their services for the plan's legal entity and fiscal year and write them on the account
+        named in `account`: fixed-assets plans the depreciation of the open assets from each asset's projected schedule of `book`
+        (the first open book when empty; at most 300 assets; a book in another currency than the plan's is refused) and shares each
+        month over the cost centers by weight; positions costs each HR position's FTE at the monthly cost of its job code (`rates`) in
+        every month the position is valid, on the cost center its department maps to (`departments`; an unmapped department is 422
+        BUD-0065); projects reads the cost (or sales) amounts of one forecast model per project, on the cost center given for each
+        project; demand values the planning forecast model `modelCode` at the unit price of each item and shares each month over the
+        cost centers by weight. A source whose service is not configured is 503 BUD-0063; a service that did not answer, or an answer
+        the plan cannot use, is 422 BUD-0064.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: sid, in: path, required: true, schema: { type: string, format: uuid } }
@@ -494,9 +503,50 @@ paths:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [source], additionalProperties: false, properties: { source: { type: string, enum: [prior-plan, gl-actuals] }, adjustmentPct: { type: string, description: Above -100 and at most 1000, at most 4 decimal places. }, accounts: { type: array, maxItems: 50, items: { type: string } }, costCenters: { type: array, maxItems: 200, description: Only with gl-actuals., items: { type: object, required: [costCenter, weight], properties: { costCenter: { type: string }, weight: { type: string } } } } } } } }
+        content: { application/json: { schema: { type: object, required: [source], additionalProperties: false, properties: { source: { type: string, enum: [prior-plan, gl-actuals, fixed-assets, positions, projects, demand] }, adjustmentPct: { type: string, description: Above -100 and at most 1000, at most 4 decimal places. }, accounts: { type: array, maxItems: 50, items: { type: string } }, costCenters: { type: array, maxItems: 200, description: Only with gl-actuals, fixed-assets and demand., items: { type: object, required: [costCenter, weight], properties: { costCenter: { type: string }, weight: { type: string } } } }, account: { type: string, description: The account the fixed-assets, positions, projects and demand amounts are planned on. }, book: { type: string, description: Depreciation book of fixed-assets. }, rates: { type: array, maxItems: 200, description: Positions; the monthly cost of a full-time position per job code., items: { type: object, required: [jobCode, monthlyCost], properties: { jobCode: { type: string }, monthlyCost: { type: string } } } }, departments: { type: array, maxItems: 200, description: Positions; the cost center of each HR department., items: { type: object, required: [departmentId, costCenter], properties: { departmentId: { type: string, format: uuid }, costCenter: { type: string } } } }, projects: { type: array, maxItems: 200, description: Projects; the forecast model of each project and the cost center it is planned on., items: { type: object, required: [projectId, modelId, costCenter], properties: { projectId: { type: string }, modelId: { type: string, format: uuid }, costCenter: { type: string }, amount: { type: string, enum: [cost, sales] } } } }, modelCode: { type: string, description: Demand; the planning forecast model. }, unitPrices: { type: array, maxItems: 200, description: Demand; the price of one unit of each item., items: { type: object, required: [itemId, price], properties: { itemId: { type: string, format: uuid }, price: { type: string } } } } } } } }
       responses:
         '200': { description: Cells written and the scenario total., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGridWritten' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/scenarios/{sid}:export:
+    get:
+      operationId: exportBudgetPlanWorkbook
+      x-passage-duty: budget.view
+      description: >-
+        The scenario's grid as an .xlsx workbook (FR-38.14). Sheet Plan has one row per account and cost center with the 12 periods of
+        the fiscal year across and a Total column; sheet Info names the plan, scenario, version, fiscal year and currency it came from.
+        The grid's ETag is in the response header. account and costCenter narrow the export. A grid of more than 10000 cells is 422
+        BUD-0067.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: sid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: account, in: query, schema: { type: string } }
+        - { name: costCenter, in: query, schema: { type: string } }
+      responses:
+        '200': { description: The workbook., headers: { ETag: { schema: { type: string } } }, content: { application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/budget/plans/{id}/scenarios/{sid}:import:
+    post:
+      operationId: importBudgetPlanWorkbook
+      x-passage-duty: budget.plan.maintain
+      description: >-
+        Writes the amounts of an edited workbook of this plan and scenario like the grid PUT (If-Match required, Draft plan only, at
+        most 5000 cells, replayed by Idempotency-Key). A blank amount counts as 0 and the Total column is ignored; a row removed from
+        the workbook leaves its cells as they are. Every problem of the workbook is reported at once under errors, keyed by cell
+        (Plan!C5): an amount that is not a number, is negative or has more than 4 decimals, an account or cost center that is empty
+        or over 100 characters, a repeated row, a changed period header. A workbook exported from another plan, scenario or fiscal
+        year is 422 BUD-0066. Nothing is written when there is a problem. With dryRun=true the workbook is only checked and the
+        answer says how many rows and cells it holds.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: sid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: dryRun, in: query, schema: { type: boolean } }
+        - { name: If-Match, in: header, required: true, description: The grid ETag read from the export or the last write., schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } } }
+      responses:
+        '200': { description: Cells written and the scenario total, or with dryRun the check result., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PlanGridWritten' } } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/budget/plans/{id}:submit:
     post:

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PassageSetup.exe: a Burn bundle that chains the Passage MSI with two OPTIONAL prerequisites, each its own package that upgrades
+  separately and can also be installed by its own command line:
+    - PostgreSQL (the EDB Windows installer) when InstallPostgres=1, for small single-site installs;
+    - the Temporal server service (PassageTemporal.msi) when InstallTemporal=1.
+  Keycloak and Kafka are not bundled (ADR-0004). Everything the Passage MSI accepts can be passed to the bundle and is forwarded.
+    wix build -arch x64 -d Version=1.2.3 -d PassageMsi=out\Passage-1.2.3-x64.msi
+      [-d TemporalMsi=out\PassageTemporal-1.2.3-x64.msi] [-d PostgresInstaller=out\postgresql-17.x-windows-x64.exe]
+      -ext WixToolset.Util.wixext -ext WixToolset.BootstrapperApplications.wixext Bundle.wxs -o PassageSetup.exe
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <?ifndef Version?><?define Version = "0.0.0" ?><?endif?>
+  <!-- The standard bootstrapper's license link; a release passes -d LicenseUrl=<the customer licence terms>. -->
+  <?ifndef LicenseUrl?><?define LicenseUrl = "https://github.com/BenjaminSRussell/Passage/blob/main/docs/ops/windows-install.md" ?><?endif?>
+  <?ifdef Fips?><?define BundleUpgradeCode = "9a1d7b3c-52e4-4a6f-8f21-0c5e6d7a8b19" ?><?else?><?define BundleUpgradeCode = "e7a50757-87b4-46af-8668-5914ce6e927d" ?><?endif?>
+  <Bundle Name="Passage" Manufacturer="Passage" Version="$(Version)" UpgradeCode="$(BundleUpgradeCode)"
+          Compressed="yes">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" LicenseUrl="$(LicenseUrl)" SuppressOptionsUI="yes" />
+    </BootstrapperApplication>
+
+    <!-- Optional prerequisite switches (all default off). -->
+    <Variable Name="InstallPostgres" Type="numeric" Value="0" bal:Overridable="yes" />
+    <Variable Name="InstallTemporal" Type="numeric" Value="0" bal:Overridable="yes" />
+    <!-- The superuser password never goes on a command line: point this at a file you created (readable only by Administrators) that holds
+         the installer's option lines, for example "superpassword=..." (the EDB installer option file). Required with InstallPostgres=1. -->
+    <Variable Name="PostgresOptionFile" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="PostgresServiceName" Type="string" Value="postgresql-x64-17" />
+    <!-- Properties forwarded to Passage.msi. Hidden ones stay out of the bundle log. -->
+    <Variable Name="PG_DSN" Type="string" Value="" Hidden="yes" bal:Overridable="yes" />
+    <Variable Name="PG_APP_DSN" Type="string" Value="" Hidden="yes" bal:Overridable="yes" />
+    <Variable Name="OIDC_ISSUER" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="OIDC_AUDIENCE" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="OIDC_JWKS_URL" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="TENANT_ID" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="OPA_URL" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="KAFKA_BOOTSTRAP" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="TEMPORAL_HOSTPORT" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="LISTEN" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="LISTEN_PORT" Type="string" Value="8443" bal:Overridable="yes" />
+    <Variable Name="CLOUD_PROFILE" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="TLS_CERT_FILE" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="TLS_KEY_FILE" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="REQUIRE_FIPS" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="REMOVE_DATA" Type="string" Value="0" bal:Overridable="yes" />
+    <Variable Name="SKIP_DOCTOR" Type="string" Value="0" bal:Overridable="yes" />
+    <Variable Name="SKIP_MIGRATE" Type="string" Value="0" bal:Overridable="yes" />
+    <Variable Name="OPEN_FIREWALL" Type="string" Value="1" bal:Overridable="yes" />
+    <Variable Name="ALLOW_PLAINTEXT" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="BACKUP_CONFIRMED" Type="string" Value="0" bal:Overridable="yes" />
+    <Variable Name="SERVICE_ACCOUNT" Type="string" Value="NT SERVICE\Passage" bal:Overridable="yes" />
+
+    <util:RegistrySearch Id="PostgresInstalled" Variable="PostgresInstalled" Root="HKLM" Key="SOFTWARE\PostgreSQL\Installations\postgresql-x64-17"
+                         Value="Base Directory" Result="exists" Bitness="always64" />
+
+    <Chain>
+      <?ifdef PostgresInstaller?>
+      <ExePackage Id="PostgreSQL" DisplayName="PostgreSQL 17" SourceFile="$(PostgresInstaller)" Cache="keep"
+                  DetectCondition="PostgresInstalled" InstallCondition="InstallPostgres=1 AND NOT PostgresInstalled AND PostgresOptionFile"
+                  InstallArguments="--mode unattended --unattendedmodeui none --optionfile &quot;[PostgresOptionFile]&quot; --servicename [PostgresServiceName] --serverport 5432"
+                  UninstallArguments="" Permanent="yes" Vital="yes" />
+      <?endif?>
+      <?ifdef TemporalMsi?>
+      <MsiPackage Id="PassageTemporal" SourceFile="$(TemporalMsi)" Visible="no" Vital="yes"
+                  InstallCondition="InstallTemporal=1" />
+      <?endif?>
+      <MsiPackage Id="PassageServer" SourceFile="$(PassageMsi)" Vital="yes" Visible="yes">
+        <MsiProperty Name="PG_DSN" Value="[PG_DSN]" />
+        <MsiProperty Name="PG_APP_DSN" Value="[PG_APP_DSN]" />
+        <MsiProperty Name="OIDC_ISSUER" Value="[OIDC_ISSUER]" />
+        <MsiProperty Name="OIDC_AUDIENCE" Value="[OIDC_AUDIENCE]" />
+        <MsiProperty Name="OIDC_JWKS_URL" Value="[OIDC_JWKS_URL]" />
+        <MsiProperty Name="TENANT_ID" Value="[TENANT_ID]" />
+        <MsiProperty Name="OPA_URL" Value="[OPA_URL]" />
+        <MsiProperty Name="KAFKA_BOOTSTRAP" Value="[KAFKA_BOOTSTRAP]" />
+        <MsiProperty Name="TEMPORAL_HOSTPORT" Value="[TEMPORAL_HOSTPORT]" />
+        <MsiProperty Name="LISTEN" Value="[LISTEN]" />
+        <MsiProperty Name="LISTEN_PORT" Value="[LISTEN_PORT]" />
+        <MsiProperty Name="CLOUD_PROFILE" Value="[CLOUD_PROFILE]" />
+        <MsiProperty Name="TLS_CERT_FILE" Value="[TLS_CERT_FILE]" />
+        <MsiProperty Name="TLS_KEY_FILE" Value="[TLS_KEY_FILE]" />
+        <MsiProperty Name="REQUIRE_FIPS" Value="[REQUIRE_FIPS]" />
+        <MsiProperty Name="REMOVE_DATA" Value="[REMOVE_DATA]" />
+        <MsiProperty Name="SKIP_DOCTOR" Value="[SKIP_DOCTOR]" />
+        <MsiProperty Name="SKIP_MIGRATE" Value="[SKIP_MIGRATE]" />
+        <MsiProperty Name="OPEN_FIREWALL" Value="[OPEN_FIREWALL]" />
+        <MsiProperty Name="ALLOW_PLAINTEXT" Value="[ALLOW_PLAINTEXT]" />
+        <MsiProperty Name="BACKUP_CONFIRMED" Value="[BACKUP_CONFIRMED]" />
+        <MsiProperty Name="SERVICE_ACCOUNT" Value="[SERVICE_ACCOUNT]" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

@@ -53,6 +53,7 @@ charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admi
 | POST | `/v1/revrec/contracts` | `revrec.maintain` (RevRecMaintain) | `Idempotency-Key` required; 201, or 200 replay; emits `contract.allocated` |
 | GET | `/v1/revrec/contracts` | `revrec.view` or the service-only `revrec.allocation.read` (billing reads the allocation of an order's contract, also on `/contracts/{id}`) | newest first; filters `legalEntityId`, `customerId`, `orderId`, `status`, `method` (contracts with an obligation of that method); `limit` ≤ 200 and `cursor` = the previous page's `nextCursor`; recognized and remaining per contract |
 | GET | `/v1/revrec/contracts/{id}` | `revrec.view` | obligations with their schedule lines; `ETag` = version |
+| POST | `/v1/revrec/contracts/{id}:modify` | `revrec.maintain` | re-allocates the existing obligations after a price change or SSP revision: `{type: PROSPECTIVE or CATCH_UP, effectiveDate, transactionPriceChange (signed), obligations?: [{obligationId, ssp}], reason?}`; optional `If-Match`; answers the contract and the `modification` (per obligation allocation before and after, progress, catch-up); see "Contract modifications" |
 | POST | `/v1/revrec/milestones/{obligationId}:satisfy` | `revrec.maintain` | recognizes a MILESTONE; optional `If-Match`; same-date retry replays; emits `schedule.recognized` |
 | POST | `/v1/revrec/recognition-runs` | `revrec.post` (RevRecPost) | key = (legal entity, period end); 201, or 200 replay; emits `schedule.recognized` per line |
 | GET | `/v1/revrec/recognition-runs` | `revrec.view` | latest period first |
@@ -234,11 +235,44 @@ duties in step.
 | `REV-0200` | 503 | The general ledger is not configured (`LEDGER_URL` unset) |
 | `REV-0201` | 502 | The general ledger did not answer, refused a balance read, or reported another currency |
 | `REV-0202` | 422 | The legal entity has no ledger in `REVREC_LEDGER_IDS` |
+| `REV-0401` | 422 | A modification's effective date is before the contract date |
+| `REV-0402` | 422 | A modification would take revenue back out of what is already recognized (use a credit note) |
+| `REV-0404` | 422 | A prospective modification has no obligation with performance left, or an obligation has revenue left but no line to carry it |
+| `REV-0405` | 409 | Credit notes already changed the contract's schedule; it cannot be re-allocated |
 | `REV-0100` | 404 | Contract or obligation not found |
 | `REV-0103` | 412 | If-Match names a contract version that is no longer current |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different body |
 | `idempotency_in_progress` | 409 | A concurrent request holds the same key, or a concurrent run the same period |
 | `BIL-0009` | warning | SSP missing for an obligation; residual method used (returned in `warnings`) |
+
+## Contract modifications
+
+`POST /v1/revrec/contracts/{id}:modify` (migration 0011) accounts for a price change or a revision of standalone selling prices on a
+contract that already has revenue behind it (ASC 606-10-25-10 to 25-13, IFRS 15.20 to 15.21). Adding goods or services at their
+standalone price is a separate contract: `:allocate`.
+
+- **PROSPECTIVE** (the remaining goods or services are distinct from those transferred): the consideration still to recognize, the
+  new transaction price less what is recognized or already booked by the invoice (point in time and usage obligations), is allocated
+  over the obligations with performance left. Each obligation weighs its SSP (the revised one, when the request names it) by the share
+  of its lines still scheduled, so a half-delivered obligation counts half. Each share is spread over that obligation's unrecognized
+  lines in proportion to their old amounts, the last line taking the rounding residual. Recognized lines are never touched and nothing
+  is caught up. Worked example: a 1,200.00 twelve-month plan, three months recognized, price +120.00: 1,020.00 over the nine months
+  left, 113.33 eight times and 113.36.
+- **CATCH_UP** (the remaining goods are not distinct and are part of one partially satisfied obligation): the new transaction price,
+  less the point in time and usage obligations, is allocated again over the other obligations by SSP; each obligation's revenue to
+  date becomes its new allocation times its progress at `effectiveDate` (ratable: the share of the lines recognized or dated on or
+  before that date; milestone: 1 once satisfied, else 0), and the difference to what was recognized is the cumulative catch-up. A
+  satisfied milestone's catch-up is a line recognized on the effective date at once (`schedule.recognized` is published); a ratable
+  catch-up is added to the lines of the period that are earned but not yet recognized, or, when there are none, as a new line dated on
+  the effective date that the next recognition run takes. The rest is spread over the future lines. Worked example (the domain tests):
+  a 1,200.00 plan 25% transferred, price +120.00: allocation 1,320.00, revenue to date 330.00 against 300.00 recognized, catch-up
+  30.00, 990.00 over the nine months left.
+- A change that would cut revenue already recognized is refused with REV-0402: revenue is not taken back out by a modification
+  (billing's credit note and the credit-note consumer reverse it). SSPs are not re-estimated outside a modification; `obligations`
+  gives the SSP at the modification date. A contract that credit notes touched (`credit_note_reversal`) is refused (REV-0405).
+- Each modification stores a `contract_modification` row and an `allocation_delta` per obligation, dated at the effective date. The
+  deferred revenue roll-forward adds the delta in the period of the effective date, not in the contract's, so the roll-forward closes
+  at zero when the new price is recognized. The new price is invoiced or credited by billing; the modification does not change billing.
 
 ## Notes
 

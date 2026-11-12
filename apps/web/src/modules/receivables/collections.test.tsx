@@ -183,7 +183,7 @@ describe("Disputes", () => {
       return undefined;
     };
     const { container } = renderAt(`/receivables/disputes/new?legalEntity=${LE}&openItem=${ITEM}&amount=1000.00`);
-    expect(screen.getByLabelText("Open item id")).toHaveValue(ITEM);
+    expect(screen.getByLabelText("Open item")).toHaveAttribute("data-value", ITEM);
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Open dispute" }));
     expect(await screen.findByText("Use an upper-case code such as PRICE or DAMAGE.")).toBeInTheDocument();
@@ -502,7 +502,7 @@ describe("Lockbox", () => {
     second.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/lockbox");
-    expect(await findAlert()).toHaveTextContent("Could not load the lockbox imports");
+    expect(await findAlert()).toHaveTextContent("Could not load lockbox imports");
   });
 
   it("imports a pasted file and lists the payments it created", async () => {

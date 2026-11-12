@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatOption, resolveOption } from "../../shell/lookup/entities";
 import { AesGcmSealer, IndexedDbStore, loadOrCreateDeviceKey, type KeyValueStore, type SealCipher } from "../mobile-flows/domain/offlineStore";
-import { fetchDay, fetchTruckStock, serverClient } from "./api/client";
+import { fetchDay, fetchTruckStock, serverClient, subscribeRoute, type RouteSubscription } from "./api/client";
 import { loadSnapshot, saveSnapshot, type DaySnapshot } from "./domain/dayCache";
 import { project, type PendingAction } from "./domain/projection";
 import { TechQueue, type Attention } from "./domain/queue";
@@ -15,6 +15,8 @@ export interface TechnicianDeps {
   client: SyncClient;
   loadDay: (date?: string) => Promise<TechnicianDay>;
   loadTruck: typeof fetchTruckStock;
+  /** Opens the route stream; omitted in tests that do not push. */
+  subscribeRoute?: (onRoute: () => void) => RouteSubscription;
   resolveName: (entity: "party" | "product", id: string) => Promise<string | undefined>;
   now: () => Date;
   isOnline: () => boolean;
@@ -40,6 +42,7 @@ export async function browserDeps(): Promise<TechnicianDeps> {
     client: serverClient,
     loadDay: fetchDay,
     loadTruck: fetchTruckStock,
+    subscribeRoute: (onRoute) => subscribeRoute(onRoute),
     resolveName: lookupName,
     now: () => new Date(),
     isOnline: () => (typeof navigator === "undefined" ? true : navigator.onLine),
@@ -47,6 +50,8 @@ export async function browserDeps(): Promise<TechnicianDeps> {
 }
 
 const SYNC_EVERY_MS = 60_000;
+/** While the route stream is open the day is read this often anyway, in case a notification was missed. */
+export const PUSHED_SYNC_EVERY_MS = 5 * 60_000;
 
 export interface TechnicianState {
   ready: boolean;
@@ -170,16 +175,27 @@ export function useTechnician(deps: TechnicianDeps | null, date?: string): Techn
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
   useEffect(() => {
-    if (!ready) return;
-    void refreshRef.current();
-    const timer = setInterval(() => void refreshRef.current(), SYNC_EVERY_MS);
-    const onOnline = () => void refreshRef.current();
+    if (!ready || !deps) return;
+    let last = 0;
+    const read = () => {
+      last = Date.now();
+      return refreshRef.current();
+    };
+    void read();
+    // The stream says when the route changed; the poll stays for devices without a stream and as a slow safety net.
+    const stream = deps.subscribeRoute?.(() => void read());
+    const timer = setInterval(() => {
+      if (stream?.open && Date.now() - last < PUSHED_SYNC_EVERY_MS) return;
+      void read();
+    }, SYNC_EVERY_MS);
+    const onOnline = () => void read();
     window.addEventListener("online", onOnline);
     return () => {
       clearInterval(timer);
+      stream?.close();
       window.removeEventListener("online", onOnline);
     };
-  }, [ready]);
+  }, [ready, deps]);
 
   const techId = snapshot?.day.technician.id ?? "";
   const act = useCallback(

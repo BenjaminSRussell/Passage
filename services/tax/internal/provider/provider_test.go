@@ -291,3 +291,27 @@ func TestVertexFromEnv(t *testing.T) {
 		t.Error("a URL without credentials was accepted")
 	}
 }
+
+// A base URL or token URL that is not https would send licence keys and tax data in the clear (#615 review).
+func TestProviders_RequireHTTPSExceptForLoopback(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	for _, base := range []string{"http://rest.avatax.com", "ftp://x", "rest.avatax.com", "https://", ""} {
+		if _, err := provider.NewAvalara(base, "a", "k", "ACME", nil); err == nil {
+			t.Errorf("avalara accepted base URL %q", base)
+		}
+		if _, err := provider.NewVertex(base, "https://tok.example/oauth", "c", "s", "u", "p", "CO", nil); err == nil {
+			t.Errorf("vertex accepted base URL %q", base)
+		}
+	}
+	if _, err := provider.NewVertex("https://vertex.example", "http://tok.example/oauth", "c", "s", "u", "p", "CO", nil); err == nil {
+		t.Error("vertex accepted a plain http token URL")
+	}
+	for _, base := range []string{"https://rest.avatax.com", "http://127.0.0.1:8080", "http://localhost:9"} {
+		if _, err := provider.NewAvalara(base, "a", "k", "ACME", nil); err != nil {
+			t.Errorf("avalara refused %q: %v", base, err)
+		}
+	}
+	if _, err := provider.AvalaraFromEnv(env(map[string]string{"AVALARA_URL": "http://tax.example.com", "AVALARA_ACCOUNT_ID": "a", "AVALARA_LICENSE_KEY": "k", "AVALARA_COMPANY_CODE": "C"})); err == nil {
+		t.Error("AvalaraFromEnv accepted http")
+	}
+}

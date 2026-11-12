@@ -68,6 +68,7 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 
 	duties := map[string]string{
 		"POST /v1/ledger/ledgers":                                                   dutyLedgerWrite,
+		"GET /v1/ledger/ledgers":                                                    dutyRead,
 		"GET /v1/ledger/ledgers/{id}":                                               dutyRead,
 		"PUT /v1/ledger/charts/{chart}/accounts/{number}":                           dutyAccountWrite,
 		"GET /v1/ledger/charts/{chart}/accounts":                                    dutyRead,

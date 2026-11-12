@@ -52,7 +52,17 @@ func NewTenantsAPI(pool *pgxpool.Pool, operatorTenantID string) *TenantsAPI {
 }
 
 func (a *TenantsAPI) operatorOnly(next http.Handler) http.Handler {
-	return requireAnyDuty(dutyMaintainTenants)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return a.operatorCheck(requireAnyDuty(dutyMaintainTenants), next)
+}
+
+// operatorReadable is operatorOnly for the registry read, which a service holding only
+// identity.tenant-registry.read (a scheduled job that needs the active tenants) may also make.
+func (a *TenantsAPI) operatorReadable(next http.Handler) http.Handler {
+	return a.operatorCheck(requireAnyDuty(dutyMaintainTenants, dutyReadTenantRegistry), next)
+}
+
+func (a *TenantsAPI) operatorCheck(dutyGate func(http.Handler) http.Handler, next http.Handler) http.Handler {
+	return dutyGate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, _ := tenant.FromContext(r.Context())
 		if !validUUID(p.TenantID) {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
@@ -68,7 +78,7 @@ func (a *TenantsAPI) operatorOnly(next http.Handler) http.Handler {
 
 func (a *TenantsAPI) Register(r chi.Router) {
 	r.With(a.operatorOnly).Post("/v1/tenants", a.create)
-	r.With(a.operatorOnly).Get("/v1/tenants", a.list)
+	r.With(a.operatorReadable).Get("/v1/tenants", a.list)
 	r.With(a.operatorOnly).Get("/v1/tenants/{id}", a.get)
 	r.With(a.operatorOnly).Post("/v1/tenants/{id}/admins", a.grantAdmin)
 }
@@ -315,6 +325,10 @@ func (a *TenantsAPI) list(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	limit, after := pageParams(r, fields)
+	status := r.URL.Query().Get("status")
+	if status != "" && status != "active" && status != "suspended" && status != "deprovisioned" {
+		fields["status"] = "must be active, suspended or deprovisioned"
+	}
 	if len(fields) > 0 {
 		invalidFields(w, r, "invalid paging parameters", fields)
 		return
@@ -322,7 +336,7 @@ func (a *TenantsAPI) list(w http.ResponseWriter, r *http.Request) {
 	var items []tenantResource
 	err := dbx.WithTenantTx(r.Context(), a.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(r.Context(), `select `+tenantColumns+` from identity_tenants
-where ($1::text is null or tenant_id > $1::uuid) order by tenant_id limit $2`, after, limit+1)
+where ($1::text is null or tenant_id > $1::uuid) and ($3 = '' or status = $3) order by tenant_id limit $2`, after, limit+1, status)
 		if err != nil {
 			return err
 		}

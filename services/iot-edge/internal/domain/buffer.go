@@ -130,3 +130,48 @@ func (b *Buffer) expire(now time.Time) {
 	}
 	b.items = b.items[cut:]
 }
+
+// Entry is one buffered payload with the id Peek and Ack use, so a persistent store can save the ring
+// and give it back with the same ids.
+type Entry struct {
+	ID      uint64
+	At      time.Time
+	Payload []byte
+}
+
+// Snapshot returns the buffered payloads, oldest first, and the id the next Push will take.
+func (b *Buffer) Snapshot() (entries []Entry, next uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	entries = make([]Entry, len(b.items))
+	for i, e := range b.items {
+		entries[i] = Entry{ID: e.id, At: e.at, Payload: e.payload}
+	}
+	return entries, b.next + 1
+}
+
+// LastID returns the id the latest Push took (0 before the first).
+func (b *Buffer) LastID() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.next
+}
+
+// Restore replaces the ring's content with entries (oldest first, ids ascending) and makes next the id of
+// the following Push. Entries beyond the capacity are dropped oldest first and counted as evicted.
+func (b *Buffer) Restore(entries []Entry, next uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.items = b.items[:0]
+	for _, e := range entries {
+		b.items = append(b.items, entry{id: e.ID, at: e.At, payload: e.Payload})
+		if e.ID >= next {
+			next = e.ID + 1
+		}
+	}
+	for b.capacity >= 0 && len(b.items) > b.capacity {
+		b.items = b.items[1:]
+		b.evicted++
+	}
+	b.next = next - 1
+}

@@ -1,10 +1,10 @@
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
 import { describeProblem, importLockbox, listLockboxBatches, type LockboxBatch, type Payment, type Problem } from "./api/client";
 import { dateTime, DAY, money, STATUS_LABELS, today, UUID } from "./format";
-import { CommandFailure, LoadFailure } from "./parts";
+import { CommandFailure } from "./parts";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { EntityName } from "../../shell/lookup/EntityName";
@@ -26,7 +26,8 @@ export function LockboxPage() {
   const state = useLoad((signal) => listLockboxBatches(signal), "batches");
   return (
     <div className={styles.stack}>
-      <PageHeader
+      <ListPage
+        id="receivables-lockbox"
         title="Lockbox imports"
         description="BAI2 files from the bank, newest first. Each check becomes a Received payment to match and apply."
         actions={
@@ -39,19 +40,12 @@ export function LockboxPage() {
             </Link>
           </div>
         }
+        noun="lockbox imports"
+        columns={batchColumns}
+        useRows={() => loadedRows(state)}
+        getRowKey={(row) => row.id}
+        empty={{ title: "No lockbox files", description: "Import the bank's BAI2 file to create one payment per check." }}
       />
-      {state.error ? (
-        <LoadFailure title="Could not load the lockbox imports" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Lockbox imports"
-          columns={batchColumns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No lockbox files", description: "Import the bank's BAI2 file to create one payment per check." }}
-        />
-      )}
     </div>
   );
 }

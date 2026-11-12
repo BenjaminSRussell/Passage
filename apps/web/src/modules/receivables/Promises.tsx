@@ -160,8 +160,8 @@ export function NewPromisePage() {
           <FormField id="np-entity" label="Legal entity" error={errors.legalEntityId}>
             {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
-          <FormField id="np-item" label="Open item id" error={errors.openItemId}>
-            {(c) => <Input {...c} className={styles.mono} value={values.openItemId} onChange={(e) => update({ openItemId: e.target.value })} invalid={Boolean(errors.openItemId)} />}
+          <FormField id="np-item" label="Open item" error={errors.openItemId}>
+            {(c) => <EntityLookup entity="openItem" {...c} value={values.openItemId} onChange={(e) => update({ openItemId: e.target.value })} invalid={Boolean(errors.openItemId)} />}
           </FormField>
           <FormField id="np-amount" label="Promised amount" hint="At most the item's open amount." error={errors.amount}>
             {(c) => <Input {...c} className={styles.mono} inputMode="decimal" value={values.amount} onChange={(e) => update({ amount: e.target.value })} invalid={Boolean(errors.amount)} />}

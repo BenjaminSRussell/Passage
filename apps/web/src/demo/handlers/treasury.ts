@@ -1,10 +1,11 @@
 // Treasury service (/api/v1/treasury) for the demo: house bank accounts, statements with their lines,
 // bank reconciliations (close, reopen, exclude, book a fee) and the cash forecast.
 // Typed against the module's own client types so shape drift fails `tsc`.
-import type { AccountPositionRow, BankAccount, CashDesk, CashDeskDay, CashDeskEntry, BankReconciliation, ForecastEntry, LineTransaction, Statement, StatementLine, TransactionKind } from "../../modules/treasury/api/client";
+import type { AccountPositionRow, BankAccount, CashDesk, CashDeskDay, CashDeskDenomination, CashDeskEntry, CashDeskEntryInput, BankReconciliation, ForecastEntry, LineTransaction, Statement, StatementLine, TransactionKind } from "../../modules/treasury/api/client";
 import { LEGAL_ENTITY } from "../company";
 import { reply, route } from "../backend";
 import { at, day, newId, table, uid } from "../store";
+import { byUsername, ME } from "./finance/people";
 
 const BASE = "/api/v1/treasury";
 const K_ACCOUNT = 360;
@@ -347,24 +348,29 @@ interface DemoDay extends CashDeskDay {
 }
 
 const DESK = uid(370, 1);
+const DOCK = uid(370, 2);
+// The front desk posts to the ledger; the dock desk needs a second signature on close.
 const desks = table<DemoDesk>([
-  { id: DESK, legalEntityId: LEGAL_ENTITY.id, code: "FRONT-1", name: "Front office petty cash", currency: "USD", mainAccountId: uid(363, 3), maxBalance: "5000.00", status: "active", version: 1 },
-  { id: uid(370, 2), legalEntityId: LEGAL_ENTITY.id, code: "DOCK-1", name: "Shipping dock", currency: "USD", mainAccountId: uid(363, 3), maxBalance: "1500.00", status: "active", version: 1 },
+  { id: DESK, legalEntityId: LEGAL_ENTITY.id, code: "FRONT-1", name: "Front office petty cash", currency: "USD", mainAccountId: uid(363, 3), maxBalance: "5000.00", status: "active", dualControl: false, version: 1 },
+  { id: DOCK, legalEntityId: LEGAL_ENTITY.id, code: "DOCK-1", name: "Shipping dock", currency: "USD", mainAccountId: uid(363, 3), maxBalance: "1500.00", status: "active", dualControl: true, version: 1 },
 ]);
+const postsToLedger = (deskId: string): boolean => deskId === DESK;
 
-function entry(n: number, kind: CashDeskEntry["kind"], amount: number, description: string, by: string, reference?: string): CashDeskEntry {
-  return { id: uid(371, n), lineNo: 0, kind, amount: dec(amount), description, reference, createdBy: by, balanceAfter: "0.00" };
+const ANA = byUsername("ana.ortiz").id;
+
+function entry(n: number, kind: CashDeskEntry["kind"], amount: number, description: string, by: string, reference?: string, counterAccount = "8000"): CashDeskEntry {
+  return { id: uid(371, n), lineNo: 0, kind, amount: dec(amount), description, reference, createdBy: by, balanceAfter: "0.00", counterAccount, postingStatus: "posted" };
 }
 
 const days = new Map<string, DemoDay[]>([
   [
     DESK,
     [
-      { deskId: DESK, businessDate: day(-2), status: "closed", openingBalance: "1200.00", bookBalance: "1480.50", countedBalance: "1480.50", difference: "0.00", openedBy: "ana.ortiz", closedBy: "ana.ortiz", entries: [entry(1, "receipt", 310.5, "Parts counter sales", "ana.ortiz"), entry(2, "payment", 30, "Office supplies", "ana.ortiz", "RCPT-4417")] },
-      { deskId: DESK, businessDate: day(0), status: "open", openingBalance: "1480.50", bookBalance: "1480.50", openedBy: "ana.ortiz", entries: [entry(3, "receipt", 250, "Walk-in sale, two seal kits", "ana.ortiz", "INV-30177"), entry(4, "payment", 36.4, "Courier tip", "ana.ortiz"), entry(5, "receipt", 120, "Customer deposit", "ana.ortiz", "DEP-0091")] },
+      { deskId: DESK, businessDate: day(-2), status: "closed", openingBalance: "1200.00", bookBalance: "1480.50", countedBalance: "1480.50", difference: "0.00", openedBy: ANA, closedBy: ANA, differencePosting: "not_posted", entries: [entry(1, "receipt", 310.5, "Parts counter sales", ANA, undefined, "4000"), entry(2, "payment", 30, "Office supplies", ANA, "RCPT-4417", "6400")] },
+      { deskId: DESK, businessDate: day(0), status: "open", openingBalance: "1480.50", bookBalance: "1480.50", openedBy: ANA, differencePosting: "not_posted", entries: [entry(3, "receipt", 250, "Walk-in sale, two seal kits", ANA, "INV-30177", "4000"), entry(4, "payment", 36.4, "Courier tip", ANA, undefined, "6400"), entry(5, "receipt", 120, "Customer deposit", ANA, "DEP-0091", "2300")] },
     ],
   ],
-  [uid(370, 2), []],
+  [DOCK, []],
 ]);
 
 function numbered(d: DemoDay): DemoDay {
@@ -379,17 +385,19 @@ function numbered(d: DemoDay): DemoDay {
 }
 for (const list of days.values()) list.forEach(numbered);
 
+const activeDay = (id: string): DemoDay | undefined => (days.get(id) ?? []).find((x) => x.status === "open" || x.status === "closing");
 const withOpen = (d: DemoDesk): CashDesk => {
-  const open = (days.get(d.id) ?? []).find((x) => x.status === "open");
+  const open = activeDay(d.id);
   return open ? { ...d, openDate: open.businessDate, balance: open.bookBalance } : d;
 };
 const stripDay = ({ entries: _e, ...rest }: DemoDay): CashDeskDay => rest;
+const countedTotal = (rows: CashDeskDenomination[]): number => rows.reduce((sum, r) => sum + Math.round(Number(r.value) * 100) * r.count, 0);
 
 route("GET", `${BASE}/cash-desks`, ({ query }) => ({ items: desks.all().filter((d) => d.legalEntityId === query.get("legalEntityId")).sort((a, b) => a.code.localeCompare(b.code)).map(withOpen) }));
 route("POST", `${BASE}/cash-desks`, ({ body }) => {
   const input = body as Omit<CashDesk, "id" | "status" | "version">;
   if (desks.all().some((d) => d.legalEntityId === input.legalEntityId && d.code === input.code)) return reply.problem(409, "TRS-0550", "a cash desk with this code exists in the legal entity");
-  const created = desks.insert({ ...input, id: newId(), status: "active", version: 1 });
+  const created = desks.insert({ ...input, dualControl: Boolean(input.dualControl), id: newId(), status: "active", version: 1 });
   days.set(created.id, []);
   return reply.created(created);
 });
@@ -397,15 +405,35 @@ route("GET", `${BASE}/cash-desks/{id}`, ({ params }) => {
   const d = desks.get(params.id);
   return d ? withOpen(d) : notFound("cash desk");
 });
+route("PATCH", `${BASE}/cash-desks/{id}`, ({ params, body }) => {
+  const d = desks.get(params.id);
+  if (!d) return notFound("cash desk");
+  const changes = body as { name?: string; maxBalance?: string; dualControl?: boolean };
+  const open = activeDay(params.id);
+  if (changes.maxBalance && open && cents(open.bookBalance) > cents(changes.maxBalance)) return reply.problem(422, "TRS-0541", `the open day already holds ${open.bookBalance}, more than the new maximum; pay cash to the bank first`);
+  return withOpen(desks.update(params.id, { ...changes, version: d.version + 1 }) ?? d);
+});
+route("POST", `${BASE}/cash-desks/{id}:deactivate`, ({ params }) => {
+  const d = desks.get(params.id);
+  if (!d) return notFound("cash desk");
+  const open = activeDay(params.id);
+  if (open) return reply.problem(409, "TRS-0555", `the desk has an open day (${open.businessDate}); close it first`);
+  return withOpen(desks.update(params.id, { status: "inactive", version: d.version + 1 }) ?? d);
+});
+route("POST", `${BASE}/cash-desks/{id}:activate`, ({ params }) => {
+  const d = desks.get(params.id);
+  return d ? withOpen(desks.update(params.id, { status: "active", version: d.version + 1 }) ?? d) : notFound("cash desk");
+});
 route("GET", `${BASE}/cash-desks/{id}/days`, ({ params }) => ({ items: [...(days.get(params.id) ?? [])].sort((a, b) => b.businessDate.localeCompare(a.businessDate)).map(stripDay) }));
 route("POST", `${BASE}/cash-desks/{id}/days`, ({ params, body }) => {
   const list = days.get(params.id);
   if (!list) return notFound("cash desk");
+  if (desks.get(params.id)?.status !== "active") return reply.problem(422, "TRS-0547", "the cash desk is inactive");
   const date = (body as { businessDate: string }).businessDate;
-  if (list.some((d) => d.status === "open")) return reply.problem(409, "TRS-0543", "the desk already has an open day; close it first");
+  if (activeDay(params.id)) return reply.problem(409, "TRS-0543", "the desk already has an open day; close it first");
   const last = list.filter((d) => d.status === "closed").sort((a, b) => b.businessDate.localeCompare(a.businessDate))[0];
   if (last && date <= last.businessDate) return reply.problem(409, "TRS-0545", `the last closed day is ${last.businessDate}; open a later day`);
-  const opened: DemoDay = { deskId: params.id, businessDate: date, status: "open", openingBalance: last?.countedBalance ?? "0.00", bookBalance: last?.countedBalance ?? "0.00", openedBy: "dev", entries: [] };
+  const opened: DemoDay = { deskId: params.id, businessDate: date, status: "open", openingBalance: last?.countedBalance ?? "0.00", bookBalance: last?.countedBalance ?? "0.00", openedBy: ME.id, differencePosting: "not_posted", entries: [] };
   list.push(opened);
   return reply.created(stripDay(opened));
 });
@@ -416,23 +444,49 @@ route("GET", `${BASE}/cash-desks/{id}/days/{date}/entries`, ({ params }) => {
 route("POST", `${BASE}/cash-desks/{id}/days/{date}:close`, ({ params, body }) => {
   const d = (days.get(params.id) ?? []).find((x) => x.businessDate === params.date);
   if (!d) return reply.problem(404, "TRS-0548", "the desk has no such business day");
-  if (d.status !== "open") return reply.problem(409, "TRS-0544", "the day is already closed");
-  const input = body as { countedBalance: string; reason?: string };
-  const diff = cents(input.countedBalance) - cents(d.bookBalance);
+  if (d.status !== "open") return reply.problem(409, "TRS-0544", "the day is already closed or waits for the second signature");
+  const input = body as { countedBalance?: string; reason?: string; denominations?: CashDeskDenomination[] };
+  const total = input.denominations?.length ? countedTotal(input.denominations) : cents(input.countedBalance ?? "0");
+  if (input.denominations?.length && input.countedBalance && cents(input.countedBalance) !== total) return reply.problem(422, "TRS-0556", `the denominations add up to ${dec(total)}, which differs from the counted balance`);
+  const diff = total - cents(d.bookBalance);
   if (diff !== 0 && !input.reason) return reply.problem(422, "TRS-0542", `the count differs from the book balance by ${dec(diff)}; give the reason`);
-  Object.assign(d, { status: "closed", countedBalance: input.countedBalance, difference: dec(diff), differenceReason: input.reason, closedBy: "dev" });
+  const dual = Boolean(desks.get(params.id)?.dualControl);
+  Object.assign(d, { status: dual ? "closing" : "closed", countedBalance: dec(total), difference: dec(diff), differenceReason: input.reason, denominations: input.denominations, closedBy: ME.id, differencePosting: !dual && diff !== 0 && postsToLedger(params.id) ? "posted" : "not_posted" });
+  return stripDay(d);
+});
+route("POST", `${BASE}/cash-desks/{id}/days/{date}:approve`, ({ params }) => {
+  const d = (days.get(params.id) ?? []).find((x) => x.businessDate === params.date);
+  if (!d) return reply.problem(404, "TRS-0548", "the desk has no such business day");
+  if (d.status !== "closing") return reply.problem(409, "TRS-0554", "the day is not waiting for a second signature");
+  Object.assign(d, { status: "closed", approvedBy: byUsername("marcus.lee").id, differencePosting: postsToLedger(params.id) && d.difference && cents(d.difference) !== 0 ? "posted" : "not_posted" });
+  return stripDay(d);
+});
+route("POST", `${BASE}/cash-desks/{id}/days/{date}:reject`, ({ params }) => {
+  const d = (days.get(params.id) ?? []).find((x) => x.businessDate === params.date);
+  if (!d) return reply.problem(404, "TRS-0548", "the desk has no such business day");
+  if (d.status !== "closing") return reply.problem(409, "TRS-0554", "the day is not waiting for a second signature");
+  Object.assign(d, { status: "open", countedBalance: undefined, difference: undefined, differenceReason: undefined, denominations: undefined, closedBy: undefined });
+  return stripDay(d);
+});
+route("POST", `${BASE}/cash-desks/{id}/days/{date}:post`, ({ params }) => {
+  const d = (days.get(params.id) ?? []).find((x) => x.businessDate === params.date);
+  if (!d) return reply.problem(404, "TRS-0548", "the desk has no such business day");
+  d.entries.forEach((e) => {
+    if (e.postingStatus === "pending") e.postingStatus = "posted";
+  });
   return stripDay(d);
 });
 route("POST", `${BASE}/cash-desks/{id}/entries`, ({ params, body }) => {
   const desk = desks.get(params.id);
-  const open = (days.get(params.id) ?? []).find((x) => x.status === "open");
+  const open = activeDay(params.id);
   if (!desk) return notFound("cash desk");
-  if (!open) return reply.problem(409, "TRS-0544", "the desk has no open day; open one first");
-  const input = body as { kind: "receipt" | "payment"; amount: string; description: string; reference?: string };
+  if (!open || open.status !== "open") return reply.problem(409, "TRS-0544", "the desk has no open day; open one first");
+  const input = body as CashDeskEntryInput;
   const after = cents(open.bookBalance) + (input.kind === "receipt" ? cents(input.amount) : -cents(input.amount));
   if (after < 0) return reply.problem(422, "TRS-0540", `the payment would overdraw the desk, which holds ${open.bookBalance}`);
   if (after > cents(desk.maxBalance)) return reply.problem(422, "TRS-0541", `the receipt would take the desk above its maximum of ${desk.maxBalance}`);
-  const created = { ...entry(open.entries.length + 100, input.kind, Number(input.amount), input.description, "dev", input.reference), id: newId() };
+  if (postsToLedger(params.id) && !input.counterAccount && !input.bankAccountId) return reply.problem(400, "COM-0001", "request failed validation");
+  const created: CashDeskEntry = { ...entry(open.entries.length + 100, input.kind, Number(input.amount), input.description, ME.id, input.reference, input.counterAccount), id: newId(), bankAccountId: input.bankAccountId, ...(input.bankAccountId ? { counterAccount: undefined } : {}), postingStatus: postsToLedger(params.id) ? "posted" : "not_posted" };
   open.entries.push(created);
   numbered(open);
   return reply.created(created);

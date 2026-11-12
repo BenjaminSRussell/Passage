@@ -136,7 +136,7 @@ describe("VersionsPage", () => {
       "GET /api/v1/costing/versions": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/costing/versions");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "No costing versions yet" })).toBeInTheDocument();
@@ -194,7 +194,7 @@ describe("CreateVersionPage", () => {
     fireEvent.change(screen.getByLabelText("Legal entity"), { target: { value: LE } });
     fireEvent.change(screen.getByLabelText("Code"), { target: { value: "STD-2026" } });
     fireEvent.click(screen.getByRole("button", { name: "Create version" }));
-    expect(await findAlert()).toHaveTextContent("CST-VER-CODE-DUPLICATE");
+    expect(await findAlert()).toHaveTextContent("a costing version with this code already exists");
   });
 });
 
@@ -266,7 +266,7 @@ describe("VersionDetailPage", () => {
     expect(screen.getByRole("button", { name: "Activate version" })).toBeDisabled();
   });
 
-  it("shows a refused preview's code and rejects bad on-hand before sending", async () => {
+  it("shows a refused preview's message and rejects bad on-hand before sending", async () => {
     const fetchMock = detailRoutes({
       [`POST /api/v1/costing/versions/${V1}:preview-activation`]: () =>
         json(422, { title: "Unprocessable Entity", code: "CST-ACT-007", detail: "1 product and site pairs have stock but no active standard cost" }),
@@ -278,7 +278,7 @@ describe("VersionDetailPage", () => {
     expect(calls(fetchMock, "POST", ":preview-activation")).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("On hand at activation (CSV)"), { target: { value: `productId,siteId,qty\n${P2},${S1},20` } });
     fireEvent.click(screen.getByRole("button", { name: "Preview revaluation" }));
-    await waitFor(() => expect(screen.getAllByRole("alert").some((a) => a.textContent?.includes("CST-ACT-007"))).toBe(true));
+    await waitFor(() => expect(screen.getAllByRole("alert").some((a) => a.textContent?.includes("no active standard cost"))).toBe(true));
   });
 
   it("imports a CSV file and copies another version, then reloads", async () => {

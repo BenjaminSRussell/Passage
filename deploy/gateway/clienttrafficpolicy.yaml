@@ -18,3 +18,4 @@ spec:
         - X-Passage-Tier
         - X-Passage-LegalEntity
         - X-Passage-Service-Token
+        - X-Passage-Gateway-Secret

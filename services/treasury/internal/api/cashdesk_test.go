@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -19,6 +20,14 @@ type fakeDesks struct {
 	entries []store.NewCashDeskEntry
 	closed  decimal.Decimal
 	reason  string
+	closeIn store.CloseDay
+	// posted holds the journal lines in the posting tests: PostPending lines wait here until the ledger takes them.
+	mu       sync.Mutex
+	journal  []store.CashDeskEntry
+	day      store.CashDeskDay
+	diffPost bool
+	updates  []store.UpdateCashDesk
+	status   string
 }
 
 func (f *fakeDesks) CreateCashDesk(_ context.Context, in store.NewCashDesk, _ string) (store.CashDesk, error) {
@@ -32,18 +41,87 @@ func (f *fakeDesks) OpenCashDeskDay(_ context.Context, id, date string) (store.C
 	return store.CashDeskDay{DeskID: id, BusinessDate: date, Status: "open"}, nil
 }
 func (f *fakeDesks) AddCashDeskEntry(_ context.Context, in store.NewCashDeskEntry, _ string) (store.CashDeskEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.entries = append(f.entries, in)
-	return store.CashDeskEntry{ID: ids.New(), Kind: in.Kind, Amount: in.Amount}, nil
+	e := store.CashDeskEntry{ID: ids.New(), DeskID: in.DeskID, BusinessDate: "2026-11-02", LineNo: len(f.entries), Kind: in.Kind, Amount: in.Amount, CounterAccount: in.CounterAccount, PostingStatus: "not_posted"}
+	if in.BankAccountID != "" {
+		e.BankAccountID = &in.BankAccountID
+	}
+	if in.PostPending {
+		e.PostingStatus = "pending"
+	}
+	f.journal = append(f.journal, e)
+	return e, nil
 }
 func (f *fakeDesks) ListCashDeskDays(context.Context, string) ([]store.CashDeskDay, error) {
 	return []store.CashDeskDay{}, nil
 }
 func (f *fakeDesks) ListCashDeskEntries(context.Context, string, string) ([]store.CashDeskEntry, error) {
-	return []store.CashDeskEntry{}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]store.CashDeskEntry{}, f.journal...), nil
 }
-func (f *fakeDesks) CloseCashDeskDay(_ context.Context, id, date string, counted decimal.Decimal, reason string) (store.CashDeskDay, error) {
-	f.closed, f.reason = counted, reason
-	return store.CashDeskDay{DeskID: id, BusinessDate: date, Status: "closed"}, nil
+func (f *fakeDesks) CloseCashDeskDay(_ context.Context, id, date string, in store.CloseDay) (store.CashDeskDay, error) {
+	f.closed, f.reason, f.closeIn = in.Counted, in.Reason, in
+	f.day = store.CashDeskDay{DeskID: id, BusinessDate: date, Status: "closed", DifferencePosting: "not_posted"}
+	if f.desk.DualControl {
+		f.day.Status = "closing"
+	} else if in.PostDifference {
+		f.day.DifferencePosting = "pending"
+		diff := "-0.50"
+		f.day.Difference = &diff
+	}
+	return f.day, nil
+}
+func (f *fakeDesks) ApproveCashDeskDay(_ context.Context, id, date string, post bool) (store.CashDeskDay, error) {
+	f.day.Status = "closed"
+	return f.day, nil
+}
+func (f *fakeDesks) RejectCashDeskDay(_ context.Context, id, date string) (store.CashDeskDay, error) {
+	f.day.Status = "open"
+	return f.day, nil
+}
+func (f *fakeDesks) GetCashDeskDay(context.Context, string, string) (store.CashDeskDay, error) {
+	return f.day, nil
+}
+func (f *fakeDesks) UpdateCashDesk(_ context.Context, id string, version int, in store.UpdateCashDesk) (store.CashDesk, error) {
+	f.updates = append(f.updates, in)
+	return f.desk, nil
+}
+func (f *fakeDesks) SetCashDeskStatus(_ context.Context, id string, version int, status string) (store.CashDesk, error) {
+	f.status = status
+	d := f.desk
+	d.Status = status
+	return d, nil
+}
+func (f *fakeDesks) PendingDeskPostings(context.Context, string, string) (store.DeskPostings, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := store.DeskPostings{Desk: f.desk, Day: f.day}
+	for _, e := range f.journal {
+		if e.PostingStatus == "pending" {
+			out.Entries = append(out.Entries, e)
+		}
+	}
+	if f.day.DifferencePosting == "pending" {
+		out.Difference = f.day.Difference
+	}
+	return out, nil
+}
+func (f *fakeDesks) MarkDeskEntryPosted(_ context.Context, _, entryID, ledgerEntryID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.journal {
+		if f.journal[i].ID == entryID {
+			f.journal[i].PostingStatus, f.journal[i].LedgerEntryID = "posted", ledgerEntryID
+		}
+	}
+	return nil
+}
+func (f *fakeDesks) MarkDeskDifferencePosted(_ context.Context, _, _, ledgerEntryID string) error {
+	f.day.DifferencePosting, f.day.DifferenceLedgerEntryID = "posted", ledgerEntryID
+	return nil
 }
 
 func deskServer(f *fakeDesks) http.Handler {

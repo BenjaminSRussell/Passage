@@ -12,6 +12,10 @@ export interface OidcConfig {
   authorizationEndpoint: string;
   tokenEndpoint: string;
   jwksUri: string;
+  /** Keycloak's end-session endpoint; signing out sends the browser here so the single sign-on session ends too. */
+  endSessionEndpoint: string;
+  /** Where Keycloak sends the browser after the end-session (a post.logout.redirect.uris entry of the client). */
+  postLogoutRedirectUri: string;
 }
 
 export interface CustomerIdentity {
@@ -20,6 +24,8 @@ export interface CustomerIdentity {
   customerId: string;
   legalEntityIds: string[];
   name: string;
+  /** The Keycloak session id (sid claim) of this sign-in, which a back-channel logout names; empty when Keycloak sent none. */
+  sessionId: string;
 }
 
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -53,6 +59,19 @@ export function authorizationUrl(cfg: OidcConfig, state: string, nonce: string, 
 }
 
 export class LoginRefused extends Error {}
+
+/**
+ * The URL that ends the contact's Keycloak session and brings the browser back to the portal: the ID token of the sign-in is the
+ * hint, so Keycloak signs out without asking. Without a token the client id stands in and Keycloak asks the contact to confirm.
+ */
+export function endSessionUrl(cfg: OidcConfig, idToken: string | undefined): string {
+  const url = new URL(cfg.endSessionEndpoint);
+  const params = new URLSearchParams({ post_logout_redirect_uri: cfg.postLogoutRedirectUri });
+  if (idToken) params.set("id_token_hint", idToken);
+  else params.set("client_id", cfg.clientId);
+  url.search = params.toString();
+  return url.toString();
+}
 
 export async function exchangeCode(cfg: OidcConfig, code: string, verifier: string, fetcher: Fetch): Promise<string> {
   const res = await fetcher(cfg.tokenEndpoint, {
@@ -111,18 +130,46 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-export async function verifyIdToken(token: string, cfg: OidcConfig, jwks: Jwks, nonce: string, nowMs: number): Promise<CustomerIdentity> {
+async function verifiedClaims(token: string, jwks: Jwks, what: string): Promise<Record<string, unknown>> {
   const parts = token.split(".");
-  if (parts.length !== 3) throw new LoginRefused("the ID token is malformed");
+  if (parts.length !== 3) throw new LoginRefused(`the ${what} is malformed`);
   const [h, p, s] = parts as [string, string, string];
   const header = decodePart(h);
-  if (header["alg"] !== "RS256" || typeof header["kid"] !== "string") throw new LoginRefused("the ID token is not RS256 with a key id");
+  if (header["alg"] !== "RS256" || typeof header["kid"] !== "string") throw new LoginRefused(`the ${what} is not RS256 with a key id`);
   const jwk = await jwks.key(header["kid"]);
-  if (!jwk) throw new LoginRefused("the ID token names an unknown signing key");
+  if (!jwk) throw new LoginRefused(`the ${what} names an unknown signing key`);
   if (!verify("RSA-SHA256", Buffer.from(`${h}.${p}`), createPublicKey({ key: jwk, format: "jwk" }), Buffer.from(s, "base64url"))) {
-    throw new LoginRefused("the ID token signature is invalid");
+    throw new LoginRefused(`the ${what} signature is invalid`);
   }
-  const claims = decodePart(p);
+  return decodePart(p);
+}
+
+const BACKCHANNEL_EVENT = "http://schemas.openid.net/event/backchannel-logout";
+
+/**
+ * Validates an OIDC back-channel logout token (OpenID Connect Back-Channel Logout 1.0, 2.6): RS256 signature from the realm keys,
+ * issuer, audience, a recent iat, the logout event, a jti, at least one of sid and sub, and no nonce. Returns what to end.
+ */
+export async function verifyLogoutToken(token: string, cfg: OidcConfig, jwks: Jwks, nowMs: number): Promise<{ sid: string; sub: string }> {
+  const claims = await verifiedClaims(token, jwks, "logout token");
+  const now = Math.floor(nowMs / 1000);
+  const aud = claims["aud"];
+  const audiences = Array.isArray(aud) ? aud : [aud];
+  if (claims["iss"] !== cfg.issuer || !audiences.includes(cfg.clientId)) throw new LoginRefused("the logout token is for another issuer or client");
+  if (typeof claims["iat"] !== "number" || Math.abs(claims["iat"] - now) > 5 * 60) throw new LoginRefused("the logout token is not recent");
+  if (typeof claims["exp"] === "number" && claims["exp"] + CLOCK_SKEW_SECONDS < now) throw new LoginRefused("the logout token has expired");
+  const events = claims["events"];
+  if (typeof events !== "object" || events === null || !(BACKCHANNEL_EVENT in events)) throw new LoginRefused("the token is not a logout token");
+  if ("nonce" in claims) throw new LoginRefused("a logout token must not carry a nonce");
+  if (typeof claims["jti"] !== "string" || claims["jti"] === "") throw new LoginRefused("the logout token has no jti");
+  const sid = str(claims["sid"]);
+  const sub = str(claims["sub"]).toLowerCase();
+  if (sid === "" && sub === "") throw new LoginRefused("the logout token names neither a session nor a user");
+  return { sid, sub };
+}
+
+export async function verifyIdToken(token: string, cfg: OidcConfig, jwks: Jwks, nonce: string, nowMs: number): Promise<CustomerIdentity> {
+  const claims = await verifiedClaims(token, jwks, "ID token");
   const now = Math.floor(nowMs / 1000);
   const aud = claims["aud"];
   const audiences = Array.isArray(aud) ? aud : [aud];
@@ -141,5 +188,5 @@ export async function verifyIdToken(token: string, cfg: OidcConfig, jwks: Jwks, 
   }
   const legalEntityIds = str(claims["le"]).split(",").map((e) => e.trim().toLowerCase()).filter((e) => UUID.test(e) && e !== NIL);
   if (legalEntityIds.length === 0) throw new LoginRefused("the account has no legal entity");
-  return { userId, tenantId, customerId, legalEntityIds, name: str(claims["name"]) || str(claims["preferred_username"]) };
+  return { userId, tenantId, customerId, legalEntityIds, name: str(claims["name"]) || str(claims["preferred_username"]), sessionId: str(claims["sid"]) };
 }

@@ -219,3 +219,63 @@ describe("plan generation", () => {
     await screen.findByText("Amounts generated.");
   });
 });
+
+describe("plan workbook", () => {
+  const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+  it("checks a workbook without writing, then imports it with the grid version and the file as the body", async () => {
+    const mock = stub((method, url, init) => {
+      if (url.endsWith(`/api/v1/budget/plans/${PLAN}`)) return json(200, plan);
+      if (url.includes(`/scenarios/${S1}/grid`) && method === "GET") return json(200, { scenario: plan.scenarios[0], cells, total: "300", truncated: false });
+      if (url.includes(`/scenarios/${S1}:import?dryRun=true`)) return json(200, { valid: true, dryRun: true, rows: 3, cells: 36, total: "1675.3734" });
+      if (url.includes(`/scenarios/${S1}:import`)) return init.body instanceof Blob ? json(200, { scenarioId: S1, version: 8, cells: 36, total: "1675.3734" }) : undefined;
+      return undefined;
+    });
+    at(`/budgeting/plans/${PLAN}/scenarios/${S1}`);
+    const file = new File(["x"], "plan.xlsx", { type: XLSX });
+    fireEvent.change(await screen.findByLabelText("Edited workbook"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Check the workbook" }));
+    await screen.findByText("The workbook is valid");
+    expect(screen.getByText(/3 rows and 36 amounts/)).toBeTruthy();
+    expect(callsTo(mock, "POST", ":import?dryRun=true")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Import the workbook" }));
+    await screen.findByText("The workbook was imported.");
+    const [, init] = callsTo(mock, "POST", ":import")[1];
+    expect((init.headers as Record<string, string>)["If-Match"]).toBe('"7"');
+    expect((init.headers as Record<string, string>)["content-type"]).toBe(XLSX);
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
+  });
+
+  it("lists every problem of a workbook by its cell and writes nothing", async () => {
+    stub((method, url) => {
+      if (url.endsWith(`/api/v1/budget/plans/${PLAN}`)) return json(200, plan);
+      if (url.includes(`/scenarios/${S1}/grid`) && method === "GET") return json(200, { scenario: plan.scenarios[0], cells, total: "300", truncated: false });
+      if (url.includes(`/scenarios/${S1}:import`))
+        return json(400, { code: "COM-0001", title: "Bad Request", detail: "request failed validation", errors: { "Plan!C10": "must be a number", "Plan!D2": "must not be negative" } });
+      return undefined;
+    });
+    const { container } = at(`/budgeting/plans/${PLAN}/scenarios/${S1}`);
+    fireEvent.change(await screen.findByLabelText("Edited workbook"), { target: { files: [new File(["x"], "plan.xlsx")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Import the workbook" }));
+    await screen.findByText(/The workbook has problems/);
+    const list = screen.getByRole("list", { name: "Problems in the workbook" });
+    expect(list.textContent).toContain("Cell D2: must not be negative");
+    expect(list.textContent).toContain("Cell C10: must be a number");
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("downloads the grid as a workbook", async () => {
+    const mock = stub((method, url) => {
+      if (url.endsWith(`/api/v1/budget/plans/${PLAN}`)) return json(200, plan);
+      if (url.includes(`/scenarios/${S1}/grid`) && method === "GET") return json(200, { scenario: plan.scenarios[0], cells, total: "300", truncated: false });
+      if (url.includes(`/scenarios/${S1}:export`)) return new Response(new Uint8Array([80, 75, 3, 4]), { status: 200, headers: { ETag: '"7"', "content-type": XLSX } });
+      return undefined;
+    });
+    URL.createObjectURL = vi.fn(() => "blob:plan");
+    URL.revokeObjectURL = vi.fn();
+    at(`/budgeting/plans/${PLAN}/scenarios/${S1}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Download as spreadsheet" }));
+    await screen.findByText(/The workbook was downloaded/);
+    expect(callsTo(mock, "GET", ":export")).toHaveLength(1);
+  });
+});

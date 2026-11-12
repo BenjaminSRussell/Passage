@@ -395,7 +395,7 @@ export function HierarchyDesignerPage() {
                   ) : null}
                   {units.error && editingDraft ? (
                     <Alert tone="warning" title="Operating units did not load" live="alert">
-                      Names show as ids and operating units cannot be added until this is fixed. {units.error.message} ({units.error.code})
+                      Names show as ids and operating units cannot be added until this is fixed. <ProblemMessage problem={units.error} />
                     </Alert>
                   ) : null}
                   {detail.error ? (

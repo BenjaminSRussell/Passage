@@ -123,6 +123,17 @@ Built and tested:
   open_items staged; rejected lines stay staged and need a waiver. An AP amount carries the ledger sign (owed to the
   vendor is negative); a positive amount (vendor debit balance) is rejected `MIG-LOAD-AP-DEBIT-BALANCE`. Configure
   `PAYABLES_URL` (chart `payables.url`) next to `RECEIVABLES_URL`; tests use `targettest.FakePayables`.
+- **Opening stock and bank balances** (H-S9-1, H-S10-1, `internal/target/opening.go`, `migrations/0028_opening_load.sql`):
+  `POST /migration/runs/{id}/opening-load` sends the staged balances of a RECONCILED onhand run to
+  `POST /v1/inventory/opening-batches` (one OPENING_BALANCE batch per currency and 1000 lines, unit cost = value over
+  quantity at six decimals, `products` maps legacy items to product ids) or of a bank_balances run to
+  `POST /v1/treasury/opening-balances` (batches of 1000 accounts in minor units, `bankAccounts` maps legacy accounts to
+  treasury account ids). Batch keys are `mf-<pack>-<system>-<company hash>-<currency>-<content hash>`; refused rows are
+  stored REJECTED with the target's reason and the rest is sent again, a 5xx leaves rows pending (PARTIAL), the target's
+  batches are read back and compared as `target.onhand.*` (item count, quantity and value per currency) or
+  `target.bank_balances.*` (item count, minor units per currency). A clean RECONCILED load counts the pack as posted in
+  the go/no-go. Configure `INVENTORY_URL` and `TREASURY_URL` (chart `inventory.url`, `treasury.url`); tests use
+  `targettest.FakeOpening`.
 - **Legacy cross-reference lookup**: `GET /api/v1/migration/xref` by legacy id or by Passage record.
 - **Store** (`internal/store`, `migrations/`): Postgres with forced row-level security on every
   table, the outbox written in the same transaction, `Idempotency-Key` replay, and an optimistic
@@ -205,7 +216,7 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 | `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `migration.cutover.manage` |
 | `POST`/`GET /api/v1/cutover/plans/{id}/rollback/compensations` | `migration.cutover.manage` |
 | `PUT /api/v1/cutover/plans/{id}/opening-targets/{system}/{company}`, `GET .../opening-targets` | `migration.cutover.manage` (the company-to-legal-entity and ledger mapping of the opening journal; a mapped company refuses any other target) |
-| `POST /api/v1/migration/opening-targets/{system}/{company}/release` | `migration.opening-target.release` plus `tenant.administer` and no legal-entity scope (frees a pin with no postings; reason, person and time are kept in `gl_opening_target_release`) |
+| `POST /api/v1/migration/opening-targets/{system}/{company}/release` | `migration.opening-target.release` plus `tenant.administer` and no legal-entity scope (frees a pin with no postings; reason, person and time are kept in `gl_opening_target_release`; refused with 409 while an opening journal of the company is being posted, because a posting holds a lease (`gl_opening_posting_lease`, migration 0029, 10 minutes at most) from before it reads the pin until its last posting row is recorded) |
 | `POST /api/v1/migration/parallel-runs/replay` | `migration.factory.run` |
 | `GET /api/v1/migration/coexistence` | `migration.factory.view` |
 | `PUT /api/v1/migration/coexistence/{system}/{company}/{entity}` | `migration.cutover.manage` |

@@ -66,6 +66,7 @@ paths:
       parameters:
         - { name: status, in: query, schema: { $ref: '#/components/schemas/JournalStatus' } }
         - { name: type, in: query, schema: { $ref: '#/components/schemas/JournalType' } }
+        - { name: q, in: query, description: Keeps the journals whose number starts with this (ignoring case)., schema: { type: string, maxLength: 40 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: cursor, in: query, description: nextCursor of the previous page, schema: { type: string } }
       responses:
@@ -170,6 +171,80 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/opening-batches:
+    post:
+      operationId: importOpeningStock
+      summary: Load a batch of opening stock from a legacy system (#49, H-S9-1)
+      description: |
+        The migration factory's cutover snapshot of stock, one currency per batch of 1 to 1000 items. The batch becomes one OPENING_BALANCE
+        journal that the import creates, approves and posts in this call, so the stock is on hand and booked against the posting profile's
+        opening account like any posted journal. `batchKey` makes a resend a replay (200 with `Idempotent-Replayed`, a half-finished call is
+        completed); the same key with other content is 422 INV-OPB-002. 422 INV-OPB-001 names invalid rows (`errors` keyed `items[row].field`).
+        `qty` is positive, `costPrice` is the unit cost; the posted value is the sum of qty times costPrice. 503 INV-OPB-003 when not enabled.
+      x-passage-duty: inventory.import.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, batchKey, postingDate, currency, items]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                batchKey: { type: string, minLength: 1, maxLength: 200 }
+                postingDate: { type: string, format: date }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [reference, productId, dimensions, enteredUnit, qty, costPrice]
+                    properties:
+                      reference: { type: string, minLength: 1, maxLength: 255 }
+                      productId: { type: string, format: uuid }
+                      dimensions: { type: object, additionalProperties: { type: string } }
+                      enteredUnit: { type: string }
+                      qty: { type: string }
+                      costPrice: { type: string }
+      responses:
+        '200':
+          description: The stored batch (a replay)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpeningBatch' }
+        '201':
+          description: Batch posted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpeningBatch' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listOpeningStockBatches
+      summary: The opening stock batches of a legal entity, in key order, with their quantity and value
+      x-passage-duty: inventory.import.read
+      parameters:
+        - { name: legal_entity, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: A page of batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/OpeningBatch' } }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /v1/inventory/onhand:
     get:
       operationId: queryInventoryOnHand
@@ -3124,6 +3199,17 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    OpeningBatch:
+      type: object
+      required: [journalId, legalEntityId, batchKey, currency, itemCount, qty, value]
+      properties:
+        journalId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        batchKey: { type: string }
+        currency: { type: string }
+        itemCount: { type: integer }
+        qty: { type: string, description: Sum of the quantities, six decimals }
+        value: { type: string, description: Sum of quantity times cost price, twelve decimals }
     JournalType:
       type: string
       description: |
@@ -3278,6 +3364,7 @@ components:
       required: [id, legalEntityId, journalType, status, postingDate, currency, version, lineCount, createdAt]
       properties:
         id: { type: string, format: uuid }
+        number: { type: string, description: 'Document number IJ-000123, per legal entity, assigned on insert (migration 0042); absent on an older journal that was not backfilled.' }
         legalEntityId: { type: string, format: uuid }
         journalType: { $ref: '#/components/schemas/JournalType' }
         status: { $ref: '#/components/schemas/JournalStatus' }

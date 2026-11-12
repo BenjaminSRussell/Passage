@@ -64,6 +64,7 @@ updates:
       - /services/warehouse
       - /tools/connectors
       - /tools/importexport
+      - /tools/passage-server
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

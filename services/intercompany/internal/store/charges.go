@@ -16,13 +16,13 @@ import (
 
 const chargeColumns = `id::text, source_id, version, lender, borrower, category, resource_role, transaction_date, quantity::text, unit_cost::text, currency,
 	status, coalesce(method, ''), coalesce(cost::text, ''), coalesce(price::text, ''), coalesce(margin::text, ''), coalesce(journal_id::text, ''),
-	coalesce(failure_code, ''), created_by, created_at`
+	coalesce(failure_code, ''), settlement_mode, tax_amount::text, tax_code, tax_recorded, created_by, created_at`
 
 func scanCharge(row pgx.Row) (domain.ChargeRecord, error) {
 	var c domain.ChargeRecord
-	var status, qty, unit, cost, price, margin string
+	var status, qty, unit, cost, price, margin, tax string
 	err := row.Scan(&c.ID, &c.SourceID, &c.Version, &c.Lender, &c.Borrower, &c.Category, &c.Role, &c.TransactionDate, &qty, &unit, &c.Currency,
-		&status, &c.Method, &cost, &price, &margin, &c.JournalID, &c.FailureCode, &c.CreatedBy, &c.CreatedAt)
+		&status, &c.Method, &cost, &price, &margin, &c.JournalID, &c.FailureCode, &c.SettlementMode, &tax, &c.TaxCode, &c.TaxRecorded, &c.CreatedBy, &c.CreatedAt)
 	if err != nil {
 		return c, err
 	}
@@ -30,7 +30,7 @@ func scanCharge(row pgx.Row) (domain.ChargeRecord, error) {
 	for _, f := range []struct {
 		dst *decimal.Decimal
 		raw string
-	}{{&c.Quantity, qty}, {&c.UnitCost, unit}, {&c.Cost, cost}, {&c.Price, price}, {&c.Margin, margin}} {
+	}{{&c.Quantity, qty}, {&c.UnitCost, unit}, {&c.Cost, cost}, {&c.Price, price}, {&c.Margin, margin}, {&c.TaxAmount, tax}} {
 		if f.raw == "" {
 			continue
 		}
@@ -92,7 +92,7 @@ func (s *Postgres) BeginCharge(ctx context.Context, c domain.ChargeRecord, hash 
 // and journal, compensated when the journal was reversed, or on suspense when
 // no transfer price applied. It publishes charge.posted.v1 for a posted charge.
 // A charge that is no longer pending is returned unchanged.
-func (s *Postgres) FinishCharge(ctx context.Context, id string, status domain.ChargeStatus, method string, p domain.ChargePricing, journalID, failureCode string) (domain.ChargeRecord, error) {
+func (s *Postgres) FinishCharge(ctx context.Context, id string, status domain.ChargeStatus, method string, p domain.ChargePricing, journalID, failureCode string, extra domain.ChargeExtra) (domain.ChargeRecord, error) {
 	pr, _, err := principalOf(ctx)
 	if err != nil {
 		return domain.ChargeRecord{}, err
@@ -107,9 +107,14 @@ func (s *Postgres) FinishCharge(ctx context.Context, id string, status domain.Ch
 		if journalID != "" {
 			journal = journalID
 		}
+		mode := extra.SettlementMode
+		if mode == "" {
+			mode = domain.SettlementJournal
+		}
 		tag, err := tx.Exec(ctx, `update ic_charge_request set status = $3, method = nullif($4, ''), cost = $5::numeric, price = $6::numeric, margin = $7::numeric,
-				journal_id = $8::uuid, failure_code = nullif($9, ''), updated_at = now()
-			where tenant_id = $1 and id = $2::uuid and status = 'pending'`, pr.TenantID, id, string(status), method, cost, price, margin, journal, failureCode)
+				journal_id = $8::uuid, failure_code = nullif($9, ''), settlement_mode = $10, tax_amount = $11::numeric, tax_code = $12, updated_at = now()
+			where tenant_id = $1 and id = $2::uuid and status = 'pending'`, pr.TenantID, id, string(status), method, cost, price, margin, journal, failureCode,
+			mode, extra.TaxAmount.String(), extra.TaxCode)
 		if err != nil {
 			return err
 		}
@@ -117,8 +122,18 @@ func (s *Postgres) FinishCharge(ctx context.Context, id string, status domain.Ch
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errChargeNotFound(id)
 		}
-		if err != nil || tag.RowsAffected() == 0 || status != domain.ChargePosted {
+		if err != nil || tag.RowsAffected() == 0 {
 			return err
+		}
+		if status == domain.ChargeInvoiceRequested {
+			return enqueue(ctx, tx, "ic_charge", out.ID, icevents.ChargeInvoiceRequested, pr.TenantID, icevents.ChargeInvoiceRequestedData{
+				ID: out.ID, SourceID: out.SourceID, Version: out.Version, Lender: out.Lender, Borrower: out.Borrower, Category: out.Category, Role: out.Role,
+				Date: out.TransactionDate.Format("2006-01-02"), Currency: out.Currency, Cost: out.Cost.String(), Price: out.Price.String(), Margin: out.Margin.String(),
+				Tax: out.TaxAmount.String(), TaxCode: out.TaxCode,
+			})
+		}
+		if status != domain.ChargePosted {
+			return nil
 		}
 		return enqueue(ctx, tx, "ic_charge", out.ID, icevents.ChargePosted, pr.TenantID, icevents.ChargePostedData{
 			ID: out.ID, SourceID: out.SourceID, Version: out.Version, Lender: out.Lender, Borrower: out.Borrower, Currency: out.Currency,
@@ -199,4 +214,17 @@ func (s *Postgres) ListCharges(ctx context.Context, f ChargeFilter, after string
 		page.Next = page.Items[limit-1].ID
 	}
 	return page, nil
+}
+
+// MarkTaxRecorded notes that the tax service has the transaction of a posted cross-border charge.
+func (s *Postgres) MarkTaxRecorded(ctx context.Context, id string) error {
+	pr, _, err := principalOf(ctx)
+	if err != nil {
+		return err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update ic_charge_request set tax_recorded = true, updated_at = now() where tenant_id = $1 and id = $2::uuid`, pr.TenantID, id)
+		return err
+	})
+	return wrap("mark intercompany charge tax recorded", err)
 }

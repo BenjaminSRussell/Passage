@@ -64,8 +64,26 @@ edge node:
 - `events.go`: PLC telegrams to `dev.passage.warehouse.automation.event.v1` events (arrived, diverted,
   fault) and a warehouse transport order to a MOVE telegram.
 
-Tests run the link against a fake PLC over `net.Pipe`. Dialling a PLC, mapping a vendor's telegram
-profile onto this one and forwarding events to the warehouse are open (NOT-IMPLEMENTED.md).
+Tests run the link against a fake PLC over `net.Pipe`. `internal/mfs/sim.go` is a simulated PLC (it accepts a MOVE
+and reports the arrival, a fault or a divert) used by the tests and the demo plant. `internal/runtime/automation.go`
+dials the PLC (`EDGE_PLC_ADDR`), sends the warehouse's pending transport orders as MOVE telegrams, reports each as
+SENT or REFUSED, and forwards the PLC's events to the warehouse ingest (`POST /v1/warehouse/automation/events`).
+Each link session has a name that travels with its events: the PLC numbers telegrams from 1 again after every
+reconnect, so the warehouse de-duplicates by station, session and sequence, not by sequence alone.
+Mapping a vendor's telegram profile onto this one is open (NOT-IMPLEMENTED.md).
+
+## Adapters, buffer and writers (#25)
+
+- `EDGE_SOURCE=opcua`: subscribes to the nodes the applied configuration maps (a tag's address is its node id,
+  `ns=2;s=Press1.Count`). `EDGE_OPCUA_ENDPOINT`, `EDGE_OPCUA_SECURITY_POLICY` and `_MODE` (None only when `PASSAGE_ENV` is dev,
+  refused elsewhere; a secured channel needs `EDGE_OPCUA_CERT_FILE` and `_KEY_FILE`), `EDGE_OPCUA_USER` with
+  `EDGE_OPCUA_PASSWORD_FILE` (refused over None in every environment), `EDGE_OPCUA_INTERVAL_MS`.
+- `EDGE_SOURCE=mqtt`: subscribes to the topics the configuration maps. A message is a bare number or text, or
+  `{"value": ..., "ts": "<RFC 3339>"}`. `EDGE_MQTT_BROKER` (host:port), `EDGE_MQTT_TLS` (required outside dev),
+  `EDGE_MQTT_CA_FILE`, `EDGE_MQTT_USER`, `EDGE_MQTT_PASSWORD_FILE`, `EDGE_MQTT_CLIENT_ID`.
+- `EDGE_WRITER`: `simulator`, `opcua` (pcs-opcua recipes) and `mqtt` (pcs-mqtt recipes), comma separated.
+- `EDGE_BUFFER_FILE`: persistent event buffer (an append-only journal); unsent events survive a restart.
+- `EDGE_PLC_ADDR`, `EDGE_PLC_STATION`, `EDGE_WAREHOUSE_URL`, `EDGE_WAREHOUSE_TOKEN_FILE`: the PLC link above.
 
 ## Configuration
 
@@ -79,7 +97,7 @@ profile onto this one and forwarding events to the warehouse are open (NOT-IMPLE
 | `SERVICE_NAME` | `iot-edge` | |
 | `EDGE_SHOPFLOOR_URL` | none | switches the runtime on; https (http only when `PASSAGE_ENV=dev`) |
 | `EDGE_NODE_ID` | none | the shopfloor edge node UUID; required with the URL |
-| `EDGE_SOURCE` | none | `simulator` is the only source built; required with the URL |
+| `EDGE_SOURCE` | none | `simulator`, `opcua` or `mqtt`; required with the URL |
 | `EDGE_TOKEN_FILE` | none | bearer token file for dev, until enrollment issues certificates |
 | `EDGE_SEQ_STATE_FILE` | none (memory) | sequence state; use a persistent path |
 | `IOT_BUFFER_CAPACITY` | `200000` | events in the in-memory ring, 1000 to 5000000 |
@@ -108,4 +126,4 @@ slice; the decisions behind SF-0018 and SF-0019 are in `DecideCert` and `Rollbac
 
 ## Dependencies
 
-Platform module only (`httpx`, `ids`), plus `rapid` for tests. No new dependencies.
+Platform module (`httpx`, `ids`), `github.com/gopcua/opcua` (MIT) for the OPC-UA adapter and its in-process test server, `rapid` for tests. The MQTT client and test broker are written in `internal/mqtt` (no dependency).

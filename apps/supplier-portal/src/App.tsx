@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { configureApi, get, signOut, type Me } from "./api";
 import { Documents } from "./pages/Documents";
+import { InvoiceLines } from "./pages/InvoiceLines";
 import { Invoices } from "./pages/Invoices";
+import { Payments } from "./pages/Payments";
 import { PurchaseOrderDetail, PurchaseOrders, type PoSummary } from "./pages/PurchaseOrders";
 import { RequestDetail, Requests, type VendorRequest } from "./pages/Requests";
 import { NewShipment, ShipmentDetail, Shipments } from "./pages/Shipments";
+import { Users } from "./pages/Users";
 import { Page, State, useLoad } from "./ui";
-import "./app.css";
 
 function Home() {
   const pos = useLoad(() => get<{ items: PoSummary[] }>("/api/v1/purchase-orders?limit=100"), []);
@@ -30,7 +32,7 @@ function Home() {
   );
 }
 
-const NAV: Array<[string, string]> = [["/", "Home"], ["/purchase-orders", "Purchase orders"], ["/shipments", "Shipments"], ["/invoices", "Invoices"], ["/documents", "Documents"], ["/requests", "Requests"]];
+const NAV: Array<[string, string]> = [["/", "Home"], ["/purchase-orders", "Purchase orders"], ["/shipments", "Shipments"], ["/invoices", "Invoices"], ["/payments", "Payments"], ["/documents", "Documents"], ["/requests", "Requests"]];
 
 export function App() {
   const me = useLoad(() => get<Me>("/bff/me"), []);
@@ -63,7 +65,7 @@ export function App() {
         ) : null}
       </header>
       <nav aria-label="Main">
-        <ul>{NAV.map(([to, label]) => <li key={to}><NavLink to={to} end={to === "/"}>{label}</NavLink></li>)}</ul>
+        <ul>{[...NAV, ...(me.data?.isAdmin ? [["/users", "Users"] as [string, string]] : [])].map(([to, label]) => <li key={to}><NavLink to={to} end={to === "/"}>{label}</NavLink></li>)}</ul>
       </nav>
       <main id="main" key={entity}>
         <State load={me}>
@@ -76,6 +78,9 @@ export function App() {
               <Route path="/shipments/new" element={<NewShipment />} />
               <Route path="/shipments/:id" element={<ShipmentDetail />} />
               <Route path="/invoices" element={<Invoices />} />
+              <Route path="/invoices/received" element={<InvoiceLines />} />
+              <Route path="/payments" element={<Payments />} />
+              <Route path="/users" element={<Users isAdmin={Boolean(me.data?.isAdmin)} />} />
               <Route path="/documents" element={<Documents />} />
               <Route path="/requests" element={<Requests />} />
               <Route path="/requests/:id" element={<RequestDetail />} />

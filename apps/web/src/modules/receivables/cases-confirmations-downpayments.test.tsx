@@ -208,7 +208,7 @@ describe("Balance confirmations", () => {
   it("lists runs with their counts and shows the empty and error states", async () => {
     server.handler = () => json(200, { items: [{ ...run, confirmations: undefined }] });
     const first = renderAt("/receivables/balance-confirmations");
-    const table = await findTable({ name: "Balance confirmation runs" });
+    const table = await findTable({ name: "Balance confirmations" });
     await waitFor(() => expect(table).toHaveTextContent("2027-03-31"));
     expect(pageViolations(first.container)).toEqual([]);
     first.unmount();
@@ -218,7 +218,7 @@ describe("Balance confirmations", () => {
     second.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/balance-confirmations");
-    expect(await findAlert()).toHaveTextContent("Could not load the confirmation runs");
+    expect(await findAlert()).toHaveTextContent("Could not load balance confirmation runs");
   });
 
   it("starts a run with the defaults and an Idempotency-Key", async () => {
@@ -388,7 +388,7 @@ describe("Down payments and deposits", () => {
     expect(ifMatch(":receive")).toBe('"1"');
     expect(server.calls.find((c) => c.url.pathname.endsWith(":receive"))!.body).toEqual({ receivedDate: "2027-03-02" });
 
-    const item = await screen.findByLabelText("Open item id");
+    const item = await screen.findByLabelText("Open item");
     fireEvent.change(item, { target: { value: ITEM } });
     fill("Amount", "2000.01");
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -410,7 +410,7 @@ describe("Down payments and deposits", () => {
       return json(200, deposit);
     };
     renderAt(`/receivables/down-payments/${DP}`);
-    fireEvent.change(await screen.findByLabelText("Open item id"), { target: { value: ITEM } });
+    fireEvent.change(await screen.findByLabelText("Open item"), { target: { value: ITEM } });
     fireEvent.click(screen.getByRole("button", { name: "Offset" }));
     expect(await findAlert()).toHaveTextContent("AR-0017");
     fireEvent.click(screen.getByRole("button", { name: "Release 700.00 USD for refund" }));

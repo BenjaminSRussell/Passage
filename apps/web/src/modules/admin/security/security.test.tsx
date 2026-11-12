@@ -52,6 +52,7 @@ describe("admin security nav", () => {
       "/admin/security/assignments": "identity.security-role.maintain",
       "/admin/security/legal-entities": "identity.legal-entity.maintain",
       "/admin/security/users": "identity.user.maintain",
+      "/admin/security/customer-contacts": "identity.customer-contact.maintain",
       "/admin/security/roles": "identity.security-role.maintain",
     });
     const shown = (held: string[]) => visibleNav(admin.nav, held).map((n) => n.to).filter((to) => to.startsWith("/admin/security"));

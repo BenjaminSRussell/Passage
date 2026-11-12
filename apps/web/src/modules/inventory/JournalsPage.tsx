@@ -18,7 +18,7 @@ import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<JournalSummary>[] = [
-  { key: "id", header: "Journal", mono: true, render: (row) => shortId(row.id) },
+  { key: "id", header: "Journal", mono: true, render: (row) => row.number ?? shortId(row.id) },
   { key: "journalType", header: "Type", render: (row) => typeLabels[row.journalType] ?? row.journalType },
   { key: "status", header: "Status", render: (row) => <Badge tone={statusTone(row.status)}>{sentence(row.status)}</Badge> },
   { key: "postingDate", header: "Posting date", mono: true },

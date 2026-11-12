@@ -22,28 +22,32 @@ import (
 // fakeStore answers the Store port without a database. It records the last
 // apply call so tests can assert what the handler forwarded.
 type fakeStore struct {
-	lastVersion   int
-	lastPlan      store.ApplyRequest
-	lastKey       string
-	lastFilter    store.PaymentFilter
-	payment       store.Payment
-	lockbox       store.LockboxImport
-	adviceOptions store.AdviceOptions
-	banks         []store.BankAccount
-	backfill      store.BackfillRequest
-	deletedBank   string
-	seenFiles     map[string]bool
-	statement     statementCall
-	snapshots     store.SnapshotFilter
-	opening       store.OpeningImport
-	rmaRetries    []string
-	rmaFilter     store.RMACreditFilter
+	lastVersion        int
+	lastPlan           store.ApplyRequest
+	lastKey            string
+	lastFilter         store.PaymentFilter
+	lastOpenItemFilter store.OpenItemFilter
+	payment            store.Payment
+	lockbox            store.LockboxImport
+	adviceOptions      store.AdviceOptions
+	banks              []store.BankAccount
+	fx                 store.FXSetting
+	reversed           string
+	backfill           store.BackfillRequest
+	deletedBank        string
+	seenFiles          map[string]bool
+	statement          statementCall
+	snapshots          store.SnapshotFilter
+	opening            store.OpeningImport
+	rmaRetries         []string
+	rmaFilter          store.RMACreditFilter
 }
 
 func (f *fakeStore) CreateOpenItem(context.Context, store.OpenItem) (store.OpenItem, error) {
 	return store.OpenItem{}, nil
 }
-func (f *fakeStore) ListOpenItems(context.Context, store.OpenItemFilter, int) ([]store.OpenItem, error) {
+func (f *fakeStore) ListOpenItems(_ context.Context, filter store.OpenItemFilter, _ int) ([]store.OpenItem, error) {
+	f.lastOpenItemFilter = filter
 	return []store.OpenItem{{Currency: "USD", DueDate: "2027-03-01", OpenAmount: decimal.RequireFromString("12.00")}}, nil
 }
 func (f *fakeStore) GetOpenItem(_ context.Context, id string) (store.OpenItem, error) {
@@ -394,10 +398,16 @@ func TestReads_ValidateQueryParameters(t *testing.T) {
 		"/v1/receivables/open-items?status=sometimes",
 		"/v1/receivables/open-items?customer=nope",
 		"/v1/receivables/open-items?limit=0",
+		"/v1/receivables/open-items?due_from=soon",
+		"/v1/receivables/open-items?due_to=2027-13-01",
+		"/v1/receivables/open-items?due_from=2027-02-01&due_to=2027-01-01",
+		"/v1/receivables/open-items?cursor=nope",
 		"/v1/receivables/aging?asOf=yesterday",
 		"/v1/receivables/payments?status=PAID",
 		"/v1/receivables/payments?customer=nope",
 		"/v1/receivables/payments?limit=501",
+		"/v1/receivables/payments?q=" + strings.Repeat("x", 101),
+		"/v1/receivables/open-items?q=" + strings.Repeat("x", 101),
 	} {
 		if rec := do(h, http.MethodGet, path, "", "receivables.view", nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", path, rec.Code)
@@ -421,7 +431,7 @@ func TestMissingTenantIsUnauthorized(t *testing.T) {
 func TestListPayments_ForwardsFiltersAndNeedsView(t *testing.T) {
 	fs := &fakeStore{}
 	h := router(fs)
-	path := "/v1/receivables/payments?status=ON_ACCOUNT&customer=" + testItem
+	path := "/v1/receivables/payments?status=ON_ACCOUNT&q=+Acme+&customer=" + testItem
 	if rec := do(h, http.MethodGet, path, "", "", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("without receivables.view: status = %d, want 403", rec.Code)
 	}
@@ -429,7 +439,10 @@ func TestListPayments_ForwardsFiltersAndNeedsView(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
-	if fs.lastFilter.Status != "ON_ACCOUNT" || fs.lastFilter.CustomerID != testItem {
+	if fs.lastFilter.Status != "ON_ACCOUNT" || fs.lastFilter.CustomerID != testItem || fs.lastFilter.Q != "Acme" {
 		t.Fatalf("filter = %+v", fs.lastFilter)
+	}
+	if rec := do(h, http.MethodGet, "/v1/receivables/open-items?q=INV-3", "", "receivables.view", nil); rec.Code != http.StatusOK || fs.lastOpenItemFilter.Q != "INV-3" {
+		t.Fatalf("open items: status = %d filter %+v", rec.Code, fs.lastOpenItemFilter)
 	}
 }

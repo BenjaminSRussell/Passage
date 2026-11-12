@@ -1255,6 +1255,220 @@ paths:
         '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 the ledger period of the entry is closed; RCV-LDG-001 the ledger refused the reversal. Not retryable.' }
         '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 the ledger could not be reached or the reversal failed; try again.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/vendor/invoiceable-lines:
+    get:
+      operationId: vendorListInvoiceableLines
+      summary: "List the received lines the vendor can still invoice"
+      x-passage-duty: receiving.vendor-portal.invoice
+      description: >-
+        Posted receipt lines of the calling vendor's purchase orders with quantity left to invoice: received minus invoiced minus what
+        other open submissions hold. The vendor is the one in the verified supplier-portal service token.
+      parameters:
+        - { name: purchaseOrderId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: The invoiceable lines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/InvoiceableLine' } }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/vendor/invoice-submissions:
+    post:
+      operationId: vendorCreateInvoiceSubmission
+      summary: "Submit an invoice against received lines as the vendor"
+      x-passage-duty: receiving.vendor-portal.invoice
+      description: >-
+        The vendor submits an invoice naming the received lines it bills (BR-20.11). Under row locks every line must be a posted receipt
+        of the vendor's own purchase order, in the invoice currency, with the quantity left after invoiced quantities and other open
+        submissions. The submission holds the quantities until accounts payable decides it or the vendor withdraws it. The answer carries
+        no vendor id.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvoiceSubmissionRequest' }
+      responses:
+        '201':
+          description: Submitted; Location names the new submission.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceSubmission' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor; AUTH-0003 the legal entity is out of scope.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'SUP-INV-004 the vendor already submitted this invoice number.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'SUP-INV-001 invalid submission; SUP-INV-002 a line is not the vendor''s posted receipt or has another currency; SUP-INV-003 more than is left to invoice.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+    get:
+      operationId: vendorListInvoiceSubmissions
+      summary: "List the vendor's invoice submissions"
+      x-passage-duty: receiving.vendor-portal.invoice
+      description: The calling vendor's submissions, newest first. A vendorId query parameter is ignored.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [SUBMITTED, WITHDRAWN, REJECTED, POSTED] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of submissions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceSubmissionPage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/vendor/invoice-submissions/{id}:
+    get:
+      operationId: vendorGetInvoiceSubmission
+      summary: "Get an invoice submission as the vendor"
+      x-passage-duty: receiving.vendor-portal.invoice
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The submission, without a vendor id.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceSubmission' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-011 unknown, or it belongs to another vendor.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/vendor/invoice-submissions/{id}:withdraw:
+    post:
+      operationId: vendorWithdrawInvoiceSubmission
+      summary: "Withdraw an open invoice submission as the vendor"
+      x-passage-duty: receiving.vendor-portal.invoice
+      description: Withdraws a SUBMITTED submission of the calling vendor and frees the quantities it held.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Withdrawn.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceSubmission' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'RCV-VND-001 the caller is not the supplier portal acting for a vendor.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-011 unknown, or it belongs to another vendor.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'SUP-INV-005 already decided or withdrawn.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoice-submissions:
+    get:
+      operationId: listInvoiceSubmissions
+      summary: "List vendors' invoice submissions for accounts payable"
+      x-passage-duty: receiving.ap.inquire
+      description: Submissions in the caller's legal entities (row security), newest first, with the vendor id.
+      parameters:
+        - { name: vendorId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [SUBMITTED, WITHDRAWN, REJECTED, POSTED] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of submissions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceSubmissionPage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoice-submissions/{id}:
+    get:
+      operationId: getInvoiceSubmission
+      summary: "Get a vendor's invoice submission for accounts payable"
+      x-passage-duty: receiving.ap.inquire
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The submission with its vendor id.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceSubmission' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-011 unknown or outside the caller''s legal entities.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoice-submissions/{id}:reject:
+    post:
+      operationId: rejectInvoiceSubmission
+      summary: "Reject a vendor's invoice submission with a reason"
+      x-passage-duty: receiving.vendor-invoice.post
+      description: Closes a SUBMITTED submission as REJECTED with a reason the vendor reads, and frees the quantities it held.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        '200':
+          description: Rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceSubmission' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-011' }
+        '409': { $ref: '#/components/responses/Problem', description: 'SUP-INV-005 already decided or withdrawn.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoice-submissions/{id}:resolve:
+    post:
+      operationId: resolveInvoiceSubmission
+      summary: "Close a vendor's invoice submission with the posted invoice"
+      x-passage-duty: receiving.vendor-invoice.post
+      description: >-
+        Closes a SUBMITTED submission as POSTED, naming the vendor invoice accounts payable posted from it. The invoice must be the
+        submission vendor's, of the submission's legal entity, POSTED or AUDIT_BLOCKED, and not already close another submission.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invoiceId]
+              properties:
+                invoiceId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Resolved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceSubmission' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-011' }
+        '409': { $ref: '#/components/responses/Problem', description: 'SUP-INV-005 already decided or withdrawn.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'SUP-INV-001 not the vendor''s invoice; SUP-INV-006 the invoice already closes another submission; SUP-INV-007 another legal entity or rejected after audit.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /healthz:
     get:
       operationId: liveness
@@ -2122,3 +2336,75 @@ components:
             properties:
               kind: { type: string, enum: [PPV, SMALL_DIFF] }
               amount: { $ref: '#/components/schemas/Money' }
+    InvoiceableLine:
+      type: object
+      required: [receiptId, receiptLineNo, packingSlip, receiptDate, purchaseOrderId, productId, receivedQty, invoicedQty, reservedQty, availableQty, unitPrice, currency]
+      properties:
+        receiptId: { type: string, format: uuid }
+        receiptLineNo: { type: integer }
+        packingSlip: { type: string }
+        receiptDate: { type: string, format: date }
+        purchaseOrderId: { type: string, format: uuid }
+        poLineNo: { type: integer }
+        productId: { type: string }
+        receivedQty: { type: string }
+        invoicedQty: { type: string }
+        reservedQty: { type: string, description: Held by other open submissions. }
+        availableQty: { type: string }
+        unitPrice: { type: string }
+        currency: { type: string }
+    InvoiceSubmissionRequest:
+      type: object
+      required: [legalEntityId, invoiceNumber, invoiceDate, currency, lines]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        invoiceNumber: { type: string, minLength: 1, maxLength: 64 }
+        invoiceDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        note: { type: string, maxLength: 1000 }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [receiptId, receiptLineNo, qty, unitPrice]
+            properties:
+              receiptId: { type: string, format: uuid }
+              receiptLineNo: { type: integer, minimum: 1 }
+              qty: { type: string }
+              unitPrice: { type: string }
+    InvoiceSubmission:
+      type: object
+      required: [id, legalEntityId, invoiceNumber, invoiceDate, currency, total, status, lines, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid, description: Accounts payable's answers only; never in the vendor's. }
+        invoiceNumber: { type: string }
+        invoiceDate: { type: string, format: date }
+        currency: { type: string }
+        total: { type: string }
+        note: { type: string }
+        status: { type: string, enum: [SUBMITTED, WITHDRAWN, REJECTED, POSTED] }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [receiptId, receiptLineNo, qty, unitPrice, amount]
+            properties:
+              receiptId: { type: string, format: uuid }
+              receiptLineNo: { type: integer }
+              qty: { type: string }
+              unitPrice: { type: string }
+              amount: { type: string }
+        createdAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+        decisionNote: { type: string }
+        invoiceId: { type: string, format: uuid }
+    InvoiceSubmissionPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InvoiceSubmission' } }
+        nextCursor: { type: string }

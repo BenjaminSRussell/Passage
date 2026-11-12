@@ -16,7 +16,7 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
 }
 
 const columns: DataTableColumn<Order>[] = [
-  { key: "id", header: "Order", mono: true, render: (row) => <Link to={`/quality/orders/${row.id}`}>{`Open order ${shortId(row.id)}`}</Link> },
+  { key: "id", header: "Order", mono: true, render: (row) => <Link to={`/quality/orders/${row.id}`}>{row.number ?? `Open order ${shortId(row.id)}`}</Link> },
   { key: "trigger", header: "Trigger", render: (row) => TRIGGER_LABELS[row.trigger] ?? row.trigger },
   { key: "itemId", header: "Item", render: (row) => <EntityName entity="product" id={row.itemId} fallback={row.itemId} /> },
   { key: "source", header: "Source", render: (row) => <SourceDocument type={row.sourceRef.type} id={row.sourceRef.id} /> },

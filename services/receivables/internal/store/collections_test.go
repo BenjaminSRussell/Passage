@@ -342,3 +342,40 @@ func TestInterest_PostOncePerPeriodChargesNewDaysOnlyAndReplays(t *testing.T) {
 		t.Errorf("INTEREST open items = %d, want 2", interest)
 	}
 }
+
+func TestListOpenItems_DueWindowAndKeysetPaging(t *testing.T) {
+	s := setup(t)
+	ctx := scopedCtx(42, legalEntity)
+	for i, due := range []string{"2027-03-01", "2027-03-02", "2027-03-02", "2027-03-10", "2027-04-01"} {
+		seedItem(t, s, ctx, "PAGE-"+string(rune('A'+i)), custA, due, "10.00", "USD")
+	}
+	var seen []string
+	var after OpenItem
+	for page := 0; page < 5; page++ {
+		f := OpenItemFilter{OpenOnly: true, DueFrom: "2027-03-01", DueTo: "2027-03-31"}
+		if page > 0 {
+			f.AfterDue, f.AfterID = after.DueDate, after.ID
+		}
+		got, err := s.ListOpenItems(ctx, f, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) == 0 {
+			break
+		}
+		for _, it := range got {
+			seen = append(seen, it.DocumentNumber)
+		}
+		after = got[len(got)-1]
+	}
+	if len(seen) != 4 {
+		t.Fatalf("paged %v; want the four items due in March, each once, and none from April", seen)
+	}
+	uniq := map[string]bool{}
+	for _, d := range seen {
+		if uniq[d] || d == "PAGE-E" {
+			t.Fatalf("paged %v: %s repeated or outside the window", seen, d)
+		}
+		uniq[d] = true
+	}
+}

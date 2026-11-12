@@ -17,6 +17,7 @@ const (
 	rmaSweepActor           = "system:receivables-rma-sweep"
 	defaultRMASweepInterval = 5 * time.Minute
 	minRMASweepInterval     = time.Minute
+	minRMAReservationTTL    = time.Hour
 	rmaSweepTimeout         = 5 * time.Minute
 )
 
@@ -24,6 +25,11 @@ const (
 type rmaSweeper interface {
 	RMASweepLegalEntities(ctx context.Context) ([]string, error)
 	SweepRMACredits(ctx context.Context, now time.Time, limit int) (store.RMASweepResult, error)
+}
+
+// rmaExpirer is the optional third pass: cancelling abandoned PENDING credits whose reservation outlived the TTL (#557).
+type rmaExpirer interface {
+	ExpireRMAReservations(ctx context.Context, now time.Time, ttl time.Duration, limit int) (store.RMAExpiryResult, error)
 }
 
 // journalSweeper is the optional second pass: the ledger journals receivables owes (30-2). The store implements it.
@@ -39,6 +45,8 @@ type rmaSweep struct {
 	interval time.Duration
 	tenants  []string
 	store    rmaSweeper
+	// reservationTTL is how long an unposted RMA credit may hold its invoice room before the sweep cancels it; 0 = never.
+	reservationTTL time.Duration
 }
 
 func newRMASweep(getenv func(string) string, s rmaSweeper) (*rmaSweep, error) {
@@ -67,7 +75,15 @@ func newRMASweep(getenv func(string) string, s rmaSweeper) (*rmaSweep, error) {
 		}
 		interval = d
 	}
-	return &rmaSweep{interval: interval, tenants: tenants, store: s}, nil
+	var ttl time.Duration
+	if v := getenv("RECEIVABLES_RMA_RESERVATION_TTL"); v != "" && v != "0" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < minRMAReservationTTL {
+			return nil, errors.New("RECEIVABLES_RMA_RESERVATION_TTL must be 0 (never expire) or a duration of at least 1h, got " + v)
+		}
+		ttl = d
+	}
+	return &rmaSweep{interval: interval, tenants: tenants, store: s, reservationTTL: ttl}, nil
 }
 
 func (s *rmaSweep) loop(ctx context.Context) {
@@ -143,6 +159,26 @@ func (s *rmaSweep) rmaPass(ctx context.Context) {
 				slog.Info("receivables RMA credit sweep finished", "tenantId", tenantID, "legalEntityId", le,
 					"posted", res.Posted, "failed", res.Failed, "parked", res.Parked, "committed", res.Committed)
 			}
+			s.expire(ctx, tenantID, le)
 		}
+	}
+}
+
+// expire cancels the abandoned credits of one legal entity when a reservation TTL is configured.
+func (s *rmaSweep) expire(ctx context.Context, tenantID, le string) {
+	ex, ok := s.store.(rmaExpirer)
+	if !ok || s.reservationTTL <= 0 {
+		return
+	}
+	runCtx, cancel := context.WithTimeout(tenant.With(ctx, tenant.Principal{TenantID: tenantID, LegalEntityID: le, UserID: rmaSweepActor}), rmaSweepTimeout)
+	defer cancel()
+	res, err := ex.ExpireRMAReservations(runCtx, time.Now().UTC(), s.reservationTTL, store.MaxRMAExpiryBatch)
+	if err != nil {
+		slog.Error("receivables RMA reservation expiry failed", "tenantId", tenantID, "legalEntityId", le, "err", err)
+		return
+	}
+	if res != (store.RMAExpiryResult{}) {
+		slog.Info("receivables RMA reservation expiry finished", "tenantId", tenantID, "legalEntityId", le,
+			"expired", res.Expired, "skipped", res.Skipped, "failed", res.Failed)
 	}
 }

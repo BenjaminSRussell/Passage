@@ -83,6 +83,7 @@ func (c *Client) allocate(ctx context.Context, code, idempotencyKey string) (str
 			duties = append(duties, d)
 		}
 		sort.Strings(duties)
+		tenant.ForwardGatewaySecret(req)
 		req.Header.Set(tenant.HeaderTenant, p.TenantID)
 		req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)
 		req.Header.Set(tenant.HeaderUser, p.UserID)

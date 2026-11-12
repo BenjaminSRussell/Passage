@@ -14,34 +14,41 @@ import (
 )
 
 var domainStatus = map[string]int{
-	domain.CodeOverDelivery:      http.StatusUnprocessableEntity,
-	domain.CodeCatchWeight:       http.StatusUnprocessableEntity,
-	domain.CodeCatchWeightUnit:   http.StatusUnprocessableEntity,
-	domain.CodeDuplicateSerial:   http.StatusUnprocessableEntity,
-	domain.CodeInvalidReceipt:    http.StatusUnprocessableEntity,
-	domain.CodeInvalidTransition: http.StatusConflict,
-	domain.CodePeriodClosed:      http.StatusUnprocessableEntity,
-	domain.CodePeriodUnresolved:  http.StatusUnprocessableEntity,
-	domain.CodeOverInvoice:       http.StatusUnprocessableEntity,
-	domain.CodeDuplicateInvoice:  http.StatusConflict,
-	domain.CodeCorrectionBelow:   http.StatusConflict,
-	domain.CodePostingPending:    http.StatusConflict,
-	domain.CodeLedgerRejected:    http.StatusUnprocessableEntity,
-	domain.CodeServiceReceipt:    http.StatusConflict,
-	domain.CodeOverCredit:        http.StatusUnprocessableEntity,
-	domain.CodePlanSettled:       http.StatusUnprocessableEntity,
-	domain.CodeAuditBlocked:      http.StatusConflict,
-	domain.CodeNotAuditBlocked:   http.StatusConflict,
-	domain.CodeAuditSelfRelease:  http.StatusForbidden,
-	domain.CodeInvalidBank:       http.StatusUnprocessableEntity,
-	domain.CodeInvalidCapture:    http.StatusUnprocessableEntity,
-	domain.CodeSheetOverLine:     http.StatusUnprocessableEntity,
-	domain.CodeSheetSelfAccept:   http.StatusForbidden,
-	domain.CodeSheetNotPending:   http.StatusConflict,
-	domain.CodeCaptureExtraction: http.StatusUnprocessableEntity,
-	domain.CodeAsnOverQty:        http.StatusUnprocessableEntity,
-	domain.CodeAsnTracking:       http.StatusConflict,
-	domain.CodeAsnConsumed:       http.StatusConflict,
+	domain.CodeOverDelivery:              http.StatusUnprocessableEntity,
+	domain.CodeCatchWeight:               http.StatusUnprocessableEntity,
+	domain.CodeCatchWeightUnit:           http.StatusUnprocessableEntity,
+	domain.CodeDuplicateSerial:           http.StatusUnprocessableEntity,
+	domain.CodeInvalidReceipt:            http.StatusUnprocessableEntity,
+	domain.CodeInvalidTransition:         http.StatusConflict,
+	domain.CodePeriodClosed:              http.StatusUnprocessableEntity,
+	domain.CodePeriodUnresolved:          http.StatusUnprocessableEntity,
+	domain.CodeOverInvoice:               http.StatusUnprocessableEntity,
+	domain.CodeDuplicateInvoice:          http.StatusConflict,
+	domain.CodeCorrectionBelow:           http.StatusConflict,
+	domain.CodePostingPending:            http.StatusConflict,
+	domain.CodeLedgerRejected:            http.StatusUnprocessableEntity,
+	domain.CodeServiceReceipt:            http.StatusConflict,
+	domain.CodeOverCredit:                http.StatusUnprocessableEntity,
+	domain.CodePlanSettled:               http.StatusUnprocessableEntity,
+	domain.CodeAuditBlocked:              http.StatusConflict,
+	domain.CodeNotAuditBlocked:           http.StatusConflict,
+	domain.CodeAuditSelfRelease:          http.StatusForbidden,
+	domain.CodeInvalidBank:               http.StatusUnprocessableEntity,
+	domain.CodeInvalidCapture:            http.StatusUnprocessableEntity,
+	domain.CodeSheetOverLine:             http.StatusUnprocessableEntity,
+	domain.CodeSheetSelfAccept:           http.StatusForbidden,
+	domain.CodeSheetNotPending:           http.StatusConflict,
+	domain.CodeCaptureExtraction:         http.StatusUnprocessableEntity,
+	domain.CodeAsnOverQty:                http.StatusUnprocessableEntity,
+	domain.CodeAsnTracking:               http.StatusConflict,
+	domain.CodeAsnConsumed:               http.StatusConflict,
+	domain.CodeSubmissionInvalid:         http.StatusUnprocessableEntity,
+	domain.CodeSubmissionLine:            http.StatusUnprocessableEntity,
+	domain.CodeSubmissionOverQty:         http.StatusUnprocessableEntity,
+	domain.CodeSubmissionDuplicate:       http.StatusConflict,
+	domain.CodeSubmissionState:           http.StatusConflict,
+	domain.CodeSubmissionInvoiceTaken:    http.StatusUnprocessableEntity,
+	domain.CodeSubmissionInvoiceMismatch: http.StatusUnprocessableEntity,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -75,6 +82,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-002", "receipt line has no open GR/IR item"))
 	case errors.Is(err, domain.ErrSelfBillPartyIncomplete):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, "AP-ERS-005", "the self-billing document cannot be issued: "+err.Error()))
+	case errors.Is(err, store.ErrSubmissionNotFound):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-011", "invoice submission not found"))
 	case errors.Is(err, store.ErrAsnNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-010", "advance ship notice not found"))
 	case errors.Is(err, store.ErrSelfBillNotFound):

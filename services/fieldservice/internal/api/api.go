@@ -21,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/routefeed"
 	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/store"
 )
 
@@ -53,6 +54,7 @@ var (
 
 // API holds the store and the counters exported on /metrics.
 type API struct {
+	feed        *routefeed.Feed
 	store       *store.Postgres
 	now         func() time.Time
 	opened      atomic.Int64

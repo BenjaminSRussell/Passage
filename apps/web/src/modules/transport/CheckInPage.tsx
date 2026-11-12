@@ -174,7 +174,7 @@ export function CheckInPage() {
           {field("sealNo", "checkin-seal", "Seal number", "The seal of an inbound sealed trailer.", { mono: true, max: 20, optional: true })}
           <LookupFormField id="checkin-load" label="Load" entity="load" optional hint="The load being collected or delivered." value={values.loadId} error={errors.loadId} onChange={(loadId) => update({ loadId })} />
           {field("driverName", "checkin-driver", "Driver name")}
-          {field("driverLicenseId", "checkin-license", "Driver license id", undefined, { max: 32 })}
+          {field("driverLicenseId", "checkin-license", "Driver licence number", undefined, { max: 32 })}
           {field("appointmentId", "checkin-appointment", "Appointment id", "Leave empty for a walk-in.", { mono: true, optional: true })}
           {field("scheduledAt", "checkin-scheduled", "Appointment time", "Required with the appointment id.", { type: "datetime-local", optional: true })}
           {field("arrivedAt", "checkin-arrived", "Arrived", "Leave empty for now; set it when entering a paper log later.", { type: "datetime-local", optional: true })}

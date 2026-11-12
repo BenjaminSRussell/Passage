@@ -11,6 +11,7 @@ Operator-facing documents for scale, DR, release and go-live.
 | [cost-model.md](cost-model.md) | Per-tenant metering, USD/EUR, accuracy target (BR-50.10) |
 | [upgrade-strategy.md](upgrade-strategy.md) | Rolling deploys, expand/contract, N/N-1 compatibility (FR-50.7) |
 | [tenant-provisioning.md](tenant-provisioning.md) | Provision and decommission steps (FR-50.8, BR-50.9) |
+| [windows-install.md](windows-install.md) | Signed MSI for Windows Server: properties, Intune/SCCM/GPO, ports, certificates, logs, upgrade, backup and restore (#607) |
 | [go-live-checklist.md](go-live-checklist.md) | 14-item cutover go/no-go and hypercare exit (9.50.1) |
 | [functional-guides/](functional-guides/) | Functional guides per phase, each wave with its owning service and web module: [phase 1](functional-guides/phase-1-master-data.md) master data, [phase 2](functional-guides/phase-2-financial-core.md) financial core, [phase 3](functional-guides/phase-3-procure-to-pay.md) procure-to-pay, [phase 4](functional-guides/phase-4-manufacturing.md) manufacturing, [phase 5](functional-guides/phase-5-order-to-cash.md) order-to-cash, [phase 6](functional-guides/phase-6-logistics.md) warehouse, quality and logistics, [phase 7](functional-guides/phase-7-treasury-controlling.md) treasury, assets and controlling, [phase 8](functional-guides/phase-8-projects-people-service.md) projects, people and service (FR-50.11) |
 | [training-curriculum.md](training-curriculum.md) | Six role-based training tracks with labs and assessments (FR-50.11) |

@@ -1,6 +1,7 @@
 // Planning half of the budgeting client (FR-38.2): plans, scenarios, the plan grid, spreading and comparison.
 // Money stays a decimal string end to end.
-import { command, query, request } from "./client";
+import { apiFetch } from "../../../shell/api/http";
+import { BudgetApiError, command, query, request, type Problem } from "./client";
 
 const BASE = "/api/v1/budget";
 
@@ -198,5 +199,32 @@ export function generateGrid(planId: string, scenarioId: string, version: number
     method: "POST",
     headers: { "content-type": "application/json", "If-Match": `"${version}"`, "Idempotency-Key": key },
     body: JSON.stringify(input),
+  });
+}
+
+export interface WorkbookCheck {
+  valid: boolean;
+  dryRun: boolean;
+  rows: number;
+  cells: number;
+  total: string;
+}
+
+/** The scenario's grid as an .xlsx workbook (FR-38.14); the grid version rides in the ETag header. */
+export async function exportWorkbook(planId: string, scenarioId: string): Promise<{ blob: Blob; version: string | null }> {
+  const res = await apiFetch(`${BASE}/plans/${encodeURIComponent(planId)}/scenarios/${encodeURIComponent(scenarioId)}:export`, { credentials: "same-origin" });
+  if (!res.ok) {
+    const problem = (await res.json().catch(() => ({}))) as Partial<Problem>;
+    throw new BudgetApiError({ title: problem.title ?? `HTTP ${res.status}`, status: res.status, code: problem.code ?? "COM-0000", detail: problem.detail, errors: problem.errors });
+  }
+  return { blob: await res.blob(), version: res.headers.get("ETag") };
+}
+
+/** Checks (dryRun) or imports an edited workbook of the same plan and scenario; the service names every bad cell. */
+export function importWorkbook(planId: string, scenarioId: string, version: number, file: Blob, key: string, dryRun: boolean): Promise<GridWritten | WorkbookCheck> {
+  return request(`${BASE}/plans/${encodeURIComponent(planId)}/scenarios/${encodeURIComponent(scenarioId)}:import${dryRun ? "?dryRun=true" : ""}`, {
+    method: "POST",
+    headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "If-Match": `"${version}"`, "Idempotency-Key": key },
+    body: file,
   });
 }

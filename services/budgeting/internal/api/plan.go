@@ -81,6 +81,7 @@ func (a *API) registerPlans(r chi.Router) {
 	maintain.Put("/v1/budget/plans/{id}/scenarios/{sid}/grid", a.putGrid)
 	maintain.Post("/v1/budget/plans/{id}/scenarios/{sid}:spread", a.spreadGrid)
 	maintain.Post("/v1/budget/plans/{id}/scenarios/{sid}:generate", a.generateGrid)
+	maintain.Post("/v1/budget/plans/{id}/scenarios/{sid}:import", a.importGrid)
 	maintain.Post("/v1/budget/plans/{id}:submit", a.submitPlan)
 
 	workflow := r.With(authz.RequireDuty(dutyPlanWorkflow))
@@ -91,6 +92,7 @@ func (a *API) registerPlans(r chi.Router) {
 	view.Get("/v1/budget/plans", a.listPlans)
 	view.Get("/v1/budget/plans/{id}", a.getPlan)
 	view.Get("/v1/budget/plans/{id}/scenarios/{sid}/grid", a.getGrid)
+	view.Get("/v1/budget/plans/{id}/scenarios/{sid}:export", a.exportGrid)
 	view.Get("/v1/budget/plans/{id}/scenarios:compare", a.compareScenarios)
 }
 

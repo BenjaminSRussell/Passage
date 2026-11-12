@@ -47,10 +47,12 @@ type PartnerUpdatedData struct {
 // is not in the PRD 7.40.5 event table: it tells consumers that an IC journal
 // whose second side was refused has been reversed.
 var (
-	JournalPosted         = events.Type(Context, "journal", "posted", 1)
-	JournalCompensated    = events.Type(Context, "journal", "compensated", 1)
-	ChargePosted          = events.Type(Context, "charge", "posted", 1)
-	ReconciliationFlagged = events.Type(Context, "reconciliation", "flagged", 1)
+	JournalPosted      = events.Type(Context, "journal", "posted", 1)
+	JournalCompensated = events.Type(Context, "journal", "compensated", 1)
+	ChargePosted       = events.Type(Context, "charge", "posted", 1)
+	// ChargeInvoiceRequested asks the invoice documents of the pairing to settle a charge in Invoice mode; nothing is posted here.
+	ChargeInvoiceRequested = events.Type(Context, "chargeinvoice", "requested", 1)
+	ReconciliationFlagged  = events.Type(Context, "reconciliation", "flagged", 1)
 )
 
 // JournalEntryData is the ledger entry one entity's side made.
@@ -95,4 +97,23 @@ type ReconciliationFlaggedData struct {
 	Currency string `json:"currency"`
 	Timing   int    `json:"timing"`
 	Mismatch int    `json:"mismatch"`
+}
+
+// ChargeInvoiceRequestedData is the payload of ChargeInvoiceRequested: what the lender's sales invoice and the borrower's vendor
+// invoice are raised for.
+type ChargeInvoiceRequestedData struct {
+	ID       string `json:"id"`
+	SourceID string `json:"sourceId"`
+	Version  int    `json:"version"`
+	Lender   string `json:"lender"`
+	Borrower string `json:"borrower"`
+	Category string `json:"category"`
+	Role     string `json:"resourceRole,omitempty"`
+	Date     string `json:"transactionDate"`
+	Currency string `json:"currency"`
+	Cost     string `json:"cost"`
+	Price    string `json:"price"`
+	Margin   string `json:"margin"`
+	Tax      string `json:"tax"`
+	TaxCode  string `json:"taxCode,omitempty"`
 }

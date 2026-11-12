@@ -71,7 +71,7 @@ describe("Bank statements", () => {
   it("lists imported statements with their counts", async () => {
     server.handler = (url) => (url.pathname.endsWith("/bank-statements/imports") ? json(200, { items: [statement] }) : undefined);
     const { container } = renderAt("/receivables/bank-statements");
-    const table = await findTable({ name: "Bank statement imports" });
+    const table = await findTable({ name: "Bank statements" });
     await waitFor(() => expect(table).toHaveTextContent("bbbbbbbbbbbb"));
     const row = within(table).getAllByRole("row")[1];
     expect(row).toHaveTextContent("1");
@@ -88,8 +88,8 @@ describe("Bank statements", () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty receivables.view" });
     renderAt("/receivables/bank-statements");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("Could not load the bank statement imports");
-    expect(alert).toHaveTextContent("AUTH-0003");
+    expect(alert).toHaveTextContent("You can't view bank statement imports");
+    expect(alert).toHaveTextContent("doesn't have access to this list");
   });
 
   it("checks the form, imports the XML and lists the payments created", async () => {
@@ -180,7 +180,7 @@ describe("Deductions", () => {
       return undefined;
     };
     const { container } = renderAt(`/receivables/deductions/new?legalEntity=${LE}&openItem=${ITEM}&amount=300.00`);
-    expect(screen.getByLabelText("Open item id")).toHaveValue(ITEM);
+    expect(screen.getByLabelText("Open item")).toHaveAttribute("data-value", ITEM);
     fill("Amount", "300.01");
     fireEvent.click(screen.getByRole("button", { name: "Record deduction" }));
     expect(await screen.findByText("At most 300.00 is open on the item.")).toBeInTheDocument();
@@ -190,7 +190,7 @@ describe("Deductions", () => {
 
     fill("Amount", "300.00");
     fill("Customer's reason", " promo spring ");
-    fill("Payment id", PAY);
+    fill("Payment", PAY);
     fireEvent.change(screen.getByLabelText("Type"), { target: { value: "PROMO" } });
     fireEvent.click(screen.getByRole("button", { name: "Record deduction" }));
     expect(await screen.findByRole("heading", { name: "Deduction 300.00 USD" })).toBeInTheDocument();

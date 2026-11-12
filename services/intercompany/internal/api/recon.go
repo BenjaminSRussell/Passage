@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -33,10 +34,13 @@ func (a *API) WithReconciliation(s ReconStore) *API {
 const MaxResolutionNote = 1000
 
 type reconRunRequest struct {
-	Period         string      `json:"period"`
-	Currency       string      `json:"currency"`
-	FXTolerancePct string      `json:"fxTolerancePct"`
-	Items          []reconItem `json:"items"`
+	Period         string `json:"period"`
+	Currency       string `json:"currency"`
+	FXTolerancePct string `json:"fxTolerancePct"`
+	// Source is "request" (the default: the pair amounts are in items) or "ledger": the pair amounts are read from the ledgers of
+	// the stored accounting matrix's entities, and items must be empty.
+	Source string      `json:"source"`
+	Items  []reconItem `json:"items"`
 }
 
 type reconRunResponse struct {
@@ -49,6 +53,7 @@ type reconRunResponse struct {
 	Mismatch       int       `json:"mismatch"`
 	Open           int       `json:"open"`
 	Blocking       bool      `json:"blocking"`
+	Source         string    `json:"source,omitempty"`
 	CreatedBy      string    `json:"createdBy"`
 	CreatedAt      time.Time `json:"createdAt"`
 }
@@ -85,7 +90,7 @@ type reconRunListResponse struct {
 
 func toReconRunResponse(r domain.ReconRun) reconRunResponse {
 	return reconRunResponse{ID: r.ID, Period: r.Period, Currency: r.Currency, FXTolerancePct: r.FXTolerancePct.String(), Matched: r.Matched, Timing: r.Timing,
-		Mismatch: r.Mismatch, Open: r.Open, Blocking: r.Mismatch > 0, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt.UTC()}
+		Mismatch: r.Mismatch, Open: r.Open, Blocking: r.Mismatch > 0, Source: r.Source, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt.UTC()}
 }
 
 func toReconItemResponse(it domain.ReconItem, currency string) reconItemResponse {
@@ -135,6 +140,13 @@ func (a *API) runReconciliation(w http.ResponseWriter, r *http.Request) {
 	}
 	if !currencyCode.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 code"
+	}
+	if req.Source == "ledger" {
+		a.runLedgerReconciliation(w, r, req, key, fields)
+		return
+	}
+	if req.Source != "" && req.Source != "request" {
+		fields["source"] = "must be request or ledger"
 	}
 	// The run fixes the period and currency of its items.
 	cr := classifyRequest{FXTolerancePct: req.FXTolerancePct, Items: make([]reconItem, len(req.Items))}
@@ -274,4 +286,48 @@ func (a *API) resolveReconItem(w http.ResponseWriter, r *http.Request) {
 	}
 	a.reconResolved.Add(1)
 	httpx.JSON(w, http.StatusOK, toReconItemResponse(it, currency))
+}
+
+// runLedgerReconciliation reads the pair amounts of every pair of the stored matrix from the ledgers (FR-40.6) and stores the run.
+func (a *API) runLedgerReconciliation(w http.ResponseWriter, r *http.Request, req reconRunRequest, key string, fields map[string]string) {
+	if len(req.Items) > 0 {
+		fields["items"] = "must be empty when the pair amounts are read from the ledgers"
+	}
+	tolerance := domain.DefaultFXTolerancePct
+	if a.registry != nil {
+		if st, err := a.registry.GetSettings(r.Context()); err == nil {
+			tolerance = st.FXTolerancePct
+		}
+	}
+	if req.FXTolerancePct != "" {
+		v := decimal.Zero
+		if amountText.MatchString(req.FXTolerancePct) {
+			v = decimal.RequireFromString(req.FXTolerancePct)
+		}
+		if !amountText.MatchString(req.FXTolerancePct) || domain.ValidateFXTolerance(v) != nil {
+			fields["fxTolerancePct"] = "must be a decimal from 0 to 5"
+		} else {
+			tolerance = v
+		}
+	}
+	if !validation(w, r, fields) {
+		return
+	}
+	if a.ledgerRecon == nil {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "reading the ledgers is not configured: the ledger is not set for this service"))
+		return
+	}
+	run, replayed, err := a.ledgerRecon.Run(r.Context(), req.Period, req.Currency, tolerance, key)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotent-Replayed", "true")
+	} else {
+		a.reconRuns.Add(1)
+		a.reconMismatches.Add(int64(run.Mismatch))
+	}
+	w.Header().Set("Location", "/v1/interco/reconciliations/"+run.ID)
+	httpx.JSON(w, http.StatusCreated, toReconRunResponse(run))
 }

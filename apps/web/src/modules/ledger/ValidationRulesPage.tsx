@@ -37,7 +37,7 @@ export function ValidationRulesPage() {
       />
       <LedgerPicker id="vr-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its validation rules.</p>
+        <p className={styles.note}>Choose a ledger to see its validation rules.</p>
       ) : result.isError ? (
         <Alert tone="danger" title="Could not load the validation rules" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
           {errorText(result.error)}

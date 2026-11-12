@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { CustomerContactsPage } from "./security/CustomerContactsPage";
 import { EffectivePermissionsPage } from "./security/EffectivePermissionsPage";
 import { LegalEntitiesPage } from "./security/LegalEntitiesPage";
 import { RoleAssignmentsPage } from "./security/RoleAssignmentsPage";
@@ -24,6 +25,7 @@ const admin: PassageModule = {
     { path: "/admin/security/legal-entities", element: createElement(LegalEntitiesPage), handle: { title: "Legal entities" } },
     { path: "/admin/security/users", element: createElement(UsersPage), handle: { title: "Users" } },
     { path: "/admin/security/users/:userId", element: createElement(UserDetailPage), handle: { title: "User" } },
+    { path: "/admin/security/customer-contacts", element: createElement(CustomerContactsPage), handle: { title: "Customer portal contacts" } },
     { path: "/admin/security/roles", element: createElement(RolesPage), handle: { title: "Role catalogue" } },
     { path: "/admin/security/roles/:name", element: createElement(RoleDetailPage), handle: { title: "Role" } },
   ],
@@ -39,6 +41,7 @@ const admin: PassageModule = {
     { label: "Role assignments", to: "/admin/security/assignments", duty: "identity.security-role.maintain" },
     { label: "Legal entities", to: "/admin/security/legal-entities", duty: "identity.legal-entity.maintain" },
     { label: "Users", to: "/admin/security/users", duty: "identity.user.maintain" },
+    { label: "Portal contacts", to: "/admin/security/customer-contacts", duty: "identity.customer-contact.maintain" },
     { label: "Role catalogue", to: "/admin/security/roles", duty: "identity.security-role.maintain" },
   ],
 };

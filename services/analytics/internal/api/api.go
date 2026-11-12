@@ -34,11 +34,18 @@ type API struct {
 	store   *store.Postgres
 	catalog []domain.Metric
 	now     func() time.Time
+	exec    Executor // runs queries on the semantic layer; nil when Cube is not configured
 }
 
 // New returns the API over the store with the platform metric catalog.
 func New(st *store.Postgres) *API {
 	return &API{store: st, catalog: domain.GovernedMetrics(), now: time.Now}
+}
+
+// WithExecutor sets the semantic layer that runs queries and fills dashboard tiles.
+func (a *API) WithExecutor(e Executor) *API {
+	a.exec = e
+	return a
 }
 
 // Register mounts the analytics routes on r.
@@ -47,6 +54,8 @@ func (a *API) Register(r *chi.Mux) {
 		g.Use(authz.RequireDuty(DutyView))
 		g.Get("/v1/analytics/metrics", a.listMetrics)
 		g.Method(http.MethodPost, "/v1/analytics/query", tenant.ReadOnlyPOST(http.HandlerFunc(a.query)))
+		g.Method(http.MethodPost, "/v1/analytics/query:execute", tenant.ReadOnlyPOST(http.HandlerFunc(a.execute)))
+		g.Get("/v1/analytics/dashboards/{id}/values", a.dashboardValues)
 	})
 	r.With(authz.RequireDuty(DutyFinance)).Get("/v1/analytics/reconciliation", a.reconciliation)
 	a.registerSlice2(r)

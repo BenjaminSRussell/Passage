@@ -84,7 +84,7 @@ func ifMatchIdem(version, key string) map[string]string {
 }
 
 func TestOrderAction_EnforcesTheDutyOfEachAction(t *testing.T) {
-	maintain, confirm := []string{dutyPurchaseOrderMaintain}, []string{dutyPurchaseOrderConfirm}
+	maintain, confirm, vendorConfirm := []string{dutyPurchaseOrderMaintain}, []string{dutyPurchaseOrderConfirm}, []string{dutyPurchaseOrderVendorConfirm}
 	tests := []struct {
 		action, status string
 		duties         []string
@@ -96,6 +96,11 @@ func TestOrderAction_EnforcesTheDutyOfEachAction(t *testing.T) {
 		{"approve", domain.POStatusInReview, confirm, 200, domain.POStatusApproved},
 		{"reject", domain.POStatusInReview, confirm, 200, domain.POStatusRejected},
 		{"confirm", domain.POStatusApproved, confirm, 200, domain.POStatusConfirmed},
+		{"confirm", domain.POStatusApproved, vendorConfirm, 200, domain.POStatusConfirmed},
+		{"approve", domain.POStatusInReview, vendorConfirm, 403, ""},
+		{"reject", domain.POStatusInReview, vendorConfirm, 403, ""},
+		{"submit", domain.POStatusDraft, vendorConfirm, 403, ""},
+		{"cancel", domain.POStatusConfirmed, vendorConfirm, 403, ""},
 		{"approve", domain.POStatusInReview, maintain, 403, ""},
 		{"confirm", domain.POStatusApproved, maintain, 403, ""},
 		{"submit", domain.POStatusDraft, confirm, 403, ""},

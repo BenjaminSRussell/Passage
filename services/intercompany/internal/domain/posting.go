@@ -50,6 +50,10 @@ type PostedEntry struct {
 	Legs            []Leg
 	LedgerEntryID   string // empty until posted
 	ReversalEntryID string // empty unless the entry was compensated
+	// PostedOn is the date the ledger took the entry; ShiftedFrom is the date it was meant for when that period was closed
+	// (zero when the entry went in on its own date).
+	PostedOn    time.Time
+	ShiftedFrom time.Time
 }
 
 // JournalRecord is a stored intercompany journal with the ledger entries it made.

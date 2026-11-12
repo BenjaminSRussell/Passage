@@ -23,6 +23,10 @@ on:
         type: boolean
         required: false
         default: false
+      portals:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -194,7 +198,7 @@ jobs:
       matrix:
         # excluded until clean: services/close engineering fx migration org party payables tax,
         # tools/connectors.
-        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/mobile, services/numbering, services/ops, services/platform-health, services/product, services/receiving, services/search, tools/importexport, tools/rlscheck, tools/tenant-restore, tools/e2e]
+        module: [platform/go, services/audit, services/batch, services/identity, services/metadata, services/mobile, services/numbering, services/ops, services/platform-health, services/product, services/receiving, services/search, tools/importexport, tools/rlscheck, tools/tenant-restore, tools/e2e, tools/passage-server]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -234,7 +238,39 @@ jobs:
             fi
             sleep $((attempt * 20))
           done
-      - run: npx playwright test
+      # The demo-flows project has its own job below, so a failure there names the demo flows.
+      - run: npx playwright test --project=chromium --project=warehouse-mobile
+
+  # The procure-to-pay and order-to-cash flows, the keyboard-only requisition run and the axe scan of every P2P/O2C
+  # route (WCAG 2.2 AA), run against the demo build: the real UI over the in-browser fake backend, every duty held.
+  # The scan fails on a serious or critical violation and on a route missing from the list (e2e/flowRoutes.ts).
+  web-demo-flows:
+    if: inputs.web
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx vite build --mode demo
+      - run: |
+          for attempt in 1 2 3; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
+            npx playwright install --with-deps chromium && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "::warning::Chromium's system packages could not be installed; installing the browser alone"
+              npx playwright install chromium
+              break
+            fi
+            sleep $((attempt * 20))
+          done
+      - run: npx playwright test --project=demo-flows
 
   warehouse-mobile:
     if: inputs.warehouse
@@ -253,6 +289,31 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # Wave 30 and the supplier portal: the two portal BFFs (Node 24, types stripped, no build step) and the two portal apps (Vite and
+  # React). Typecheck, tests and, where the package has one, the production build.
+  portals:
+    name: portals (${{ matrix.package }})
+    if: inputs.portals
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [services/customer-portal-ts, apps/customer-portal, services/supplier-portal-ts, apps/supplier-portal]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build --if-present
 
   # Wave 47: agent runtime, MCP gateway and the eval harness (gate thresholds,
   # metrics, authorization and audit contract tests). `npm run eval` is not a
@@ -327,7 +388,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e
       - run: helm lint services/platform-health/charts/hello-ledger services/receiving/charts/receiving services/fx/charts/fx services/org/charts/org services/identity/charts/identity services/batch/charts/batch services/edi/charts/edi
       - run: bash services/receiving/charts/receiving/test-env.sh
       - run: bash services/identity/charts/identity/test-networkpolicy.sh
@@ -349,7 +410,7 @@ jobs:
         with:
           go-version: '1.26'
           cache-dependency-path: '**/go.sum'
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4
         with:
           tofu_version: 1.13.2
@@ -419,7 +480,7 @@ jobs:
           cache: false
       - run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
       - run: pip install pyyaml==6.0.2 && PATH="$(go env GOPATH)/bin:$PATH" make -C deploy test-gateway
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e
       - run: make -C deploy test-argocd
       - name: Install Kyverno CLI
         env:

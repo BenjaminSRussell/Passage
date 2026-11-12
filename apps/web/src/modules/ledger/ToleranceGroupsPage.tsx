@@ -38,7 +38,7 @@ export function ToleranceGroupsPage() {
       />
       <LedgerPicker id="tg-ledger" label="Choose a ledger" ledgerId={ledgerId} onChange={setLedgerId} />
       {ledgerId === "" ? (
-        <p className={styles.note}>Enter a ledger id to see its tolerance groups.</p>
+        <p className={styles.note}>Choose a ledger to see its tolerance groups.</p>
       ) : result.isError ? (
         <Alert tone="danger" title="Could not load the tolerance groups" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
           {errorText(result.error)}

@@ -94,12 +94,16 @@ export function WorkerHomeResource({ worker, onSaved }: { worker: Worker; onSave
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not save the home resource" live="alert">
-              {failure.code === "SF-0143"
-                ? "The worker was changed by someone else. Reload the page and try again."
-                : failure.code === "SF-0156"
-                  ? "The shop floor does not know this resource: it has no registered machine and no dispatched jobs."
-                  : failure.message}{" "}
-              ({failure.code})
+              <ProblemMessage
+                problem={failure}
+                message={
+                  failure.code === "SF-0143"
+                    ? "The worker was changed by someone else. Reload the page and try again."
+                    : failure.code === "SF-0156"
+                      ? "The shop floor does not know this resource: it has no registered machine and no dispatched jobs."
+                      : undefined
+                }
+              />
             </Alert>
           </div>
         ) : null}

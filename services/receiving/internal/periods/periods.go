@@ -107,6 +107,7 @@ func (c *Client) call(ctx context.Context, op, method, target string, payload []
 		return 0, nil, fmt.Errorf("%s: %w", op, err)
 	}
 	if !signed {
+		tenant.ForwardGatewaySecret(req)
 		req.Header.Set(tenant.HeaderDuties, dutyPeriodCheck)
 		req.Header.Set(tenant.HeaderTenant, principal.TenantID)
 		req.Header.Set(tenant.HeaderLegalEntity, legalEntity)

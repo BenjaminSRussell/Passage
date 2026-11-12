@@ -69,6 +69,11 @@ type Pair struct {
 	SellerIsSubsidiary bool
 	ICNetInvestment    bool   // IC balance is part of the net investment in the foreign operation (IAS 21.32)
 	FXGainLossAccount  string // profit or loss account for IC exchange differences (IAS 21.45); AcctFXGainLoss when empty
+	// UnrealizedProfit, when set, is the unrealized profit in closing inventory (unit currency) summed over the IC receipt layers;
+	// it replaces ICSales less ICCost times UnsoldShare in E3.
+	UnrealizedProfit *decimal.Decimal
+	// Dividend is the dividend the subsidiary declared in the period (unit currency); a positive amount makes E6.
+	Dividend decimal.Decimal
 }
 
 // Eliminate builds the entries for E1–E5 and checks that every rule balances.
@@ -96,8 +101,11 @@ func Eliminate(p Pair) ([]Entry, error) {
 
 	// E3: unrealized profit in closing inventory at the average rate. Upstream
 	// profit is shared with the NCI; downstream profit belongs to the parent.
-	if p.UnsoldShare.IsPositive() {
+	if p.UnsoldShare.IsPositive() || (p.UnrealizedProfit != nil && p.UnrealizedProfit.IsPositive()) {
 		profit := p.ICSales.Sub(p.ICCost).Mul(p.UnsoldShare)
+		if p.UnrealizedProfit != nil {
+			profit = *p.UnrealizedProfit
+		}
 		up := round(profit.Mul(p.Rates.Average), cur)
 		out = leg(out, RuleE3, AcctCOGS, up)
 		out = leg(out, RuleE3, AcctInventory, up.Neg())
@@ -130,6 +138,15 @@ func Eliminate(p Pair) ([]Entry, error) {
 	nciProfit := round(NCIShare(round(p.NetIncome.Mul(p.Rates.Average), cur), p.OwnershipPct), cur)
 	out = leg(out, RuleE5, AcctNCIProfit, nciProfit)
 	out = leg(out, RuleE5, AcctNCIEquity, nciProfit.Neg())
+
+	// E6: the dividend the subsidiary declared, at the average rate, against its owners' dividend income and the NCI's share.
+	if p.Dividend.IsPositive() {
+		e6, err := EliminateDividends(Dividend{Currency: cur, OwnershipPct: p.OwnershipPct, Rate: p.Rates.Average, Amount: p.Dividend})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e6...)
+	}
 
 	if err := CheckBalanced(out); err != nil {
 		return nil, err
@@ -199,6 +216,10 @@ func (p Pair) validate() error {
 		return invalid("closing, average and historical rates must be positive")
 	case p.UnsoldShare.IsNegative() || p.UnsoldShare.GreaterThan(decimal.NewFromInt(1)):
 		return invalid("unsold share must be between 0 and 1")
+	case p.UnrealizedProfit != nil && p.UnrealizedProfit.IsNegative():
+		return invalid("unrealized profit must not be negative")
+	case p.Dividend.IsNegative():
+		return invalid("dividend must not be negative")
 	case p.FXGainLossAccount != "" && (!codePattern.MatchString(p.FXGainLossAccount) || reservedAccounts[p.FXGainLossAccount]):
 		return invalid("FX gain or loss account must be 1 to 64 letters, digits or . _ : - and not an elimination or CTA account")
 	case p.InvestmentCost.IsNegative():

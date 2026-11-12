@@ -365,6 +365,55 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: 'PTY-CUSTOMER-NOT-FOUND (unknown id, another tenant or legal entity).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/customers/{id}/portal-access:
+    put:
+      operationId: setCustomerPortalAccess
+      x-passage-duty: party.write
+      summary: Let contacts of a ship-to customer also act for its bill-to account in the customer portal.
+      description: Off by default. A bill-to contact always reaches the accounts that bill to it; a ship-to contact reaches its bill-to account only when billToAccess is true.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [billToAccess], properties: { billToAccess: { type: boolean } } }
+      responses:
+        '200': { description: The new setting., content: { application/json: { schema: { type: object, properties: { billToAccess: { type: boolean } } } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-CUSTOMER-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/customer-portal/accounts:
+    get:
+      operationId: customerPortalAccounts
+      summary: The accounts a customer portal contact may act for.
+      x-passage-duty: party.customer-portal.read
+      description: |
+        For the customer portal only (#30): the service-only duty, and the customer is the signed `cus` claim of the customer-portal
+        service token (a staff caller is 403 PTY-CUS-001). Answers the customer itself ("self") and the accounts that bill to it
+        ("ship-to") in the same legal entity and customer group and not blocked for all transactions; its own bill-to account
+        ("bill-to") only when portal-access is set on it. A shared customer group alone relates nothing.
+      responses:
+        '200':
+          description: The accounts, the customer first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        accountNumber: { type: string }
+                        name: { type: string }
+                        relation: { type: string, enum: [self, bill-to, ship-to] }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-CUSTOMER-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/party/vendors/{id}/bank-accounts:
     parameters:
       - { name: id, in: path, required: true, description: Vendor role id., schema: { type: string, format: uuid } }
@@ -675,6 +724,408 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/vendor-portal/prospects:
+    post:
+      operationId: registerVendorProspect
+      summary: "Record a supplier's own registration from the public portal page"
+      x-passage-duty: party.vendor-portal.register
+      description: >-
+        Called only by the supplier portal BFF with a vendorless supplier-portal service token whose only duty is this one; any other
+        caller is refused with PTY-SUP-SCOPE. The registration lands in vendor_prospect for a buyer to accept or reject. The answer is
+        the same 202 whether or not the email already waits for review, so it never tells a stranger who has registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewVendorProspect' }
+      responses:
+        '202':
+          description: Received.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [RECEIVED] }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON, or a body over 16 KiB.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE: not the supplier portal acting for no vendor.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID with per-field errors.' }
+        '429': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-LIMIT: too many registrations are waiting for review.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/invites:
+    get:
+      operationId: listVendorInvites
+      summary: "List the calling vendor's user invitations"
+      x-passage-duty: party.vendor-portal.admin
+      description: The invitations of the vendor in the verified supplier-portal service token, newest first. Tokens are never returned.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: The invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/VendorInvite' } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE: not a supplier account.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+    post:
+      operationId: createVendorInvite
+      summary: "Invite a user to the calling vendor's supplier portal account"
+      x-passage-duty: party.vendor-portal.admin
+      description: >-
+        Stores the invitation with a hash of its token and an expiry and emits the created event without the token; a pending
+        invitation of the same vendor for the same email is revoked. The token is in this answer only; nothing stores it. Only the vendor administrator's token carries the duty (the supplier-admin role); the portal signs it only for the invitation routes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                displayName: { type: string, maxLength: 140 }
+      responses:
+        '201':
+          description: Created; the token is shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invite, token]
+                properties:
+                  invite: { $ref: '#/components/schemas/VendorInvite' }
+                  token: { type: string }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE: not a supplier account.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID with per-field errors.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/invites/{id}:revoke:
+    post:
+      operationId: revokeVendorInvite
+      summary: "Revoke an open invitation of the calling vendor"
+      x-passage-duty: party.vendor-portal.admin
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorInvite' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE: not a supplier account.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-NOT-FOUND: unknown, or another vendor''s.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-STATE: the invitation was already accepted.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/invites/{id}:verify:
+    post:
+      operationId: verifyVendorInvite
+      summary: "Check an invitation token without using it"
+      x-passage-duty: party.vendor-portal.invite-accept
+      description: The token must name the invitation in the path and the vendor in the verified token, and its secret must match.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InviteToken' }
+      responses:
+        '200':
+          description: Valid; who to create and for which vendor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorInviteDetails' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON, or a body over 2 KiB.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-INVITE-INVALID: not valid, expired or already used.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-portal/invites/{id}:accept:
+    post:
+      operationId: acceptVendorInvite
+      summary: "Use an invitation token"
+      x-passage-duty: party.vendor-portal.invite-accept
+      description: As verify, then marks the invitation accepted (once) and emits the accepted event without the token.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InviteToken' }
+      responses:
+        '200':
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorInviteDetails' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON, or a body over 2 KiB.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003 or PTY-SUP-SCOPE.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-INVITE-INVALID: not valid, expired or already used.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-prospects:
+    get:
+      operationId: listVendorProspects
+      summary: "List supplier registrations for review"
+      x-passage-duty: party.read
+      description: Registrations from the public portal page in the caller's tenant, newest first, optionally of one status.
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [NEW, ACCEPTED, REJECTED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
+      responses:
+        '200':
+          description: One page of registrations; nextCursor is present when another page follows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/VendorProspect' } }
+                  nextCursor: { type: string }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001: cursor is not a nextCursor of this list.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: unknown status.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-prospects/{id}:
+    get:
+      operationId: getVendorProspect
+      summary: "Get one supplier registration"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The registration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorProspect' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-NOT-FOUND.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-prospects/{id}:accept:
+    post:
+      operationId: acceptVendorProspect
+      summary: "Accept a supplier registration as a vendor"
+      x-passage-duty: party.write
+      description: >-
+        Claims the registration, then creates the party (organization, legal name and registration number from the registration), a
+        vendor role blocked until the onboarding is approved by someone other than the accepting buyer, and the onboarding
+        questionnaire request. Every step is idempotent on the registration id, so repeating a call that stopped part-way finishes it.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountNumber, vendorGroupId, currencyCode, questionnaireId]
+              properties:
+                accountNumber: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+                vendorGroupId: { type: string, format: uuid }
+                paymentTermId: { type: string, format: uuid }
+                currencyCode: { type: string, pattern: '^[A-Z]{3}$' }
+                questionnaireId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Accepted, with the party, vendor and onboarding request ids.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorProspect' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-NOT-FOUND, or the questionnaire is unknown.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-STATE: already rejected, or accepted into another party; PTY-VENDOR-EXISTS: the account number is taken.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID or PTY-PARTY-INVALID with per-field errors.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/vendor-prospects/{id}:reject:
+    post:
+      operationId: rejectVendorProspect
+      summary: "Reject a supplier registration with a note"
+      x-passage-duty: party.vendor-request.decide
+      description: Closes a NEW registration as REJECTED with the note; nothing is created.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        '200':
+          description: Rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorProspect' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-NOT-FOUND.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-PROSPECT-STATE: already decided.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-SUP-INVALID: the note is missing or too long.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/payment-terms:
+    get:
+      operationId: listPaymentTerms
+      summary: "List payment terms"
+      x-passage-duty: party.read
+      description: The tenant's payment terms by code, for a form to pick the term of a customer or vendor role by name.
+      responses:
+        '200':
+          description: The payment terms.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PaymentTerm' } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/payment-terms/{id}:
+    get:
+      operationId: getPaymentTerm
+      summary: "Get one payment term"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The payment term.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentTerm' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PAYMENT-TERM-NOT-FOUND.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/posting-profiles:
+    get:
+      operationId: listPostingProfiles
+      summary: "List customer posting profiles of the caller's legal entities"
+      x-passage-duty: party.read
+      description: Posting profiles by code in the caller's legal entities (row security), optionally of one of them.
+      parameters:
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The posting profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PostingProfile' } }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001: legalEntityId is not a UUID.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/posting-profiles/{id}:
+    get:
+      operationId: getPostingProfile
+      summary: "Get one posting profile"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The posting profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostingProfile' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-POSTING-PROFILE-NOT-FOUND: unknown or outside the caller''s legal entities.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/customer-groups:
+    get:
+      operationId: listCustomerGroups
+      summary: "List customer groups"
+      x-passage-duty: party.read
+      responses:
+        '200':
+          description: The customer groups by code.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/CustomerGroup' } }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+    post:
+      operationId: createCustomerGroup
+      summary: "Register a customer group"
+      x-passage-duty: party.write
+      description: >-
+        A short code (1 to 10 of A-Z, 0-9, dash, underscore; upper-cased) and a name. An optional id registers a group id customer roles
+        already carry. Also allowed with party.import.write. An Idempotency-Key replays the stored group.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                id: { type: string, format: uuid }
+                code: { type: string, pattern: '^[A-Za-z0-9_-]{1,10}$' }
+                name: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerGroup' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-CUSTOMER-GROUP-EXISTS: the code or id is taken; idempotency_key_reuse: the key was used with another body.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-CUSTOMER-GROUP-INVALID with per-field errors.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/customer-groups/{id}:
+    get:
+      operationId: getCustomerGroup
+      summary: "Get one customer group"
+      x-passage-duty: party.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The customer group.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerGroup' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-CUSTOMER-GROUP-NOT-FOUND.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
   /healthz:
     get:
       operationId: liveness
@@ -958,6 +1409,93 @@ components:
         serviceCode: { type: string }
         traceId: { type: string }
         errors: { type: object, additionalProperties: { type: string } }
+    NewVendorProspect:
+      type: object
+      required: [companyName, contactName, email, country]
+      properties:
+        companyName: { type: string, minLength: 1, maxLength: 200 }
+        contactName: { type: string, minLength: 1, maxLength: 140 }
+        email: { type: string, format: email }
+        phone: { type: string, maxLength: 40 }
+        country: { type: string, pattern: '^[A-Za-z]{2}$' }
+        taxId: { type: string, maxLength: 40 }
+        website: { type: string, maxLength: 200 }
+        message: { type: string, maxLength: 2000 }
+    VendorProspect:
+      type: object
+      required: [id, companyName, contactName, email, country, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        companyName: { type: string }
+        contactName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        country: { type: string }
+        taxId: { type: string }
+        website: { type: string }
+        message: { type: string }
+        status: { type: string, enum: [NEW, ACCEPTED, REJECTED] }
+        createdAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+        decisionNote: { type: string }
+        partyId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        requestId: { type: string, format: uuid, description: The onboarding questionnaire request. }
+    VendorInvite:
+      type: object
+      required: [id, vendorId, email, role, status, expiresAt, invitedBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        email: { type: string }
+        displayName: { type: string }
+        role: { type: string }
+        status: { type: string }
+        expiresAt: { type: string, format: date-time }
+        invitedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        acceptedAt: { type: string, format: date-time }
+    VendorInviteDetails:
+      allOf:
+        - { $ref: '#/components/schemas/VendorInvite' }
+        - type: object
+          required: [legalEntityId, vendorName]
+          properties:
+            legalEntityId: { type: string, format: uuid }
+            vendorName: { type: string }
+    InviteToken:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, maxLength: 2048 }
+    PaymentTerm:
+      type: object
+      required: [id, code, name, offsetMonths, version]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        netDays: { type: integer, description: Days after the invoice date; absent when dayOfMonth is set. }
+        dayOfMonth: { type: integer, minimum: 1, maximum: 31 }
+        offsetMonths: { type: integer }
+        version: { type: integer }
+    PostingProfile:
+      type: object
+      required: [id, legalEntityId, code, name, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        version: { type: integer }
+    CustomerGroup:
+      type: object
+      required: [id, code, name, version]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        version: { type: integer }
   responses:
     Problem:
       description: RFC 9457 problem details.

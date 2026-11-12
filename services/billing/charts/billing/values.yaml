@@ -16,7 +16,8 @@ maxLines: 2000
 # client is wired. Empty means every quote fails closed with BIL-0001.
 taxRates: ""
 # Callers (edi reads invoices) present a signed service token verified against these
-# keys, formatted name=base64-public-key and comma separated.
+# keys, formatted name=base64-public-key and comma separated. List edi's public key as edi=<base64 Ed25519 key>: the edi
+# service signs its invoice reads (billing.invoice.read, #35) with it.
 serviceIdentity:
   publicKeys: ""
   signingKeySecret: ""

@@ -150,7 +150,7 @@ func (c *Client) do(ctx context.Context, op, version string, in []byte) ([]byte,
 	if err != nil {
 		return nil, "", fmt.Errorf("azurekv: %s: %w", op, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, maxBody))
 	if err != nil {
 		return nil, "", fmt.Errorf("azurekv: %s: read: %w", op, err)
@@ -184,7 +184,7 @@ func ValidVersion(v string) bool {
 		return false
 	}
 	for _, r := range v {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
 			return false
 		}
 	}
@@ -277,7 +277,7 @@ func (w *WorkloadIdentity) Token(ctx context.Context, scope string) (string, err
 	if err != nil {
 		return "", err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, maxBody))
 	var out struct {
 		AccessToken string `json:"access_token"`

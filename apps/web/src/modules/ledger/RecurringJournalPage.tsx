@@ -22,6 +22,7 @@ import { dayLabel, RecurringStatusBadge } from "./RecurringJournalsPage";
 import { UUID } from "./pages";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 
 const ACCOUNT = /^[A-Za-z0-9._-]{1,20}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -83,7 +84,7 @@ type Errors = Record<string, string>;
 /** Client checks that mirror PUT /recurring-journals/{id}; the service has the last word. */
 export function validateRecurring(v: RecurringDraft): Errors {
   const e: Errors = {};
-  if (!UUID.test(v.ledgerId.trim())) e.ledgerId = "Enter the ledger id as a UUID.";
+  if (!UUID.test(v.ledgerId.trim())) e.ledgerId = "Choose the ledger.";
   if (!JOURNAL_NAME_CODE.test(v.journalName)) e.journalName = "Use 1 to 20 letters, digits, dashes or underscores.";
   if (v.name.trim() === "" || v.name.length > 80) e.name = "Enter a name of up to 80 characters.";
   if (v.description.length > 255) e.description = "Use at most 255 characters.";
@@ -301,9 +302,7 @@ function RecurringForm({ initial, existing }: { initial: RecurringDraft; existin
   return (
     <Card>
       <form className={styles.form} onSubmit={submit} noValidate aria-label={existing ? `Edit recurring journal ${existing.name}` : "New recurring journal"}>
-        <FormField id="rj-ledger" label="Ledger id" hint={existing ? "The ledger can't be changed." : undefined} error={errors.ledgerId}>
-          {(c) => <Input {...c} className={styles.mono} value={values.ledgerId} readOnly={Boolean(existing)} onChange={(e) => update({ ledgerId: e.target.value })} invalid={Boolean(errors.ledgerId)} />}
-        </FormField>
+        <LookupFormField id="rj-ledger" label="Ledger" entity="ledger" hint={existing ? "The ledger can't be changed." : undefined} value={values.ledgerId} readOnly={Boolean(existing)} error={errors.ledgerId} onChange={(ledgerId) => update({ ledgerId })} />
         <FormField id="rj-journal" label="Journal name" hint="The batches it generates are entered under this name." error={errors.journalName}>
           {(c) => <Input {...c} className={styles.mono} value={values.journalName} maxLength={20} onChange={(e) => update({ journalName: e.target.value })} invalid={Boolean(errors.journalName)} />}
         </FormField>

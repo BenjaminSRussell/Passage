@@ -419,6 +419,98 @@ func TestWorkersAreTenantWide(t *testing.T) {
 	}
 }
 
+// A worker carries no name on the bus; it takes its person's name from the
+// party record, whichever of the two events arrives first, and follows a
+// rename of the person.
+func TestWorkersAreFoundByTheirPersonsName(t *testing.T) {
+	st := setup(t)
+	ctx := asScope(testkit.TenantID(1), "")
+	person, early := ids.New(), ids.New()
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: person, Number: "P-000401", Title: "Rosa Delgado", Subtitle: "person", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	worker := Record{Type: TypeWorker, ID: ids.New(), Number: "WRK-000401", Title: "WRK-000401", Subtitle: "employee", PartyID: person, At: t0}
+	if _, err := st.Apply(ctx, worker); err != nil {
+		t.Fatal(err)
+	}
+	// A worker indexed before its person keeps its number as the title until the party event names it.
+	if _, err := st.Apply(ctx, Record{Type: TypeWorker, ID: ids.New(), Number: "WRK-000402", Title: "WRK-000402", Subtitle: "employee", PartyID: early, At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	find := func(q string) []string {
+		hits, err := st.Search(ctx, Query{Text: q, Types: []string{TypeWorker}, Limit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, h := range hits {
+			out = append(out, h.Number+" "+h.Title)
+		}
+		return out
+	}
+	if got := find("rosa delgado"); !slices.Equal(got, []string{"WRK-000401 Rosa Delgado"}) {
+		t.Fatalf("by name: %v", got)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: early, Number: "P-000402", Title: "Tomas Lindqvist", Subtitle: "person", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if got := find("lindqvist"); !slices.Equal(got, []string{"WRK-000402 Tomas Lindqvist"}) {
+		t.Fatalf("named after the worker: %v", got)
+	}
+	// An older party event changes nothing; a newer one renames the worker.
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: person, Number: "P-000401", Title: "Old Name", At: t0.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: person, Number: "P-000401", Title: "Rosa Delgado Ruiz", Version: 2, At: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := find("old name"); len(got) != 0 {
+		t.Fatalf("an older party event renamed the worker: %v", got)
+	}
+	if got := find("wrk-000401"); !slices.Equal(got, []string{"WRK-000401 Rosa Delgado Ruiz"}) {
+		t.Fatalf("after the rename: %v", got)
+	}
+	// Workers stay in their tenant: a party of another tenant with the same id renames nothing here.
+	if _, err := st.Apply(asScope(testkit.TenantID(2), ""), Record{Type: TypeParty, ID: person, Number: "P-9", Title: "Somebody Else", At: t0.Add(2 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := find("wrk-000401"); !slices.Equal(got, []string{"WRK-000401 Rosa Delgado Ruiz"}) {
+		t.Fatalf("another tenant's party renamed the worker: %v", got)
+	}
+}
+
+// A worker indexed before its party id was kept (search 0005) gets it from a
+// replay of worker.created, and party renames reach it from then on.
+func TestReplayedWorkerTakesItsPartyAndItsRenames(t *testing.T) {
+	st, admin := setupWithAdmin(t)
+	ctx := asScope(testkit.TenantID(1), "")
+	person, workerID := ids.New(), ids.New()
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: person, Number: "P-000501", Title: "Ines Navarro", Subtitle: "person", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	// The row as the consumer wrote it before 0005: no party id, the number as the title.
+	if _, err := st.Apply(ctx, Record{Type: TypeWorker, ID: workerID, Number: "WRK-000501", Title: "WRK-000501", Subtitle: "employee", At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeWorker, ID: workerID, Number: "WRK-000501", Title: "WRK-000501", Subtitle: "employee", PartyID: person, At: t0}); err != nil {
+		t.Fatal(err)
+	}
+	var party *string
+	if err := admin.QueryRow(context.Background(), `select party_id::text from search_record_tenant where record_type = 'worker' and record_id = $1`, workerID).Scan(&party); err != nil {
+		t.Fatal(err)
+	}
+	if party == nil || *party != person {
+		t.Fatalf("party_id after the replay = %v, want %s", party, person)
+	}
+	if _, err := st.Apply(ctx, Record{Type: TypeParty, ID: person, Number: "P-000501", Title: "Ines Navarro Gil", Version: 2, At: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := st.Search(ctx, Query{Text: "wrk-000501", Types: []string{TypeWorker}, Limit: 5})
+	if err != nil || len(hits) != 1 || hits[0].Title != "Ines Navarro Gil" {
+		t.Fatalf("worker after the rename = %+v, %v", hits, err)
+	}
+}
+
 // testdata/matching.json is the shared statement of what a query finds. The
 // web app's browser-side matcher (apps/web/src/shell/search/match.ts), which
 // lists use to filter loaded rows, runs the same cases, so the palette and a

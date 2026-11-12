@@ -107,7 +107,7 @@ describe("posting from the preview", () => {
     handler = (url, method) => (url.pathname === "/api/v1/interco/journals:preview" && method === "POST" ? { status: 200, body: { pairId: "p-9", balanced: true, legs } } : undefined);
     renderAt("/intercompany/journal");
     fireEvent.click(screen.getByRole("button", { name: "Preview journal" }));
-    await screen.findByText("Both entities post under pair", { exact: false });
+    await screen.findByText("Both sides post as one linked pair in A and B", { exact: false });
     fireEvent.click(await screen.findByRole("button", { name: "Post journal" }));
     expect(await screen.findByText("Choose the posting date.")).toBeInTheDocument();
     expect(screen.getAllByText("Enter the ledger code.")).toHaveLength(2);

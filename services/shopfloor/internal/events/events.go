@@ -242,7 +242,7 @@ type RegistrationPostedData struct {
 	// number (text, as stored) when the registration names a known job.
 	OrderRef     string `json:"orderRef,omitempty"`
 	OperationRef string `json:"operationRef,omitempty"`
-	// CostRate is the worker's hourly rate effective on the UTC date the work started, when it is greater than zero; the
+	// CostRate is the worker's hourly rate effective on the local date the work started in the worker's time zone (UTC by default), when it is greater than zero; the
 	// w21 job-card consumer uses it over the resource labor rate (BR-25.9).
 	CostRate *decimal.Decimal `json:"costRate,omitempty"`
 	// CostRateCurrency is the worker's currency, the currency of CostRate.

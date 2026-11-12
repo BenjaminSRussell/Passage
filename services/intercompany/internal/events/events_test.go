@@ -20,7 +20,7 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 	spec := string(raw)
 	payloads := map[string]any{
 		PartnerCreated: PartnerCreatedData{}, PartnerUpdated: PartnerUpdatedData{},
-		JournalPosted: JournalData{}, JournalCompensated: JournalData{}, ChargePosted: ChargePostedData{}, ReconciliationFlagged: ReconciliationFlaggedData{},
+		JournalPosted: JournalData{}, JournalCompensated: JournalData{}, ChargePosted: ChargePostedData{}, ChargeInvoiceRequested: ChargeInvoiceRequestedData{}, ReconciliationFlagged: ReconciliationFlaggedData{},
 	}
 	for typ, payload := range payloads {
 		if !events.ValidType(typ) {

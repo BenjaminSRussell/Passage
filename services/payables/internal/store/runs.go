@@ -28,29 +28,32 @@ var (
 )
 
 type PaymentRun struct {
-	ID                 string              `json:"id"`
-	LegalEntityID      string              `json:"legalEntityId"`
-	ProposalID         string              `json:"proposalId"`
-	Status             string              `json:"status"`
-	RequestedBy        string              `json:"requestedBy"`
-	LedgerID           string              `json:"ledgerId"`
-	BankAccount        string              `json:"bankAccount"`
-	ControlAccount     string              `json:"controlAccount"`
-	DiscountAccount    *string             `json:"discountAccount,omitempty"`
-	WithholdingAccount *string             `json:"withholdingAccount,omitempty"`
-	FileNumber         *string             `json:"fileNumber,omitempty"`
-	FileSHA256         *string             `json:"fileSha256,omitempty"`
-	PaymentCount       *int                `json:"paymentCount,omitempty"`
-	FileGeneratedAt    *time.Time          `json:"fileGeneratedAt,omitempty"`
-	JournalRequested   *time.Time          `json:"journalRequestedAt,omitempty"`
-	JournalRejected    *time.Time          `json:"journalRejectedAt,omitempty"`
-	JournalEntryID     *string             `json:"journalEntryId,omitempty"`
-	JournalPostedAt    *time.Time          `json:"journalPostedAt,omitempty"`
-	SettledAt          *time.Time          `json:"settledAt,omitempty"`
-	FailureReason      *string             `json:"failureReason,omitempty"`
-	CreatedAt          time.Time           `json:"createdAt"`
-	CompletedAt        *time.Time          `json:"completedAt,omitempty"`
-	Payments           []domain.RunPayment `json:"payments"`
+	ID                 string     `json:"id"`
+	LegalEntityID      string     `json:"legalEntityId"`
+	ProposalID         string     `json:"proposalId"`
+	Status             string     `json:"status"`
+	RequestedBy        string     `json:"requestedBy"`
+	LedgerID           string     `json:"ledgerId"`
+	BankAccount        string     `json:"bankAccount"`
+	ControlAccount     string     `json:"controlAccount"`
+	DiscountAccount    *string    `json:"discountAccount,omitempty"`
+	WithholdingAccount *string    `json:"withholdingAccount,omitempty"`
+	FileNumber         *string    `json:"fileNumber,omitempty"`
+	FileSHA256         *string    `json:"fileSha256,omitempty"`
+	PaymentCount       *int       `json:"paymentCount,omitempty"`
+	FileGeneratedAt    *time.Time `json:"fileGeneratedAt,omitempty"`
+	JournalRequested   *time.Time `json:"journalRequestedAt,omitempty"`
+	JournalRejected    *time.Time `json:"journalRejectedAt,omitempty"`
+	JournalEntryID     *string    `json:"journalEntryId,omitempty"`
+	JournalPostedAt    *time.Time `json:"journalPostedAt,omitempty"`
+	SettledAt          *time.Time `json:"settledAt,omitempty"`
+	FailureReason      *string    `json:"failureReason,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	CompletedAt        *time.Time `json:"completedAt,omitempty"`
+	// WithholdingRecordError is set while the tax service refuses the run's withholding entries for good; an operator fixes the cause
+	// (the withholding code, the grant) and repeats post-journal.
+	WithholdingRecordError *string             `json:"withholdingRecordError,omitempty"`
+	Payments               []domain.RunPayment `json:"payments"`
 }
 
 type NewRun struct {
@@ -76,13 +79,13 @@ type RunFile struct {
 
 const runColumns = `id::text, legal_entity_id::text, proposal_id::text, status, requested_by, ledger_id::text, bank_account, control_account,
 	discount_account, withholding_account, file_number, file_sha256, payment_count, file_generated_at, journal_requested_at, journal_rejected_at, journal_entry_id, journal_posted_at, settled_at,
-	failure_reason, created_at, completed_at`
+	failure_reason, created_at, completed_at, withholding_record_error`
 
 func scanRun(row pgx.Row) (PaymentRun, error) {
 	var r PaymentRun
 	err := row.Scan(&r.ID, &r.LegalEntityID, &r.ProposalID, &r.Status, &r.RequestedBy, &r.LedgerID, &r.BankAccount, &r.ControlAccount,
 		&r.DiscountAccount, &r.WithholdingAccount, &r.FileNumber, &r.FileSHA256, &r.PaymentCount, &r.FileGeneratedAt, &r.JournalRequested, &r.JournalRejected, &r.JournalEntryID, &r.JournalPostedAt, &r.SettledAt,
-		&r.FailureReason, &r.CreatedAt, &r.CompletedAt)
+		&r.FailureReason, &r.CreatedAt, &r.CompletedAt, &r.WithholdingRecordError)
 	return r, err
 }
 
@@ -533,6 +536,14 @@ func (s *Postgres) FailRun(ctx context.Context, id, reason string) (PaymentRun, 
 			return ErrJournalRequested
 		}
 		return failRun(ctx, tx, id, l.proposalID, reason)
+	})
+}
+
+// SetWithholdingRecordError parks a run whose withholding the tax service refused for good (reason), or clears the park (empty reason).
+func (s *Postgres) SetWithholdingRecordError(ctx context.Context, id, reason string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update ap_payment_run set withholding_record_error = nullif($2, '') where id = $1::uuid`, id, reason)
+		return err
 	})
 }
 

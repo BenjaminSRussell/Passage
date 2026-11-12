@@ -28,7 +28,7 @@ import type {
 } from "../../../modules/purchasing/api/client";
 import { ITEMS, LEGAL_ENTITY, PLANT, VENDORS, WH_RAW, WORKERS, itemByNumber } from "../../company";
 import { reply, route } from "../../backend";
-import { at, day, dec, table, uid } from "../../store";
+import { at, day, dec, matchesQ, table, uid } from "../../store";
 
 const BASE = "/api/v1/procurement";
 const K_REQ = 300;
@@ -75,6 +75,8 @@ function rline(lineNo: number, number: string, qty: number, needIn: number, opts
     siteId: PLANT.id,
     warehouseId: WH_RAW.id,
     preferredVendorId: opts.vendor === false ? undefined : vendorOf(number).id,
+    glAccount: "5100",
+    costCenter: "CC-PLANT",
     status: opts.status ?? "OPEN",
     purchaseOrderId: opts.po?.id,
     purchaseOrderLineNo: opts.po?.lineNo,
@@ -204,6 +206,8 @@ route("POST", `${BASE}/requisitions`, ({ body }) => {
       siteId: l.siteId,
       warehouseId: l.warehouseId,
       preferredVendorId: l.preferredVendorId || (it?.vendor !== undefined ? VENDORS[it.vendor].id : undefined),
+      glAccount: l.glAccount,
+      costCenter: l.costCenter,
       status: "OPEN",
     };
   });
@@ -459,7 +463,7 @@ route("GET", `${BASE}/purchase-orders`, ({ query }) => {
   const vendor = query.get("vendorId");
   const rows = pos
     .all()
-    .filter((p) => (!status || p.approvalStatus === status) && (!vendor || p.vendorId === vendor))
+    .filter((p) => (!status || p.approvalStatus === status) && (!vendor || p.vendorId === vendor) && matchesQ(query, p.number))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return { items: rows.map(poSummary) };
 });

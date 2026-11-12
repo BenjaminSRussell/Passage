@@ -708,6 +708,30 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/vendor/payments:
+    get:
+      operationId: listVendorPayments
+      summary: "List the supplier portal vendor's invoices with their payment status"
+      x-passage-duty: payables.vendor-portal.read
+      description: >-
+        For the supplier portal service only (the duty is service-only). The vendor is the one in the verified supplier-portal service
+        token; a vendorId or legal entity in the query is ignored. Each of the vendor's invoices reads OPEN, SCHEDULED (in an approved
+        payment proposal, with the run date), PARTIALLY_PAID, PAID (with the paid date) or CANCELLED, newest invoice first with keyset
+        paging. Payment holds, vendor blocks and the contents of a proposal are not shown.
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [OPEN, SCHEDULED, PARTIALLY_PAID, PAID, CANCELLED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
+      responses:
+        '200':
+          description: One page of the vendor's invoices.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorPaymentPage' }
+        '400': { $ref: '#/components/responses/Problem', description: 'PAY-0001 invalid status, limit or cursor.' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden', description: 'PAY-VND-001 the caller is not the supplier portal acting for a vendor; AUTH-0003 missing duty.' }
+        '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -1370,6 +1394,27 @@ components:
         status: { type: integer }
         code: { type: string }
         detail: { type: string }
+    VendorPayment:
+      type: object
+      required: [invoiceId, invoiceNumber, invoiceDate, dueDate, currency, amount, paidAmount, openAmount, status]
+      properties:
+        invoiceId: { type: string, format: uuid }
+        invoiceNumber: { type: string }
+        invoiceDate: { type: string, format: date }
+        dueDate: { type: string, format: date }
+        currency: { type: string }
+        amount: { type: string }
+        paidAmount: { type: string }
+        openAmount: { type: string }
+        status: { type: string, enum: [OPEN, SCHEDULED, PARTIALLY_PAID, PAID, CANCELLED] }
+        scheduledFor: { type: string, format: date, description: The run date of the approved payment proposal; SCHEDULED only. }
+        paidAt: { type: string, format: date, description: PAID only. }
+    VendorPaymentPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/VendorPayment' } }
+        nextCursor: { type: string }
   responses:
     Unauthorized:
       description: Tenant header missing (tenant.Middleware, text/plain carrying the JSON of TenantRejection) or malformed (the handler's own check, application/problem+json).

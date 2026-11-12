@@ -114,6 +114,8 @@ export interface SourceRef {
 
 export interface Order {
   id: string;
+  /** Document number QO-000123; absent on an older order that was not backfilled. */
+  number?: string;
   trigger: Trigger;
   sourceRef: SourceRef;
   itemId: string;

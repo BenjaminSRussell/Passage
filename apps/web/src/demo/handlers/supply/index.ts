@@ -11,3 +11,4 @@ import "./stock";
 import "./procurement";
 import "./docks";
 import "./quality";
+import "./vendorPortal";

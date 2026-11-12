@@ -45,10 +45,20 @@ type Allocation struct {
 	// DiscountAvailable is the item's cash discount amount (terms); a settlement
 	// may not take more.
 	DiscountAvailable decimal.Decimal
+	// ItemCurrencyAmount is set for a cross-currency settlement (an item in another currency than the payment): what the
+	// allocation takes off the item, in the item's currency. Amount is then the cash in the payment currency. Such an
+	// allocation carries no cash discount and no write-off.
+	ItemCurrencyAmount decimal.Decimal
 }
 
-// ReductionOf is what the allocation takes off the open item.
+// CrossCurrency reports whether the allocation settles an item in another currency than the payment.
+func (a Allocation) CrossCurrency() bool { return a.ItemCurrencyAmount.IsPositive() }
+
+// ReductionOf is what the allocation takes off the open item, in the item's currency.
 func (a Allocation) ReductionOf() decimal.Decimal {
+	if a.CrossCurrency() {
+		return a.ItemCurrencyAmount
+	}
 	return a.Amount.Add(a.CashDiscount).Add(a.WriteOff)
 }
 
@@ -86,6 +96,12 @@ func ValidateApply(valueDate time.Time, unapplied decimal.Decimal, allocs []Allo
 		seen[a.OpenItemID] = true
 		if a.Amount.IsNegative() || a.CashDiscount.IsNegative() || a.WriteOff.IsNegative() {
 			return applyErr("settlement amounts must not be negative")
+		}
+		if a.CrossCurrency() && (a.CashDiscount.IsPositive() || a.WriteOff.IsPositive()) {
+			return applyErr("settlement " + a.OpenItemID + " is in another currency than the payment and takes no cash discount or write-off")
+		}
+		if a.CrossCurrency() && !a.Amount.IsPositive() {
+			return applyErr("settlement " + a.OpenItemID + " needs the cash applied in the payment currency")
 		}
 		if !a.ReductionOf().IsPositive() {
 			return applyErr("settlement " + a.OpenItemID + " moves no money")

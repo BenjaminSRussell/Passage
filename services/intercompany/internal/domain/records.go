@@ -16,6 +16,9 @@ const (
 	// ChargeSuspense: no transfer price applied (IC-0821, BR-40.12), so nothing
 	// is posted. Submitting the source again with the next version reprices it.
 	ChargeSuspense ChargeStatus = "suspense"
+	// ChargeInvoiceRequested: the settlement mode is Invoice, so the charge was handed to the invoice documents of the pairing
+	// (event chargeinvoice.requested) and nothing was posted here.
+	ChargeInvoiceRequested ChargeStatus = "invoice_requested"
 )
 
 // ChargeRecord is a stored IC charge request with its price and the journal it posted.
@@ -38,8 +41,15 @@ type ChargeRecord struct {
 	Margin          decimal.Decimal
 	JournalID       string
 	FailureCode     string
-	CreatedBy       string
-	CreatedAt       time.Time
+	// SettlementMode is Journal or Invoice, the tenant's setting when the charge was priced.
+	SettlementMode string
+	// TaxAmount and TaxCode are the cross-border tax the tax service worked out; TaxRecorded says the tax service has the
+	// transaction.
+	TaxAmount   decimal.Decimal
+	TaxCode     string
+	TaxRecorded bool
+	CreatedBy   string
+	CreatedAt   time.Time
 }
 
 // Resolution of a reconciliation item (FR-40.6).
@@ -63,8 +73,10 @@ type ReconRun struct {
 	Timing         int
 	Mismatch       int
 	Open           int
-	CreatedBy      string
-	CreatedAt      time.Time
+	// Source is where the pair amounts came from: request (sent with it) or ledger (read from the ledgers of the entities).
+	Source    string
+	CreatedBy string
+	CreatedAt time.Time
 }
 
 // ReconItem is one entity pair's classified item.
@@ -92,4 +104,30 @@ type ReconItem struct {
 func ClassifyItem(it ReconItem, fxTolerancePct decimal.Decimal) ReconResult {
 	return Classify(ReconInput{AmountA: it.AmountA, AmountB: it.AmountB, NextPeriodA: it.NextPeriodA, NextPeriodB: it.NextPeriodB,
 		FXApplies: it.FXApplies, FXTolerancePct: fxTolerancePct})
+}
+
+// ChargeExtra is what a charge records besides its price: the settlement mode that applied and the cross-border tax.
+type ChargeExtra struct {
+	SettlementMode string
+	TaxAmount      decimal.Decimal
+	TaxCode        string
+}
+
+// FXAdjustment is the entry that books the FX difference of a reconciliation item to the FX-difference account of the entity that
+// holds the due-from side. It is stored before it is posted, under the item, so a retry finds it and the ledger's idempotency key
+// keeps the entry single.
+type FXAdjustment struct {
+	ID               string
+	ItemID           string
+	Entity           string
+	Target           Target
+	Currency         string
+	Amount           decimal.Decimal
+	IncreasesBalance bool // the due-from balance goes up (debit) when the entity's side was the smaller one
+	BalanceAccount   string
+	FXAccount        string
+	PeriodEnd        time.Time
+	Status           string // pending or posted
+	LedgerEntryID    string
+	PostedOn         time.Time
 }

@@ -146,7 +146,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if sched != nil {
 		go sched.Run(ctx)
 	}
-	admin.Handle("/metrics", metrics(a.Metrics(), sched))
+	admin.Handle("/metrics", httpx.WithMetrics(metrics(a.Metrics(), sched)))
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

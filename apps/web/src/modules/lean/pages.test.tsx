@@ -229,7 +229,7 @@ describe("production flows", () => {
     };
     const { container } = renderAt("/lean/flows/new");
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sauce line" } });
-    fireEvent.change(screen.getByLabelText("Value stream id"), { target: { value: STREAM } });
+    fireEvent.change(screen.getByLabelText("Value stream"), { target: { value: STREAM } });
     fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
     fireEvent.change(screen.getByLabelText("Activity name"), { target: { value: "Mix" } });
     expect(pageViolations(container)).toEqual([]);

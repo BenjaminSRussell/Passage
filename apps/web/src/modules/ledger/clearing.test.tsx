@@ -112,7 +112,7 @@ describe("open items", () => {
 
   it("asks for a ledger first", () => {
     renderAt("/ledger/open-items");
-    expect(screen.getByText("Enter a ledger id to see its open items.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a ledger to see its open items.")).toBeInTheDocument();
     expect(server.calls).toHaveLength(0);
   });
 

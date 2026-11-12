@@ -89,6 +89,7 @@ describe("shipments list", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "PACKED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(within(screen.getByRole("table", { name: "Shipments" })).queryByText("SH-0000001")).toBeNull());
     expect(server.calls.filter((c) => !c.url.pathname.includes("/sales/")).at(-1)?.url.searchParams.get("status")).toBe("PACKED");
 

@@ -613,14 +613,17 @@ var orderStatuses = map[string]bool{
 	domain.StatusPending: true, domain.StatusClosed: true, domain.StatusCancelled: true,
 }
 
-// listOrders is the quality order worklist: ?status=&siteId=&limit= (section 6.33.14).
+// listOrders is the quality order worklist: ?status=&siteId=&q=&limit= (section 6.33.14); q is a number prefix.
 func (a *API) listOrders(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.OrderFilter{Status: q.Get("status"), SiteID: q.Get("siteId")}
+	f := store.OrderFilter{Status: q.Get("status"), SiteID: q.Get("siteId"), Number: q.Get("q")}
 	fields := map[string]string{}
+	if len(f.Number) > 40 {
+		fields["q"] = "must be at most 40 characters"
+	}
 	if f.Status != "" && !orderStatuses[f.Status] {
 		fields["status"] = "is not a quality order status"
 	}

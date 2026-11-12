@@ -146,7 +146,7 @@ describe("Kiosk", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByText("Clocked in since 2026-10-21 07:00 UTC.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Clock out" }));
-    expect(await findAlert()).toHaveTextContent("Service unavailable (COM-0503)");
+    expect(await findAlert()).toHaveTextContent("This service is unavailable right now");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Clock out" }));
     expect(await screen.findByText("You are clocked out.")).toBeInTheDocument();

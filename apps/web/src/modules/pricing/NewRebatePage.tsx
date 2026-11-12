@@ -77,7 +77,7 @@ export function validateRebate(v: RebateDraft): Errors {
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (!UUID.test(v.customer.trim())) {
-    errors.customer = v.party === "VENDOR" ? "Choose a vendor." : v.scope === "customer" ? "Choose a customer." : "Enter the customer group id (a UUID).";
+    errors.customer = v.party === "VENDOR" ? "Choose a vendor." : v.scope === "customer" ? "Choose a customer." : "Choose a customer group.";
   }
   if (v.productScope !== "all" && !UUID.test(v.productKey.trim())) {
     errors.productKey = v.productScope === "product" ? "Choose a product." : "Enter the product group id (a UUID).";
@@ -245,7 +245,7 @@ export function NewRebatePage() {
               onChange={(customer) => update({ customer })}
             />
           ) : (
-            text("rb-customer", "customer", "Customer group id", { mono: true })
+            <LookupFormField id="rb-customer" label="Customer group" entity="customerGroup" value={values.customer} error={errors.customer} onChange={(customer) => update({ customer })} />
           )}
           <FormField id="rb-product-scope" label="Products" hint="Limit the agreement to the invoice lines of one product or one product group.">
             {(c) => (
@@ -259,7 +259,7 @@ export function NewRebatePage() {
           {values.productScope === "product" ? (
             <LookupFormField id="rb-product-key" label="Product" entity="product" value={values.productKey} error={errors.productKey} onChange={(productKey) => update({ productKey })} />
           ) : values.productScope === "group" ? (
-            text("rb-product-key", "productKey", "Product group id", { mono: true })
+            <LookupFormField id="rb-product-key" label="Product group" entity="itemGroup" value={values.productKey} error={errors.productKey} onChange={(productKey) => update({ productKey })} />
           ) : null}
           <FormField id="rb-basis" label="Basis">
             {(c) => (

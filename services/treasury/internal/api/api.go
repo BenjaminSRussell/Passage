@@ -56,6 +56,7 @@ type API struct {
 	recons       Reconciliations
 	cash         CashPositions
 	desks        CashDesks
+	openings     OpeningBalances
 	sources      []forecastsrc.Source
 	ledger       ledgerclient.Ledger
 	glProfiles   map[string]GLProfile
@@ -149,6 +150,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerBankReconciliation(r)
 	a.registerCashPosition(r)
 	a.registerCashDesks(r)
+	a.registerOpening(r)
 	a.registerEBICS(r)
 }
 

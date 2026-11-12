@@ -36,6 +36,48 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            {{- if .Values.captureStore.kind }}
+            - name: FIELDSERVICE_CAPTURE_STORE
+              value: {{ .Values.captureStore.kind | quote }}
+            {{- if eq .Values.captureStore.kind "fs" }}
+            - name: FIELDSERVICE_CAPTURE_DIR
+              value: /var/lib/passage/captures
+            {{- else if eq .Values.captureStore.kind "s3" }}
+            - name: FIELDSERVICE_S3_ENDPOINT
+              value: {{ required "captureStore.s3.endpoint is required" .Values.captureStore.s3.endpoint | quote }}
+            - name: FIELDSERVICE_S3_BUCKET
+              value: {{ required "captureStore.s3.bucket is required" .Values.captureStore.s3.bucket | quote }}
+            - name: FIELDSERVICE_S3_REGION
+              value: {{ required "captureStore.s3.region is required" .Values.captureStore.s3.region | quote }}
+            - name: FIELDSERVICE_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "captureStore.s3.secretName is required" .Values.captureStore.s3.secretName }}
+                  key: access-key
+            - name: FIELDSERVICE_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.captureStore.s3.secretName }}
+                  key: secret-key
+            {{- end }}
+            {{- end }}
+            {{- if .Values.captureStore.job.tenantIds }}
+            - name: FIELDSERVICE_CAPTURE_JOB_TENANT_IDS
+              value: {{ join "," .Values.captureStore.job.tenantIds | quote }}
+            - name: FIELDSERVICE_CAPTURE_RETENTION_DAYS
+              value: {{ .Values.captureStore.job.retentionDays | quote }}
+            {{- if .Values.captureStore.job.at }}
+            - name: FIELDSERVICE_CAPTURE_JOB_AT
+              value: {{ .Values.captureStore.job.at | quote }}
+            {{- else }}
+            - name: FIELDSERVICE_CAPTURE_JOB_INTERVAL
+              value: {{ .Values.captureStore.job.interval | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if and (eq .Values.captureStore.kind "fs") .Values.captureStore.fs.claimName }}
+          volumeMounts:
+            - { name: captures, mountPath: /var/lib/passage/captures }
+          {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
@@ -49,3 +91,9 @@ spec:
             httpGet: { path: /readyz, port: http }
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if and (eq .Values.captureStore.kind "fs") .Values.captureStore.fs.claimName }}
+      volumes:
+        - name: captures
+          persistentVolumeClaim:
+            claimName: {{ .Values.captureStore.fs.claimName }}
+      {{- end }}

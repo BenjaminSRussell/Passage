@@ -131,7 +131,7 @@ describe("ReservationsPage", () => {
       "GET /api/v1/budget/reservations": () => (fail ? json(503, { title: "down", code: "COM-0500", detail: "internal error" }) : json(200, { items: [] })),
     });
     at("/budgeting/reservations");
-    expect(await findAlert()).toHaveTextContent("COM-0500");
+    expect(await findAlert()).toHaveTextContent("Something went wrong on our side");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No reservation documents")).toBeInTheDocument();
@@ -181,7 +181,7 @@ describe("CreateReservationPage", () => {
     fireEvent.change(document.getElementById("reservation-span-0")!, { target: { value: "FY2026" } });
     fireEvent.change(document.getElementById("reservation-amount-0")!, { target: { value: "500" } });
     fireEvent.click(screen.getByRole("button", { name: "Create reservation" }));
-    expect(await screen.findByText(/CO-0601/)).toBeInTheDocument();
+    expect(await screen.findByText(/Budget check failed on dept-10/)).toBeInTheDocument();
   });
 });
 
@@ -244,6 +244,6 @@ describe("ReservationDetailPage", () => {
   it("shows the problem when the document cannot be loaded", async () => {
     stubRoutes({ [`GET /api/v1/budget/reservations/${RES}`]: () => json(404, { title: "Not Found", code: "BUD-0005", detail: "reservation not found" }) });
     at(`/budgeting/reservations/${RES}`);
-    expect(await findAlert()).toHaveTextContent("BUD-0005");
+    expect(await findAlert()).toHaveTextContent("reservation not found");
   });
 });

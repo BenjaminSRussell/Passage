@@ -1,7 +1,9 @@
 {
   "assignments": {},
   "duties": {
-    "identity.user.maintain": {"permissions": [{"resource": "/v1/identity/users{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "identity.user.maintain": {"permissions": [{"resource": "/v1/identity/users{,/**}", "methods": ["GET", "POST", "PATCH"]}, {"resource": "/v1/identity/user-names", "methods": ["GET"]}]},
+    "identity.user-name.read": {"permissions": [{"resource": "/v1/identity/user-names", "methods": ["GET"]}]},
+    "identity.customer-contact.maintain": {"permissions": [{"resource": "/v1/identity/customer-contacts{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.user.provision": {"permissions": [{"resource": "/scim/v2{,/**}", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"]}]},
     "identity.effective-permission.view": {"permissions": [{"resource": "/v1/identity/users/*/effective-permissions", "methods": ["GET"]}]},
     "identity.security-role.maintain": {"permissions": [
@@ -46,12 +48,16 @@
     "io.data.export": {"permissions": [{"resource": "/v1/exports{,/**}", "methods": ["GET", "POST"]}]},
     "platform.release.maintain": {"permissions": [{"resource": "/v1/platform/releases{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]}]},
     "platform.release.view": {"permissions": [{"resource": "/v1/platform/releases{,/**}", "methods": ["GET"]}]},
-    "ops.region.view": {"operator_only": true, "permissions": [{"resource": "/v1/ops/regions", "methods": ["GET"]}, {"resource": "/v1/ops/capacity/estimate", "methods": ["GET"]}, {"resource": "/v1/ops/failover-requests/*", "methods": ["GET"]}]},
+    "ops.region.view": {"operator_only": true, "permissions": [{"resource": "/v1/ops/regions", "methods": ["GET"]}, {"resource": "/v1/ops/capacity/estimate", "methods": ["GET"]}, {"resource": "/v1/ops/failover-requests/*", "methods": ["GET"]}, {"resource": "/v1/ops/failovers/*", "methods": ["GET"]}, {"resource": "/v1/ops/break-glass", "methods": ["GET"]}, {"resource": "/v1/ops/failovers/*/scorecard", "methods": ["GET"]}, {"resource": "/v1/ops/tenants/*/license", "methods": ["GET"]}]},
     "ops.region.report": {"operator_only": true, "permissions": [{"resource": "/v1/ops/regions/*/lag", "methods": ["PUT"]}]},
-    "ops.failover.execute": {"operator_only": true, "permissions": [{"resource": "/v1/ops/failover", "methods": ["POST"]}, {"resource": "/v1/ops/regions/*:rejoin", "methods": ["POST"]}, {"resource": "/v1/ops/failover-requests/*:approve", "methods": ["POST"]}]},
+    "ops.failover.execute": {"operator_only": true, "permissions": [{"resource": "/v1/ops/failover", "methods": ["POST"]}, {"resource": "/v1/ops/regions/*:rejoin", "methods": ["POST"]}, {"resource": "/v1/ops/failover-requests/*:approve", "methods": ["POST"]}, {"resource": "/v1/ops/failovers/*/steps/*", "methods": ["PUT"]}]},
+    "ops.breakglass.request": {"operator_only": true, "permissions": [{"resource": "/v1/ops/break-glass", "methods": ["POST"]}, {"resource": "/v1/ops/break-glass/*:revoke", "methods": ["POST"]}]},
+    "ops.license.install": {"operator_only": true, "permissions": [{"resource": "/v1/ops/tenants/*/license", "methods": ["PUT"]}]},
+    "ops.breakglass.review": {"operator_only": true, "permissions": [{"resource": "/v1/ops/break-glass/*:review", "methods": ["POST"]}]},
     "platform.promotion.approve": {"permissions": [{"resource": "/v1/platform/releases{,/**}", "methods": ["POST"]}]},
     "platform.environment.rollback": {"permissions": [{"resource": "/v1/platform/releases{,/**}", "methods": ["POST"]}]},
     "identity.tenant.maintain": {"permissions": [{"resource": "/v1/tenants{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "identity.tenant-registry.read": {"permissions": [{"resource": "/v1/tenants", "methods": ["GET"]}]},
     "identity.legal-entity.maintain": {"permissions": [{"resource": "/v1/legal-entities{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
     "identity.feature.view": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET"]}]},
     "identity.feature.maintain": {"permissions": [{"resource": "/v1/tenant/features", "methods": ["GET", "PUT"]}]},
@@ -114,6 +120,7 @@
       {"resource": "/v1/ledger/journal-batches", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches/*/attachments", "methods": ["GET"]},
+      {"resource": "/v1/ledger/ledgers", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledger-sets", "methods": ["GET"]},
       {"resource": "/v1/ledger/ledger-sets/*", "methods": ["GET"]},
       {"resource": "/v1/reporting/runs/*/cells/*/*/lines", "methods": ["GET"]},
@@ -536,6 +543,8 @@
       {"resource": "/v1/inventory/consignment-orders/*:close", "methods": ["POST"]},
       {"resource": "/v1/inventory/consignment-orders/*:cancel", "methods": ["POST"]}
     ]},
+    "inventory.import.write": {"service_only": true, "permissions": [{"resource": "/v1/inventory/opening-batches", "methods": ["POST"]}]},
+    "inventory.import.read": {"service_only": true, "permissions": [{"resource": "/v1/inventory/opening-batches", "methods": ["GET"]}]},
     "inventory.truck-stock.write": {"permissions": [{"resource": "/v1/inventory/truck-stock-levels", "methods": ["PUT"]}]},
     "inventory.transfer.write": {"permissions": [
       {"resource": "/v1/inventory/transfer-orders", "methods": ["POST"]},
@@ -598,7 +607,8 @@
       {"resource": "/v1/procurement/inbound-changes/*:retry", "methods": ["POST"]},
       {"resource": "/v1/procurement/inbound-changes/*:acknowledge", "methods": ["POST"]},
       {"resource": "/v1/procurement/requisition-lines/*:split", "methods": ["POST"]},
-      {"resource": "/v1/procurement/requisition-releases", "methods": ["POST"]}
+      {"resource": "/v1/procurement/requisition-releases", "methods": ["POST"]},
+      {"resource": "/v1/procurement/budget-calls:retry", "methods": ["POST"]}
     ]},
     "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}
@@ -652,6 +662,7 @@
       {"resource": "/v1/procurement/model-service-specs/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes", "methods": ["GET"]},
       {"resource": "/v1/procurement/inbound-changes/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/budget-calls", "methods": ["GET"]},
       {"resource": "/v1/procurement/inquiries/*", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases", "methods": ["GET"]},
       {"resource": "/v1/procurement/requisition-releases/*", "methods": ["GET"]},
@@ -668,6 +679,9 @@
       {"resource": "/v1/procurement/vendor/purchase-orders/*/acknowledgements", "methods": ["POST"]}
     ]},
     "purchasing.inbound.apply": {"flag": true, "permissions": []},
+    "procurement.purchase-order.vendor-confirm": {"service_only": true, "permissions": [
+      {"resource": "/v1/procurement/purchase-orders/*:confirm", "methods": ["POST"]}
+    ]},
     "procurement.purchase-order.confirm": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders/*:approve", "methods": ["POST"]},
       {"resource": "/v1/procurement/purchase-orders/*:reject", "methods": ["POST"]},
@@ -772,7 +786,9 @@
       {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]},
       {"resource": "/v1/receiving/ers-settlements:run", "methods": ["POST"]},
       {"resource": "/v1/receiving/one-time-payees", "methods": ["POST"]},
-      {"resource": "/v1/receiving/invoice-captures", "methods": ["POST"]}
+      {"resource": "/v1/receiving/invoice-captures", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoice-submissions/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoice-submissions/*:resolve", "methods": ["POST"]}
     ]},
     "receiving.invoice-audit.release": {"permissions": [
       {"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]},
@@ -804,7 +820,11 @@
       {"resource": "/v1/receiving/vendor/invoice-captures", "methods": ["POST", "GET"]},
       {"resource": "/v1/receiving/vendor/invoice-captures/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/vendor/invoices", "methods": ["GET"]},
-      {"resource": "/v1/receiving/vendor/invoices/*", "methods": ["GET"]}
+      {"resource": "/v1/receiving/vendor/invoices/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoiceable-lines", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoice-submissions", "methods": ["POST", "GET"]},
+      {"resource": "/v1/receiving/vendor/invoice-submissions/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/vendor/invoice-submissions/*:withdraw", "methods": ["POST"]}
     ]},
     "receiving.ers-price.confirm": {"permissions": [
       {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
@@ -819,6 +839,8 @@
       {"resource": "/v1/receiving/invoices/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoice-submissions", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoice-submissions/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
     ]},
     "receiving.admin": {"permissions": [
@@ -873,12 +895,15 @@
       {"resource": "/v1/party/parties", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/customers/*/credit-limit", "methods": ["POST"]},
+      {"resource": "/v1/party/customers/*/portal-access", "methods": ["PUT"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
+      {"resource": "/v1/party/customer-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*:merge", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-questionnaires", "methods": ["POST"]},
       {"resource": "/v1/party/vendors/*/onboarding", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-prospects/*:accept", "methods": ["POST"]},
       {"resource": "/v1/party/vendors/*/documents", "methods": ["POST"]},
       {"resource": "/v1/party/controlled-documents", "methods": ["POST"]},
       {"resource": "/v1/party/controlled-documents/*:distribute", "methods": ["POST"]}
@@ -888,6 +913,7 @@
       {"resource": "/v1/party/parties/*", "methods": ["PATCH"]},
       {"resource": "/v1/party/parties/*/vendor", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["POST"]},
+      {"resource": "/v1/party/customer-groups", "methods": ["POST"]},
       {"resource": "/v1/party/parties/*/customer", "methods": ["POST"]}
     ]},
     "party.vendor.lookup": {"service_only": true, "permissions": [
@@ -908,10 +934,18 @@
       {"resource": "/v1/party/vendors/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-groups", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-groups/*", "methods": ["GET"]},
+      {"resource": "/v1/party/customer-groups", "methods": ["GET"]},
+      {"resource": "/v1/party/customer-groups/*", "methods": ["GET"]},
+      {"resource": "/v1/party/payment-terms", "methods": ["GET"]},
+      {"resource": "/v1/party/payment-terms/*", "methods": ["GET"]},
+      {"resource": "/v1/party/posting-profiles", "methods": ["GET"]},
+      {"resource": "/v1/party/posting-profiles/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendors/*/bank-accounts", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-questionnaires", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-requests", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-requests/*", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-prospects", "methods": ["GET"]},
+      {"resource": "/v1/party/vendor-prospects/*", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-documents", "methods": ["GET"]},
       {"resource": "/v1/party/vendor-documents/*/content", "methods": ["GET"]},
       {"resource": "/v1/party/controlled-documents", "methods": ["GET"]},
@@ -947,7 +981,8 @@
     ]},
     "party.vendor-request.decide": {"permissions": [
       {"resource": "/v1/party/vendor-requests/*:approve", "methods": ["POST"]},
-      {"resource": "/v1/party/vendor-requests/*:reject", "methods": ["POST"]}
+      {"resource": "/v1/party/vendor-requests/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-prospects/*:reject", "methods": ["POST"]}
     ]},
     "receivables.customer-portal.read": {"service_only": true, "permissions": [
       {"resource": "/v1/receivables/customer-portal/open-items", "methods": ["GET"]},
@@ -963,7 +998,23 @@
       {"resource": "/v1/sales/customer-portal/orders", "methods": ["GET"]},
       {"resource": "/v1/sales/customer-portal/orders/*", "methods": ["GET"]},
       {"resource": "/v1/sales/customer-portal/returns", "methods": ["GET"]},
-      {"resource": "/v1/sales/customer-portal/returns/*", "methods": ["GET"]}
+      {"resource": "/v1/sales/customer-portal/returns/*", "methods": ["GET"]},
+      {"resource": "/v1/sales/customer-portal/products", "methods": ["GET"]}
+    ]},
+    "sales.customer-portal.order": {"service_only": true, "permissions": [
+      {"resource": "/v1/sales/customer-portal/orders", "methods": ["POST"]}
+    ]},
+    "sales.customer-portal.return": {"service_only": true, "permissions": [
+      {"resource": "/v1/sales/customer-portal/returns", "methods": ["POST"]}
+    ]},
+    "party.customer-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/customer-portal/accounts", "methods": ["GET"]}
+    ]},
+    "identity.customer-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/identity/customer-portal/legal-entity", "methods": ["GET"]}
+    ]},
+    "product.names.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/product/products:names", "methods": ["GET"]}
     ]},
     "party.vendor-portal.read": {"service_only": true, "permissions": [
       {"resource": "/v1/party/vendor-portal/requests", "methods": ["GET"]},
@@ -980,11 +1031,27 @@
       {"resource": "/v1/party/vendor-portal/documents", "methods": ["POST"]},
       {"resource": "/v1/party/vendor-portal/distributions/*:acknowledge", "methods": ["POST"]}
     ]},
+    "party.vendor-portal.admin": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/invites", "methods": ["GET", "POST"]},
+      {"resource": "/v1/party/vendor-portal/invites/*:revoke", "methods": ["POST"]}
+    ]},
+    "party.vendor-portal.invite-accept": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/invites/*:verify", "methods": ["POST"]},
+      {"resource": "/v1/party/vendor-portal/invites/*:accept", "methods": ["POST"]}
+    ]},
+    "party.vendor-portal.register": {"service_only": true, "permissions": [
+      {"resource": "/v1/party/vendor-portal/prospects", "methods": ["POST"]}
+    ]},
+    "payables.vendor-portal.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/payables/vendor/payments", "methods": ["GET"]}
+    ]},
     "party.approval-policy.write": {"permissions": [
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
     ]},
     "receivables.aging.run": {"permissions": [{"resource": "/v1/receivables/aging-snapshots", "methods": ["POST"]}]},
     "receivables.bankaccount.manage": {"permissions": [{"resource": "/v1/receivables/bank-accounts", "methods": ["PUT", "DELETE"]}]},
+    "receivables.fxsetting.manage": {"permissions": [{"resource": "/v1/receivables/fx-settings", "methods": ["PUT"]}]},
+    "receivables.payment.reverse": {"permissions": [{"resource": "/v1/receivables/payments/*:reverse", "methods": ["POST"]}]},
     "receivables.payment-file.import": {"permissions": [
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["POST"]},
       {"resource": "/v1/receivables/lockbox/imports", "methods": ["POST"]}
@@ -1017,6 +1084,7 @@
       {"resource": "/v1/receivables/balance-confirmations/*", "methods": ["GET"]},
       {"resource": "/v1/receivables/balance-confirmations/*/differences", "methods": ["GET"]},
       {"resource": "/v1/receivables/bank-accounts", "methods": ["GET"]},
+      {"resource": "/v1/receivables/fx-settings", "methods": ["GET"]},
       {"resource": "/v1/receivables/bank-statements/imports", "methods": ["GET"]},
       {"resource": "/v1/receivables/cases", "methods": ["GET"]},
       {"resource": "/v1/receivables/cases/*", "methods": ["GET"]},
@@ -1068,8 +1136,10 @@
     "analytics.view": {"permissions": [
       {"resource": "/v1/analytics/dashboards", "methods": ["GET"]},
       {"resource": "/v1/analytics/dashboards/*", "methods": ["GET"]},
+      {"resource": "/v1/analytics/dashboards/*/values", "methods": ["GET"]},
       {"resource": "/v1/analytics/metrics", "methods": ["GET"]},
-      {"resource": "/v1/analytics/query", "methods": ["POST"]}
+      {"resource": "/v1/analytics/query", "methods": ["POST"]},
+      {"resource": "/v1/analytics/query:execute", "methods": ["POST"]}
     ]},
     "analytics.ux.record": {"permissions": [{"resource": "/v1/analytics/ux-events", "methods": ["POST"]}]},
     "analytics.ux.view": {"permissions": [
@@ -1208,6 +1278,9 @@
       {"resource": "/v1/consol/groups", "methods": ["POST"]},
       {"resource": "/v1/consol/groups/*/account-map", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units", "methods": ["POST"]},
+      {"resource": "/v1/consol/groups/*/units/*", "methods": ["PATCH", "DELETE"]},
+      {"resource": "/v1/consol/groups/*/units/*/layers/*", "methods": ["PUT"]},
+      {"resource": "/v1/consol/groups/*/units/*/terms", "methods": ["PUT"]},
       {"resource": "/v1/consol/groups/*/units/*/ownership", "methods": ["POST"]}
     ]},
     "consolidation.journal.maintain": {"permissions": [{"resource": "/v1/consol/group-journals:preview", "methods": ["POST"]}]},
@@ -1227,13 +1300,22 @@
     "consolidation.view": {"permissions": [
       {"resource": "/v1/consol/collections/*", "methods": ["GET"]},
       {"resource": "/v1/consol/collections/*/trial-balance", "methods": ["GET"]},
+      {"resource": "/v1/consol/collections/*/validations", "methods": ["GET"]},
       {"resource": "/v1/consol/groups", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/account-map", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/account-map/versions", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/unit-terms", "methods": ["GET"]},
       {"resource": "/v1/consol/groups/*/collections", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/investments", "methods": ["GET"]},
+      {"resource": "/v1/consol/groups/*/layers/*", "methods": ["GET"]},
       {"resource": "/v1/consol/runs", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*", "methods": ["GET"]},
+      {"resource": "/v1/consol/runs/*/investments", "methods": ["GET"]},
       {"resource": "/v1/consol/runs/*/statements", "methods": ["GET"]}
+    ]},
+    "knowledge.write": {"permissions": [
+      {"resource": "/api/v1/knowledge/chunks", "methods": ["POST"]}
     ]},
     "mcp.copilot.use": {"permissions": [
       {"resource": "/api/v1/copilot/chat", "methods": ["POST"]},
@@ -1328,7 +1410,8 @@
       {"resource": "/edi/v1/partners/*/auto-outbound", "methods": ["GET", "PUT"]},
       {"resource": "/edi/v1/partners/*/self-billing", "methods": ["GET", "PUT"]},
       {"resource": "/edi/v1/partners/*/punchout", "methods": ["GET", "PUT"]},
-      {"resource": "/edi/v1/partners/*/cxml", "methods": ["GET", "PUT"]}
+      {"resource": "/edi/v1/partners/*/cxml", "methods": ["GET", "PUT"]},
+      {"resource": "/edi/v1/partners/*/cxml/outbound", "methods": ["GET", "PUT"]}
     ]},
     "edi.operate": {"permissions": [
       {"resource": "/edi/v1/inbound/edifact", "methods": ["POST"]},
@@ -1344,6 +1427,7 @@
       {"resource": "/edi/v1/messages/*:post", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/*/outbound", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/*/outbound:from-source", "methods": ["POST"]},
+      {"resource": "/edi/v1/partners/*/cxml:send", "methods": ["POST"]},
       {"resource": "/edi/v1/partners/sla", "methods": ["GET"]}
     ]},
     "edi.pii.view": {"flag": true, "permissions": []},
@@ -1353,7 +1437,11 @@
       {"resource": "/edi/v1/einvoice/invoices", "methods": ["GET", "POST"]},
       {"resource": "/edi/v1/einvoice/invoices/*", "methods": ["GET"]},
       {"resource": "/edi/v1/einvoice/invoices/*:submit", "methods": ["POST"]},
-      {"resource": "/edi/v1/einvoice/invoices/*:response", "methods": ["POST"]}
+      {"resource": "/edi/v1/einvoice/invoices/*:response", "methods": ["POST"]},
+      {"resource": "/edi/v1/einvoice/invoices/*:validate", "methods": ["POST"]},
+      {"resource": "/edi/v1/einvoice/invoices/*/facturx.pdf", "methods": ["GET"]},
+      {"resource": "/edi/v1/einvoice/mandates", "methods": ["GET"]},
+      {"resource": "/edi/v1/einvoice/mandates/*/*", "methods": ["PUT", "DELETE"]}
     ]},
     "edi.outbound.from-event": {"flag": true, "permissions": []},
     "eam.asset.maintain": {"permissions": [
@@ -1611,8 +1699,12 @@
     "intercompany.configure": {"permissions": [
       {"resource": "/v1/interco/centralized-payments/reversals:preview", "methods": ["POST"]},
       {"resource": "/v1/interco/centralized-payments:preview", "methods": ["POST"]},
+      {"resource": "/v1/interco/entities/*", "methods": ["PUT"]},
+      {"resource": "/v1/interco/matrix", "methods": ["PUT"]},
       {"resource": "/v1/interco/partners", "methods": ["POST"]},
-      {"resource": "/v1/interco/partners/*", "methods": ["PATCH"]}
+      {"resource": "/v1/interco/partners/*", "methods": ["PATCH"]},
+      {"resource": "/v1/interco/settings", "methods": ["PUT"]},
+      {"resource": "/v1/interco/transfer-prices", "methods": ["POST"]}
     ]},
     "intercompany.plan": {"permissions": [{"resource": "/v1/interco/planning-groups:sequence", "methods": ["POST"]}]},
     "intercompany.post": {"permissions": [
@@ -1622,6 +1714,7 @@
       {"resource": "/v1/interco/journals:preview", "methods": ["POST"]}
     ]},
     "intercompany.reconcile": {"permissions": [
+      {"resource": "/v1/interco/reconciliations/items/*/fx-adjust", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations/items/*/resolve", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations/run", "methods": ["POST"]},
       {"resource": "/v1/interco/reconciliations:classify", "methods": ["POST"]}
@@ -1630,15 +1723,19 @@
       {"resource": "/v1/interco/chains:preview", "methods": ["POST"]},
       {"resource": "/v1/interco/charges", "methods": ["GET"]},
       {"resource": "/v1/interco/charges/*", "methods": ["GET"]},
+      {"resource": "/v1/interco/entities", "methods": ["GET"]},
       {"resource": "/v1/interco/journals", "methods": ["GET"]},
       {"resource": "/v1/interco/journals/*", "methods": ["GET"]},
+      {"resource": "/v1/interco/matrix", "methods": ["GET"]},
       {"resource": "/v1/interco/reconciliations", "methods": ["GET"]},
       {"resource": "/v1/interco/reconciliations/*", "methods": ["GET"]},
       {"resource": "/v1/interco/partners", "methods": ["GET"]},
       {"resource": "/v1/interco/partners/*", "methods": ["GET"]},
       {"resource": "/v1/interco/partners/*/changes:evaluate", "methods": ["POST"]},
       {"resource": "/v1/interco/partners/*/lines:price", "methods": ["POST"]},
-      {"resource": "/v1/interco/transfer-pricing/evidence:export", "methods": ["POST"]}
+      {"resource": "/v1/interco/settings", "methods": ["GET"]},
+      {"resource": "/v1/interco/transfer-pricing/evidence:export", "methods": ["POST"]},
+      {"resource": "/v1/interco/transfer-prices", "methods": ["GET"]}
     ]},
     "receivables.interest.post": {"permissions": [
       {"resource": "/v1/receivables/interest-notes:calculate", "methods": ["POST"]},
@@ -1688,6 +1785,7 @@
       {"resource": "/api/v1/migration/parallel-runs/replay", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/load", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/load-payables", "methods": ["POST"]},
+      {"resource": "/api/v1/migration/runs/*/opening-load", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["POST"]},
       {"resource": "/api/v1/migration/runs/*/quarantine/*/release", "methods": ["POST"]}
     ]},
@@ -1702,6 +1800,7 @@
       {"resource": "/api/v1/migration/runs/*/opening-journal", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-load", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/payables-load", "methods": ["GET"]},
+      {"resource": "/api/v1/migration/runs/*/opening-load", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/target-rows", "methods": ["GET"]},
       {"resource": "/api/v1/migration/runs/*/projects/*/opening", "methods": ["GET"]},
       {"resource": "/api/v1/migration/tolerances", "methods": ["GET"]}
@@ -1958,7 +2057,8 @@
     "fieldservice.work-order.execute": {"permissions": [
       {"resource": "/v1/service/work-orders/*/actions", "methods": ["POST"]},
       {"resource": "/v1/service/work-orders/*/captures/*", "methods": ["PUT"]},
-      {"resource": "/v1/service/technicians/*/day", "methods": ["GET"]}
+      {"resource": "/v1/service/technicians/*/day", "methods": ["GET"]},
+      {"resource": "/v1/service/technicians/*/day/events", "methods": ["GET"]}
     ]},
     "fieldservice.technician.dispatch": {"permissions": [
       {"resource": "/v1/service/technicians", "methods": ["POST"]},
@@ -2076,7 +2176,12 @@
       {"resource": "/print/v1/jobs/*", "methods": ["GET"]},
       {"resource": "/print/v1/printers", "methods": ["GET"]},
       {"resource": "/print/v1/printers/status", "methods": ["GET"]},
-      {"resource": "/print/v1/routing-rules", "methods": ["GET"]}
+      {"resource": "/print/v1/routing-rules", "methods": ["GET"]},
+      {"resource": "/print/v1/document-templates", "methods": ["GET"]},
+      {"resource": "/print/v1/document-templates/*", "methods": ["GET"]},
+      {"resource": "/print/v1/text-blocks", "methods": ["GET"]},
+      {"resource": "/print/v1/output-rules", "methods": ["GET"]},
+      {"resource": "/print/v1/output-plan", "methods": ["GET"]}
     ]},
     "print.document.render": {"permissions": [
       {"resource": "/print/v1/documents:render", "methods": ["POST"]}
@@ -2088,7 +2193,11 @@
       {"resource": "/print/v1/printers/*", "methods": ["PATCH"]},
       {"resource": "/print/v1/printers/*:retire", "methods": ["POST"]},
       {"resource": "/print/v1/routing-rules/*", "methods": ["PUT", "DELETE"]},
-      {"resource": "/print/v1/jobs:sweep", "methods": ["POST"]}
+      {"resource": "/print/v1/jobs:sweep", "methods": ["POST"]},
+      {"resource": "/print/v1/document-templates/*", "methods": ["PUT"]},
+      {"resource": "/print/v1/text-blocks/*/*", "methods": ["PUT"]},
+      {"resource": "/print/v1/output-rules", "methods": ["POST"]},
+      {"resource": "/print/v1/output-rules/*", "methods": ["DELETE"]}
     ]},
     "warehouse.offline-conflict.resolve": {"permissions": [
       {"resource": "/api/v1/mobile/offline/conflicts", "methods": ["GET"]},
@@ -2247,12 +2356,17 @@
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*/scenarios/*:spread", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/scenarios/*:generate", "methods": ["POST"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:import", "methods": ["POST"]},
       {"resource": "/v1/budget/plans/*/stage-owners", "methods": ["PUT"]},
       {"resource": "/v1/budget/plans/*:submit", "methods": ["POST"]}
     ]},
     "budget.encumbrance.convert": {"service_only": true, "permissions": [
       {"resource": "/v1/budget/encumbrances/*:convert", "methods": ["POST"]},
       {"resource": "/v1/budget/encumbrances:convert", "methods": ["POST"]}
+    ]},
+    "budget.requisition.check": {"service_only": true, "permissions": [
+      {"resource": "/v1/budget/requisition-checks", "methods": ["POST"]},
+      {"resource": "/v1/budget/requisition-checks:release-line", "methods": ["POST"]}
     ]},
     "budget.plan.workflow": {"service_only": true, "permissions": [
       {"resource": "/v1/budget/plans/*/stages/*:sign-off", "methods": ["POST"]},
@@ -2273,6 +2387,7 @@
       {"resource": "/v1/budget/plans", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*/scenarios/*/grid", "methods": ["GET"]},
+      {"resource": "/v1/budget/plans/*/scenarios/*:export", "methods": ["GET"]},
       {"resource": "/v1/budget/plans/*/scenarios:compare", "methods": ["GET"]},
       {"resource": "/v1/budget/available", "methods": ["GET"]},
       {"resource": "/v1/budget/checks", "methods": ["GET"]},
@@ -2312,6 +2427,7 @@
       {"resource": "/v1/controlling/allocation-runs/*", "methods": ["GET"]},
       {"resource": "/v1/controlling/allocation-templates", "methods": ["GET"]},
       {"resource": "/v1/controlling/allocation-templates/*", "methods": ["GET"]},
+      {"resource": "/v1/controlling/cost-actuals", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-behavior-rules", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-elements", "methods": ["GET"]},
       {"resource": "/v1/controlling/cost-object-hierarchies", "methods": ["GET"]},
@@ -3130,11 +3246,14 @@
       {"resource": "/v1/production/inheritance-rules/*", "methods": ["GET"]},
       {"resource": "/v1/production/batch-derivations", "methods": ["GET"]},
       {"resource": "/v1/production/rework-orders", "methods": ["GET"]},
-      {"resource": "/v1/production/rework-orders/*", "methods": ["GET"]}
+      {"resource": "/v1/production/rework-orders/*", "methods": ["GET"]},
+      {"resource": "/v1/production/recipe-targets", "methods": ["GET"]},
+      {"resource": "/v1/production/batch-orders/*/control-recipe", "methods": ["GET"]}
     ]},
     "production.batch-order.write": {"permissions": [
       {"resource": "/v1/production/batch-orders", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:release", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-orders/*:send-recipe", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:report-finished", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:rescale", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:start", "methods": ["POST"]},
@@ -3168,7 +3287,10 @@
       {"resource": "/v1/production/cost-snapshots", "methods": ["GET"]},
       {"resource": "/v1/production/cost-snapshots:run", "methods": ["POST"]}
     ]},
-    "production.formula.write": {"permissions": [{"resource": "/v1/production/formulas", "methods": ["POST"]}]},
+    "production.formula.write": {"permissions": [
+      {"resource": "/v1/production/formulas", "methods": ["POST"]},
+      {"resource": "/v1/production/recipe-targets/*", "methods": ["PUT", "DELETE"]}
+    ]},
     "production.journal.over-consume": {"flag": true, "permissions": []},
     "production.journal.post": {"permissions": [
       {"resource": "/v1/production/as-built/*", "methods": ["POST"]},
@@ -3259,6 +3381,7 @@
     "revrec.maintain": {"permissions": [
       {"resource": "/v1/revrec/contracts", "methods": ["POST"]},
       {"resource": "/v1/revrec/contracts/*:allocate", "methods": ["POST"]},
+      {"resource": "/v1/revrec/contracts/*:modify", "methods": ["POST"]},
       {"resource": "/v1/revrec/milestones/*:satisfy", "methods": ["POST"]},
       {"resource": "/v1/revrec/recognition-templates/*", "methods": ["PUT"]}
     ]},
@@ -3518,7 +3641,8 @@
     ]},
     "shopfloor.controlrecipe.create": {"permissions": [
       {"resource": "/v1/shopfloor/control-recipes", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/control-recipes/*:resend", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/control-recipes/*:resend", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/control-recipes:from-pi-sheet", "methods": ["POST"]}
     ]},
     "shopfloor.controlrecipe.execute": {"permissions": [{"resource": "/v1/shopfloor/control-recipes/*:report", "methods": ["POST"]}]},
     "shopfloor.job.sync": {"flag": true, "permissions": []},
@@ -3573,7 +3697,16 @@
       {"resource": "/v1/shopfloor/jobs/*:feedback", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/registrations", "methods": ["POST"]}
     ]},
+    "shopfloor.pisheet.maintain": {"permissions": [
+      {"resource": "/v1/shopfloor/pi-sheets", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*", "methods": ["PUT"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*:release", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*:new-version", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*:obsolete", "methods": ["POST"]}
+    ]},
     "shopfloor.view": {"permissions": [
+      {"resource": "/v1/shopfloor/pi-sheets", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/pi-sheets/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/control-recipes", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/control-recipes/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/absence-codes", "methods": ["GET"]},
@@ -3657,11 +3790,21 @@
       {"resource": "/v1/treasury/reconciliation-rules/*:deactivate", "methods": ["POST"]},
       {"resource": "/v1/treasury/reconciliation-runs", "methods": ["POST"]}
     ]},
+    "treasury.import.write": {"service_only": true, "permissions": [{"resource": "/v1/treasury/opening-balances", "methods": ["POST"]}]},
+    "treasury.import.read": {"service_only": true, "permissions": [{"resource": "/v1/treasury/opening-balances", "methods": ["GET"]}]},
     "treasury.cashdesk.write": {"permissions": [
       {"resource": "/v1/treasury/cash-desks", "methods": ["POST"]},
       {"resource": "/v1/treasury/cash-desks/*/days", "methods": ["POST"]},
       {"resource": "/v1/treasury/cash-desks/*/days/*:close", "methods": ["POST"]},
-      {"resource": "/v1/treasury/cash-desks/*/entries", "methods": ["POST"]}
+      {"resource": "/v1/treasury/cash-desks/*/days/*:post", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/entries", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*", "methods": ["PATCH"]},
+      {"resource": "/v1/treasury/cash-desks/*:activate", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*:deactivate", "methods": ["POST"]}
+    ]},
+    "treasury.cashdesk.approve": {"permissions": [
+      {"resource": "/v1/treasury/cash-desks/*/days/*:approve", "methods": ["POST"]},
+      {"resource": "/v1/treasury/cash-desks/*/days/*:reject", "methods": ["POST"]}
     ]},
     "treasury.statement.import": {"permissions": [
       {"resource": "/v1/treasury/statements/import", "methods": ["POST"]},
@@ -3699,7 +3842,16 @@
       {"resource": "/v1/warehouse/receipts", "methods": ["GET"]},
       {"resource": "/v1/warehouse/receipts/*", "methods": ["GET"]},
       {"resource": "/v1/warehouse/work", "methods": ["GET"]},
-      {"resource": "/v1/warehouse/work/*", "methods": ["GET"]}
+      {"resource": "/v1/warehouse/work/*", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/rfid-reads", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/pallets/*/label", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]}
+    ]},
+    "warehouse.rfid.ingest": {"permissions": [{"resource": "/v1/warehouse/rfid-reads:ingest", "methods": ["POST"]}]},
+    "warehouse.automation.execute": {"permissions": [
+      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/automation/transport-orders/*:report", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/automation/events", "methods": ["POST"]}
     ]},
     "warehouse.receipt.register": {"permissions": [
       {"resource": "/v1/warehouse/dock-appointments", "methods": ["POST"]},
@@ -3708,10 +3860,12 @@
     ]},
     "warehouse.setup.maintain": {"permissions": [
       {"resource": "/v1/warehouse/dock-doors", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/gs1-settings", "methods": ["PUT"]},
       {"resource": "/v1/warehouse/location-directives", "methods": ["POST"]},
       {"resource": "/v1/warehouse/locations:bulk", "methods": ["POST"]}
     ]},
     "warehouse.setup.view": {"permissions": [
+      {"resource": "/v1/warehouse/gs1-settings", "methods": ["GET"]},
       {"resource": "/v1/warehouse/location-directives", "methods": ["GET"]},
       {"resource": "/v1/warehouse/location-directives:simulate", "methods": ["POST"]},
       {"resource": "/v1/warehouse/locations", "methods": ["GET"]}
@@ -3734,6 +3888,7 @@
     ]},
     "warehouse.work.supervise": {"permissions": [
       {"resource": "/v1/warehouse/work", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions", "methods": ["GET"]},
       {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}
@@ -3774,8 +3929,17 @@
     "platform.global.admin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {
-    "consolidation": {"ledger": ["ledger.balance.read"]},
-    "intercompany": {"ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup"]},
+    "consolidation": {
+      "ledger": ["ledger.balance.read"],
+      "fx": ["fx.rate.lookup"],
+      "org": ["org.read"]
+    },
+    "intercompany": {
+      "ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.ledger.lookup", "ledger.balance.read"],
+      "fx": ["fx.rate.lookup"],
+      "org": ["org.read"],
+      "tax": ["tax.tax.calculate", "tax.transaction.record"]
+    },
     "finreport": {"ledger": ["ledger.entry.lookup", "ledger.balance.read"]},
     "billing": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
@@ -3799,7 +3963,7 @@
       "payables": ["payables.inbox.read"]
     },
     "purchasing": {
-      "budgeting": ["budget.encumbrance.convert"]
+      "budgeting": ["budget.encumbrance.convert", "budget.requisition.check"]
     },
     "receiving": {
       "ledger": ["ledger.entry.post", "ledger.journal.reverse"],
@@ -3825,7 +3989,11 @@
       "engineering": ["engineering.read"]
     },
     "budgeting": {
-      "ledger": ["ledger.balance.read"]
+      "ledger": ["ledger.balance.read"],
+      "assets": ["assets.asset.view"],
+      "hr": ["hr.org.inquire"],
+      "projects": ["projects.inquire"],
+      "planning": ["planning.read"]
     },
     "costing": {
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
@@ -3864,7 +4032,7 @@
       "receivables": ["receivables.forecast.read"]
     },
     "sales": {
-      "product": ["product.configuration.read"],
+      "product": ["product.configuration.read", "product.names.read"],
       "production": ["production.order.create-from-sales"],
       "billing": ["billing.invoice.read"],
       "fulfillment": ["fulfillment.packing-slip.read"],
@@ -3875,7 +4043,8 @@
     "receivables": {
       "ledger": ["ledger.entry.post", "ledger.ledger.lookup"],
       "tax": ["tax.transaction.record"],
-      "billing": ["billing.invoice.read", "billing.credit-reservation.write"]
+      "billing": ["billing.invoice.read", "billing.credit-reservation.write"],
+      "fx": ["fx.rate.lookup"]
     },
     "ledger": {
       "close": ["period.check"],
@@ -3890,7 +4059,7 @@
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"],
       "fx": ["fx.rate.lookup"],
-      "tax": ["tax.withholding.calculate"],
+      "tax": ["tax.withholding.calculate", "tax.withholding.record"],
       "party": ["party.vendor-bank.reveal", "party.vendor.lookup"]
     },
     "workflow-ts": {
@@ -3930,6 +4099,8 @@
     "migration-factory": {
       "receivables": ["receivables.import.write", "receivables.view"],
       "payables": ["opening-item.import", "opening-item.import.read"],
+      "inventory": ["inventory.import.write", "inventory.import.read"],
+      "treasury": ["treasury.import.write", "treasury.import.read"],
       "ledger": ["ledger.entry.post", "ledger.balance.read", "ledger.ledger.lookup"]
     },
     "integration-hub": {
@@ -3939,26 +4110,35 @@
       "fulfillment": ["fulfillment.shipment.read"],
       "billing": ["billing.invoice.read"],
       "sales": ["sales.order.lookup", "sales.channel.intake"],
-      "purchasing": ["procurement.requisition.create"]
+      "purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
+      "receiving": ["receiving.asn.maintain"]
     },
     "fieldservice": {
       "dispatch": ["dispatch.run.create", "dispatch.run.read"]
     },
     "processmfg": {
-      "identity": ["identity.feature.view"]
+      "identity": ["identity.feature.view"],
+      "shopfloor": ["shopfloor.controlrecipe.create"]
+    },
+    "shopfloor": {
+      "identity": ["identity.tenant-registry.read"]
     },
     "supplier-portal": {
       "purchasing": ["procurement.vendor-portal.read", "procurement.vendor-portal.acknowledge"],
       "receiving": ["receiving.vendor-portal.asn", "receiving.vendor-portal.invoice"],
-      "party": ["party.vendor-portal.read", "party.vendor-portal.write"]
+      "party": ["party.vendor-portal.read", "party.vendor-portal.write", "party.vendor-portal.register", "party.vendor-portal.invite-accept", "party.vendor-portal.admin"],
+      "payables": ["payables.vendor-portal.read"]
     },
     "customer-portal": {
       "receivables": ["receivables.customer-portal.read"],
       "billing": ["billing.customer-portal.read"],
-      "sales": ["sales.customer-portal.read"]
+      "sales": ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"],
+      "party": ["party.customer-portal.read"],
+      "identity": ["identity.customer-portal.read"]
     }
   },
   "service_principals": {
+    "edi-cxml": ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"],
     "edi-outbound": ["edi.outbound.from-event"],
     "edi-sales": ["sales.channel.intake"],
     "finreport-ledger": ["ledger.entry.lookup"],

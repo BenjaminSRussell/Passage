@@ -106,7 +106,7 @@ describe("new bank account", () => {
     fill("Account code", "OPS-01");
     fill("IBAN", "DE89 3704 0044 0532 0130 00");
     fill("Currency", "EUR");
-    fill("GL main account id", GL);
+    fill("General ledger account", GL);
     fireEvent.click(screen.getByRole("button", { name: "Create bank account" }));
     expect(await screen.findByRole("heading", { name: "Bank account OPS-01" })).toBeInTheDocument();
     const post = server.calls.find((c) => c.method === "POST")!;
@@ -126,7 +126,7 @@ describe("new bank account", () => {
     fill("Account code", "US-01");
     fill("IBAN", "DE89370400440532013000");
     fill("Currency", "USD");
-    fill("GL main account id", GL);
+    fill("General ledger account", GL);
     fill("Statement account number", "12#45");
     fireEvent.click(screen.getByRole("button", { name: "Create bank account" }));
     expect(await screen.findByText("Use up to 35 characters: A to Z, 0 to 9, slash, dot or hyphen.")).toBeInTheDocument();
@@ -145,7 +145,7 @@ describe("new bank account", () => {
     fill("Account code", "OPS-01");
     fill("IBAN", "DE89370400440532013000");
     fill("Currency", "EUR");
-    fill("GL main account id", GL);
+    fill("General ledger account", GL);
     fireEvent.click(screen.getByRole("button", { name: "Create bank account" }));
     expect(await findAlert()).toHaveTextContent("This account already exists");
     const firstKey = header(server.calls[0], "Idempotency-Key");
@@ -181,7 +181,7 @@ describe("bank account detail", () => {
     const post = server.calls.find((c) => c.method === "POST")!;
     expect(post.url.pathname).toBe(`/api/v1/treasury/bank-accounts/${ACCT}:activate`);
     expect(header(post, "If-Match")).toBe('"1"');
-    expect(screen.getByRole("status")).toHaveTextContent("the account is now active");
+    expect(screen.getByText(/the account is now active/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Import statement" })).toHaveAttribute("href", `/treasury/statements/import?bankAccountId=${ACCT}`);
   });
 

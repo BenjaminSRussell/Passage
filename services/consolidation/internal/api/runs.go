@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -22,10 +23,11 @@ import (
 // RunStore persists consolidation runs. internal/store implements it over
 // Postgres with row-level security and the outbox.
 type RunStore interface {
-	CreateRun(ctx context.Context, in domain.RunInput, res domain.RunResult, key string) (store.RunRecord, bool, error)
+	CreateRun(ctx context.Context, in domain.RunInput, res domain.RunResult, collectionID, key string) (store.RunRecord, bool, error)
 	ListRuns(ctx context.Context, f store.RunFilter, after string, limit int) (store.RunPage, error)
 	GetRun(ctx context.Context, id string) (store.RunDetail, error)
 	GetStatements(ctx context.Context, id string) (store.RunStatements, error)
+	RunInvestments(ctx context.Context, id string) ([]store.InvestmentRecord, error)
 }
 
 const (
@@ -46,6 +48,26 @@ type startRunBody struct {
 	Period   string        `json:"period"`
 	Currency string        `json:"currency"`
 	Units    []runUnitBody `json:"units"`
+	// CollectionID derives the units of the run from a stored collection of the group's balances instead of taking them
+	// from the request; Units must then be empty. IC supplies the pair amounts a trial balance cannot attribute to one partner.
+	CollectionID string          `json:"collectionId"`
+	IC           []icOverrideRow `json:"ic"`
+	// OpeningRates gives the opening rate of a currency when no collection of the unit's previous fiscal year end holds it.
+	OpeningRates []openingRateRow `json:"openingRates"`
+}
+
+type icOverrideRow struct {
+	Unit         string `json:"unit"`
+	ICSales      string `json:"icSales"`
+	ICCost       string `json:"icCost"`
+	UnsoldShare  string `json:"unsoldShare"`
+	ICReceivable string `json:"icReceivable"`
+	PayableGroup string `json:"payableGroup"`
+}
+
+type openingRateRow struct {
+	Currency string `json:"currency"`
+	Rate     string `json:"rate"`
 }
 
 type runResponse struct {
@@ -53,6 +75,7 @@ type runResponse struct {
 	GroupID          string    `json:"groupId"`
 	Period           string    `json:"period"`
 	Currency         string    `json:"currency"`
+	CollectionID     string    `json:"collectionId,omitempty"`
 	Version          int       `json:"version"`
 	Status           string    `json:"status"`
 	InputsHash       string    `json:"inputsHash"`
@@ -61,6 +84,9 @@ type runResponse struct {
 	EliminationCount int       `json:"eliminationCount"`
 	CTAAmount        string    `json:"ctaAmount"`
 	CreatedAt        time.Time `json:"createdAt"`
+	// Warnings are what the run did on a fallback, such as the seller's margin for an IC layer with no group cost (CNS-0908). They are
+	// not stored.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type balanceBody struct {
@@ -101,7 +127,7 @@ type runListResponse struct {
 
 func toRunResponse(rec store.RunRecord) runResponse {
 	return runResponse{
-		ID: rec.ID, GroupID: rec.GroupID, Period: rec.Period, Currency: rec.Currency, Version: rec.Version, Status: rec.Status,
+		ID: rec.ID, GroupID: rec.GroupID, Period: rec.Period, Currency: rec.Currency, CollectionID: rec.CollectionID, Version: rec.Version, Status: rec.Status,
 		InputsHash: rec.InputsHash, CreatedBy: rec.CreatedBy, UnitCount: rec.UnitCount, EliminationCount: rec.EliminationCount,
 		CTAAmount: rec.CTA.StringFixed(money.MinorUnits(rec.Currency)), CreatedAt: rec.CreatedAt.UTC(),
 	}
@@ -150,6 +176,10 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		validation(w, r, map[string]string{"units": fmt.Sprintf("must contain at most %d units", domain.MaxRunUnits)})
 		return
 	}
+	if body.CollectionID != "" {
+		a.startRunFromCollection(w, r, body, key)
+		return
+	}
 	fields := map[string]string{}
 	in := domain.RunInput{GroupID: body.GroupID, Period: body.Period, Currency: body.Currency}
 	if !currencyCode.MatchString(body.Currency) {
@@ -186,7 +216,7 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
-	rec, replayed, err := a.runs.CreateRun(r.Context(), in, res, key)
+	rec, replayed, err := a.runs.CreateRun(r.Context(), in, res, "", key)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
@@ -280,4 +310,176 @@ func (a *API) getRunStatements(w http.ResponseWriter, r *http.Request) {
 		out.Statements = append(out.Statements, statementLineBody{Statement: l.Statement, Line: l.Code, Amount: l.Amount.StringFixed(places)})
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// startRunFromCollection derives the run's units from a stored collection (FR-40.10) and stores the run as the next version of
+// its group, period and currency, recording the collection it came from.
+func (a *API) startRunFromCollection(w http.ResponseWriter, r *http.Request, body startRunBody, key string) {
+	if a.groups == nil {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "group storage is not configured"))
+		return
+	}
+	fields := map[string]string{}
+	if !ids.Valid(body.CollectionID) {
+		fields["collectionId"] = "must be a collection id"
+	}
+	if len(body.Units) > 0 {
+		fields["units"] = "must be empty when the run is derived from a collection"
+	}
+	f := decimals{}
+	ic := map[string]domain.ICOverride{}
+	for i, o := range body.IC {
+		at := func(name string) string { return fmt.Sprintf("ic[%d].%s", i, name) }
+		if !ids.Valid(o.Unit) {
+			fields[at("unit")] = "must be a unit id of the group"
+			continue
+		}
+		var ov domain.ICOverride
+		opt := func(name, raw string, into **decimal.Decimal) {
+			if raw == "" {
+				return
+			}
+			d := f.get(at(name), raw, true)
+			*into = &d
+		}
+		opt("icSales", o.ICSales, &ov.ICSales)
+		opt("icCost", o.ICCost, &ov.ICCost)
+		opt("unsoldShare", o.UnsoldShare, &ov.UnsoldShare)
+		opt("icReceivable", o.ICReceivable, &ov.ICReceivable)
+		opt("payableGroup", o.PayableGroup, &ov.PayableGroup)
+		ic[o.Unit] = ov
+	}
+	openingRates := map[string]decimal.Decimal{}
+	for i, o := range body.OpeningRates {
+		if !currencyCode.MatchString(o.Currency) {
+			fields[fmt.Sprintf("openingRates[%d].currency", i)] = "must be an ISO 4217 code"
+			continue
+		}
+		openingRates[o.Currency] = f.get(fmt.Sprintf("openingRates[%d].rate", i), o.Rate, true)
+	}
+	for k, v := range f {
+		fields[k] = v
+	}
+	if !validation(w, r, fields) {
+		return
+	}
+	c, err := a.groups.GetCollection(r.Context(), body.CollectionID)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	if body.GroupID != "" && body.GroupID != c.GroupID || body.Period != "" && body.Period != c.Period || body.Currency != "" && body.Currency != c.Currency {
+		validation(w, r, map[string]string{"collectionId": "belongs to group " + c.GroupID + ", period " + c.Period + " in " + c.Currency + "; leave groupId, period and currency out or make them match"})
+		return
+	}
+	group, err := a.groups.GetGroup(r.Context(), c.GroupID)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	terms, err := a.groups.GetUnitTerms(r.Context(), c.GroupID)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	in := domain.DeriveInput{GroupCurrency: c.Currency, Period: c.Period, Units: group.Units, Lines: c.Lines, Rates: c.Rates,
+		Terms: map[string]domain.UnitTerms{}, Opening: map[string]domain.OpeningBasis{}, OpeningRates: openingRates, IC: ic}
+	for id, t := range terms {
+		in.Terms[id] = t.UnitTerms
+	}
+	// Each unit's opening comes from the collection at the end of its previous fiscal year, when the group has one.
+	byPeriod := map[string]*store.CollectionDetail{}
+	for _, u := range group.Units {
+		end, err := a.previousYearEnd(r.Context(), u, c.Period)
+		if err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
+		prev, seen := byPeriod[end]
+		if !seen {
+			got, ok, err := a.groups.LatestCollection(r.Context(), c.GroupID, end)
+			if err != nil {
+				httpx.Fail(w, r, problemFrom(err))
+				return
+			}
+			if ok {
+				prev = &got
+			}
+			byPeriod[end] = prev
+		}
+		if prev == nil {
+			continue
+		}
+		var lines []domain.CollectLine
+		for _, l := range prev.Lines {
+			if l.UnitID == u.ID {
+				lines = append(lines, l)
+			}
+		}
+		if closing, _, ok := domain.NetAssets(lines); ok {
+			basis := domain.OpeningBasis{NetAssets: closing}
+			if rate, ok := prev.Rates[u.Currency]; ok {
+				basis.Rate = rate.Closing
+			}
+			in.Opening[u.ID] = basis
+		}
+	}
+	if in.Layers, err = a.groups.GetLayers(r.Context(), c.GroupID, c.Period); err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	// An equity-method unit's investment starts the fiscal year at the carrying amount of the register at the previous year end.
+	in.PreviousCarrying = map[string]decimal.Decimal{}
+	registers := map[string]map[string]store.InvestmentRecord{}
+	for _, u := range group.Units {
+		if t, ok := in.Terms[u.ID]; !ok || t.Method != domain.MethodEquity {
+			continue
+		}
+		end, err := a.previousYearEnd(r.Context(), u, c.Period)
+		if err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
+		reg, seen := registers[end]
+		if !seen {
+			got, found, err := a.groups.LatestInvestments(r.Context(), c.GroupID, end)
+			if err != nil {
+				httpx.Fail(w, r, problemFrom(err))
+				return
+			}
+			if found {
+				reg = got
+			}
+			registers[end] = reg
+		}
+		if line, ok := reg[u.ID]; ok && line.Method == domain.MethodEquity {
+			in.PreviousCarrying[u.ID] = line.ClosingCarrying
+		}
+	}
+	derived, err := domain.DeriveRun(in)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	units := derived.Units
+	run := domain.RunInput{GroupID: c.GroupID, Period: c.Period, Currency: c.Currency, Units: units, Associates: derived.Associates}
+	res, err := domain.ComputeRun(run)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	rec, replayed, err := a.runs.CreateRun(r.Context(), run, res, c.ID, key)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotent-Replayed", "true")
+	} else {
+		a.runsCompleted.Add(1)
+	}
+	w.Header().Set("Location", "/v1/consol/runs/"+rec.ID)
+	out := toRunResponse(rec)
+	out.Warnings = derived.Warnings
+	httpx.JSON(w, http.StatusCreated, out)
 }

@@ -13,16 +13,18 @@ database:
 
 # Public keys of the services that call purchasing with a signed service token
 # (caller[:kid]=base64 Ed25519 public key, comma separated; not secret). receiving
-# reports settled invoicing-plan rows this way (#289).
+# reports settled invoicing-plan rows this way (#289). List edi's public key as edi=<base64 Ed25519 key>: edi creates
+# requisitions from punchout returns (procurement.requisition.create) and, for inbound cXML, confirms purchase orders (#35).
 serviceIdentity:
   publicKeys: ""
-  # purchasing signs its call to budgeting (budget.encumbrance.convert) with this Secret's key "signing-key", mounted at
+  # purchasing signs its calls to budgeting (budget.encumbrance.convert, budget.requisition.check) with this Secret's key "signing-key", mounted at
   # /var/run/passage/service-identity. Add purchasing's public key to budgeting's serviceIdentity.publicKeys first.
   signingKeySecret: ""
   keyId: ""
 
-# Base URLs of the services purchasing calls. budgeting converts a requisition line's pre-encumbrance when a PO line is
-# created from it (FR-38.5); unset, nothing is converted and purchasing logs a warning at start.
+# Base URLs of the services purchasing calls. budgeting checks an approved requisition and reserves its lines as pre-encumbrances,
+# gives them back when it is cancelled, and converts a line's pre-encumbrance when a PO line is created from it (FR-38.5). Unset,
+# requisitions are approved unchecked, nothing is converted and purchasing logs a warning at start.
 serviceUrls:
   budgeting: ""
 
@@ -64,3 +66,12 @@ consumer:
     limits:
       cpu: 500m
       memory: 256Mi
+
+# CronJob running `purchasing budget-calls-retry <tenant-id>...` (FR-38.5): repeats the calls to budgeting that failed (a requisition
+# line's pre-encumbrance converted into its PO line's encumbrance, or given back when a requisition was cancelled), the same work as
+# POST /v1/procurement/budget-calls:retry. Needs serviceUrls.budgeting and serviceIdentity.signingKeySecret. Tenants are listed
+# because the app role cannot enumerate them. The job fails while a tenant still has calls budgeting did not accept.
+budgetCallsRetry:
+  enabled: false
+  schedule: "*/15 * * * *"
+  tenantIds: []

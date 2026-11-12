@@ -202,7 +202,7 @@ describe("vendor role", () => {
     renderAt(`/party/${PARTY}`);
     await screen.findByRole("heading", { name: "Northwind" });
     fill();
-    type("Vendor payment term id", TERM);
+    type("Vendor payment term", TERM);
     click("Add vendor role");
     expect(await screen.findByText(/already has a vendor role here/)).toBeInTheDocument();
     expect((posts()[0]?.body as Record<string, string>).paymentTermId).toBe(TERM);
@@ -212,9 +212,9 @@ describe("vendor role", () => {
 describe("customer role and credit limit", () => {
   async function addCustomer() {
     type("Customer account number", "C-100");
-    type("Customer group id", GROUP);
-    type("Customer payment term id", TERM);
-    type("Posting profile id", PROFILE);
+    type("Customer group", GROUP);
+    type("Customer payment term", TERM);
+    type("Posting profile", PROFILE);
     type("Customer currency", "usd");
     click("Add customer role");
   }
@@ -235,7 +235,7 @@ describe("customer role and credit limit", () => {
       currencyCode: "USD",
     });
     expect(post.headers.get("Idempotency-Key")).toBeTruthy();
-    await waitFor(() => expect(screen.getByLabelText("Customer role id")).toHaveValue(CUSTOMER));
+    await waitFor(() => expect(screen.getByLabelText("Customer")).toHaveAttribute("data-value", CUSTOMER));
   });
 
   it("validates the customer role before calling the API", async () => {
@@ -243,7 +243,7 @@ describe("customer role and credit limit", () => {
     renderAt(`/party/${PARTY}`);
     await screen.findByRole("heading", { name: "Northwind" });
     click("Add customer role");
-    expect(await screen.findByText("Enter the posting profile id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the posting profile.")).toBeInTheDocument();
     expect(posts()).toHaveLength(0);
   });
 
@@ -251,7 +251,7 @@ describe("customer role and credit limit", () => {
     detail((call) => (call.method === "POST" ? json(200, { creditLimit: "5000.00" }) : undefined));
     renderAt(`/party/${PARTY}`);
     await screen.findByRole("heading", { name: "Northwind" });
-    type("Customer role id", CUSTOMER);
+    type("Customer", CUSTOMER);
     type("Credit limit", "5000.00");
     click("Set credit limit");
     expect(await screen.findByText("The stored credit limit is 5000.00.")).toBeInTheDocument();
@@ -280,7 +280,7 @@ describe("customer role and credit limit", () => {
     );
     renderAt(`/party/${PARTY}`);
     await screen.findByRole("heading", { name: "Northwind" });
-    type("Customer role id", CUSTOMER);
+    type("Customer", CUSTOMER);
     type("Credit limit", "25000.00");
     click("Set credit limit");
     const link = await screen.findByRole("link", {
@@ -294,10 +294,10 @@ describe("customer role and credit limit", () => {
     detail();
     renderAt(`/party/${PARTY}`);
     await screen.findByRole("heading", { name: "Northwind" });
-    type("Customer role id", "nope");
+    type("Customer", "nope");
     type("Credit limit", "1.234");
     click("Set credit limit");
-    expect(await screen.findByText("Enter the customer role id (a UUID).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the customer.")).toBeInTheDocument();
     expect(screen.getByText(/at most 2 decimals/)).toBeInTheDocument();
     expect(posts()).toHaveLength(0);
   });
@@ -312,7 +312,7 @@ describe("customer role and credit limit", () => {
     );
     renderAt(`/party/${PARTY}`);
     await screen.findByRole("heading", { name: "Northwind" });
-    type("Customer role id", CUSTOMER);
+    type("Customer", CUSTOMER);
     type("Credit limit", "9.00");
     click("Set credit limit");
     expect(await screen.findByRole("link", { name: "Open the pending change" })).toHaveAttribute(
@@ -419,16 +419,16 @@ describe("focus and navigation", () => {
     );
     await screen.findByRole("heading", { name: "Northwind" });
     type("Customer account number", "C-100");
-    type("Customer group id", GROUP);
-    type("Customer payment term id", TERM);
-    type("Posting profile id", PROFILE);
+    type("Customer group", GROUP);
+    type("Customer payment term", TERM);
+    type("Posting profile", PROFILE);
     type("Customer currency", "usd");
     click("Add customer role");
-    await waitFor(() => expect(screen.getByLabelText("Customer role id")).toHaveValue(CUSTOMER));
+    await waitFor(() => expect(screen.getByLabelText("Customer")).toHaveAttribute("data-value", CUSTOMER));
     click("Go next");
     await waitFor(() => expect(api.calls.some((c) => c.url.pathname.endsWith(NEXT))).toBe(true));
-    await screen.findByLabelText("Customer role id");
-    await waitFor(() => expect(screen.getByLabelText("Customer role id")).toHaveValue(""));
+    await screen.findByLabelText("Customer");
+    await waitFor(() => expect(screen.getByLabelText("Customer")).toHaveAttribute("data-value", ""));
   });
 });
 

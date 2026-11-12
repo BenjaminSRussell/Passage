@@ -82,6 +82,10 @@ type RequisitionLine struct {
 	// CONSOLIDATED line (FR-17.3 commitment tracking).
 	PurchaseOrderID     string `json:"purchaseOrderId,omitempty"`
 	PurchaseOrderLineNo int    `json:"purchaseOrderLineNo,omitempty"`
+	// GLAccount and CostCenter are the budget dimensions the line is charged to (account|costCenter is the budget control
+	// dimension key). A line without both is not budget controlled.
+	GLAccount  string `json:"glAccount,omitempty"`
+	CostCenter string `json:"costCenter,omitempty"`
 	// CatalogEntryID names the procurement catalog entry the line was picked from
 	// (FR-17.18); empty for a non-catalog line.
 	CatalogEntryID string `json:"catalogEntryId,omitempty"`
@@ -140,10 +144,12 @@ func (s *Postgres) CreateRequisition(ctx context.Context, in Requisition, idem I
 		}
 		for _, l := range in.Lines {
 			if _, err := tx.Exec(ctx, `insert into purchase_requisition_line (tenant_id, id, requisition_id, line_no, product_id, description,
-				category, qty, unit, estimated_unit_price, amount, requested_date, site_id, preferred_vendor_id, status, catalog_entry_id, warehouse_id)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'OPEN', $15, $16)`,
+				category, qty, unit, estimated_unit_price, amount, requested_date, site_id, preferred_vendor_id, status, catalog_entry_id, warehouse_id,
+				gl_account, cost_center)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'OPEN', $15, $16, $17, $18)`,
 				p.TenantID, ids.New(), in.ID, l.LineNo, nullable(l.ProductID), l.Description, l.Category, l.Qty, l.Unit,
-				l.EstimatedUnitPrice, l.Amount, l.RequestedDate.Time, nullable(l.SiteID), nullable(l.PreferredVendorID), nullable(l.CatalogEntryID), nullable(l.WarehouseID)); err != nil {
+				l.EstimatedUnitPrice, l.Amount, l.RequestedDate.Time, nullable(l.SiteID), nullable(l.PreferredVendorID), nullable(l.CatalogEntryID), nullable(l.WarehouseID),
+				nullable(l.GLAccount), nullable(l.CostCenter)); err != nil {
 				return err
 			}
 		}
@@ -285,7 +291,7 @@ func loadRequisition(ctx context.Context, tx pgx.Tx, id string) (Requisition, er
 	rows, err := tx.Query(ctx, `select id, line_no, coalesce(product_id::text, ''), description, category, qty, unit,
 		estimated_unit_price, amount, requested_date, coalesce(site_id::text, ''), coalesce(preferred_vendor_id::text, ''), status,
 		coalesce(purchase_order_id::text, ''), coalesce(purchase_order_line_no, 0), coalesce(catalog_entry_id::text, ''), coalesce(warehouse_id::text, ''),
-		coalesce(split_from_line_id::text, '')
+		coalesce(split_from_line_id::text, ''), coalesce(gl_account, ''), coalesce(cost_center, '')
 		from purchase_requisition_line where tenant_id = $1 and requisition_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return Requisition{}, err
@@ -296,7 +302,7 @@ func loadRequisition(ctx context.Context, tx pgx.Tx, id string) (Requisition, er
 		var l RequisitionLine
 		var requested time.Time
 		if err := rows.Scan(&l.ID, &l.LineNo, &l.ProductID, &l.Description, &l.Category, &l.Qty, &l.Unit, &l.EstimatedUnitPrice,
-			&l.Amount, &requested, &l.SiteID, &l.PreferredVendorID, &l.Status, &l.PurchaseOrderID, &l.PurchaseOrderLineNo, &l.CatalogEntryID, &l.WarehouseID, &l.SplitFromLineID); err != nil {
+			&l.Amount, &requested, &l.SiteID, &l.PreferredVendorID, &l.Status, &l.PurchaseOrderID, &l.PurchaseOrderLineNo, &l.CatalogEntryID, &l.WarehouseID, &l.SplitFromLineID, &l.GLAccount, &l.CostCenter); err != nil {
 			return Requisition{}, err
 		}
 		l.RequestedDate = day(requested)

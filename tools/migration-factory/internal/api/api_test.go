@@ -421,6 +421,38 @@ func (u unreachableStore) RejectPayablesRows(context.Context, string, time.Durat
 	u.fail()
 	return nil
 }
+func (u unreachableStore) GetOpeningLoad(context.Context, string) (domain.OpeningLoad, error) {
+	u.fail()
+	return domain.OpeningLoad{}, nil
+}
+func (u unreachableStore) ClaimOpeningLoad(context.Context, string, string, string, time.Duration) (domain.OpeningLoad, store.OpeningRun, []store.PlannedOpening, []store.PendingOpening, error) {
+	u.fail()
+	return domain.OpeningLoad{}, store.OpeningRun{}, nil, nil, nil
+}
+func (u unreachableStore) PlanOpeningBatch(context.Context, string, string, time.Duration, store.PlannedOpening) error {
+	u.fail()
+	return nil
+}
+func (u unreachableStore) DropOpeningPlan(context.Context, string, string) error {
+	u.fail()
+	return nil
+}
+func (u unreachableStore) RecordOpeningBatch(context.Context, string, string, time.Duration, store.OpeningBatchSent) error {
+	u.fail()
+	return nil
+}
+func (u unreachableStore) RejectOpeningRows(context.Context, string, string, time.Duration, []store.OpeningReject) error {
+	u.fail()
+	return nil
+}
+func (u unreachableStore) ListOpeningRejects(context.Context, string, int) ([]store.OpeningRejectRow, error) {
+	u.fail()
+	return nil, nil
+}
+func (u unreachableStore) FinishOpeningLoad(context.Context, string, store.OpeningFinish) (domain.OpeningLoad, []domain.ControlTotal, error) {
+	u.fail()
+	return domain.OpeningLoad{}, nil, nil
+}
 func (u unreachableStore) FinishPayablesLoad(context.Context, string, store.PayablesFinish) (domain.PayablesLoad, []domain.ControlTotal, error) {
 	u.fail()
 	return domain.PayablesLoad{}, nil, nil

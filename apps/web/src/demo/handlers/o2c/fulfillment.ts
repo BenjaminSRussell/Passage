@@ -1,9 +1,9 @@
 // Fulfillment service (/api/v1/fulfillment) for the demo: shipments, packing slips and tracking for the shipped
 // sales orders in model.ts. Reads only; picking and posting are not part of the demo.
-import type { OperationRule, PackingSlipSummary, TrackingEvent } from "../../../modules/fulfillment/api/client";
-import { LEGAL_ENTITY } from "../../company";
+import type { ContainerType, LegalEntitySetting, OperationRule, PackingSlipSummary, ReleaseRule, TrackingEvent, WarehouseSetting } from "../../../modules/fulfillment/api/client";
+import { LEGAL_ENTITY, WH_DAL, WH_FG } from "../../company";
 import { reply, route } from "../../backend";
-import { at } from "../../store";
+import { at, matchesQ } from "../../store";
 import { shipments, slips } from "./model";
 
 const BASE = "/api/v1/fulfillment";
@@ -49,7 +49,7 @@ function slipSummary(s: ReturnType<typeof slips.all>[number]): PackingSlipSummar
 route("GET", `${BASE}/packing-slips`, ({ query }) => {
   const rows = slips
     .all()
-    .filter((s) => (!query.get("shipmentId") || s.shipmentId === query.get("shipmentId")) && (!query.get("orderId") || s.orderId === query.get("orderId")) && (!query.get("status") || s.status === query.get("status")))
+    .filter((s) => (!query.get("shipmentId") || s.shipmentId === query.get("shipmentId")) && (!query.get("orderId") || s.orderId === query.get("orderId")) && (!query.get("status") || s.status === query.get("status")) && matchesQ(query, s.packingSlipNumber))
     .sort((a, b) => b.postingDate.localeCompare(a.postingDate))
     .map(slipSummary);
   return { items: rows };
@@ -83,3 +83,29 @@ route("GET", `${BASE}/legal-entity-settings/{id}`, ({ params }) => ({
   updatedAt: at(-90),
 }));
 route("GET", `${BASE}/delivery-tolerances`, () => ({ items: [] }));
+
+// Fulfillment setup lists (#505): container types, posting settings of the legal entity, and the per-warehouse
+// operation, release and short-pick rules of the two shipping warehouses.
+const containerTypes: ContainerType[] = [
+  { code: "CTN-S", tareKg: "0.40", returnable: false, packagingMaterial: "CARDBOARD" },
+  { code: "CTN-L", tareKg: "0.95", returnable: false, packagingMaterial: "CARDBOARD" },
+  { code: "CRATE-PUMP", tareKg: "18.50", returnable: true, packagingMaterial: "WOOD" },
+  { code: "PALLET-EUR", tareKg: "25.00", returnable: true, packagingMaterial: "WOOD" },
+];
+route("GET", `${BASE}/container-types`, () => ({ items: containerTypes }));
+
+const legalEntitySettings: LegalEntitySetting[] = [
+  { legalEntityId: LEGAL_ENTITY.id, cogsAtShipment: false, asnEnabled: true, gs1CompanyPrefix: "0614141", ssccExtensionDigit: 3, packagingFeeBillable: true, rtpTrackingEnabled: true, rtpChargeDays: 90, version: 2, updatedAt: at(-40) },
+];
+route("GET", `${BASE}/legal-entity-settings`, () => ({ items: legalEntitySettings }));
+
+const shippingWarehouses = [WH_FG, WH_DAL];
+route("GET", `${BASE}/operation-rules`, (): { items: OperationRule[] } => ({
+  items: shippingWarehouses.map((w, i) => ({ warehouseId: w.id, legalEntityId: LEGAL_ENTITY.id, postingDateSource: i === 0 ? "SHIP_TIMESTAMP" : "TODAY", timeZone: "America/Chicago", autoPackEnabled: true, workbenchGroupKeyDefault: i === 0 ? "CUSTOMER" : "CARRIER", version: 1, updatedAt: at(-60) })),
+}));
+route("GET", `${BASE}/release-rules`, (): { items: ReleaseRule[] } => ({
+  items: shippingWarehouses.map((w, i) => ({ warehouseId: w.id, legalEntityId: LEGAL_ENTITY.id, horizonDays: i === 0 ? 3 : 2, requireFullAtp: i === 0, waveMaxLines: 200, waveMaxOrders: 40, version: 1, updatedAt: at(-60) })),
+}));
+route("GET", `${BASE}/warehouse-settings`, (): { items: WarehouseSetting[] } => ({
+  items: shippingWarehouses.map((w, i) => ({ warehouseId: w.id, legalEntityId: LEGAL_ENTITY.id, shortPickAction: i === 0 ? "REMAINDER_BACKORDER" : "KEEP_OPEN", version: 1, updatedAt: at(-30) })),
+}));
