@@ -183,13 +183,31 @@ func TestBreakGlassReadsAnyoneOnlyWhenAuditedAndSaysSo(t *testing.T) {
 	if !ownOnlySeen[len(ownOnlySeen)-1] {
 		t.Fatal("a read without BREAK-GLASS must stay own-only")
 	}
-	// The reason code without the duty grants nothing either.
-	serveBenefits(t, withSpy(&phiaudit.Fake{}), worker, "?purpose=BREAK-GLASS", dutyEssBenefits)
-	if !ownOnlySeen[len(ownOnlySeen)-1] {
-		t.Fatal("BREAK-GLASS without the duty must stay own-only")
+	// The reason code is reserved: without the duty, or when the caller can read anyone anyway, it is refused, so
+	// nothing that is not emergency access reaches the review queue.
+	calls := len(ownOnlySeen)
+	for _, duties := range [][]string{{dutyEssBenefits}, {dutyEssBenefits, dutyWorkerInquire, dutyBenefitsBreakGlass}} {
+		spam := &phiaudit.Fake{}
+		rec := serveBenefits(t, withSpy(spam), worker, "?purpose=BREAK-GLASS", duties...)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "purpose") || len(spam.Reads()) != 0 || len(ownOnlySeen) != calls {
+			t.Fatalf("BREAK-GLASS with %v: %d %s, %d reads recorded", duties, rec.Code, rec.Body.String(), len(spam.Reads()))
+		}
 	}
 
-	calls := len(ownOnlySeen)
+	// A break-glass read of a record with no health-plan election or life event is still recorded.
+	empty := &phiaudit.Fake{}
+	a := withSpy(empty)
+	a.listWorkerBenefits = func(context.Context, string, bool) (store.WorkerBenefits, error) {
+		return store.WorkerBenefits{WorkerID: worker}, nil
+	}
+	if rec := serveBenefits(t, a, worker, "?purpose=BREAK-GLASS%3A+ER", dutyBenefitsBreakGlass); rec.Code != http.StatusOK {
+		t.Fatalf("break-glass read of an empty record: %d %s", rec.Code, rec.Body.String())
+	}
+	if reads := empty.Reads(); len(reads) != 1 || reads[0].Purpose != "BREAK-GLASS: ER" || len(reads[0].Fields) == 0 {
+		t.Fatalf("a break-glass read must always be recorded: %+v", reads)
+	}
+
+	calls = len(ownOnlySeen)
 	rec = serveBenefits(t, withSpy(nil), worker, "?purpose=BREAK-GLASS", dutyBenefitsBreakGlass)
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), codeBreakGlassUnaudited) || len(ownOnlySeen) != calls {
 		t.Fatalf("break-glass with auditing off must be refused before the read: %d %s", rec.Code, rec.Body.String())

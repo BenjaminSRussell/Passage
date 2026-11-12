@@ -974,8 +974,9 @@ paths:
         caller without hr.worker.inquire who holds it reads anyone's benefits by giving a
         purpose with the BREAK-GLASS reason code ("BREAK-GLASS: <reason>"); the read is
         recorded and queued for review by a second person (GET
-        /v1/audit/reads:break-glass). With read auditing off such a read is refused with
-        403 HCM-BREAK-GLASS-UNAUDITED.
+        /v1/audit/reads:break-glass), even when the record holds no health-plan election.
+        With read auditing off such a read is refused with 403 HCM-BREAK-GLASS-UNAUDITED.
+        The reason code is reserved: a caller whose scope it would not widen gets 400.
       x-passage-duty: hr.benefits.self
       parameters:
         - $ref: "#/components/parameters/WorkerId"
