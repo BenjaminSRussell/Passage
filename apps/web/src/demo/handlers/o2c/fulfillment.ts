@@ -1,7 +1,7 @@
 // Fulfillment service (/api/v1/fulfillment) for the demo: shipments, packing slips and tracking for the shipped
 // sales orders in model.ts. Reads only; picking and posting are not part of the demo.
 import type { ContainerType, LegalEntitySetting, OperationRule, PackingSlipSummary, ReleaseRule, TrackingEvent, WarehouseSetting } from "../../../modules/fulfillment/api/client";
-import { LEGAL_ENTITY, WH_DAL, WH_FG } from "../../company";
+import { CUSTOMERS, ITEMS, LEGAL_ENTITY, WH_DAL, WH_FG } from "../../company";
 import { reply, route } from "../../backend";
 import { at, matchesQ } from "../../store";
 import { shipments, slips } from "./model";
@@ -109,3 +109,32 @@ route("GET", `${BASE}/release-rules`, (): { items: ReleaseRule[] } => ({
 route("GET", `${BASE}/warehouse-settings`, (): { items: WarehouseSetting[] } => ({
   items: shippingWarehouses.map((w, i) => ({ warehouseId: w.id, legalEntityId: LEGAL_ENTITY.id, shortPickAction: i === 0 ? "REMAINDER_BACKORDER" : "KEEP_OPEN", version: 1, updatedAt: at(-30) })),
 }));
+
+// Packing rules, packaging materials and returnable balances (#505 lists): a few rows for the Cedar Ridge Pumps
+// pumps and the two biggest customers. Drop-ships: none are open in the demo.
+route("GET", `${BASE}/packing-rules`, ({ query }) => {
+  const rows = [
+    { id: "0f1a0000-0000-4000-8000-000000000001", productId: ITEMS[0].id, customerId: null, containerType: "CRATE-PUMP", qtyPerContainer: "1", maxWeightKg: "180" },
+    { id: "0f1a0000-0000-4000-8000-000000000002", productId: ITEMS[1].id, customerId: null, containerType: "CTN-L", qtyPerContainer: "4", maxWeightKg: "40" },
+    { id: "0f1a0000-0000-4000-8000-000000000003", productId: ITEMS[1].id, customerId: CUSTOMERS[0].id, containerType: "PALLET-EUR", qtyPerContainer: "24", maxWeightKg: "900" },
+  ];
+  const product = query.get("productId");
+  return { items: rows.filter((r) => !product || r.productId === product) };
+});
+route("GET", `${BASE}/product-packaging`, ({ query }) => {
+  const rows = [
+    { productId: ITEMS[0].id, materialCode: "WOOD", weightPerUnitKg: "18.5" },
+    { productId: ITEMS[1].id, materialCode: "CARDBOARD", weightPerUnitKg: "0.95" },
+  ];
+  const product = query.get("productId");
+  return { items: rows.filter((r) => !product || r.productId === product) };
+});
+route("GET", `${BASE}/returnable-packaging`, ({ query }) => {
+  const rows = [
+    { customerId: CUSTOMERS[0].id, containerType: "PALLET-EUR", balance: "6", lastShippedAt: at(-4), lastReturnedAt: at(-20) },
+    { customerId: CUSTOMERS[2].id, containerType: "CRATE-PUMP", balance: "2", lastShippedAt: at(-9), lastReturnedAt: null },
+  ];
+  const customer = query.get("customerId");
+  return { items: rows.filter((r) => !customer || r.customerId === customer) };
+});
+route("GET", `${BASE}/drop-ships`, () => ({ items: [] }));
