@@ -160,6 +160,17 @@ spec:
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage.wms.shipment, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
+      # intercompany: one literal per AsyncAPI channel of services/intercompany/events/asyncapi.yaml (outbox-intercompany routes by event type).
+      - resource: {type: topic, name: passage.interco.partner, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.interco.journal, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.interco.charge, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.interco.chargeinvoice, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.interco.reconciliation, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]
       - resource: {type: group, name: passage-connect, patternType: literal}
@@ -736,6 +747,60 @@ spec:
     transforms.outbox.route.by.field: type
     transforms.outbox.route.topic.regex: 'dev\.passage\.wms\.(?<routedByValue>[a-z][a-z0-9]*)\.[a-z][a-z0-9]*\.v[0-9]+'
     transforms.outbox.route.topic.replacement: passage.wms.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
+    transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
+    transforms.enrich.source.default: passage
+    transforms.enrich.dataschema.template: https://schemas.passage.dev/{type}.json
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# Intercompany routes by event type: its aggregate types (partner, ic_journal, ic_charge, ic_reconciliation_run) are not its
+# channels, and chargeinvoice.requested is written under ic_charge but has its own channel. dev.passage.interco.<entity>.<verb>.v<n>
+# goes to passage.interco.<entity>, the AsyncAPI channels in services/intercompany/events/asyncapi.yaml. Billing's and payables'
+# IC charge consumers read passage.interco.chargeinvoice (#40, deploy/kafka/billing-consumer.yaml and payables-consumer.yaml). The ACLs above are literal per channel (a new entity needs an entry); deploy/scripts/
+# test_argocd_apps.py routes every message of the AsyncAPI through the regex and compares the ACLs with the channels.
+# snapshot.mode no_data: pgoutput streaming ignores RLS, so the CDC role needs neither BYPASSRLS nor a snapshot read of the forced-RLS outbox.
+# debezium_cdc_intercompany has REPLICATION; the intercompany database and that role are provisioned with the service's database.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-intercompany
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.hello-ledger.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc-intercompany:username}
+    database.password: ${secrets:kafka/debezium-cdc-intercompany:password}
+    database.dbname: passage_intercompany
+    topic.prefix: passage.interco
+    slot.name: passage_outbox_intercompany
+    publication.name: passage_outbox_intercompany
+    publication.autocreate.mode: disabled
+    table.include.list: public.outbox
+    snapshot.mode: no_data
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 604800000
+    transforms: outbox,enrich
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: type
+    transforms.outbox.route.topic.regex: 'dev\.passage\.interco\.(?<routedByValue>[a-z][a-z0-9]*)\.[a-z][a-z0-9]*\.v[0-9]+'
+    transforms.outbox.route.topic.replacement: passage.interco.${routedByValue}
     transforms.outbox.table.expand.json.payload: true
     transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     transforms.enrich.type: dev.passage.connect.cloudevents.CloudEventsEnricher
