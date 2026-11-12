@@ -22,6 +22,14 @@ var allowlist = map[string]string{
 	"ops.ops_failover:" + problemNoTenantID:         "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0001_init, #50)",
 	"ops.ops_failover_request:" + problemNotForced:  "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0003_failover_request, #50)",
 	"ops.ops_failover_request:" + problemNoTenantID: "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0003_failover_request, #50)",
+	"ops.ops_failover_step:" + problemNotForced:     "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_failover_step:" + problemNoTenantID:    "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_break_glass:" + problemNotForced:       "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_break_glass:" + problemNoTenantID:      "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_break_glass_use:" + problemNotForced:   "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_break_glass_use:" + problemNoTenantID:  "permanent: platform control-plane state, not tenant data; no tenant column, reached only by the ops.* operator duties (0004_steps_break_glass, #50)",
+	"ops.ops_tenant_license:" + problemNotForced: "permanent: platform control-plane state, not tenant data; keyed by licensee_id, reached only by the ops.* operator duties (0005_license, #50)",
+	"ops.ops_tenant_license:" + problemNoTenantID: "permanent: platform control-plane state, not tenant data; keyed by licensee_id, reached only by the ops.* operator duties (0005_license, #50)",
 	// A consolidation group spans legal entities by design: the group's units, ownership chain and consolidated trial balance are read
 	// whole by the consolidation duties, and hiding a unit outside the caller's scope would give a wrong consolidated result, not a smaller one.
 	"consolidation.consolidation_unit:" + problemNoEntityPol: "permanent: group-level master data; a consolidation group spans legal entities and is read whole by the consolidation duties (0003_groups, #40)",
@@ -53,6 +61,7 @@ var allowlist = map[string]string{
 	"edi.transport_work:" + problemNoTenantPol:                    "permanent: no passage_app grant; maintained by the SECURITY DEFINER partner_transport, transport_delivery and transport_mdn triggers and read only by edi_as2_endpoint() (endpoint id to tenant and partner for the unauthenticated AS2 listener) and edi_transport_due_tenants() (due tenants for the dispatcher, the MDN timeout sweep and the SFTP poller) (0006_partner_transport, 0007_as2_mdn_queue, #483)",
 	"identity.identity_tenants:" + problemExtraPolicy:             "permanent: SELECT-only operator policy gated on identity_operator, whose own policy is tenant-scoped; lets the provisioning operator list tenants",
 	"ledger.description_template:" + problemNullEntity:            "permanent: NULL legal_entity_id is a tenant-wide description template, not a missing scope",
+	"print.print_output_rule:" + problemNullEntity:                "permanent: NULL legal_entity_id is a tenant-wide output rule; only callers with tenant-wide authority may create or delete one (#622 review)",
 	"org.address_purpose:" + problemNullEntity:                    "permanent: NULL legal_entity_id is tenant-wide reference data",
 	"org.currency_rounding:" + problemNullEntity:                  "permanent: NULL legal_entity_id is tenant-wide reference data",
 	"org.org_unit_translation:" + problemNullEntity:               "permanent: NULL legal_entity_id is tenant-wide reference data",

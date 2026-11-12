@@ -27,6 +27,9 @@ const (
 	retA   = "0195f0a0-0000-7000-8000-0000000000c1"
 	retB   = "0195f0a0-0000-7000-8000-0000000000c2"
 	portLE = "00000000-0000-4000-8000-0000000000b1"
+	// prodPump is a product both customers' fixtures carry; prodOnlyB only customer B has bought.
+	prodPump  = "0195f0a0-0000-7000-8000-0000000000d1"
+	prodOnlyB = "0195f0a0-0000-7000-8000-0000000000d2"
 )
 
 // customerStore holds the rows of two customers and answers like the SQL does: the lists honour the customer filter (and
@@ -45,12 +48,12 @@ func newCustomerStore(leaky bool) *customerStore {
 	mkOrder := func(id, cust, status, number string) store.Order {
 		return store.Order{ID: id, CustomerID: cust, InvoiceAccountID: cust, OrderNumber: number, Status: status, Currency: "USD", Channel: "EDI-SECRET",
 			NetTotal: decimal.RequireFromString("10"), Version: 4, Holds: []store.Hold{{HoldType: "CREDIT"}}, CreditCheck: json.RawMessage(`{"exposure":"secret"}`),
-			Lines: []store.Line{{ID: "l1", LineNo: 1, ProductID: "prod-secret", Quantity: decimal.NewFromInt(2), Unit: "EA", WarehouseID: "wh-secret", LineNet: decimal.RequireFromString("10"), LineStatus: "OPEN"}}}
+			Lines: []store.Line{{ID: "l1", LineNo: 1, ProductID: prodPump, Quantity: decimal.NewFromInt(2), Unit: "EA", WarehouseID: "wh-secret", LineNet: decimal.RequireFromString("10"), LineStatus: "OPEN"}}}
 	}
 	mkReturn := func(id, cust, number string) store.ReturnOrder {
 		cost := decimal.RequireFromString("7")
 		return store.ReturnOrder{ID: id, CustomerID: cust, RMANumber: number, Status: "AUTHORIZED", Currency: "USD", CreatedBy: "clerk-secret", JournalPostingID: strPtr("journal-secret"),
-			Lines: []store.ReturnLine{{LineNo: 1, ProductID: "prod-secret", WarehouseID: "wh-secret", Unit: "EA", UnitCost: &cost}}}
+			Lines: []store.ReturnLine{{LineNo: 1, ProductID: prodPump, WarehouseID: "wh-secret", Unit: "EA", UnitCost: &cost}}}
 	}
 	return &customerStore{leaky: leaky,
 		orders:  []store.Order{mkOrder(ordA, custA, "CONFIRMED", "SO-A-1"), mkOrder(ordB, custB, "CONFIRMED", "SO-B-1"), mkOrder(ordA0, custA, "DRAFT", "SO-A-DRAFT")},
@@ -183,7 +186,7 @@ func TestCustomerPortal_AnotherCustomersOrderAndADraftAreNotFound(t *testing.T) 
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "SO-A-1") {
 		t.Fatalf("own order: %d %s", rec.Code, rec.Body)
 	}
-	for _, internal := range []string{"prod-secret", "wh-secret", "warehouseId", "productId", "holds", "creditCheck", "exposure", "EDI-SECRET", "invoiceAccountId"} {
+	for _, internal := range []string{"wh-secret", "warehouseId", "holds", "creditCheck", "exposure", "EDI-SECRET", "invoiceAccountId"} {
 		if strings.Contains(rec.Body.String(), internal) {
 			t.Errorf("the order exposes %q: %s", internal, rec.Body)
 		}
@@ -213,7 +216,7 @@ func TestCustomerPortal_ReturnsAreOnlyTheCallersOwnAndHideCosts(t *testing.T) {
 		if rec.Code != http.StatusOK || len(page.Items) != 1 || page.Items[0]["rmaNumber"] != "RMA-A-1" {
 			t.Fatalf("leaky=%v returns: %d %s", leaky, rec.Code, rec.Body)
 		}
-		for _, internal := range []string{"prod-secret", "wh-secret", "unitCost", "clerk-secret", "journal-secret", "RMA-B-1", "createdBy"} {
+		for _, internal := range []string{"wh-secret", "unitCost", "clerk-secret", "journal-secret", "RMA-B-1", "createdBy"} {
 			if strings.Contains(rec.Body.String(), internal) {
 				t.Errorf("returns expose %q: %s", internal, rec.Body)
 			}

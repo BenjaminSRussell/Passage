@@ -39,6 +39,8 @@ salesReportInterval: "30s"      # SALES_REPORT_INTERVAL, how often due reports a
 # Callers (edi reads shipments) present a signed service token verified against these
 # keys, formatted name=base64-public-key and comma separated. signingKeySecret is
 # required with inventoryUrl, carrierGatewayUrl or salesUrl (fulfillment signs those calls).
+# List edi's public key here as edi=<base64 Ed25519 key> (the edi service signs its shipment reads, grant
+# fulfillment.shipment.read, with its serviceIdentity key; the edi outbound consumer of #35 needs it).
 serviceIdentity:
   publicKeys: ""
   signingKeySecret: ""

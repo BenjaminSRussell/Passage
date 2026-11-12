@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
 // Control recipes (FR-25.15, BR-25.11, BR-25.15). A control recipe is the ISA-88 structure of one order
@@ -79,6 +83,17 @@ type Instruction struct {
 	// Node is the OPC-UA node id (pcs-opcua) or topic (pcs-mqtt) a setpoint is written to or a data
 	// request reads from.
 	Node string `json:"node,omitempty"`
+	// Materials is the structured form of a material-list instruction, scaled to the batch: the PI sheet
+	// shows each product by name with its quantity. Text stays required as the plain-language summary.
+	Materials []InstructionMaterial `json:"materials,omitempty"`
+}
+
+// InstructionMaterial is one line of a material-list instruction.
+type InstructionMaterial struct {
+	ItemID string `json:"itemId"`
+	Qty    string `json:"qty"`
+	Unit   string `json:"unit,omitempty"`
+	Role   string `json:"role,omitempty"` // ingredient, co-product or by-product
 }
 
 // Phase, Operation, UnitProcedure and Procedure are the ISA-88 levels.
@@ -196,6 +211,11 @@ func checkInstruction(f map[string]string, path string, want int, in Instruction
 		if strings.TrimSpace(in.Text) == "" {
 			f[path+".text"] = "is required for this category"
 		}
+		if in.Category == InstMaterials {
+			checkMaterials(f, path, in.Materials)
+		} else if len(in.Materials) > 0 {
+			f[path+".materials"] = "applies to a material-list instruction only"
+		}
 	case InstSetpoint, InstDataRequest, InstInspection:
 		c := in.Char
 		if c == nil || strings.TrimSpace(c.Name) == "" || len(c.Name) > 120 {
@@ -217,6 +237,30 @@ func checkInstruction(f map[string]string, path string, want int, in Instruction
 	}
 	if len(in.Node) > 300 {
 		f[path+".node"] = "must be at most 300 characters"
+	}
+}
+
+const maxMaterials = 200
+
+func checkMaterials(f map[string]string, path string, ms []InstructionMaterial) {
+	if len(ms) > maxMaterials {
+		f[path+".materials"] = fmt.Sprintf("holds %d lines; at most %d", len(ms), maxMaterials)
+		return
+	}
+	for i, m := range ms {
+		p := fmt.Sprintf("%s.materials[%d]", path, i)
+		if !ids.Valid(m.ItemID) {
+			f[p+".itemId"] = "must be a product UUID"
+		}
+		if q, err := decimal.NewFromString(strings.TrimSpace(m.Qty)); err != nil || q.IsNegative() {
+			f[p+".qty"] = "must be a decimal quantity, zero or more"
+		}
+		if len(m.Unit) > 20 {
+			f[p+".unit"] = "must be at most 20 characters"
+		}
+		if m.Role != "" && m.Role != "ingredient" && m.Role != "co-product" && m.Role != "by-product" {
+			f[p+".role"] = "must be ingredient, co-product or by-product"
+		}
 	}
 }
 
@@ -292,4 +336,61 @@ func ResendCheck(status string, sendCount int, messagesForOrder bool, force bool
 		return "force", fmt.Errorf("process messages were already received for this order, so the process control system may have started it; resend with force and a reason")
 	}
 	return "", nil
+}
+
+// PhasePaths lists the path of every phase of the recipe in order (procedure/unit procedure/operation/phase),
+// the form a process message names a phase in.
+func (d RecipeDoc) PhasePaths() []string {
+	var out []string
+	for _, up := range d.Procedure.UnitProcedures {
+		for _, op := range up.Operations {
+			for _, ph := range op.Phases {
+				out = append(out, strings.Join([]string{d.Procedure.Name, up.Name, op.Name, ph.Name}, "/"))
+			}
+		}
+	}
+	return out
+}
+
+// Process message values a process control system sends to end a recipe it runs (FR-25.17, 25-5).
+const (
+	// StatusCharacteristic is the characteristic of an order-status message that carries the outcome.
+	StatusCharacteristic = "status"
+	// StatusMessageCharacteristic optionally carries the reason of an aborted or failed batch.
+	StatusMessageCharacteristic = "message"
+)
+
+// RecipeEnd decides whether a process message ends a recipe that is in-execution on a process control
+// system. Two messages do: an order-status message whose status is completed (the recipe completes) or
+// aborted or error (the recipe goes to error, with the message characteristic as the reason), and a
+// phase-end message for the last phase of the recipe (the recipe completes). Every other message leaves the
+// recipe as it is. It returns the status the recipe moves to and the error text for the error status.
+func RecipeEnd(category, phasePath string, values []Characteristic, doc RecipeDoc) (to, errText string, ends bool) {
+	switch category {
+	case "order-status":
+		status, reason := "", ""
+		for _, v := range values {
+			switch v.Name {
+			case StatusCharacteristic:
+				status = strings.ToLower(strings.TrimSpace(v.Value))
+			case StatusMessageCharacteristic:
+				reason = strings.TrimSpace(v.Value)
+			}
+		}
+		switch status {
+		case "completed":
+			return RecipeCompleted, "", true
+		case "aborted", "error", "failed":
+			if reason == "" {
+				reason = "the process control system reported the batch as " + status
+			}
+			return RecipeError, reason, true
+		}
+	case "phase-end":
+		paths := doc.PhasePaths()
+		if len(paths) > 0 && phasePath == paths[len(paths)-1] {
+			return RecipeCompleted, "", true
+		}
+	}
+	return "", "", false
 }

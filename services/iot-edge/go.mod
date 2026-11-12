@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/BenjaminSRussell/passage/platform v0.0.0
+	github.com/gopcua/opcua v0.9.1
 	pgregory.net/rapid v1.3.0
 )
 

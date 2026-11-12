@@ -31,6 +31,10 @@ const (
 // fakeStore records the calls the handlers make and returns canned results.
 // The store's own behaviour is covered by the database tests in internal/store.
 type fakeStore struct {
+	target        *store.RecipeTarget
+	gotTarget     store.RecipeTarget
+	link          store.ControlRecipeLink
+	linkSet       int
 	formula       store.Formula
 	order         store.BatchOrder
 	err           error

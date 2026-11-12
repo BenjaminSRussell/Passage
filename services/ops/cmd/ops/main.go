@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -45,6 +48,8 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	// The ops service must answer in a fenced region: it runs the rejoin and serves /healthz/region.
+	httpx.DisableFence()
 	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
 		return err
 	}
@@ -60,6 +65,25 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("FAILOVER_MAX_LAG_S must be a positive number of seconds, got %q", v)
 		}
 		cfg.MaxLagSeconds = n
+	}
+	for _, t := range []struct {
+		env string
+		dst *int
+	}{{"RTO_TARGET_MIN", &cfg.RTOTargetMinutes}, {"RPO_TARGET_S", &cfg.RPOTargetSeconds}} {
+		if v := getenv(t.env); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return fmt.Errorf("%s must be a positive number, got %q", t.env, v)
+			}
+			*t.dst = n
+		}
+	}
+	if v := getenv("OPS_LICENSE_PUBLIC_KEY"); v != "" {
+		key, err := base64.StdEncoding.DecodeString(v)
+		if err != nil || len(key) != ed25519.PublicKeySize {
+			return errors.New("OPS_LICENSE_PUBLIC_KEY must be the base64 of a 32-byte Ed25519 public key")
+		}
+		cfg.LicensePublicKey = key
 	}
 	seed, err := domain.ParseRegions(getenv("OPS_REGIONS"))
 	if err != nil {
@@ -82,7 +106,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
 		return err
 	}
-	st := store.New(pool)
+	lagPolicy := store.LagPolicy{StaleAfter: 90 * time.Second, RequireReports: getenv("OPS_REQUIRE_LAG_REPORTS") == "true"}
+	if v := getenv("OPS_LAG_STALE_S"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("OPS_LAG_STALE_S must be a number of seconds (0 turns the check off), got %q", v)
+		}
+		lagPolicy.StaleAfter = time.Duration(n) * time.Second
+	}
+	st := store.New(pool).WithLagPolicy(lagPolicy)
 	if len(seed) > 0 {
 		if err := st.Seed(ctx, seed); err != nil {
 			return fmt.Errorf("seed regions: %w", err)

@@ -4,7 +4,7 @@
 import type { LegalEntity } from "../../../modules/org/api/client";
 import type { Country, Currency } from "../../../modules/org/api/reference";
 import type { FiscalCalendar, FiscalPattern, FiscalPeriod, Team, TeamMember, TeamType } from "../../../modules/org/api/structure";
-import { CUSTOMERS, LEGAL_ENTITY } from "../../company";
+import { CUSTOMERS, LEGAL_ENTITY, LEGAL_ENTITY_DE, LEGAL_ENTITY_ES } from "../../company";
 import { reply, route } from "../../backend";
 import { at, day, newId, table, uid } from "../../store";
 import { byUsername } from "./people";
@@ -120,6 +120,25 @@ const legalEntities = table<LegalEntity>([
     fiscalCalendarId: CAL,
     registrationNumber: "EIN 42-1876530",
   },
+  // The group's European subsidiaries, so a screen that names one (an e-invoice of the German entity) shows its name.
+  ...([
+    [LEGAL_ENTITY_DE, "Europe/Berlin", "de-DE", "HRB 218834"],
+    [LEGAL_ENTITY_ES, "Europe/Madrid", "es-ES", "B-85123456"],
+  ] as const).map(([e, timeZone, defaultLanguage, registrationNumber]) => ({
+    id: e.id,
+    code: e.code,
+    name: e.name,
+    country: e.country,
+    currency: e.currency,
+    timeZone,
+    defaultLanguage,
+    status: "active" as const,
+    version: 1,
+    createdAt: at(-900),
+    updatedAt: at(-30),
+    fiscalCalendarId: CAL,
+    registrationNumber,
+  })),
 ]);
 const matches = (q: string | null, ...fields: string[]) => {
   const needle = (q ?? "").trim().toLowerCase();

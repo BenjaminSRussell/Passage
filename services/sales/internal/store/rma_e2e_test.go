@@ -570,3 +570,28 @@ func TestRMA_ReturnCostMethods(t *testing.T) {
 		})
 	}
 }
+
+// A portal return line takes unit, site and warehouse from the order line its invoice line was billed from.
+func TestRMA_PortalLineComesFromTheInvoicedOrderLine(t *testing.T) {
+	e := newRMAEnv(t)
+	site, wh := ids.New(), ids.New()
+	line := Line{LineNo: 1, ProductID: e.product, Quantity: d(10), Unit: "BOX", SiteID: site, WarehouseID: wh, UnitPrice: d(100), DiscPct: d(0), LineNet: d(1000), RequestedShipDate: "2027-03-04"}
+	o, _, err := e.s.CreateOrder(e.ctx, NewOrder{LegalEntityID: e.le, CustomerID: e.customer, InvoiceAccountID: e.customer, OrderType: "ORDER", Currency: "USD", RequestedShipDate: "2027-03-04", Channel: "UI", RequestHash: "h", Lines: []Line{line}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.src.invoice.Lines[0].OrderLineID = o.Lines[0].ID
+	in := e.newOrder(domain.DispositionReturnToStock, 2)
+	in.Lines[0].SiteID, in.Lines[0].WarehouseID, in.Lines[0].Unit, in.Lines[0].FromOrderLine = ids.New(), ids.New(), "EA", true
+	rma := e.create(t, in)
+	if l := rma.Lines[0]; l.SiteID != site || l.WarehouseID != wh || l.Unit != "BOX" {
+		t.Fatalf("line %+v, want BOX at the invoiced order line's site and warehouse", l)
+	}
+	// An invoice line that cannot be traced to an order line is refused for a portal return.
+	e.src.invoice.Lines[0].OrderLineID = ids.New()
+	in2 := e.newOrder(domain.DispositionReturnToStock, 1)
+	in2.Lines[0].FromOrderLine = true
+	if _, _, err := e.s.CreateReturnOrder(e.ctx, in2); err == nil {
+		t.Fatal("an untraceable line was accepted")
+	}
+}

@@ -191,7 +191,7 @@ var serviceGrants = map[string]map[string][]string{
 		"receivables": {"receivables.forecast.read"},
 	},
 	"sales": {
-		"product":     {"product.configuration.read"},
+		"product":     {"product.configuration.read", "product.names.read"},
 		"production":  {"production.order.create-from-sales"},
 		"billing":     {"billing.invoice.read"},
 		"fulfillment": {"fulfillment.packing-slip.read"},
@@ -261,13 +261,21 @@ var serviceGrants = map[string]map[string][]string{
 		"billing":     {"billing.invoice.read"},
 		"sales":       {"sales.order.lookup", "sales.channel.intake"},
 		// A returned punchout cart becomes a requisition of the requester (#35, 35-3): the token carries the requester as act.
-		"purchasing": {"procurement.requisition.create"},
+		"purchasing": {"procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"},
+		// An inbound ship notice of a cXML network becomes the receiving ASN of the purchase order it names (#35, 35-4).
+		"receiving": {"receiving.asn.maintain"},
 	},
 	"fieldservice": {
 		"dispatch": {"dispatch.run.create", "dispatch.run.read"},
 	},
 	"processmfg": {
 		"identity": {"identity.feature.view"},
+		// A released batch order generates its control recipe (#25, 25-5): the token carries the releasing user as act.
+		"shopfloor": {"shopfloor.controlrecipe.create"},
+	},
+	// The shopfloor sweeper reads the active tenants from the identity registry instead of a configured list (#25).
+	"shopfloor": {
+		"identity": {"identity.tenant-registry.read"},
 	},
 	// The supplier portal BFF acts for one vendor user at a time (#511). Every token it signs carries the vendor id (vnd) from the
 	// user's verified session, and the target service scopes every read and write to that vendor. Only vendor-portal duties,
@@ -280,11 +288,13 @@ var serviceGrants = map[string]map[string][]string{
 	},
 	// The customer portal BFF acts for one customer contact at a time (#30). Every token it signs carries the customer id (cus)
 	// from the contact's verified session, and the target service scopes every read to that customer. Only customer-portal
-	// duties, which no human role holds and which are read-only, are granted.
+	// duties, which no human role holds, are granted: reads, and the two writes a customer makes for itself (an order and a return).
 	"customer-portal": {
 		"receivables": {"receivables.customer-portal.read"},
 		"billing":     {"billing.customer-portal.read"},
-		"sales":       {"sales.customer-portal.read"},
+		"sales":       {"sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"},
+		"party":       {"party.customer-portal.read"},
+		"identity":    {"identity.customer-portal.read"},
 	},
 }
 
@@ -306,11 +316,11 @@ func serviceGrant(iss, aud string) []string { return serviceGrants[iss][aud] }
 // (a party merge moves roles in every entity). A token carrying one names no
 // legal entity and carries no other duty, and every other token names one
 // entity, so a tenant-level duty never rides in an entity-scoped token (#450).
-var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}}
+var tenantLevelDuties = map[string]struct{}{"party.merge.execute": {}, "identity.feature.view": {}, "identity.tenant-registry.read": {}}
 
 // tenantReadDuties are tenant-level duties that only read tenant settings, so any signed-in user's service call may
 // carry them; the rest of tenantLevelDuties need a tenant administrator.
-var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}}
+var tenantReadDuties = map[string]struct{}{"identity.feature.view": {}, "identity.tenant-registry.read": {}}
 
 func tenantLevelToken(duties []string) (tenantLevel, mixed bool) {
 	n := 0

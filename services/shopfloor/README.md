@@ -638,18 +638,37 @@ that cannot be signed: not PEM, bad signature, ECDSA below P-256 or RSA below 20
 `pki.Issuer` interface and is not built. Because the redeem route has no identity, `cmd/shopfloor` mounts it on a router without
 the tenant middleware and everything else behind it; the gateway must let that one route through without a session.
 
+### PI sheets (25-5, FR-25.16)
+
+A PI sheet is a versioned template of the control recipe structure (unit procedures, operations, phases, numbered instructions in
+the eight categories). `POST /v1/shopfloor/pi-sheets` creates a draft (version 1 of a code), `PUT` edits a draft (`rev` is the
+rev read), `:release` makes it immutable and the one released version of its code (the earlier one becomes obsolete),
+`:new-version` copies a released sheet into the next draft (one draft per code), `:obsolete` retires one. `POST
+/v1/shopfloor/control-recipes:from-pi-sheet` copies a released sheet's document into a control recipe for an order and resource
+and keeps the sheet's id on it. Duty `shopfloor.pisheet.maintain` designs; `shopfloor.view` reads; `shopfloor.controlrecipe.create`
+makes the recipe. Migration `0027`. The web designer is at `/shopfloor/pi-sheets` and the kiosk runs a kiosk recipe at
+`/shopfloor/kiosk/pi/{recipeId}`: each entered value and each confirmed setpoint is posted as a process message (`process-data`, or
+`quality-result` for an inspection) with its limits, a value outside them needs a comment, and the recipe is reported received,
+in-execution and completed.
+
+### Process messages that end a recipe
+
+An `order-status` process message from the process control system ends the in-execution recipes of its order that run on a
+process control system: status `completed` completes them, `aborted`, `error` or `failed` sends them to error with the `message`
+characteristic as the reason; a `phase-end` for the last phase of the recipe completes it. A setpoint deviation also becomes a
+`deviation` process message.
+
 ### Tenant sweeper
 
 `go run ./cmd/shopfloor sweep` runs the scheduled jobs in process, so no external scheduler has to call them: the andon
 sweep (every minute, same as `andon:sweep`), the OEE rollup (every 15 minutes over the last four completed 15 minute
 buckets, same as `oee:rollup`), the auto clock-out (hourly, same as `registrations:auto-clock-out`) and the process
 message retry (every minute, same as `process-messages:retry-due`). Settings: `SWEEP_TENANT_IDS` (comma-separated tenant
-UUIDs, required), `SWEEP_ANDON_INTERVAL`, `SWEEP_ROLLUP_INTERVAL`, `SWEEP_AUTO_CLOCK_INTERVAL`, `SWEEP_RETRY_INTERVAL`
+UUIDs, required unless the registry is used), `SWEEP_TENANT_SOURCE=identity` (with `IDENTITY_URL`, `SWEEP_OPERATOR_TENANT_ID` and the service signing key: also sweep every active tenant of the identity registry, read at the start of each run), `SWEEP_ANDON_INTERVAL`, `SWEEP_ROLLUP_INTERVAL`, `SWEEP_AUTO_CLOCK_INTERVAL`, `SWEEP_RETRY_INTERVAL`
 (Go durations of at least 10s, `0` switches a job off) and `SWEEP_AUTO_CLOCK_AFTER_HOURS` (4 to 24, default 16). Each job
 runs per tenant under that tenant's row-level security as `system:shopfloor-sweeper` with its own 2 minute timeout; a
 failing tenant is logged and counted (`shopfloor_sweep_failures_total{job}`) and the others still run. The Helm chart
-starts it with `sweeper.enabled` and `sweeper.tenantIds`, as one replica. Listing tenants is by configuration; a tenant
-directory to read them from is not built.
+starts it with `sweeper.enabled` and `sweeper.tenantIds`, as one replica. With the registry the tenants are read from identity (`GET /v1/tenants?status=active` under the read-only duty `identity.tenant-registry.read`); while identity is away the last list is used.
 
 Ports: `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`).
 
@@ -785,7 +804,12 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0174` | 404 | Control recipe not found |
 | `SF-0175` | 409 | The control recipe cannot take that status from where it is, or a write outside in-execution, or a resend of a recipe not in error |
 | `SF-0176` | 422 | The control recipe was already sent again five times |
-| `SF-0177` | 422 | Process messages exist for the order: resend with force and a reason |
+| `SF-0177` | 422 | A process message for the order arrived after the recipe was last sent: resend with force and a reason |
+| `SF-0180` | 404 | PI sheet not found |
+| `SF-0181` | 409 | The PI sheet is not in a state that command needs (only a draft is edited or released, only a released sheet gets a new version or is retired) |
+| `SF-0182` | 409 | The PI sheet changed since it was read (`rev`) |
+| `SF-0183` | 409 | A PI sheet with this code exists, or the code has a draft already |
+| `SF-0184` | 422 | A control recipe is made from a released PI sheet whose steps fit the destination |
 | `SF-0178` | 422 | The control recipe cannot go to that destination, or a write is not a setpoint of the recipe |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 

@@ -16,6 +16,10 @@ Each service has an `HTTPRoute` named after it. `/api/v1/<svc>` is rewritten to 
 
 The Gateway has two listeners. `https` (443, TLS terminate, Secret `passage-api-tls`, to be issued by cert-manager or supplied by the environment) is the listener for stage and prod. `http-dev` (80) is for dev only; remove it in any non-dev environment.
 
+## Region health edge (PSG-50, OPS-1703)
+
+DNS health checks read `GET /healthz/region` of each region without a Passage token, so it cannot sit behind the JWT SecurityPolicy that targets Gateway `passage-api`. It has a Gateway of its own, `passage-region`, like the AS2 edge: `region-gateway.yaml` holds the Gateway (one HTTPS listener `region-https`, hostname `region.dev.passage.dev`), its Certificate, HTTPRoute `ops-region-health` (the exact path `/healthz/region`, `GET`, to Service `ops` port 8080 and nothing else), a ClientTrafficPolicy that strips the identity headers and requires TLS 1.2, and a per-address rate limit. The answer names the region and its role (`200` while PRIMARY, `503` with `Retry-After: 30` otherwise). `test_gateway.py` (`RegionHealthEdge`) checks that no SecurityPolicy reaches it and nothing else is routed there. Per region, override the hostname in the environment's overlay (`region.<env>.passage.dev`).
+
 ## AS2 edge (#483)
 
 Trading partners post AS2 messages and asynchronous MDNs to the edi AS2 listener without a Passage token: edi authenticates each request by its AS2 signature against the partner certificate pinned on the transport (see `services/edi/README.md`, "AS2 listener security"). They come in through a second Gateway, `passage-as2`, so the JWT SecurityPolicy, which targets Gateway `passage-api`, cannot apply to them, and the API routes cannot be reached without a token through it:
@@ -29,6 +33,14 @@ Trading partners post AS2 messages and asynchronous MDNs to the edi AS2 listener
 The edi chart's NetworkPolicy admits only the Envoy proxies of `passage-as2` (namespace `envoy-gateway-system`, labels `gateway.envoyproxy.io/owning-gateway-name: passage-as2` and `owning-gateway-namespace: hello-ledger`) to the AS2 port; the API and metrics ports keep their previous reach (#82 item 2). `deploy/envs/dev/values/edi.yaml` turns the listener and the workers on with `EDI_AS2_PUBLIC_URL=https://as2.dev.passage.dev`.
 
 Operations: point DNS for `as2.<env>.passage.dev` at the load balancer address of the `passage-as2` Envoy Service (its own address, not passage-api's). In dev the certificate comes from the local CA, which partners do not trust; for stage and prod set the hostname (`as2.stage.passage.dev`, `as2.prod.passage.dev`, like the hello-ledger hosts) and issue the certificate from a publicly trusted issuer (ACME), or give partners the CA to pin. Partners that allow-list our address need the AS2 Envoy Service's address. The edge has no allow-list of partner addresses: the signature is the authentication.
+
+## Plant edge for iot-edge connectors (#25)
+
+iot-edge connectors redeem a one-time enrollment token without a session and then call the shop floor service with the mTLS client certificate they were issued, so they come in through a third Gateway, `passage-edge` (`edge-gateway.yaml`, `edge-certificate.yaml`, `edge-clienttrafficpolicy.yaml`, `edge-httproute.yaml`), outside the JWT SecurityPolicy:
+
+- The listener (`edge-https`, 443, hostname `edge.<env>.passage.dev`) asks for a client certificate but does not require one (`clientValidation.optional`): a connector with no certificate yet may call only `POST /v1/shopfloor/edge-nodes/{id}:enroll`, whose body token is its credential. A certificate that is presented must chain to the edge CA in Secret `passage-edge-ca-trust` (key `ca.crt`, the CA certificate of the shop floor chart's `edgePki` issuer).
+- Envoy forwards the verified certificate's subject in `X-Forwarded-Client-Cert` (`SanitizeSet`: built from the verified certificate, a client-sent value is dropped). The shop floor service reads the common name `edge:<node id>`, finds the node's tenant (`edge_node_tenant`, migration shopfloor/0026), and treats the call as that connector with the one connector duty; it still matches the name to the node's bound `connectorSubject`. A request that already carries a tenant is left alone.
+- The only route, `shopfloor-edge`, exposes what a connector calls (`:enroll`, `:renew-certificate`, `:heartbeat`, `GET .../config`, `GET .../control-recipes`, `POST .../control-recipes/{rid}:report` and `POST /v1/shopfloor/machine-events`) and nothing else of the shop floor service; `test_gateway.py` checks the matches against the paths the service serves and the connector calls. Enforcement against a live Envoy is #213, and a rate limit on the public redeem route is open.
 
 ## Dev JWKS and claim contract
 

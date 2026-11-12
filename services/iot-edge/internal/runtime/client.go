@@ -194,3 +194,5 @@ func (c *Client) Heartbeat(ctx context.Context, hb Heartbeat) (HeartbeatReply, e
 	}
 	return r, nil
 }
+
+func decodeJSON(b []byte, v any) error { return json.Unmarshal(b, v) }

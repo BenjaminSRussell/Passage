@@ -47,6 +47,8 @@ const (
 	dutyJobs         = "product.jobs.write"
 	dutyExplode      = "product.variants.explode"
 	dutyReleasedRead = "product.released.read"
+	// dutyNamesRead is the service-only duty of the product-name read: sales labels the lines of the customer portal with it and reads nothing else.
+	dutyNamesRead = "product.names.read"
 
 	dutyConfigurationRead = "product.configuration.read"
 	// dutyUOMConvert is the service-only duty of the unit conversion alone: the
@@ -105,6 +107,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Post("/v1/product/products", a.createProduct)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products", a.listProducts)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/products:search", a.search)
+	r.With(authz.RequireAnyDuty(dutyView, dutyNamesRead)).Get("/v1/product/products:names", a.productNames)
 	r.With(authz.RequireAnyDuty(dutyView, dutyImportRead)).Get("/v1/product/products/{id}", a.getProduct)
 	r.With(authz.RequireAnyDuty(dutyMaintain, dutyImport)).Patch("/v1/product/products/{id}", a.updateProduct)
 	r.With(authz.RequireAnyDuty(dutyMaintain, dutyExplode)).Post("/v1/product/products/{id}/variants:explode", a.explode)
@@ -781,6 +784,37 @@ func (a *API) convert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]string{"from": q.Get("from"), "to": to, "quantity": qty})
+}
+
+const maxProductNames = 200
+
+// productNames answers the number and name of up to 200 products by id (?ids=a,b,c), for a service that labels its own rows.
+func (a *API) productNames(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	raw := strings.Split(r.URL.Query().Get("ids"), ",")
+	wanted := make([]string, 0, len(raw))
+	for _, id := range raw {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		}
+		if !ids.Valid(id) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "ids must be a comma-separated list of product ids"))
+			return
+		}
+		wanted = append(wanted, id)
+	}
+	if len(wanted) == 0 || len(wanted) > maxProductNames {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", fmt.Sprintf("name 1 to %d product ids", maxProductNames)))
+		return
+	}
+	items, err := a.store.ProductNames(r.Context(), wanted)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (a *API) search(w http.ResponseWriter, r *http.Request) {

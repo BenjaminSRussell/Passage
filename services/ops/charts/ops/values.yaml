@@ -5,6 +5,14 @@ migrateOnStart: false
 region: { name: "", registered: "" }
 # PRD 9.50.5: a failover to a passive region lagging more than this needs acceptDataLoss and a second approver.
 failoverMaxLagSeconds: 300
+# A lag reading older than this is unknown (about three reporting intervals): a stopped reporter blocks a failover instead of
+# leaving the last number in place. 0 turns the check off. With lagReporter.enabled a region that never reported is unknown too.
+lagStaleSeconds: 90
+# Game-day targets (PRD 9.50.5): the scorecard of a failover is measured against them.
+rtoTargetMinutes: 60
+rpoTargetSeconds: 300
+# Base64 Ed25519 public key of Passage commercial operations; tenant licences are installed only when signed with its key (LIC-1804).
+licensePublicKey: ""
 # The platform operator's tenant (identity's IDENTITY_OPERATOR_TENANT_ID). The ops routes serve this tenant only; the
 # service refuses to start without it.
 operatorTenantId: ""
@@ -16,3 +24,19 @@ serviceMonitor: { enabled: false }
 
 serviceIdentity:
   publicKeys: ""
+
+# The lag reporter (passage-ops lag-report): reads the real replication state of this region's Postgres and reports it to the
+# ops API every interval. Run it where the standby is (mode standby, region = this region) or next to the primary (mode primary,
+# region = the standby's name). A failed measurement reports unknownLagSeconds, so a broken reporter blocks a failover.
+lagReporter:
+  enabled: false
+  mode: standby
+  region: ""
+  intervalSeconds: 30
+  unknownLagSeconds: 86400
+  # Gateway (or ops service) URL the reports go to, and the secret holding OPS_TOKEN and OPS_LAG_DATABASE_URL.
+  apiUrl: ""
+  secret: ops-lag-reporter
+  applicationName: "%"
+# Where every service of this release's cluster reads the region role from (global.regionFenceUrl in the service charts):
+# the ops /healthz/region of this region, for example http://ops.<namespace>.svc/healthz/region.

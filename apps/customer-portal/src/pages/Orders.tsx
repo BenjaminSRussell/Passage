@@ -1,17 +1,17 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { get } from "../api";
-import { Badge, day, money, Page, State, useLoad } from "../ui";
+import { Badge, day, money, Notice, Page, State, useLoad } from "../ui";
 
 export interface Order {
   id: string; orderNumber: string; orderType: string; status: string; currency: string; requestedShipDate: string; externalRef?: string;
   netTotal: string; lineCount?: number; createdAt: string;
-  lines?: Array<{ lineNo: number; quantity: string; unit: string; unitPrice: string; lineNet: string; requestedShipDate: string; confirmedShipDate?: string; lineStatus: string; deliveredQty: string; invoicedQty: string }>;
+  lines?: Array<{ lineNo: number; productId: string; productName?: string; quantity: string; unit: string; unitPrice: string; lineNet: string; requestedShipDate: string; confirmedShipDate?: string; lineStatus: string; deliveredQty: string; invoicedQty: string }>;
 }
 
 export function Orders() {
   const list = useLoad(() => get<{ items: Order[] }>("/api/v1/orders?limit=100"), []);
   return (
-    <Page title="Orders">
+    <Page title="Orders" action={<Link className="button" to="/orders/new">New order</Link>}>
       <State load={list} empty={(d) => d.items.length === 0}>
         {(d) => (
           <table>
@@ -38,12 +38,17 @@ export function Orders() {
 export function OrderDetail() {
   const { id = "" } = useParams();
   const load = useLoad(() => get<Order>(`/api/v1/orders/${id}`), [id]);
+  const placed = (useLocation().state as { placed?: string } | null)?.placed;
   return (
     <Page title="Order">
+      {placed ? <Notice kind="ok">Your order {placed} has been placed. We will confirm the ship dates after a credit check.</Notice> : null}
       <State load={load}>
         {(o) => (
           <>
-            <p><Link to="/orders">Back to orders</Link></p>
+            <p>
+              <Link to="/orders">Back to orders</Link>{" "}
+              <Link to="/orders/new" state={{ lines: (o.lines ?? []).map((l) => ({ productId: l.productId, unit: l.unit, quantity: l.quantity })) }}>Order these again</Link>
+            </p>
             <dl>
               <dt>Order</dt><dd>{o.orderNumber}</dd>
               <dt>Status</dt><dd><Badge value={o.status} /></dd>
@@ -51,11 +56,12 @@ export function OrderDetail() {
             </dl>
             <table>
               <caption className="sr-only">Lines of order {o.orderNumber}</caption>
-              <thead><tr><th scope="col">Line</th><th scope="col">Quantity</th><th scope="col">Unit price</th><th scope="col">Net</th><th scope="col">Ship date</th><th scope="col">Delivered</th><th scope="col">Invoiced</th><th scope="col">Status</th></tr></thead>
+              <thead><tr><th scope="col">Line</th><th scope="col">Product</th><th scope="col">Quantity</th><th scope="col">Unit price</th><th scope="col">Net</th><th scope="col">Ship date</th><th scope="col">Delivered</th><th scope="col">Invoiced</th><th scope="col">Status</th></tr></thead>
               <tbody>
                 {(o.lines ?? []).map((l) => (
                   <tr key={l.lineNo}>
                     <th scope="row">{l.lineNo}</th>
+                    <td>{l.productName ?? "Product"}</td>
                     <td>{l.quantity} {l.unit}</td>
                     <td>{l.unitPrice}</td>
                     <td>{l.lineNet}</td>

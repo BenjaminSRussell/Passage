@@ -27,6 +27,9 @@ import { NewPayAgreementPage } from "./NewPayAgreementPage";
 import { NewTimeProfilePage } from "./NewTimeProfilePage";
 import { OeePage } from "./OeePage";
 import { PayAgreementsPage } from "./PayAgreementsPage";
+import { KioskPiPage } from "./KioskPiPage";
+import { NewPiSheetPage, PiSheetDesignerPage } from "./PiSheetDesignerPage";
+import { PiSheetsPage } from "./PiSheetsPage";
 import { PayExportDetailPage } from "./PayExportDetailPage";
 import { PayExportsPage } from "./PayExportsPage";
 import { NewProcessCategoryPage } from "./NewProcessCategoryPage";
@@ -45,7 +48,7 @@ const shopfloor: PassageModule = {
   id: "shopfloor",
   title: "Shop floor",
   description:
-    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles, pay agreements and absence codes, who is clocked in, their time, job bundles, pay approval and payroll export; machines, the edge fleet with its connector heartbeats and versioned configuration, downtimes with their reason code master, andon alerts and OEE; control recipes sent to a kiosk or a process control system, with their monitor and resend; process messages and their deliveries, with the category master that routes and checks them.",
+    "Kiosk clock in and out; the job dispatch list with quantity, scrap and quality check reports; supervisor time corrections with a reason, pay revision with reversal lines and the review of clock-ins closed automatically; workers with their time profiles, pay agreements and absence codes, who is clocked in, their time, job bundles, pay approval and payroll export; machines, the edge fleet with its connector heartbeats and versioned configuration, downtimes with their reason code master, andon alerts and OEE; control recipes sent to a kiosk or a process control system, with their monitor and resend; PI sheets designed, released and run on the kiosk; process messages and their deliveries, with the category master that routes and checks them.",
   routes: [
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
@@ -84,6 +87,10 @@ const shopfloor: PassageModule = {
     { path: "/shopfloor/edge-nodes/:id", element: createElement(EdgeNodeDetailPage), handle: { title: "Edge node", duty: "shopfloor.view" } },
     { path: "/shopfloor/control-recipes", element: createElement(ControlRecipesPage), handle: { title: "Control recipes", duty: "shopfloor.view" } },
     { path: "/shopfloor/control-recipes/:id", element: createElement(ControlRecipeDetailPage), handle: { title: "Control recipe", duty: "shopfloor.view" } },
+    { path: "/shopfloor/pi-sheets", element: createElement(PiSheetsPage), handle: { title: "PI sheets", duty: "shopfloor.view" } },
+    { path: "/shopfloor/pi-sheets/new", element: createElement(NewPiSheetPage), handle: { title: "New PI sheet", duty: "shopfloor.pisheet.maintain" } },
+    { path: "/shopfloor/pi-sheets/:id", element: createElement(PiSheetDesignerPage), handle: { title: "PI sheet", duty: "shopfloor.view" } },
+    { path: "/shopfloor/kiosk/pi/:id", element: createElement(KioskPiPage), handle: { title: "PI sheet", duty: "shopfloor.controlrecipe.execute" } },
     { path: "/shopfloor/process-messages", element: createElement(ProcessMessagesPage), handle: { title: "Process messages" } },
     { path: "/shopfloor/process-messages/new", element: createElement(NewProcessMessagePage), handle: { title: "Record process message" } },
     { path: "/shopfloor/process-messages/:id", element: createElement(ProcessMessageDetailPage), handle: { title: "Process message" } },
@@ -107,6 +114,7 @@ const shopfloor: PassageModule = {
     { label: "OEE", to: "/shopfloor/oee", duty: "shopfloor.view" },
     { label: "Edge fleet", to: "/shopfloor/edge-nodes", duty: "shopfloor.view" },
     { label: "Control recipes", to: "/shopfloor/control-recipes", duty: "shopfloor.view" },
+    { label: "PI sheets", to: "/shopfloor/pi-sheets", duty: "shopfloor.view" },
     { label: "Process messages", to: "/shopfloor/process-messages", duty: "shopfloor.view" },
     { label: "Process categories", to: "/shopfloor/process-categories", duty: "shopfloor.view" },
   ],

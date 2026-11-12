@@ -45,7 +45,9 @@ func portalCustomerOnly(next portalHandler) http.HandlerFunc {
 }
 
 type portalLine struct {
-	LineNo      int    `json:"lineNo"`
+	LineNo int `json:"lineNo"`
+	// ProductID lets the portal name the product of a line when it requests a return; absent for a line that is not for a product.
+	ProductID   string `json:"productId,omitempty"`
 	Description string `json:"description"`
 	Qty         string `json:"qty"`
 	UnitPrice   string `json:"unitPrice"`
@@ -76,7 +78,7 @@ func toPortalInvoice(inv store.Invoice, withLines bool) portalInvoice {
 		exp := money.MinorUnits(inv.Currency)
 		out.Lines = make([]portalLine, 0, len(inv.Lines))
 		for _, l := range inv.Lines {
-			out.Lines = append(out.Lines, portalLine{LineNo: l.No, Description: l.Description, Qty: l.Qty.String(), UnitPrice: l.UnitPrice.String(),
+			out.Lines = append(out.Lines, portalLine{LineNo: l.No, ProductID: l.Source.ProductID, Description: l.Description, Qty: l.Qty.String(), UnitPrice: l.UnitPrice.String(),
 				DiscountPct: l.DiscountPct.String(), Net: fixed(l.Net, exp), Tax: fixed(l.Tax, exp)})
 		}
 	}

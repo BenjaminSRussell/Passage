@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -90,7 +95,8 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 	router := httpx.NewRouterWithoutTenant()
 	a.RegisterPublic(router)
 	tenantRouter := chi.NewRouter()
-	tenantRouter.Use(tenant.Middleware)
+	// A connector's certificate, forwarded by the edge gateway, becomes its identity before the tenant middleware.
+	tenantRouter.Use(api.EdgeCertIdentity(st), tenant.Middleware)
 	a.Register(tenantRouter)
 	router.Mount("/", tenantRouter)
 	admin := http.NewServeMux()
@@ -104,10 +110,16 @@ func run(ctx context.Context, getenv func(string) string, args []string) error {
 	return <-errs
 }
 
-// edgeIssuer loads the CA that signs edge client certificates when SHOPFLOOR_EDGE_CA_CERT_FILE and
-// SHOPFLOOR_EDGE_CA_KEY_FILE are set (the dev and demo issuer; the platform issuer is not built). With
-// neither set enrollment answers SF-0173; with only one set the service does not start.
+// edgeIssuer builds the issuer of edge client certificates. SHOPFLOOR_EDGE_ISSUER=cert-manager is the platform
+// issuer: cert-manager signs through a CertificateRequest the service creates with its service account (the
+// issuer's name in SHOPFLOOR_EDGE_ISSUER_NAME, its kind in SHOPFLOOR_EDGE_ISSUER_KIND, the namespace in
+// SHOPFLOOR_EDGE_ISSUER_NAMESPACE or the pod's own). Otherwise the dev and demo issuer loads the CA from
+// SHOPFLOOR_EDGE_CA_CERT_FILE and SHOPFLOOR_EDGE_CA_KEY_FILE. With neither set enrollment answers SF-0173;
+// with only one CA file set the service does not start.
 func edgeIssuer(getenv func(string) string) (pki.Issuer, error) {
+	if getenv("SHOPFLOOR_EDGE_ISSUER") == "cert-manager" {
+		return certManagerIssuer(getenv)
+	}
 	certFile, keyFile := getenv("SHOPFLOOR_EDGE_CA_CERT_FILE"), getenv("SHOPFLOOR_EDGE_CA_KEY_FILE")
 	switch {
 	case certFile == "" && keyFile == "":
@@ -120,6 +132,46 @@ func edgeIssuer(getenv func(string) string) (pki.Issuer, error) {
 		return nil, fmt.Errorf("edge CA: %w", err)
 	}
 	return ca, nil
+}
+
+const saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+func certManagerIssuer(getenv func(string) string) (pki.Issuer, error) {
+	name := getenv("SHOPFLOOR_EDGE_ISSUER_NAME")
+	if name == "" {
+		return nil, errors.New("SHOPFLOOR_EDGE_ISSUER=cert-manager needs SHOPFLOOR_EDGE_ISSUER_NAME")
+	}
+	if getenv("SHOPFLOOR_EDGE_CA_CERT_FILE") != "" || getenv("SHOPFLOOR_EDGE_CA_KEY_FILE") != "" {
+		return nil, errors.New("SHOPFLOOR_EDGE_ISSUER=cert-manager and the SHOPFLOOR_EDGE_CA_*_FILE variables are two issuers; set one")
+	}
+	kind := getenv("SHOPFLOOR_EDGE_ISSUER_KIND")
+	if kind != "" && kind != "Issuer" && kind != "ClusterIssuer" {
+		return nil, errors.New("SHOPFLOOR_EDGE_ISSUER_KIND must be Issuer or ClusterIssuer")
+	}
+	ns := getenv("SHOPFLOOR_EDGE_ISSUER_NAMESPACE")
+	if ns == "" {
+		b, err := os.ReadFile(saDir + "/namespace")
+		if err != nil {
+			return nil, errors.New("SHOPFLOOR_EDGE_ISSUER_NAMESPACE is required outside a pod: " + err.Error())
+		}
+		ns = strings.TrimSpace(string(b))
+	}
+	api := getenv("KUBERNETES_API_URL")
+	if api == "" {
+		host, port := getenv("KUBERNETES_SERVICE_HOST"), getenv("KUBERNETES_SERVICE_PORT")
+		if host == "" || port == "" {
+			return nil, errors.New("KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT are not set; is this a pod?")
+		}
+		api = "https://" + net.JoinHostPort(host, port)
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	if ca, err := os.ReadFile(saDir + "/ca.crt"); err == nil {
+		pool := x509.NewCertPool()
+		if pool.AppendCertsFromPEM(ca) {
+			client.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}
+		}
+	}
+	return &pki.CertManager{APIServer: api, Namespace: ns, IssuerName: name, IssuerKind: kind, Token: pki.ServiceAccountToken, Client: client}, nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

@@ -21,6 +21,7 @@
         "identity.setup.maintain",
         "identity.setup.view",
         "identity.user.maintain",
+        "identity.customer-contact.maintain",
         "ledger.balance.read",
         "ledger.journal.approve",
         "ledger.journal.read",

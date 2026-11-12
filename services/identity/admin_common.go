@@ -24,6 +24,7 @@ import (
 
 const (
 	dutyMaintainTenants       = "identity.tenant.maintain"
+	dutyReadTenantRegistry    = "identity.tenant-registry.read"
 	dutyMaintainLegalEntities = "identity.legal-entity.maintain"
 	dutyMaintainSecurityRoles = "identity.security-role.maintain"
 

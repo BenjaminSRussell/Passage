@@ -99,7 +99,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 func adminHandler(metrics *importer.Metrics) http.Handler {
 	admin := http.NewServeMux()
-	admin.Handle("/metrics", metrics.Handler())
+	admin.Handle("/metrics", httpx.WithMetrics(metrics.Handler()))
 	return admin
 }
 

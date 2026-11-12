@@ -88,10 +88,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	a.Register(router)
 	admin := http.NewServeMux()
-	admin.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+	admin.Handle("/metrics", httpx.WithMetrics(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = fmt.Fprint(w, "# HELP budgeting_up Process is serving.\n# TYPE budgeting_up gauge\nbudgeting_up 1\n")
-	})
+	})))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
