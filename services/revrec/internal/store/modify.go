@@ -177,7 +177,7 @@ func (s *Postgres) ModifyContract(ctx context.Context, contractID string, req Mo
 			mo := domain.ModObligation{ID: o.ID, Method: o.Method, SSP: o.SSP, SSPSource: o.SSPSource,
 				Allocated: o.Allocated.Sub(ct.reduced).Sub(ct.reversed), Reversed: ct.reversed.Add(modReversed[o.ID])}
 			for _, sc := range o.Schedule {
-				mo.Lines = append(mo.Lines, domain.ModLine{ID: sc.ID, Date: sc.Date, Amount: sc.Amount, Status: sc.Status})
+				mo.Lines = append(mo.Lines, domain.ModLine{ID: sc.ID, Date: sc.Date, Amount: sc.Amount, Status: sc.Status, Credited: sc.Credited})
 			}
 			in.Obligations = append(in.Obligations, mo)
 		}

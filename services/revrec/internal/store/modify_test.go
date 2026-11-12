@@ -262,3 +262,35 @@ func TestModifyContract_RemovalBelowRecognizedReversesRevenueAndQueuesBilling(t 
 		t.Fatalf("support revenue left %s (%v)", left, err)
 	}
 }
+
+// The review case through Postgres: support's 1,200.00 over twelve months, six recognized (600.00), and a credit note that took 300.00
+// off the six months left (50.00 each, credited_amount 50.00). A catch-up of +100.00 at the end of June measures progress by time
+// (0.5, the credited amounts added back): revenue to date 500.00 against 600.00 recognized, so 100.00 is reversed.
+func TestModifyContract_CatchUpOnACreditedContractMeasuresProgressBeforeTheCredit(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := tenantCtx(1, "")
+	le := ids.New()
+	c := supportAndLicence(t, le)
+	c.Obligations = c.Obligations[1:]
+	c.Obligations[0].Allocated, c.Obligations[0].LineNo = decimal.RequireFromString("1200.00"), 1
+	c.TransactionPrice = decimal.RequireFromString("1200.00")
+	created, err := s.CreateContract(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recognizeThrough(t, s, ctx, le, 6)
+	sup := created.Obligations[0]
+	if _, _, err := s.ApplyCreditLine(ctx, CreditNote{ID: ids.New(), Number: "CN-1", LegalEntityID: le, Currency: "USD", PostingDate: day(2027, time.June, 15), EventID: "e1"},
+		CreditLine{LineNo: 1, OriginalLineNo: 1, OrderID: created.OrderID, ProductID: sup.ProductID, Deferred: decimal.RequireFromString("300.00")}); err != nil {
+		t.Fatal(err)
+	}
+	_, mod, err := s.ModifyContract(ctx, created.ID, ModificationRequest{Type: domain.ModCatchUp, EffectiveDate: day(2027, time.June, 30),
+		PriceChange: decimal.RequireFromString("100.00")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := mod.Obligations[0]
+	if !o.Progress.Equal(decimal.RequireFromString("0.5")) || !mod.Reversal.Equal(decimal.RequireFromString("100.00")) || !o.AllocatedAfter.Equal(decimal.RequireFromString("1000.00")) {
+		t.Fatalf("modification %+v", mod)
+	}
+}

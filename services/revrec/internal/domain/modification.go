@@ -42,6 +42,30 @@ type ModLine struct {
 	Date   *time.Time
 	Amount decimal.Decimal
 	Status string
+	// Credited is what credit notes took off the line (revenue_schedule.credited_amount). It changes the revenue, not the
+	// performance: the line's share of the obligation's measure of progress is Amount + Credited, and a line credit notes took to
+	// zero (REVERSED) still counts in the measure.
+	Credited decimal.Decimal
+}
+
+// measure is a line's weight in the measure of progress: its amount before credit notes. A line a modification cancelled (REVERSED
+// with nothing credited) weighs nothing.
+func measure(l ModLine) decimal.Decimal {
+	if l.Status == ScheduleReversed && !l.Credited.IsPositive() {
+		return decimal.Zero
+	}
+	return l.Amount.Add(l.Credited)
+}
+
+// pending reports whether a line's performance is not transferred yet as far as its status goes: SCHEDULED, or REVERSED by credit
+// notes (the time it stands for still passes, only its revenue was credited).
+func pending(l ModLine) bool {
+	return l.Status == ScheduleScheduled || (l.Status == ScheduleReversed && l.Credited.IsPositive())
+}
+
+// earnedBy reports whether a pending line is dated on or before the effective date.
+func earnedBy(l ModLine, effective time.Time) bool {
+	return l.Date != nil && !dateOnly(*l.Date).After(dateOnly(effective))
 }
 
 // ModObligation is a performance obligation with its schedule, before the modification.
@@ -151,13 +175,11 @@ func sum(lines []ModLine) decimal.Decimal {
 	return s
 }
 
-// liveTotal is the amount of all lines that still count (not REVERSED).
+// liveTotal is the measure of all the obligation's lines (see measure): credit notes do not shrink it.
 func liveTotal(o ModObligation) decimal.Decimal {
 	s := decimal.Zero
 	for _, l := range o.Lines {
-		if l.Status != ScheduleReversed {
-			s = s.Add(l.Amount)
-		}
+		s = s.Add(measure(l))
 	}
 	return s
 }
@@ -180,8 +202,8 @@ func Progress(o ModObligation, effective time.Time) decimal.Decimal {
 		}
 		earned := decimal.Zero
 		for _, l := range o.Lines {
-			if l.Status == ScheduleRecognized || (l.Status == ScheduleScheduled && l.Date != nil && !dateOnly(*l.Date).After(dateOnly(effective))) {
-				earned = earned.Add(l.Amount)
+			if l.Status == ScheduleRecognized || (pending(l) && earnedBy(l, effective)) {
+				earned = earned.Add(measure(l))
 			}
 		}
 		return earned.DivRound(total, 18)
@@ -189,13 +211,20 @@ func Progress(o ModObligation, effective time.Time) decimal.Decimal {
 	return decimal.NewFromInt(1)
 }
 
-// leftShare is the share of an obligation's lines still SCHEDULED: what performance remains for a prospective modification.
+// leftShare is the share of an obligation's measure not recognized yet (SCHEDULED lines, and lines credit notes took to zero): what
+// performance remains for a prospective modification.
 func leftShare(o ModObligation) decimal.Decimal {
 	total := liveTotal(o)
 	if !total.IsPositive() {
 		return decimal.Zero
 	}
-	return sum(scheduledOf(o)).DivRound(total, 18)
+	left := decimal.Zero
+	for _, l := range o.Lines {
+		if pending(l) {
+			left = left.Add(measure(l))
+		}
+	}
+	return left.DivRound(total, 18)
 }
 
 // distribute splits total over lines in proportion to their old amounts, rounding half-even to the currency's minor unit with the last
@@ -298,13 +327,16 @@ func scoped(in ModificationInput, o ModObligation) (progress, ssp decimal.Decima
 		}
 		return decimal.Zero, base.Mul(sc)
 	}
-	earnedLines, future := split(o, in.EffectiveDate)
-	// The measure is the lines (time for a ratable obligation), gross of credit-note reversals, which change the revenue and not
-	// the performance.
-	gross := o
-	gross.Reversed = decimal.Zero
-	done := recognizedOf(gross).Add(sum(earnedLines))
-	left := sum(future)
+	// The measure is the lines (time for a ratable obligation) before credit notes, which change the revenue and not the performance.
+	done, left := decimal.Zero, decimal.Zero
+	for _, l := range o.Lines {
+		switch {
+		case l.Status == ScheduleRecognized || (pending(l) && earnedBy(l, in.EffectiveDate)):
+			done = done.Add(measure(l))
+		case pending(l):
+			left = left.Add(measure(l))
+		}
+	}
 	whole := done.Add(left)
 	kept := done.Add(left.Mul(sc))
 	if !kept.IsPositive() {

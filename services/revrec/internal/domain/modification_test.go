@@ -340,3 +340,49 @@ func TestModify_CatchUpDoesNotCountEarnedLinesThatAreNotRecognizedYet(t *testing
 		t.Fatalf("lines = %v", got)
 	}
 }
+
+// credited12 is ratable12 with six months recognized and a credit note that took 300.00 of deferred revenue off the six months left
+// (50.00 each, credited_amount 50.00 each).
+func credited12(id string) ModObligation {
+	o := ratable12(id, 6)
+	for i := 6; i < 12; i++ {
+		o.Lines[i].Amount, o.Lines[i].Credited = dec("50.00"), dec("50.00")
+	}
+	o.Allocated = dec("900.00")
+	return o
+}
+
+// Review case: a 1,200.00 ratable obligation, 600.00 recognized over six months, a credit note took 300.00 off the six months left. A
+// catch-up of +100.00 at the end of month 6 measures progress by time, 0.5 (not 600/900 from the credited amounts): revenue to date is
+// 1,000.00 x 0.5 = 500.00 against 600.00 recognized, so 100.00 comes back out.
+func TestModify_CatchUpOnACreditedObligationMeasuresProgressBeforeTheCredit(t *testing.T) {
+	res, err := Modify(ModificationInput{Type: ModCatchUp, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("900.00"),
+		PriceChange: dec("100.00"), Obligations: []ModObligation{credited12("a")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := res.Obligations[0]
+	if !c.Progress.Equal(dec("0.5")) || !c.AllocatedAfter.Equal(dec("1000.00")) || !c.Reversal.Equal(dec("100.00")) || !c.CatchUp.Equal(dec("-100.00")) {
+		t.Fatalf("change = %+v", c)
+	}
+	// A line credit notes took to zero still counts in the measure.
+	o := credited12("b")
+	o.Lines[11].Amount, o.Lines[11].Credited, o.Lines[11].Status = dec("0"), dec("100.00"), ScheduleReversed
+	if p := Progress(o, *day("2027-06-30")); !p.Equal(dec("0.5")) {
+		t.Fatalf("progress with a credit-reversed line = %s", p)
+	}
+}
+
+// The same credit skews prospective weights too: a credited and an uncredited obligation, both half delivered with SSP 1,200.00, share the
+// remaining 1,200.00 equally (600.00 each), not 480.00 / 720.00 by their credited amounts.
+func TestModify_ProspectiveWeightsACreditedObligationByItsMeasure(t *testing.T) {
+	res, err := Modify(ModificationInput{Type: ModProspective, EffectiveDate: *day("2027-06-30"), Currency: "USD", TransactionPrice: dec("2100.00"),
+		PriceChange: dec("300.00"), Obligations: []ModObligation{credited12("a"), ratable12("b", 6)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := res.Obligations[0], res.Obligations[1]
+	if !a.AllocatedAfter.Equal(dec("1200.00")) || !b.AllocatedAfter.Equal(dec("1200.00")) {
+		t.Fatalf("allocation %s / %s", a.AllocatedAfter, b.AllocatedAfter)
+	}
+}

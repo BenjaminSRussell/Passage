@@ -100,6 +100,8 @@ type Schedule struct {
 	Amount       decimal.Decimal
 	Status       string
 	RecognizedOn *time.Time
+	// Credited is what credit notes took off the line (credited_amount).
+	Credited decimal.Decimal
 }
 
 // ContractFilter narrows ListContracts; empty fields do not filter. Method
@@ -667,7 +669,8 @@ func loadObligations(ctx context.Context, tx pgx.Tx, c *Contract) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	srows, err := tx.Query(ctx, `select s.id::text, s.obligation_id::text, s.seq, s.scheduled_date, s.amount::text, s.status, s.recognized_on
+	srows, err := tx.Query(ctx, `select s.id::text, s.obligation_id::text, s.seq, s.scheduled_date, s.amount::text, s.status, s.recognized_on,
+		  s.credited_amount::text
 		from revenue_schedule s join performance_obligation o on o.tenant_id = s.tenant_id and o.id = s.obligation_id
 		where o.contract_id = $1::uuid order by o.line_no, s.seq`, c.ID)
 	if err != nil {
@@ -677,11 +680,14 @@ func loadObligations(ctx context.Context, tx pgx.Tx, c *Contract) error {
 	c.Recognized = decimal.Zero
 	for srows.Next() {
 		var sc Schedule
-		var obligationID, amount string
-		if err := srows.Scan(&sc.ID, &obligationID, &sc.Seq, &sc.Date, &amount, &sc.Status, &sc.RecognizedOn); err != nil {
+		var obligationID, amount, credited string
+		if err := srows.Scan(&sc.ID, &obligationID, &sc.Seq, &sc.Date, &amount, &sc.Status, &sc.RecognizedOn, &credited); err != nil {
 			return err
 		}
 		if sc.Amount, err = decimal.NewFromString(amount); err != nil {
+			return err
+		}
+		if sc.Credited, err = decimal.NewFromString(credited); err != nil {
 			return err
 		}
 		if sc.Status == domain.ScheduleRecognized {
