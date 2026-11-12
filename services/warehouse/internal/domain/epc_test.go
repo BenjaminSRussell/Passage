@@ -228,3 +228,36 @@ func TestDecodeEPC_RefusesBrokenLongTags(t *testing.T) {
 		t.Error("21 characters do not fit SGTIN-198")
 	}
 }
+
+// Fixed vectors, not round trips. GDTI-96 is the GS1 TDS example urn:epc:tag:gdti-96:3.0614141.12345.400. The others
+// were laid out bit by bit from the TDS partition and field tables (company prefix 0614141, filter 3) by a separate
+// implementation; GDTI partition 3 (9-digit prefix) checks the 11-bit document type of the TDS GDTI partition table, which a 10-bit
+// table got wrong.
+func TestDecodeEPC_FixedTDSVectors(t *testing.T) {
+	for _, tc := range []struct {
+		hex, scheme, key, serial, urn string
+	}{
+		{"2C74257BF460720000000190", "GDTI-96", "0614141123452", "400", "urn:epc:id:gdti:0614141.12345.400"},
+		{"2C0C75BCD150F60000000007", "GDTI-96", "1234567891231", "7", "urn:epc:id:gdti:123456789.123.7"},
+		{"3E74257BF46072C183670D1B80000000000000000000", "GDTI-174", "0614141123452", "006847", "urn:epc:id:gdti:0614141.12345.006847"},
+		{"3674257BF6B7A659B2C2BF100000000000000000000000000000", "SGTIN-198", "70614141123451", "32a/b", "urn:epc:id:sgtin:0614141.712345.32a%2Fb"},
+		{"3974257BF46072D5B37700000000000000000000000000000000", "SGLN-195", "0614141123452", "5678", "urn:epc:id:sgln:0614141.12345.5678"},
+		{"3774257BF40C0E59B2C2BF1000000000000000000000", "GRAI-170", "00614141123452", "32a/b", "urn:epc:id:grai:0614141.12345.32a%2Fb"},
+		{"3874257BF58B266D1AB460C00000000000000000000000000000", "GIAI-202", "061414112345400", "", "urn:epc:id:giai:0614141.12345400"},
+	} {
+		got, err := DecodeEPC(tc.hex)
+		if err != nil || got.Scheme != tc.scheme || got.Key != tc.key || got.Serial != tc.serial || got.URN != tc.urn || (tc.scheme != "GDTI-96" || tc.serial == "400") && got.Filter != 3 {
+			t.Errorf("%s: %+v %v", tc.hex, got, err)
+		}
+	}
+	// The encoders give the same bits.
+	if h, _ := EncodeEPC96(0x2C, 3, "0614141", "12345", big.NewInt(400)); h != "2C74257BF460720000000190" {
+		t.Errorf("GDTI-96 encoding %s", h)
+	}
+	if h, _ := EncodeEPC96(0x2C, 0, "123456789", "123", big.NewInt(7)); h != "2C0C75BCD150F60000000007" {
+		t.Errorf("GDTI-96 partition 3 encoding %s", h)
+	}
+	if h, _ := EncodeEPCString(0x3E, 3, "0614141", "12345", "006847"); h != "3E74257BF46072C183670D1B80000000000000000000" {
+		t.Errorf("GDTI-174 encoding %s", h)
+	}
+}
