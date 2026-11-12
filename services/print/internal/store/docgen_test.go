@@ -34,6 +34,9 @@ func TestDocgen_TemplatesBlocksAndOutputRulesUnderRLS(t *testing.T) {
 	}
 	// A save based on version 1 after version 2 was saved is refused, and nothing is stored.
 	var p *httpx.Problem
+	if _, err := s.PutTemplate(ctx, tpl, 0, "designer-1"); !errors.As(err, &p) || p.Status != 428 || p.Code != domain.CodeTemplateIfMatch {
+		t.Fatalf("replace without If-Match: %v", err)
+	}
 	if _, err := s.PutTemplate(ctx, tpl, 1, "designer-1"); !errors.As(err, &p) || p.Status != 412 || p.Code != domain.CodeTemplateStale {
 		t.Fatalf("stale If-Match: %v", err)
 	}

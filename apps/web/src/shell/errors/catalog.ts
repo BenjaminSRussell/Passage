@@ -237,6 +237,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "PRN-0015": { message: "That output rule wasn't found.", action: "Reload the output rules to see the current list." },
   "PRN-0016": { message: "Document templates, text blocks and output rules aren't available right now.", action: "Try again in a few minutes. If it keeps failing, contact support with the details below." },
   "PRN-0017": { message: "Someone else saved this document template after you opened it.", action: RELOAD_AND_REDO },
+  "PRN-0018": { message: "This document template already exists, so a save has to say which version it changes.", action: RELOAD_AND_REDO },
   "MOB-0112": { message: "No printer queue is set up for this document.", action: "Add a routing rule for the document type, or choose a queue." },
   "AP-OPN-001": { message: "A settled or reversed open item can't be held or released.", action: "Reload the page to see the item's current state." },
   "INV-OPB-001": { message: "Some opening stock rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },

@@ -213,9 +213,10 @@ paths:
         A template changes the title, footer line, column names and visible columns of a document type, and names the text
         blocks that supply the letter body and form notes. Every save raises the version. At most one template of a document
         type is the default; saving one as the default clears the flag on the previous one. The document type of an
-        existing template cannot change. Send the version you edited as If-Match (the read's ETag, for example "3"): a
-        save based on an older version than the current one is 412 PRN-0017 and nothing is stored. Without If-Match the
-        save is unconditional. Every saved version is kept with who saved it (GET .../versions).
+        existing template cannot change. Replacing an existing template needs the version you edited as If-Match (the
+        read's ETag, for example "3"): without it 428 PRN-0018, and a save based on an older version than the current
+        one is 412 PRN-0017; nothing is stored either way. A new template is created without If-Match. Every saved
+        version is kept with who saved it (GET .../versions).
       x-passage-duty: print.admin
       parameters:
         - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z][A-Z0-9_-]{1,39}$' } }
@@ -230,6 +231,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /print/v1/document-templates/{code}/versions:
     get:
       operationId: listDocumentTemplateVersions

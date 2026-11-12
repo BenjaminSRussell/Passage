@@ -20,8 +20,8 @@ import (
 // rules. Postgres implements it next to Store; the API reads it through a type assertion,
 // so the label and job code does not depend on it.
 type DocStore interface {
-	// PutTemplate saves t; ifMatch, when not 0, must be the template's current version (0 for a new template is
-	// any). by names who saved it in the version history.
+	// PutTemplate saves t. Replacing an existing template needs ifMatch, its current version (PRN-0018 without,
+	// PRN-0017 when stale); a new template takes 0 (or any version, refused as stale). by is kept in the history.
 	PutTemplate(ctx context.Context, t domain.DocumentTemplate, ifMatch int, by string) (domain.DocumentTemplate, error)
 	ListTemplateVersions(ctx context.Context, code string) ([]domain.TemplateVersion, error)
 	GetTemplate(ctx context.Context, code string) (domain.DocumentTemplate, error)
@@ -52,8 +52,9 @@ func scanTemplate(row pgx.Row) (domain.DocumentTemplate, error) {
 }
 
 // PutTemplate creates or replaces the template with t.Code and raises its version. A
-// default template takes the default flag from the type's previous default. ifMatch, when not 0, must be the
-// current version (PRN-0017, 412, otherwise: someone saved it meanwhile); every saved version is kept with by.
+// default template takes the default flag from the type's previous default. Replacing a template needs ifMatch, the
+// current version (428 PRN-0018 without it, 412 PRN-0017 when someone saved it meanwhile); every saved version is
+// kept with by.
 func (s *Postgres) PutTemplate(ctx context.Context, t domain.DocumentTemplate, ifMatch int, by string) (domain.DocumentTemplate, error) {
 	p, _ := tenant.FromContext(ctx)
 	cfg, err := json.Marshal(t.Config)
@@ -69,6 +70,9 @@ func (s *Postgres) PutTemplate(ctx context.Context, t domain.DocumentTemplate, i
 			return httpx.NewProblem(http.StatusConflict, domain.CodeInvalid, "the document type of a template cannot change")
 		case err != nil && !errors.Is(err, pgx.ErrNoRows):
 			return err
+		}
+		if ifMatch == 0 && current != 0 {
+			return httpx.NewProblem(http.StatusPreconditionRequired, domain.CodeTemplateIfMatch, fmt.Sprintf("the template exists (version %d): send the version you edited as If-Match", current))
 		}
 		if ifMatch != 0 && ifMatch != current {
 			return httpx.NewProblem(http.StatusPreconditionFailed, domain.CodeTemplateStale, fmt.Sprintf("the template is at version %d, not %d: someone saved it after you opened it", current, ifMatch))

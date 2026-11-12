@@ -49,6 +49,9 @@ func newMemDocs() *memDocs {
 func (m *memDocs) PutTemplate(_ context.Context, t domain.DocumentTemplate, ifMatch int, by string) (domain.DocumentTemplate, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if ifMatch == 0 && m.templates[t.Code].Version != 0 {
+		return t, httpx.NewProblem(http.StatusPreconditionRequired, domain.CodeTemplateIfMatch, "if-match required")
+	}
 	if ifMatch != 0 && ifMatch != m.templates[t.Code].Version {
 		return t, httpx.NewProblem(http.StatusPreconditionFailed, domain.CodeTemplateStale, "stale")
 	}
@@ -175,8 +178,15 @@ func TestTemplates_PutVersionDefaultAndDuties(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"version":1`) {
 		t.Fatalf("put: %d %s", rec.Code, rec.Body)
 	}
-	if rec := call(t, h, http.MethodPut, "/print/v1/document-templates/INV-STD", body, "print.admin", ""); !strings.Contains(rec.Body.String(), `"version":2`) {
-		t.Fatalf("second save: %s", rec.Body)
+	req := httptest.NewRequest(http.MethodPut, "/print/v1/document-templates/INV-STD", strings.NewReader(body))
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-User", "worker-7")
+	req.Header.Set("X-Passage-Duties", "print.admin")
+	req.Header.Set("If-Match", `"1"`)
+	second := httptest.NewRecorder()
+	h.ServeHTTP(second, req)
+	if !strings.Contains(second.Body.String(), `"version":2`) {
+		t.Fatalf("second save: %s", second.Body)
 	}
 	if rec := call(t, h, http.MethodPut, "/print/v1/document-templates/INV-STD", body, "print.job.submit", ""); rec.Code != http.StatusForbidden {
 		t.Fatalf("a worker saved a template: %d", rec.Code)
@@ -211,6 +221,9 @@ func TestTemplates_IfMatchAndHistory(t *testing.T) {
 	}
 	if rec := put(""); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"1"` {
 		t.Fatalf("first save: %d %v", rec.Code, rec.Header())
+	}
+	if rec := put(""); rec.Code != http.StatusPreconditionRequired || !strings.Contains(rec.Body.String(), domain.CodeTemplateIfMatch) {
+		t.Fatalf("replace without If-Match: %d %s", rec.Code, rec.Body)
 	}
 	if rec := put(`"1"`); rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"2"` {
 		t.Fatalf("save on version 1: %d %s", rec.Code, rec.Body)

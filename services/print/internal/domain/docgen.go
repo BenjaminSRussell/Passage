@@ -18,6 +18,7 @@ const (
 	CodeTextBlockNotFound = "PRN-0013" // text block (or its language) not found (service-local)
 	CodeTextBlockData     = "PRN-0014" // a placeholder of a text block has no value (service-local)
 	CodeTemplateStale     = "PRN-0017" // If-Match names another version than the template's current one (service-local)
+	CodeTemplateIfMatch   = "PRN-0018" // a save of an existing template without If-Match (service-local)
 
 	maxBlockBody     = 4000
 	maxTemplateItems = 8
