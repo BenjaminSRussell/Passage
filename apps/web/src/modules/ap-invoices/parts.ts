@@ -1,6 +1,6 @@
 import { DECIMAL, UUID } from "../../shell/api/http";
 import type { BadgeTone } from "../../shell/ui";
-import type { CaptureStatus, InvoiceStatus, MatchStatus, REVIEW_REASONS } from "./api/client";
+import type { CaptureStatus, InvoiceStatus, MatchStatus, REVIEW_REASONS, SubmissionStatus } from "./api/client";
 
 export { DECIMAL, UUID };
 
@@ -15,6 +15,8 @@ export interface InvoiceCandidate {
 
 export interface InvoiceNavState {
   items?: InvoiceCandidate[];
+  /** Header fields a vendor already gave, such as an invoice submitted in the supplier portal. */
+  header?: { legalEntityId?: string; invoiceNumber?: string; invoiceDate?: string };
 }
 
 export const invoiceStatusLabel: Record<InvoiceStatus, string> = {
@@ -24,6 +26,15 @@ export const invoiceStatusLabel: Record<InvoiceStatus, string> = {
 };
 
 export const invoiceStatusTone: Record<InvoiceStatus, BadgeTone> = { POSTED: "success", AUDIT_BLOCKED: "warning", AUDIT_REJECTED: "danger" };
+
+export const submissionStatusLabel: Record<SubmissionStatus, string> = {
+  SUBMITTED: "Waiting for review",
+  WITHDRAWN: "Withdrawn by the vendor",
+  REJECTED: "Rejected",
+  POSTED: "Posted as an invoice",
+};
+
+export const submissionStatusTone: Record<SubmissionStatus, BadgeTone> = { SUBMITTED: "info", WITHDRAWN: "neutral", REJECTED: "danger", POSTED: "success" };
 
 export const captureStatusLabel: Record<CaptureStatus, string> = { CAPTURED: "Captured", NEEDS_REVIEW: "Needs review" };
 

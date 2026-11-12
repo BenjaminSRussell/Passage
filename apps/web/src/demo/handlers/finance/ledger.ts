@@ -522,6 +522,27 @@ const summary = (b: JournalBatch): JournalBatch => {
 };
 
 route("GET", `${BASE}/ledgers`, () => ({ items: [ledger] }));
+
+// The chart's main accounts, for the main account lookup. The three cash accounts keep the ids the treasury bank
+// accounts and cash desks name (handlers/treasury.ts).
+const CASH_ACCOUNT_IDS: Record<string, string> = { "1010": uid(363, 1), "1020": uid(363, 2), "1050": uid(363, 3) };
+const ACCOUNT_TYPES: Record<string, string> = { "1": "asset", "2": "liability", "3": "equity", "4": "revenue" };
+route("GET", `${BASE}/charts/{chart}/accounts`, ({ params }) => ({
+  items:
+    params.chart === ledger.chartCode
+      ? Object.entries(ACCOUNTS).map(([number, name]) => ({
+          id: CASH_ACCOUNT_IDS[number] ?? uid(363, 10_000 + Number(number)),
+          chartCode: ledger.chartCode,
+          accountNumber: number,
+          name,
+          accountType: ACCOUNT_TYPES[number[0]] ?? "expense",
+          isPostable: true,
+          reconciliationAccountType: "",
+          lockVersion: 1,
+        }))
+      : [],
+  nextAfter: "",
+}));
 route("GET", `${BASE}/ledgers/{id}`, ({ params }) => (params.id === LEDGER_ID ? ledger : notFound("LEDGER_NOT_FOUND", "ledger")));
 route("GET", `${BASE}/journal-names`, () => ({ items: names.all().map((n) => nameRow(n.code)!) }));
 route("GET", `${BASE}/journal-names/{code}`, ({ params }) => nameRow(params.code) ?? notFound("LEDGER_JOURNAL_NAME_NOT_FOUND", "journal name"));

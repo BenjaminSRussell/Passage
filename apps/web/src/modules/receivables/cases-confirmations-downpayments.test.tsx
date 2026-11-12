@@ -208,7 +208,7 @@ describe("Balance confirmations", () => {
   it("lists runs with their counts and shows the empty and error states", async () => {
     server.handler = () => json(200, { items: [{ ...run, confirmations: undefined }] });
     const first = renderAt("/receivables/balance-confirmations");
-    const table = await findTable({ name: "Balance confirmation runs" });
+    const table = await findTable({ name: "Balance confirmations" });
     await waitFor(() => expect(table).toHaveTextContent("2027-03-31"));
     expect(pageViolations(first.container)).toEqual([]);
     first.unmount();
@@ -218,7 +218,7 @@ describe("Balance confirmations", () => {
     second.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/balance-confirmations");
-    expect(await findAlert()).toHaveTextContent("Could not load the confirmation runs");
+    expect(await findAlert()).toHaveTextContent("Could not load balance confirmation runs");
   });
 
   it("starts a run with the defaults and an Idempotency-Key", async () => {

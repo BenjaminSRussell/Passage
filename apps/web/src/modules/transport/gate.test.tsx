@@ -341,7 +341,6 @@ describe("goods in transit", () => {
       return undefined;
     };
     renderAt(`/transport/goods-in-transit/new?voyageId=${VOYAGE}`);
-    expect(screen.getByLabelText("Voyage id")).toHaveValue(VOYAGE);
     fill("Destination site", SITE);
     fill("Receipt lines", "1");
     fireEvent.click(screen.getByRole("button", { name: "Open order" }));

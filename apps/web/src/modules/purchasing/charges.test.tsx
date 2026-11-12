@@ -93,7 +93,7 @@ describe("charge code create", () => {
     expect(await screen.findByText("Enter the legal entity id (a UUID).")).toBeInTheDocument();
     expect(screen.getByText("Use 1 to 20 letters, digits, _ or -.")).toBeInTheDocument();
     expect(screen.getByText("Enter the name.")).toBeInTheDocument();
-    expect(screen.getByText("Enter the debit account id (a UUID).")).toBeInTheDocument();
+    expect(screen.getByText("Choose the debit account.")).toBeInTheDocument();
     expect(mock).not.toHaveBeenCalled();
     expect(pageViolations(container)).toEqual([]);
   });
@@ -113,7 +113,7 @@ describe("charge code create", () => {
     fireEvent.change(screen.getByLabelText("Debit side"), { target: { value: "ITEM" } });
     fireEvent.change(screen.getByLabelText("Credit side"), { target: { value: "LEDGER" } });
     expect(screen.queryByLabelText("Vendor")).toBeNull();
-    fireEvent.change(screen.getByLabelText("Credit account id"), { target: { value: AUTO } });
+    fireEvent.change(screen.getByLabelText("Credit account"), { target: { value: AUTO } });
     fireEvent.click(screen.getByRole("button", { name: "Save charge code" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/charge-codes/${ID}`));
     const sent = JSON.parse((mock.mock.calls[0][1] as RequestInit).body as string);

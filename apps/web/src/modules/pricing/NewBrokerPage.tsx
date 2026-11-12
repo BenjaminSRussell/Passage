@@ -52,7 +52,7 @@ export function validateBroker(v: BrokerDraft): Errors {
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Choose a legal entity.";
   if (v.name.trim() === "" || v.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (!UUID.test(v.brokerVendorId.trim())) errors.brokerVendorId = "Choose the broker's vendor.";
-  if (v.customerScope !== "all" && !UUID.test(v.customerKey.trim())) errors.customerKey = v.customerScope === "customer" ? "Choose a customer." : "Enter the customer group id (a UUID).";
+  if (v.customerScope !== "all" && !UUID.test(v.customerKey.trim())) errors.customerKey = v.customerScope === "customer" ? "Choose a customer." : "Choose a customer group.";
   if (v.productScope !== "all" && (v.productKey.trim() === "" || v.productKey.trim().length > 64)) errors.productKey = "Enter the product or group (up to 64 characters).";
   const rate = Number(v.rate);
   if (!DECIMAL.test(v.rate.trim()) || rate <= 0 || (v.rateKind === "PERCENT_NET" && rate > 100)) {
@@ -164,7 +164,7 @@ export function NewBrokerPage() {
           {values.customerScope === "customer" ? (
             <LookupFormField id="bk-customer" label="Customer" entity="customer" scope={{ legalEntityId: values.legalEntityId || undefined }} value={values.customerKey} error={errors.customerKey} onChange={(customerKey) => update({ customerKey })} />
           ) : values.customerScope === "group" ? (
-            text("bk-customer", "customerKey", "Customer group id", { mono: true })
+            <LookupFormField id="bk-customer" label="Customer group" entity="customerGroup" value={values.customerKey} error={errors.customerKey} onChange={(customerKey) => update({ customerKey })} />
           ) : null}
           <FormField id="bk-product-scope" label="Products">
             {(c) => (

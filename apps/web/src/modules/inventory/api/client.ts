@@ -31,6 +31,8 @@ export type OnHandGroup = (typeof ON_HAND_GROUPS)[number];
 
 export interface JournalSummary {
   id: string;
+  /** Document number IJ-000123; absent on an older journal that was not backfilled. */
+  number?: string;
   legalEntityId: string;
   journalType: JournalType;
   status: JournalStatus;

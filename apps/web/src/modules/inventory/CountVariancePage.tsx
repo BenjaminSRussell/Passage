@@ -55,7 +55,7 @@ type FilterErrors = Partial<Record<keyof CountVarianceFilters, string>>;
 export function validateCountVarianceFilters(f: CountVarianceFilters): FilterErrors {
   const errors: FilterErrors = {};
   for (const [key, label] of [["legalEntityId", "legal entity"], ["planId", "count plan"], ["sheetId", "count sheet"]] as const) {
-    if (f[key].trim() !== "" && !UUID.test(f[key].trim())) errors[key] = `Enter the ${label} id (a UUID).`;
+    if (f[key].trim() !== "" && !UUID.test(f[key].trim())) errors[key] = `Choose the ${label} from the list.`;
   }
   if (f.from && f.to && f.to < f.from) errors.to = "The end date is before the start date.";
   return errors;
@@ -92,18 +92,12 @@ export function CountVariancePage() {
       />
       <Card title="Filter">
         <form onSubmit={apply} noValidate className={styles.form}>
-          <FormField id="variance-plan" label="Count plan" optional error={errors.planId}>
-            {(control) => <Input {...control} value={draft.planId} onChange={set("planId")} placeholder="Plan id" invalid={Boolean(errors.planId)} />}
-          </FormField>
-          <FormField id="variance-sheet" label="Count sheet" optional error={errors.sheetId}>
-            {(control) => <Input {...control} value={draft.sheetId} onChange={set("sheetId")} placeholder="Sheet id" invalid={Boolean(errors.sheetId)} />}
-          </FormField>
+          <LookupFormField id="variance-plan" label="Count plan" entity="countPlan" optional prefill={false} scope={{ legalEntityId: draft.legalEntityId || undefined }} value={draft.planId} error={errors.planId} onChange={(planId) => setDraft({ ...draft, planId })} />
+          <LookupFormField id="variance-sheet" label="Count sheet" entity="countSheet" optional prefill={false} scope={{ legalEntityId: draft.legalEntityId || undefined }} value={draft.sheetId} error={errors.sheetId} onChange={(sheetId) => setDraft({ ...draft, sheetId })} />
           <FormField id="variance-warehouse" label="Warehouse" optional>
             {(control) => <Input {...control} value={draft.warehouseId} onChange={set("warehouseId")} />}
           </FormField>
-          <FormField id="variance-counter" label="Counter" optional>
-            {(control) => <Input {...control} value={draft.counter} onChange={set("counter")} placeholder="User id of the counter" />}
-          </FormField>
+          <LookupFormField id="variance-counter" label="Counter" entity="user" optional prefill={false} value={draft.counter} onChange={(counter) => setDraft({ ...draft, counter })} />
           <LookupFormField id="variance-entity" label="Legal entity" entity="legalEntity" optional prefill={false} value={draft.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setDraft({ ...draft, legalEntityId })} />
           <FormField id="variance-from" label="Counted from" optional>
             {(control) => <Input {...control} type="date" value={draft.from} onChange={set("from")} />}

@@ -138,6 +138,14 @@ Code layout: `internal/domain` (pure rules and unit/property tests),
 `0002_compliance_stability.sql`, `0003_nonconformance_capa.sql`, `0004_certificates_samples.sql`,
 `0005_study_lifecycle_source_coa.sql`).
 
+## Order numbers (#500, migration `0008`)
+
+Every quality order gets a document number `QO-000001`, `QO-000002`, ... per tenant on insert, from a counter row the
+insert trigger takes under a row lock. Migration `0008` numbers the existing orders in creation order (under a role that
+bypasses row-level security only) and the counter continues after them. Orders carry `number`, and
+`GET /v1/quality/quality-orders?q=` keeps the orders whose number starts with `q` (ignoring case, LIKE wildcards escaped),
+so a lookup finds an order by its number. The number is not on `order.created` yet.
+
 ## Run
 
 ```

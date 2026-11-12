@@ -29,7 +29,18 @@ export type LookupEntityKey =
   | "batch"
   | "formula"
   | "ecr"
-  | "purchaseOrder";
+  | "purchaseOrder"
+  | "receipt"
+  | "vendorInvoice"
+  | "countPlan"
+  | "countSheet"
+  | "voyage"
+  | "mainAccount"
+  | "customerGroup"
+  | "paymentTerm"
+  | "postingProfile"
+  | "qualityOrder"
+  | "inventoryJournal";
 
 export interface LookupOption {
   id: string;
@@ -525,7 +536,127 @@ function ledgerOption(row: Raw): LookupOption | null {
   return hit ? { ...hit, number: [hit.number, currency].filter(Boolean).join(" · ") || undefined, currency } : null;
 }
 
+/** Count plans have no single-plan route, so a plan's name is found in the list. */
+async function countPlanOptions(scope: LookupScope, signal?: AbortSignal): Promise<LookupOption[]> {
+  return present(
+    (await listRows("/api/v1/inventory/count-plans", {}, signal))
+      .filter((row) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId)
+      .map((row) => option(row, ["name"], ["warehouse"])),
+  );
+}
+
+const countPlanDef: LookupDef = {
+  noun: "count plan",
+  search: async (q, scope, signal) => narrow(await countPlanOptions(scope, signal), q),
+  resolve: async (id, signal) => (await countPlanOptions({}, signal)).find((entry) => entry.id === id) ?? null,
+};
+
+/**
+ * A main account reads "1100 Cash at bank (asset)". Accounts belong to a chart, and a ledger names its chart: the charts of
+ * the ledgers in scope are read, then their postable accounts. There is no read of one account by id, so a resolve reads the
+ * same lists (bounded) and finds the id.
+ */
+async function mainAccountOptions(scope: LookupScope, signal?: AbortSignal): Promise<LookupOption[]> {
+  const ledgers = await listRows("/api/v1/ledger/ledgers", { legalEntityId: scope.legalEntityId }, signal);
+  const charts = [...new Set(ledgers.map((row) => text(row, "chartCode")).filter((code): code is string => Boolean(code)))];
+  const lists = await Promise.all(
+    charts.map(async (chart) => {
+      const rows: Raw[] = [];
+      let after: string | undefined;
+      for (let page = 0; page < MAX_LIST_PAGES; page++) {
+        const body = await getJson(`/api/v1/ledger/charts/${encodeURIComponent(chart)}/accounts${query({ limit: "1000", after })}`, signal);
+        rows.push(...items(body));
+        after = text((body ?? {}) as Raw, "nextAfter");
+        if (!after) break;
+      }
+      return rows
+        .filter((row) => row.isPostable !== false)
+        .map((row) => {
+          const id = text(row, "id");
+          const number = text(row, "accountNumber");
+          const name = text(row, "name");
+          if (!id || !number) return null;
+          const type = text(row, "accountType");
+          return { id, name: name ? `${number} ${name}` : number, number: [type, charts.length > 1 ? chart : undefined].filter(Boolean).join(" · ") || undefined };
+        });
+    }),
+  );
+  return present(lists.flat());
+}
+
+const mainAccountDef: LookupDef = {
+  noun: "main account",
+  search: async (q, scope, signal) => narrow(await mainAccountOptions(scope, signal), q),
+  resolve: async (id, signal) => (await mainAccountOptions({}, signal)).find((entry) => entry.id === id) ?? null,
+};
+
 export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
+  receipt: listedEntity(
+    "receipt",
+    "/api/v1/receiving/receipts",
+    (row) => {
+      const hit = option(row, ["receiptNumber"], []);
+      const number = [text(row, "packingSlip") ? `slip ${text(row, "packingSlip")}` : undefined, text(row, "receiptDate"), text(row, "state")?.toLowerCase()].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+    () => ({ limit: "100" }),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
+  vendorInvoice: listedEntity(
+    "vendor invoice",
+    "/api/v1/receiving/invoices",
+    (row) => {
+      const hit = option(row, ["invoiceNumber"], []);
+      const total = text(row, "total");
+      const currency = text(row, "currency");
+      const number = [total && currency ? `${total} ${currency}` : undefined, text(row, "invoiceDate")].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency } : null;
+    },
+    () => ({ limit: "100" }),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
+  countPlan: countPlanDef,
+  countSheet: listedEntity(
+    "count sheet",
+    "/api/v1/inventory/count-sheets",
+    (row) => {
+      const hit = option(row, ["number"], []);
+      const number = [text(row, "planName"), text(row, "status")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined } : null;
+    },
+    () => ({}),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
+  voyage: listedEntity(
+    "voyage",
+    "/api/v1/transport/voyages",
+    (row) => {
+      const hit = option(row, ["reference"], []);
+      const number = [text(row, "status")?.toLowerCase(), text(row, "currency")].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+  ),
+  mainAccount: mainAccountDef,
+  qualityOrder: searchedEntity(
+    "quality order",
+    "/api/v1/quality/quality-orders",
+    (row) => {
+      const hit = option(row, ["number"], []);
+      return hit ? { ...hit, number: text(row, "status")?.replace(/_/g, " ").toLowerCase() } : null;
+    },
+  ),
+  inventoryJournal: searchedEntity(
+    "inventory journal",
+    "/api/v1/inventory/journals",
+    (row) => {
+      const hit = option(row, ["number"], []);
+      const number = [text(row, "journalType")?.replace(/_/g, " ").toLowerCase(), text(row, "status")?.toLowerCase(), text(row, "postingDate")].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined } : null;
+    },
+  ),
+  customerGroup: listedEntity("customer group", "/api/v1/party/customer-groups", codeAndName),
+  paymentTerm: listedEntity("payment term", "/api/v1/party/payment-terms", codeAndName),
+  postingProfile: listedEntity("posting profile", "/api/v1/party/posting-profiles", codeAndName, (scope) => ({ legalEntityId: scope.legalEntityId })),
   purchaseOrder: searchedEntity(
     "purchase order",
     "/api/v1/procurement/purchase-orders",

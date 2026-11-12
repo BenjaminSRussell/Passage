@@ -18,7 +18,7 @@ export interface GoodsInTransitValues {
 export function validateGoodsInTransit(v: GoodsInTransitValues): { errors: Record<string, string>; input?: NewGoodsInTransit } {
   const errors: Record<string, string> = {};
   const voyageId = v.voyageId.trim();
-  if (!UUID.test(voyageId)) errors.voyageId = "Enter the voyage id as a lower-case UUID.";
+  if (!UUID.test(voyageId)) errors.voyageId = "Choose the voyage.";
   const siteId = v.siteId.trim();
   if (!UUID.test(siteId)) errors.siteId = "Choose a destination site.";
   if (!(ORIGIN_INCOTERMS as readonly string[]).includes(v.incoterm)) errors.incoterm = "Choose an origin Incoterm.";
@@ -76,8 +76,8 @@ export function NewGoodsInTransitPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="git-voyage" label="Voyage id" hint="An estimated voyage (UUID)." error={errors.voyageId}>
-            {(control) => <Input {...control} className={styles.mono} value={values.voyageId} onChange={(e) => update({ voyageId: e.target.value })} invalid={Boolean(errors.voyageId)} />}
+          <FormField id="git-voyage" label="Voyage" hint="An estimated voyage, by its reference." error={errors.voyageId}>
+            {(control) => <EntityLookup entity="voyage" {...control} value={values.voyageId} onChange={(e) => update({ voyageId: e.target.value })} invalid={Boolean(errors.voyageId)} />}
           </FormField>
           <FormField id="git-incoterm" label="Incoterm" hint="DAP, DPU and DDP transfer at receipt and open no order." error={errors.incoterm}>
             {(control) => (

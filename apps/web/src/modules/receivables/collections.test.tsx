@@ -502,7 +502,7 @@ describe("Lockbox", () => {
     second.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/lockbox");
-    expect(await findAlert()).toHaveTextContent("Could not load the lockbox imports");
+    expect(await findAlert()).toHaveTextContent("Could not load lockbox imports");
   });
 
   it("imports a pasted file and lists the payments it created", async () => {

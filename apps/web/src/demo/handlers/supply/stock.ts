@@ -371,6 +371,7 @@ function journal(n: number, type: JournalType, status: JournalStatus, ago: numbe
   const isPosted = status === "POSTED";
   return {
     id: uid(K_JOURNAL, n),
+    number: `IJ-${String(n).padStart(6, "0")}`,
     legalEntityId: LEGAL_ENTITY.id,
     journalType: type,
     status,

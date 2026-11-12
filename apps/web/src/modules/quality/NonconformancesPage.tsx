@@ -37,6 +37,7 @@ import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
 import { EntityName } from "../../shell/lookup/EntityName";
+import { InsideControl } from "../../shell/ui";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
 
@@ -64,7 +65,7 @@ const columns: DataTableColumn<Nonconformance>[] = [
     key: "qualityOrderId",
     header: "Quality order",
     mono: true,
-    render: (row) => (row.qualityOrderId ? <Link to={`/quality/orders/${row.qualityOrderId}`}>{shortId(row.qualityOrderId)}</Link> : dash),
+    render: (row) => (row.qualityOrderId ? <Link to={`/quality/orders/${row.qualityOrderId}`}><InsideControl.Provider value={true}><EntityName entity="qualityOrder" id={row.qualityOrderId} fallback="Quality order" /></InsideControl.Provider></Link> : dash),
   },
   { key: "status", header: "Status", render: (row) => <NcrStatusBadge status={row.status} /> },
 ];
@@ -282,7 +283,7 @@ export function NewNonconformancePage() {
               <Select {...control} value={values.qualityOrderId} onChange={(event) => update({ qualityOrderId: event.target.value })}>
                 <option value="">None</option>
                 {(inspections.data ?? []).map((o) => (
-                  <option key={o.id} value={o.id}>{`${shortId(o.id)} · ${TRIGGER_LABELS[o.trigger] ?? o.trigger}`}</option>
+                  <option key={o.id} value={o.id}>{`${o.number ?? shortId(o.id)} · ${TRIGGER_LABELS[o.trigger] ?? o.trigger}`}</option>
                 ))}
               </Select>
             )}

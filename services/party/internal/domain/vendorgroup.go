@@ -50,3 +50,10 @@ func (g NewVendorGroup) Validate() map[string]string {
 	}
 	return errs
 }
+
+// A customer group (#500) has the same shape and rules as a vendor group: a
+// short code that fits a ledger dimension value, and a name.
+type (
+	CustomerGroup    = VendorGroup
+	NewCustomerGroup = NewVendorGroup
+)

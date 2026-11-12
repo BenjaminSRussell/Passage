@@ -195,3 +195,57 @@ func TestSubmission_BuyerRejectsWithANoteAndNoOtherLegalEntitySeesIt(t *testing.
 		t.Errorf("posted against an unknown invoice: %v", err)
 	}
 }
+
+// A submission is closed by an invoice of its own legal entity that is posted or
+// held for audit, and an invoice closes at most one submission (#511 review).
+func TestSubmission_AnInvoiceClosesOneSubmissionOfItsOwnLegalEntity(t *testing.T) {
+	e := setup(t)
+	p := principal(1)
+	ctx := ctxOf(p)
+	r := qty3Receipt(t, e, p, "PS-7", nil)
+	first, err := e.st.CreateSubmission(ctx, submission(p, vendorID, "INV-71", billing(r.ID, "1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.st.CreateSubmission(ctx, submission(p, vendorID, "INV-72", billing(r.ID, "1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoice := func(legalEntity, status string) string {
+		t.Helper()
+		id := uuid.NewString()
+		owner := tenant.Principal{TenantID: p.TenantID, LegalEntityID: legalEntity}
+		err := dbx.WithTenantTx(ctxOf(owner), e.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `insert into receiving_vendor_invoice (tenant_id, id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date, currency, ledger_id, fiscal_period_id, ledger_entry_id, total, status)
+				values ($1, $2, $3, $4, $5, current_date, current_date, 'USD', $6, $6, 'e1', 2.5, $7)`, p.TenantID, id, legalEntity, vendorID, "K-"+id[30:], vendorID, status)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	otherEntity := invoice(uuid.NewString(), "POSTED")
+	rejected := invoice(p.LegalEntityID, "AUDIT_REJECTED")
+	held := invoice(p.LegalEntityID, "AUDIT_BLOCKED")
+	if _, err := e.st.DecideSubmission(ctx, first.ID, "ap-clerk", domain.SubmissionPosted, "", otherEntity); err == nil {
+		t.Error("closed with an invoice of another legal entity")
+	}
+	if _, err := e.st.DecideSubmission(ctx, first.ID, "ap-clerk", domain.SubmissionPosted, "", rejected); codeOf(t, err) != domain.CodeSubmissionInvoiceMismatch {
+		t.Errorf("closed with an invoice rejected after audit: %v", err)
+	}
+	if d, err := e.st.DecideSubmission(ctx, first.ID, "ap-clerk", domain.SubmissionPosted, "", held); err != nil || d.InvoiceID != held {
+		t.Fatalf("an invoice held for audit closes the submission: %+v %v", d, err)
+	}
+	if _, err := e.st.DecideSubmission(ctx, second.ID, "ap-clerk", domain.SubmissionPosted, "", held); codeOf(t, err) != domain.CodeSubmissionInvoiceTaken {
+		t.Errorf("the same invoice closed a second submission: %v", err)
+	}
+	// The index refuses it too, whatever reaches the table.
+	err = dbx.WithTenantTx(ctx, e.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update receiving_invoice_submission set invoice_id = $3 where tenant_id = $1 and id = $2`, p.TenantID, second.ID, held)
+		return err
+	})
+	if err == nil {
+		t.Error("the unique index let two submissions name one invoice")
+	}
+}

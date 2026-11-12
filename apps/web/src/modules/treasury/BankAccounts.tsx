@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
+import { EntityName } from "../../shell/lookup/EntityName";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -134,7 +135,7 @@ export function validateAccount(v: AccountDraft): Errors {
     errors.statementAccount = "Use up to 35 characters: A to Z, 0 to 9, slash, dot or hyphen.";
   if (v.bic.trim() !== "" && !BIC.test(v.bic.trim().toUpperCase())) errors.bic = "Enter an 8 or 11 character BIC.";
   if (!CURRENCY.test(v.currency.trim())) errors.currency = "Enter an ISO 4217 code such as EUR.";
-  if (!UUID.test(v.mainAccountId.trim())) errors.mainAccountId = "Enter the GL main account id (a UUID).";
+  if (!UUID.test(v.mainAccountId.trim())) errors.mainAccountId = "Choose the general ledger account.";
   return errors;
 }
 
@@ -225,7 +226,16 @@ export function NewBankAccountPage() {
           )}
           {field("bic", "BIC", undefined, true)}
           {field("currency", "Currency", "ISO 4217, for example EUR.")}
-          {field("mainAccountId", "GL main account id", "The ledger bank account this account posts to.")}
+          <LookupFormField
+            id="ba-mainAccountId"
+            label="General ledger account"
+            entity="mainAccount"
+            hint="The ledger bank account this account posts to."
+            scope={{ legalEntityId: values.legalEntityId || undefined }}
+            value={values.mainAccountId}
+            error={errors.mainAccountId}
+            onChange={(mainAccountId) => update({ mainAccountId })}
+          />
           {failure ? (
             <div className={styles.formActions}>
               <CommandFailure title={failure.code === "TRS-0404" ? "This account already exists" : "Could not create the bank account"} problem={failure} />
@@ -357,11 +367,11 @@ export function BankAccountDetailPage() {
           <Detail term="Currency" mono>
             {acct.currency}
           </Detail>
-          <Detail term="Legal entity" mono>
-            {acct.legalEntityId}
+          <Detail term="Legal entity">
+            <EntityName entity="legalEntity" id={acct.legalEntityId} fallback="Not available" />
           </Detail>
-          <Detail term="GL main account" mono>
-            {acct.mainAccountId}
+          <Detail term="General ledger account">
+            <EntityName entity="mainAccount" id={acct.mainAccountId} fallback="Not available" />
           </Detail>
           <Detail term="Version" mono>
             {String(acct.version)}

@@ -66,6 +66,7 @@ paths:
       parameters:
         - { name: status, in: query, schema: { $ref: '#/components/schemas/JournalStatus' } }
         - { name: type, in: query, schema: { $ref: '#/components/schemas/JournalType' } }
+        - { name: q, in: query, description: Keeps the journals whose number starts with this (ignoring case)., schema: { type: string, maxLength: 40 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: cursor, in: query, description: nextCursor of the previous page, schema: { type: string } }
       responses:
@@ -3363,6 +3364,7 @@ components:
       required: [id, legalEntityId, journalType, status, postingDate, currency, version, lineCount, createdAt]
       properties:
         id: { type: string, format: uuid }
+        number: { type: string, description: 'Document number IJ-000123, per legal entity, assigned on insert (migration 0042); absent on an older journal that was not backfilled.' }
         legalEntityId: { type: string, format: uuid }
         journalType: { $ref: '#/components/schemas/JournalType' }
         status: { $ref: '#/components/schemas/JournalStatus' }

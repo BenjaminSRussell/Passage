@@ -1,4 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { RepName } from "./RepName";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { LookupFormField } from "../../shell/lookup/LookupFormField";
 import { Link, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
 import { listCommissionTransactions, listSalesGroups, type CommissionFilter, type CommissionTransaction } from "./api/client";
@@ -21,9 +24,9 @@ function columns(groupName: (id: string) => string): DataTableColumn<CommissionT
       mono: true,
       render: (t) => (t.reversesInvoiceLineId ? `${t.invoiceLineId} (credits ${t.reversesInvoiceLineId})` : t.invoiceLineId),
     },
-    { key: "customerId", header: "Customer", mono: true, render: (t) => t.customerId ?? "" },
+    { key: "customerId", header: "Customer", render: (t) => (t.customerId ? <EntityName entity="customer" id={t.customerId} fallback="Customer" /> : "") },
     { key: "salesGroupId", header: "Sales group", render: (t) => groupName(t.salesGroupId) },
-    { key: "repId", header: "Rep", mono: true },
+    { key: "repId", header: "Rep", render: (t) => <RepName id={t.repId} /> },
     { key: "basis", header: "Basis", render: (t) => (t.basis === "MARGIN" ? "Margin" : "Revenue") },
     { key: "basisAmount", header: "Basis amount", mono: true, align: "end" },
     { key: "ratePct", header: "Rate", mono: true, align: "end", render: (t) => `${t.ratePct}% × ${t.sharePct}%` },
@@ -101,9 +104,9 @@ export function CommissionTransactionsPage() {
             </Select>
           )}
         </FormField>
-        {text("repId", "Rep")}
+        <LookupFormField id="ct-repId" label="Rep" entity="worker" optional prefill={false} value={draft.repId} onChange={(repId) => setDraft((d) => ({ ...d, repId }))} />
         {text("period", "Month", "For example 2027-03.")}
-        {text("customerId", "Customer")}
+        <LookupFormField id="ct-customerId" label="Customer" entity="customer" optional prefill={false} value={draft.customerId} onChange={(customerId) => setDraft((d) => ({ ...d, customerId }))} />
         {text("invoiceLineId", "Invoice line", "Also finds its credit notes.")}
         <Button type="submit">Show transactions</Button>
       </form>

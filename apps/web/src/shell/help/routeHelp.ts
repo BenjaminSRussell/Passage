@@ -276,6 +276,20 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "ap-clerk.md#enter-a-vendor-invoice",
   },
   {
+    patterns: ["/ap-invoices/submissions"],
+    title: "Invoice submissions",
+    purpose: "Invoices vendors submitted in the supplier portal against goods you received.",
+    howTo: ["Filter by vendor or status.", "Open a submission waiting for review."],
+    guide: "ap-clerk.md#enter-a-vendor-invoice",
+  },
+  {
+    patterns: ["/ap-invoices/submissions/:id"],
+    title: "Invoice submission",
+    purpose: "One invoice a vendor submitted, with the received lines it bills.",
+    howTo: ["Select Post as vendor invoice; the form opens filled in.", "After posting, record the posted invoice.", "Or reject it with a reason the vendor reads."],
+    guide: "ap-clerk.md#enter-a-vendor-invoice",
+  },
+  {
     patterns: ["/ap-invoices/:id"],
     title: "Vendor invoice",
     purpose: "One posted vendor invoice, with links to its receipt and purchase order.",

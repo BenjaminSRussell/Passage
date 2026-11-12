@@ -174,7 +174,7 @@ function NewDeskCard({ legalEntityId, onCreated }: { legalEntityId: string; onCr
     if (!/^[A-Z0-9-]{1,20}$/.test(v.code.trim())) found.code = "Use 1 to 20 characters: A to Z, 0 to 9 or a hyphen.";
     if (v.name.trim() === "") found.name = "Give the desk a name.";
     if (!CURRENCY.test(v.currency.trim())) found.currency = "Enter an ISO 4217 code such as USD.";
-    if (!UUID.test(v.mainAccountId.trim())) found.mainAccountId = "Enter the general ledger cash account (a UUID).";
+    if (!UUID.test(v.mainAccountId.trim())) found.mainAccountId = "Choose the general ledger cash account.";
     if (!POSITIVE.test(v.maxBalance.trim()) || Number(v.maxBalance) <= 0) found.maxBalance = "Enter the most cash the desk may hold, such as 5000.00.";
     setErrors(found);
     setFailure(null);
@@ -203,8 +203,8 @@ function NewDeskCard({ legalEntityId, onCreated }: { legalEntityId: string; onCr
         <FormField id="nd-currency" label="Currency" error={errors.currency}>
           {(c) => <Input {...c} className={styles.mono} value={v.currency} onChange={set("currency")} invalid={Boolean(errors.currency)} />}
         </FormField>
-        <FormField id="nd-account" label="General ledger account id" hint="The cash account the desk belongs to." error={errors.mainAccountId}>
-          {(c) => <Input {...c} className={styles.mono} value={v.mainAccountId} onChange={set("mainAccountId")} invalid={Boolean(errors.mainAccountId)} />}
+        <FormField id="nd-account" label="General ledger account" hint="The cash account the desk belongs to." error={errors.mainAccountId}>
+          {(c) => <EntityLookup {...c} entity="mainAccount" scope={{ legalEntityId }} value={v.mainAccountId} onChange={(e) => setV((prev) => ({ ...prev, mainAccountId: e.target.value }))} invalid={Boolean(errors.mainAccountId)} />}
         </FormField>
         <FormField id="nd-max" label="Most cash the desk may hold" error={errors.maxBalance}>
           {(c) => <Input {...c} className={styles.mono} inputMode="decimal" value={v.maxBalance} onChange={set("maxBalance")} invalid={Boolean(errors.maxBalance)} />}

@@ -311,8 +311,9 @@ func (s *Postgres) moveSubmission(ctx context.Context, id, vendorID, status, by,
 			return submissionError(domain.CodeSubmissionState, "the submission is %s", cur.Status)
 		}
 		if invoiceID != "" {
-			var vendor string
-			if err := tx.QueryRow(ctx, `SELECT vendor_id::text FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2::uuid`, tenantID, invoiceID).Scan(&vendor); err != nil {
+			var vendor, legalEntity, invoiceStatus string
+			if err := tx.QueryRow(ctx, `SELECT vendor_id::text, legal_entity_id::text, status FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2::uuid`, tenantID, invoiceID).
+				Scan(&vendor, &legalEntity, &invoiceStatus); err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return submissionError(domain.CodeSubmissionInvalid, "invoiceId is not a posted invoice")
 				}
@@ -321,9 +322,27 @@ func (s *Postgres) moveSubmission(ctx context.Context, id, vendorID, status, by,
 			if !strings.EqualFold(vendor, cur.VendorID) {
 				return submissionError(domain.CodeSubmissionInvalid, "the invoice is another vendor's")
 			}
+			if !strings.EqualFold(legalEntity, cur.LegalEntityID) {
+				return submissionError(domain.CodeSubmissionInvoiceMismatch, "the invoice is of another legal entity than the submission")
+			}
+			if invoiceStatus != "POSTED" && invoiceStatus != "AUDIT_BLOCKED" {
+				return submissionError(domain.CodeSubmissionInvoiceMismatch, "the invoice is %s; only a posted invoice or one held for audit closes a submission", invoiceStatus)
+			}
+			var taken bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM receiving_invoice_submission WHERE tenant_id = $1 AND invoice_id = $2::uuid AND id <> $3::uuid)`,
+				tenantID, invoiceID, id).Scan(&taken); err != nil {
+				return err
+			}
+			if taken {
+				return submissionError(domain.CodeSubmissionInvoiceTaken, "the invoice already closes another submission")
+			}
 		}
 		_, err = tx.Exec(ctx, `UPDATE receiving_invoice_submission SET status = $3, decided_by = NULLIF($4, ''), decided_at = CASE WHEN $3 IN ('REJECTED', 'POSTED') THEN now() END,
 			decision_note = $5, invoice_id = NULLIF($6, '')::uuid WHERE tenant_id = $1 AND id = $2::uuid`, tenantID, id, status, by, note, invoiceID)
+		if isUnique(err, "receiving_invoice_submission_invoice_once") {
+			// Another resolve named the same invoice in between.
+			return submissionError(domain.CodeSubmissionInvoiceTaken, "the invoice already closes another submission")
+		}
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

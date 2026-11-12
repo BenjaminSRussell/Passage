@@ -81,6 +81,41 @@ interface Start {
   activeId: string | null;
 }
 
+/** What a page that loads its whole list itself (one request, no paging) hands to ListPage. */
+export interface LoadedList<T> {
+  data: T[] | null | undefined;
+  loading: boolean;
+  error?: unknown;
+  reload(): void;
+}
+
+/**
+ * Whether a load failed for want of access: an HTTP 403, which the module clients carry as a status or as the problem
+ * code (AUTH-0003 from the duty check, or HTTP-403 when the body had none).
+ */
+export function isForbidden(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { status, code } = error as { status?: unknown; code?: unknown };
+  return status === 403 || code === "AUTH-0003" || code === "HTTP-403";
+}
+
+/**
+ * ListData for a list the page already loaded in full, such as a setup list it also reloads after a save. Pass it as
+ * `useRows={() => loadedRows(state)}`; filters and sort then work on the loaded rows. A 403 shows the no-access message.
+ */
+export function loadedRows<T>(state: LoadedList<T>, forbidden = isForbidden(state.error)): ListData<T> {
+  return {
+    rows: state.error ? [] : (state.data ?? []),
+    loading: state.loading && !state.data,
+    loadingMore: false,
+    error: state.error ? state.error : undefined,
+    forbidden,
+    hasMore: false,
+    loadMore: () => undefined,
+    retry: state.reload,
+  };
+}
+
 export async function entityText(entity: LookupEntityKey, id: string): Promise<string> {
   const found = id === "" ? null : await resolveOption(entity, id);
   return found ? formatOption(found) : id;

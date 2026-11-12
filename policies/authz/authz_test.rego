@@ -3061,6 +3061,19 @@ test_migration_opening_load_routes_need_run_and_view_duties if {
 	not allowed("migration.factory.view", "POST", "/api/v1/migration/runs/r1/opening-load")
 }
 
+test_party_setup_lists_are_read_with_party_read if {
+	allowed("party.read", "GET", "/v1/party/payment-terms")
+	allowed("party.read", "GET", "/v1/party/payment-terms/t1")
+	allowed("party.read", "GET", "/v1/party/posting-profiles")
+	allowed("party.read", "GET", "/v1/party/posting-profiles/p1")
+	allowed("party.read", "GET", "/v1/party/customer-groups")
+	allowed("party.read", "GET", "/v1/party/customer-groups/g1")
+	allowed("party.write", "POST", "/v1/party/customer-groups")
+	allowed("party.import.write", "POST", "/v1/party/customer-groups")
+	not allowed("party.read", "POST", "/v1/party/customer-groups")
+	not allowed("party.write", "POST", "/v1/party/payment-terms")
+}
+
 # #548/#552: any role can resolve user ids to display names without holding the user-maintenance duty, and user administrators can too.
 test_user_name_lookup if {
 	allowed("identity.user-name.read", "GET", "/v1/identity/user-names")

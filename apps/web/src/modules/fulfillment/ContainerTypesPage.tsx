@@ -1,11 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Badge, Button, Card, FormField, Input, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
 import { describeProblem, listContainerTypes, saveContainerType, type ContainerType, type Problem } from "./api/client";
 import { CONTAINER_CODE, dash, DECIMAL, MATERIAL_CODE } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 
 const columns: DataTableColumn<ContainerType>[] = [
   { key: "code", header: "Code", mono: true },
@@ -68,28 +67,21 @@ export function ContainerTypesPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader
+      <ListPage
+        id="fulfillment-container-types"
         title="Container types"
         description="Cartons, crates and pallets the packers use. Packed containers take the tare, returnable flag and material of their type."
-      />
-      {state.error ? (
-        <Alert tone="danger" title="Could not load container types" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Container types"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.code}
-          loading={state.loading}
-          onRowOpen={(row) => {
+        noun="container types"
+        singular="container type"
+        columns={columns}
+        useRows={() => loadedRows(state)}
+        getRowKey={(row) => row.code}
+        onRowOpen={(row) => {
             setValues({ code: row.code, tareKg: row.tareKg, packagingMaterial: row.packagingMaterial ?? "", returnable: row.returnable });
             key.renew();
           }}
-          empty={{ title: "No container types yet", description: "Add the cartons and pallets you pack into, then add packing rules that use them." }}
-        />
-      )}
+        empty={{ title: "No container types yet", description: "Add the cartons and pallets you pack into, then add packing rules that use them." }}
+      />
       <Card title="Add or change a container type">
         <form className={styles.form} onSubmit={submit} noValidate>
           <p className={styles.note}>Saving an existing code replaces it. Open a row above to edit it.</p>

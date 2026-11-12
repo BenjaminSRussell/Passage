@@ -49,6 +49,16 @@ Protected fields per legal entity (FR-7.10, `party.protected_fields`): `GET /v1/
 
 A caller holding only `party.import.write` (no `party.read` or `party.write`) gets a write receipt (`id`, `partyNumber`, `partyType`, `status`, `version`) from `POST` and `PATCH /v1/party/parties`, not the party record, because that duty opens no read route; role creates answer with the role, which carries no personal data.
 
+## Setup records of a customer role (#500, migration `0017`)
+
+`GET /v1/party/payment-terms[/{id}]` and `GET /v1/party/posting-profiles[/{id}]` (`?legalEntityId=`, row security keeps the
+caller's legal entities) read the terms and profiles a customer role names, and `/v1/party/customer-groups` registers and reads
+customer groups (code and name, the same rules as vendor groups; `POST` with `party.write` or `party.import.write`, an optional
+`id` registers a group id roles already carry). Migration `0017` creates `customer_group` and backfills a group for every
+`customer_group_id` already on a customer role (`CG` + the first 8 hex digits, the vendor group collision rule), under a role
+that bypasses row-level security only. The web forms pick these records by name. Payment terms and posting profiles have no
+create route yet: they are loaded with the master data.
+
 ## Vendor master
 
 `vendor_role` (`0008`) is the vendor side of a party, one row per party and legal entity, with tenant and legal-entity RLS. It carries `vendor_group_id` (the vendor group other services reconcile against, for example payables aging and `invoice.posted` in receiving), `account_number`, `payment_term_id`, `currency_code` and `blocked`. Routes: `POST /v1/party/parties/{id}/vendor` (`party.write` or `party.import.write`; the caller must carry exactly one legal entity, 409 `PTY-VENDOR-EXISTS` for a second role or a taken account number; `Idempotency-Key` replays the original role, scoped to the legal entity and party, column `vendor_role.idempotency_key` from `0010`), `GET /v1/party/vendors/{id}` and `GET /v1/party/parties/{id}/vendors` (`party.read`; the lookup receiving calls at invoice posting).
@@ -85,6 +95,11 @@ Vendor-admin invitations. `POST /v1/party/vendor-portal/invites` (`party.vendor-
 | `COM-0500` | 500 | internal error, detail hidden |
 | `AUTH-0001` | 401 | missing or malformed tenant |
 | `AUTH-0003` | 403 | missing duty |
+| `PTY-PAYMENT-TERM-NOT-FOUND` | 404 | unknown payment term, another tenant's, or a malformed id |
+| `PTY-POSTING-PROFILE-NOT-FOUND` | 404 | unknown posting profile, outside the caller's legal entities, or a malformed id |
+| `PTY-CUSTOMER-GROUP-NOT-FOUND` | 404 | unknown customer group, another tenant's, or a malformed id |
+| `PTY-CUSTOMER-GROUP-INVALID` | 422 | customer group body failed validation; `errors` names the field |
+| `PTY-CUSTOMER-GROUP-EXISTS` | 409 | the customer group code or id is taken in the tenant |
 | `PTY-PROSPECT-NOT-FOUND` | 404 | no such registration |
 | `PTY-PROSPECT-STATE` | 409 | the registration was already accepted or rejected |
 | `PTY-PROSPECT-LIMIT` | 429 | too many registrations are waiting in the legal entity |

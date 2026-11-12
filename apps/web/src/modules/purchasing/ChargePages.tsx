@@ -194,8 +194,8 @@ export function validateChargeCode(f: CodeForm, creating: boolean): Errors {
   if (f.name.trim() === "") e.name = "Enter the name.";
   if (!decimalPattern.test(f.defaultValue.trim())) e.defaultValue = "Enter a decimal value.";
   else if (f.calc === "PERCENT" && Number(f.defaultValue) > 100) e.defaultValue = "A percentage is at most 100.";
-  if (f.debitType === "LEDGER" && !uuidPattern.test(f.debitAccountId.trim())) e.debitAccountId = "Enter the debit account id (a UUID).";
-  if (f.creditType === "LEDGER" && !uuidPattern.test(f.creditAccountId.trim())) e.creditAccountId = "Enter the credit account id (a UUID).";
+  if (f.debitType === "LEDGER" && !uuidPattern.test(f.debitAccountId.trim())) e.debitAccountId = "Choose the debit account.";
+  if (f.creditType === "LEDGER" && !uuidPattern.test(f.creditAccountId.trim())) e.creditAccountId = "Choose the credit account.";
   if (f.debitType === "VENDOR" && f.creditType === "VENDOR") e.creditType = "A vendor debit needs a ledger credit.";
   if (f.debitType === "VENDOR" && !uuidPattern.test(f.vendorId.trim())) e.vendorId = "Enter the vendor id (a UUID).";
   else if (hasVendorSide(f) && f.vendorId.trim() !== "" && !uuidPattern.test(f.vendorId.trim())) e.vendorId = "Enter a UUID or leave blank.";
@@ -264,8 +264,8 @@ function CodeFields({ id, form, set, errors, creating }: { id: string; form: Cod
         )}
       </FormField>
       {form.debitType === "LEDGER" ? (
-        <FormField id={`${id}-debit-account`} label="Debit account id" error={errors.debitAccountId}>
-          {(c) => <Input {...c} value={form.debitAccountId} onChange={(e) => set({ debitAccountId: e.target.value })} />}
+        <FormField id={`${id}-debit-account`} label="Debit account" error={errors.debitAccountId}>
+          {(c) => <EntityLookup entity="mainAccount" scope={{ legalEntityId: form.legalEntityId || undefined }} {...c} value={form.debitAccountId} onChange={(e) => set({ debitAccountId: e.target.value })} invalid={Boolean(errors.debitAccountId)} />}
         </FormField>
       ) : null}
       <FormField id={`${id}-credit`} label="Credit side" hint="Vendor is payable to the vendor below, or the order's vendor" error={errors.creditType}>
@@ -280,8 +280,8 @@ function CodeFields({ id, form, set, errors, creating }: { id: string; form: Cod
         )}
       </FormField>
       {form.creditType === "LEDGER" ? (
-        <FormField id={`${id}-credit-account`} label="Credit account id" error={errors.creditAccountId}>
-          {(c) => <Input {...c} value={form.creditAccountId} onChange={(e) => set({ creditAccountId: e.target.value })} />}
+        <FormField id={`${id}-credit-account`} label="Credit account" error={errors.creditAccountId}>
+          {(c) => <EntityLookup entity="mainAccount" scope={{ legalEntityId: form.legalEntityId || undefined }} {...c} value={form.creditAccountId} onChange={(e) => set({ creditAccountId: e.target.value })} invalid={Boolean(errors.creditAccountId)} />}
         </FormField>
       ) : null}
       {hasVendorSide(form) ? (
@@ -778,7 +778,7 @@ export function AutoChargeCreatePage() {
               )}
             </FormField>
             {form.accountCode !== "ALL" ? (
-              <FormField id="ac-account" label={form.accountCode === "GROUP" ? "Vendor group id" : "Vendor"} error={errors.accountId}>
+              <FormField id="ac-account" label={form.accountCode === "GROUP" ? "Vendor group" : "Vendor"} error={errors.accountId}>
                 {(c) =>
                   form.accountCode === "GROUP" ? (
                     <Input {...c} value={form.accountId} onChange={(e) => set({ accountId: e.target.value })} />

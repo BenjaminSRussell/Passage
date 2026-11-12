@@ -6,6 +6,7 @@ export const FLOW_ROUTES: readonly string[] = [
   "/ap-invoices",
   "/ap-invoices/grir",
   "/ap-invoices/post",
+  "/ap-invoices/submissions",
   "/billing",
   "/billing/credit-notes",
   "/billing/deferred-revenue",

@@ -94,25 +94,24 @@ describe("Count variance report", () => {
   });
 
   it("sends every filter on apply and blocks invalid ones", async () => {
+    const COUNTER = "0190d000-0000-7000-8000-0000000000c1";
     handler = () => json(200, { items: [], totalsByCounter: [], truncated: false });
     renderAt("/inventory/reports/count-variance");
     await screen.findByText("No counted lines");
     expect(calls[0].url.search).toBe("");
-    fireEvent.change(screen.getByLabelText(/^Count plan/), { target: { value: "nope" } });
     fireEvent.change(screen.getByLabelText(/^Counted from/), { target: { value: "2026-09-10" } });
     fireEvent.change(screen.getByLabelText(/^Counted to/), { target: { value: "2026-09-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("Enter the count plan id (a UUID).")).toBeInTheDocument();
-    expect(screen.getByText("The end date is before the start date.")).toBeInTheDocument();
+    expect(await screen.findByText("The end date is before the start date.")).toBeInTheDocument();
     expect(calls).toHaveLength(1);
 
     fireEvent.change(screen.getByLabelText(/^Count plan/), { target: { value: PLAN_ID } });
     fireEvent.change(screen.getByLabelText(/^Counted to/), { target: { value: "2026-09-30" } });
-    fireEvent.change(screen.getByLabelText(/^Counter/), { target: { value: "ann" } });
+    fireEvent.change(screen.getByLabelText(/^Counter/), { target: { value: COUNTER } });
     fireEvent.change(screen.getByLabelText(/^Warehouse/), { target: { value: "W1" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(calls).toHaveLength(2));
-    expect(Object.fromEntries(calls[1].url.searchParams)).toEqual({ planId: PLAN_ID, from: "2026-09-10", to: "2026-09-30", counter: "ann", warehouseId: "W1" });
+    expect(Object.fromEntries(calls[1].url.searchParams)).toEqual({ planId: PLAN_ID, from: "2026-09-10", to: "2026-09-30", counter: COUNTER, warehouseId: "W1" });
   });
 
   it("shows a failure and says when the list was capped", async () => {
@@ -123,8 +122,8 @@ describe("Count variance report", () => {
 
   it("validates filters", () => {
     expect(validateCountVarianceFilters({ legalEntityId: "x", planId: "", sheetId: "y", warehouseId: "", counter: "", from: "", to: "" })).toEqual({
-      legalEntityId: "Enter the legal entity id (a UUID).",
-      sheetId: "Enter the count sheet id (a UUID).",
+      legalEntityId: "Choose the legal entity from the list.",
+      sheetId: "Choose the count sheet from the list.",
     });
   });
 });
