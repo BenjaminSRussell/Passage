@@ -28,11 +28,11 @@ spec:
       template:
         metadata:
           labels:
-            {{- include "passage.wiLabels" $ | nindent 12 }}
+            {{- with include "passage.wiLabels" $ }}{{ . | nindent 12 }}{{- end }}
             app.kubernetes.io/name: passage-hr-{{ $job.command }}
             app.kubernetes.io/instance: {{ $root.Release.Name }}
         spec:
-          {{- include "passage.wiServiceAccount" (dict "root" $ "name" "passage-hr") | nindent 10 }}
+          {{- with include "passage.wiServiceAccount" (dict "root" $ "name" "passage-hr") }}{{ . | nindent 10 }}{{- end }}
           restartPolicy: Never
           securityContext:
             {{- toYaml $root.Values.podSecurityContext | nindent 12 }}

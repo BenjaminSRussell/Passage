@@ -14,11 +14,11 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "passage.wiLabels" $ | nindent 8 }}
+        {{- with include "passage.wiLabels" $ }}{{ . | nindent 8 }}{{- end }}
         app.kubernetes.io/name: passage-hr
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      {{- include "passage.wiServiceAccount" (dict "root" $ "name" "passage-hr") | nindent 6 }}
+      {{- with include "passage.wiServiceAccount" (dict "root" $ "name" "passage-hr") }}{{ . | nindent 6 }}{{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       volumes:
@@ -69,10 +69,13 @@ spec:
               value: {{ .Values.complianceUrl | default (printf "http://compliance-compliance.%s.svc:8080" .Release.Namespace) | quote }}
             - name: HR_RETENTION_PURGE_ENABLED
               value: {{ .Values.config.retentionPurgeEnabled | quote }}
+{{- /* PHI read auditing (#606): rendered only when it is set or the hipaa overlay can turn it on, so a default render is unchanged. */}}
+{{- if or .Values.config.phiReadAudit (has "hipaa" (((.Values.global | default dict).cloudOverlays) | default list)) }}
             - name: PASSAGE_PHI_READ_AUDIT
               value: {{ .Values.config.phiReadAudit | quote }}
             - name: AUDIT_URL
               value: {{ .Values.auditUrl | default (printf "http://audit-audit.%s.svc:8080" .Release.Namespace) | quote }}
+{{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_NAME
               value: hr

@@ -12,10 +12,10 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "passage.wiLabels" $ | nindent 8 }}
+        {{- with include "passage.wiLabels" $ }}{{ . | nindent 8 }}{{- end }}
         app.kubernetes.io/name: migration
     spec:
-      {{- include "passage.wiServiceAccount" (dict "root" $ "name" "passage-migration") | nindent 6 }}
+      {{- with include "passage.wiServiceAccount" (dict "root" $ "name" "passage-migration") }}{{ . | nindent 6 }}{{- end }}
       securityContext:
         runAsNonRoot: true
         {{- if or .Values.fieldCrypt.keysSecret .Values.serviceIdentity.signingKeySecret }}

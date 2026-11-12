@@ -14,11 +14,11 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "passage.wiLabels" $ | nindent 8 }}
+        {{- with include "passage.wiLabels" $ }}{{ . | nindent 8 }}{{- end }}
         app.kubernetes.io/name: {{ .Values.serviceName }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      {{- include "passage.wiServiceAccount" (dict "root" $ "name" "passage-compliance") | nindent 6 }}
+      {{- with include "passage.wiServiceAccount" (dict "root" $ "name" "passage-compliance") }}{{ . | nindent 6 }}{{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
         {{- if .Values.fieldCrypt.keysSecret }}
