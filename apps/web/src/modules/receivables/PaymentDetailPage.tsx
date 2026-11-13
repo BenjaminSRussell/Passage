@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, DataTable, FormField, Input, PageHeader, Skeleton, Textarea, type DataTableColumn } from "../../shell/ui";
+import { EntityName } from "../../shell/lookup/EntityName";
 import {
   applyPayment,
   describeProblem,
@@ -16,6 +17,8 @@ import {
   type Payment,
   type Problem,
   type SettlementInput,
+  type UnapplyResult,
+  unapplyPayment,
 } from "./api/client";
 import { compareDecimals, DECIMAL, DECISION_LABELS, MODE_LABELS, money, STATUS_LABELS, STATUS_TONES, subtract, sumDecimals } from "./format";
 import styles from "./pages.module.css";
@@ -103,6 +106,7 @@ export function PaymentDetailPage() {
   const [match, setMatch] = useState<MatchResult | null>(null);
   const [failure, setFailure] = useState<{ title: string; problem: Problem } | null>(null);
   const [result, setResult] = useState<ApplyResult | null>(null);
+  const [unapplied, setUnapplied] = useState<UnapplyResult | null>(null);
   const [busy, setBusy] = useState<"match" | "apply" | null>(null);
   const applyKey = useRef(newKey());
 
@@ -157,6 +161,7 @@ export function PaymentDetailPage() {
     try {
       const out = await applyPayment(payment.id, payment.version, built, applyKey.current);
       setResult(out);
+      setUnapplied(null);
       setPlan({});
       setMatch(null);
       applyKey.current = newKey();
@@ -234,7 +239,7 @@ export function PaymentDetailPage() {
           <Detail term="Mode">{MODE_LABELS[payment.paymentMode] ?? payment.paymentMode}</Detail>
           <Detail term="Received" mono>{payment.receivedDate}</Detail>
           <Detail term="Value date" mono>{payment.valueDate}</Detail>
-          <Detail term="Customer" mono>{payment.customerId ?? "Unidentified"}</Detail>
+          <Detail term="Customer">{payment.customerId ? <EntityName entity="customer" id={payment.customerId} /> : "Unidentified"}</Detail>
           <Detail term="Payer">{payment.payerName ?? "Not given"}</Detail>
           <Detail term="Payer account">{payment.payerAccountHash ? "Given (kept as a hash)" : "Not given"}</Detail>
           <Detail term="Short-pay reason">{payment.shortPayReason ?? "None"}</Detail>
@@ -245,6 +250,11 @@ export function PaymentDetailPage() {
         <Alert tone="success" title="Payment applied" live="status">
           {result.settlements.length} item(s) settled; {money(result.payment.unappliedAmount, result.payment.currency)} on account. Status:{" "}
           {STATUS_LABELS[result.payment.status] ?? result.payment.status}.
+        </Alert>
+      ) : null}
+      {unapplied ? (
+        <Alert tone="success" title="Payment unapplied" live="status">
+          {unapplied.reversed.length} settlement(s) reversed; {money(unapplied.payment.unappliedAmount, unapplied.payment.currency)} is unapplied again.
         </Alert>
       ) : null}
       {failure ? (
@@ -308,6 +318,83 @@ export function PaymentDetailPage() {
       ) : (
         <p className={styles.note}>This payment is {STATUS_LABELS[payment.status]?.toLowerCase() ?? payment.status} with nothing left to apply.</p>
       )}
+      {hasApplications(payment) ? (
+        <UnapplyCard
+          payment={payment}
+          onDone={(out) => {
+            setResult(null);
+            setUnapplied(out);
+            state.reload();
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** Whether some of the payment's cash went to items: what is unapplied is less than what was received. */
+export function hasApplications(payment: Pick<Payment, "status" | "amount" | "unappliedAmount">): boolean {
+  return payment.status !== "REVERSED" && compareDecimals(payment.unappliedAmount, payment.amount) < 0;
+}
+
+/**
+ * Undo the payment's applications (duty receivables.payment.reverse): every item it settled is open again by what it took off,
+ * and its cash is unapplied, ready to apply again. The cash receipt itself stays.
+ */
+function UnapplyCard({ payment, onDone }: { payment: Payment; onDone(result: UnapplyResult): void }) {
+  const [reason, setReason] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<{ title: string; problem: Problem } | null>(null);
+  const tooLong = reason.length > 500;
+
+  async function unapply() {
+    setAsking(false);
+    setBusy(true);
+    setFailure(null);
+    try {
+      const out = await unapplyPayment(payment.id, payment.version, reason.trim());
+      setReason("");
+      onDone(out);
+    } catch (error) {
+      const stale = error instanceof ReceivablesApiError && error.status === 412;
+      setFailure({ title: stale ? "The payment changed since you opened it. Reload it and try again." : "Could not unapply the payment", problem: describeProblem(error) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Undo the applications" headingLevel={3}>
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          Reverses every settlement this payment made. The items it settled are open again by what it took off them, the ledger gets the mirror journal, and{" "}
+          {money(subtract(payment.amount, payment.unappliedAmount), payment.currency)} goes back to unapplied so you can apply it again. The cash receipt stays.
+        </p>
+        <FormField id="unapply-reason" label="Reason" optional error={tooLong ? "Use at most 500 characters." : undefined}>
+          {(c) => <Textarea {...c} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} invalid={tooLong} />}
+        </FormField>
+        <div className={styles.actions}>
+          <Button variant="danger" loading={busy} disabled={tooLong} onClick={() => setAsking(true)}>
+            Unapply payment
+          </Button>
+        </div>
+        {failure ? (
+          <Alert tone="danger" title={failure.title} live="alert">
+            <ProblemMessage problem={failure.problem} />
+          </Alert>
+        ) : null}
+      </div>
+      {asking ? (
+        <ConfirmDialog
+          title="Unapply this payment?"
+          description="Every item it settled opens again. You can apply the payment again afterwards."
+          confirmLabel="Unapply payment"
+          cancelLabel="Keep the applications"
+          onConfirm={() => void unapply()}
+          onCancel={() => setAsking(false)}
+        />
+      ) : null}
+    </Card>
   );
 }

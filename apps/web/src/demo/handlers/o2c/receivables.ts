@@ -35,6 +35,7 @@ import {
   payments,
   paymentsOf,
   settleItem,
+  unsettleItem,
   statementBatches,
   worklist,
 } from "./arModel";
@@ -204,6 +205,9 @@ route("POST", `${BASE}/payments/{id}:match`, ({ params }) => {
 
 const APPLIABLE = new Set(["RECEIVED", "SUGGESTED", "ON_ACCOUNT"]);
 
+/** The live applications of each payment applied in this session, so :unapply can give them back. */
+const applications = new Map<string, { openItemId: string; amount: number; total: number }[]>();
+
 route("POST", `${BASE}/payments/{id}:apply`, ({ params, headers, body }) => {
   const p = payments.get(params.id);
   if (!p) return notFound("Payment");
@@ -228,6 +232,7 @@ route("POST", `${BASE}/payments/{id}:apply`, ({ params, headers, body }) => {
   const records: SettlementRecord[] = lines.map((l) => {
     const total = r2(Number(l.amount) + Number(l.cashDiscount ?? 0) + Number(l.writeOff ?? 0));
     const after = settleItem(l.openItemId, total, day(0));
+    applications.set(p.id, [...(applications.get(p.id) ?? []), { openItemId: l.openItemId, amount: Number(l.amount), total }]);
     return { openItemId: l.openItemId, amount: dec(Number(l.amount)), cashDiscount: dec(Number(l.cashDiscount ?? 0)), writeOff: dec(Number(l.writeOff ?? 0)), openAfter: after?.openAmount ?? "0.00", itemStatus: after?.status ?? "CLEARED" };
   });
   const next = payments.update(p.id, {
@@ -238,6 +243,23 @@ route("POST", `${BASE}/payments/{id}:apply`, ({ params, headers, body }) => {
     version: p.version + 1,
   })!;
   return reply.ok({ payment: next, settlements: records }, { ETag: `"${next.version}"` });
+});
+
+route("POST", `${BASE}/payments/{id}:unapply`, ({ params, headers }) => {
+  const p = payments.get(params.id);
+  if (!p) return notFound("Payment");
+  const v = ifMatch(headers);
+  if (v !== undefined && v !== p.version) return stale("payment");
+  const live = applications.get(p.id) ?? [];
+  if (live.length === 0) return reply.problem(409, "AR-0010", `The payment has no application to reverse (status ${p.status}).`);
+  const reversed = live.map((a, i) => {
+    const after = unsettleItem(a.openItemId, a.total, day(0));
+    return { settlementId: uid(KR.payment, 900 + i), openItemId: a.openItemId, amount: dec(a.amount), itemAmount: dec(a.total), openAfter: after?.openAmount ?? dec(a.total), itemStatus: after?.status ?? "OPEN" };
+  });
+  applications.delete(p.id);
+  const back = r2(live.reduce((sum, a) => sum + a.amount, 0));
+  const next = payments.update(p.id, { unappliedAmount: dec(r2(Number(p.unappliedAmount) + back)), status: "RECEIVED", version: p.version + 1 })!;
+  return reply.ok({ payment: next, reversed }, { ETag: `"${next.version}"` });
 });
 
 // ---- Lockbox (BAI2) and bank statements (camt.053) ----
