@@ -174,7 +174,8 @@ func TestPunchout_CXMLSessionReturnAndRequisition(t *testing.T) {
 	}
 	body := reqs.calls[0]
 	if body.LegalEntityID != srcLE || body.Currency != "USD" || len(body.Lines) != 2 || body.Lines[0].Description != "Pump seal kit" || body.Lines[0].Category != "31161500" ||
-		body.Lines[0].Qty != "2" || body.Lines[0].EstimatedUnitPrice != "25" || body.Lines[1].Unit != "CS" || body.Lines[1].Category != "15121500" {
+		body.Lines[0].Qty != "2" || body.Lines[0].EstimatedUnitPrice != "25" || body.Lines[1].Unit != "CS" || body.Lines[1].Category != "15121500" ||
+		body.Lines[0].CatalogSource != "PUNCHOUT" || body.Lines[0].SupplierPartID == "" {
 		t.Fatalf("requisition body: %+v", body)
 	}
 	if rec := do(t, h, http.MethodPost, create, "", "edi.requisition.create", asUser(requesterA)); rec.Code != http.StatusOK || len(reqs.calls) != 1 {
@@ -299,4 +300,16 @@ func TestPunchout_SupplierConfigValidationAndPublicURL(t *testing.T) {
 		t.Fatalf("no public url: %d %s", rec.Code, rec.Body.String())
 	}
 	_ = a
+}
+
+// #35 (35-3): the requester sees the active punchout suppliers by name, not the partner list.
+func TestPunchout_SuppliersListForRequesters(t *testing.T) {
+	_, h, _, partner, _ := punchoutSetup(t, "https://supplier.example/setup")
+	rec := do(t, h, http.MethodGet, "/edi/v1/punchout/suppliers", "", "edi.requisition.create", asUser(requesterA))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), partner) || !strings.Contains(rec.Body.String(), `"name"`) {
+		t.Fatalf("suppliers: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodGet, "/edi/v1/punchout/suppliers", "", "edi.operate", asUser(requesterA)); rec.Code != http.StatusForbidden {
+		t.Fatalf("duty: %d", rec.Code)
+	}
 }

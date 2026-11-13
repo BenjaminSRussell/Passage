@@ -337,6 +337,16 @@ func (a *API) listPunchoutSessions(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// listPunchoutSuppliers lists the suppliers whose punchout catalog the caller can open (#35, 35-3): what the web screen offers.
+func (a *API) listPunchoutSuppliers(w http.ResponseWriter, r *http.Request) {
+	items, err := a.store.ListPunchoutSuppliers(r.Context(), listLimit(r))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (a *API) cancelPunchoutSession(w http.ResponseWriter, r *http.Request) {
 	s, ok := a.ownSession(w, r)
 	if !ok {
@@ -518,7 +528,8 @@ func (a *API) createRequisitionFromSession(w http.ResponseWriter, r *http.Reques
 			category = "PUNCHOUT"
 		}
 		body.Lines = append(body.Lines, sources.RequisitionLine{Description: desc, Category: category, Qty: l.Quantity.String(), Unit: l.UnitCode,
-			EstimatedUnitPrice: l.UnitPrice.String(), RequestedDate: today.AddDate(0, 0, l.LeadTimeDays).Format("2006-01-02")})
+			EstimatedUnitPrice: l.UnitPrice.String(), RequestedDate: today.AddDate(0, 0, l.LeadTimeDays).Format("2006-01-02"),
+			CatalogSource: "PUNCHOUT", SupplierPartID: partID(l.SupplierPartID), NeedsApproval: l.NeedsApproval})
 	}
 	ref, err := a.Requisitions.CreateRequisition(r.Context(), s.LegalEntityID, "punchout:"+s.ID, body)
 	var refused *sources.RequisitionRefusedError
@@ -538,4 +549,12 @@ func (a *API) createRequisitionFromSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, map[string]string{"sessionId": s.ID, "requisitionId": ref.ID})
+}
+
+// partID is the supplier part id purchasing keeps (at most 100 characters); a longer one is left out rather than refused.
+func partID(id string) string {
+	if len(id) > 100 {
+		return ""
+	}
+	return id
 }

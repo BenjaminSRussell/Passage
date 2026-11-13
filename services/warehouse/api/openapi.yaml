@@ -558,6 +558,70 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/Unprocessable" }
+  /v1/warehouse/shipments/{id}:ship:
+    post:
+      operationId: confirmShipmentShipped
+      summary: Confirm that a shipment left the dock without a packing slip (#35, 35-1)
+      description: >
+        Records that the fulfillment shipment {id} left the warehouse without a
+        packing slip posted for it and emits dev.passage.wms.shipment.shipped.v1
+        in the same transaction, so the EDI engine still sends the shipment's
+        856 or DESADV to the partners that receive it automatically. ssccs are
+        the containers that left (left out: every closed container of the
+        shipment). legalEntityId defaults to the caller's and must be in its
+        scope. shippedAt defaults to now and may not be in the future. A
+        shipment is confirmed once: a second confirmation under another
+        Idempotency-Key is 409 WMS-SHIPMENT-SHIPPED (a shipment that leaves in
+        several loads is shipped by packing slips in fulfillment).
+      x-passage-duty: warehouse.shipment.confirm
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [warehouseId]
+              properties:
+                warehouseId: { type: string, format: uuid }
+                legalEntityId: { type: string, format: uuid }
+                carrierCode: { type: string, pattern: "^[A-Z0-9]{2,4}$", description: The carrier's SCAC. }
+                shippedAt: { type: string, format: date-time }
+                ssccs:
+                  type: array
+                  maxItems: 500
+                  items: { type: string, pattern: "^[0-9]{18}$" }
+      responses:
+        "201":
+          description: Confirmed (or replayed).
+          headers: { Idempotent-Replayed: { $ref: "#/components/headers/IdempotentReplayed" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipConfirmation" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+  /v1/warehouse/shipments/{id}/shipped:
+    get:
+      operationId: getShipmentShipped
+      summary: Read the warehouse's ship confirmation of a shipment
+      x-passage-duty: warehouse.inquiry.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The confirmation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipConfirmation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/warehouse/receipts:
     get:
       operationId: listReceipts
@@ -1083,7 +1147,8 @@ components:
     NotFound:
       description: >
         No such work (WMS-WORK-NOT-FOUND), receipt (WMS-RECEIPT-NOT-FOUND),
-        dock door in the warehouse (WMS-DOOR-NOT-FOUND), or work or receipt
+        dock door in the warehouse (WMS-DOOR-NOT-FOUND), ship confirmation
+        (WMS-SHIPMENT-NOT-FOUND), or work or receipt
         line (WMS-LINE-NOT-FOUND) in the tenant.
       content:
         application/problem+json:
@@ -1091,7 +1156,7 @@ components:
     Conflict:
       description: >
         WMS-DUPLICATE (location name, directive sequence, door code or ASN
-        reference taken), WMS-0105 (line already confirmed with another key),
+        reference taken), WMS-SHIPMENT-SHIPPED (the shipment already confirmed shipped), WMS-0105 (line already confirmed with another key),
         WMS-0108 (door already booked for an overlapping window),
         WMS-RECEIPT-LINE-RECEIVED (pallet already received), WMS-0110 (illegal
         work or line transition, or a blocked location status at confirmation)
@@ -1108,6 +1173,18 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    ShipConfirmation:
+      type: object
+      required: [shipmentId, legalEntityId, warehouseId, shippedAt, ssccs, confirmedBy, createdAt]
+      properties:
+        shipmentId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        warehouseId: { type: string, format: uuid }
+        carrierCode: { type: string }
+        shippedAt: { type: string, format: date-time }
+        ssccs: { type: array, items: { type: string } }
+        confirmedBy: { type: string }
+        createdAt: { type: string, format: date-time }
     GS1Settings:
       type: object
       required: [companyPrefix, extension, nextSerial, issued, updatedBy, updatedAt]

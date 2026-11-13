@@ -249,3 +249,34 @@ func (s *Store) ResolvePublicEndpoint(ctx context.Context, kind, ref string) (te
 	}
 	return tenantID, partnerID, err
 }
+
+// PunchoutSupplierRef is a supplier a requester can open a punchout catalog of: an active partner with punchout settings.
+type PunchoutSupplierRef struct {
+	PartnerID     string   `json:"partnerId"`
+	Name          string   `json:"name"`
+	LegalEntityID string   `json:"legalEntityId"`
+	Currencies    []string `json:"currencies"`
+}
+
+// ListPunchoutSuppliers lists the active partners with punchout settings in the caller's legal entities, by name (#35, 35-3).
+func (s *Store) ListPunchoutSuppliers(ctx context.Context, limit int) ([]PunchoutSupplierRef, error) {
+	out := []PunchoutSupplierRef{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select p.id::text, p.name, s.legal_entity_id::text, s.currencies from punchout_supplier s
+			join trading_partner p on p.tenant_id = s.tenant_id and p.id = s.partner_id
+			where p.status = 'active' order by p.name, p.id limit $1`, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r PunchoutSupplierRef
+			if err := rows.Scan(&r.PartnerID, &r.Name, &r.LegalEntityID, &r.Currencies); err != nil {
+				return err
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	return out, err
+}

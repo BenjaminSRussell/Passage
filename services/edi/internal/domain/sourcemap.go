@@ -73,7 +73,9 @@ type SourceContainerLine struct {
 }
 
 type SourceContainer struct {
+	ID                string                `json:"id"`
 	SSCC              string                `json:"sscc"`
+	PackingSlipID     *string               `json:"packingSlipId"`
 	Status            string                `json:"status"`
 	GrossKg           decimal.Decimal       `json:"grossKg"`
 	ParentContainerID *string               `json:"parentContainerId"`

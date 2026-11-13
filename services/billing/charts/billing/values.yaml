@@ -68,3 +68,24 @@ containerSecurityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
+# The intercompany charge consumer (#40, args [consume]): raises the lender's invoice proposal of intercompany's
+# chargeinvoice.requested (Invoice settlement mode) on icCharge.revenueAccount, with icCharge.taxCode when the charge names no tax
+# code. It exits at start unless service:billing-iccharge is seeded. Off by default, like the other consumers, until it is turned on
+# per environment (intercompany's outbox connector creates the topic). Its KafkaUser, ACLs and dead-letter topic are
+# deploy/kafka/billing-consumer.yaml.
+consumer:
+  enabled: false
+  replicaCount: 1
+  icCharge:
+    revenueAccount: ""
+    taxCode: ""
+    paymentTermDays: 30
+  kafka:
+    brokers: ""
+    group: billing-iccharge
+    username: billing-consumer
+    dlqTopic: passage.billing.iccharge.dlq
+    secret: ""
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }

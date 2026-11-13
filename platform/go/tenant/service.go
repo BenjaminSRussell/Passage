@@ -271,6 +271,10 @@ var serviceGrants = map[string]map[string][]string{
 		"purchasing": {"procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"},
 		// An inbound ship notice of a cXML network becomes the receiving ASN of the purchase order it names (#35, 35-4).
 		"receiving": {"receiving.asn.maintain"},
+		// An inbound cXML invoice lands in payables' vendor-invoice intake for an AP clerk (#35, 35-4).
+		"payables": {"payables.vendor-invoice.intake"},
+		// A self-billed line's VAT is checked at the rate the tax service determines (#35, 35-5).
+		"tax": {"tax.tax.calculate"},
 	},
 	"fieldservice": {
 		"dispatch": {"dispatch.run.create", "dispatch.run.read"},

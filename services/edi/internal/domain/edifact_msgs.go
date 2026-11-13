@@ -505,6 +505,10 @@ func MapINVOIC(m EdifactMessage) (Invoice, error) {
 			inv.Number = s.El(1, 0)
 		case "UNS":
 			pastUNS = true
+		case "CUX":
+			if s.El(0, 0) == "2" {
+				inv.Currency = s.El(0, 1)
+			}
 		case "DTM":
 			switch s.El(0, 0) {
 			case "137":

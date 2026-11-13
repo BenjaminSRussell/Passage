@@ -51,6 +51,7 @@ type API struct {
 	employeeVendors     *employeeVendorDeps
 	opening             *openingDeps
 	vendorPayments      store.VendorPaymentStore
+	intake              VendorInvoiceIntakeStore
 	// vendorGroupDim is the ledger dimension attribute that carries the vendor group code on the AP control account; empty posts and compares none.
 	vendorGroupDim string
 }
@@ -110,6 +111,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerEmployeeVendors(r)
 	a.registerOpening(r)
 	a.registerVendorPayments(r)
+	a.registerVendorInvoiceIntake(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {

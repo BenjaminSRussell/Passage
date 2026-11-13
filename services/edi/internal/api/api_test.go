@@ -183,7 +183,7 @@ func TestMapsTest_UnsupportedSetIsReportedAsAnIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ic.Groups[0].Transactions[0].SetID = "810"
+	ic.Groups[0].Transactions[0].SetID = "830"
 	raw, err := domain.Serialize(ic)
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +207,7 @@ func TestMapsTest_UnsupportedSetIsReportedAsAnIssue(t *testing.T) {
 		t.Fatalf("an unsupported set has no canonical order: %s", rec.Body.String())
 	}
 	if tx.Status != "FAILED" || len(tx.Issues) != 1 || tx.Issues[0].Code != CodeUnsupportedSet || !tx.Issues[0].Reject {
-		t.Fatalf("unsupported 810 = %+v", tx)
+		t.Fatalf("unsupported 830 = %+v", tx)
 	}
 }
 
