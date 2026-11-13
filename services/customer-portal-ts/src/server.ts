@@ -287,8 +287,11 @@ export function createHttpServer(deps: ServerDeps): Server {
     try {
       const r = await call(mint(session, read.audience, read.duty, le, chosen.customerId), "GET", source, {});
       if (!r.ok) {
-        const status = r.status === 401 ? 502 : r.status;
-        res.writeHead(status, { "content-type": "application/problem+json", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+        // As in forward: a rejected service token is the portal's fault, never the user's, and says nothing of the read.
+        log({ msg: "pdf read refused", audience: read.audience, status: r.status });
+        if (r.status === 401) return problem(res, 502, "CUS-BFF-502", "the service refused this portal");
+        const type = r.headers.get("content-type") ?? "";
+        res.writeHead(r.status, { "content-type": type.includes("json") ? type : "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" });
         res.end(await r.text());
         return;
       }

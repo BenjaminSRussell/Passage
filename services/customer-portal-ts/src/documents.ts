@@ -46,11 +46,25 @@ export const MAX_LINES = 500;
 
 const TITLES: Record<string, string> = { INVOICE: "Invoice", CREDIT_NOTE: "Credit note", DEBIT_NOTE: "Debit note" };
 
-const cut = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+/**
+ * Print refuses any control character (a line break only in a table cell) and the Unicode line separators, so a tab or a
+ * carriage return in an invoice line would fail the whole document: each becomes a space.
+ */
+const CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029]/g;
+const clean = (text: string, multiline = false): string => {
+  const plain = text.replace(/\r\n?/g, "\n").replace(CONTROL, " ");
+  return multiline ? plain : plain.replace(/\n/g, " ");
+};
+
+const cut = (text: string, max: number, multiline = false): string => {
+  const plain = clean(text, multiline);
+  return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
+};
 
 /** The seller printed in the letterhead: the legal entity's customer-facing name, or a plain word when identity had none. */
 export function sellerName(name: string | null): string {
-  return name && name.trim() !== "" ? cut(name.trim(), 200) : "Your supplier";
+  const shown = name ? clean(name).trim() : "";
+  return shown !== "" ? cut(shown, 200) : "Your supplier";
 }
 
 export function invoiceDocument(invoice: PortalInvoice, seller: string | null): DocumentRequest {
@@ -60,7 +74,7 @@ export function invoiceDocument(invoice: PortalInvoice, seller: string | null): 
     { label: "Due date", value: invoice.dueDate },
     { label: "Payment terms", value: `${invoice.paymentTermDays} days` },
     { label: "Currency", value: invoice.currency },
-    ...(invoice.originalNumber ? [{ label: "Credits invoice", value: invoice.originalNumber }] : []),
+    ...(invoice.originalNumber ? [{ label: "Credits invoice", value: cut(invoice.originalNumber, 200) }] : []),
   ];
   const totals = [
     { label: "Net", value: invoice.totals.net },
@@ -75,7 +89,7 @@ export function invoiceDocument(invoice: PortalInvoice, seller: string | null): 
     title: TITLES[invoice.type] ?? "Invoice",
     fields,
     columns: [{ header: "Line", align: "R" }, { header: "Description" }, { header: "Quantity", align: "R" }, { header: "Unit price", align: "R" }, { header: "Discount %", align: "R" }, { header: "Net", align: "R" }, { header: "Tax", align: "R" }],
-    lines: lines.map((l) => [String(l.lineNo), cut(l.description, 500), l.qty, l.unitPrice, l.discountPct, l.net, l.tax]),
+    lines: lines.map((l) => [String(l.lineNo), cut(l.description, 500, true), l.qty, l.unitPrice, l.discountPct, l.net, l.tax]),
     totals,
     ...((invoice.lines ?? []).length > MAX_LINES ? { notes: `The first ${MAX_LINES} of ${(invoice.lines ?? []).length} lines are shown.` } : {}),
   };

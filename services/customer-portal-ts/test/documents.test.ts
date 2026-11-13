@@ -46,6 +46,15 @@ describe("document requests", () => {
     expect(statementDocument({ asOf: "2026-11-10", sections: [] }, null).body).toContain("Nothing is open");
   });
 
+  it("turns the control characters print refuses into spaces, keeping a line break only in a table cell", () => {
+    const d = invoiceDocument({ ...invoice, number: "INV\t7", lines: [{ ...invoice.lines![0]!, description: "Seal kit\r\nsize\tM\u2028" }] }, "Cedar\u0007 Ridge\nPumps");
+    expect(d.number).toBe("INV 7");
+    expect(d.lines[0]![1]).toBe("Seal kit\nsize M ");
+    expect(d.legalEntity.name).toBe("Cedar  Ridge Pumps");
+    const s = statementDocument({ asOf: "2026-11-10", sections: [{ ...statement.sections[0]!, lines: [{ ...statement.sections[0]!.lines[0]!, documentNumber: "INV\n42" }] }] }, null);
+    expect(s.lines[0]![1]).toBe("INV 42");
+  });
+
   it("stays inside print's line limit and says so", () => {
     const line = statement.sections[0]!.lines[0]!;
     const long = statementDocument({ asOf: "2026-11-10", sections: [{ currency: "USD", closingBalance: "0", lines: Array.from({ length: MAX_LINES + 5 }, () => line) }] }, null);
@@ -107,6 +116,16 @@ describe("PDF downloads", () => {
     const res = await api(rig, s, "GET", `/api/v1/invoices/${ID_1}/pdf`);
     expect(res.status).toBe(404);
     expect(((await res.json()) as { code: string }).code).toBe("BIL-0404");
+    expect(rig.calls.some((c) => c.url.startsWith("http://print.test"))).toBe(false);
+  });
+
+  it("answers 502, not a sign-in, when the service refuses the portal's own token", async () => {
+    rig = await startRig();
+    rig.on("http://billing.test", () => Response.json({ code: "AUTH-0001", status: 401, detail: "service token rejected" }, { status: 401 }));
+    const s = await signIn(rig);
+    const res = await api(rig, s, "GET", `/api/v1/invoices/${ID_1}/pdf`);
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { code: string }).code).toBe("CUS-BFF-502");
     expect(rig.calls.some((c) => c.url.startsWith("http://print.test"))).toBe(false);
   });
 
