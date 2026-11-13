@@ -3262,3 +3262,12 @@ test_payables_withholding_reporter_holds_only_the_record_duty if {
 	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
 	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/remittance-runs")
 }
+
+test_payment_prediction_settings_and_accuracy_are_agent_admin_routes if {
+	allowed("agents.admin", "GET", "/api/v1/predictions/payment/settings")
+	allowed("agents.admin", "PUT", "/api/v1/predictions/payment/settings")
+	allowed("agents.admin", "GET", "/api/v1/predictions/payment/accuracy")
+	not allowed("collections.view", "PUT", "/api/v1/predictions/payment/settings")
+	not allowed("collections.view", "GET", "/api/v1/predictions/payment/accuracy")
+	not allowed("agents.admin", "DELETE", "/api/v1/predictions/payment/settings")
+}

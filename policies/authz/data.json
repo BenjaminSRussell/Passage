@@ -1123,8 +1123,10 @@
       {"resource": "/api/v1/agents/*/versions/*/promote", "methods": ["PUT"]},
       {"resource": "/api/v1/agents/budgets/*", "methods": ["GET"]},
       {"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]},
+      {"resource": "/api/v1/predictions/payment/accuracy", "methods": ["GET"]},
       {"resource": "/api/v1/predictions/payment/retrain", "methods": ["POST"]},
-      {"resource": "/api/v1/predictions/payment/score", "methods": ["POST"]}
+      {"resource": "/api/v1/predictions/payment/score", "methods": ["POST"]},
+      {"resource": "/api/v1/predictions/payment/settings", "methods": ["GET", "PUT"]}
     ]},
     "collections.view": {"permissions": [{"resource": "/api/v1/ar/invoices/*/prediction", "methods": ["GET"]}]},
     "analytics.author": {"permissions": [
