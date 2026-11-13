@@ -20,10 +20,19 @@ CREATE POLICY inventory_opening_reference_legal_entity_scope ON inventory_openin
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
+-- The batches recorded before this table existed hold their references through their posted journals' lines.
+INSERT INTO inventory_opening_reference (tenant_id, legal_entity_id, reference, batch_key)
+SELECT b.tenant_id, b.legal_entity_id, l.client_key, b.batch_key
+FROM inventory_opening_batch b
+JOIN inventory_journal_line l ON l.tenant_id = b.tenant_id AND l.journal_id = b.journal_id
+WHERE l.client_key IS NOT NULL
+ON CONFLICT (tenant_id, legal_entity_id, reference) DO NOTHING;
+
+-- DELETE: a batch that stopped before its journal was posted releases its references.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
-    EXECUTE 'GRANT SELECT, INSERT ON inventory_opening_reference TO passage_app';
+    EXECUTE 'GRANT SELECT, INSERT, DELETE ON inventory_opening_reference TO passage_app';
   END IF;
 END
 $$;

@@ -16,6 +16,17 @@ import (
 // CodeOpeningKeyConflict is a batch key sent again with other content.
 const CodeOpeningKeyConflict = "INV-OPB-002"
 
+// ReleaseOpeningReferences drops the references a batch reserved, when the import stopped before its journal was posted (#49). A
+// batch that was recorded keeps them: those references opened stock.
+func (s *Postgres) ReleaseOpeningReferences(ctx context.Context, legalEntityID, batchKey string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `delete from inventory_opening_reference r where r.tenant_id = $1 and r.legal_entity_id = $2 and r.batch_key = $3
+			and not exists (select 1 from inventory_opening_batch b where b.tenant_id = r.tenant_id and b.batch_key = r.batch_key)`, p.TenantID, legalEntityID, batchKey)
+		return err
+	})
+}
+
 // errReferencesHeld rolls back a reservation that found references of another batch.
 var errReferencesHeld = errors.New("opening references held by another batch")
 

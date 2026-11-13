@@ -132,6 +132,10 @@ func TestOpeningBatchRefusesAForeignJournalUnderItsKey(t *testing.T) {
 	if rec := do(t, h, http.MethodGet, "/v1/inventory/onhand?product="+p2, "", []string{"inventory.read"}, nil); strings.Contains(rec.Body.String(), "500") {
 		t.Fatalf("the foreign journal was posted: %s", rec.Body)
 	}
+	// The refused call released what it reserved: another batch holding L1 goes through (#49).
+	if rec := do(t, h, http.MethodPost, "/v1/inventory/opening-batches", openingBody("b11", openingItem("L1", p2, "10", "1")), []string{"inventory.import.write"}, nil); rec.Code != http.StatusCreated {
+		t.Fatalf("L1 stayed reserved by the refused batch: %d %s", rec.Code, rec.Body)
+	}
 	// The prefix is reserved: nobody can create a journal under it through the journal API.
 	create := `{"legalEntityId":"` + glEntity + `","journalType":"OPENING_BALANCE","postingDate":"2026-12-31","currency":"USD"}`
 	if rec := do(t, h, http.MethodPost, "/v1/inventory/journals", create, []string{"inventory.journal.write"}, map[string]string{"Idempotency-Key": "opening-batch:b10"}); rec.Code != http.StatusBadRequest {

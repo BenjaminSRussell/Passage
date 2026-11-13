@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -44,6 +45,7 @@ type OpeningBatches interface {
 	FindOpeningBatch(ctx context.Context, key string) (store.OpeningBatch, bool, error)
 	RecordOpeningBatch(ctx context.Context, b store.OpeningBatch) error
 	ReserveOpeningReferences(ctx context.Context, legalEntityID, batchKey string, refs []string) (map[string]string, error)
+	ReleaseOpeningReferences(ctx context.Context, legalEntityID, batchKey string) error
 	ListOpeningBatches(ctx context.Context, legalEntityID, afterKey string, limit int) ([]store.OpeningBatch, error)
 }
 
@@ -249,12 +251,14 @@ func (a *API) importOpeningBatch(w http.ResponseWriter, r *http.Request) {
 	j, inserted, err := a.store.CreateJournal(ctx, domain.Journal{LegalEntityID: req.LegalEntityID, Type: domain.JournalOpeningBalance, PostingDate: date, Currency: req.Currency},
 		openingKeyPrefix+req.BatchKey)
 	if err != nil {
+		a.releaseOpening(ctx, req.LegalEntityID, req.BatchKey)
 		a.failed(w, r, "create opening journal", err)
 		return
 	}
 	// A journal that was there before must hold exactly the lines of this request (or none yet): whatever else sits under the key
 	// is not this batch and is never posted or recorded as it.
 	if !inserted && !sameOpeningLines(j.Lines, lines) {
+		a.releaseOpening(ctx, req.LegalEntityID, req.BatchKey)
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeOpeningKeyConflict, "the batch key was already used with other content"))
 		return
 	}
@@ -264,13 +268,13 @@ func (a *API) importOpeningBatch(w http.ResponseWriter, r *http.Request) {
 			j, err = a.store.TransitionJournal(ctx, j.ID, j.Version, domain.JournalSubmitted)
 		}
 		if err != nil {
-			a.openingLost(w, r, req.BatchKey, hash, err)
+			a.openingNotPosted(w, r, req.LegalEntityID, req.BatchKey, hash, err)
 			return
 		}
 	}
 	if j.Status == domain.JournalSubmitted {
 		if j, err = a.store.TransitionJournal(ctx, j.ID, j.Version, domain.JournalApproved); err != nil {
-			a.openingLost(w, r, req.BatchKey, hash, err)
+			a.openingNotPosted(w, r, req.LegalEntityID, req.BatchKey, hash, err)
 			return
 		}
 	}
@@ -321,6 +325,29 @@ func sameOpeningLines(held, want []domain.JournalLine) bool {
 
 // openingLost answers a step that failed: when a concurrent call with the same content has recorded the batch meanwhile, this call
 // is a replay of it; otherwise the failure stands.
+// openingNotPosted answers a failure before the batch's journal was posted: unless a concurrent call recorded the batch, the
+// references the call reserved are released, so a corrected batch under another key is not refused for rows that never posted
+// (a resend under the same key reserves them again before it goes on).
+func (a *API) openingNotPosted(w http.ResponseWriter, r *http.Request, legalEntityID, key, hash string, cause error) {
+	if held, ok, err := a.opening.FindOpeningBatch(r.Context(), key); err == nil && ok && held.ContentHash == hash {
+		w.Header().Set("Idempotent-Replayed", "true")
+		httpx.JSON(w, http.StatusOK, openingResponse(held))
+		return
+	}
+	a.releaseOpening(r.Context(), legalEntityID, key)
+	a.failed(w, r, "import opening batch", cause)
+}
+
+// releaseOpening releases the references a batch reserved when it stopped before its journal was posted. It is best effort: a
+// failure is logged, and the reservation then stays until the same key is resent and finishes.
+func (a *API) releaseOpening(ctx context.Context, legalEntityID, key string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := a.opening.ReleaseOpeningReferences(ctx, legalEntityID, key); err != nil {
+		slog.Warn("release opening references failed", "batchKey", key, "err", err)
+	}
+}
+
 func (a *API) openingLost(w http.ResponseWriter, r *http.Request, key, hash string, cause error) {
 	if held, ok, err := a.opening.FindOpeningBatch(r.Context(), key); err == nil && ok && held.ContentHash == hash {
 		w.Header().Set("Idempotent-Replayed", "true")
