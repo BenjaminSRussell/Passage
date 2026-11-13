@@ -23,9 +23,11 @@ CREATE TABLE IF NOT EXISTS kill_switch_change (
 CREATE INDEX IF NOT EXISTS kill_switch_change_scope ON kill_switch_change (scope, target_tenant_id, version DESC);
 ALTER TABLE kill_switch_change ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kill_switch_change FORCE ROW LEVEL SECURITY;
-CREATE POLICY kill_switch_change_read ON kill_switch_change AS PERMISSIVE FOR SELECT USING (true);
-CREATE POLICY kill_switch_change_write ON kill_switch_change AS PERMISSIVE FOR INSERT
+CREATE POLICY kill_switch_change_tenant_access ON kill_switch_change AS PERMISSIVE
+  USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+-- Every pod reads every toggle (allowlisted in tools/rlscheck): writes stay bound by the tenant policy above.
+CREATE POLICY kill_switch_change_fleet_read ON kill_switch_change AS PERMISSIVE FOR SELECT USING (true);
 
 -- Toggles are append-only: no UPDATE or DELETE grant.
 DO $$
