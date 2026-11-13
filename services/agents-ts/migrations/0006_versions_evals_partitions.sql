@@ -70,10 +70,13 @@ BEGIN
 END
 $guard$;
 
+-- run_month defaults to the current UTC month only for pods of the previous release, which insert actions without
+-- it while a rollout replaces them; the foreign key refuses a default that is not the run's month. This release
+-- always sets it (store/pg.ts finishRun).
 CREATE TABLE agent_action_p (
   tenant_id uuid NOT NULL,
   run_id text NOT NULL,
-  run_month date NOT NULL,
+  run_month date NOT NULL DEFAULT ((date_trunc('month', now() AT TIME ZONE 'UTC'))::date),
   seq integer NOT NULL CHECK (seq >= 1),
   tool_name text NOT NULL,
   input_json text NOT NULL,

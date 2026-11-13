@@ -219,6 +219,19 @@ describe.runIf(ownerUrl)("agent_version, eval_run and the partitioned agent_acti
     for (const row of config.rows) expect(row.proconfig).toEqual([expect.stringMatching(/^search_path=agents_[0-9a-f]{12}, pg_temp$/)]);
   });
 
+  it("an insert without run_month, as a pod of the previous release makes, lands in the run's month when the run is this month's", async () => {
+    const req = makeRequest({ runId: `legacy-${randomUUID()}` });
+    await fx.store.startRun(req);
+    await fx.store.withTenant(TENANT, (c) =>
+      c.query(
+        "insert into agent_action (tenant_id, run_id, seq, tool_name, input_json, output_hash, output_json, output_truncated, decision, decided_at) values ($1, $2, 1, 't', '{}', $3, '{}', false, 'DENIED', now())",
+        [TENANT, req.runId, "0".repeat(64)],
+      ),
+    );
+    const month = new Date().toISOString().slice(0, 7);
+    expect(await partitionsOf(req.runId)).toEqual([{ part: `agent_action_${month.replace("-", "")}`, run_month: `${month}-01` }]);
+  });
+
   it("keeps (tenant, run, seq) unique and pins run_month to the run's own month", async () => {
     const req = makeRequest({ runId: `uniq-${randomUUID()}` });
     await fx.store.startRun(req);
