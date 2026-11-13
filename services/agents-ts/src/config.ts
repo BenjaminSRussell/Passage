@@ -32,8 +32,6 @@ export interface Config {
   approvalExpiryHours: number | undefined;
   /** How often each pod polls the shared kill switch (AC-47.6); below the 10 s fail-closed window. */
   killSwitchPollMs: number;
-  /** `agent@version` pairs whose evaluation passed (the eval pipeline sets this; FR-47.10). */
-  evalPassed: ReadonlySet<string>;
   /** Provider credentials and endpoints, read from the environment only. */
   anthropic: { apiKey: string; baseUrl: string | undefined };
   openai: { apiKey: string; baseUrl: string; auth: "bearer" | "api-key"; apiVersion: string | undefined };
@@ -70,6 +68,23 @@ function phiFile(path: string | undefined): string | undefined {
   return path === undefined || path === "" ? undefined : readFileSync(path, "utf8");
 }
 
+/**
+ * The model settings that pin each agent definition (FR-47.10): the default model and the per-agent overrides. The
+ * service and the eval recorder (cli/record-eval.ts) read the same ones, so both compute the same prompt hashes.
+ */
+export function loadModelSettings(env: NodeJS.ProcessEnv): { model: string; agentModels: Record<string, string> } {
+  let agentModels: Record<string, string> = {};
+  const rawModels = env["AGENTS_MODEL_OVERRIDES"];
+  if (rawModels !== undefined && rawModels !== "") {
+    const parsed: unknown = JSON.parse(rawModels);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || Object.values(parsed).some((v) => typeof v !== "string" || v === "")) {
+      throw new Error('AGENTS_MODEL_OVERRIDES must be a JSON object of agent id to model id, for example {"ap_coding":"claude-opus-5-5"}');
+    }
+    agentModels = parsed as Record<string, string>;
+  }
+  return { model: env["AGENTS_MODEL"] ?? MODEL_SONNET, agentModels };
+}
+
 /** 12-factor config. Invalid or missing required settings are an error at startup, never a silent default. */
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const mcpUrl = env["MCP_URL"] ?? "";
@@ -81,14 +96,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   if (provider !== "anthropic" && provider !== "openai" && provider !== "bedrock") {
     throw new Error("AGENTS_PROVIDER must be anthropic, openai or bedrock");
   }
-  let agentModels: Record<string, string> = {};
-  const rawModels = env["AGENTS_MODEL_OVERRIDES"];
-  if (rawModels !== undefined && rawModels !== "") {
-    const parsed: unknown = JSON.parse(rawModels);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || Object.values(parsed).some((v) => typeof v !== "string" || v === "")) {
-      throw new Error('AGENTS_MODEL_OVERRIDES must be a JSON object of agent id to model id, for example {"ap_coding":"claude-opus-5-5"}');
-    }
-    agentModels = parsed as Record<string, string>;
+  const { model, agentModels } = loadModelSettings(env);
+  if ((env["AGENTS_EVAL_PASSED"] ?? "") !== "") {
+    throw new Error("AGENTS_EVAL_PASSED is no longer read: record the eval pipeline's report with dist/cli/record-eval.js (eval_run)");
   }
   const limit = env["AGENTS_SELF_APPROVAL_LIMIT"] ?? "0";
   if (!/^[0-9]+(\.[0-9]{1,6})?$/.test(limit)) throw new Error("AGENTS_SELF_APPROVAL_LIMIT must be a decimal amount");
@@ -99,7 +109,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   if (approvalExpiryHours !== undefined && approvalExpiryHours > 240) throw new Error("AGENTS_APPROVAL_EXPIRY_H must be 1 to 240");
   const killSwitchPollMs = positiveInt(env, "AGENTS_KILLSWITCH_POLL_MS", 1000);
   if (killSwitchPollMs < 100 || killSwitchPollMs > 5000) throw new Error("AGENTS_KILLSWITCH_POLL_MS must be 100 to 5000: a pod fails closed after 10 s without a poll");
-  const model = env["AGENTS_MODEL"] ?? MODEL_SONNET;
   const issuer = env["AGENTS_JWT_ISSUER"] ?? "";
   if (!/^https?:\/\//.test(issuer)) throw new Error("AGENTS_JWT_ISSUER must be the issuer (realm URL) of the callers' bearer tokens");
   const jwksUrl = env["AGENTS_JWKS_URL"] || undefined;
@@ -123,7 +132,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     selfApprovalLimit: { amount: limit, currency },
     approvalExpiryHours,
     killSwitchPollMs,
-    evalPassed: new Set((env["AGENTS_EVAL_PASSED"] ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "")),
     anthropic: { apiKey: env["ANTHROPIC_API_KEY"] ?? "", baseUrl: env["ANTHROPIC_BASE_URL"] },
     openai: {
       apiKey: env["OPENAI_API_KEY"] ?? "",

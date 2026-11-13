@@ -35,8 +35,9 @@ copilot: { tokenCap: 8000, maxTurns: 4 }
 approvalExpiryHours: ""
 # Above this amount an approver who started the run may not approve it (wave-48 SoD limit).
 selfApprovalLimit: { amount: "0", currency: USD }
-# agent@version pairs whose evaluation passed (set by the eval pipeline, FR-47.10); an agent not listed answers AGT-0204.
-evalPassed: ""
+# An agent runs only when the newest eval_run of its exact definition passed (AGT-0204 otherwise). The eval pipeline
+# records its report with `node dist/cli/record-eval.js report.json`, using this release's image, DATABASE_URL and model
+# settings (FR-47.10).
 resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { cpu: 500m, memory: 512Mi }

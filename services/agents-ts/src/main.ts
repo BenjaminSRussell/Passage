@@ -18,11 +18,12 @@ import { PgApprovalStore } from "./store/approvals.js";
 import { PgKillSwitchLog } from "./store/killswitch.js";
 import { KillSwitchPoller } from "./runtime/killswitch-poller.js";
 import { openAgentStore } from "./store/pg.js";
+import { PgVersionStore } from "./store/registry.js";
 
 export { loadConfig };
 
 /** The version-1 catalog with each agent's model pinned: the override for its id, else the default model (FR-47.10). */
-export function agentCatalog(cfg: Config) {
+export function agentCatalog(cfg: Pick<Config, "model" | "agentModels">) {
   return defaultCatalog(cfg.model).map((a) => ({ ...a, modelId: cfg.agentModels[a.agentId] ?? a.modelId }));
 }
 
@@ -41,9 +42,21 @@ async function main(): Promise<void> {
   const mcp = createMcpConnector({ baseUrl: cfg.mcpUrl });
   const providerFor = createProviderFactory(cfg);
   const agents = agentCatalog(cfg);
+  // Every definition this pod runs is in agent_version; a run starts only when its newest eval_run passed (AGT-0204).
+  const versions = new PgVersionStore(pool);
+  await versions.register(agents);
+  // agent_action is partitioned by month (migration 0006): keep this month and the next two in place, checked daily.
+  const ensurePartitions = (): Promise<void> =>
+    store.ensureActionPartitions(2).then(
+      (made) => (made > 0 ? log("info", "agent_action partitions created", { made }) : undefined),
+      (err: unknown) => log("warn", "agent_action partitions not created", { error: String(err) }),
+    );
+  await ensurePartitions();
+  const partitionTimer = setInterval(() => void ensurePartitions(), 24 * 3_600_000);
+  partitionTimer.unref();
   const runs = createRunService({
     agents,
-    evalPassed: (id, v) => cfg.evalPassed.has(`${id}@${v}`),
+    evalPassed: (agent) => versions.evalPassed(agent),
     providerFor,
     mcp,
     store,
@@ -97,6 +110,7 @@ async function main(): Promise<void> {
   log("info", "agents listening", { provider: cfg.provider, model: cfg.model, agents: AGENT_IDS.length });
   process.once("SIGTERM", () => {
     killPoller.stop();
+    clearInterval(partitionTimer);
     admin.close();
     server.close(() => void pool.end().finally(() => process.exit(0)));
   });

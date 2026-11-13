@@ -40,8 +40,8 @@ export interface RunServiceConfig {
 
 export interface RunServiceDeps {
   agents: readonly AgentVersion[];
-  /** True when the version has a passing evaluation on its current dataset (FR-47.10). */
-  evalPassed: (agentId: string, version: number) => boolean;
+  /** True when this exact definition's newest eval run passed (FR-47.10; production: PgVersionStore.evalPassed). */
+  evalPassed: (agent: AgentVersion) => boolean | Promise<boolean>;
   /** The provider for a model id; each agent version pins its model (FR-47.10). */
   providerFor: (modelId: string) => ModelProvider;
   mcp: McpConnector;
@@ -98,7 +98,7 @@ export function createRunService(deps: RunServiceDeps) {
       requireDuty(caller, AGENT_INVOKE_DUTY, `agent ${agentId}`);
       for (const duty of agent.requiredDuties) requireDuty(caller, duty, `agent ${agentId}`);
       if (deps.killSwitch.isHalted(caller.tenantId)) throw new AgentError("AGT-0201", "agent runs are halted by the kill switch");
-      if (!deps.evalPassed(agent.agentId, agent.version)) {
+      if (!(await deps.evalPassed(agent))) {
         throw new AgentError("AGT-0204", `agent ${agent.agentId} v${agent.version} has no passing evaluation`);
       }
       assertCanStartRun(await deps.store.budgetSnapshot(caller.tenantId, now().toISOString().slice(0, 7)));
