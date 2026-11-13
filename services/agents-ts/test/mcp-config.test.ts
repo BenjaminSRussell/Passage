@@ -83,6 +83,9 @@ describe("config", () => {
     [{ MCP_URL: base.MCP_URL, AGENTS_JWKS_URL: base.AGENTS_JWKS_URL }, /AGENTS_JWT_ISSUER/],
     [{ MCP_URL: base.MCP_URL, AGENTS_JWT_ISSUER: base.AGENTS_JWT_ISSUER }, /AGENTS_JWKS_URL or AGENTS_JWKS_FILE/],
     [{ ...base, AGENTS_JWKS_URL: "file:///etc/keys" }, /AGENTS_JWKS_URL/],
+    [{ ...base, AGENTS_KILLSWITCH_POLL_MS: "20000" }, /100 to 5000/],
+    // Evals are persisted rows now (eval_run); the old list would be a silent second source of truth.
+    [{ ...base, AGENTS_EVAL_PASSED: "ap_coding@1" }, /record-eval/],
   ])("refuses invalid settings %#", (env, message) => {
     expect(() => loadConfig(env)).toThrow(message);
   });

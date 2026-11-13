@@ -331,11 +331,30 @@ jobs:
       fail-fast: false
       matrix:
         package: [services/agents-ts, services/mcp-ts, evals]
+    # The agents-ts Postgres tests (approvals, budgets, kill switch, registry and partitions) run against it.
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      PASSAGE_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      PASSAGE_TEST_APP_DATABASE_URL: postgres://passage_app:passage_app@localhost:5432/postgres?sslmode=disable
     defaults:
       run:
         working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$GITHUB_WORKSPACE/.github/postgres-test-setup.sql"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: '24'
@@ -394,11 +413,30 @@ jobs:
           - package: prediction-py
             ortools: false
             extras: dev
+    # prediction-py's repository tests run against it (tests/test_store.py); the other packages ignore it.
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      PASSAGE_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      PASSAGE_TEST_APP_DATABASE_URL: postgres://passage_app:passage_app@localhost:5432/postgres?sslmode=disable
     defaults:
       run:
         working-directory: services/${{ matrix.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$GITHUB_WORKSPACE/.github/postgres-test-setup.sql"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: '3.12'

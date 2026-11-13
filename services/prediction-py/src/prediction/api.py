@@ -18,8 +18,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from prediction.domain import Config, Model, OpenInvoice, PaidInvoice, Prediction, PredictionError
-from prediction.service import InMemoryRepository, PredictionService
+from prediction.domain import MAE_MAX_DAYS_RANGE, MIN_ROWS_RANGE, Config, Model, OpenInvoice, PaidInvoice, Prediction, PredictionError
+from prediction.service import InMemoryRepository, PredictionService, Repository
 
 NIL = uuid.UUID(int=0)
 DUTY_ADMIN = "agents.admin"  # retrain and score (seeded in policies/authz/data.json)
@@ -36,7 +36,19 @@ def _config_from_env() -> Config:
     )
 
 
-service = PredictionService(InMemoryRepository(), _config_from_env())
+def _repository() -> Repository:
+    """Postgres when DATABASE_URL is set (the chart always sets it); in memory otherwise (tests, local runs)."""
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        return InMemoryRepository()
+    from prediction.store import PgRepository, migrate
+
+    if os.environ.get("MIGRATE_ON_START") == "true":
+        migrate(url)
+    return PgRepository(url)
+
+
+service = PredictionService(_repository(), _config_from_env())
 app = FastAPI(title="Passage payment prediction", version="0.1.0")
 
 
@@ -120,6 +132,12 @@ class RetrainRequest(BaseModel):
     paidInvoices: list[PaidIn] = Field(max_length=MAX_PAID)
 
 
+class SettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    minRows: int | None = Field(default=None, ge=MIN_ROWS_RANGE[0], le=MIN_ROWS_RANGE[1])
+    maeMaxDays: float | None = Field(default=None, ge=MAE_MAX_DAYS_RANGE[0], le=MAE_MAX_DAYS_RANGE[1], allow_inf_nan=False)
+
+
 class ScoreRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     openInvoices: list[InvoiceIn] = Field(min_length=1, max_length=MAX_OPEN)
@@ -162,8 +180,14 @@ def healthz() -> dict[str, str]:
 
 
 @app.get("/readyz")
-def readyz() -> dict[str, str]:
-    return {"status": "ready"}
+def readyz() -> JSONResponse:
+    ping = getattr(service.repo, "ping", None)
+    if ping is not None:
+        try:
+            ping()
+        except Exception:  # noqa: BLE001 - any database failure means not ready
+            return JSONResponse({"status": "database unavailable"}, status_code=503)
+    return JSONResponse({"status": "ready"})
 
 
 @app.post("/api/v1/predictions/payment/retrain")
@@ -198,3 +222,31 @@ def get_prediction(invoice_id: str, who: Annotated[Caller, Depends(caller)]) -> 
     prediction, stale = found
     return JSONResponse(_prediction_json(prediction, stale))
 
+
+
+def _settings_json(tenant_id: str) -> dict[str, object]:
+    cfg = service.config_for(tenant_id)
+    return {"minRows": cfg.min_rows, "maeMaxDays": cfg.mae_max_days, "tenantOverride": service.repo.settings(tenant_id) is not None}
+
+
+@app.get("/api/v1/predictions/payment/settings")
+def get_settings(who: Annotated[Caller, Depends(caller)]) -> JSONResponse:
+    """The tenant's prediction.payment.min_rows and mae_max_days (9.47.20), or the service defaults."""
+    who.require(DUTY_ADMIN)
+    return JSONResponse(_settings_json(who.tenant_id))
+
+
+@app.put("/api/v1/predictions/payment/settings")
+def put_settings(body: SettingsRequest, who: Annotated[Caller, Depends(caller)]) -> JSONResponse:
+    """Sets the tenant's parameters; a field left out keeps its current value. The next retrain uses them."""
+    who.require(DUTY_ADMIN)
+    service.save_settings(who.tenant_id, who.user_id, body.minRows, body.maeMaxDays)
+    return JSONResponse(_settings_json(who.tenant_id))
+
+
+@app.get("/api/v1/predictions/payment/accuracy")
+def get_accuracy(who: Annotated[Caller, Depends(caller)]) -> JSONResponse:
+    """The prediction accuracy report: predictions whose invoices have since been paid, MAE, share within 7 days
+    and p_late_30d calibration, overall and per model version."""
+    who.require(DUTY_ADMIN)
+    return JSONResponse(service.accuracy(who.tenant_id))

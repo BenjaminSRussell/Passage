@@ -1,5 +1,14 @@
 image: { repository: ghcr.io/benjaminsrussell/prediction, digest: "", tag: "", pullPolicy: IfNotPresent }
+# Models, predictions, per-tenant settings and the outbox live in Postgres, so every replica serves the same state.
 replicaCount: 2
+# Secret with the key DATABASE_URL (database passage_prediction, role passage_app).
+databaseSecret: prediction-db
+# Run the migrations at start, as the owner role. Off by default: migrations run from the pipeline.
+migrateOnStart: false
+# Service-wide defaults of prediction.payment.min_rows (100 to 10000) and mae_max_days (1 to 30); a tenant's own
+# settings (PUT /api/v1/predictions/payment/settings) take precedence.
+minRows: 500
+maeMaxDays: 6
 resources:
   requests: { cpu: 250m, memory: 256Mi }
   limits: { cpu: "1", memory: 1Gi }

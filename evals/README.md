@@ -45,7 +45,7 @@ match hand-computed values.
 
 - FR-47.9 eval harness and thresholds (`gate.ts`)
 - AC-47.3 (AP coding top-1 >= 0.92) and AC-47.4 (cash application precision >= 0.90): the gate and harness are built; the full datasets are not
-- BR-47.8 dataset versioning: each dataset's version is the hash of its content (`datasetVersion`), printed with every result; the re-baseline queue and promotion gate are in `rebaseline.ts`, reading persisted `eval_run` rows is not built (no store yet)
+- BR-47.8 dataset versioning: each dataset's version is the hash of its content (`datasetVersion`), printed with every result; the re-baseline queue and promotion gate are in `rebaseline.ts`. The runtime stores this CLI's report in `eval_run` with `services/agents-ts` `dist/cli/record-eval.js`, and runs an agent definition only when its newest eval run passed
 - FR-47.9 refusal correctness >= 0.99 on the adversarial set: metric, harness and seed set. The CLI does not run it yet, because the copilot that answers the prompts is not built
 
 ## Dependencies

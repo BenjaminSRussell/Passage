@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentError } from "../src/errors.js";
-import { runAgent, RUN_TIMEOUT_MS, type AuditPort, type BudgetRequest, type RunDeps } from "../src/runtime/engine.js";
+import { runAgent, RUN_TIMEOUT_MS, type AuditPort, type BudgetRequest, type ModelProvider, type RunDeps } from "../src/runtime/engine.js";
 import { openAgentStore, PgAgentStore } from "../src/store/pg.js";
 import { proposeTool, providerRejected, providerUnavailable } from "../src/providers/wire.js";
 import { APPROVER, FakeApprovals, FakeTools, makeDeps, makeRequest, postDescriptor, proposal, ScriptedProvider, testAudit, testBudgets } from "./fakes.js";
@@ -441,14 +441,38 @@ describe.runIf(ownerUrl)("persisted audit and token budget in Postgres", () => {
     const cap = 1_000;
     const limit = 10 * cap;
     await store.setBudget(t, "2026-10", { limitIn: limit, limitOut: limit, softPct: 80 });
-    const runAll = (tokensIn: number, tenantId: string, label: string) =>
-      Promise.allSettled(
+    // Every model call waits until 10 runs hold the budget and the other 10 were refused, so a run that
+    // settles early can never free room for a run that had not reserved yet (the test is about the race
+    // between reservations, not about scheduling).
+    const runAll = (tokensIn: number, tenantId: string, label: string) => {
+      let arrived = 0;
+      let refused = 0;
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => (open = resolve));
+      const check = (): void => {
+        if (arrived === 10 && refused === 10) open();
+      };
+      return Promise.allSettled(
         Array.from({ length: 20 }, (_, i) => {
           const response = { ...proposal(0.8), usage: { tokensIn, tokensOut: 30 } };
-          const run = committingRun({ budgets: store, audit: store, provider: new ScriptedProvider([response]) });
-          return runAgent(run.deps, makeRequest({ runId: `${label}${i}`, tenantId, runTokenCap: cap }));
+          const scripted = new ScriptedProvider([response]);
+          const provider: ModelProvider = {
+            complete: async (req) => {
+              arrived += 1;
+              check();
+              await gate;
+              return scripted.complete(req);
+            },
+          };
+          const run = committingRun({ budgets: store, audit: store, provider });
+          return runAgent(run.deps, makeRequest({ runId: `${label}${i}`, tenantId, runTokenCap: cap })).catch((err: unknown) => {
+            refused += 1;
+            check();
+            throw err;
+          });
         }),
       );
+    };
 
     const honest = await runAll(60, t, "ok");
     expect(honest.filter((o) => o.status === "fulfilled")).toHaveLength(10);

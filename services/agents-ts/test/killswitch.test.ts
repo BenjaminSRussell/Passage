@@ -64,6 +64,15 @@ describe("KillSwitchRegistry (AC-47.6, BR-47.5)", () => {
     expect(reg.isHalted(T1)).toBe(false);
   });
 
+  it("a registry that starts unsynced is closed until its first successful read", () => {
+    const c = clock(1_000_000);
+    const reg = new KillSwitchRegistry(c.now, KILL_PROPAGATION_MS, { startSynced: false });
+    expect(reg.isStale()).toBe(true);
+    expect(reg.isHalted(T1)).toBe(true);
+    reg.heartbeat();
+    expect(reg.isHalted(T1)).toBe(false);
+  });
+
   it("a kill applied on one worker halts every tenant it covers within the window (AC-47.6)", () => {
     const c = clock();
     const worker = new KillSwitchRegistry(c.now);

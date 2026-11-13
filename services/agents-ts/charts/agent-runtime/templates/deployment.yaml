@@ -91,12 +91,12 @@ spec:
             - name: AGENTS_APPROVAL_EXPIRY_H
               value: {{ .Values.approvalExpiryHours | quote }}
             {{- end }}
+            - name: AGENTS_KILLSWITCH_POLL_MS
+              value: {{ .Values.killSwitchPollMs | quote }}
             - name: AGENTS_SELF_APPROVAL_LIMIT
               value: {{ .Values.selfApprovalLimit.amount | quote }}
             - name: AGENTS_SELF_APPROVAL_CURRENCY
               value: {{ .Values.selfApprovalLimit.currency | quote }}
-            - name: AGENTS_EVAL_PASSED
-              value: {{ .Values.evalPassed | quote }}
             - name: AGENTS_JWT_ISSUER
               value: {{ .Values.auth.issuer | quote }}
             - name: AGENTS_JWT_AUDIENCE

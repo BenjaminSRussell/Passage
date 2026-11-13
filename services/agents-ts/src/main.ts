@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
@@ -7,7 +6,7 @@ import { createAuthenticator } from "./api/auth.js";
 import type { AgentsApiDeps } from "./api/router.js";
 import { createProviderFactory, loadConfig, type Config } from "./config.js";
 import { CopilotAnswerCache } from "./domain/copilot.js";
-import { KillSwitchRegistry } from "./domain/killswitch.js";
+import { KILL_PROPAGATION_MS, KillSwitchRegistry } from "./domain/killswitch.js";
 import { createLogger } from "./logging/pseudonymize.js";
 import { createCopilotService } from "./runtime/copilot.js";
 import { createKnowledgeService } from "./runtime/knowledge.js";
@@ -16,12 +15,15 @@ import { createMcpConnector } from "./runtime/mcp.js";
 import { createRunService } from "./runtime/service.js";
 import { createAdminServer, createRequestHandler, listen, Metrics } from "./server.js";
 import { PgApprovalStore } from "./store/approvals.js";
+import { PgKillSwitchLog } from "./store/killswitch.js";
+import { KillSwitchPoller } from "./runtime/killswitch-poller.js";
 import { openAgentStore } from "./store/pg.js";
+import { PgVersionStore } from "./store/registry.js";
 
 export { loadConfig };
 
 /** The version-1 catalog with each agent's model pinned: the override for its id, else the default model (FR-47.10). */
-export function agentCatalog(cfg: Config) {
+export function agentCatalog(cfg: Pick<Config, "model" | "agentModels">) {
   return defaultCatalog(cfg.model).map((a) => ({ ...a, modelId: cfg.agentModels[a.agentId] ?? a.modelId }));
 }
 
@@ -32,19 +34,30 @@ async function main(): Promise<void> {
   const cfg = loadConfig(process.env);
   const { pool, store } = await openAgentStore(process.env);
   const inbox = new PgApprovalStore(store);
-  const registry = new KillSwitchRegistry(() => Date.now());
-  // The registry fails closed after 10 s without a heartbeat. The Kafka feed that drives heartbeats
-  // across pods is not built (NOT-IMPLEMENTED.md), so each pod heartbeats itself and a toggle
-  // reaches only the pod that took it.
-  const heartbeat = setInterval(() => registry.heartbeat(), 2000);
-  heartbeat.unref();
-  let version = Date.now();
+  // Every pod polls kill_switch_change (AC-47.6); a pod that cannot read it for 10 s fails closed, and a pod that has
+  // not read it yet is closed from the start (and not ready).
+  const registry = new KillSwitchRegistry(() => Date.now(), KILL_PROPAGATION_MS, { startSynced: false });
+  const killLog = new PgKillSwitchLog(store, pool);
+  const killPoller = new KillSwitchPoller(killLog, registry, (err) => log("warn", "kill switch poll failed", { error: String(err) }));
+  await killPoller.start(cfg.killSwitchPollMs);
   const mcp = createMcpConnector({ baseUrl: cfg.mcpUrl });
   const providerFor = createProviderFactory(cfg);
   const agents = agentCatalog(cfg);
+  // Every definition this pod runs is in agent_version; a run starts only when its newest eval_run passed (AGT-0204).
+  const versions = new PgVersionStore(pool);
+  await versions.register(agents);
+  // agent_action is partitioned by month (migration 0006): keep this month and the next two in place, checked daily.
+  const ensurePartitions = (): Promise<void> =>
+    store.ensureActionPartitions(2).then(
+      (made) => (made > 0 ? log("info", "agent_action partitions created", { made }) : undefined),
+      (err: unknown) => log("warn", "agent_action partitions not created", { error: String(err) }),
+    );
+  await ensurePartitions();
+  const partitionTimer = setInterval(() => void ensurePartitions(), 24 * 3_600_000);
+  partitionTimer.unref();
   const runs = createRunService({
     agents,
-    evalPassed: (id, v) => cfg.evalPassed.has(`${id}@${v}`),
+    evalPassed: (agent) => versions.evalPassed(agent),
     providerFor,
     mcp,
     store,
@@ -77,20 +90,9 @@ async function main(): Promise<void> {
       jwks: cfg.jwt.jwksFile !== undefined ? (JSON.parse(readFileSync(cfg.jwt.jwksFile, "utf8")) as { keys: [] }) : undefined,
     }),
     registry,
-    versions: { next: () => (version += 1) },
+    // The toggle, its version and its killswitch.changed outbox row are stored in one transaction.
+    log: killLog,
     approvals: inbox,
-    // Writes the event to the tenant's outbox for the relay; the toggle answers only after it is stored.
-    publish: async (event) => {
-      await store.withTenant(event.tenantId, (c) =>
-        c.query("insert into outbox (id, tenant_id, aggregate_type, aggregate_id, type, payload) values ($1, $2, 'kill_switch', $3, $4, $5::jsonb)", [
-          randomUUID(),
-          event.tenantId,
-          event.tenantId,
-          event.type,
-          JSON.stringify(event.data),
-        ]),
-      );
-    },
     runs,
     copilot,
     knowledge,
@@ -108,7 +110,8 @@ async function main(): Promise<void> {
   const server = await listen(createServer(handler), cfg.host, cfg.port);
   log("info", "agents listening", { provider: cfg.provider, model: cfg.model, agents: AGENT_IDS.length });
   process.once("SIGTERM", () => {
-    clearInterval(heartbeat);
+    killPoller.stop();
+    clearInterval(partitionTimer);
     admin.close();
     server.close(() => void pool.end().finally(() => process.exit(0)));
   });

@@ -3295,6 +3295,15 @@ test_payables_withholding_reporter_holds_only_the_record_duty if {
 	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/remittance-runs")
 }
 
+test_payment_prediction_settings_and_accuracy_are_agent_admin_routes if {
+	allowed("agents.admin", "GET", "/api/v1/predictions/payment/settings")
+	allowed("agents.admin", "PUT", "/api/v1/predictions/payment/settings")
+	allowed("agents.admin", "GET", "/api/v1/predictions/payment/accuracy")
+	not allowed("collections.view", "PUT", "/api/v1/predictions/payment/settings")
+	not allowed("collections.view", "GET", "/api/v1/predictions/payment/accuracy")
+	not allowed("agents.admin", "DELETE", "/api/v1/predictions/payment/settings")
+}
+
 # #35 (35-1): the warehouse confirms a shipment shipped without a packing slip with the ship-confirm duty; reading it is an inquiry.
 test_warehouse_shipment_shipped_confirmation if {
 	allowed("warehouse.shipment.confirm", "POST", "/v1/warehouse/shipments/s1:ship")

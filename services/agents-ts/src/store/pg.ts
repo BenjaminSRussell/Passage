@@ -182,11 +182,12 @@ export class PgAgentStore implements AuditPort, BudgetPort {
 
   async finishRun(req: RunRequest, result: RunResult, afterCommitError?: string): Promise<void> {
     await this.withTenant(req.tenantId, async (c) => {
-      const res = await c.query(
+      const res = await c.query<{ run_month: string }>(
         `update agent_run
             set status = $3, code = $4, reason = $5, tokens_in = $6, tokens_out = $7, estimated = $8, post_commit_error = $9,
                 model_provider = $10, model_host = $11, model_region = $12
-          where tenant_id = $1 and run_id = $2 and status = 'RUNNING'`,
+          where tenant_id = $1 and run_id = $2 and status = 'RUNNING'
+          returning run_month::text`,
         [
           req.tenantId,
           result.runId,
@@ -202,14 +203,18 @@ export class PgAgentStore implements AuditPort, BudgetPort {
           result.modelEndpoint?.region ?? null,
         ],
       );
-      if (res.rowCount === 0) throw new Error(`run ${result.runId} is not open for audit`);
+      const runMonth = res.rows[0]?.run_month;
+      if (runMonth === undefined) throw new Error(`run ${result.runId} is not open for audit`);
       for (const a of result.actions) {
+        if (a.runId !== result.runId) throw new Error(`action ${a.seq} belongs to run ${a.runId}, not ${result.runId}`);
+        // Every action lands in its run's monthly partition (migration 0006).
         await c.query(
-          `insert into agent_action (tenant_id, run_id, seq, tool_name, input_json, output_hash, output_json, output_truncated, approver_user_id, decision, decided_at, committed_entity_ref, reason)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          `insert into agent_action (tenant_id, run_id, run_month, seq, tool_name, input_json, output_hash, output_json, output_truncated, approver_user_id, decision, decided_at, committed_entity_ref, reason)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
           [
             req.tenantId,
             a.runId,
+            runMonth,
             a.seq,
             a.toolName,
             a.inputJson,
@@ -245,6 +250,15 @@ export class PgAgentStore implements AuditPort, BudgetPort {
         reason: r.reason,
       }));
     });
+  }
+
+  /**
+   * Creates this month's partition of `agent_action` and the next `monthsAhead` (migration 0006). Idempotent and
+   * safe from every pod at once; returns how many partitions were created.
+   */
+  async ensureActionPartitions(monthsAhead = 2): Promise<number> {
+    const res = await this.pool.query<{ made: number }>("select agent_action_ensure_partitions($1) as made", [monthsAhead]);
+    return res.rows[0]?.made ?? 0;
   }
 
   /** Locks the tenant's budget row for the month, creating it from the default when none exists. */

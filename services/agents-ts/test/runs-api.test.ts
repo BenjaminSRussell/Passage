@@ -15,7 +15,8 @@ const setup = async (opts: { killed?: boolean; evalPassed?: boolean; mcp?: FakeM
   const spawned: Array<Promise<unknown>> = [];
   const runs = createRunService({
     agents: defaultCatalog("claude-sonnet-5-5"),
-    evalPassed: () => opts.evalPassed ?? true,
+    // Async, as PgVersionStore.evalPassed is: a refusal must still stop the start.
+    evalPassed: async () => opts.evalPassed ?? true,
     providerFor: () => provider,
     mcp,
     store,

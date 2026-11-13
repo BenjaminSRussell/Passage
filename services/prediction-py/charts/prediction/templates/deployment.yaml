@@ -29,6 +29,16 @@ spec:
               drop: [ALL]
           ports:
             - { name: http, containerPort: 8080 }
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.databaseSecret | quote }}, key: DATABASE_URL }
+            - name: MIGRATE_ON_START
+              value: {{ .Values.migrateOnStart | quote }}
+            - name: PREDICTION_MIN_ROWS
+              value: {{ .Values.minRows | quote }}
+            - name: PREDICTION_MAE_MAX_DAYS
+              value: {{ .Values.maeMaxDays | quote }}
           startupProbe:
             httpGet: { path: /healthz, port: http }
             failureThreshold: 30

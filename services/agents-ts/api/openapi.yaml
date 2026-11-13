@@ -25,7 +25,8 @@ paths:
       description: |
         As this worker sees them. `halted` is true when runs for the caller's
         tenant are stopped for any reason, including a worker that has not
-        heard from the kill-switch stream for 10 s (`stale`, fail-closed).
+        read the shared kill switch (kill_switch_change) for 10 s (`stale`,
+        fail-closed).
         Readable with agents.admin or platform.global.admin.
       x-passage-duty: agents.admin
       responses:
@@ -43,10 +44,12 @@ paths:
         TENANT scope needs agents.admin and the caller's own tenant (AGT-0403
         otherwise). GLOBAL scope needs platform.global.admin (break-glass). Idempotent
         by scope: asking for the state the switch is already in returns its
-        current toggle and publishes nothing. Otherwise
-        dev.passage.agent.killswitch.changed.v1 is published before the
-        response, and only then applied to this worker. Versions are strictly
-        increasing so workers ignore duplicates.
+        current toggle and publishes nothing; the stored state decides, so the
+        same toggle sent to two workers is stored once. Otherwise the toggle
+        and its dev.passage.agent.killswitch.changed.v1 outbox row are stored
+        in one transaction, applied to this worker, and reach every other
+        worker at its next poll (within a second by default). Versions are
+        strictly increasing so workers ignore duplicates.
       x-passage-duty: agents.admin
       x-passage-approval: none
       requestBody:

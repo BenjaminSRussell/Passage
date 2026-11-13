@@ -50,10 +50,14 @@ export class KillSwitchRegistry implements KillSwitchPort {
   private readonly nowMs: () => number;
   private readonly maxStalenessMs: number;
 
-  constructor(nowMs: () => number, maxStalenessMs: number = KILL_PROPAGATION_MS) {
+  /**
+   * `startSynced: false` makes a new registry stale until its first apply or heartbeat: a pod that polls the shared
+   * kill switch must not run anything before it has read the table once (main.ts).
+   */
+  constructor(nowMs: () => number, maxStalenessMs: number = KILL_PROPAGATION_MS, opts: { startSynced?: boolean } = {}) {
     this.nowMs = nowMs;
     this.maxStalenessMs = maxStalenessMs;
-    this.syncedAtMs = nowMs();
+    this.syncedAtMs = opts.startSynced === false ? Number.NEGATIVE_INFINITY : nowMs();
   }
 
   /** Applies a change. Returns false for a duplicate or out-of-order version. */

@@ -29,6 +29,22 @@ class Node:
             node = node.left if x[node.feature] <= node.threshold else node.right
         return node.value
 
+    def to_dict(self) -> dict[str, object]:
+        if self.left is None or self.right is None:
+            return {"v": self.value}
+        return {"f": self.feature, "t": self.threshold, "l": self.left.to_dict(), "r": self.right.to_dict()}
+
+    @staticmethod
+    def from_dict(d: dict[str, object]) -> "Node":
+        if "v" in d:
+            return Node(value=float(d["v"]))  # type: ignore[arg-type]
+        return Node(
+            feature=int(d["f"]),  # type: ignore[arg-type]
+            threshold=float(d["t"]),  # type: ignore[arg-type]
+            left=Node.from_dict(d["l"]),  # type: ignore[arg-type]
+            right=Node.from_dict(d["r"]),  # type: ignore[arg-type]
+        )
+
 
 def thresholds(X: list[list[float]]) -> list[list[float]]:
     """Candidate split points per feature: midpoints between up to MAX_BINS quantile values."""
@@ -121,6 +137,19 @@ class Booster:
     base: float
     learning_rate: float
     trees: list[Node] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        """JSON form for the model artifact; floats round-trip exactly through json."""
+        return {"logistic": self.logistic, "base": self.base, "learning_rate": self.learning_rate, "trees": [t.to_dict() for t in self.trees]}
+
+    @staticmethod
+    def from_dict(d: dict[str, object]) -> "Booster":
+        return Booster(
+            logistic=bool(d["logistic"]),
+            base=float(d["base"]),  # type: ignore[arg-type]
+            learning_rate=float(d["learning_rate"]),  # type: ignore[arg-type]
+            trees=[Node.from_dict(t) for t in d["trees"]],  # type: ignore[union-attr]
+        )
 
     def raw(self, x: list[float]) -> float:
         return self.base + self.learning_rate * sum(t.predict(x) for t in self.trees)

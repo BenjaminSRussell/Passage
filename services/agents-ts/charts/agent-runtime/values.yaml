@@ -3,9 +3,10 @@ image: { repository: ghcr.io/benjaminsrussell/passage-agents, digest: "", tag: "
 databaseSecret: agents-db
 # Run the migrations at start, as the owner role. Off by default: migrations run from the pipeline.
 migrateOnStart: false
-# Several replicas are safe for the API and runs, but the kill switch is not shared between pods until
-# the Kafka feed is built (NOT-IMPLEMENTED.md): a toggle reaches only the pod that took it.
-replicaCount: 1
+# Every pod polls the shared kill switch (kill_switch_change) every killSwitchPollMs and fails closed after
+# 10 s without a successful poll (AC-47.6), so a toggle taken on one pod halts runs on all of them.
+replicaCount: 2
+killSwitchPollMs: 1000
 # The MCP gateway every tool call goes through, with the caller's own token.
 mcpUrl: http://mcp-gateway.passage.svc.cluster.local:8080
 model:
@@ -34,8 +35,9 @@ copilot: { tokenCap: 8000, maxTurns: 4 }
 approvalExpiryHours: ""
 # Above this amount an approver who started the run may not approve it (wave-48 SoD limit).
 selfApprovalLimit: { amount: "0", currency: USD }
-# agent@version pairs whose evaluation passed (set by the eval pipeline, FR-47.10); an agent not listed answers AGT-0204.
-evalPassed: ""
+# An agent runs only when the newest eval_run of its exact definition passed (AGT-0204 otherwise). The eval pipeline
+# records its report with `node dist/cli/record-eval.js report.json`, using this release's image and model settings and
+# the owner (migration) role's DATABASE_URL: the pods' passage_app role may only read eval_run (FR-47.10).
 resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { cpu: 500m, memory: 512Mi }
