@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS agent_version (
 
 -- eval_run: one gate result of the eval pipeline for one definition on one dataset version (evals/src/run.ts
 -- report). Append-only. The latest run of a definition decides whether it may run (AGT-0204), so a later failing
--- run on a new dataset version blocks a definition that passed before (BR-47.8).
+-- run on a new dataset version blocks a definition that passed before (BR-47.8). Only the eval pipeline writes it,
+-- with the owner role (cli/record-eval.ts): the application role it gates may only read it.
 CREATE TABLE IF NOT EXISTS eval_run (
   eval_run_id uuid PRIMARY KEY,
   agent_id text NOT NULL,
@@ -181,14 +182,14 @@ CREATE POLICY agent_action_tenant_access ON agent_action AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 
--- The application role reaches agent_action only through the parent (partitions carry no grant). Versions and eval
--- runs are append-only for it.
+-- The application role reaches agent_action only through the parent (partitions carry no grant). Versions are
+-- append-only for it; eval runs are read-only, so a pod can never record a passing eval for itself.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT ON agent_action TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON agent_version TO passage_app';
-    EXECUTE 'GRANT SELECT, INSERT ON eval_run TO passage_app';
+    EXECUTE 'GRANT SELECT ON eval_run TO passage_app';
     EXECUTE 'GRANT EXECUTE ON FUNCTION agent_action_ensure_partitions(integer) TO passage_app';
   END IF;
 END

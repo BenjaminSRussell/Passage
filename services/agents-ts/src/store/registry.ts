@@ -59,7 +59,8 @@ const asEvalRun = (r: EvalRow): StoredEvalRun => ({
 /**
  * `agent_version` and `eval_run` (migration 0006, FR-47.10, BR-47.8). A definition is its agent id, version and
  * prompt hash; an eval passes one exact definition. These are platform rows, the same for every tenant, so the
- * statements run on the pool without a tenant setting.
+ * statements run on the pool without a tenant setting. `recordEval` needs the owner role (the eval pipeline,
+ * cli/record-eval.ts): the pods' passage_app role may only read eval_run.
  */
 export class PgVersionStore {
   constructor(private readonly pool: pg.Pool) {}
@@ -117,7 +118,8 @@ export class PgVersionStore {
    */
   async evalPassed(agent: AgentVersion): Promise<boolean> {
     const res = await this.pool.query<{ passed: boolean }>(
-      "select passed from eval_run where agent_id = $1 and version = $2 and prompt_hash = $3 order by recorded_at desc limit 1",
+      // Two runs recorded at the same instant: the failing one wins.
+      "select passed from eval_run where agent_id = $1 and version = $2 and prompt_hash = $3 order by recorded_at desc, passed limit 1",
       [agent.agentId, agent.version, promptHash(agent)],
     );
     return res.rows[0]?.passed ?? false;

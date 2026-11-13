@@ -61,8 +61,9 @@ export function evalResults(report: EvalReport, catalog: readonly AgentVersion[]
 
 /**
  * `node dist/cli/record-eval.js <report.json | ->`: stores the eval pipeline's gate results in eval_run for the
- * definitions this deployment runs. Run it with the deployment's DATABASE_URL, AGENTS_MODEL and
- * AGENTS_MODEL_OVERRIDES, so the prompt hashes are the ones the pods compute. EVAL_RECORDED_BY names the job.
+ * definitions this deployment runs. DATABASE_URL is the owner (migration) role's: the application role may only read
+ * eval_run. AGENTS_MODEL and AGENTS_MODEL_OVERRIDES are the deployment's, so the prompt hashes are the ones the pods
+ * compute. EVAL_RECORDED_BY names the job.
  */
 async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<void> {
   const source = argv[0];
@@ -73,6 +74,8 @@ async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<void> {
   const { results, skipped, notEvaluated } = evalResults(report, agentCatalog(loadModelSettings(env)), env["EVAL_RECORDED_BY"] || "eval-pipeline");
   const pool = new pg.Pool({ connectionString: url, max: 1 });
   try {
+    const role = (await pool.query<{ role: string }>("select current_user as role")).rows[0]?.role;
+    if (role === "passage_app") throw new Error("record-eval needs the owner (migration) role's DATABASE_URL: passage_app may only read eval_run");
     const store = new PgVersionStore(pool);
     const recorded = [];
     for (const r of results) {

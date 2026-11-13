@@ -70,10 +70,13 @@ describe("eval report parsing (record-eval)", () => {
 describe.runIf(ownerUrl)("agent_version, eval_run and the partitioned agent_action in Postgres", () => {
   let fx: Fixture;
   let versions: PgVersionStore;
+  /** The eval pipeline records with the owner role; the pods read with passage_app. */
+  let pipeline: PgVersionStore;
 
   beforeAll(async () => {
     fx = await fixture();
     versions = new PgVersionStore(fx.app);
+    pipeline = new PgVersionStore(fx.owner);
   });
   afterAll(async () => {
     await fx.close();
@@ -93,11 +96,11 @@ describe.runIf(ownerUrl)("agent_version, eval_run and the partitioned agent_acti
 
   it("a definition may run only when its newest eval run passed, and only that exact definition", async () => {
     expect(await versions.evalPassed(cash!)).toBe(false);
-    await versions.recordEval({ ...evalOf(cash), datasetId: "cash-app-v1" });
+    await pipeline.recordEval({ ...evalOf(cash), datasetId: "cash-app-v1" });
     expect(await versions.evalPassed(cash!)).toBe(true);
     expect(await versions.evalPassed({ ...cash!, modelId: "claude-haiku-5-5" })).toBe(false);
     // A later failing run, say on a new dataset version, blocks it again (BR-47.8).
-    await versions.recordEval({ ...evalOf(cash, ["precision 0.81 below 0.90"]), datasetId: "cash-app-v1", datasetVersion: "v2" });
+    await pipeline.recordEval({ ...evalOf(cash, ["precision 0.81 below 0.90"]), datasetId: "cash-app-v1", datasetVersion: "v2" });
     expect(await versions.evalPassed(cash!)).toBe(false);
     const runs = await versions.evalRuns(cash!);
     expect(runs.map((r) => [r.datasetVersion, r.passed])).toEqual([
@@ -107,20 +110,35 @@ describe.runIf(ownerUrl)("agent_version, eval_run and the partitioned agent_acti
     expect(runs[0]).toMatchObject({ failures: ["precision 0.81 below 0.90"], recordedBy: "ci", promptHash: promptHash(cash!) });
   });
 
-  it("versions and eval runs are append-only for the application role, and an eval must name a registered definition", async () => {
-    await versions.recordEval(evalOf(ap));
+  it("a failing and a passing run recorded at the same instant leave the definition blocked", async () => {
+    const [, , mrp] = defaultCatalog("claude-sonnet-5-5");
+    await versions.register([mrp!]);
+    for (const [passed, failures] of [[true, "[]"], [false, '["x"]']] as const) {
+      await fx.owner.query(
+        "insert into eval_run (eval_run_id, agent_id, version, prompt_hash, dataset_id, dataset_version, passed, metrics, failures, recorded_by, recorded_at) values ($1, $2, $3, $4, 'd', 'v', $5, '{}', $6::jsonb, 'ci', '2026-11-13T10:00:00Z')",
+        [randomUUID(), mrp!.agentId, mrp!.version, promptHash(mrp!), passed, failures],
+      );
+    }
+    expect(await versions.evalPassed(mrp!)).toBe(false);
+  });
+
+  it("versions are append-only and eval runs read-only for the application role, and an eval must name a registered definition", async () => {
+    await pipeline.recordEval(evalOf(ap));
+    // The role the gate applies to can never record a passing eval for itself.
+    await expect(versions.recordEval(evalOf(ap))).rejects.toThrow(/permission denied/);
+    expect(await versions.evalPassed(ap!)).toBe(true);
     await expect(fx.app.query("update agent_version set system_prompt = 'x'")).rejects.toThrow(/permission denied/);
     await expect(fx.app.query("delete from agent_version")).rejects.toThrow(/permission denied/);
     await expect(fx.app.query("update eval_run set passed = true")).rejects.toThrow(/permission denied/);
     await expect(fx.app.query("delete from eval_run")).rejects.toThrow(/permission denied/);
     await expect(
-      fx.app.query(
+      fx.owner.query(
         "insert into eval_run (eval_run_id, agent_id, version, prompt_hash, dataset_id, dataset_version, passed, metrics, recorded_by) values ($1, 'ap_coding', 9, $2, 'd', 'v', true, '{}', 'ci')",
         [randomUUID(), promptHash(ap!)],
       ),
     ).rejects.toThrow(/foreign key/);
     await expect(
-      fx.app.query(
+      fx.owner.query(
         "insert into eval_run (eval_run_id, agent_id, version, prompt_hash, dataset_id, dataset_version, passed, metrics, failures, recorded_by) values ($1, 'ap_coding', 1, $2, 'd', 'v', true, '{}', '[\"x\"]', 'ci')",
         [randomUUID(), promptHash(ap!)],
       ),
