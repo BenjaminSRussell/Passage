@@ -492,6 +492,18 @@ jobs:
           docker logs keycloak-hipaa
           exit 1
 
+  # The docs and ops tools (#560): the OpenAPI gate over every service spec (a route without an entry fails), the AsyncAPI
+  # reference, the docs link check and the cost, licence and capacity calculators the ops service mirrors.
+  docs-tools:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml==6.0.2
+      - run: python -m unittest discover -s docs/ops/tools -p 'test_*.py'
+
   deploy-release:
     runs-on: ubuntu-24.04
     steps:
