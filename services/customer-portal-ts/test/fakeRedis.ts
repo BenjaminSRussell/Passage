@@ -1,5 +1,5 @@
-// An in-process stand-in for a Valkey or Redis server: RESP2 over TCP with AUTH, SELECT, PING, SET (EX, PX, KEEPTTL), GET, GETDEL
-// and DEL, and expiry against a clock the test controls. It also lets a test cut every connection or stop answering.
+// An in-process stand-in for a Valkey or Redis server: RESP2 over TCP with AUTH, SELECT, PING, SET (EX, PX, KEEPTTL), GET, GETDEL,
+// DEL, INCR and PEXPIRE, and expiry against a clock the test controls. It also lets a test cut every connection or stop answering.
 
 import { createServer, type Server, type Socket } from "node:net";
 import type { AddressInfo } from "node:net";
@@ -70,8 +70,17 @@ export async function startFakeRedis(opts: { password?: string } = {}): Promise<
         sets.set(rest[0]!, set);
         return ":1\r\n";
       }
-      case "PEXPIRE":
+      case "PEXPIRE": {
+        const e = live(rest[0]!);
+        if (e) e.expiresAt = clock.ms + Number(rest[1]);
         return ":1\r\n";
+      }
+      case "INCR": {
+        const e = live(rest[0]!);
+        const n = Number(e?.value ?? "0") + 1;
+        store.set(rest[0]!, { value: String(n), expiresAt: e?.expiresAt });
+        return `:${n}\r\n`;
+      }
       case "SMEMBERS": {
         const m = [...(sets.get(rest[0]!) ?? [])];
         return `*${m.length}\r\n${m.map((x) => `$${Buffer.byteLength(x)}\r\n${x}\r\n`).join("")}`;

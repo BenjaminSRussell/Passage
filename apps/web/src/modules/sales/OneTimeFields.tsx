@@ -1,4 +1,4 @@
-import { FormField, Input } from "../../shell/ui";
+import { FormField, Input, type FormFieldTarget } from "../../shell/ui";
 import type { OneTimeParty } from "./api/client";
 import styles from "./pages.module.css";
 
@@ -60,6 +60,12 @@ const FIELDS: { key: keyof OneTimeValues; label: string; hint?: string; optional
 ];
 
 /** The walk-in buyer's document-level name, address and tax id (FR-27.22). */
+/** The summary target of a one-time buyer error keyed `oneTime.field`. */
+export function oneTimeTarget(key: string): FormFieldTarget | undefined {
+  const field = FIELDS.find((f) => `oneTime.${f.key}` === key);
+  return field ? { id: `onetime-${field.key}`, label: field.label } : undefined;
+}
+
 export function OneTimeFields({ values, errors, onChange }: Props) {
   return (
     <fieldset className={styles.form}>

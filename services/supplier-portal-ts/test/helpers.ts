@@ -47,6 +47,8 @@ export interface Rig {
   answers: (...r: Response[]) => void;
   /** Claims the fake identity provider puts in the next ID token. */
   claims: Record<string, unknown>;
+  /** Signs a token with the identity provider's key, as Keycloak signs a logout token. */
+  signToken: (claims: Record<string, unknown>) => string;
   seedBase64: string;
   now: { ms: number };
   close: () => Promise<void>;
@@ -78,6 +80,7 @@ export async function startRig(opts: RigOptions = {}): Promise<Rig> {
   const calls: Call[] = [];
   const queue: Response[] = [];
   const rig = { calls, now, seedBase64, claims: {} as Record<string, unknown> } as Rig;
+  rig.signToken = (claims) => idToken(privateKey, claims);
   rig.answer = (r) => {
     queue.length = 0;
     queue.push(r);
@@ -118,7 +121,7 @@ export async function startRig(opts: RigOptions = {}): Promise<Rig> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   rig.server = server;
   rig.base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  rig.claims = { sub: "user-1", tid: TENANT, vendor_id: VENDOR_A, le: LE_1, roles: ["supplier-user"], name: "Pat Supplier" };
+  rig.claims = { sub: "user-1", tid: TENANT, vendor_id: VENDOR_A, le: LE_1, roles: ["supplier-user"], name: "Pat Supplier", sid: "kc-sid-1" };
   rig.close = () => new Promise((resolve) => server.close(() => resolve()));
   (rig as Rig & { setNonce: (n: string) => void }).setNonce = (n) => {
     lastNonce = n;

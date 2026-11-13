@@ -8,14 +8,23 @@ import {
   Button,
   buttonClassName,
   Card,
-  DataTable,
   FormField,
   Input,
   PageHeader,
   Select,
   Skeleton,
   Textarea,
-  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   assignCase,
@@ -37,7 +46,7 @@ import {
 import { CASE_CATEGORY_LABELS, CASE_PRIORITY_LABELS, CURRENCY, dateTime, DECIMAL, money, PRIORITY_TONES, UUID } from "./format";
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
-import { useLoad } from "./useLoad";
+import { useCappedRows, useLoad } from "./useLoad";
 import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
@@ -48,7 +57,7 @@ function statusBadge(c: CollectionCase) {
   return c.slaBreached ? <Badge tone="danger">SLA breached</Badge> : <Badge tone="info">Open</Badge>;
 }
 
-const columns: DataTableColumn<CollectionCase>[] = [
+const columns: ListColumn<CollectionCase>[] = [
   { key: "category", header: "Category", render: (row) => CASE_CATEGORY_LABELS[row.category] ?? row.category },
   { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "reason", header: "Reason" },
@@ -66,62 +75,46 @@ const columns: DataTableColumn<CollectionCase>[] = [
   { key: "status", header: "Status", render: statusBadge },
 ];
 
+const caseFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: [{ value: "OPEN", label: "Open" }, { value: "CLOSED", label: "Closed" }] },
+  { kind: "select", key: "category", label: "Category", anyLabel: "All categories", options: CASE_CATEGORIES.map((k) => ({ value: k, label: CASE_CATEGORY_LABELS[k] })) },
+];
+
+/** Open cases are the work, so the list opens on them. */
+const OPEN_FIRST = { status: "OPEN" };
+
+function useCaseRows(query: ListQuery, onCapped: (capped: boolean) => void): ListData<CollectionCase> {
+  const status = (query.filters.status ?? "") as CaseStatus | "";
+  const category = (query.filters.category ?? "") as CaseCategory | "";
+  return useCappedRows((signal) => listCases({ status, category, limit: PAGE }, signal), `${status}|${category}`, PAGE, onCapped);
+}
+
 /** Collection cases (FR-30.18): grouped collection work with an SLA per category. */
 export function CasesPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<CaseStatus | "">("OPEN");
-  const [category, setCategory] = useState<CaseCategory | "">("");
-  const state = useLoad((signal) => listCases({ status, category, limit: PAGE }, signal), `${status}|${category}`);
-
+  const [capped, setCapped] = useState(false);
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Collection cases"
-        description="Open cases first, nearest SLA first. A disagreed balance confirmation opens a dispute case on its own."
-        actions={
-          <Link className={buttonClassName("primary")} to="/receivables/cases/new">
-            Open case
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="cs-status" label="Status">
-          {(c) => (
-            <Select {...c} value={status} onChange={(e) => setStatus(e.target.value as CaseStatus | "")}>
-              <option value="OPEN">Open</option>
-              <option value="CLOSED">Closed</option>
-              <option value="">All statuses</option>
-            </Select>
-          )}
-        </FormField>
-        <FormField id="cs-category" label="Category">
-          {(c) => (
-            <Select {...c} value={category} onChange={(e) => setCategory(e.target.value as CaseCategory | "")}>
-              <option value="">All categories</option>
-              {CASE_CATEGORIES.map((k) => (
-                <option key={k} value={k}>
-                  {CASE_CATEGORY_LABELS[k]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </div>
-      {state.error ? (
-        <LoadFailure title="Could not load the cases" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Collection cases"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No cases", description: "Open a case to group the collection work on a customer." }}
-          onRowOpen={(row) => navigate(`/receivables/cases/${row.id}`)}
-        />
-      )}
-      {state.data && state.data.length >= PAGE ? <p className={styles.note}>Showing the first {PAGE} cases.</p> : null}
-    </div>
+    <ListPage
+      id="receivables-cases"
+      title="Collection cases"
+      description="Open cases first, nearest SLA first. A disagreed balance confirmation opens a dispute case on its own."
+      actions={
+        <Link className={buttonClassName("primary")} to="/receivables/cases/new">
+          Open case
+        </Link>
+      }
+      noun="cases"
+      singular="case"
+      columns={columns}
+      filters={caseFilters}
+      defaultFilters={OPEN_FIRST}
+      useRows={(query) => useCaseRows(query, setCapped)}
+      search={(row) => ({ number: row.documentNumber ?? "", name: row.reason })}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/receivables/cases/${row.id}`)}
+      empty={{ title: "No cases", description: "Open a case to group the collection work on a customer." }}
+      footer={capped ? <p className={styles.note}>Showing the first {PAGE} cases. Narrow the filters to see the others.</p> : null}
+    />
   );
 }
 
@@ -175,6 +168,16 @@ export function toCaseInput(v: CaseDraft): CaseInput {
   };
 }
 
+const NEW_CASE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "nc-entity", label: "Legal entity" },
+  customerId: { id: "nc-customer", label: "Customer" },
+  owner: { id: "nc-owner", label: "Owner" },
+  openItemId: { id: "nc-item", label: "Open item" },
+  currency: { id: "nc-currency", label: "Currency" },
+  attachedAmount: { id: "nc-amount", label: "Amount" },
+  reason: { id: "nc-reason", label: "Reason" },
+};
+
 /** Open a collection case. The open items page can link here with the customer, entity and item filled in. */
 export function NewCasePage() {
   const navigate = useNavigate();
@@ -194,6 +197,8 @@ export function NewCasePage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<CaseDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -209,6 +214,7 @@ export function NewCasePage() {
     setBusy(true);
     try {
       const created = await createCase(toCaseInput(values), key.current);
+      release();
       navigate(`/receivables/cases/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -251,6 +257,7 @@ export function NewCasePage() {
       <PageHeader title="Open collection case" description={`The SLA follows the category: ${SLA_HOURS[values.category]} hours for ${CASE_CATEGORY_LABELS[values.category].toLowerCase()} cases.`} />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_CASE_FIELDS)} attempt={attempt} />
           {text("nc-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true })}
           {text("nc-customer", "customerId", "Customer", { entity: "customer", mono: true })}
           <FormField id="nc-category" label="Category">
@@ -299,6 +306,7 @@ export function NewCasePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

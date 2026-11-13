@@ -128,8 +128,16 @@ export function sameToken(a: string | undefined, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-/** A fixed-window limiter per key (the session id), in memory per pod: with several pods the limit applies to each. */
-export class RateLimiter {
+/** Decides whether a session may make one more /api/v1 call now. */
+export interface Limiter {
+  allow(key: string, now: number): boolean | Promise<boolean>;
+}
+
+/**
+ * A fixed-window limiter per key (the session id), in memory per pod: with several pods the limit applies to each. Used without a
+ * shared store (development, one pod); RedisRateLimiter shares the count across pods.
+ */
+export class RateLimiter implements Limiter {
   private windows = new Map<string, { start: number; count: number }>();
   private readonly limit: number;
   private readonly windowMs: number;

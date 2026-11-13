@@ -345,4 +345,37 @@ describe("Payment detail", () => {
     expect(await screen.findByText(/applied with nothing left to apply/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Apply payment" })).not.toBeInTheDocument();
   });
+
+  it("unapplies an applied payment after a confirmation, under If-Match, and offers it for applying again", async () => {
+    let applied = true;
+    server.handler = (url, init) => {
+      if (url.pathname.endsWith(`/payments/${PAY}:unapply`) && init.method === "POST") {
+        applied = false;
+        return json(200, { payment: { ...payment, version: 3 }, reversed: [{ settlementId: "s1", openItemId: ITEM, amount: "980.00", itemAmount: "980.00", openAfter: "980.00", itemStatus: "OPEN" }] });
+      }
+      if (url.pathname.endsWith(`/payments/${PAY}`)) return json(200, applied ? { ...payment, status: "APPLIED", unappliedAmount: "0", version: 2 } : { ...payment, version: 3 });
+      if (url.pathname.endsWith("/open-items")) return json(200, { items: applied ? [] : [item] });
+      return undefined;
+    };
+    const { container } = renderAt(`/receivables/payments/${PAY}`);
+    expect(await screen.findByRole("heading", { name: "Undo the applications" })).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fill("Reason", "Applied to the wrong invoice");
+    fireEvent.click(screen.getByRole("button", { name: "Unapply payment" }));
+    expect(server.calls.some((c) => c.url.pathname.endsWith(":unapply"))).toBe(false);
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Unapply payment" }));
+    expect(await screen.findByText(/1 settlement\(s\) reversed; 980.00 USD is unapplied again/)).toBeInTheDocument();
+    const call = server.calls.find((c) => c.url.pathname.endsWith(":unapply"))!;
+    expect(new Headers(call.init.headers).get("If-Match")).toBe('"2"');
+    expect(call.body).toEqual({ reason: "Applied to the wrong invoice" });
+    expect(await screen.findByRole("button", { name: "Apply payment" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Undo the applications" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer unapply for a payment with nothing applied", async () => {
+    detailServer(() => json(200, {}));
+    renderAt(`/receivables/payments/${PAY}`);
+    await findTable({ name: "Open items to settle" });
+    expect(screen.queryByRole("button", { name: "Unapply payment" })).not.toBeInTheDocument();
+  });
 });

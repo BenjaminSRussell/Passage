@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { clientAddress, NO_TRUSTED_PROXIES, rateKey, type TrustedProxies } from "./clientAddress.ts";
-import { authorizationUrl, endSessionUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
+import { authorizationUrl, endSessionUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, verifyLogoutToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
 import { PendingProvisioner, type UserProvisioner } from "./provision.ts";
 import { matchRoute, QUERY_ALLOWLIST, STRIPPED_BODY_KEYS, type Route } from "./routes.ts";
 import { screenUpload, type ScanPolicy } from "./scan.ts";
@@ -341,6 +341,7 @@ export function createHttpServer(deps: ServerDeps): Server {
     if (method === "POST" && url.pathname === "/bff/invites/accept") return invitation(req, res, "accept");
 
     if (method === "POST" && url.pathname === "/bff/logout") return logout(req, res);
+    if (method === "POST" && url.pathname === "/bff/backchannel-logout") return backchannelLogout(req, res);
 
     const session = await deps.sessions.get(parseCookies(req.headers.cookie).get(SESSION_COOKIE), now());
     if (!session) return problem(res, 401, "SUP-BFF-401", "sign in first");
@@ -382,6 +383,35 @@ export function createHttpServer(deps: ServerDeps): Server {
       return problem(res, 503, "SUP-BFF-503", "the portal cannot reach its session store; you are signed out on this device, the session ends by itself", clear);
     }
     send(res, 200, { logoutUrl }, clear);
+  }
+
+  /**
+   * OIDC back-channel logout (#511): Keycloak calls this (no cookie, no CSRF) when a supplier user's single sign-on session ends,
+   * including when an administrator disables the user or ends the session in Keycloak. The logout token is verified (signature,
+   * issuer, audience, event) and every portal session of that Keycloak session, or of that user when none is named, is deleted, so a
+   * removed supplier user is signed out of the portal at once instead of keeping access for the rest of the session.
+   */
+  async function backchannelLogout(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    try {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += (chunk as Buffer).length;
+        if (size > 16 * 1024) return send(res, 400, { error: "invalid_request" });
+        chunks.push(chunk as Buffer);
+      }
+      const token = new URLSearchParams(Buffer.concat(chunks).toString("utf8")).get("logout_token") ?? "";
+      const { sid, sub } = await verifyLogoutToken(token, deps.oidc, deps.jwks, now());
+      const ended = await deps.sessions.deleteByKeycloak(sid, sub);
+      log({ msg: "back-channel logout", sessions: ended });
+      send(res, 200, {});
+    } catch (err) {
+      if (err instanceof LoginRefused) {
+        log({ msg: "back-channel logout refused", reason: err.message });
+        return send(res, 400, { error: "invalid_request" });
+      }
+      throw err;
+    }
   }
 
   return createServer((req, res) => {

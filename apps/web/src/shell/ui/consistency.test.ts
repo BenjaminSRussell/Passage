@@ -13,6 +13,9 @@
  *    page: its table holds the record's related rows. They are listed in `listPageBacklog.json`; the audit fails
  *    when a page is added to that shape and when a listed page has moved to `ListPage` (remove it from the list).
  *
+ * 3. Create forms on the form standard (docs/forms.md). A procure-to-pay or order-to-cash page exported as `New…Page` or
+ *    `…CreatePage` renders `FormErrorSummary` and guards unsaved changes with `useUnsavedChanges`.
+ *
  * Run `npx vitest run src/shell/ui/consistency.test.ts` to see the report; the failure message lists what to change.
  */
 import { describe, expect, it } from "vitest";
@@ -84,13 +87,22 @@ describe("UI consistency audit", () => {
   });
 
   it("lists every procure-to-pay and order-to-cash list page that is not on ListPage", () => {
-    const listed = new Set(backlog.pages);
+    const listed = new Set<string>(backlog.pages);
     const now = Object.entries(sources)
       .filter(([path, source]) => FLOW_MODULES.includes(moduleOf(path)) && !isRecordPage(path) && isUnconvertedList(source))
       .map(([path]) => fileOf(path))
       .sort();
     expect(now.filter((f) => !listed.has(f)), "new list pages use ListPage (docs/lists.md)").toEqual([]);
     expect([...listed].filter((f) => !now.includes(f)), "these moved to ListPage: remove them from listPageBacklog.json").toEqual([]);
+  });
+
+  it("puts every procure-to-pay and order-to-cash create form on the form standard", () => {
+    const missing = Object.entries(sources)
+      .filter(([path, source]) => FLOW_MODULES.includes(moduleOf(path)) && /export function (?:New[A-Za-z]*|[A-Za-z]+Create)Page\(/.test(source))
+      .flatMap(([path, source]) =>
+        ["FormErrorSummary", "useUnsavedChanges"].filter((piece) => !source.includes(`<${piece}`) && !source.includes(`${piece}(`)).map((piece) => `${fileOf(path)}: no ${piece}`),
+      );
+    expect(missing, "create forms follow docs/forms.md").toEqual([]);
   });
 
   it("recognises the shapes it looks for", () => {

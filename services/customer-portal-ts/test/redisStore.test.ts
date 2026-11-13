@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { RedisSessionStore } from "../src/redisStore.ts";
+import { RedisRateLimiter, RedisSessionStore } from "../src/redisStore.ts";
 import { parseStoreUrl, RespClient, RespError } from "../src/resp.ts";
-import { ABSOLUTE_TIMEOUT_MS, IDLE_TIMEOUT_MS, LOGIN_TTL_MS, MemorySessionStore, StoreUnavailable, type SessionStore } from "../src/session.ts";
-import { sessionStoreFromEnv } from "../src/main.ts";
+import { ABSOLUTE_TIMEOUT_MS, IDLE_TIMEOUT_MS, LOGIN_TTL_MS, MemorySessionStore, RateLimiter, StoreUnavailable, type SessionStore } from "../src/session.ts";
+import { RATE_LIMIT, sessionStoreFromEnv, storesFromEnv } from "../src/main.ts";
 import { api, CUSTOMER_A, LE_1, signIn, startRig, TENANT, type Rig } from "./helpers.ts";
 import { startFakeRedis, type FakeRedis } from "./fakeRedis.ts";
 
@@ -295,5 +295,38 @@ describe("two pods behind one store", () => {
     expect(((await res.json()) as { code: string }).code).toBe("CUS-BFF-503");
     redis.mute = false;
     expect((await fetch(`${rig.base}/bff/me`, { headers: { cookie: s.cookie } })).status).toBe(200);
+  });
+});
+
+describe("rate limit shared across pods", () => {
+  it("counts a session's calls on every pod against one limit per window", async () => {
+    redis = await startFakeRedis();
+    const podA = new RedisRateLimiter(client(redis), 3, 60_000);
+    const podB = new RedisRateLimiter(client(redis), 3, 60_000);
+    expect(await podA.allow("s1", T0)).toBe(true);
+    expect(await podB.allow("s1", T0 + 1)).toBe(true);
+    expect(await podA.allow("s1", T0 + 2)).toBe(true);
+    expect(await podB.allow("s1", T0 + 3)).toBe(false);
+    expect(await podA.allow("s2", T0 + 3)).toBe(true);
+    const next = (Math.floor(T0 / 60_000) + 1) * 60_000;
+    expect(await podB.allow("s1", next)).toBe(true);
+    const counter = [...redis.dump().keys()].find((k) => k.startsWith("customer-portal:rate:s1:"));
+    expect(counter).toBeDefined();
+    expect(redis.commands.filter((c) => c[0] === "PEXPIRE" && c[1]!.includes(":rate:s1:")).length).toBe(2);
+  });
+
+  it("refuses rather than waves a call through when the store cannot be reached", async () => {
+    redis = await startFakeRedis();
+    const limiter = new RedisRateLimiter(client(redis), 3, 60_000);
+    redis.mute = true;
+    await expect(limiter.allow("s1", T0)).rejects.toBeInstanceOf(StoreUnavailable);
+  });
+
+  it("uses the shared limiter with the shared store and the pod's own without one", () => {
+    expect(storesFromEnv({}, () => "", () => undefined).limiter).toBeInstanceOf(RateLimiter);
+    const shared = storesFromEnv({ SESSION_STORE_URL: "redis://valkey.svc:6379" }, () => "", () => undefined);
+    expect(shared.limiter).toBeInstanceOf(RedisRateLimiter);
+    expect(shared.sessions).toBeInstanceOf(RedisSessionStore);
+    expect(RATE_LIMIT).toBe(300);
   });
 });

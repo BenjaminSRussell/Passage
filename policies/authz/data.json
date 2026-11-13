@@ -2212,6 +2212,9 @@
     "print.document.render": {"permissions": [
       {"resource": "/print/v1/documents:render", "methods": ["POST"]}
     ]},
+    "print.customer-portal.render": {"service_only": true, "permissions": [
+      {"resource": "/print/v1/documents:render", "methods": ["POST"]}
+    ]},
     "print.admin": {"permissions": [
       {"resource": "/print/v1/jobs:purge", "methods": ["POST"]},
       {"resource": "/print/v1/printers", "methods": ["POST"]},
@@ -4193,7 +4196,8 @@
       "billing": ["billing.customer-portal.read"],
       "sales": ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"],
       "party": ["party.customer-portal.read"],
-      "identity": ["identity.customer-portal.read"]
+      "identity": ["identity.customer-portal.read"],
+      "print": ["print.customer-portal.render"]
     }
   },
   "service_principals": {

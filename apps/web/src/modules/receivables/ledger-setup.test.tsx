@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { findTable } from "../../test-utils";
 import { json, pageViolations, renderAt, server, useFakeServer } from "./testServer";
-import { validateBackfill, validateFX, validateMapping } from "./LedgerSetup";
+import { toFXSetting, validateBackfill, validateFX, validateMapping } from "./LedgerSetup";
 
 useFakeServer();
 
@@ -24,6 +24,17 @@ describe("ledger setup validation", () => {
     expect(validateFX({ ...base, lossAccount: "" }).lossAccount).toBeTruthy();
   });
 
+  it("checks the FX tolerance against the service's bounds and leaves an empty one out", () => {
+    const base = { crossCurrencyEnabled: false, functionalCurrency: "", gainAccount: "7100", lossAccount: "7200", toleranceAmount: "", tolerancePercent: "" };
+    expect(validateFX(base)).toEqual({});
+    expect(validateFX({ ...base, toleranceAmount: "0", tolerancePercent: "0.25" })).toEqual({});
+    expect(validateFX({ ...base, toleranceAmount: "-1" }).toleranceAmount).toBeTruthy();
+    expect(validateFX({ ...base, toleranceAmount: "1000000.5" }).toleranceAmount).toBeTruthy();
+    expect(validateFX({ ...base, tolerancePercent: "100.5" }).tolerancePercent).toBeTruthy();
+    expect(validateFX({ ...base, tolerancePercent: "0.12345" }).tolerancePercent).toBeTruthy();
+    expect(toFXSetting(LE, { ...base, toleranceAmount: " 2.50 " })).toEqual({ legalEntityId: LE, crossCurrencyEnabled: false, functionalCurrency: "", gainAccount: "7100", lossAccount: "7200", toleranceAmount: "2.50" });
+  });
+
   it("takes the opening account and date together", () => {
     expect(validateBackfill({ openingAccount: "", openingDate: "" })).toEqual({});
     expect(validateBackfill({ openingAccount: "3000", openingDate: "" }).openingAccount).toBeTruthy();
@@ -38,7 +49,7 @@ describe("ledger setup page", () => {
         return json(200, { items: [{ legalEntityId: LE, currency: "USD", accountRef: "", glAccount: "1010", name: "Operating account" }] });
       }
       if (url.pathname.endsWith("/fx-settings") && !init.method) {
-        return json(200, { legalEntityId: LE, crossCurrencyEnabled: false, functionalCurrency: "", gainAccount: "7100", lossAccount: "7200" });
+        return json(200, { legalEntityId: LE, crossCurrencyEnabled: false, functionalCurrency: "", gainAccount: "7100", lossAccount: "7200", tolerancePercent: "0.5" });
       }
       if (url.pathname.endsWith("/fx-settings") && init.method === "PUT") return json(200, JSON.parse(String(init.body)));
       if (url.pathname.endsWith("/gl-journals:backfill")) {
@@ -57,10 +68,12 @@ describe("ledger setup page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save exchange settings" }));
     expect(await screen.findByText("Enter the functional currency to settle across currencies.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Functional currency"), { target: { value: "usd" } });
+    expect(screen.getByLabelText(/^Tolerance percent/)).toHaveValue("0.5");
+    fireEvent.change(screen.getByLabelText(/^Tolerance amount/), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: "Save exchange settings" }));
     await waitFor(() => expect(server.calls.some((c) => c.method === "PUT" && c.url.pathname.endsWith("/fx-settings"))).toBe(true));
     const put = server.calls.find((c) => c.method === "PUT" && c.url.pathname.endsWith("/fx-settings"));
-    expect(put?.body).toMatchObject({ legalEntityId: LE, crossCurrencyEnabled: true, functionalCurrency: "USD", gainAccount: "7100", lossAccount: "7200" });
+    expect(put?.body).toMatchObject({ legalEntityId: LE, crossCurrencyEnabled: true, functionalCurrency: "USD", gainAccount: "7100", lossAccount: "7200", toleranceAmount: "10", tolerancePercent: "0.5" });
 
     fireEvent.click(screen.getByRole("button", { name: "Queue the journals" }));
     expect(await screen.findByText(/2 cash receipts, 1 applications, 1 dunning fees/)).toBeInTheDocument();

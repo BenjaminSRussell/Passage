@@ -16,6 +16,17 @@ import {
   Skeleton,
   Textarea,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   CLAIM_TYPES,
@@ -54,7 +65,7 @@ import {
 } from "./format";
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
-import { useLoad } from "./useLoad";
+import { useCappedRows, useLoad } from "./useLoad";
 import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
@@ -71,7 +82,7 @@ function worked(d: Deduction): boolean {
   return d.status === "OPEN" || d.status === "MATCHED";
 }
 
-const columns: DataTableColumn<Deduction>[] = [
+const columns: ListColumn<Deduction>[] = [
   { key: "documentNumber", header: "Item", mono: true },
   { key: "type", header: "Type", render: (row) => DEDUCTION_TYPE_LABELS[row.type] ?? row.type },
   { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
@@ -81,64 +92,42 @@ const columns: DataTableColumn<Deduction>[] = [
   { key: "status", header: "Status", render: (row) => statusBadge(row.status) },
 ];
 
+const deductionFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: DEDUCTION_STATUSES.map((s) => ({ value: s, label: DEDUCTION_LABELS[s] })) },
+  { kind: "select", key: "type", label: "Type", anyLabel: "All types", options: DEDUCTION_TYPES.map((t) => ({ value: t, label: DEDUCTION_TYPE_LABELS[t] })) },
+];
+
+function useDeductionRows(query: ListQuery, onCapped: (capped: boolean) => void): ListData<Deduction> {
+  const status = (query.filters.status ?? "") as DeductionStatus | "";
+  const type = (query.filters.type ?? "") as DeductionType | "";
+  return useCappedRows((signal) => listDeductions({ status, type, limit: PAGE }, signal), `${status}|${type}`, PAGE, onCapped);
+}
+
 /** The deductions workbench (FR-30.17): deductions being worked first, oldest first. */
 export function DeductionsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<DeductionStatus | "">("");
-  const [type, setType] = useState<DeductionType | "">("");
-  const state = useLoad((signal) => listDeductions({ status, type, limit: PAGE }, signal), `${status}|${type}`);
+  const [capped, setCapped] = useState(false);
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Deductions"
-        description="Short-paid amounts moved off their invoices. Match each to a claim and approve it, deny and re-bill it, split it, or write it off. Deductions are aged here, apart from invoices, and never dunned."
-        actions={
-          <Link className={buttonClassName("primary")} to="/receivables/deductions/new">
-            Record deduction
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="de-status" label="Status">
-          {(c) => (
-            <Select {...c} value={status} onChange={(e) => setStatus(e.target.value as DeductionStatus | "")}>
-              <option value="">All statuses</option>
-              {DEDUCTION_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {DEDUCTION_LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <FormField id="de-type" label="Type">
-          {(c) => (
-            <Select {...c} value={type} onChange={(e) => setType(e.target.value as DeductionType | "")}>
-              <option value="">All types</option>
-              {DEDUCTION_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {DEDUCTION_TYPE_LABELS[t]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </div>
-      {state.error ? (
-        <LoadFailure title="Could not load the deductions" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Deductions"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No deductions", description: "Record a deduction from a short-paid open item." }}
-          onRowOpen={(row) => navigate(`/receivables/deductions/${row.id}`)}
-        />
-      )}
-      {state.data && state.data.length >= PAGE ? <p className={styles.note}>Showing the first {PAGE} deductions.</p> : null}
-    </div>
+    <ListPage
+      id="receivables-deductions"
+      title="Deductions"
+      description="Short-paid amounts moved off their invoices. Match each to a claim and approve it, deny and re-bill it, split it, or write it off. Deductions are aged here, apart from invoices, and never dunned."
+      actions={
+        <Link className={buttonClassName("primary")} to="/receivables/deductions/new">
+          Record deduction
+        </Link>
+      }
+      noun="deductions"
+      singular="deduction"
+      columns={columns}
+      filters={deductionFilters}
+      useRows={(query) => useDeductionRows(query, setCapped)}
+      search={(row) => ({ number: row.documentNumber, name: row.claimRef ?? undefined })}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/receivables/deductions/${row.id}`)}
+      empty={{ title: "No deductions", description: "Record a deduction from a short-paid open item." }}
+      footer={capped ? <p className={styles.note}>Showing the first {PAGE} deductions. Narrow the filters to see the others.</p> : null}
+    />
   );
 }
 
@@ -182,6 +171,14 @@ export function toDeductionInput(v: DeductionDraft): DeductionInput {
   };
 }
 
+const NEW_DEDUCTION_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "nde-entity", label: "Legal entity" },
+  openItemId: { id: "nde-item", label: "Open item" },
+  paymentId: { id: "nde-payment", label: "Payment" },
+  reasonCode: { id: "nde-reason", label: "Customer's reason" },
+  amount: { id: "nde-amount", label: "Amount" },
+};
+
 /** Record a deduction: the amount moves off the short-paid item into the workbench. */
 export function NewDeductionPage() {
   const navigate = useNavigate();
@@ -199,6 +196,8 @@ export function NewDeductionPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<DeductionDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -214,6 +213,7 @@ export function NewDeductionPage() {
     setBusy(true);
     try {
       const created = await createDeduction(toDeductionInput(values), key.current);
+      release();
       navigate(`/receivables/deductions/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -259,6 +259,7 @@ export function NewDeductionPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_DEDUCTION_FIELDS)} attempt={attempt} />
           {text("nde-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
           {text("nde-item", "openItemId", "Open item", { entity: "openItem", hint: "The short-paid invoice; the deduction takes its customer and currency." })}
           {text("nde-payment", "paymentId", "Payment", { entity: "arPayment", optional: true, hint: "The short payment, if it is recorded." })}
@@ -290,6 +291,7 @@ export function NewDeductionPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

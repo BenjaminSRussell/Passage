@@ -1,7 +1,28 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  buttonClassName,
+  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   describeProblem,
   getReleaseRun,
@@ -13,7 +34,18 @@ import {
   type ReleaseStatus,
   type ReleasedOrder,
 } from "./api/client";
-import { Details, LoadError, StatusBadge, money, statusLabel, useResource, uuidPattern, type Failure, Named } from "./parts";
+import {
+  Details,
+  LoadError,
+  StatusBadge,
+  money,
+  statusLabel,
+  useResource,
+  uuidPattern,
+  type Failure,
+  Named,
+  useProcurementPages,
+} from "./parts";
 import { formatInstant } from "./RfqPages";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -41,7 +73,7 @@ export function validateRelease(legalEntityId: string, windowDays: string, maxLi
   return errors;
 }
 
-const columns: DataTableColumn<ReleaseRun>[] = [
+const columns: ListColumn<ReleaseRun>[] = [
   { key: "createdAt", header: "Run", mono: true, render: (r) => formatInstant(r.createdAt) },
   { key: "legalEntityId", header: "Legal entity", render: (r) => <Named entity="legalEntity" id={r.legalEntityId} /> },
   { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
@@ -51,80 +83,46 @@ const columns: DataTableColumn<ReleaseRun>[] = [
   { key: "orders", header: "Orders", align: "end", render: (r) => String(r.purchaseOrders.length) },
 ];
 
+const listFilters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }];
+
+function useReleaseRows(query: ListQuery): ListData<ReleaseRun> {
+  const status = (query.filters.status ?? "") as ReleaseStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listReleaseRuns({ status }, { cursor, signal }));
+}
+
 /**
  * Release runs: each run took the approved requisition lines that had a vendor and ordered them as draft purchase
  * orders. A run that left lines in the consolidation queue says why on its page.
  */
 export function ReleaseRunsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<ReleaseStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<ReleaseRun[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listReleaseRuns({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Release runs"
-        description="Each run orders the approved requisition lines that have a vendor as draft purchase orders. Lines it could not order stay in the consolidation queue."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/releases/new">
-            Start a release run
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="rel-status" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as ReleaseStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="the release runs" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Release runs"
-        columns={columns}
-        rows={page.error ? [] : rows}
-        getRowKey={(r) => r.id}
-        loading={page.loading && rows.length === 0}
-        empty={{
-          title: "No release runs yet",
-          description: "Start a run to order the approved requisition lines that already have a vendor.",
-        }}
-        onRowOpen={(r) => navigate(`/purchasing/releases/${r.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-release-runs"
+      title="Release runs"
+      description="Each run orders the approved requisition lines that have a vendor as draft purchase orders. Lines it could not order stay in the consolidation queue."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/releases/new">
+          Start a release run
+        </Link>
+      }
+      noun="release runs"
+      singular="release run"
+      columns={columns}
+      filters={listFilters}
+      useRows={useReleaseRows}
+      getRowKey={(r) => r.id}
+      onRowOpen={(r) => navigate(`/purchasing/releases/${r.id}`)}
+      empty={{ title: "No release runs yet", description: "Start a run to order the approved requisition lines that already have a vendor." }}
+    />
   );
 }
+
+const RELEASE_RUN_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "rel-legal-entity", label: "Legal entity" },
+  windowDays: { id: "rel-window", label: "Delivery window (days)" },
+  maxLines: { id: "rel-max", label: "Most lines to read" },
+};
 
 /** Starts a release run for a legal entity and opens its record. */
 export function ReleaseRunCreatePage() {
@@ -137,6 +135,8 @@ export function ReleaseRunCreatePage() {
   const [busy, setBusy] = useState(false);
   // One key per distinct request, so a retry after a dropped response replays the stored run instead of ordering twice.
   const key = useMemo(() => newIdempotencyKey(), [legalEntityId, windowDays, maxLines]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([legalEntityId, windowDays, maxLines]));
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -150,6 +150,7 @@ export function ReleaseRunCreatePage() {
         { legalEntityId: legalEntityId.trim(), windowDays: Number(windowDays), maxLines: Number(maxLines) },
         key,
       );
+      release();
       navigate(`/purchasing/releases/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -167,6 +168,7 @@ export function ReleaseRunCreatePage() {
         description="Orders every approved requisition line of the legal entity that has a vendor, one vendor at a time, as draft purchase orders. Lines without a vendor, and vendors whose orders cannot be made, stay in the consolidation queue with the reason."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, RELEASE_RUN_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Run">
           <div className={styles.grid}>
             <FormField id="rel-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -192,6 +194,7 @@ export function ReleaseRunCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

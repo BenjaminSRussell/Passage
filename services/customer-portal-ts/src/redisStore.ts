@@ -4,7 +4,7 @@
 // replayed callback finds nothing on any pod.
 
 import type { RespClient, RespValue } from "./resp.ts";
-import { ABSOLUTE_TIMEOUT_MS, expired, LOGIN_TTL_MS, newSession, StoreUnavailable, type PendingLogin, type Session, type SessionStore } from "./session.ts";
+import { ABSOLUTE_TIMEOUT_MS, expired, LOGIN_TTL_MS, newSession, StoreUnavailable, type Limiter, type PendingLogin, type Session, type SessionStore } from "./session.ts";
 import type { CustomerIdentity } from "./oidc.ts";
 
 const TOUCH_AFTER_MS = 60_000;
@@ -102,6 +102,36 @@ export class RedisSessionStore implements SessionStore {
       return typeof l.nonce === "string" && typeof l.verifier === "string" && typeof l.expiresAt === "number" && l.expiresAt >= now ? l : undefined;
     } catch {
       return undefined;
+    }
+  }
+}
+
+/**
+ * The per-session rate limit shared by every pod (#30): one counter per session and fixed window in the session store, raised with
+ * INCR and given a time to live of two windows when it is created, so the limit is the same whether a contact's calls land on one pod
+ * or many. A store that cannot be reached is StoreUnavailable (the portal answers 503), never a free pass.
+ */
+export class RedisRateLimiter implements Limiter {
+  private readonly client: Pick<RespClient, "command">;
+  private readonly limit: number;
+  private readonly windowMs: number;
+  private readonly prefix: string;
+
+  constructor(client: Pick<RespClient, "command">, limit: number, windowMs: number, prefix = "customer-portal:") {
+    this.client = client;
+    this.limit = limit;
+    this.windowMs = windowMs;
+    this.prefix = prefix;
+  }
+
+  async allow(key: string, now: number): Promise<boolean> {
+    const counter = `${this.prefix}rate:${key}:${Math.floor(now / this.windowMs)}`;
+    try {
+      const count = Number(await this.client.command("INCR", counter));
+      if (count === 1) await this.client.command("PEXPIRE", counter, this.windowMs * 2);
+      return count <= this.limit;
+    } catch (err) {
+      throw new StoreUnavailable(`the session store failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

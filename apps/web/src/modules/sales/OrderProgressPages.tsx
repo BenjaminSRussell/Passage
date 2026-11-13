@@ -2,7 +2,29 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, Textarea, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  EmptyState,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  StatusPill,
+  Textarea,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   cancelOrderRemainder,
   describeProblem,
@@ -190,6 +212,17 @@ const refusalTitle: Record<string, string> = {
   "SLS-0060": "This reference was already recorded",
 };
 
+const PROGRESS_FIELDS: Record<string, FormFieldTarget> = {
+  sourceRef: { id: "progress-source", label: "Reference" },
+  lines: { label: "Lines" },
+};
+
+/** A line's quantity error is keyed `line-<lineNo>`. */
+function progressLineTarget(key: string): FormFieldTarget | undefined {
+  const lineNo = /^line-(\d+)$/.exec(key)?.[1];
+  return lineNo ? { id: `progress-line-${lineNo}`, label: `Quantity on line ${lineNo}` } : undefined;
+}
+
 /** Records a delivery or an invoice on one order: pick the report, name its source and enter the quantity covered on each line. */
 export function NewOrderProgressPage() {
   const { id = "" } = useParams();
@@ -204,6 +237,8 @@ export function NewOrderProgressPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([chosenKind, sourceRef, quantities, finals]));
   // The delivery tolerance of each line's product and customer widens what a
   // delivery may cover. It is a hint: when it cannot be read the form checks the
   // exact open quantity and the service stays the judge. A catch-weight line is
@@ -299,6 +334,7 @@ export function NewOrderProgressPage() {
     setBusy(true);
     try {
       await recordOrderProgress(id, { kind, sourceRef: sourceRef.trim(), lines: chosen }, key.current);
+      release();
       navigate(`/sales/orders/${id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -415,6 +451,7 @@ export function NewOrderProgressPage() {
       ) : null}
       <Card>
         <form className={styles.form} onSubmit={(e) => void submit(e)} noValidate aria-label="Record delivery or invoice">
+          <FormErrorSummary items={summaryItems(errors, PROGRESS_FIELDS, progressLineTarget)} attempt={attempt} />
           <FormField id="progress-kind" label="Report">
             {(control) => (
               <Select
@@ -460,6 +497,7 @@ export function NewOrderProgressPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

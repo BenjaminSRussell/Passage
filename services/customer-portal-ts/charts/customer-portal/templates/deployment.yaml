@@ -63,6 +63,8 @@ spec:
               value: {{ .Values.upstreams.party | quote }}
             - name: IDENTITY_URL
               value: {{ .Values.upstreams.identity | quote }}
+            - name: PRINT_URL
+              value: {{ .Values.upstreams.print | quote }}
             {{- if .Values.sessionStore.url }}
             - name: SESSION_STORE_URL
               value: {{ .Values.sessionStore.url | quote }}

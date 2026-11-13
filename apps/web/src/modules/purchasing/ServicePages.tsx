@@ -1,7 +1,31 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  DataTable,
+  EmptyState,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  buttonClassName,
+  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   ProcurementApiError,
   changeModelServiceSpec,
@@ -26,7 +50,21 @@ import {
   type ServiceSpecResult,
 } from "./api/client";
 import { MAX_DEPTH, MAX_NODES, draftFromOutline, newOutlineRow, toOutlineInput, type OutlineDraftRow } from "./outline";
-import { Details, LoadError, ShortId, StatusBadge, currencyPattern, dash, decimalPattern, statusLabel, useResource, uuidPattern, type Failure, Named } from "./parts";
+import {
+  Details,
+  LoadError,
+  ShortId,
+  StatusBadge,
+  currencyPattern,
+  dash,
+  decimalPattern,
+  statusLabel,
+  useResource,
+  uuidPattern,
+  type Failure,
+  Named,
+  useProcurementPages,
+} from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -513,7 +551,7 @@ export function ServiceSpecPage() {
 
 // --- Model service specifications ---
 
-const modelColumns: DataTableColumn<ModelServiceSpec>[] = [
+const modelColumns: ListColumn<ModelServiceSpec>[] = [
   { key: "code", header: "Code", mono: true },
   { key: "name", header: "Name" },
   { key: "currency", header: "Currency", mono: true },
@@ -521,87 +559,40 @@ const modelColumns: DataTableColumn<ModelServiceSpec>[] = [
   { key: "status", header: "Status", render: (m) => <StatusBadge status={m.status} /> },
 ];
 
+const modelFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+  { kind: "text", key: "q", label: "Code or name" },
+];
+
+function useModelRows(query: ListQuery): ListData<ModelServiceSpec> {
+  const status = (query.filters.status ?? "") as ModelServiceStatus | "";
+  const q = query.filters.q ?? "";
+  return useProcurementPages(`${status}|${q}`, (cursor, signal) => listModelServiceSpecs({ status, q }, { cursor, signal }));
+}
+
 /** Model service specifications with status and text filters and load-more paging. */
 export function ModelServiceSpecsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<ModelServiceStatus | "">("");
-  const [q, setQ] = useState("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<ModelServiceSpec[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listModelServiceSpecs({ status, q }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, q, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Model service specifications"
-        description="Reusable outlines of planned services, for example a maintenance visit, that a buyer copies into a service line instead of typing it again."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/model-service-specs/new">
-            New model
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="ms-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as ModelServiceStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-        <div className={styles.filter}>
-          <FormField id="ms-text-filter" label="Code or name" optional>
-            {(control) => (
-              <Input
-                {...control}
-                value={q}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setQ(e.target.value);
-                }}
-              />
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="model service specifications" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Model service specifications"
-        columns={modelColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(m) => m.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No model service specifications yet", description: "Create one for a service you buy often, such as a maintenance visit or an inspection." }}
-        onRowOpen={(m) => navigate(`/purchasing/model-service-specs/${m.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-model-service-specs"
+      title="Model service specifications"
+      description="Reusable outlines of planned services, for example a maintenance visit, that a buyer copies into a service line instead of typing it again."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/model-service-specs/new">
+          New model
+        </Link>
+      }
+      noun="model service specifications"
+      singular="model service specification"
+      columns={modelColumns}
+      filters={modelFilters}
+      useRows={useModelRows}
+      search={(m) => ({ number: m.code, name: m.name })}
+      getRowKey={(m) => m.id}
+      onRowOpen={(m) => navigate(`/purchasing/model-service-specs/${m.id}`)}
+      empty={{ title: "No model service specifications yet", description: "Create one for a service you buy often, such as a maintenance visit or an inspection." }}
+    />
   );
 }
 
@@ -678,6 +669,34 @@ function ModelFields({ id, form, set, errors, creating }: { id: string; form: Mo
   );
 }
 
+const MODEL_SERVICE_SPEC_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "ms-legal-entity", label: "Legal entity" },
+  code: { id: "ms-code", label: "Code" },
+  name: { id: "ms-name", label: "Name" },
+  currency: { id: "ms-currency", label: "Currency" },
+  outline: { label: "Outline" },
+};
+
+const OUTLINE_TARGETS: Record<string, [string, string]> = {
+  kind: ["kind", "kind"],
+  depth: ["depth", "nesting level"],
+  description: ["description", "description"],
+  productId: ["product", "service product"],
+  qty: ["qty", "quantity"],
+  unit: ["unit", "unit"],
+  unitPrice: ["price", "unit price"],
+};
+
+/** An outline row's error is keyed `outline[i].field`; the model form's rows are the `msr` fields. */
+function outlineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^outline\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const target = OUTLINE_TARGETS[field];
+  const row = `Row ${Number(i) + 1}`;
+  return target ? { id: `msr-${i}-${target[0]}`, label: `${row} ${target[1]}` } : { label: row };
+}
+
 /** Create form for a model service specification. */
 export function ModelServiceSpecCreatePage() {
   const navigate = useNavigate();
@@ -687,6 +706,8 @@ export function ModelServiceSpecCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form, rows]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form, rows]));
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -697,6 +718,7 @@ export function ModelServiceSpecCreatePage() {
     setBusy(true);
     try {
       const { body } = await createModelServiceSpec(built.input, key);
+      release();
       navigate(`/purchasing/model-service-specs/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -711,6 +733,7 @@ export function ModelServiceSpecCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New model service specification" description="A code is unique within its legal entity and cannot be renamed; deactivate a model instead of deleting it." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, MODEL_SERVICE_SPEC_CREATE_FIELDS, outlineTarget)} attempt={attempt} />
         <Card title="Model">
           <ModelFields id="ms" form={form} set={(patch) => setForm((f) => ({ ...f, ...patch }))} errors={errors} creating />
         </Card>
@@ -729,6 +752,7 @@ export function ModelServiceSpecCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

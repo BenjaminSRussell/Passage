@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { get } from "../api";
-import { Badge, day, money, Page, State, useLoad } from "../ui";
+import { Badge, day, DownloadButton, money, Page, State, useLoad } from "../ui";
 
 interface Totals { net: string; charges: string; tax: string; gross: string }
 export interface Invoice {
@@ -46,6 +46,7 @@ export function InvoiceDetail() {
         {(i) => (
           <>
             <p><Link to="/invoices">Back to invoices</Link></p>
+            <DownloadButton path={`/api/v1/invoices/${i.id}/pdf`} fileName={`${i.number}.pdf`} label={`Download ${i.type === "CREDIT_NOTE" ? "credit note" : "invoice"} PDF`} />
             <dl>
               <dt>Number</dt><dd>{i.number}</dd>
               {i.originalNumber ? <><dt>Credits invoice</dt><dd>{i.originalNumber}</dd></> : null}

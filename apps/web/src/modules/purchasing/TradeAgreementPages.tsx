@@ -4,14 +4,23 @@ import {
   Alert,
   Button,
   Card,
-  DataTable,
   EmptyState,
   FormField,
   Input,
   PageHeader,
   Select,
   buttonClassName,
-  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   createTradeAgreement,
@@ -38,6 +47,7 @@ import {
   useResource,
   uuidPattern,
   type Failure,
+  useProcurementPages,
 } from "./parts";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { LookupFormField } from "../../shell/lookup/LookupFormField";
@@ -62,7 +72,7 @@ export function quantityBreak(t: Pick<TradeAgreement, "fromQty" | "toQty">): str
   return t.toQty ? `${t.fromQty} to under ${t.toQty}` : `${t.fromQty} and up`;
 }
 
-const listColumns: DataTableColumn<TradeAgreement>[] = [
+const listColumns: ListColumn<TradeAgreement>[] = [
   { key: "account", header: "Vendor", render: (t) => level(accountLabels[t.accountCode], t.accountId, t.accountCode === "VENDOR" ? "vendor" : t.accountCode === "GROUP" ? "vendorGroup" : undefined) },
   { key: "item", header: "Item", render: (t) => level(itemLabels[t.itemCode], t.itemId, t.itemCode === "PRODUCT" ? "product" : t.itemCode === "GROUP" ? "itemGroup" : undefined) },
   { key: "price", header: "Price", align: "end", render: (t) => `${money(t.price, t.currency)} / ${t.priceUnit} ${t.unit}` },
@@ -72,48 +82,41 @@ const listColumns: DataTableColumn<TradeAgreement>[] = [
   { key: "status", header: "Status", render: (t) => <StatusBadge status={t.status} /> },
 ];
 
+const listFilters: ListFilterDef[] = [
+  { kind: "entity", key: "accountId", label: "Vendor", entity: "vendor" },
+  { kind: "entity", key: "itemId", label: "Product", entity: "product" },
+];
+
+function useAgreementRows(query: ListQuery): ListData<TradeAgreement> {
+  const accountId = query.filters.accountId ?? "";
+  const itemId = query.filters.itemId ?? "";
+  return useProcurementPages(`${accountId}|${itemId}`, (cursor, signal) =>
+    listTradeAgreements({ accountId: accountId || undefined, itemId: itemId || undefined }, { cursor, signal }),
+  );
+}
+
 /** Trade agreement journal: every price row, newest first. */
 export function TradeAgreementsPage() {
   const navigate = useNavigate();
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<TradeAgreement[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listTradeAgreements({}, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Trade agreements"
-        description="Vendor price rows. The most specific valid row wins: vendor over group over all, product over group over all."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/trade-agreements/new">
-            New price row
-          </Link>
-        }
-      />
-      {page.error ? <LoadError what="trade agreements" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Trade agreements"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(t) => t.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No trade agreements yet", description: "Price rows you add here price purchase order lines automatically." }}
-        onRowOpen={(t) => navigate(`/purchasing/trade-agreements/${t.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-trade-agreements"
+      title="Trade agreements"
+      description="Vendor price rows. The most specific valid row wins: vendor over group over all, product over group over all."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/trade-agreements/new">
+          New price row
+        </Link>
+      }
+      noun="trade agreements"
+      singular="trade agreement"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useAgreementRows}
+      getRowKey={(t) => t.id}
+      onRowOpen={(t) => navigate(`/purchasing/trade-agreements/${t.id}`)}
+      empty={{ title: "No trade agreements yet", description: "Price rows you add here price purchase order lines automatically." }}
+    />
   );
 }
 
@@ -172,6 +175,19 @@ function toInput(d: Draft): TradeAgreementInput {
   };
 }
 
+const TRADE_AGREEMENT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  accountId: { id: "ta-account-id", label: "Vendor or vendor group" },
+  itemId: { id: "ta-item-id", label: "Product or item group" },
+  price: { id: "ta-price", label: "Price" },
+  priceUnit: { id: "ta-price-unit", label: "Per quantity" },
+  currency: { id: "ta-currency", label: "Currency" },
+  unit: { id: "ta-unit", label: "Unit" },
+  fromQty: { id: "ta-from-qty", label: "From quantity" },
+  toQty: { id: "ta-to-qty", label: "To quantity" },
+  validFrom: { id: "ta-valid-from", label: "Valid from" },
+  validTo: { id: "ta-valid-to", label: "Valid to" },
+};
+
 /** New price row; the service refuses an equal-specificity overlap with PRC-TA-002. */
 export function TradeAgreementCreatePage() {
   const navigate = useNavigate();
@@ -194,6 +210,8 @@ export function TradeAgreementCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [draft]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([draft]));
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   async function onSubmit(event: FormEvent) {
@@ -205,6 +223,7 @@ export function TradeAgreementCreatePage() {
     setBusy(true);
     try {
       const { body } = await createTradeAgreement(toInput(draft), key);
+      release();
       navigate(`/purchasing/trade-agreements/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -219,6 +238,7 @@ export function TradeAgreementCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New price row" description="A purchase price for a vendor (or group, or all vendors) and a product (or group, or all products)." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, TRADE_AGREEMENT_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Applies to">
           <div className={styles.grid}>
             <FormField id="ta-account-code" label="Vendor level">
@@ -313,6 +333,7 @@ export function TradeAgreementCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

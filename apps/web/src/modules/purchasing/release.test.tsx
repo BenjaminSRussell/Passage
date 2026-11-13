@@ -46,15 +46,16 @@ describe("release runs", () => {
     expect(screen.getByRole("link", { name: "Start a release run" })).toHaveAttribute("href", "/purchasing/releases/new");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "FAILED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/requisition-releases?status=FAILED"));
   });
 
   it("shows the empty state and the load error with a retry", async () => {
     let fail = true;
-    stubFetch(() => (fail ? problem(403, "AUTH-0003", "missing duty procurement.purchase-order.inquire") : json({ items: [] })));
+    stubFetch(() => (fail ? problem(500, "PRC-0500", "store unavailable") : json({ items: [] })));
     renderAt("/purchasing/releases");
-    expect(await screen.findByText(/Could not load the release runs/)).toBeInTheDocument();
-    expect(screen.getByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/Could not load release runs/)).toBeInTheDocument();
+    expect(screen.getByText(/PRC-0500/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("No release runs yet")).toBeInTheDocument();

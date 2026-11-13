@@ -165,6 +165,7 @@ paths:
         limit, a control character, a line with the wrong number of cells), or with 422 PRN-0009 when it has more than 500
         lines. Fields added since the first release are optional, so earlier callers are unaffected.
       x-passage-duty: print.document.render
+      x-passage-duty-alternatives: [print.customer-portal.render]
       requestBody:
         required: true
         content:

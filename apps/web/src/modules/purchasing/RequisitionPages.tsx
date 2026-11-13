@@ -14,7 +14,6 @@ import {
   FormSection,
   Input,
   PageHeader,
-  Select,
   Textarea,
   buttonClassName,
   summaryItems,
@@ -22,6 +21,11 @@ import {
   useUnsavedChanges,
   type DataTableColumn,
   type FormFieldTarget,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import { copy } from "../../shell/copy";
 import {
@@ -60,6 +64,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -69,7 +74,7 @@ const STATUSES: RequisitionStatus[] = ["DRAFT", "IN_REVIEW", "APPROVED", "REJECT
 
 const roleLabels = approverRoleLabels;
 
-const listColumns: DataTableColumn<RequisitionSummary>[] = [
+const listColumns: ListColumn<RequisitionSummary>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "status", header: "Status", render: (row) => <StatusBadge status={row.status} /> },
   { key: "lineCount", header: "Lines", align: "end" },
@@ -78,76 +83,40 @@ const listColumns: DataTableColumn<RequisitionSummary>[] = [
   { key: "createdAt", header: "Created", mono: true, render: (row) => row.createdAt.slice(0, 10) },
 ];
 
+const listFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+  { kind: "select", key: "mine", label: "Raised by", anyLabel: "Anyone", options: [{ value: "true", label: "Only me" }] },
+];
+
+function useRequisitionRows(query: ListQuery): ListData<RequisitionSummary> {
+  const status = (query.filters.status ?? "") as RequisitionStatus | "";
+  const mine = query.filters.mine === "true";
+  return useProcurementPages(`${status}|${mine}`, (cursor, signal) => listRequisitions({ status, mine }, { cursor, signal }));
+}
+
 /** Requisition list: status filter, "only mine", newest first, load-more paging. */
 export function RequisitionsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<RequisitionStatus | "">("");
-  const [mine, setMine] = useState(false);
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<RequisitionSummary[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listRequisitions({ status, mine }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, mine, cursor],
-  );
-
-  const resetTo = (apply: () => void) => {
-    setCursor(undefined);
-    apply();
-  };
-
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Requisitions"
-        description="Requests to buy goods and services, routed for approval by amount and category."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/requisitions/new">
-            New requisition
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="requisition-status-filter" label="Status">
-            {(control) => (
-              <Select {...control} value={status} onChange={(e) => resetTo(() => setStatus(e.target.value as RequisitionStatus | ""))}>
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-        <label className={styles.checkboxRow}>
-          <Input type="checkbox" checked={mine} onChange={(e) => resetTo(() => setMine(e.target.checked))} />
-          Only my requisitions
-        </label>
-      </div>
-      {page.error ? <LoadError what="requisitions" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Requisitions"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(row) => row.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No requisitions yet", description: "Requisitions you or your team raise appear here." }}
-        onRowOpen={(row) => navigate(`/purchasing/requisitions/${row.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-requisitions"
+      title="Requisitions"
+      description="Requests to buy goods and services, routed for approval by amount and category."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/requisitions/new">
+          New requisition
+        </Link>
+      }
+      noun="requisitions"
+      singular="requisition"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useRequisitionRows}
+      search={(row) => ({ number: row.number })}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/purchasing/requisitions/${row.id}`)}
+      empty={{ title: "No requisitions yet", description: "Requisitions you or your team raise appear here." }}
+    />
   );
 }
 

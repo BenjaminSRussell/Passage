@@ -109,6 +109,23 @@ interface Settlement {
 }
 export const settlements: Settlement[] = [];
 
+/** Gives back to an item what a reversed settlement took off it (an unapplied payment), and logs it. */
+export function unsettleItem(id: string, total: number, date = day(0)): OpenItem | undefined {
+  const inv = invoices.get(id);
+  if (inv) {
+    const gross = Number(inv.totals.gross);
+    const open = Math.min(gross, r2(invoiceOpen(inv) + total));
+    invoices.update(id, { settled: 1 - open / gross, status: open >= gross ? "POSTED" : "PARTIALLY_SETTLED", version: inv.version + 1 });
+  } else {
+    const item = extraItems.get(id);
+    if (!item) return undefined;
+    const open = r2(Number(item.openAmount) + total);
+    extraItems.update(id, { openAmount: dec(open), status: itemStatus(open, Number(item.amount)), version: item.version + 1 });
+  }
+  settlements.push({ openItemId: id, amount: -total, date });
+  return findItem(id);
+}
+
 /** Reduces an item's open amount by total (payment, discount and write-off together) and logs it. */
 export function settleItem(id: string, total: number, date = day(0)): OpenItem | undefined {
   const inv = invoices.get(id);

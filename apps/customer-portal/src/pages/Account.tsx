@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { get } from "../api";
-import { Badge, day, Field, money, Page, State, useLoad } from "../ui";
+import { Badge, day, DownloadButton, Field, money, Page, State, useLoad } from "../ui";
 
 export interface OpenItem {
   id: string; documentNumber: string; documentDate: string; dueDate: string; currency: string; amount: string; openAmount: string;
@@ -94,6 +94,7 @@ export function Statement() {
       <State load={load} empty={(d) => d.sections.length === 0}>
         {(d) => (
           <>
+            <DownloadButton path={`/api/v1/statement/pdf${asOf ? `?asOf=${asOf}` : ""}`} fileName={`statement-${d.asOf}.pdf`} label="Download statement PDF" />
             {d.sections.map((s) => (
               <section key={s.currency} aria-label={`Statement in ${s.currency}`}>
                 <h2>{s.currency}</h2>

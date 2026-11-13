@@ -2,7 +2,22 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  useFormBaseline,
+  useUnsavedChanges,
+  FormErrorSummary,
+  summaryItems,
+  useSubmitAttempt,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import { createArrival, fetchOpenPurchaseOrders, fetchPurchaseOrderLines, newKey, type ArrivalInput, type PurchaseOrderLine } from "./api/client";
 import { DECIMAL, fieldErrors, UUID } from "../../shell/api/http";
 import styles from "../../shell/pageLayout.module.css";
@@ -108,6 +123,29 @@ export function toArrivalInput(v: ArrivalDraft): ArrivalInput {
   };
 }
 
+const NEW_ARRIVAL_FIELDS: Record<string, FormFieldTarget> = {
+  vendorId: { id: "arrival-vendorId", label: "Vendor" },
+  purchaseOrderId: { id: "arrival-purchaseOrderId", label: "Purchase order" },
+  legalEntityId: { id: "arrival-legalEntityId", label: "Legal entity" },
+  packingSlip: { id: "arrival-packingSlip", label: "Packing slip" },
+  carrier: { id: "arrival-carrier", label: "Carrier" },
+  palletCount: { id: "arrival-palletCount", label: "Pallet count" },
+  receiptDate: { id: "arrival-receiptDate", label: "Receipt date" },
+  currency: { id: "arrival-currency", label: "Currency" },
+  lines: { label: "Lines" },
+};
+
+const ARRIVAL_LINE_LABELS: Record<string, string> = { poLineNo: "purchase order line", productId: "product", overDeliveryPct: "over-delivery percent", unit: "unit" };
+
+/** A line's error is keyed `lines[i].field`. */
+function arrivalLineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const label = ARRIVAL_LINE_LABELS[field];
+  return label ? { id: `line-${i}-${field}`, label: `Line ${Number(i) + 1} ${label}` } : { label: `Line ${Number(i) + 1}` };
+}
+
 /** Record a delivery at the dock (POST /arrivals); the receipt is registered afterwards. */
 export function NewArrivalPage() {
   const navigate = useNavigate();
@@ -118,6 +156,7 @@ export function NewArrivalPage() {
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const attempt = useSubmitAttempt(errors);
   const purchaseOrder = useQuery({
     queryKey: ["receiving", "purchase-order-lines", values.purchaseOrderId],
     queryFn: () => fetchPurchaseOrderLines(values.purchaseOrderId),
@@ -167,6 +206,7 @@ export function NewArrivalPage() {
       <PageHeader title="Record arrival" description="Log a delivery as it reaches the dock. You register the quantities received on the receipt afterwards." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New arrival">
+          <FormErrorSummary items={summaryItems(errors, NEW_ARRIVAL_FIELDS, arrivalLineTarget)} attempt={attempt} />
           <FormField id="arrival-vendorId" label="Vendor" error={errors.vendorId}>
             {(c) => (
               <EntityLookup

@@ -31,9 +31,9 @@ describe("purchasing policy list", () => {
   });
 
   it("shows the problem code and retries on a load failure", async () => {
-    const mock = stubFetch(() => problem(403, "AUTH-0003", "missing duty"));
+    const mock = stubFetch(() => problem(500, "PRC-0500", "store unavailable"));
     renderAt("/purchasing/policies");
-    expect(await screen.findByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/PRC-0500/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
   });

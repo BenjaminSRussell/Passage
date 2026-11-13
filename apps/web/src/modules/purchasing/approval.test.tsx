@@ -77,12 +77,13 @@ describe("requisition approvals inbox", () => {
         : json({ items: [waiting(), waiting({ id: "66666666-6666-4666-8666-666666666666", number: "PR-00000008", nextApprover: "CFO", approvedSteps: 1 })] }),
     );
     const { container, router } = renderAt("/purchasing/approvals");
-    const table = await findTable({ name: "Requisitions waiting for approval" });
+    const table = await findTable({ name: "Requisition approvals" });
     expect(within(table).getByText("PR-00000007")).toBeInTheDocument();
     expect(within(table).getByText("2 of 2")).toBeInTheDocument();
     expect(within(table).getAllByText("7000.00 USD")).toHaveLength(2);
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Waiting for"), { target: { value: "CFO" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/requisition-approvals?role=CFO"));
     fireEvent.click(within(table).getByText("PR-00000007"));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/purchasing/requisitions/${REQ_ID}`));
@@ -91,10 +92,10 @@ describe("requisition approvals inbox", () => {
 
   it("shows the empty state, and the load error with a retry", async () => {
     let fail = true;
-    stubFetch(() => (fail ? problem(403, "AUTH-0003", "missing duty") : json({ items: [] })));
+    stubFetch(() => (fail ? problem(500, "PRC-0500", "store unavailable") : json({ items: [] })));
     renderAt("/purchasing/approvals");
-    expect(await screen.findByText(/Could not load the approvals/)).toBeInTheDocument();
-    expect(screen.getByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/Could not load approvals/)).toBeInTheDocument();
+    expect(screen.getByText(/PRC-0500/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Nothing is waiting for approval")).toBeInTheDocument();

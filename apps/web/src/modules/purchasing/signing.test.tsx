@@ -58,9 +58,9 @@ describe("signing limits list", () => {
   });
 
   it("shows the problem code and retries", async () => {
-    const mock = stubFetch(() => problem(403, "AUTH-0003", "missing duty"));
+    const mock = stubFetch(() => problem(500, "PRC-0500", "store unavailable"));
     renderAt("/purchasing/signing-limits");
-    expect(await screen.findByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/PRC-0500/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
   });
@@ -70,8 +70,10 @@ describe("signing limits list", () => {
     renderAt("/purchasing/signing-limits");
     await screen.findByText("No signing limits yet");
     fireEvent.change(screen.getByLabelText("Document"), { target: { value: "REQUISITION" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(mock.mock.calls.some(([url]) => String(url).includes("documentType=REQUISITION"))).toBe(true));
     fireEvent.change(screen.getByLabelText("Recertification"), { target: { value: "yes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(mock.mock.calls.some(([url]) => String(url).includes("expired=true"))).toBe(true));
   });
 });
@@ -121,7 +123,7 @@ describe("signing limit requests", () => {
   it("lists pending requests first and explains the empty state", async () => {
     const mock = stubFetch(() => json({ items: [] }));
     const { container } = renderAt("/purchasing/signing-limit-requests");
-    expect(await screen.findByText("No requests")).toBeInTheDocument();
+    expect(await screen.findByText("No signing limit requests match these filters")).toBeInTheDocument();
     expect(String(mock.mock.calls[0][0])).toContain("status=PENDING");
     expect(pageViolations(container)).toEqual([]);
   });

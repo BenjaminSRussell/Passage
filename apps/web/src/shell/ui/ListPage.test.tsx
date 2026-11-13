@@ -472,6 +472,30 @@ describe("ListPage saved views", () => {
     expect(last()).toEqual({ filters: { status: "PAID" }, sort: null });
   });
 
+  it("opens on the list's working set without a default view, and never over a default view the person saved", () => {
+    renderList(memory(), { defaultFilters: { status: "OPEN" } });
+    expect(last()).toEqual({ filters: { status: "OPEN" }, sort: null });
+    cleanup();
+    const saved = {
+      version: 1,
+      defaultId: "v1",
+      views: [{ id: "v1", name: "Everything", query: { filters: {}, sort: null }, visible: ["number", "amount", "status"], known: ["number", "amount", "status", "note"] }],
+    };
+    renderList(memory({ [viewStoreKey("ada", "invoices")]: JSON.stringify(saved) }), { defaultFilters: { status: "OPEN" } });
+    expect(last()).toEqual({ filters: {}, sort: null });
+  });
+
+  it("opens on the filters a link asked for, over the default view's filters but with its columns", () => {
+    const saved = {
+      version: 1,
+      defaultId: "v1",
+      views: [{ id: "v1", name: "Paid", query: { filters: { status: "PAID" }, sort: null }, visible: ["number", "status"], known: ["number", "amount", "status", "note"] }],
+    };
+    renderList(memory({ [viewStoreKey("ada", "invoices")]: JSON.stringify(saved) }), { initialFilters: { status: "OPEN" }, defaultFilters: { status: "PAID" } });
+    expect(last()).toEqual({ filters: { status: "OPEN" }, sort: null });
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Number", "Status"]);
+  });
+
   it("starts empty from a record it cannot read, and says when the browser will not keep a view", async () => {
     const user = userEvent.setup();
     renderList(memory({ [viewStoreKey("ada", "invoices")]: JSON.stringify({ version: 99, views: [{}] }) }, true));

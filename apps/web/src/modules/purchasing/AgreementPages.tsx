@@ -12,8 +12,19 @@ import {
   Input,
   PageHeader,
   Select,
+  ListPage,
   buttonClassName,
   type DataTableColumn,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   changePurchaseAgreement,
@@ -42,6 +53,7 @@ import {
   money,
   statusLabel,
   todayIso,
+  useProcurementPages,
   useResource,
   uuidPattern,
   type Failure,
@@ -81,7 +93,7 @@ export function ReleaseLevel({ pct }: { pct: string }) {
   return <Badge tone={tone}>{pct} %</Badge>;
 }
 
-const listColumns: DataTableColumn<PurchaseAgreementSummary>[] = [
+const listColumns: ListColumn<PurchaseAgreementSummary>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "status", header: "Status", render: (a) => <StatusBadge status={a.status} /> },
   { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
@@ -90,72 +102,36 @@ const listColumns: DataTableColumn<PurchaseAgreementSummary>[] = [
   { key: "maxPctReleased", header: "Highest release", align: "end", render: (a) => <ReleaseLevel pct={a.maxPctReleased} /> },
 ];
 
+const listFilters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }];
+
+function useAgreementRows(query: ListQuery): ListData<PurchaseAgreementSummary> {
+  const status = (query.filters.status ?? "") as AgreementStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listPurchaseAgreements({ status }, { cursor, signal }));
+}
+
 /** Purchase agreement list with a status filter and load-more paging. */
 export function PurchaseAgreementsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<AgreementStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<PurchaseAgreementSummary[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listPurchaseAgreements({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Purchase agreements"
-        description="Blanket agreements with a vendor: what was committed, what purchase orders have released, and what remains."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/agreements/new">
-            New agreement
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="pa-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as AgreementStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="purchase agreements" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Purchase agreements"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(a) => a.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No purchase agreements yet", description: "Agree quantities or spend with a vendor, then release purchase orders against them." }}
-        onRowOpen={(a) => navigate(`/purchasing/agreements/${a.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-agreements"
+      title="Purchase agreements"
+      description="Blanket agreements with a vendor: what was committed, what purchase orders have released, and what remains."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/agreements/new">
+          New agreement
+        </Link>
+      }
+      noun="purchase agreements"
+      singular="purchase agreement"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useAgreementRows}
+      search={(a) => ({ number: a.number })}
+      getRowKey={(a) => a.id}
+      onRowOpen={(a) => navigate(`/purchasing/agreements/${a.id}`)}
+      empty={{ title: "No purchase agreements yet", description: "Agree quantities or spend with a vendor, then release purchase orders against them." }}
+    />
   );
 }
 
@@ -251,6 +227,36 @@ function toInput(h: HeaderDraft, lines: LineDraft[]): PurchaseAgreementInput {
   };
 }
 
+const PURCHASE_AGREEMENT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "pa-legal-entity", label: "Legal entity" },
+  vendorId: { id: "pa-vendor", label: "Vendor" },
+  currency: { id: "pa-currency", label: "Currency" },
+  validFrom: { id: "pa-valid-from", label: "Valid from" },
+  validTo: { id: "pa-valid-to", label: "Valid to" },
+};
+
+const AGREEMENT_LINE_TARGETS: Record<string, [string, string]> = {
+  commitmentType: ["type", "commitment"],
+  productId: ["product", "product"],
+  category: ["category", "category"],
+  unit: ["unit", "unit"],
+  committedQty: ["committed", "committed quantity"],
+  committedAmount: ["committed", "committed amount"],
+  unitPrice: ["price", "unit price"],
+  discountPct: ["discount", "discount %"],
+  maxEnforced: ["enforced", "limit"],
+};
+
+/** A line's error is keyed `lines[i].field`. */
+function agreementLineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const target = AGREEMENT_LINE_TARGETS[field];
+  const row = `Line ${Number(i) + 1}`;
+  return target ? { id: `pa-line-${i}-${target[0]}`, label: `${row} ${target[1]}` } : { label: row };
+}
+
 /** New purchase agreement: header, validity and commitment lines (FR-17.5). */
 export function PurchaseAgreementCreatePage() {
   const navigate = useNavigate();
@@ -267,6 +273,8 @@ export function PurchaseAgreementCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [header, lines]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([header, lines]));
   const setH = (patch: Partial<HeaderDraft>) => setHeader((h) => ({ ...h, ...patch }));
   const update = (index: number, patch: Partial<LineDraft>) => setLines((ls) => ls.map((l, i) => (i === index ? { ...l, ...patch } : l)));
 
@@ -279,6 +287,7 @@ export function PurchaseAgreementCreatePage() {
     setBusy(true);
     try {
       const { body } = await createPurchaseAgreement(toInput(header, lines), key);
+      release();
       navigate(`/purchasing/agreements/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -296,6 +305,7 @@ export function PurchaseAgreementCreatePage() {
         description="Commit a quantity or a spend with one vendor. Purchase order lines that reference an agreement line release against it."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, PURCHASE_AGREEMENT_CREATE_FIELDS, agreementLineTarget)} attempt={attempt} />
         <Card title="Agreement">
           <div className={styles.grid}>
             <FormField id="pa-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -419,6 +429,7 @@ export function PurchaseAgreementCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

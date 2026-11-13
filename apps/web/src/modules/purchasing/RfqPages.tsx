@@ -15,6 +15,17 @@ import {
   Textarea,
   buttonClassName,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   awardRFQ,
@@ -62,6 +73,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import { AmendmentsPanel, EditDraftForm } from "./RfqAmend";
 import styles from "./pages.module.css";
@@ -76,7 +88,7 @@ function lineItem(l: { productId?: string; description?: string }) {
   return l.description ? l.description : <Named entity="product" id={l.productId} />;
 }
 
-const listColumns: DataTableColumn<RFQSummary>[] = [
+const listColumns: ListColumn<RFQSummary>[] = [
   { key: "number", header: "Number", mono: true },
   {
     key: "status",
@@ -94,72 +106,38 @@ const listColumns: DataTableColumn<RFQSummary>[] = [
   { key: "replyCount", header: "Replies", align: "end" },
 ];
 
+const listFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+];
+
+function useRFQRows(query: ListQuery): ListData<RFQSummary> {
+  const status = (query.filters.status ?? "") as RFQStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listRFQs({ statuses: status ? [status] : [] }, { cursor, signal }));
+}
+
 /** RFQ list with a status filter and load-more paging. */
 export function RFQsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<RFQStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<RFQSummary[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listRFQs({ statuses: status ? [status] : [] }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Requests for quotation"
-        description="Ask several vendors to quote, compare their replies line by line, and award the winners as purchase orders."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/rfqs/new">
-            New RFQ
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="rfq-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as RFQStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="requests for quotation" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Requests for quotation"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(r) => r.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No requests for quotation yet", description: "Create one for the lines that need a vendor, then send it to the vendors you want quotes from." }}
-        onRowOpen={(r) => navigate(`/purchasing/rfqs/${r.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-rfqs"
+      title="Requests for quotation"
+      description="Ask several vendors to quote, compare their replies line by line, and award the winners as purchase orders."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/rfqs/new">
+          New RFQ
+        </Link>
+      }
+      noun="requests for quotation"
+      singular="request for quotation"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useRFQRows}
+      search={(r) => ({ number: r.number })}
+      getRowKey={(r) => r.id}
+      onRowOpen={(r) => navigate(`/purchasing/rfqs/${r.id}`)}
+      empty={{ title: "No requests for quotation yet", description: "Create one for the lines that need a vendor, then send it to the vendors you want quotes from." }}
+    />
   );
 }
 
@@ -256,6 +234,28 @@ function toInput(h: HeaderDraft, lines: LineDraft[]): RFQInput {
   };
 }
 
+const RFQ_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "rfq-legal-entity", label: "Legal entity" },
+  replyDeadline: { id: "rfq-deadline", label: "Reply deadline" },
+  rankingRule: { id: "rfq-ranking", label: "Rank replies by" },
+  criteria: { label: "Scoring criteria" },
+};
+
+const RFQ_ROW_TARGETS: Record<string, Record<string, [string, string]>> = {
+  criteria: { name: ["name", "name"], weight: ["weight", "weight"] },
+  lines: { productId: ["product", "product"], description: ["description", "description"], qty: ["qty", "quantity"], unit: ["unit", "unit"], requiredDate: ["required", "required by"] },
+};
+
+/** A criterion's error is keyed `criteria[i].field`, a line's `lines[i].field`. */
+function rfqRowTarget(key: string): FormFieldTarget | undefined {
+  const match = /^(criteria|lines)\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, group, i, field] = match;
+  const target = RFQ_ROW_TARGETS[group][field];
+  const row = `${group === "lines" ? "Line" : "Criterion"} ${Number(i) + 1}`;
+  return target ? { id: `rfq-${group === "lines" ? "line" : "criterion"}-${i}-${target[0]}`, label: `${row} ${target[1]}` } : { label: row };
+}
+
 /** New RFQ: legal entity, reply deadline, ranking rule and the lines to quote (FR-17.4). */
 export function RFQCreatePage() {
   const navigate = useNavigate();
@@ -295,6 +295,8 @@ export function RFQCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [header, lines]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([header, lines]));
   const setH = (patch: Partial<HeaderDraft>) => setHeader((h) => ({ ...h, ...patch }));
   const update = (index: number, patch: Partial<LineDraft>) => setLines((ls) => ls.map((l, i) => (i === index ? { ...l, ...patch } : l)));
 
@@ -307,6 +309,7 @@ export function RFQCreatePage() {
     setBusy(true);
     try {
       const { body } = await createRFQ(toInput(header, lines), key);
+      release();
       navigate(`/purchasing/rfqs/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -324,6 +327,7 @@ export function RFQCreatePage() {
         description="The RFQ is saved as a draft. Send it to vendors from its page; replies after the deadline are kept but left out of the ranking, or refused when the RFQ is sealed."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, RFQ_CREATE_FIELDS, rfqRowTarget)} attempt={attempt} />
         <Card title="Request">
           <div className={styles.grid}>
             <FormField id="rfq-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -459,6 +463,7 @@ export function RFQCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

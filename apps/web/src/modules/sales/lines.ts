@@ -1,3 +1,4 @@
+import type { FormFieldTarget } from "../../shell/ui";
 import type { DeliveryDateControl, NewOrderLine } from "./api/client";
 import { DECIMAL, UUID } from "./format";
 
@@ -64,4 +65,14 @@ export function validateLines(lines: LineValues[], errors: Record<string, string
     requestedShipDate: l.requestedShipDate,
     ...(l.deliveryDateControl ? { deliveryDateControl: l.deliveryDateControl } : {}),
   }));
+}
+
+/** The summary target of a line error keyed `lines[i].field`, for a form whose LinesEditor uses `idPrefix`. */
+export function lineErrorTarget(key: string, idPrefix = "line"): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, name] = match;
+  const field = lineFields.find((f) => f.name === name);
+  const row = `Line ${Number(i) + 1}`;
+  return field ? { id: `${idPrefix}-${i}-${name}`, label: `${row} ${field.label.toLowerCase()}` } : { label: row };
 }

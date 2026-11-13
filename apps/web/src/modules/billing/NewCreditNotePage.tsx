@@ -1,6 +1,22 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import { BillingApiError, createCreditNote, describeProblem, getInvoice, newKey, type CreditNoteInput, type Invoice, type Problem } from "./api/client";
 import { DAY, DECIMAL, invoiceName, today } from "./format";
 import styles from "./pages.module.css";
@@ -72,6 +88,21 @@ function serviceErrors(fields: Record<string, string>, input: CreditNoteInput, o
   return out;
 }
 
+const CREDIT_FIELDS: Record<string, FormFieldTarget> = {
+  creditDate: { id: "cn-date", label: "Credit date" },
+  reason: { id: "cn-reason", label: "Reason" },
+  chargeAmount: { id: "cn-charge", label: "Header charges to credit" },
+  lines: { label: "Lines" },
+};
+
+/** A line's quantity error is keyed `lines[i].qty` by its place in the original; its field is named by the line number. */
+function creditLineTarget(original: Invoice): (key: string) => FormFieldTarget | undefined {
+  return (key) => {
+    const line = original.lines[Number(/^lines\[(\d+)\]\.qty$/.exec(key)?.[1] ?? -1)];
+    return line ? { id: `cn-line-${line.lineNo}`, label: `Quantity to credit on line ${line.lineNo}` } : undefined;
+  };
+}
+
 function CreditForm({ original }: { original: Invoice }) {
   const navigate = useNavigate();
   const [values, setValues] = useState<CreditValues>(() => emptyCredit(today() < original.invoiceDate ? original.invoiceDate : today()));
@@ -79,6 +110,8 @@ function CreditForm({ original }: { original: Invoice }) {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
   const currency = original.currency;
 
   function update(patch: Partial<CreditValues>) {
@@ -96,6 +129,7 @@ function CreditForm({ original }: { original: Invoice }) {
     const input = toCreditInput(values, original);
     try {
       const created = await createCreditNote(input, key.current);
+      release();
       navigate(`/billing/invoices/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -111,6 +145,7 @@ function CreditForm({ original }: { original: Invoice }) {
   return (
     <Card>
       <form className={styles.form} onSubmit={submit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, CREDIT_FIELDS, creditLineTarget(original))} attempt={attempt} />
         <FormField id="cn-scope" label="What to credit">
           {(c) => (
             <Select {...c} value={values.scope} onChange={(e) => update({ scope: e.target.value as CreditScope })}>
@@ -192,6 +227,7 @@ function CreditForm({ original }: { original: Invoice }) {
           </Link>
         </div>
       </form>
+      {prompt}
     </Card>
   );
 }

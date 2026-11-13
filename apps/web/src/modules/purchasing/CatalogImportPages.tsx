@@ -14,6 +14,17 @@ import {
   Textarea,
   buttonClassName,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   actOnCatalogImport,
@@ -40,6 +51,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -56,7 +68,7 @@ const ROW_STATUSES: ImportRowStatus[] = [
   "REJECTED",
 ];
 
-const listColumns: DataTableColumn<CatalogImport>[] = [
+const listColumns: ListColumn<CatalogImport>[] = [
   {
     key: "createdAt",
     header: "Staged",
@@ -83,88 +95,36 @@ const listColumns: DataTableColumn<CatalogImport>[] = [
   },
 ];
 
+const listFilters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: IMPORT_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }];
+
+function useImportRows(query: ListQuery): ListData<CatalogImport> {
+  const status = (query.filters.status ?? "") as CatalogImportStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listCatalogImports({ status }, { cursor, signal }));
+}
+
 /** Staged vendor catalog files with a status filter and load-more paging (FR-17.18). */
 export function CatalogImportsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<CatalogImportStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<CatalogImport[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listCatalogImports({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Vendor catalog imports"
-        description="Vendor price files wait here until a buyer accepts their rows and adds them to a catalog."
-        actions={
-          <Link
-            className={buttonClassName("secondary")}
-            to="/purchasing/catalogs"
-          >
-            Catalogs
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="import-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as CatalogImportStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {IMPORT_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? (
-        <LoadError
-          what="vendor imports"
-          error={page.error}
-          onRetry={page.reload}
-        />
-      ) : null}
-      <DataTable
-        label="Vendor catalog imports"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(i) => i.id}
-        loading={page.loading && rows.length === 0}
-        empty={{
-          title: "No vendor imports yet",
-          description:
-            "Open a catalog and choose Import vendor file to stage a price list.",
-        }}
-        onRowOpen={(i) => navigate(`/purchasing/catalog-imports/${i.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button
-            loading={page.loading}
-            onClick={() => setCursor(page.data?.nextCursor)}
-          >
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-catalog-imports"
+      title="Vendor catalog imports"
+      description="Vendor price files wait here until a buyer accepts their rows and adds them to a catalog."
+      actions={
+        <Link className={buttonClassName("secondary")} to="/purchasing/catalogs">
+          Catalogs
+        </Link>
+      }
+      noun="vendor imports"
+      singular="vendor import"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useImportRows}
+      search={(i) => ({ number: "", name: i.fileName || "Pasted rows" })}
+      getRowKey={(i) => i.id}
+      onRowOpen={(i) => navigate(`/purchasing/catalog-imports/${i.id}`)}
+      empty={{ title: "No vendor imports yet", description: "Open a catalog and choose Import vendor file to stage a price list." }}
+    />
   );
 }
 
@@ -173,6 +133,11 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const CSV_HINT =
   "Vendor part number,Name,Category,Unit,Unit price,Currency,Lead time days\nG-100,Safety gloves,MRO,PR,4.25,USD,3";
+
+const CATALOG_IMPORT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  vendorId: { id: "import-vendor", label: "Vendor" },
+  csv: { id: "import-csv", label: "Rows" },
+};
 
 /** Stage a vendor CSV against a catalog: choose a file or paste the rows (FR-17.18). */
 export function CatalogImportCreatePage() {
@@ -185,6 +150,8 @@ export function CatalogImportCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [vendorId, fileName, csv]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([vendorId, fileName, csv]));
 
   async function onFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -219,6 +186,7 @@ export function CatalogImportCreatePage() {
         },
         key,
       );
+      release();
       navigate(`/purchasing/catalog-imports/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -247,6 +215,7 @@ export function CatalogImportCreatePage() {
         {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, CATALOG_IMPORT_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Vendor file">
           <div className={styles.grid}>
             <FormField
@@ -302,6 +271,7 @@ export function CatalogImportCreatePage() {
           </div>
         </Card>
       </form>
+      {prompt}
     </div>
   );
 }

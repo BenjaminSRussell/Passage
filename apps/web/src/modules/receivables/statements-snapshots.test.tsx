@@ -1,4 +1,4 @@
-import { findAlert, findStatus, findTable } from "../../test-utils";
+import { findAlert, findTable } from "../../test-utils";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { BalanceSnapshot, Payment, Statement } from "./api/client";
@@ -127,7 +127,8 @@ describe("Balance snapshots", () => {
     const { container } = renderAt("/receivables/balance-snapshots");
     expect(await screen.findByText("Choose a legal entity")).toBeInTheDocument();
     fill("Legal entity", LE);
-    const table = await findTable({ name: "Balance snapshots for 2027-03-31" });
+    expect(await screen.findByText("Balances as of 2027-03-31.")).toBeInTheDocument();
+    const table = await findTable({ name: "Balance snapshots" });
     expect(server.calls[0].url.searchParams.get("legalEntityId")).toBe(LE);
     expect(server.calls[0].url.searchParams.has("asOf")).toBe(false);
     const rows = within(table).getAllByRole("row").slice(1);
@@ -154,7 +155,7 @@ describe("Balance snapshots", () => {
     expect(await screen.findByText("No snapshot")).toBeInTheDocument();
     const lists = server.calls.filter((c) => c.method === "GET").length;
     fireEvent.click(screen.getByRole("button", { name: "Run snapshot now" }));
-    expect(await findStatus()).toHaveTextContent("2 balance(s) stored for 2027-03-30; 1 change(s) announced.");
+    expect(await screen.findByText("2 balance(s) stored for 2027-03-30; 1 change(s) announced.")).toBeInTheDocument();
     const post = server.calls.find((c) => c.method === "POST")!;
     expect(post.body).toEqual({ legalEntityId: LE, asOf: "2027-03-30" });
     await waitFor(() => expect(server.calls.filter((c) => c.method === "GET").length).toBeGreaterThan(lists));
@@ -178,7 +179,7 @@ describe("Balance snapshots", () => {
     renderAt("/receivables/balance-snapshots");
     fill("Legal entity", LE);
     const failed = await findAlert();
-    expect(failed).toHaveTextContent("Could not load the balance snapshots");
+    expect(failed).toHaveTextContent("Could not load balance snapshots");
     expect(failed).toHaveTextContent("COM-0500");
   });
 });

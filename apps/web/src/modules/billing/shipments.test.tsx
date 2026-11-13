@@ -188,6 +188,20 @@ describe("Invoice shipments", () => {
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: "Create proposals" }));
     expect(await screen.findByText("is required (BIL-0004)")).toBeInTheDocument();
+    const summary = screen.getByRole("alert", { name: /problem/i });
+    expect(within(summary).getByRole("button", { name: "Slip 1, line 1 revenue account: is required (BIL-0004)" })).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement?.id).toBe("sp-line-0-0-revenueAccount"));
+  });
+
+  it("lists a header field the form renders through its helper in the error summary and focuses it", async () => {
+    renderAt("/billing/proposals/new");
+    fillForm();
+    fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "euro" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create proposals" }));
+    const summary = await screen.findByRole("alert", { name: /problem/i });
+    expect(within(summary).getByRole("button", { name: "Currency: Enter a three-letter currency code such as EUR." })).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement?.id).toBe("sp-currency"));
+    expect(server.calls).toHaveLength(0);
   });
 
   it("adds and removes packing slips and lines", async () => {

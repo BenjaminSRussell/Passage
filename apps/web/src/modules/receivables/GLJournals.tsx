@@ -1,10 +1,25 @@
 import { useState } from "react";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  type BadgeTone,
+  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+} from "../../shell/ui";
 import { describeProblem, listGLJournals, retryGLJournal, sweepGLJournals, type GLJournal, type JournalStatus, type JournalSweepResult, type Problem } from "./api/client";
 import { dateTime, DAY, money } from "./format";
-import { CommandFailure, LoadFailure } from "./parts";
+import { CommandFailure } from "./parts";
 import styles from "./pages.module.css";
-import { useLoad } from "./useLoad";
+import { useCappedRows } from "./useLoad";
 import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 200;
@@ -29,7 +44,7 @@ export function standing(journal: GLJournal): Standing {
 
 const TONES: Record<Standing, BadgeTone> = { Posted: "success", Waiting: "info", Parked: "danger" };
 
-const columns: DataTableColumn<GLJournal>[] = [
+const columns: ListColumn<GLJournal>[] = [
   { key: "postingDate", header: "Posting date", mono: true },
   { key: "sourceType", header: "What happened", render: (row) => SOURCE_LABELS[row.sourceType] ?? row.sourceType },
   { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
@@ -38,16 +53,36 @@ const columns: DataTableColumn<GLJournal>[] = [
   { key: "attempts", header: "Tries", mono: true, align: "end" },
 ];
 
+const journalFilters: ListFilterDef[] = [
+  {
+    kind: "select",
+    key: "status",
+    label: "Status",
+    anyLabel: "Posted and waiting",
+    options: [
+      { value: "PENDING", label: "Waiting or parked" },
+      { value: "POSTED", label: "Posted" },
+    ],
+  },
+  { kind: "select", key: "parked", label: "Parked", anyLabel: "Parked or not", options: [{ value: "true", label: "Parked journals only" }] },
+];
+
+/** `version` reloads the list after a posting pass or a retry. */
+function useJournalRows(query: ListQuery, version: number, onCapped: (capped: boolean) => void): ListData<GLJournal> {
+  const status = (query.filters.status ?? "") as JournalStatus | "";
+  const parked = query.filters.parked === "true";
+  return useCappedRows((signal) => listGLJournals({ status, parked, limit: PAGE }, signal), `${status}|${parked}|${version}`, PAGE, onCapped);
+}
+
 /**
  * Ledger journals (30-2): every cash receipt, application, fee, interest charge and write-off receivables owes the general ledger,
  * stored with the change that caused it and posted by a worker. A journal the ledger refused is parked until someone retries it,
  * if need be under a new posting date.
  */
 export function GLJournalsPage() {
-  const [status, setStatus] = useState<JournalStatus | "">("");
-  const [parkedOnly, setParkedOnly] = useState(false);
   const [selected, setSelected] = useState<GLJournal | null>(null);
-  const state = useLoad((signal) => listGLJournals({ status, parked: parkedOnly, limit: PAGE }, signal), `${status}|${parkedOnly}`);
+  const [version, setVersion] = useState(0);
+  const [capped, setCapped] = useState(false);
   const [sweeping, setSweeping] = useState(false);
   const [sweep, setSweep] = useState<JournalSweepResult | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -58,7 +93,7 @@ export function GLJournalsPage() {
     setSweep(null);
     try {
       setSweep(await sweepGLJournals());
-      state.reload();
+      setVersion((v) => v + 1);
     } catch (error) {
       setFailure(describeProblem(error));
     } finally {
@@ -67,53 +102,49 @@ export function GLJournalsPage() {
   }
 
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Ledger journals"
-        description="What receivables owes the general ledger, newest first. A journal is posted automatically; one the ledger refused is parked here until you retry it."
-        actions={
-          <Button variant="primary" loading={sweeping} onClick={() => void postDue()}>
-            Post due journals
-          </Button>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="gl-status" label="Status">
-          {(c) => (
-            <Select {...c} value={status} onChange={(e) => setStatus(e.target.value as JournalStatus | "")}>
-              <option value="">Posted and waiting</option>
-              <option value="PENDING">Waiting or parked</option>
-              <option value="POSTED">Posted</option>
-            </Select>
-          )}
-        </FormField>
-        <span className={styles.check}>
-          <input id="gl-parked" type="checkbox" checked={parkedOnly} onChange={(e) => setParkedOnly(e.target.checked)} />
-          <label htmlFor="gl-parked">Parked journals only</label>
-        </span>
-      </div>
-      {sweep ? (
-        <Alert tone={sweep.failed + sweep.parked > 0 ? "warning" : "success"} title="Journals posted" live="status">
-          {sweep.posted} posted, {sweep.failed} to try again later, {sweep.parked} parked because the ledger refused them.
-        </Alert>
-      ) : null}
-      {failure ? <CommandFailure title="Could not post the journals" problem={failure} /> : null}
-      {state.error ? (
-        <LoadFailure title="Could not load the ledger journals" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Ledger journals"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No journals", description: "Journals appear here when a payment is received or applied, a fee or interest is charged or an amount is written off." }}
-          onRowOpen={(row) => setSelected(row)}
-        />
-      )}
-      {state.data && state.data.length >= PAGE ? <p className={styles.note}>Showing the newest {PAGE} journals.</p> : null}
-      {selected ? <JournalDetail key={selected.id} journal={selected} onChanged={() => { setSelected(null); state.reload(); }} /> : null}
-    </div>
+    <ListPage
+      id="receivables-gl-journals"
+      title="Ledger journals"
+      description="What receivables owes the general ledger, newest first. A journal is posted automatically; one the ledger refused is parked here until you retry it."
+      actions={
+        <Button variant="primary" loading={sweeping} onClick={() => void postDue()}>
+          Post due journals
+        </Button>
+      }
+      notice={
+        <>
+          {sweep ? (
+            <Alert tone={sweep.failed + sweep.parked > 0 ? "warning" : "success"} title="Journals posted" live="status">
+              {sweep.posted} posted, {sweep.failed} to try again later, {sweep.parked} parked because the ledger refused them.
+            </Alert>
+          ) : null}
+          {failure ? <CommandFailure title="Could not post the journals" problem={failure} /> : null}
+        </>
+      }
+      noun="ledger journals"
+      singular="ledger journal"
+      columns={columns}
+      filters={journalFilters}
+      useRows={(query) => useJournalRows(query, version, setCapped)}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => setSelected(row)}
+      empty={{ title: "No journals", description: "Journals appear here when a payment is received or applied, a fee or interest is charged or an amount is written off." }}
+      footer={
+        <>
+          {capped ? <p className={styles.note}>Showing the newest {PAGE} journals.</p> : null}
+          {selected ? (
+            <JournalDetail
+              key={selected.id}
+              journal={selected}
+              onChanged={() => {
+                setSelected(null);
+                setVersion((v) => v + 1);
+              }}
+            />
+          ) : null}
+        </>
+      }
+    />
   );
 }
 

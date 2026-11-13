@@ -1,6 +1,29 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, entityText, FormField, Input, ListPage, PageHeader, StatusPill, type ListColumn, type ListData, type ListFilterDef, type ListQuery, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  entityText,
+  FormField,
+  Input,
+  ListPage,
+  PageHeader,
+  StatusPill,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  useFormBaseline,
+  useUnsavedChanges,
+  FormErrorSummary,
+  summaryItems,
+  useSubmitAttempt,
+  type FormFieldTarget,
+  FormSection,
+} from "../../shell/ui";
 import {
   createQuotation,
   describeProblem,
@@ -16,7 +39,7 @@ import {
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { EntityName } from "../../shell/lookup/EntityName";
 import { formatDateTime, money, sentence, today, UUID } from "./format";
-import { emptyLine, validateLines, type LineValues } from "./lines";
+import { emptyLine, lineErrorTarget, validateLines, type LineValues } from "./lines";
 import { LinesEditor } from "./LinesEditor";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -161,6 +184,17 @@ export function QuotationsPage() {
   );
 }
 
+const NEW_QUOTATION_FIELDS: Record<string, FormFieldTarget> = {
+  currency: { id: "quotation-currency", label: "Currency" },
+  legalEntityId: { id: "quotation-legalEntityId", label: "Legal entity" },
+  customerId: { id: "quotation-customerId", label: "Customer" },
+  invoiceAccountId: { id: "quotation-invoiceAccountId", label: "Invoice account" },
+  validUntil: { id: "quotation-validUntil", label: "Valid until" },
+  probabilityPct: { id: "quotation-probabilityPct", label: "Win probability %" },
+  listingOverrideReason: { id: "quotation-listingOverrideReason", label: "Listing override reason" },
+  lines: { label: "Lines" },
+};
+
 /** Creates a DRAFT quotation numbered SQ- (duty sales.quotation.maintain). */
 export function NewQuotationPage() {
   const navigate = useNavigate();
@@ -179,6 +213,7 @@ export function NewQuotationPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
 
   function update(patch: Partial<QuotationValues>) {
     setValues((v) => ({ ...v, ...patch }));
@@ -243,13 +278,18 @@ export function NewQuotationPage() {
       <PageHeader title="New sales quotation" description="The quotation is saved as a draft. Send it from the quotation page, then convert it into an order." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New sales quotation">
+          <FormErrorSummary items={summaryItems(errors, NEW_QUOTATION_FIELDS, (key) => lineErrorTarget(key))} attempt={attempt} />
           {lookup("legalEntityId", "legalEntity", "Legal entity", "The selling legal entity.")}
           {lookup("customerId", "customer", "Customer", "Search by name or account number.")}
           {lookup("invoiceAccountId", "customer", "Invoice account", "Leave empty to invoice the customer.", true)}
           {header("currency", "Currency")}
           {header("validUntil", "Valid until", "Leave empty for the legal entity's quotation expiry (30 days unless changed in Sales parameters).", { type: "date", optional: true })}
-          {header("probabilityPct", "Win probability %", "Leave empty for the legal entity's default (50% unless changed in Sales parameters).", { optional: true, numeric: true })}
-          {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
+          <FormSection collapse="more">
+            {header("probabilityPct", "Win probability %", "Leave empty for the legal entity's default (50% unless changed in Sales parameters).", { optional: true, numeric: true })}
+          </FormSection>
+          <FormSection collapse="advanced">
+            {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
+          </FormSection>
           <LinesEditor lines={values.lines} errors={errors} legalEntityId={values.legalEntityId} newLineDate={start} onChange={(lines) => update({ lines })} />
           {failure ? (
             <div className={styles.formActions}>

@@ -13,5 +13,6 @@
 | Logout ends the Keycloak session | built | the browser is sent to the end-session URL |
 | Sign-in realm, contact invitation, MFA | built in identity, not applied | a live Keycloak is needed (#213) |
 | Paying by card or ACH (FR-30.25) | not built | needs the payments gateway (a separate service) that does not exist |
-| Invoice and statement PDF download, shipment tracking, documents (FR-30.26) | not built | need the document store (decision on #512) and a carrier read API |
+| Invoice and statement PDF download (FR-30.26) | built | Download buttons on the invoice and statement pages; the BFF renders them through print |
+| Shipment tracking, stored documents (FR-30.26) | not built | need the document store (decision on #512) and a carrier read API |
 | Full WCAG audit with a screen reader, mobile-first visual check | not built | axe covers the automatable part; the screen-reader pass and device review go to #512 |

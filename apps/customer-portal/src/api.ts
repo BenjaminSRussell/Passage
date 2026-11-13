@@ -70,6 +70,24 @@ export async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * Downloads a PDF the BFF renders (an invoice or the statement): fetched with the same legal entity and account headers as every
+ * read, then saved under the name the BFF gives. A plain link could not carry those headers.
+ */
+export async function download(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(path, { method: "GET", credentials: "same-origin", headers: { ...headers("GET"), accept: "application/pdf" } });
+  if (!res.ok) return fail(res);
+  const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 /** The two writes of the portal. `key` is one per submit (newSubmitKey). */
 export async function post<T>(path: string, body: unknown, key: string): Promise<T> {
   const res = await fetch(path, {

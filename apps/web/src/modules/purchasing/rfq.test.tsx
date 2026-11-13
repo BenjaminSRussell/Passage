@@ -144,6 +144,7 @@ describe("RFQ list", () => {
     renderAt("/purchasing/rfqs");
     expect(await screen.findByRole("heading", { name: "No requests for quotation yet" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "AWARDED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/rfqs?status=AWARDED"));
   });
 

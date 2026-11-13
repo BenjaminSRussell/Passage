@@ -61,9 +61,11 @@ describe("ledger journals page", () => {
     expect(table).not.toHaveTextContent("PAY-1");
     expect(pageViolations(container)).toEqual([]);
 
-    fireEvent.click(screen.getByLabelText("Parked journals only"));
+    fireEvent.change(screen.getByLabelText("Parked"), { target: { value: "true" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("parked") === "true")).toBe(true));
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "PENDING" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("status") === "PENDING")).toBe(true));
   });
 
