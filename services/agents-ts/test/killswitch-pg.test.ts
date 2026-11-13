@@ -174,6 +174,14 @@ describe.runIf(ownerUrl)("kill switch shared through Postgres (AC-47.6)", () => 
     }
   });
 
+  it("polls work on pooled connections an earlier tenant transaction left with an empty tenant setting", async () => {
+    const t = nextTenant();
+    await toggle(admin(t), { scope: "TENANT", tenantId: t, active: true }, new KillSwitchRegistry(() => Date.now()));
+    // Dirty every connection of the pool (max 16) with a transaction-scoped tenant setting.
+    await Promise.all(Array.from({ length: 32 }, () => fx.store.withTenant(nextTenant(), (c) => c.query("select pg_sleep(0.01)"))));
+    for (let i = 0; i < 32; i++) expect((await log.changesSince(0)).some((c) => c.tenantId === t)).toBe(true);
+  });
+
   it("toggles are append-only for the application role, and a row can only switch the writer's own tenant", async () => {
     const t = nextTenant();
     await toggle(admin(t), { scope: "TENANT", tenantId: t, active: true }, new KillSwitchRegistry(() => Date.now()));
