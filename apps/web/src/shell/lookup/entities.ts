@@ -51,7 +51,8 @@ export type LookupEntityKey =
   | "checklistTemplate"
   | "questionnaireSchedule"
   | "employment"
-  | "dockAppointment";
+  | "dockAppointment"
+  | "project";
 
 export interface LookupOption {
   id: string;
@@ -1061,6 +1062,18 @@ export const lookupDefs: Record<LookupEntityKey, LookupDef> = {
       return match ? option(match, ["name"], ["code"], ["code"]) : null;
     },
   },
+  // A project is keyed by its code (P-1001), so the code is its name; the type and stage describe it.
+  project: listedEntity(
+    "project",
+    "/api/v1/projects",
+    (row) => {
+      const hit = option(row, ["id"], []);
+      const number = [text(row, "projectType")?.replace(/_/g, " ").toLowerCase(), text(row, "stage")?.replace(/_/g, " ").toLowerCase()].filter(Boolean).join(" · ");
+      return hit ? { ...hit, number: number || undefined, currency: text(row, "currency") } : null;
+    },
+    () => ({ limit: "100" }),
+    (row, scope) => !scope.legalEntityId || text(row, "legalEntityId") === scope.legalEntityId,
+  ),
 };
 
 export function formatOption(entry: LookupOption): string {

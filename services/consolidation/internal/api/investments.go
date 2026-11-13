@@ -152,6 +152,11 @@ type investmentBody struct {
 	Dividends        string `json:"dividends"`
 	ClosingCarrying  string `json:"closingCarrying"`
 	UnrecognizedLoss string `json:"unrecognizedLoss"`
+	// A foreign associate (IAS 21.44, IAS 28): its currency, the closing carrying amount in it, and the exchange difference of the
+	// retranslation at the closing rate, in the group currency, booked to the translation reserve.
+	UnitCurrency        string `json:"unitCurrency,omitempty"`
+	ClosingCarryingUnit string `json:"closingCarryingUnit,omitempty"`
+	FXDifference        string `json:"fxDifference,omitempty"`
 }
 
 type investmentsOut struct {
@@ -164,8 +169,13 @@ type investmentsOut struct {
 
 func toInvestmentBody(r store.InvestmentRecord, currency string) investmentBody {
 	f := func(d decimal.Decimal) string { return d.StringFixed(int32(money.MinorUnits(currency))) }
-	return investmentBody{Unit: r.UnitID, Method: r.Method, OwnershipPct: r.OwnershipPct.String(), Cost: f(r.Cost), OpeningCarrying: f(r.OpeningCarrying),
+	out := investmentBody{Unit: r.UnitID, Method: r.Method, OwnershipPct: r.OwnershipPct.String(), Cost: f(r.Cost), OpeningCarrying: f(r.OpeningCarrying),
 		ShareOfProfit: f(r.ShareOfProfit), Dividends: f(r.Dividends), ClosingCarrying: f(r.ClosingCarrying), UnrecognizedLoss: f(r.UnrecognizedLoss)}
+	if r.UnitCurrency != "" {
+		out.UnitCurrency, out.FXDifference = r.UnitCurrency, f(r.FXDifference)
+		out.ClosingCarryingUnit = r.ClosingCarryingUnit.StringFixed(int32(money.MinorUnits(r.UnitCurrency)))
+	}
+	return out
 }
 
 // getRunInvestments handles GET /runs/{id}/investments: the investments register of a run, one line per unit in the group currency: at

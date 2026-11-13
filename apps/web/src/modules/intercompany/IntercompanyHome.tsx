@@ -4,6 +4,19 @@ import styles from "./pages.module.css";
 
 const tools = [
   {
+    title: "Entities and accounting matrix",
+    to: "/intercompany/entities",
+    action: "Set up the entities",
+    description:
+      "Say where each entity keeps its books and which accounts hold each pair's receivable and payable, so the service can post and read the ledgers.",
+  },
+  {
+    title: "Transfer prices and settings",
+    to: "/intercompany/transfer-prices",
+    action: "Open transfer prices",
+    description: "Store the effective-dated price of each lender, borrower and category, and choose how charges settle and when the ledgers are reconciled.",
+  },
+  {
     title: "Trading partners",
     to: "/intercompany/partners",
     action: "Manage pairings",

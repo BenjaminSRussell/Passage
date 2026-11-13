@@ -1,0 +1,19 @@
+{
+  "pack": "payroll_ytd",
+  "expectations": [
+    {"type": "expect_column_values_to_not_be_null", "check": "legacy_id_present", "column": "legacyId"},
+    {"type": "expect_column_values_to_be_unique", "check": "legacy_id_unique", "column": "legacyId", "skip_blank": true},
+    {"type": "expect_compound_columns_to_be_unique", "check": "worker_tax_year_unique", "columns": ["worker", "taxYear"]},
+    {"type": "expect_column_values_to_be_in_set", "check": "currency_iso4217", "column": "currency", "set": "iso4217"},
+    {"type": "expect_column_values_to_be_in_set", "check": "worker_in_master", "column": "worker", "set": "workers"},
+    {"type": "expect_column_values_to_match_regex", "check": "tax_year_yyyy", "column": "taxYear", "regex": "^[0-9]{4}$"},
+    {"type": "expect_column_values_to_be_between", "check": "amounts_not_negative", "column": "gross", "min": "0"},
+    {"type": "expect_column_values_to_be_between", "check": "amounts_not_negative", "column": "tax", "min": "0"},
+    {"type": "expect_column_values_to_be_between", "check": "amounts_not_negative", "column": "deductions", "min": "0"},
+    {"type": "expect_column_values_to_have_max_decimals_for_currency", "check": "amounts_in_minor_units", "column": "gross", "currency_column": "currency"},
+    {"type": "expect_column_values_to_have_max_decimals_for_currency", "check": "amounts_in_minor_units", "column": "tax", "currency_column": "currency"},
+    {"type": "expect_column_values_to_have_max_decimals_for_currency", "check": "amounts_in_minor_units", "column": "deductions", "currency_column": "currency"},
+    {"type": "expect_column_values_to_have_max_decimals_for_currency", "check": "amounts_in_minor_units", "column": "net", "currency_column": "currency"},
+    {"type": "expect_column_values_to_equal_signed_sum_of_columns", "check": "net_is_gross_less_tax_and_deductions", "column": "net", "terms": ["+gross", "-tax", "-deductions"]}
+  ]
+}

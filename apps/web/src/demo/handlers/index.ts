@@ -22,3 +22,4 @@ import "./technician";
 import "./analytics";
 import "./b2b";
 import "./party";
+import "./migration";

@@ -9,6 +9,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/dq"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -129,6 +130,13 @@ func (s *Server) startOnhandRun(w http.ResponseWriter, r *http.Request) {
 		items[it] = struct{}{}
 	}
 	accepted, quarantined := domain.ValidateOnhand(lines, items)
+	accepted, quarantined, err = gateSuite(domain.PackOnhand, lines, dq.OnhandRows(lines), map[string]map[string]bool{"items": dq.SetOf(items), "iso4217": dq.ISO4217()},
+		func(l domain.OnhandLine) string { return l.LegacyID }, func(l domain.OnhandLine) string { return l.LegacyID }, accepted, quarantined,
+		func(l domain.OnhandLine, why string) domain.Quarantined { return quarantine(l.Record(), l, why) })
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	if err := domain.QuarantineShareExceeded(len(quarantined), len(lines), maxPct); err != nil {
 		fail(w, r, err)
 		return

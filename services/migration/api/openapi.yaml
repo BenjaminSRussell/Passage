@@ -1021,6 +1021,37 @@ paths:
           description: MIG-XREF-REF-MISMATCH, a ref's entity is neither the subject entity nor a collection subject entity of the mapping.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/xref:resolve:
+    get:
+      operationId: resolveXref
+      summary: Resolve legacy keys to the Passage ids this service loaded
+      description: "For a loading service (service token; duty migration.xref.read, granted to migration-factory): the Passage id of each legacy key of one entity from one source system, following a party merge to the surviving record (#49, H-S8-6: the migration factory resolves an open item's legacy customer). Keys the cross-reference does not hold are left out. The token's legal-entity scope applies, so a customer row of another legal entity is not found; a customer key is the legacy company and account joined by |, such as USMF|C-1001."
+      x-passage-duty: migration.xref.read
+      parameters:
+        - { name: sourceSystem, in: query, required: true, schema: { type: string, maxLength: 64 }, description: "ax2012, d365fo, sap_ecc, sap_s4 or a custom system" }
+        - { name: entity, in: query, required: true, schema: { type: string, maxLength: 64 }, description: such as customer }
+        - { name: keys, in: query, required: true, schema: { type: string }, description: 1 to 500 legacy keys separated by commas }
+      responses:
+        '200':
+          description: The keys the cross-reference holds, in the order asked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [sourceKey, targetId]
+                      properties:
+                        sourceKey: { type: string }
+                        targetId: { type: string, format: uuid }
+        '400':
+          description: COM-0001, a parameter is missing or there are more than 500 keys.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/migration-settings:
     get:
       operationId: getMigrationSettings

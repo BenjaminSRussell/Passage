@@ -180,7 +180,7 @@ paths:
         journal that the import creates, approves and posts in this call, so the stock is on hand and booked against the posting profile's
         opening account like any posted journal. `batchKey` makes a resend a replay (200 with `Idempotent-Replayed`, a half-finished call is
         completed); the same key with other content is 422 INV-OPB-002. 422 INV-OPB-001 names invalid rows (`errors` keyed `items[row].field`).
-        `qty` is positive, `costPrice` is the unit cost; the posted value is the sum of qty times costPrice. 503 INV-OPB-003 when not enabled.
+        `qty` is positive, `costPrice` is the unit cost; the posted value is the sum of qty times costPrice. 503 INV-OPB-003 when not enabled. A reference opens stock once per legal entity across batches: a reference another batch already reserved is 422 INV-OPB-005 with the rows named, and nothing of the batch is reserved or posted.
       x-passage-duty: inventory.import.write
       requestBody:
         required: true

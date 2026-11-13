@@ -81,7 +81,8 @@ describe("posted journals", () => {
     expect(await screen.findByText("Reversed")).toBeInTheDocument();
     expect(screen.getAllByText("Posted").length).toBeGreaterThan(1);
     expect(pageViolations(container)).toEqual([]);
-    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "compensated" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "compensated" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("status") === "compensated")).toBe(true));
   });
 

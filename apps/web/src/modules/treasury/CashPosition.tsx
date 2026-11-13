@@ -20,6 +20,7 @@ import { useLoad } from "./useLoad";
 const SOURCES: Record<AccountPositionRow["source"], string> = {
   "camt.052": "Intraday report",
   "camt.053": "Bank statement",
+  opening: "Opening balance from the migration",
   none: "No bank file yet",
 };
 

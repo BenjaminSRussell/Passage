@@ -132,7 +132,8 @@ type positionResponse struct {
 }
 
 // cashPosition answers the booked and available balance of every active bank account of a legal entity, from the
-// freshest of its latest camt.052 report and its latest camt.053 statement, with totals per currency (FR-36.8).
+// freshest of its latest camt.052 report, its latest camt.053 statement and its migrated opening balance, with totals per currency
+// (FR-36.8, #49).
 func (a *API) cashPosition(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) || !a.cashReady(w, r) {
 		return
@@ -151,7 +152,7 @@ func (a *API) cashPosition(w http.ResponseWriter, r *http.Request) {
 	resp := positionResponse{AsOf: now, StaleHours: domain.DefaultStaleHours, Accounts: []positionAccount{}}
 	positions := make([]domain.AccountPosition, 0, len(accounts))
 	for _, pa := range accounts {
-		pos := domain.Position(domain.PositionInput{Account: pa.Account.AccountCode, Currency: pa.Account.Currency, Statement: pa.Statement, Intraday: pa.Intraday}, now, domain.DefaultStaleHours)
+		pos := domain.Position(domain.PositionInput{Account: pa.Account.AccountCode, Currency: pa.Account.Currency, Statement: pa.Statement, Intraday: pa.Intraday, Opening: pa.Opening}, now, domain.DefaultStaleHours)
 		positions = append(positions, pos)
 		resp.Accounts = append(resp.Accounts, positionAccount{BankAccountID: pa.Account.ID, AccountCode: pa.Account.AccountCode, IBANMasked: pa.Account.IBANMasked, AccountPosition: pos})
 	}

@@ -843,3 +843,50 @@ export function listTolerances(signal?: AbortSignal): Promise<Tolerance[]> {
 export function putTolerance(body: ToleranceRequest, key: string = newKey()): Promise<Tolerance> {
   return send("/migration/tolerances", { method: "PUT", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
 }
+
+/** A staged onhand or bank_balances run sent to its target: inventory opening batches or treasury opening balances. */
+export interface OpeningLoad {
+  runId: string;
+  target: "inventory" | "treasury";
+  legalEntityId: string;
+  status: TargetLoadStatus;
+  clean: boolean;
+  staged: number;
+  loaded: number;
+  rejected: number;
+  pending: number;
+  attempts: number;
+  lastError?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  version: number;
+}
+
+export interface OpeningLoadDetail extends OpeningLoad {
+  reconciliation: ControlTotal[];
+  rejects: { legacyId: string; code: string; detail: string }[];
+}
+
+export interface OpeningLoadRequest {
+  legalEntityId: string;
+  postingDate: string;
+  /** Legacy item to Passage product id (onhand); an item that is already a product id needs no entry. */
+  products?: Record<string, string>;
+  /** Legacy bank account to treasury bank account id (bank_balances). */
+  bankAccounts?: Record<string, string>;
+}
+
+/** POST /migration/runs/{id}/opening-load: sends the staged balances to inventory or treasury and reconciles them. Repeatable. */
+export function runOpeningLoad(runId: string, req: OpeningLoadRequest): Promise<OpeningLoad> {
+  return send(`/migration/runs/${encodeURIComponent(runId)}/opening-load`, { method: "POST", body: JSON.stringify(req) });
+}
+
+/** GET /migration/runs/{id}/opening-load; null when the run has not been loaded yet (409 MIG-1563). */
+export async function getOpeningLoad(runId: string, signal?: AbortSignal): Promise<OpeningLoadDetail | null> {
+  try {
+    return await send<OpeningLoadDetail>(`/migration/runs/${encodeURIComponent(runId)}/opening-load`, {}, signal);
+  } catch (error) {
+    if (error instanceof MigrationApiError && error.code === "MIG-1563") return null;
+    throw error;
+  }
+}

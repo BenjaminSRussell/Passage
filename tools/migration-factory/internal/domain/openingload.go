@@ -220,6 +220,31 @@ func ReconcileStock(legalEntityID string, expected, actual OpeningTotals) ([]Con
 	return out, nil
 }
 
+// ReconcileOnHand is the on-hand read-back of BR-49.3 (H-S9-2): per product, the quantity the factory's accepted opening batches put
+// in the legal entity against what the inventory ledger's on-hand inquiry reports after the import. Products are Passage ids. Stock
+// moved after the load, or loaded into the entity from outside the factory, shows as a difference.
+func ReconcileOnHand(legalEntityID string, loaded, onHand map[string]decimal.Decimal) ([]ControlTotal, error) {
+	products := make([]string, 0, len(loaded))
+	for p := range loaded {
+		products = append(products, p)
+	}
+	for p := range onHand {
+		if _, ok := loaded[p]; !ok {
+			products = append(products, p)
+		}
+	}
+	sort.Strings(products)
+	out := make([]ControlTotal, 0, len(products))
+	for _, p := range products {
+		t, err := NewControlTotal("target.onhand.onhand_quantity", map[string]string{"legalEntityId": legalEntityID, "product": p}, loaded[p], onHand[p], Tolerance{})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 // ReconcileBank compares the accounts and the balance per currency in minor units that treasury holds with what was loaded.
 func ReconcileBank(legalEntityID string, expected, actual OpeningTotals) ([]ControlTotal, error) {
 	key := map[string]string{"legalEntityId": legalEntityID}

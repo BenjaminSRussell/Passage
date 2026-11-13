@@ -107,3 +107,26 @@ func TestXrefSummary_CountsPerSystemAndEntity(t *testing.T) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A loading service resolves legacy keys to the Passage ids this service loaded (#49, H-S8-6); keys it does not hold are left out.
+func TestXrefResolve_AnswersTheHeldKeysOnly(t *testing.T) {
+	s := store.NewMem()
+	seedXref(t, s, 3)
+	r := router(s, rowsExtractor{}, domain.NewMemLoader())
+	rec := do(r, http.MethodGet, xrefPath+":resolve?sourceSystem=ax2012&entity=customer&keys=C001,NOPE,C002", "", "migration.xref.read", true)
+	var out struct {
+		Items []struct{ SourceKey, TargetID string } `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK || len(out.Items) != 2 ||
+		out.Items[0].SourceKey != "C001" || out.Items[0].TargetID != "00000000-0000-7000-8000-000000000001" || out.Items[1].SourceKey != "C002" {
+		t.Fatalf("resolve: %d %s", rec.Code, rec.Body)
+	}
+	for _, q := range []string{"?entity=customer&keys=C1", "?sourceSystem=ax2012&keys=C1", "?sourceSystem=ax2012&entity=customer", "?sourceSystem=ax2012&entity=customer&keys=" + strings.Repeat("k,", 501)} {
+		if rec := do(r, http.MethodGet, xrefPath+":resolve"+q, "", "migration.xref.read", true); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: %d %s", q, rec.Code, rec.Body)
+		}
+	}
+	if rec := do(r, http.MethodGet, xrefPath+":resolve?sourceSystem=ax2012&entity=customer&keys=C001", "", duties, true); rec.Code != http.StatusForbidden {
+		t.Fatalf("the run duty does not resolve: %d", rec.Code)
+	}
+}
