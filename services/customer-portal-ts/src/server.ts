@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { authorizationUrl, endSessionUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, verifyLogoutToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
 import { FORBIDDEN_BODY_FIELDS, IDEMPOTENCY_KEY, matchRoute, QUERY_ALLOWLIST, type Route } from "./routes.ts";
 import type { Audience, ServiceTokenSigner } from "./serviceToken.ts";
-import { LOGIN_TTL_MS, parseCookies, SESSION_COOKIE, sameToken, StoreUnavailable, type RateLimiter, type Session, type SessionStore } from "./session.ts";
+import { LOGIN_TTL_MS, parseCookies, SESSION_COOKIE, sameToken, StoreUnavailable, type Limiter, type Session, type SessionStore } from "./session.ts";
 
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -27,7 +27,7 @@ export interface ServerDeps {
   appOrigin: string;
   /** False only for local development over plain http. */
   cookieSecure: boolean;
-  limiter: RateLimiter;
+  limiter: Limiter;
   now?: () => number;
   log?: (entry: Record<string, unknown>) => void;
 }
@@ -177,7 +177,7 @@ export function createHttpServer(deps: ServerDeps): Server {
     const { route, upstreamPath } = matched;
     const le = legalEntity(session, req);
     if (!le) return problem(res, 400, "CUS-BFF-401", "name one of your legal entities in X-Legal-Entity");
-    if (!deps.limiter.allow(session.id, now())) return problem(res, 429, "CUS-BFF-429", "too many requests");
+    if (!(await deps.limiter.allow(session.id, now()))) return problem(res, 429, "CUS-BFF-429", "too many requests");
     let body: string | undefined;
     const extra: Record<string, string> = {};
     if (route.method === "POST") {
@@ -230,7 +230,7 @@ export function createHttpServer(deps: ServerDeps): Server {
 
   /** The contact's companies with their customer-facing names, one small read of identity per legal entity (cached). */
   async function companies(res: ServerResponse, session: Session): Promise<void> {
-    if (!deps.limiter.allow(session.id, now())) return problem(res, 429, "CUS-BFF-429", "too many requests");
+    if (!(await deps.limiter.allow(session.id, now()))) return problem(res, 429, "CUS-BFF-429", "too many requests");
     const items = await Promise.all(
       session.identity.legalEntityIds.map(async (le) => {
         const key = `${session.identity.tenantId}:${le}`;
