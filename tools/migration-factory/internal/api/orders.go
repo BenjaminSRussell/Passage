@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/dq"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -134,6 +135,14 @@ func (s *Server) startOpenOrdersRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accepted, quarantined := domain.ValidateOpenOrders(lines, masters)
+	accepted, quarantined, err = gateSuite(domain.PackOpenOrders, lines, dq.OpenOrderRows(lines),
+		map[string]map[string]bool{"items": dq.SetOf(masters.Items), "customers": dq.SetOf(masters.Customers), "vendors": dq.SetOf(masters.Vendors), "iso4217": dq.ISO4217()},
+		domain.OpenOrderLine.HeldKey, domain.OpenOrderLine.HeldKey, accepted, quarantined,
+		func(o domain.OpenOrderLine, why string) domain.Quarantined { return quarantine(o.Record(), o, why) })
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	if err := domain.QuarantineShareExceeded(len(quarantined), len(lines), maxPct); err != nil {
 		fail(w, r, err)
 		return

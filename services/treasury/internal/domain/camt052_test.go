@@ -104,6 +104,31 @@ func TestPosition_IntradayWinsOnlyWhenNewerThanTheStatement(t *testing.T) {
 	}
 }
 
+// The migrated opening balance is the position until something newer than the end of the cutover day arrives (#49).
+func TestPosition_StartsFromTheMigratedOpeningBalance(t *testing.T) {
+	now := time.Date(2026, 12, 31, 18, 0, 0, 0, time.UTC)
+	opening := &OpeningBalance{AsOf: "2026-12-31", Amount: d52("12500.75")}
+	p := Position(PositionInput{Account: "A", Currency: "USD", Opening: opening}, now, DefaultStaleHours)
+	if p.Source != SourceOpening || !p.Booked.Equal(d52("12500.75")) || !p.Available.Equal(d52("12500.75")) || p.Stale {
+		t.Fatalf("opening only: %+v", p)
+	}
+	// A statement that closed before the cutover is older than the opening balance.
+	old := &StatementBalance{ClosingDate: "2026-12-30", ClosingAmount: d52("9000")}
+	if p = Position(PositionInput{Account: "A", Currency: "USD", Statement: old, Opening: opening}, now, DefaultStaleHours); p.Source != SourceOpening {
+		t.Fatalf("pre-cutover statement: %+v", p)
+	}
+	// A statement closing on the cutover day is the bank's own figure and wins.
+	same := &StatementBalance{ClosingDate: "2026-12-31", ClosingAmount: d52("12600")}
+	if p = Position(PositionInput{Account: "A", Currency: "USD", Statement: same, Opening: opening}, now, DefaultStaleHours); p.Source != SourceStatement || !p.Booked.Equal(d52("12600")) {
+		t.Fatalf("statement of the cutover day: %+v", p)
+	}
+	// A report created the morning after the cutover wins.
+	next := report(time.Date(2027, 1, 1, 9, 0, 0, 0, time.UTC), IntradayBalance{Code: "ITBD", Amount: d52("12700")})
+	if p = Position(PositionInput{Account: "A", Currency: "USD", Statement: old, Intraday: next, Opening: opening}, now.AddDate(0, 0, 1), DefaultStaleHours); p.Source != SourceIntraday {
+		t.Fatalf("report after the cutover: %+v", p)
+	}
+}
+
 func TestPosition_StaleAndEmpty(t *testing.T) {
 	now := time.Date(2026, 10, 25, 15, 0, 0, 0, time.UTC)
 	p := Position(PositionInput{Account: "A", Currency: "EUR", Statement: &StatementBalance{ClosingDate: "2026-10-21", ClosingAmount: d52("5")}}, now, DefaultStaleHours)

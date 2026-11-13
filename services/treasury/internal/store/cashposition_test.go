@@ -82,8 +82,16 @@ func TestCashPositionAccounts_ReturnsTheLatestStatementAndTheLatestReport(t *tes
 	if _, err := s.CreateBankAccount(ctx, NewBankAccount{LegalEntityID: le, AccountCode: "DRAFT-1", IBAN: "GB82WEST12345698765432", Currency: "GBP", MainAccountID: ids.New()}, ids.New()); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.CashPositionAccounts(ctx, le); err != nil || len(got) != 1 || got[0].Statement != nil || got[0].Intraday != nil {
+	if got, err := s.CashPositionAccounts(ctx, le); err != nil || len(got) != 1 || got[0].Statement != nil || got[0].Intraday != nil || got[0].Opening != nil {
 		t.Fatalf("before any file: %+v, %v", got, err)
+	}
+	// The migrated opening balance is read in the account's currency (minor units to an amount).
+	if _, _, err := s.ImportOpeningBalances(ctx, OpeningImport{LegalEntityID: le, BatchKey: "cutover", AsOf: "2026-10-20",
+		Items: []OpeningItem{{Reference: "AX-OPS", BankAccountID: acct.ID, Currency: acct.Currency, BalanceMinor: 98050}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.CashPositionAccounts(ctx, le); err != nil || got[0].Opening == nil || got[0].Opening.AsOf != "2026-10-20" || got[0].Opening.Amount.String() != "980.5" {
+		t.Fatalf("opening = %+v, %v", got[0].Opening, err)
 	}
 	if _, err := s.ImportStatement(ctx, importInput(t, acct.ID, camt("STMT-A", 0, 2, ""))); err != nil {
 		t.Fatal(err)

@@ -430,6 +430,7 @@ func (a *API) startRunFromCollection(w http.ResponseWriter, r *http.Request, bod
 	}
 	// An equity-method unit's investment starts the fiscal year at the carrying amount of the register at the previous year end.
 	in.PreviousCarrying = map[string]decimal.Decimal{}
+	in.PreviousCarryingUnit = map[string]decimal.Decimal{}
 	registers := map[string]map[string]store.InvestmentRecord{}
 	for _, u := range group.Units {
 		if t, ok := in.Terms[u.ID]; !ok || t.Method != domain.MethodEquity {
@@ -454,6 +455,9 @@ func (a *API) startRunFromCollection(w http.ResponseWriter, r *http.Request, bod
 		}
 		if line, ok := reg[u.ID]; ok && line.Method == domain.MethodEquity {
 			in.PreviousCarrying[u.ID] = line.ClosingCarrying
+			if line.UnitCurrency != "" && line.UnitCurrency == u.Currency {
+				in.PreviousCarryingUnit[u.ID] = line.ClosingCarryingUnit
+			}
 		}
 	}
 	derived, err := domain.DeriveRun(in)

@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/dq"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -93,6 +94,11 @@ func stagedLines(pack domain.Pack, recs []stagedRecordDTO, master map[string]str
 			all = append(all, w.Staged())
 		}
 		accepted, quarantined = domain.ValidateWIPProd(in, master)
+		var err error
+		if accepted, quarantined, err = gateSuite(pack, in, dq.WIPProdRows(in), map[string]map[string]bool{"items": dq.SetOf(master), "iso4217": dq.ISO4217()},
+			func(w domain.WIPProdLine) string { return w.LegacyID }, stagedKey, accepted, quarantined, holdStaged); err != nil {
+			return nil, nil, nil, err
+		}
 	case domain.PackFixedAssets:
 		in := make([]domain.FixedAssetLine, 0, len(recs))
 		for _, rec := range recs {
@@ -122,6 +128,11 @@ func stagedLines(pack domain.Pack, recs []stagedRecordDTO, master map[string]str
 			all = append(all, p.Staged())
 		}
 		accepted, quarantined = domain.ValidatePayrollYTD(in, master)
+		var err error
+		if accepted, quarantined, err = gateSuite(pack, in, dq.PayrollYTDRows(in), map[string]map[string]bool{"workers": dq.SetOf(master), "iso4217": dq.ISO4217()},
+			func(p domain.PayrollYTDLine) string { return p.LegacyID }, stagedKey, accepted, quarantined, holdStaged); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	return all, accepted, quarantined, nil
 }

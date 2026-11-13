@@ -117,6 +117,8 @@ export interface ReconRun {
   open: number;
   /** True while the run holds a Mismatch. */
   blocking: boolean;
+  /** "ledger" when the pair amounts were read from the ledgers of the stored matrix. */
+  source?: string;
   createdBy: string;
   createdAt: string;
 }

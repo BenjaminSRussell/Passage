@@ -172,10 +172,15 @@ route("GET", `${BASE}/bank-reconciliations`, ({ query }) => {
 });
 
 route("POST", `${BASE}/bank-reconciliations`, ({ body }) => {
-  const input = body as { statementId: string; bookBalance: string; outstandingAmount?: string };
+  const input = body as { statementId: string; bookBalance?: string; outstandingAmount?: string; bookBalanceSource?: "stated" | "opening" };
   const st = statements.get(input.statementId);
   if (!st) return notFound("statement");
   if (recons.all().some((r) => r.statementId === st.id)) return reply.problem(409, "TRS-0504", "this statement already has a reconciliation");
+  // The demo's migrated opening balance is the statement's opening balance of the account's first reconciliation (#49).
+  const fromOpening = input.bookBalanceSource === "opening";
+  if (fromOpening && recons.all().some((r) => r.bankAccountId === st.bankAccountId)) {
+    return reply.problem(422, "TRS-0607", "the account was reconciled before; only its first reconciliation starts from the opening balance");
+  }
   const created = recons.insert({
     id: newId(),
     legalEntityId: st.legalEntityId,
@@ -187,9 +192,9 @@ route("POST", `${BASE}/bank-reconciliations`, ({ body }) => {
     state: "open",
     openingBalance: st.openingBalance,
     closingBalance: st.closingBalance,
-    bookBalance: input.bookBalance,
+    bookBalance: fromOpening ? st.openingBalance : (input.bookBalance ?? "0.00"),
     outstandingAmount: input.outstandingAmount ?? "0.00",
-    bookBalanceSource: "stated",
+    bookBalanceSource: fromOpening ? "opening" : "stated",
     bookBalanceStatedBy: "dev",
     bookBalanceStatedAt: at(0),
     version: 1,

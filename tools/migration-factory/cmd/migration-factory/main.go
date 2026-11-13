@@ -103,6 +103,16 @@ func treasuryTarget(getenv func(string) string) (*target.Treasury, error) {
 	return target.NewTreasury(cfg), nil
 }
 
+// xrefTarget reads MIGRATION_URL (see targetConfig): the migration service whose cross-reference resolves the legacy customers of
+// an open-items run (H-S8-6). Without it a customer must be on the record or in load.customerIds.
+func xrefTarget(getenv func(string) string) (*target.Xref, error) {
+	cfg, err := targetConfig(getenv, "MIGRATION_URL")
+	if err != nil {
+		return nil, err
+	}
+	return target.NewXref(cfg), nil
+}
+
 func run(ctx context.Context, getenv func(string) string) error {
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -121,6 +131,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	treasury, err := treasuryTarget(getenv)
+	if err != nil {
+		return err
+	}
+	xref, err := xrefTarget(getenv)
 	if err != nil {
 		return err
 	}
@@ -144,7 +158,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if addr == "" {
 		addr = ":8080"
 	}
-	srv := api.New(store.New(pool)).WithTarget(receivables).WithPayables(payables).WithInventory(inventory).WithTreasury(treasury)
+	srv := api.New(store.New(pool)).WithTarget(receivables).WithPayables(payables).WithInventory(inventory).WithTreasury(treasury).WithXref(xref)
 	if ledger != nil {
 		srv = srv.WithLedger(ledger)
 	}

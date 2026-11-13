@@ -28,9 +28,11 @@ type FakeOpening struct {
 	Refuse map[string]bool
 	// Drift is added to the quantity (inventory) or the first balance (treasury) of every listed batch, to prove the
 	// reconciliation catches a target that holds something else than was sent.
-	Drift    int64
-	failNext []int
-	loseNext int
+	Drift int64
+	// OnHandDrift is added to the on-hand quantity GET /v1/inventory/onhand reports for a product id (stock moved after the load).
+	OnHandDrift map[string]decimal.Decimal
+	failNext    []int
+	loseNext    int
 }
 
 type openingBatch struct {
@@ -38,6 +40,8 @@ type openingBatch struct {
 	Count                              int
 	Qty, Value                         decimal.Decimal
 	Minor                              map[string]int64
+	// ByProduct is the quantity of each product id of an inventory batch, which its posted journal put on hand.
+	ByProduct map[string]decimal.Decimal
 }
 
 // NewInventoryOpening starts the fake inventory service; it closes with the test.
@@ -47,7 +51,7 @@ func NewInventoryOpening(t testing.TB) *FakeOpening { return newOpening(t, "inve
 func NewTreasuryOpening(t testing.TB) *FakeOpening { return newOpening(t, "treasury") }
 
 func newOpening(t testing.TB, kind string) *FakeOpening {
-	f := &FakeOpening{kind: kind, batches: map[string]*openingBatch{}, Refuse: map[string]bool{}}
+	f := &FakeOpening{kind: kind, batches: map[string]*openingBatch{}, Refuse: map[string]bool{}, OnHandDrift: map[string]decimal.Decimal{}}
 	path := "/v1/inventory/opening-batches"
 	if kind == "treasury" {
 		path = "/v1/treasury/opening-balances"
@@ -55,6 +59,9 @@ func newOpening(t testing.TB, kind string) *FakeOpening {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+path, f.post)
 	mux.HandleFunc("GET "+path, f.list)
+	if kind == "inventory" {
+		mux.HandleFunc("GET /v1/inventory/onhand", f.onHand)
+	}
 	f.Server = httptest.NewServer(mux)
 	t.Cleanup(f.Close)
 	return f
@@ -183,12 +190,13 @@ func (f *FakeOpening) post(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "COM-0001", "request failed validation")
 		return
 	}
-	b := &openingBatch{LegalEntityID: strings.ToLower(req.LegalEntityID), Key: req.BatchKey, Currency: req.Currency, Count: len(req.Items), Minor: map[string]int64{}}
+	b := &openingBatch{LegalEntityID: strings.ToLower(req.LegalEntityID), Key: req.BatchKey, Currency: req.Currency, Count: len(req.Items), Minor: map[string]int64{}, ByProduct: map[string]decimal.Decimal{}}
 	bad := map[string]string{}
 	seen := map[string]bool{}
 	for i, rawItem := range req.Items {
 		var it struct {
 			Reference    string `json:"reference"`
+			ProductID    string `json:"productId"`
 			Qty          string `json:"qty"`
 			CostPrice    string `json:"costPrice"`
 			Currency     string `json:"currency"`
@@ -211,6 +219,7 @@ func (f *FakeOpening) post(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			b.Qty, b.Value = b.Qty.Add(q), b.Value.Add(q.Mul(c))
+			b.ByProduct[strings.ToLower(it.ProductID)] = b.ByProduct[strings.ToLower(it.ProductID)].Add(q)
 		} else {
 			b.Minor[it.Currency] += it.BalanceMinor
 		}
@@ -249,6 +258,32 @@ func (f *FakeOpening) post(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(f.batchJSON(b, 0))
+}
+
+// onHand answers GET /v1/inventory/onhand?product=&groupBy=legal_entity with what the stored batches put on hand for the product,
+// one row per legal entity, plus OnHandDrift.
+func (f *FakeOpening) onHand(w http.ResponseWriter, r *http.Request) {
+	call, ok := f.admit(w, r, "inventory.read")
+	if !ok {
+		return
+	}
+	product := strings.ToLower(r.URL.Query().Get("product"))
+	f.mu.Lock()
+	byLE := map[string]decimal.Decimal{}
+	for _, b := range f.batches {
+		if q, ok := b.ByProduct[product]; ok {
+			byLE[b.LegalEntityID] = byLE[b.LegalEntityID].Add(q)
+		}
+	}
+	drift := f.OnHandDrift[product]
+	f.mu.Unlock()
+	items := []map[string]any{}
+	for le, q := range byLE {
+		items = append(items, map[string]any{"group": map[string]string{"legal_entity": le}, "physicalInvent": q.Add(drift).String(), "postedValue": "0", "blocked": "0", "currency": "", "negative": false})
+	}
+	f.finish(call, http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "truncated": false})
 }
 
 func (f *FakeOpening) batchJSON(b *openingBatch, drift int64) map[string]any {

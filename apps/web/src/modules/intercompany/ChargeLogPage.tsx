@@ -1,11 +1,8 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ProblemMessage } from "../../shell/errors";
-import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, type Problem } from "./api/client";
+import { Badge, buttonClassName, ListPage, type BadgeTone, type DataTableColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
 import { listCharges, type ChargeRecord, type ChargeStatus } from "./api/postings";
 import { amount } from "./format";
-import styles from "./pages.module.css";
+import { usePagedRows } from "./usePagedRows";
 
 const tone: Record<ChargeStatus, BadgeTone> = { posted: "success", pending: "warning", suspense: "warning", compensated: "danger" };
 const label: Record<ChargeStatus, string> = { posted: "Posted", pending: "Paused, can be resumed", suspense: "On suspense: no transfer price", compensated: "Reversed" };
@@ -20,73 +17,51 @@ const columns: DataTableColumn<ChargeRecord>[] = [
   { key: "status", header: "Status", render: (c) => <Badge tone={tone[c.status]}>{label[c.status]}</Badge> },
 ];
 
+const chargeFilters: ListFilterDef[] = [
+  {
+    kind: "select",
+    key: "status",
+    label: "Status",
+    anyLabel: "All charges",
+    options: [
+      { value: "posted", label: "Posted" },
+      { value: "suspense", label: "On suspense" },
+      { value: "compensated", label: "Reversed" },
+      { value: "pending", label: "Paused" },
+    ],
+  },
+];
+
+function useChargeRows(query: ListQuery): ListData<ChargeRecord> {
+  const status = query.filters.status ?? "";
+  return usePagedRows((after, signal) => listCharges({ status: status || undefined, after }, signal), status);
+}
+
 /** Every IC charge submitted, per source and version (FR-40.13, BR-40.12). */
 export function ChargeLogPage() {
-  const [status, setStatus] = useState("");
-  const [state, setState] = useState<{ loading: boolean; items: ChargeRecord[]; next?: string; failure: Problem | null }>({ loading: true, items: [], failure: null });
-  const [reload, setReload] = useState(0);
-  const [more, setMore] = useState(false);
-
-  useEffect(() => {
-    const ctl = new AbortController();
-    setState((s) => ({ ...s, loading: true, failure: null }));
-    listCharges({ status: status || undefined }, ctl.signal)
-      .then((page) => setState({ loading: false, items: page.items, next: page.nextCursor, failure: null }))
-      .catch((err: unknown) => {
-        if (!ctl.signal.aborted) setState({ loading: false, items: [], failure: describeProblem(err) });
-      });
-    return () => ctl.abort();
-  }, [status, reload]);
-
-  async function loadMore() {
-    if (!state.next) return;
-    setMore(true);
-    try {
-      const page = await listCharges({ status: status || undefined, after: state.next });
-      setState((s) => ({ ...s, items: [...s.items, ...page.items], next: page.nextCursor }));
-    } catch (err) {
-      setState((s) => ({ ...s, failure: describeProblem(err) }));
-    } finally {
-      setMore(false);
-    }
-  }
-
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Intercompany charge log"
-        description="A charge on suspense had no transfer price on its date, so nothing was posted. Add the price and submit the source again with the next version to post it."
-        actions={<Link to="/intercompany/charges">Price and post a charge</Link>}
-      />
-      <Card>
-        <div className={styles.filters}>
-          <FormField id="charges-status" label="Show">
-            {(c) => (
-              <Select {...c} value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">All charges</option>
-                <option value="posted">Posted</option>
-                <option value="suspense">On suspense</option>
-                <option value="compensated">Reversed</option>
-                <option value="pending">Paused</option>
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </Card>
-      {state.failure ? (
-        <Alert tone="danger" title="We couldn't load the charges" live="alert" action={<Button size="sm" onClick={() => setReload((n) => n + 1)}>Try again</Button>}>
-          <ProblemMessage problem={state.failure} />
-        </Alert>
-      ) : (
-        <DataTable label="Intercompany charges" columns={columns} rows={state.items} getRowKey={(c) => c.id} loading={state.loading} empty={{ title: "No charges yet", description: "Price a charge and post it to see it here." }} />
-      )}
-      {state.next && !state.failure ? (
-        <div className={styles.formActions}>
-          <Button loading={more} onClick={() => void loadMore()}>
-            Show more charges
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="intercompany-charge-log"
+      title="Intercompany charge log"
+      description="A charge on suspense had no transfer price on its date, so nothing was posted. Add the price and submit the source again with the next version to post it."
+      actions={
+        <>
+          <Link className={buttonClassName("primary")} to="/intercompany/charges">
+            Price and post a charge
+          </Link>
+          <Link className={buttonClassName("secondary")} to="/intercompany/transfer-prices">
+            Transfer prices
+          </Link>
+        </>
+      }
+      noun="charges"
+      singular="charge"
+      columns={columns}
+      filters={chargeFilters}
+      useRows={useChargeRows}
+      getRowKey={(c) => c.id}
+      search={(c) => ({ number: c.sourceId, name: c.resourceRole })}
+      empty={{ title: "No charges yet", description: "Price a charge and post it to see it here." }}
+    />
   );
 }

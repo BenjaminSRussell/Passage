@@ -103,9 +103,16 @@ type InvestmentRecord struct {
 
 func insertInvestments(ctx context.Context, tx pgx.Tx, tenantID, runID string, lines []domain.InvestmentLine) error {
 	for _, l := range lines {
-		if _, err := tx.Exec(ctx, `insert into consolidation_investment (tenant_id, run_id, unit_id, method, ownership_pct, cost, opening_carrying, share_of_profit, dividends, closing_carrying, unrecognized_loss)
-			values ($1, $2, $3, $4, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric)`,
-			tenantID, runID, l.UnitID, l.Method, l.OwnershipPct.String(), l.Cost.String(), l.OpeningCarrying.String(), l.ShareOfProfit.String(), l.Dividends.String(), l.ClosingCarrying.String(), l.UnrecognizedLoss.String()); err != nil {
+		var unitCarrying *string
+		if l.UnitCurrency != "" {
+			v := l.ClosingCarryingUnit.String()
+			unitCarrying = &v
+		}
+		if _, err := tx.Exec(ctx, `insert into consolidation_investment (tenant_id, run_id, unit_id, method, ownership_pct, cost, opening_carrying, share_of_profit, dividends, closing_carrying, unrecognized_loss,
+				unit_currency, closing_carrying_unit, fx_difference)
+			values ($1, $2, $3, $4, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric, nullif($12, ''), $13::numeric, $14::numeric)`,
+			tenantID, runID, l.UnitID, l.Method, l.OwnershipPct.String(), l.Cost.String(), l.OpeningCarrying.String(), l.ShareOfProfit.String(), l.Dividends.String(), l.ClosingCarrying.String(), l.UnrecognizedLoss.String(),
+			l.UnitCurrency, unitCarrying, l.FXDifference.String()); err != nil {
 			return err
 		}
 	}
@@ -116,14 +123,15 @@ func scanInvestments(rows pgx.Rows) ([]InvestmentRecord, error) {
 	var out []InvestmentRecord
 	for rows.Next() {
 		var r InvestmentRecord
-		var pct, cost, open, share, div, closing, loss string
-		if err := rows.Scan(&r.RunID, &r.UnitID, &r.Method, &pct, &cost, &open, &share, &div, &closing, &loss); err != nil {
+		var pct, cost, open, share, div, closing, loss, unitCarrying, fx string
+		if err := rows.Scan(&r.RunID, &r.UnitID, &r.Method, &pct, &cost, &open, &share, &div, &closing, &loss, &r.UnitCurrency, &unitCarrying, &fx); err != nil {
 			return nil, err
 		}
 		for _, f := range []struct {
 			dst *decimal.Decimal
 			raw string
-		}{{&r.OwnershipPct, pct}, {&r.Cost, cost}, {&r.OpeningCarrying, open}, {&r.ShareOfProfit, share}, {&r.Dividends, div}, {&r.ClosingCarrying, closing}, {&r.UnrecognizedLoss, loss}} {
+		}{{&r.OwnershipPct, pct}, {&r.Cost, cost}, {&r.OpeningCarrying, open}, {&r.ShareOfProfit, share}, {&r.Dividends, div}, {&r.ClosingCarrying, closing}, {&r.UnrecognizedLoss, loss},
+			{&r.ClosingCarryingUnit, unitCarrying}, {&r.FXDifference, fx}} {
 			var err error
 			if *f.dst, err = decimal.NewFromString(f.raw); err != nil {
 				return nil, fmt.Errorf("store: investment amount %q: %w", f.raw, err)
@@ -134,7 +142,8 @@ func scanInvestments(rows pgx.Rows) ([]InvestmentRecord, error) {
 	return out, rows.Err()
 }
 
-const investmentColumns = `i.run_id::text, i.unit_id, i.method, i.ownership_pct::text, i.cost::text, i.opening_carrying::text, i.share_of_profit::text, i.dividends::text, i.closing_carrying::text, i.unrecognized_loss::text`
+const investmentColumns = `i.run_id::text, i.unit_id, i.method, i.ownership_pct::text, i.cost::text, i.opening_carrying::text, i.share_of_profit::text, i.dividends::text, i.closing_carrying::text, i.unrecognized_loss::text,
+	coalesce(i.unit_currency, ''), coalesce(i.closing_carrying_unit, 0)::text, i.fx_difference::text`
 
 // RunInvestments returns the investments register of a run, ordered by unit.
 func (s *Postgres) RunInvestments(ctx context.Context, runID string) ([]InvestmentRecord, error) {

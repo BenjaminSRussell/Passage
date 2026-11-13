@@ -23,3 +23,4 @@ import "./analytics";
 import "./b2b";
 import "./ops";
 import "./party";
+import "./migration";

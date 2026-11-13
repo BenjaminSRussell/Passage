@@ -153,6 +153,219 @@ func TestGLBalancesSuiteFlagsWhatTheGoValidatorQuarantines(t *testing.T) {
 	assertParity(t, "gl_balances", rows, rep, defects, quarantined, suite)
 }
 
+func TestOpenItemsSuiteFlagsWhatTheGoValidatorQuarantines(t *testing.T) {
+	rec := func(id, ledger, party, account, currency string) domain.Record {
+		return domain.Record{LegacyID: id, Ledger: ledger, Party: party, Account: account, Currency: currency, Amount: dec("10")}
+	}
+	records := []domain.Record{rec("OI-0", "", "C1", "1200", "USD"), rec("OI-0", "AP", "V1", "2100", "USD")} // the same id on the two sides is fine
+	defects := []struct {
+		check string
+		r     domain.Record
+	}{
+		{"legacy_id_present", rec("", "", "C1", "1200", "USD")},
+		{"legacy_id_unique_per_side", rec("OI-0", "AR", "C1", "1200", "USD")},
+		{"party_in_master", rec("OI-3", "", "NOPE", "1200", "USD")},
+		{"currency_iso4217", rec("OI-4", "", "C1", "1200", "ZZZ")},
+		{"control_account_required", rec("OI-5", "AP", "V1", " ", "USD")},
+	}
+	var ds []defect
+	for _, d := range defects {
+		records = append(records, d.r)
+	}
+	rows := dq.OpenItemRows(records)
+	for i, d := range defects {
+		ds = append(ds, defect{check: d.check, row: rows[2+i]})
+	}
+	suite, err := dq.Load("open_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := suite.Run(rows, map[string]map[string]bool{"parties": {"C1": true, "V1": true}, "iso4217": isoSet()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, quarantined := domain.Validate(records, map[string]struct{}{"C1": {}, "V1": {}})
+	assertRowParity(t, "open_items", rows, rep, ds, len(quarantined), suite, map[int]bool{2: true, 3: true, 4: true, 5: true, 6: true})
+}
+
+func TestOpenOrdersSuiteFlagsWhatTheGoValidatorQuarantines(t *testing.T) {
+	line := func(id, typ, order, ln, item, party string) domain.OpenOrderLine {
+		return domain.OpenOrderLine{LegacyID: id, OrderType: typ, OrderNumber: order, LineNumber: ln, Item: item, Party: party, Unit: "EA", Currency: "USD",
+			OrderedQty: dec("10"), DeliveredQty: dec("2"), UnitPrice: dec("5"), DeliveryDate: "2026-12-01"}
+	}
+	with := func(o domain.OpenOrderLine, f func(*domain.OpenOrderLine)) domain.OpenOrderLine { f(&o); return o }
+	lines := []domain.OpenOrderLine{line("L-0", "SALES", "SO1", "1", "BOLT", "C1"), line("L-0", "PURCHASE", "PO1", "1", "BOLT", "V1")}
+	defects := []struct {
+		check string
+		o     domain.OpenOrderLine
+	}{
+		{"legacy_id_present", line("", "SALES", "SO2", "1", "BOLT", "C1")},
+		{"order_type_known", line("L-3", "RETURN", "RO1", "1", "BOLT", "C1")},
+		{"legacy_id_unique_per_order_type", line("L-0", "SALES", "SO3", "1", "BOLT", "C1")},
+		{"order_and_line_number_required", line("L-5", "SALES", "", "1", "BOLT", "C1")},
+		{"order_line_unique", line("L-6", "SALES", "SO1", "1", "BOLT", "C1")},
+		{"item_in_master", line("L-7", "SALES", "SO4", "1", "NOPE", "C1")},
+		{"party_in_master", line("L-8", "PURCHASE", "PO2", "1", "BOLT", "C1")},
+		{"unit_required", with(line("L-9", "SALES", "SO5", "1", "BOLT", "C1"), func(o *domain.OpenOrderLine) { o.Unit = "" })},
+		{"ordered_quantity_positive", with(line("L-10", "SALES", "SO6", "1", "BOLT", "C1"), func(o *domain.OpenOrderLine) { o.OrderedQty, o.DeliveredQty = dec("0"), dec("0") })},
+		{"delivered_quantity_not_negative", with(line("L-11", "SALES", "SO7", "1", "BOLT", "C1"), func(o *domain.OpenOrderLine) { o.DeliveredQty = dec("-1") })},
+		{"line_still_open", with(line("L-12", "SALES", "SO8", "1", "BOLT", "C1"), func(o *domain.OpenOrderLine) { o.DeliveredQty = dec("10") })},
+		{"unit_price_not_negative", with(line("L-13", "SALES", "SO9", "1", "BOLT", "C1"), func(o *domain.OpenOrderLine) { o.UnitPrice = dec("-1") })},
+		{"delivery_date_iso", with(line("L-14", "SALES", "SO10", "1", "BOLT", "C1"), func(o *domain.OpenOrderLine) { o.DeliveryDate = "2026-02-30" })},
+		{"currency_iso4217", with(line("L-15", "SALES", "SO11", "1", "BOLT", "C1"), func(o *domain.OpenOrderLine) { o.Currency = "ZZZ" })},
+	}
+	for _, d := range defects {
+		lines = append(lines, d.o)
+	}
+	rows := dq.OpenOrderRows(lines)
+	var ds []defect
+	failed := map[int]bool{}
+	for i, d := range defects {
+		ds = append(ds, defect{check: d.check, row: rows[2+i]})
+		failed[2+i] = true
+	}
+	suite, err := dq.Load("open_orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := suite.Run(rows, map[string]map[string]bool{"items": {"BOLT": true}, "customers": {"C1": true}, "vendors": {"V1": true}, "iso4217": isoSet()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, quarantined := domain.ValidateOpenOrders(lines, domain.OrderMasters{Items: map[string]struct{}{"BOLT": {}}, Customers: map[string]struct{}{"C1": {}}, Vendors: map[string]struct{}{"V1": {}}})
+	assertRowParity(t, "open_orders", rows, rep, ds, len(quarantined), suite, failed)
+}
+
+func TestWIPProdSuiteFlagsWhatTheGoValidatorQuarantines(t *testing.T) {
+	line := func(id, order, item, currency, material string) domain.WIPProdLine {
+		return domain.WIPProdLine{LegacyID: id, ProductionOrder: order, Item: item, Currency: currency, Material: dec(material), Labor: dec("10"), Overhead: dec("5")}
+	}
+	lines := []domain.WIPProdLine{line("W-0", "PO-1", "PUMP", "USD", "100")}
+	defects := []struct {
+		check string
+		w     domain.WIPProdLine
+	}{
+		{"legacy_id_present", line("", "PO-2", "PUMP", "USD", "1")},
+		{"legacy_id_unique", line("W-0", "PO-3", "PUMP", "USD", "1")},
+		{"production_order_unique", line("W-4", "PO-1", "PUMP", "USD", "1")},
+		{"currency_iso4217", line("W-5", "PO-5", "PUMP", "ZZZ", "1")},
+		{"measures_at_most_6_places", line("W-6", "PO-6", "PUMP", "USD", "1.1234567")},
+		{"production_order_required", line("W-7", "", "PUMP", "USD", "1")},
+		{"item_in_master", line("W-8", "PO-8", "NOPE", "USD", "1")},
+		{"components_not_negative", line("W-9", "PO-9", "PUMP", "USD", "-1")},
+	}
+	for _, d := range defects {
+		lines = append(lines, d.w)
+	}
+	rows := dq.WIPProdRows(lines)
+	var ds []defect
+	failed := map[int]bool{}
+	for i, d := range defects {
+		ds = append(ds, defect{check: d.check, row: rows[1+i]})
+		failed[1+i] = true
+	}
+	suite, err := dq.Load("wip_prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := suite.Run(rows, map[string]map[string]bool{"items": {"PUMP": true}, "iso4217": isoSet()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, quarantined := domain.ValidateWIPProd(lines, map[string]struct{}{"PUMP": {}})
+	assertRowParity(t, "wip_prod", rows, rep, ds, len(quarantined), suite, failed)
+}
+
+func TestPayrollYTDSuiteFlagsWhatTheGoValidatorQuarantines(t *testing.T) {
+	line := func(id, worker, year, currency, gross, tax, ded, net string) domain.PayrollYTDLine {
+		return domain.PayrollYTDLine{LegacyID: id, Worker: worker, TaxYear: year, Currency: currency, Gross: dec(gross), Tax: dec(tax), Deductions: dec(ded), Net: dec(net)}
+	}
+	lines := []domain.PayrollYTDLine{line("P-0", "W1", "2026", "USD", "1000", "200", "50", "750")}
+	defects := []struct {
+		check string
+		p     domain.PayrollYTDLine
+	}{
+		{"legacy_id_present", line("", "W2", "2026", "USD", "10", "0", "0", "10")},
+		{"legacy_id_unique", line("P-0", "W3", "2026", "USD", "10", "0", "0", "10")},
+		{"worker_tax_year_unique", line("P-3", "W1", "2026", "USD", "10", "0", "0", "10")},
+		{"currency_iso4217", line("P-4", "W4", "2026", "ZZZ", "10", "0", "0", "10")},
+		{"worker_in_master", line("P-5", "NOPE", "2026", "USD", "10", "0", "0", "10")},
+		{"tax_year_yyyy", line("P-6", "W6", "26", "USD", "10", "0", "0", "10")},
+		{"amounts_not_negative", line("P-7", "W7", "2026", "USD", "10", "-1", "0", "11")},
+		{"amounts_in_minor_units", line("P-8", "W8", "2026", "JPY", "10.5", "0", "0", "10.5")},
+		{"net_is_gross_less_tax_and_deductions", line("P-9", "W9", "2026", "USD", "10", "1", "0", "10")},
+	}
+	for _, d := range defects {
+		lines = append(lines, d.p)
+	}
+	rows := dq.PayrollYTDRows(lines)
+	var ds []defect
+	failed := map[int]bool{}
+	for i, d := range defects {
+		ds = append(ds, defect{check: d.check, row: rows[1+i]})
+		failed[1+i] = true
+	}
+	suite, err := dq.Load("payroll_ytd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workers := map[string]bool{}
+	master := map[string]struct{}{}
+	for _, w := range []string{"W1", "W2", "W3", "W4", "W6", "W7", "W8", "W9"} {
+		workers[w] = true
+		master[w] = struct{}{}
+	}
+	rep, err := suite.Run(rows, map[string]map[string]bool{"workers": workers, "iso4217": isoSet()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, quarantined := domain.ValidatePayrollYTD(lines, master)
+	assertRowParity(t, "payroll_ytd", rows, rep, ds, len(quarantined), suite, failed)
+}
+
+// assertRowParity is assertParity for the packs whose fixtures say which rows the validator quarantines: the suite must flag
+// exactly those rows, the validator must quarantine as many, each defect must be caught by its own check, every expectation
+// must be exercised and coverage must be at least 95 %.
+func assertRowParity(t *testing.T, pack string, rows []dq.Row, rep dq.Report, defects []defect, quarantined int, suite dq.Suite, want map[int]bool) {
+	t.Helper()
+	if quarantined != len(want) {
+		t.Fatalf("%s: the Go validator quarantines %d rows, the fixtures expect %d", pack, quarantined, len(want))
+	}
+	got := map[int]bool{}
+	for _, i := range rep.Failed() {
+		got[i] = true
+	}
+	if fmt.Sprint(sortedKeys(got)) != fmt.Sprint(sortedKeys(want)) {
+		t.Fatalf("%s: the suite flags rows %v, the validator quarantines rows %v", pack, sortedKeys(got), sortedKeys(want))
+	}
+	index := map[string]int{}
+	for i, r := range rows {
+		index[fmt.Sprintf("%p", r)] = i
+	}
+	caught := 0
+	exercised := map[string]bool{}
+	for _, d := range defects {
+		exercised[d.check] = true
+		i := index[fmt.Sprintf("%p", d.row)]
+		for _, res := range rep.Results {
+			if res.Expectation.Check == d.check && slices.Contains(res.Unexpected, i) {
+				caught++
+				break
+			}
+		}
+	}
+	for _, e := range suite.Expectations {
+		if !exercised[e.Check] {
+			t.Errorf("%s: expectation %s has no defect fixture", pack, e.Check)
+		}
+	}
+	if cov := float64(caught) / float64(len(defects)); cov < 0.95 {
+		t.Errorf("%s: coverage %.0f%% is under 95%%", pack, cov*100)
+	} else {
+		t.Logf("%s: %d of %d validator checks covered (%.0f%%)", pack, caught, len(defects), cov*100)
+	}
+}
+
 // assertParity checks that the suite and the Go validator flag the same rows, that each defect is caught by its own
 // check, that every expectation of the suite is exercised, and that coverage is at least 95 %.
 func assertParity(t *testing.T, pack string, rows []dq.Row, rep dq.Report, defects []defect, quarantined []domain.Quarantined, suite dq.Suite) {
@@ -272,7 +485,7 @@ func TestRunnerExpectations(t *testing.T) {
 	if _, err := dq.Load("nope"); err == nil {
 		t.Fatal("a pack without a suite")
 	}
-	if got := dq.Packs(); !slices.Equal(got, []string{"bank_balances", "gl_balances", "onhand"}) {
+	if got := dq.Packs(); !slices.Equal(got, []string{"bank_balances", "gl_balances", "onhand", "open_items", "open_orders", "payroll_ytd", "wip_prod"}) {
 		t.Fatalf("packs %v", got)
 	}
 }

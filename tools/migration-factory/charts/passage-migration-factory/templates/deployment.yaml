@@ -60,6 +60,10 @@ spec:
             - name: TREASURY_URL
               value: {{ .Values.treasury.url | quote }}
             {{- end }}
+            {{- if .Values.migration.url }}
+            - name: MIGRATION_URL
+              value: {{ .Values.migration.url | quote }}
+            {{- end }}
             {{- if .Values.signing.secretName }}
             - name: PASSAGE_SERVICE_NAME
               value: migration-factory
