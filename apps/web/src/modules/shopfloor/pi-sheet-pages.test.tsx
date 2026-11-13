@@ -220,7 +220,7 @@ const kioskRecipe = (status: ControlRecipeDetail["status"]): ControlRecipeDetail
                   instructions: [
                     { seq: 1, category: "instruction-text", text: "Check the casing." },
                     { seq: 2, category: "process-data-request", text: "Measure the end float.", characteristic: { name: "End float", type: "numeric", unit: "mm", min: 0.2, max: 0.5 } },
-                    { seq: 3, category: "signature-request", text: "Sign to confirm." },
+                    { seq: 3, category: "signature-request", text: "Sign to confirm.", meaning: "verified" },
                   ],
                 },
               ],
@@ -274,9 +274,17 @@ describe("kiosk PI sheet", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Finish" }));
     expect(await screen.findByText("Type your name to sign.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Ana Ruiz" } });
+    fireEvent.change(screen.getByLabelText("Verified by: your name"), { target: { value: "Ana Ruiz" } });
+    fireEvent.click(screen.getByRole("button", { name: "Finish" }));
+    expect(await screen.findByText('Confirm the statement "I verified this step." to sign.')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("I verified this step."));
     fireEvent.click(screen.getByRole("button", { name: "Finish" }));
     expect(await screen.findByText("All steps are done")).toBeInTheDocument();
+    const signed = calls.filter((c) => c.url.pathname.endsWith("/process-messages")).at(-1)?.body as { values: unknown[] };
+    expect(signed.values).toEqual([
+      { name: "signed-by", type: "text", value: "Ana Ruiz" },
+      { name: "signature-meaning", type: "text", value: "verified" },
+    ]);
     expect(calls.filter((c) => c.url.pathname.endsWith(":report")).map((c) => (c.body as { status: string }).status).at(-1)).toBe("completed");
   });
 

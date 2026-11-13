@@ -1,6 +1,6 @@
 import { Button, FormField, Input, Select, Textarea } from "../../shell/ui";
-import type { Instruction, InstructionCategory, RecipeDocument, RecipeOperation, RecipePhase, RecipeUnitProcedure } from "./api/client";
-import { CATEGORIES, CATEGORY_LABEL, moveItem, newInstruction, renumber } from "./piSheet";
+import type { Instruction, InstructionCategory, RecipeDocument, RecipeOperation, RecipePhase, RecipeUnitProcedure, SignatureMeaning } from "./api/client";
+import { CATEGORIES, CATEGORY_LABEL, MEANING_LABEL, moveItem, newInstruction, renumber } from "./piSheet";
 import styles from "./pages.module.css";
 
 /** Edits the ISA-88 structure of a PI sheet: unit procedures, operations, phases and their numbered instructions (FR-25.16). */
@@ -193,6 +193,19 @@ function InstructionEditor({
       <FormField id={`pi-text-${id}`} label={ins.category === "material-list" ? "Summary" : "Text"}>
         {(control) => <Textarea {...control} rows={2} maxLength={4000} value={ins.text ?? ""} disabled={readOnly} onChange={(e) => onChange({ ...ins, text: e.target.value })} />}
       </FormField>
+      {ins.category === "signature-request" ? (
+        <FormField id={`pi-meaning-${id}`} label="Signature meaning" hint="What the signer states by signing (21 CFR 11.50).">
+          {(control) => (
+            <Select {...control} value={ins.meaning ?? "performed"} disabled={readOnly} onChange={(e) => onChange({ ...ins, meaning: e.target.value as SignatureMeaning })}>
+              {(Object.keys(MEANING_LABEL) as SignatureMeaning[]).map((m) => (
+                <option key={m} value={m}>
+                  {MEANING_LABEL[m]}
+                </option>
+              ))}
+            </Select>
+          )}
+        </FormField>
+      ) : null}
       {hasCharacteristic ? (
         <div className={styles.premiumRow}>
           <FormField id={`pi-cname-${id}`} label="Characteristic">

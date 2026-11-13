@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/migrations"
 )
@@ -113,5 +114,52 @@ func TestHTTP_AndonSweepRaisesForSilentMachine(t *testing.T) {
 	rec = call(t, h, http.MethodPost, "/v1/shopfloor/andon/"+board.Items[0].ID+":clear", `{"reason":"it is fine"}`, duties)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != store.CodeAndonNotClearable {
 		t.Fatalf("clear a downtime alert %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A tenant's own andon thresholds replace the defaults: with three minutes down set, a machine down for five minutes
+// raises its alert on ingest, where the default ten minutes would not.
+func TestHTTP_AndonSettingsChangeTheThreshold(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	h := newRouterAt(store.New(app), func() time.Time { return now })
+	duties := floorDuty + "," + DutySetup + "," + DutyView
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/andon-settings", ``, duties)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"downtimeMinutes":10`) || !strings.Contains(rec.Body.String(), `"default":true`) {
+		t.Fatalf("default settings %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(t, h, http.MethodPut, "/v1/shopfloor/andon-settings", `{"downtimeMinutes":0,"clearMinutes":5,"scrapPercent":5,"scrapMinCount":10}`, duties); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "downtimeMinutes") {
+		t.Fatalf("zero minutes %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(t, h, http.MethodPut, "/v1/shopfloor/andon-settings", `{"downtimeMinutes":3,"clearMinutes":1,"scrapPercent":2,"scrapMinCount":20}`, DutyView); rec.Code != http.StatusForbidden {
+		t.Fatalf("without the setup duty %d", rec.Code)
+	}
+	rec = call(t, h, http.MethodPut, "/v1/shopfloor/andon-settings", `{"downtimeMinutes":3,"clearMinutes":1,"scrapPercent":2,"scrapMinCount":20}`, duties)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"downtimeMinutes":3`) || strings.Contains(rec.Body.String(), `"default":true`) {
+		t.Fatalf("put settings %d %s", rec.Code, rec.Body.String())
+	}
+	body := fmt.Sprintf(`{"machineId":"M-302","resourceId":%q,"idealCycleSeconds":"60"}`, resourceID)
+	if rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/machines", body, duties, map[string]string{"Idempotency-Key": "m-302"}); rec.Code != http.StatusCreated {
+		t.Fatalf("machine %d %s", rec.Code, rec.Body.String())
+	}
+	events := fmt.Sprintf(`{"events":[{"machineId":"M-302","seq":1,"kind":"state","ts":%q,"state":"DOWN"}]}`, now.Add(-5*time.Minute).Format(time.RFC3339))
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/machine-events", events, duties); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"andonsRaised":1`) {
+		t.Fatalf("ingest with a three-minute threshold %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAndonSettings_FieldErrorsAndScrapRule(t *testing.T) {
+	s := domain.AndonSettings{DowntimeMinutes: 3, ClearMinutes: 0, ScrapPercent: 2, ScrapMinCount: 20}
+	if f := s.FieldErrors(); len(f) != 0 {
+		t.Fatalf("valid settings: %v", f)
+	}
+	if !s.ScrapExceeded(100, 97) || s.ScrapExceeded(100, 98) || s.ScrapExceeded(19, 0) {
+		t.Fatal("scrap rule with 2 % over 20 pieces")
+	}
+	if f := (domain.AndonSettings{}).FieldErrors(); len(f) != 3 {
+		t.Fatalf("zero settings: %v", f)
 	}
 }

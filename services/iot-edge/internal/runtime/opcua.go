@@ -195,6 +195,43 @@ func (o *OPCUAConn) Read(ctx context.Context, node string) (float64, error) {
 	return n, nil
 }
 
+// NodeType implements NodeTyper: the OPC-UA built-in type of the node's current value (Double, Float, Int32, ...).
+func (o *OPCUAConn) NodeType(ctx context.Context, node string) (string, error) {
+	dv, err := o.readValue(ctx, node)
+	if err != nil {
+		return "", err
+	}
+	return opcuaTypeName(dv.Value.Value()), nil
+}
+
+func opcuaTypeName(v any) string {
+	switch v.(type) {
+	case float64:
+		return "Double"
+	case float32:
+		return "Float"
+	case int8:
+		return "SByte"
+	case uint8:
+		return "Byte"
+	case int16:
+		return "Int16"
+	case uint16:
+		return "UInt16"
+	case int32:
+		return "Int32"
+	case uint32:
+		return "UInt32"
+	case int64:
+		return "Int64"
+	case uint64:
+		return "UInt64"
+	case bool:
+		return "Boolean"
+	}
+	return ""
+}
+
 // Write implements Writer: it writes value to the node in the node's own data type, read first, so a
 // Float node gets a Float and an Int32 node an Int32. A value the type cannot hold exactly is refused.
 func (o *OPCUAConn) Write(ctx context.Context, node string, value float64) error {

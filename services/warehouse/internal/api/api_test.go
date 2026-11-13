@@ -419,6 +419,10 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"GET /v1/warehouse/automation/transport-orders":              dutyInquiry + " or " + dutyAutomation,
 		"POST /v1/warehouse/automation/transport-orders/{id}:report": dutyAutomation,
 		"POST /v1/warehouse/automation/events":                       dutyAutomation,
+		"POST /v1/warehouse/automation/transport-orders/{id}:cancel": dutyWorkSupervise,
+		"GET /v1/warehouse/rfid-rules":                               dutySetupView,
+		"POST /v1/warehouse/rfid-rules":                              dutySetupMaintain,
+		"DELETE /v1/warehouse/rfid-rules/{id}":                       dutySetupMaintain,
 	}
 	served := 0
 	router := httpx.NewRouter()

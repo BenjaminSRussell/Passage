@@ -3137,6 +3137,40 @@ test_consolidation_ic_layers_and_investments_register if {
 	not allowed("consolidation.configure", "GET", "/v1/consol/runs/r1/investments")
 }
 
+# #32: RFID rules are warehouse setup; cancelling an automation order is supervision, not the connector's.
+test_warehouse_rfid_rules_and_automation_cancel if {
+	allowed("warehouse.setup.view", "GET", "/v1/warehouse/rfid-rules")
+	not allowed("warehouse.setup.view", "POST", "/v1/warehouse/rfid-rules")
+	allowed("warehouse.setup.maintain", "POST", "/v1/warehouse/rfid-rules")
+	allowed("warehouse.setup.maintain", "DELETE", "/v1/warehouse/rfid-rules/0195f0a0-0000-7000-8000-0000000000a2")
+	not allowed("warehouse.rfid.ingest", "POST", "/v1/warehouse/rfid-rules")
+	allowed("warehouse.work.supervise", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:cancel")
+	not allowed("warehouse.automation.execute", "POST", "/v1/warehouse/automation/transport-orders/0195f0a0-0000-7000-8000-0000000000a1:cancel")
+}
+
+# #25: andon thresholds are shop floor setup; a node's certificate history is a read, revoking one is edge configuration.
+test_shopfloor_andon_settings_and_certificate_revocation if {
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/andon-settings")
+	not allowed("shopfloor.view", "PUT", "/v1/shopfloor/andon-settings")
+	allowed("shopfloor.setup.maintain", "PUT", "/v1/shopfloor/andon-settings")
+	allowed("shopfloor.view", "GET", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates")
+	allowed("shopfloor.edge.configure", "POST", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates/3f2a:revoke")
+	not allowed("shopfloor.view", "POST", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates/3f2a:revoke")
+	not allowed("shopfloor.edge.connect", "POST", "/v1/shopfloor/edge-nodes/0195f0a0-0000-7000-8000-0000000000a1/certificates/3f2a:revoke")
+}
+
+# #25: potency adjustments of a batch order are part of maintaining the order.
+test_processmfg_potency_adjustments_follow_batch_order_write if {
+	allowed("production.batch-order.write", "PUT", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/potency-adjustments")
+	not allowed("production.batch-order.read", "PUT", "/v1/production/batch-orders/0195f0a0-0000-7000-8000-0000000000a1/potency-adjustments")
+}
+
+# #46: the version history of a document template is a read, like the template.
+test_print_document_template_versions_are_a_read if {
+	allowed("print.job.submit", "GET", "/print/v1/document-templates/INV-STD/versions")
+	not allowed("print.job.submit", "PUT", "/print/v1/document-templates/INV-STD")
+}
+
 test_lookup_reads_reach_the_form_fillers if {
 	allowed("hr.action.maintain", "GET", "/v1/hr/checklist-templates")
 	allowed("hr.action.maintain", "GET", "/v1/hr/employments/e1")

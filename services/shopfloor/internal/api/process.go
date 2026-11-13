@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -121,6 +122,9 @@ func (a *API) createProcessMessage(w http.ResponseWriter, r *http.Request) {
 		OrderID: req.OrderID, PhasePath: req.PhasePath, OccurredAt: req.OccurredAt, Values: req.Values}
 	if fields := in.FieldErrors(); len(fields) > 0 {
 		validationFailed(w, r, fields)
+		return
+	}
+	if ok := a.checkSignature(w, r, &in); !ok {
 		return
 	}
 	cat, err := a.store.ResolveProcessCategory(r.Context(), in.CategoryCode)
@@ -416,4 +420,59 @@ func (a *API) retryDueProcessMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	a.processRetried.Add(int64(len(claims)))
 	httpx.JSON(w, http.StatusOK, itemsResponse[store.RetryClaim]{Items: claims})
+}
+
+// checkSignature makes the meaning of a kiosk signature the server's, not the kiosk's: a message that carries a
+// signature (signed-by or signature-meaning) must name, in its sourceMessageId ("<control recipe id>:<step key>"), a
+// signature-request step of a recipe of its order. The meaning is the step's (performed by default): a message
+// without one gets it, one with another meaning is refused (SF-0186, 422). It reports whether to go on.
+func (a *API) checkSignature(w http.ResponseWriter, r *http.Request, in *domain.NewMessage) bool {
+	meaningAt := -1
+	signed := false
+	for i, v := range in.Values {
+		switch v.Name {
+		case "signature-meaning":
+			meaningAt = i
+		case "signed-by":
+			signed = true
+		}
+	}
+	if !signed && meaningAt < 0 {
+		return true
+	}
+	refuse := func(detail string) bool {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeSignatureStep, detail))
+		return false
+	}
+	recipeID, key, found := strings.Cut(in.SourceMessageID, ":")
+	if !found || !ids.Valid(recipeID) {
+		return refuse("a signature must name the recipe step it signs (sourceMessageId <recipe id>:<step>)")
+	}
+	rc, err := a.store.GetControlRecipe(r.Context(), strings.ToLower(recipeID))
+	if err != nil {
+		var p *httpx.Problem
+		if errors.As(err, &p) && p.Status == http.StatusNotFound {
+			return refuse("the signed recipe does not exist")
+		}
+		a.fail(w, r, "read the signed control recipe", err)
+		return false
+	}
+	var doc domain.RecipeDoc
+	if err := json.Unmarshal(rc.Recipe, &doc); err != nil {
+		a.fail(w, r, "read the signed control recipe", err)
+		return false
+	}
+	step, ok := doc.SignatureStep(key)
+	if !ok || step.Category != domain.InstSignature || !strings.EqualFold(rc.OrderID, in.OrderID) {
+		return refuse("the message does not name a signature step of a recipe of its order")
+	}
+	want := domain.MeaningOf(step)
+	if meaningAt < 0 {
+		in.Values = append(in.Values, domain.Characteristic{Name: "signature-meaning", Type: "text", Value: want})
+		return true
+	}
+	if in.Values[meaningAt].Value != want {
+		return refuse("the step is signed as " + want + ", not " + in.Values[meaningAt].Value)
+	}
+	return true
 }

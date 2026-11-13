@@ -4,8 +4,49 @@ import (
 	"net/http"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/shopfloor/internal/store"
 )
+
+// getAndonSettings returns the tenant's andon thresholds (the defaults until it sets its own).
+func (a *API) getAndonSettings(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	out, err := a.store.GetAndonSettings(r.Context())
+	if err != nil {
+		a.fail(w, r, "get andon settings", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// putAndonSettings sets the tenant's andon thresholds (FR-25.11, D4): minutes down before the alert, minutes clear
+// before it closes, and the scrap share of a bucket with its minimum piece count.
+func (a *API) putAndonSettings(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	user, ok := authenticatedUser(w, r, "setting the andon thresholds")
+	if !ok {
+		return
+	}
+	var req domain.AndonSettings
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if f := req.FieldErrors(); len(f) > 0 {
+		validationFailed(w, r, f)
+		return
+	}
+	out, err := a.store.PutAndonSettings(r.Context(), req, user)
+	if err != nil {
+		a.fail(w, r, "put andon settings", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
 
 type andonClearRequest struct {
 	Reason string `json:"reason"`

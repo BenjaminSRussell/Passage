@@ -186,6 +186,10 @@ func (s *Postgres) SweepAndon(ctx context.Context, now time.Time) (AndonSweepRes
 		if out.IdleOpened, err = openIdleDowntimes(ctx, tx, p.TenantID, now); err != nil {
 			return err
 		}
+		set, err := andonSettings(ctx, tx, p.TenantID)
+		if err != nil {
+			return err
+		}
 		// The machine row is the lock ingest takes per machine. A machine whose events are being
 		// ingested right now is skipped: that ingest raises its alert itself if it is due, and
 		// waiting on it could deadlock on the downtime and andon rows both transactions write.
@@ -193,7 +197,7 @@ func (s *Postgres) SweepAndon(ctx context.Context, now time.Time) (AndonSweepRes
 			from downtime_record d join machine m on m.tenant_id = d.tenant_id and m.id = d.machine_id
 			where d.tenant_id = $1 and d.ended_at is null and not d.andon_raised and d.started_at < $2
 			order by d.started_at, d.id
-			for update of m skip locked`, p.TenantID, now.Add(-domain.AndonAfter))
+			for update of m skip locked`, p.TenantID, now.Add(-set.DownAfter()))
 		if err != nil {
 			return err
 		}
@@ -222,17 +226,17 @@ func (s *Postgres) SweepAndon(ctx context.Context, now time.Time) (AndonSweepRes
 			}
 			out.DowntimeRaised += n
 		}
-		if out.Cleared, err = clearAndon(ctx, tx, p.TenantID, "", now); err != nil {
+		if out.Cleared, err = clearAndon(ctx, tx, p.TenantID, "", now, set); err != nil {
 			return err
 		}
-		return sweepScrapRate(ctx, tx, p.TenantID, now, &out)
+		return sweepScrapRate(ctx, tx, p.TenantID, now, set, &out)
 	})
 	return out, err
 }
 
 // sweepScrapRate applies the scrap rate rule to the latest completed bucket of every machine's
 // resource (the OEE rollup stores buckets only for machines).
-func sweepScrapRate(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time, out *AndonSweepResult) error {
+func sweepScrapRate(ctx context.Context, tx pgx.Tx, tenantID string, now time.Time, set domain.AndonSettings, out *AndonSweepResult) error {
 	// Per machine resource (one machine per resource) and per bucket width, the newest completed
 	// bucket is one backward primary-key probe; of those, the one ending last wins, the narrowest
 	// on a tie. This keeps the per-minute sweep off the full bucket history (3-year retention).
@@ -273,7 +277,7 @@ func sweepScrapRate(ctx context.Context, tx pgx.Tx, tenantID string, now time.Ti
 	}
 	for _, l := range all {
 		end := l.start.Add(time.Duration(l.minutes) * time.Minute)
-		if domain.ScrapRateExceeded(l.total, l.good) {
+		if set.ScrapExceeded(l.total, l.good) {
 			site, err := siteOfResource(ctx, tx, tenantID, l.resourceID)
 			if err != nil {
 				return err
@@ -288,7 +292,7 @@ func sweepScrapRate(ctx context.Context, tx pgx.Tx, tenantID string, now time.Ti
 			out.ScrapRateRaised += n
 			continue
 		}
-		if domain.AndonCleared(end, now) {
+		if set.Cleared(end, now) {
 			tag, err := tx.Exec(ctx, `update andon_alert set cleared_at = greatest($3, started_at)
 				where tenant_id = $1 and resource_id = $2 and kind = 'scrap-rate' and cleared_at is null`, tenantID, l.resourceID, now)
 			if err != nil {
@@ -435,4 +439,64 @@ func openIdleDowntimes(ctx context.Context, tx pgx.Tx, tenantID string, now time
 		opened += int(tag.RowsAffected())
 	}
 	return opened, nil
+}
+
+// andonSettings reads the tenant's andon thresholds, or the defaults when it has set none.
+func andonSettings(ctx context.Context, tx pgx.Tx, tenantID string) (domain.AndonSettings, error) {
+	s := domain.DefaultAndonSettings()
+	err := tx.QueryRow(ctx, `select downtime_minutes, clear_minutes, scrap_percent, scrap_min_count from andon_setting where tenant_id = $1`, tenantID).
+		Scan(&s.DowntimeMinutes, &s.ClearMinutes, &s.ScrapPercent, &s.ScrapMinCount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.DefaultAndonSettings(), nil
+	}
+	return s, err
+}
+
+// AndonSettingsView is a tenant's thresholds with who set them; Default is true while the tenant has set none.
+type AndonSettingsView struct {
+	domain.AndonSettings
+	Default   bool       `json:"default"`
+	UpdatedBy string     `json:"updatedBy,omitempty"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
+}
+
+// GetAndonSettings returns the tenant's andon thresholds.
+func (s *Postgres) GetAndonSettings(ctx context.Context) (AndonSettingsView, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := AndonSettingsView{AndonSettings: domain.DefaultAndonSettings(), Default: true}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var at time.Time
+		err := tx.QueryRow(ctx, `select downtime_minutes, clear_minutes, scrap_percent, scrap_min_count, updated_by, updated_at from andon_setting where tenant_id = $1`, p.TenantID).
+			Scan(&out.DowntimeMinutes, &out.ClearMinutes, &out.ScrapPercent, &out.ScrapMinCount, &out.UpdatedBy, &at)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		at = at.UTC()
+		out.Default, out.UpdatedAt = false, &at
+		return nil
+	})
+	return out, err
+}
+
+// PutAndonSettings sets the tenant's andon thresholds; the next ingest and sweep use them.
+func (s *Postgres) PutAndonSettings(ctx context.Context, set domain.AndonSettings, user string) (AndonSettingsView, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out AndonSettingsView
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var at time.Time
+		if err := tx.QueryRow(ctx, `insert into andon_setting (tenant_id, downtime_minutes, clear_minutes, scrap_percent, scrap_min_count, updated_by, updated_at)
+			values ($1,$2,$3,$4,$5,$6,now())
+			on conflict (tenant_id) do update set downtime_minutes = excluded.downtime_minutes, clear_minutes = excluded.clear_minutes,
+				scrap_percent = excluded.scrap_percent, scrap_min_count = excluded.scrap_min_count, updated_by = excluded.updated_by, updated_at = now()
+			returning updated_at`, p.TenantID, set.DowntimeMinutes, set.ClearMinutes, set.ScrapPercent, set.ScrapMinCount, user).Scan(&at); err != nil {
+			return err
+		}
+		at = at.UTC()
+		out = AndonSettingsView{AndonSettings: set, UpdatedBy: user, UpdatedAt: &at}
+		return nil
+	})
+	return out, err
 }

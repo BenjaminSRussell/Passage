@@ -29,11 +29,13 @@ beforeEach(() => {
   rememberOption("product", { id: SEAL, name: "Mechanical seal MK-125", number: "SEAL-MK-125" });
   rememberOption("product", { id: BEARING, name: "Bearing 6206", number: "BRG-6206" });
   rememberOption("legalEntity", { id: ENTITY, name: "Cedar Ridge Pumps, Inc.", number: "CRP-US" });
+  rememberOption("site", { id: SITE, name: "Cedar Rapids plant", number: "CR" });
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
       calls.push({ method: init.method ?? "GET", url, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.pathname.endsWith("/truck-stock-levels") && init.method === "PUT") return new Response(JSON.stringify({ items: levels }), { status: 200 });
       if (url.pathname.endsWith("/truck-stock-levels")) return new Response(JSON.stringify({ items: levels }), { status: 200 });
       if (url.pathname.endsWith("/truck-stock:replenish")) return new Response(JSON.stringify({ orders }), { status: 200 });
       return new Response("{}", { status: 404 });
@@ -93,5 +95,87 @@ describe("truck stock", () => {
     renderAt(["inventory.read", "inventory.transfer.write"]);
     expect(await screen.findByText("Stocked")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refill trucks below minimum" })).toBeDisabled();
+  });
+
+  it("links to the levels form only for someone who maintains truck stock", async () => {
+    renderAt(["inventory.read"]);
+    await screen.findByText("Stocked");
+    expect(screen.queryByRole("link", { name: "Set truck levels" })).toBeNull();
+  });
+});
+
+describe("set truck stock levels", () => {
+  const formAt = (search: string) => renderAt(["inventory.read", "inventory.truck-stock.write"], search).container;
+  const formPath = `?legalEntityId=${ENTITY}&siteId=${SITE}&warehouseId=${TRUCK}`;
+
+  function renderForm(search = formPath) {
+    return render(
+      <MemoryRouter initialEntries={[`/inventory/truck-stock/levels${search}`]}>
+        <PrincipalProvider duties={["inventory.read", "inventory.truck-stock.write"]}>
+          <Routes>
+            {inventory.routes.map((route) => (
+              <Route key={route.path} path={route.path} element={route.element} />
+            ))}
+          </Routes>
+        </PrincipalProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("is reached from the truck stock screen", async () => {
+    formAt(`?legalEntityId=${ENTITY}`);
+    const link = await screen.findByRole("link", { name: "Set truck levels" });
+    expect(link.getAttribute("href")).toBe(`/inventory/truck-stock/levels?legalEntityId=${ENTITY}`);
+  });
+
+  it("asks for a truck before it loads anything", async () => {
+    renderForm(`?legalEntityId=${ENTITY}`);
+    expect(await screen.findByText("Choose a truck")).toBeInTheDocument();
+    expect(calls.filter((c) => c.url.pathname.endsWith("/truck-stock-levels"))).toHaveLength(0);
+  });
+
+  it("fills in the truck's current levels, checks them, and replaces them with what is on the form", async () => {
+    const view = renderForm();
+    expect(await screen.findByText("Part 2")).toBeInTheDocument();
+    expect(screen.getByText("Now CR-FG. Pick another warehouse to change it.")).toBeInTheDocument();
+    expect(calls[0]?.url.searchParams.get("warehouseId")).toBe(TRUCK);
+    expect(view.container.textContent).not.toContain(TRUCK);
+
+    fireEvent.change(screen.getByLabelText("Maximum", { selector: "#tl-line-2-max" }), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save levels" }));
+    expect(await screen.findByText("The maximum cannot be below the minimum.")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+
+    fireEvent.change(screen.getByLabelText("Maximum", { selector: "#tl-line-2-max" }), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove part 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save levels" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+      legalEntityId: ENTITY,
+      siteId: SITE,
+      warehouseId: TRUCK,
+      sourceSiteId: "CR",
+      sourceWarehouseId: "CR-FG",
+      levels: [{ productId: BEARING, unit: "EA", minQty: "4", maxQty: "12" }],
+    });
+    expect(await screen.findByRole("heading", { name: "Truck stock" })).toBeInTheDocument();
+  });
+
+  it("puts the service's field errors on the form", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init: RequestInit = {}) => {
+        const url = new URL(input, "http://localhost");
+        if (init.method === "PUT") {
+          return new Response(JSON.stringify({ code: "COM-0001", detail: "invalid", errors: { sourceWarehouseId: "must differ from the truck's warehouse" } }), { status: 400 });
+        }
+        if (url.pathname.endsWith("/truck-stock-levels")) return new Response(JSON.stringify({ items: levels }), { status: 200 });
+        return new Response("{}", { status: 404 });
+      }),
+    );
+    renderForm();
+    await screen.findByText("Part 2");
+    fireEvent.click(screen.getByRole("button", { name: "Save levels" }));
+    expect(await screen.findByText("must differ from the truck's warehouse")).toBeInTheDocument();
   });
 });

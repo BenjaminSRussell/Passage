@@ -41,6 +41,7 @@ import { TransferLinesPage } from "./TransferLinesPage";
 import { TransferOrderPage } from "./TransferOrderPage";
 import { TransferOrdersPage } from "./TransferOrdersPage";
 import { TruckStockPage } from "./TruckStockPage";
+import { TruckLevelsPage } from "./TruckLevelsPage";
 import { WorkspacePage } from "./WorkspacePage";
 
 const inventory: PassageModule = {
@@ -78,6 +79,7 @@ const inventory: PassageModule = {
     { path: "/inventory/transfer-lines", element: createElement(TransferLinesPage) },
     { path: "/inventory/in-transit", element: createElement(InTransitPage) },
     { path: "/inventory/truck-stock", element: createElement(TruckStockPage), handle: { title: "Truck stock" } },
+    { path: "/inventory/truck-stock/levels", element: createElement(TruckLevelsPage), handle: { title: "Set truck stock levels" } },
     { path: "/inventory/abc-runs", element: createElement(AbcRunsPage) },
     { path: "/inventory/abc-runs/new", element: createElement(NewAbcRunPage) },
     { path: "/inventory/abc-runs/:id", element: createElement(AbcRunPage), handle: { title: "ABC run" } },
