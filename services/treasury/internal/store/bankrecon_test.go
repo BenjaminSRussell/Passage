@@ -439,7 +439,7 @@ func TestListReconciliations_PagesByKeysetAndFilters(t *testing.T) {
 }
 
 // The first reconciliation of an account can start from the opening book balance the migration loaded (#49); a later one, a
-// statement before the cutover and an account without an opening balance must state it. Restating makes the balance stated.
+// statement closing on another day than the cutover and an account without an opening balance must state it. Restating makes the balance stated.
 func TestCreateReconciliation_FirstOneStartsFromTheMigratedOpeningBalance(t *testing.T) {
 	f := newReconFixture(t)
 	if _, err := f.s.CreateReconciliation(f.ctx, NewReconciliation{StatementID: f.statement.ID, FromOpening: true}, ids.New()); problemCode(t, err) != CodeReconNoOpening {
@@ -468,5 +468,15 @@ func TestCreateReconciliation_FirstOneStartsFromTheMigratedOpeningBalance(t *tes
 	}
 	if _, err := f.s.CreateReconciliation(f.ctx, NewReconciliation{StatementID: res.Statement.ID, FromOpening: true}, ids.New()); problemCode(t, err) != CodeReconNotFirstOpen {
 		t.Fatalf("a second reconciliation from the opening balance: %v", err)
+	}
+
+	// The opening balance is the book balance at the end of the cutover day: a statement closing on another day is refused.
+	g := newReconFixture(t)
+	if _, _, err := g.s.ImportOpeningBalances(g.ctx, OpeningImport{LegalEntityID: g.le, BatchKey: "cutover-early", AsOf: "2026-10-21",
+		Items: []OpeningItem{{Reference: "AX-OPER-2", BankAccountID: g.account.ID, Currency: g.account.Currency, BalanceMinor: 145700}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.s.CreateReconciliation(g.ctx, NewReconciliation{StatementID: g.statement.ID, FromOpening: true}, ids.New()); problemCode(t, err) != CodeReconNotFirstOpen {
+		t.Fatalf("a statement closing the day after the cutover: %v", err)
 	}
 }

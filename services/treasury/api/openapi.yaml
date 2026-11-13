@@ -2552,7 +2552,7 @@ components:
         statementId: {type: string, format: uuid}
         bookBalance: {type: string, description: "Signed decimal, at most the currency's minor units; required unless bookBalanceSource is opening"}
         outstandingAmount: {type: string, description: "Book items not yet on the statement, signed; default 0"}
-        bookBalanceSource: {type: string, enum: [stated, opening], default: stated, description: "opening starts the account's first reconciliation, of a statement closing on or after the cutover, from the opening book balance the migration factory loaded (#49); leave bookBalance out. 422 TRS-0606 without an opening balance, TRS-0607 for a later reconciliation or an earlier statement."}
+        bookBalanceSource: {type: string, enum: [stated, opening], default: stated, description: "opening starts the account's first reconciliation, of a statement closing on the cutover date, from the opening book balance the migration factory loaded (#49); leave bookBalance out. 422 TRS-0606 without an opening balance, TRS-0607 for a later reconciliation or a statement closing on another date."}
     BankReconciliationLines:
       type: object
       required: [lines, matchedCount, matchedTotal, excludedCount, excludedTotal, unmatchedCount, unmatchedTotal]

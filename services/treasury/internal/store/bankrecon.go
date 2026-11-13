@@ -105,7 +105,7 @@ type NewReconciliation struct {
 // Problems of a reconciliation that starts from the migrated opening balance.
 const (
 	CodeReconNoOpening    = "TRS-0606" // the account has no migrated opening balance
-	CodeReconNotFirstOpen = "TRS-0607" // only the account's first reconciliation, of a statement after the cutover, starts from it
+	CodeReconNotFirstOpen = "TRS-0607" // only the account's first reconciliation, of a statement closing on the cutover date, starts from it
 )
 
 type ReconciliationQuery struct {
@@ -290,7 +290,7 @@ func (s *Postgres) CreateReconciliation(ctx context.Context, in NewReconciliatio
 }
 
 // openingBook is the migrated opening book balance of the statement's account, for the account's first reconciliation of a
-// statement that closes on or after the cutover date.
+// statement that closes on the cutover date.
 func openingBook(ctx context.Context, tx pgx.Tx, tenantID, statementID, currency string) (decimal.Decimal, error) {
 	var account, closing string
 	var asOfPtr *string
@@ -305,8 +305,10 @@ func openingBook(ctx context.Context, tx pgx.Tx, tenantID, statementID, currency
 		return decimal.Zero, httpx.NewProblem(http.StatusUnprocessableEntity, CodeReconNoOpening, "the account has no opening balance from the migration; state the book balance")
 	}
 	asOf, minor := *asOfPtr, *minorPtr
-	if closing < asOf {
-		return decimal.Zero, httpx.NewProblem(http.StatusUnprocessableEntity, CodeReconNotFirstOpen, "the statement closes before the cutover date "+asOf+"; state the book balance")
+	// The opening balance is the book balance at the end of the cutover day only: a statement closing later would need the book
+	// movements posted since the cutover, which the opening balance does not hold.
+	if closing != asOf {
+		return decimal.Zero, httpx.NewProblem(http.StatusUnprocessableEntity, CodeReconNotFirstOpen, "the statement closes on "+closing+", not on the cutover date "+asOf+", so the opening balance is not the book balance on its closing date; state the book balance")
 	}
 	var earlier int
 	if err := tx.QueryRow(ctx, `select count(*) from bank_reconciliation where tenant_id = $1 and bank_account_id = $2`, tenantID, account).Scan(&earlier); err != nil {

@@ -43,7 +43,7 @@ const FAILURES: Record<string, string> = {
   "TRS-0410": "The difference is not zero, so the period cannot close",
   "TRS-0504": "This statement already has a reconciliation",
   "TRS-0606": "This account has no opening balance from the migration",
-  "TRS-0607": "Only the first reconciliation after the cutover starts from the opening balance",
+  "TRS-0607": "Only the first reconciliation, of a statement closing on the cutover date, starts from the opening balance",
   "TRS-0506": "The period is closed",
   "TRS-0507": "Some lines are neither matched nor excluded",
   "TRS-0508": "A later period of this account is closed",
@@ -252,7 +252,7 @@ export function NewReconciliationPage() {
               </Select>
             )}
           </FormField>
-          <FormField id="nr-book-source" label="Book balance from" hint="The first reconciliation after the cutover can start from the opening balance the migration loaded for this account.">
+          <FormField id="nr-book-source" label="Book balance from" hint="The account's first reconciliation, of the statement that closes on the cutover date, can start from the opening balance the migration loaded.">
             {(c) => (
               <Select {...c} value={fromOpening ? "opening" : "stated"} onChange={(e) => setFromOpening(e.target.value === "opening")}>
                 <option value="stated">I state it</option>

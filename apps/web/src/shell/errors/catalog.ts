@@ -251,7 +251,7 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "TRS-0604": { message: "A bank account in this batch already has an opening balance.", action: "Remove the account from the batch; an account is opened once." },
   "TRS-0605": { message: "Opening bank balances can't be loaded here because the import is not switched on.", action: "Ask your administrator to turn on the opening balance import." },
   "TRS-0606": { message: "This bank account has no opening balance from the migration, so the reconciliation can't start from it.", action: "Enter the book balance yourself." },
-  "TRS-0607": { message: "Only an account's first reconciliation after the cutover can start from its migrated opening balance.", action: "Enter the book balance yourself." },
+  "TRS-0607": { message: "Only an account's first reconciliation, of a statement that closes on the cutover date, can start from its migrated opening balance.", action: "Enter the book balance yourself." },
   "MIG-1560": { message: "The target service for this opening load is not set up.", action: "Ask your administrator to configure the inventory or treasury address for the migration factory." },
   "MIG-1561": { message: "The inventory or treasury service refused the migration factory.", action: "Ask your administrator to check the factory's service access." },
   "MIG-1562": { message: "The inventory or treasury service refused the batch, so the balances stay pending.", action: "Read the message, fix what it names, then load again." },
