@@ -35,6 +35,7 @@ deterministic in tests.
 | `src/errors.ts` | `AgentError` with the stable PRD 9.47.18 codes |
 | `src/api/router.ts` | `createAgentsHandler`: the node:http listener for the routes this slice serves (`GET`/`POST /api/v1/agents/kill-switch`, `POST /api/v1/agents/runs/{run_id}/actions/{id}/decision`). Takes the caller from the verified bearer token (`auth.ts`), caps bodies at 64 KiB, answers RFC 9457 problems and never echoes an internal error |
 | `src/api/killswitch.ts` | Kill switch toggle (AC-47.6): tenant scope needs agents.admin and the caller's own tenant, global scope platform.global.admin. Idempotent by scope. The `killswitch.changed` event is published first and applied to the local registry only after it succeeded. `readKillSwitchStatus` serves the administration screen |
+| `src/store/killswitch.ts`, `src/runtime/killswitch-poller.ts`, `migrations/0005_kill_switch.sql` | The kill switch every pod shares (AC-47.6). `kill_switch_change` is an append-only log of toggles with a version from one sequence; `PgKillSwitchLog.toggle` takes a transaction advisory lock, decides idempotence from the stored state, inserts the row and writes its `killswitch.changed` outbox event in the same transaction, so versions commit in order. `KillSwitchPoller` reads `version > applied` every `AGENTS_KILLSWITCH_POLL_MS` on every pod and heartbeats only after a successful read, so a pod that cannot read the table for 10 s fails closed. A starting pod reads only the latest toggle of each switch. The chart runs two replicas |
 | `src/api/decision.ts` | Approval decision (FR-47.8): approver duty (AGT-0203), self-approval (AGT-0209), expiry recorded as REJECTED/EXPIRED (BR-47.3). Idempotent by action id with a first-writer-wins `ApprovalStore.record`; a different decision on a decided action is 409. Every store call is scoped to the caller's tenant |
 | `src/api/auth.ts` | Caller authentication: verifies the bearer token (RS256 against the realm's JWKS, issuer, audience, expiry, not-before) and takes the tenant (`tid`), user (`sub`) and duties from it. The X-Passage-* edge headers are never the source of identity; present ones must match the token. 401 AGT-0401 otherwise, 503 AGT-0503 when the keys cannot be read |
 | `src/api/principal.ts` | The `Principal` type, the HTTP error codes and the mapping of `AgentError` to status |
@@ -59,6 +60,7 @@ deterministic in tests.
 | `AGENTS_RUN_TOKEN_CAP`, `AGENTS_COPILOT_TOKEN_CAP`, `AGENTS_COPILOT_MAX_TURNS` | Per-run and per-chat token caps, chat turns | 20000, 8000, 4 |
 | `AGENTS_EVAL_PASSED` | `agent@version` pairs whose evaluation passed, comma separated; others answer AGT-0204 | none |
 | `AGENTS_APPROVAL_EXPIRY_H`, `AGENTS_SELF_APPROVAL_LIMIT`, `AGENTS_SELF_APPROVAL_CURRENCY` | BR-47.3 expiry (1 to 240 hours) and the self-approval limit | 72, 0, USD |
+| `AGENTS_KILLSWITCH_POLL_MS` | How often each pod reads the shared kill switch (100 to 5000) | 1000 |
 | `HTTP_ADDR`, `ADMIN_ADDR`, `MIGRATE_ON_START`, `AGENTS_DB_POOL` | Listeners and database | `0.0.0.0:8080`, `0.0.0.0:9090`, off, 10 |
 
 ## Run and test
@@ -91,7 +93,7 @@ rejected with AGT-0202 and no provider call, tenants isolated).
 - FR-47.13 provider layer: Anthropic, OpenAI-compatible (Azure through the same adapter) and Amazon Bedrock (Converse API, in-tree SigV4 checked against AWS SDK reference signatures) adapters, with parity tests in `test/providers.test.ts` and `test/bedrock.test.ts`
 - FR-47.5 to 47.7 agent definitions: `defaultCatalog` in `src/agents/catalog.ts` builds version 1 of the five agents (prompts, read and propose tools only, required duties); wiring them into the runtime is not built
 - BR-47.9 provider failover: `createFailoverProvider` in `src/providers/failover.ts`; only outages (5xx, timeouts, transport errors) count, a rejected request never fails over
-- FR-47.12 kill switch: `KillSwitchRegistry` and the `killswitch.changed` payload; the engine checks it before the provider call (AC-47.6). The toggle and status endpoints and the worker-side feed are built; the Kafka consumer that drives the feed and the outbox writer behind `publish` are not
+- FR-47.12 kill switch: `KillSwitchRegistry` and the `killswitch.changed` payload; the engine checks it before the provider call (AC-47.6). Toggles are stored in `kill_switch_change` and every pod polls it (`test/killswitch-pg.test.ts`: a toggle on one pod halts runs on another, concurrent toggles commit in version order, a pod that cannot read the table fails closed)
 - FR-47.8 approval decision: the endpoint and its rules run against `PgApprovalStore` (`approval_request`, migration 0002)
 - AC-47.4 cost guard: `budgetThresholdEvent` fires once when the budget moves into SOFT (80%) or HARD (100%). The event is the alert; routing it to a pager is the alerting consumer's job
 - FR-47.14 knowledge retrieval: hybrid fusion and the 0.75 citation gate (AGT-0212) in `src/domain/knowledge.ts`; the search tool and index are not built
