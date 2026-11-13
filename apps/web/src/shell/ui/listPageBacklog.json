@@ -1,11 +1,3 @@
 {
-  "pages": [
-    "modules/receivables/Cases.tsx",
-    "modules/receivables/Deductions.tsx",
-    "modules/receivables/Disputes.tsx",
-    "modules/receivables/DownPayments.tsx",
-    "modules/receivables/Dunning.tsx",
-    "modules/receivables/GLJournals.tsx",
-    "modules/receivables/Statements.tsx"
-  ]
+  "pages": []
 }

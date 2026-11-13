@@ -1,7 +1,25 @@
 import { useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Skeleton,
+  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  loadedRows,
+} from "../../shell/ui";
 import {
   createDunningRun,
   describeProblem,
@@ -28,7 +46,7 @@ function runBadge(status: RunStatus) {
   return <Badge tone={RUN_TONES[status] ?? "neutral"}>{RUN_LABELS[status] ?? status}</Badge>;
 }
 
-const runColumns: DataTableColumn<DunningRunSummary>[] = [
+const runColumns: ListColumn<DunningRunSummary>[] = [
   { key: "runDate", header: "Run date", mono: true },
   { key: "legalEntityId", header: "Legal entity", render: (row) => <EntityName entity="legalEntity" id={row.legalEntityId} /> },
   { key: "graceDays", header: "Grace days", mono: true, align: "end" },
@@ -37,51 +55,37 @@ const runColumns: DataTableColumn<DunningRunSummary>[] = [
   { key: "status", header: "Status", render: (row) => runBadge(row.status) },
 ];
 
+const runFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: RUN_STATUSES.map((s) => ({ value: s, label: RUN_LABELS[s] })) },
+];
+
+function useRunRows(query: ListQuery): ListData<DunningRunSummary> {
+  const status = (query.filters.status ?? "") as RunStatus | "";
+  return loadedRows(useLoad((signal) => listDunningRuns(status, signal), status));
+}
+
 /** Dunning runs (FR-30.7): proposals in draft, reviewed, issued or cancelled. */
 export function DunningRunsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<RunStatus | "">("");
-  const state = useLoad((signal) => listDunningRuns(status, signal), status);
-
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Dunning runs"
-        description="Latest run first. A run proposes letters as a draft; review it, then issue it to raise levels and post fees."
-        actions={
-          <Link className={buttonClassName("primary")} to="/receivables/dunning-runs/new">
-            New dunning run
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="dr-status" label="Status">
-          {(c) => (
-            <Select {...c} value={status} onChange={(e) => setStatus(e.target.value as RunStatus | "")}>
-              <option value="">All statuses</option>
-              {RUN_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {RUN_LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </div>
-      {state.error ? (
-        <LoadFailure title="Could not load the dunning runs" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Dunning runs"
-          columns={runColumns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No dunning runs", description: "Start a run to see which customers get a letter and at which level." }}
-          onRowOpen={(row) => navigate(`/receivables/dunning-runs/${row.id}`)}
-        />
-      )}
-    </div>
+    <ListPage
+      id="receivables-dunning-runs"
+      title="Dunning runs"
+      description="Latest run first. A run proposes letters as a draft; review it, then issue it to raise levels and post fees."
+      actions={
+        <Link className={buttonClassName("primary")} to="/receivables/dunning-runs/new">
+          New dunning run
+        </Link>
+      }
+      noun="dunning runs"
+      singular="dunning run"
+      columns={runColumns}
+      filters={runFilters}
+      useRows={useRunRows}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/receivables/dunning-runs/${row.id}`)}
+      empty={{ title: "No dunning runs", description: "Start a run to see which customers get a letter and at which level." }}
+    />
   );
 }
 

@@ -84,7 +84,7 @@ describe("UI consistency audit", () => {
   });
 
   it("lists every procure-to-pay and order-to-cash list page that is not on ListPage", () => {
-    const listed = new Set(backlog.pages);
+    const listed = new Set<string>(backlog.pages);
     const now = Object.entries(sources)
       .filter(([path, source]) => FLOW_MODULES.includes(moduleOf(path)) && !isRecordPage(path) && isUnconvertedList(source))
       .map(([path]) => fileOf(path))

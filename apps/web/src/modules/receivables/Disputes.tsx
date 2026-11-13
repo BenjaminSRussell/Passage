@@ -8,14 +8,17 @@ import {
   Button,
   buttonClassName,
   Card,
-  DataTable,
   FormField,
   Input,
   PageHeader,
   Select,
   Skeleton,
   Textarea,
-  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   describeProblem,
@@ -36,7 +39,7 @@ import {
 import { dateTime, DECIMAL, DISPUTE_LABELS, DISPUTE_TONES, money, RESOLUTION_LABELS, UUID } from "./format";
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
-import { useLoad } from "./useLoad";
+import { useCappedRows, useLoad } from "./useLoad";
 import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
@@ -53,7 +56,7 @@ function statusBadge(status: DisputeStatus) {
   return <Badge tone={DISPUTE_TONES[status] ?? "neutral"}>{DISPUTE_LABELS[status] ?? status}</Badge>;
 }
 
-const columns: DataTableColumn<Dispute>[] = [
+const columns: ListColumn<Dispute>[] = [
   { key: "documentNumber", header: "Document", mono: true },
   { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "reasonCode", header: "Reason", mono: true },
@@ -63,53 +66,50 @@ const columns: DataTableColumn<Dispute>[] = [
   { key: "status", header: "Status", render: (row) => statusBadge(row.status) },
 ];
 
+const disputeFilters: ListFilterDef[] = [
+  {
+    kind: "select",
+    key: "status",
+    label: "Status",
+    anyLabel: "All statuses",
+    options: [{ value: "active", label: "Open and under review" }, ...DISPUTE_STATUSES.map((s) => ({ value: s, label: DISPUTE_LABELS[s] }))],
+  },
+];
+
+/** Disputes still being worked are what the page is for, so it opens on them. */
+const ACTIVE_FIRST = { status: "active" };
+
+function useDisputeRows(query: ListQuery, onCapped: (capped: boolean) => void): ListData<Dispute> {
+  const status = (query.filters.status ?? "") as DisputeStatus | "active" | "";
+  return useCappedRows((signal) => listDisputes({ status, limit: PAGE }, signal), status, PAGE, onCapped);
+}
+
 /** Disputes (FR-30.9): items the customer contests. An active dispute keeps its item out of dunning and interest. */
 export function DisputesPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<DisputeStatus | "active" | "">("active");
-  const state = useLoad((signal) => listDisputes({ status, limit: PAGE }, signal), status);
-
+  const [capped, setCapped] = useState(false);
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Disputes"
-        description="Disputed items, nearest SLA first. While a dispute is open or under review, dunning and interest skip its item."
-        actions={
-          <Link className={buttonClassName("primary")} to="/receivables/disputes/new">
-            Open dispute
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="dsp-status" label="Status">
-          {(c) => (
-            <Select {...c} value={status} onChange={(e) => setStatus(e.target.value as DisputeStatus | "active" | "")}>
-              <option value="active">Open and under review</option>
-              <option value="">All statuses</option>
-              {DISPUTE_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {DISPUTE_LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </div>
-      {state.error ? (
-        <LoadFailure title="Could not load the disputes" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Disputes"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No disputes", description: "Open a dispute from an open item when the customer contests it." }}
-          onRowOpen={(row) => navigate(`/receivables/disputes/${row.id}`)}
-        />
-      )}
-      {state.data && state.data.length >= PAGE ? <p className={styles.note}>Showing the first {PAGE} disputes.</p> : null}
-    </div>
+    <ListPage
+      id="receivables-disputes"
+      title="Disputes"
+      description="Disputed items, nearest SLA first. While a dispute is open or under review, dunning and interest skip its item."
+      actions={
+        <Link className={buttonClassName("primary")} to="/receivables/disputes/new">
+          Open dispute
+        </Link>
+      }
+      noun="disputes"
+      singular="dispute"
+      columns={columns}
+      filters={disputeFilters}
+      initialFilters={ACTIVE_FIRST}
+      useRows={(query) => useDisputeRows(query, setCapped)}
+      search={(row) => ({ number: row.documentNumber, name: row.reasonCode })}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/receivables/disputes/${row.id}`)}
+      empty={{ title: "No disputes", description: "Open a dispute from an open item when the customer contests it." }}
+      footer={capped ? <p className={styles.note}>Showing the first {PAGE} disputes. Narrow the filters to see the others.</p> : null}
+    />
   );
 }
 

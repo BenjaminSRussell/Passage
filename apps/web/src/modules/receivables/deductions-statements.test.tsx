@@ -154,8 +154,10 @@ describe("Deductions", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "MATCHED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("status") === "MATCHED")).toBe(true));
     fireEvent.change(screen.getByLabelText("Type"), { target: { value: "PRICE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("type") === "PRICE")).toBe(true));
     fireEvent.click(within(await findTable({ name: "Deductions" })).getAllByRole("button", { name: "INV-30001" })[0]);
     expect(await screen.findByRole("heading", { name: "Deduction 300.00 USD" })).toBeInTheDocument();
@@ -169,7 +171,7 @@ describe("Deductions", () => {
     server.handler = () => json(500, { code: "COM-0500", detail: "database unavailable" });
     renderAt("/receivables/deductions");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("Could not load the deductions");
+    expect(alert).toHaveTextContent("Could not load deductions");
     expect(alert).toHaveTextContent("COM-0500");
   });
 

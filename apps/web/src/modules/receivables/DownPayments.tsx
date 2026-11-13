@@ -15,6 +15,11 @@ import {
   Select,
   Skeleton,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   createDownPayment,
@@ -48,7 +53,7 @@ import {
 } from "./format";
 import { CommandFailure, Detail, isStale, keepKeyAfter, LoadFailure } from "./parts";
 import styles from "./pages.module.css";
-import { useLoad } from "./useLoad";
+import { useCappedRows, useLoad } from "./useLoad";
 import { EntityName } from "../../shell/lookup/EntityName";
 
 const PAGE = 500;
@@ -58,7 +63,7 @@ function statusBadge(status: DownPaymentStatus) {
   return <Badge tone={DOWN_PAYMENT_TONES[status] ?? "neutral"}>{DOWN_PAYMENT_LABELS[status] ?? status}</Badge>;
 }
 
-const columns: DataTableColumn<DownPayment>[] = [
+const columns: ListColumn<DownPayment>[] = [
   { key: "kind", header: "Kind", render: (row) => KIND_LABELS[row.kind] ?? row.kind },
   { key: "customerId", header: "Customer", render: (row) => <EntityName entity="customer" id={row.customerId} /> },
   { key: "amount", header: "Amount", mono: true, align: "end", render: (row) => money(row.amount, row.currency) },
@@ -67,64 +72,41 @@ const columns: DataTableColumn<DownPayment>[] = [
   { key: "status", header: "Status", render: (row) => statusBadge(row.status) },
 ];
 
+const downPaymentFilters: ListFilterDef[] = [
+  { kind: "select", key: "kind", label: "Kind", anyLabel: "All kinds", options: DOWN_PAYMENT_KINDS.map((k) => ({ value: k, label: KIND_LABELS[k] })) },
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: DOWN_PAYMENT_STATUSES.map((s) => ({ value: s, label: DOWN_PAYMENT_LABELS[s] })) },
+];
+
+function useDownPaymentRows(query: ListQuery, onCapped: (capped: boolean) => void): ListData<DownPayment> {
+  const kind = (query.filters.kind ?? "") as DownPaymentKind | "";
+  const status = (query.filters.status ?? "") as DownPaymentStatus | "";
+  return useCappedRows((signal) => listDownPayments({ kind, status, limit: PAGE }, signal), `${kind}|${status}`, PAGE, onCapped);
+}
+
 /** Down payments and security deposits (FR-30.21), newest first. */
 export function DownPaymentsPage() {
   const navigate = useNavigate();
-  const [kind, setKind] = useState<DownPaymentKind | "">("");
-  const [status, setStatus] = useState<DownPaymentStatus | "">("");
-  const state = useLoad((signal) => listDownPayments({ kind, status, limit: PAGE }, signal), `${kind}|${status}`);
+  const [capped, setCapped] = useState(false);
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Down payments and deposits"
-        description="Down payments (2190) clear the order's final invoice. Security deposits (2195) offset open items or are refunded."
-        actions={
-          <Link className={buttonClassName("primary")} to="/receivables/down-payments/new">
-            Request down payment
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="dp-kind" label="Kind">
-          {(c) => (
-            <Select {...c} value={kind} onChange={(e) => setKind(e.target.value as DownPaymentKind | "")}>
-              <option value="">All kinds</option>
-              {DOWN_PAYMENT_KINDS.map((k) => (
-                <option key={k} value={k}>
-                  {KIND_LABELS[k]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <FormField id="dp-status" label="Status">
-          {(c) => (
-            <Select {...c} value={status} onChange={(e) => setStatus(e.target.value as DownPaymentStatus | "")}>
-              <option value="">All statuses</option>
-              {DOWN_PAYMENT_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {DOWN_PAYMENT_LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-      </div>
-      {state.error ? (
-        <LoadFailure title="Could not load the down payments" problem={state.error} retry={state.reload} />
-      ) : (
-        <DataTable
-          label="Down payments and deposits"
-          columns={columns}
-          rows={state.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={state.loading}
-          empty={{ title: "No down payments", description: "Request a down payment for an order, or a security deposit from a customer." }}
-          onRowOpen={(row) => navigate(`/receivables/down-payments/${row.id}`)}
-        />
-      )}
-      {state.data && state.data.length >= PAGE ? <p className={styles.note}>Showing the first {PAGE} down payments.</p> : null}
-    </div>
+    <ListPage
+      id="receivables-down-payments"
+      title="Down payments and deposits"
+      description="Down payments (2190) clear the order's final invoice. Security deposits (2195) offset open items or are refunded."
+      actions={
+        <Link className={buttonClassName("primary")} to="/receivables/down-payments/new">
+          Request down payment
+        </Link>
+      }
+      noun="down payments"
+      singular="down payment"
+      columns={columns}
+      filters={downPaymentFilters}
+      useRows={(query) => useDownPaymentRows(query, setCapped)}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/receivables/down-payments/${row.id}`)}
+      empty={{ title: "No down payments", description: "Request a down payment for an order, or a security deposit from a customer." }}
+      footer={capped ? <p className={styles.note}>Showing the first {PAGE} down payments. Narrow the filters to see the others.</p> : null}
+    />
   );
 }
 

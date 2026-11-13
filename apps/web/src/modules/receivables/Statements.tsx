@@ -1,7 +1,23 @@
 import { useState } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  EmptyState,
+  FormField,
+  Input,
+  PageHeader,
+  StatGroup,
+  StatTile,
+  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  loadedRows,
+} from "../../shell/ui";
 import {
   describeProblem,
   fetchStatement,
@@ -141,7 +157,7 @@ export function StatementPage() {
   );
 }
 
-const snapshotColumns: DataTableColumn<BalanceSnapshot>[] = [
+const snapshotColumns: ListColumn<BalanceSnapshot>[] = [
   { key: "customerId", header: "Customer", render: (row) => <PlainName short entity="customer" id={row.customerId} /> },
   { key: "currency", header: "Currency", mono: true },
   { key: "riskScore", header: "Risk score", mono: true, align: "end" },
@@ -186,57 +202,57 @@ export function BalanceSnapshotsPage() {
   }
 
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Balance snapshots"
-        description="Each customer's balance per currency as stored by the nightly aging and risk score job, riskiest first. A balance that moved since the last snapshot is announced to sales credit and the portal."
-        actions={
-          <Link className={buttonClassName("secondary")} to="/receivables/worklist">
-            Collections worklist
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="bs-entity-snap" label="Legal entity" error={entity !== "" && !entityValid ? "Choose a legal entity." : undefined}>
-          {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />}
-        </FormField>
-        <FormField id="bs-as-of" label="Key date" optional hint="Empty shows the latest snapshot." error={dateValid ? undefined : "Enter a date as YYYY-MM-DD."}>
-          {(c) => <Input {...c} type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} invalid={!dateValid} />}
-        </FormField>
-        <Button variant="primary" onClick={run} loading={busy} disabled={!ready}>
-          Run snapshot now
-        </Button>
-      </div>
-      {result ? (
-        <Alert tone="success" title="Snapshot stored" live="status">
-          {`${result.rows} balance(s) stored for ${result.asOf}; ${result.changed} change(s) announced.`}
-        </Alert>
-      ) : null}
-      {failure ? <CommandFailure title={failure.code === "AUTH-0003" ? "You may not run the snapshot" : "Could not run the snapshot"} problem={failure} /> : null}
-      {!ready ? (
-        <EmptyState title="Choose a legal entity" description="Snapshots are stored per legal entity. Enter its id to see them." />
-      ) : state.error ? (
-        <LoadFailure title="Could not load the balance snapshots" problem={state.error} retry={state.reload} />
-      ) : (
+    <ListPage
+      id="receivables-balance-snapshots"
+      title="Balance snapshots"
+      description="Each customer's balance per currency as stored by the nightly aging and risk score job, riskiest first. A balance that moved since the last snapshot is announced to sales credit and the portal."
+      actions={
+        <Link className={buttonClassName("secondary")} to="/receivables/worklist">
+          Collections worklist
+        </Link>
+      }
+      notice={
         <>
-          {rows.length > 0 ? (
-            <StatGroup label="Snapshot totals">
-              <StatTile label="Customers" value={String(new Set(rows.map((r) => r.customerId)).size)} />
-              <StatTile label="With overdue balances" value={String(rows.filter((r) => compareDecimals(r.overdue, "0") > 0).length)} tone="danger" />
-              <StatTile label="At dunning level 3 or 4" value={String(rows.filter((r) => r.dunningLevel >= 3).length)} tone="warning" />
-            </StatGroup>
+          <div className={styles.toolbar}>
+            <FormField id="bs-entity-snap" label="Legal entity" error={entity !== "" && !entityValid ? "Choose a legal entity." : undefined}>
+              {(c) => <EntityLookup entity="legalEntity" {...c} value={legalEntityId} onChange={(e) => setLegalEntityId(e.target.value)} invalid={entity !== "" && !entityValid} />}
+            </FormField>
+            <FormField id="bs-as-of" label="Key date" optional hint="Empty shows the latest snapshot." error={dateValid ? undefined : "Enter a date as YYYY-MM-DD."}>
+              {(c) => <Input {...c} type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} invalid={!dateValid} />}
+            </FormField>
+            <Button variant="primary" onClick={run} loading={busy} disabled={!ready}>
+              Run snapshot now
+            </Button>
+          </div>
+          {result ? (
+            <Alert tone="success" title="Snapshot stored" live="status">
+              {`${result.rows} balance(s) stored for ${result.asOf}; ${result.changed} change(s) announced.`}
+            </Alert>
           ) : null}
-          <DataTable
-            label={`Balance snapshots for ${shownDate}`}
-            columns={snapshotColumns}
-            rows={rows}
-            getRowKey={(row) => `${row.customerId}|${row.currency}`}
-            loading={state.loading}
-            empty={{ title: "No snapshot", description: "No snapshot is stored for this legal entity and date. Run it now, or wait for the 01:30 job." }}
-            onRowOpen={(row) => navigate(statementLink(row.legalEntityId, row.customerId))}
-          />
+          {failure ? <CommandFailure title={failure.code === "AUTH-0003" ? "You may not run the snapshot" : "Could not run the snapshot"} problem={failure} /> : null}
+          {ready && rows.length > 0 ? (
+            <>
+              <p className={styles.note}>{`Balances as of ${shownDate}.`}</p>
+              <StatGroup label="Snapshot totals">
+                <StatTile label="Customers" value={String(new Set(rows.map((r) => r.customerId)).size)} />
+                <StatTile label="With overdue balances" value={String(rows.filter((r) => compareDecimals(r.overdue, "0") > 0).length)} tone="danger" />
+                <StatTile label="At dunning level 3 or 4" value={String(rows.filter((r) => r.dunningLevel >= 3).length)} tone="warning" />
+              </StatGroup>
+            </>
+          ) : null}
         </>
-      )}
-    </div>
+      }
+      noun="balance snapshots"
+      singular="balance snapshot"
+      columns={snapshotColumns}
+      useRows={() => loadedRows(state)}
+      getRowKey={(row) => `${row.customerId}|${row.currency}`}
+      onRowOpen={(row) => navigate(statementLink(row.legalEntityId, row.customerId))}
+      empty={
+        ready
+          ? { title: "No snapshot", description: "No snapshot is stored for this legal entity and date. Run it now, or wait for the 01:30 job." }
+          : { title: "Choose a legal entity", description: "Snapshots are stored per legal entity. Enter its id to see them." }
+      }
+    />
   );
 }

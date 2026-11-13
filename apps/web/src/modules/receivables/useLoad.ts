@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { loadedRows, type ListData } from "../../shell/ui";
 import { describeProblem, type Problem } from "./api/client";
 
 export interface LoadState<T> {
@@ -38,4 +39,15 @@ export function useLoad<T>(load: (signal: AbortSignal) => Promise<T>, key: strin
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
   return { ...state, reload };
+}
+
+/**
+ * ListData for a `ListPage` whose rows come from one capped call (the receivables list routes take a `limit` and no
+ * cursor). `onCapped` hears whether the cap was reached, so the page can say that more rows exist than it shows.
+ */
+export function useCappedRows<T>(load: (signal: AbortSignal) => Promise<T[]>, key: string, cap: number, onCapped: (capped: boolean) => void): ListData<T> {
+  const state = useLoad(load, key);
+  const capped = (state.data?.length ?? 0) >= cap;
+  useEffect(() => onCapped(capped), [capped, onCapped]);
+  return loadedRows(state);
 }

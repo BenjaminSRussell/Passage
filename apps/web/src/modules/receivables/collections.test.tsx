@@ -161,6 +161,7 @@ describe("Disputes", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "REJECTED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("status") === "REJECTED")).toBe(true));
     fireEvent.click(within(await findTable({ name: "Disputes" })).getByRole("button", { name: "INV-30001" }));
     expect(await screen.findByRole("heading", { name: "Dispute on INV-30001" })).toBeInTheDocument();
@@ -169,11 +170,11 @@ describe("Disputes", () => {
   it("shows the empty and error states", async () => {
     server.handler = () => json(200, { items: [] });
     const first = renderAt("/receivables/disputes");
-    expect(await screen.findByText("No disputes")).toBeInTheDocument();
+    expect(await screen.findByText("No disputes match these filters")).toBeInTheDocument();
     first.unmount();
     server.handler = () => json(503, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/disputes");
-    expect(await findAlert()).toHaveTextContent("Could not load the disputes");
+    expect(await findAlert()).toHaveTextContent("Could not load disputes");
   });
 
   it("opens a dispute from an open item with an Idempotency-Key", async () => {
@@ -330,6 +331,7 @@ describe("Dunning runs", () => {
     expect(table).toHaveTextContent("Issued");
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "DRAFT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("status") === "DRAFT")).toBe(true));
     fireEvent.click(within(await findTable({ name: "Dunning runs" })).getByRole("button", { name: "2027-03-31" }));
     expect(await screen.findByRole("heading", { name: "Dunning run 2027-03-31" })).toBeInTheDocument();
@@ -342,7 +344,7 @@ describe("Dunning runs", () => {
     first.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/dunning-runs");
-    expect(await findAlert()).toHaveTextContent("Could not load the dunning runs");
+    expect(await findAlert()).toHaveTextContent("Could not load dunning runs");
   });
 
   it("proposes a run with an Idempotency-Key and opens its preview", async () => {
