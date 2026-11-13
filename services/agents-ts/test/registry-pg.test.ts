@@ -179,6 +179,28 @@ describe.runIf(ownerUrl)("agent_version, eval_run and the partitioned agent_acti
     expect(await fx.store.ensureActionPartitions(4)).toBe(0);
   });
 
+  it("the partition functions name their own schema, so a temporary table of the application role cannot stand in for one", async () => {
+    const now = new Date();
+    const ahead = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 5, 1));
+    const part = `agent_action_${ahead.toISOString().slice(0, 7).replace("-", "")}`;
+    const c = await fx.app.connect();
+    try {
+      // Temporary tables come first in an unqualified lookup: one named after the coming month, and a fake default partition.
+      await c.query(`create temp table ${part} (x int)`);
+      await c.query("create temp table agent_action_default (like agent_action)");
+      expect((await c.query("select agent_action_ensure_partitions(5) as made")).rows[0].made).toBe(1);
+    } finally {
+      await c.query("discard temp").catch(() => undefined);
+      c.release();
+    }
+    const found = await fx.owner.query("select to_regclass($1)::text as rel, (select relispartition from pg_class where oid = to_regclass($1)) as attached", [part]);
+    expect(found.rows[0]).toEqual({ rel: part, attached: true });
+    const config = await fx.owner.query<{ proname: string; proconfig: string[] }>(
+      "select proname, proconfig from pg_proc where proname in ('agent_action_create_partitions', 'agent_action_ensure_partitions') and pronamespace = current_schema()::regnamespace order by proname",
+    );
+    for (const row of config.rows) expect(row.proconfig).toEqual([expect.stringMatching(/^search_path=agents_[0-9a-f]{12}, pg_temp$/)]);
+  });
+
   it("keeps (tenant, run, seq) unique and pins run_month to the run's own month", async () => {
     const req = makeRequest({ runId: `uniq-${randomUUID()}` });
     await fx.store.startRun(req);

@@ -93,9 +93,12 @@ CREATE TABLE agent_action_p_default PARTITION OF agent_action_p DEFAULT;
 
 -- Creates the monthly partitions from `first_month` to `last_month` (inclusive) that do not exist yet. Rows of
 -- those months already in the default partition move into the new partition before it is attached. Owner only.
+-- Every name is qualified with the function's own schema (its search_path below is that schema, then pg_temp):
+-- an unqualified lookup would try the caller's temporary tables first.
 CREATE OR REPLACE FUNCTION agent_action_create_partitions(first_month date, last_month date) RETURNS integer
-LANGUAGE plpgsql SET search_path FROM CURRENT AS $fn$
+LANGUAGE plpgsql AS $fn$
 DECLARE
+  s text := current_schema();
   m date := date_trunc('month', first_month)::date;
   stop date := date_trunc('month', last_month)::date;
   next_m date;
@@ -110,12 +113,12 @@ BEGIN
   WHILE m <= stop LOOP
     next_m := (m + interval '1 month')::date;
     part := 'agent_action_' || to_char(m, 'YYYYMM');
-    IF to_regclass(quote_ident(part)) IS NULL THEN
-      EXECUTE format('CREATE TABLE %I (LIKE agent_action INCLUDING DEFAULTS INCLUDING CONSTRAINTS)', part);
+    IF to_regclass(format('%I.%I', s, part)) IS NULL THEN
+      EXECUTE format('CREATE TABLE %I.%I (LIKE %I.agent_action INCLUDING DEFAULTS INCLUDING CONSTRAINTS)', s, part, s);
       EXECUTE format(
-        'WITH moved AS (DELETE FROM agent_action_default WHERE run_month >= %L AND run_month < %L RETURNING *) INSERT INTO %I SELECT * FROM moved',
-        m, next_m, part);
-      EXECUTE format('ALTER TABLE agent_action ATTACH PARTITION %I FOR VALUES FROM (%L) TO (%L)', part, m, next_m);
+        'WITH moved AS (DELETE FROM %I.agent_action_default WHERE run_month >= %L AND run_month < %L RETURNING *) INSERT INTO %I.%I SELECT * FROM moved',
+        s, m, next_m, s, part);
+      EXECUTE format('ALTER TABLE %I.agent_action ATTACH PARTITION %I.%I FOR VALUES FROM (%L) TO (%L)', s, s, part, m, next_m);
       made := made + 1;
     END IF;
     m := next_m;
@@ -127,7 +130,7 @@ $fn$;
 -- What the pods call at start and daily: this month and the next `months_ahead` (0 to 12). SECURITY DEFINER so the
 -- application role can create partitions without owning the table; it can do nothing else through it.
 CREATE OR REPLACE FUNCTION agent_action_ensure_partitions(months_ahead integer) RETURNS integer
-LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $fn$
+LANGUAGE plpgsql SECURITY DEFINER AS $fn$
 DECLARE
   this_month date := date_trunc('month', now() AT TIME ZONE 'UTC')::date;
 BEGIN
@@ -137,6 +140,14 @@ BEGIN
   RETURN agent_action_create_partitions(this_month, (this_month + make_interval(months => months_ahead))::date);
 END
 $fn$;
+-- Pinned to the schema the migration runs in, with pg_temp searched last (CREATE FUNCTION ... SECURITY DEFINER,
+-- "Writing SECURITY DEFINER Functions Safely").
+DO $sp$
+BEGIN
+  EXECUTE format('ALTER FUNCTION agent_action_create_partitions(date, date) SET search_path = %I, pg_temp', current_schema());
+  EXECUTE format('ALTER FUNCTION agent_action_ensure_partitions(integer) SET search_path = %I, pg_temp', current_schema());
+END
+$sp$;
 REVOKE ALL ON FUNCTION agent_action_create_partitions(date, date) FROM PUBLIC;
 REVOKE ALL ON FUNCTION agent_action_ensure_partitions(integer) FROM PUBLIC;
 
