@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ApiError } from "./api";
+import { ApiError, download } from "./api";
 
 export interface Loaded<T> {
   data: T | undefined;
@@ -85,3 +85,28 @@ export function Badge({ value }: { value: string }) {
 
 export const day = (iso?: string): string => (iso ? iso.slice(0, 10) : "");
 export const money = (amount: string, currency: string): string => `${amount} ${currency}`;
+
+/** A button that downloads a PDF from the BFF, with a busy state and the reason when it fails. */
+export function DownloadButton({ path, fileName, label }: { path: string; fileName: string; label: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <span className="download">
+      <button
+        type="button"
+        aria-busy={busy || undefined}
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          setError("");
+          download(path, fileName)
+            .catch((e: unknown) => setError(messageOf(e)))
+            .finally(() => setBusy(false));
+        }}
+      >
+        {busy ? "Preparing…" : label}
+      </button>
+      {error ? <Notice kind="error">{error}</Notice> : null}
+    </span>
+  );
+}

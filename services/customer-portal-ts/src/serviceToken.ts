@@ -18,6 +18,7 @@ export const SERVICE_GRANTS = {
   sales: ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"],
   party: ["party.customer-portal.read"],
   identity: ["identity.customer-portal.read"],
+  print: ["print.customer-portal.render"],
 } as const;
 
 export type Audience = keyof typeof SERVICE_GRANTS;

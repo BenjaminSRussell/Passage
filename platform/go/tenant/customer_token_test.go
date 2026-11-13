@@ -111,7 +111,8 @@ func TestPortalCustomerTrustsOnlyTheCustomerPortalToken(t *testing.T) {
 }
 
 // The customer portal holds customer-portal duties only: reads, plus the two writes a customer makes for itself (an order and a
-// return), and the party and identity reads that name the customer's accounts and companies.
+// return), the party and identity reads that name the customer's accounts and companies, and print's renderer, which reads no
+// business data (its own customer-portal duty turns the invoice or statement the BFF already read for the customer into a PDF).
 func TestCustomerPortalGrantIsCustomerScoped(t *testing.T) {
 	grants := tenant.ServiceGrantTable()["customer-portal"]
 	want := map[string][]string{
@@ -120,6 +121,7 @@ func TestCustomerPortalGrantIsCustomerScoped(t *testing.T) {
 		"sales":       {"sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"},
 		"party":       {"party.customer-portal.read"},
 		"identity":    {"identity.customer-portal.read"},
+		"print":       {"print.customer-portal.render"},
 	}
 	if len(grants) != len(want) {
 		t.Fatalf("grants %v", grants)

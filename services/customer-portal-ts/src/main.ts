@@ -2,7 +2,7 @@
 // OIDC_CLIENT_SECRET, OIDC_REDIRECT_URI; optionally OIDC_AUTHORIZATION_ENDPOINT, OIDC_TOKEN_ENDPOINT and OIDC_JWKS_URI
 // (default to the Keycloak paths under the issuer); OIDC_END_SESSION_ENDPOINT (default: the Keycloak logout path) and
 // OIDC_POST_LOGOUT_REDIRECT_URI (default: APP_ORIGIN/); APP_ORIGIN; COOKIE_SECURE=false for local http;
-// RECEIVABLES_URL, BILLING_URL, SALES_URL, PARTY_URL, IDENTITY_URL; PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE;
+// RECEIVABLES_URL, BILLING_URL, SALES_URL, PARTY_URL, IDENTITY_URL, PRINT_URL (the invoice and statement PDFs); PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE;
 // SESSION_STORE_URL (redis:// or rediss:// of a Valkey or Redis server shared by the pods; unset keeps sessions in this pod's memory,
 // which suits development and a single pod only; set, it also holds the per-session rate limit for every pod) with SESSION_STORE_PASSWORD or SESSION_STORE_PASSWORD_FILE and, for rediss:// with a private CA, SESSION_STORE_CA_FILE (PEM).
 
@@ -87,6 +87,7 @@ function main(): void {
       sales: required(env, "SALES_URL"),
       party: required(env, "PARTY_URL"),
       identity: required(env, "IDENTITY_URL"),
+      print: required(env, "PRINT_URL"),
     },
     appOrigin: required(env, "APP_ORIGIN"),
     cookieSecure: env["COOKIE_SECURE"] !== "false",

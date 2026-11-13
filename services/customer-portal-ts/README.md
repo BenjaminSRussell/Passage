@@ -11,7 +11,7 @@ The back end of `apps/customer-portal`. TypeScript on Node 24 (types stripped, n
 | `src/session.ts`, `src/redisStore.ts`, `src/resp.ts` | Sessions behind an HttpOnly `__Host-` cookie (30 min idle, 8 h absolute), single-use login state, CSRF token, per-session rate limit (300 calls a minute, one counter across pods when the store is shared). The store is an interface: in memory for development, or a Valkey or Redis server shared by the pods (`SESSION_STORE_URL`; a small RESP client, no dependency). An unreachable store is 503, never a sign-out |
 | `src/serviceToken.ts` | Signs service tokens (Ed25519, `platform/go/tenant` format) with `iss: customer-portal`, the session's tenant and one legal entity, `act` = contact, and `cus` = the customer. Grants: the read-only customer-portal duties on receivables, billing and sales only |
 | `src/routes.ts` | The table of `/api/v1/*` routes and the one upstream call each becomes, with the one duty each carries. Reads are GET; the only writes are `POST /orders` and `POST /returns` |
-| `src/server.ts` (`POST /bff/backchannel-logout`) | `/bff/login`, `/bff/callback`, `/bff/me`, `/bff/logout` (answers the Keycloak end-session URL), `/healthz`, `/readyz`, `/api/v1/companies` (names from identity) and the `/api/v1` proxy |
+| `src/server.ts` (`POST /bff/backchannel-logout`) | `/bff/login`, `/bff/callback`, `/bff/me`, `/bff/logout` (answers the Keycloak end-session URL), `/healthz`, `/readyz`, `/api/v1/companies` (names from identity), the invoice and statement PDFs (`src/documents.ts`, rendered by print) and the `/api/v1` proxy |
 
 ## Customer scoping
 
@@ -27,10 +27,10 @@ writes need a CSRF token, a same-origin `Origin`, a JSON body up to 64 KiB and a
 
 ## Run
 
-Environment: `OIDC_ISSUER`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `APP_ORIGIN`, `RECEIVABLES_URL`, `BILLING_URL`, `SALES_URL`, `PARTY_URL`, `IDENTITY_URL`,
+Environment: `OIDC_ISSUER`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `APP_ORIGIN`, `RECEIVABLES_URL`, `BILLING_URL`, `SALES_URL`, `PARTY_URL`, `IDENTITY_URL`, `PRINT_URL`,
 `PASSAGE_SERVICE_SIGNING_KEY` (or `_FILE`); optional `OIDC_CLIENT_ID`, endpoint overrides (`OIDC_END_SESSION_ENDPOINT`,
 `OIDC_POST_LOGOUT_REDIRECT_URI`), `SESSION_STORE_URL` with `SESSION_STORE_PASSWORD` (or `_FILE`), `HTTP_ADDR`, `COOKIE_SECURE=false`
-(local http). The services (receivables, billing, sales, party and identity) trust this key through `PASSAGE_SERVICE_PUBLIC_KEYS`
+(local http). The services (receivables, billing, sales, party, identity and print) trust this key through `PASSAGE_SERVICE_PUBLIC_KEYS`
 (`customer-portal=<base64 public key>`).
 
 ```

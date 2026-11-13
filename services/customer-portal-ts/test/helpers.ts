@@ -104,7 +104,7 @@ export async function startRig(opts: { limit?: number; sessions?: SessionStore }
     fetcher,
     sessions,
     signer: createServiceTokenSigner({ seedBase64, now: () => now.ms }),
-    upstreams: { receivables: "http://receivables.test", billing: "http://billing.test", sales: "http://sales.test", party: "http://party.test", identity: "http://identity.test" },
+    upstreams: { receivables: "http://receivables.test", billing: "http://billing.test", sales: "http://sales.test", party: "http://party.test", identity: "http://identity.test", print: "http://print.test" },
     appOrigin: APP,
     cookieSecure: true,
     limiter: new RateLimiter(opts.limit ?? 1000, 60_000),

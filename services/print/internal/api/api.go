@@ -114,7 +114,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/jobs:purge", a.purgeJobs)
 		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/jobs:sweep", a.sweepJobs)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/jobs/{id}", a.getJob)
-		r.With(authz.RequireDuty(dutyRenderDocument)).Post("/documents:render", a.renderDocument)
+		r.With(authz.RequireAnyDuty(dutyRenderDocument, dutyRenderPortal)).Post("/documents:render", a.renderDocument)
 		a.registerDocgen(r)
 	})
 }

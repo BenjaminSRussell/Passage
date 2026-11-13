@@ -8,7 +8,12 @@ import (
 	"github.com/BenjaminSRussell/passage/services/print/internal/domain"
 )
 
-const dutyRenderDocument = "print.document.render"
+const (
+	dutyRenderDocument = "print.document.render"
+	// dutyRenderPortal is the customer portal's own, service-only duty for the same renderer (#30): it renders the invoice or
+	// statement the portal already read for its customer. Rendering reads nothing, so it reaches no other data.
+	dutyRenderPortal = "print.customer-portal.render"
+)
 
 // renderDocument serves POST /print/v1/documents:render (issue #530). The caller sends a
 // purchase order, customer invoice, packing slip or remittance advice (#528) as data; the
