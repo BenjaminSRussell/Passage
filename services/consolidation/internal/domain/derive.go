@@ -315,20 +315,24 @@ func deriveAssociate(in DeriveInput, u Unit, pct decimal.Decimal, terms UnitTerm
 	if u.Currency != in.GroupCurrency {
 		// A foreign associate is a foreign operation (IAS 21.44, IAS 28.25): its carrying amount is kept in its own currency and
 		// retranslated at the closing rate, the difference going to the translation reserve.
+		// A register line carries the investment from last year's closing rate, which is this year's opening rate. Without one the
+		// run starts from the investment cost, which the group booked at the rate of acquisition: the opening is translated at that
+		// rate, so the opening carrying amount is the cost exactly and the whole move to the closing rate goes to the reserve.
 		openRate := rates.Opening
-		if !openRate.IsPositive() {
-			openRate = terms.HistoricalRate // the first fiscal year after the acquisition: the investment was bought at that rate
+		fc, ok := in.PreviousCarryingUnit[u.ID]
+		fromRegister := ok || hasPrev(in.PreviousCarrying, u.ID)
+		if !fromRegister {
+			openRate = terms.HistoricalRate
 		}
 		if !openRate.IsPositive() {
 			return RunAssociate{}, fmt.Errorf("needs the opening rate of %s to retranslate the investment: collect the end of its previous fiscal year, give the opening rate, or store the rate at acquisition", u.Currency)
 		}
-		fc, ok := in.PreviousCarryingUnit[u.ID]
 		switch {
 		case ok:
-		case hasPrev(in.PreviousCarrying, u.ID):
+		case fromRegister:
 			fc = opening.Div(openRate) // a register line from before retranslation: its group amount was at last year's closing rate
 		default:
-			fc = terms.InvestmentCost.Div(terms.HistoricalRate)
+			fc = terms.InvestmentCost.Div(openRate)
 		}
 		a.Foreign = &ForeignAssociate{UnitCurrency: u.Currency, OpeningCarrying: fc, NetIncome: profit, Dividends: dividends.Mul(pct).Div(decimal.NewFromInt(100)),
 			OpeningRate: openRate, AverageRate: rates.Average, ClosingRate: rates.Closing}

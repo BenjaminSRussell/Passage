@@ -222,7 +222,7 @@ func ComputeRun(in RunInput) (RunResult, error) {
 		associates = associates.Add(eq.ShareOfProfit)
 		associateFX = associateFX.Add(eq.FXDifference)
 		line := InvestmentLine{UnitID: a.ID, Method: MethodEquity, OwnershipPct: a.Associate.OwnershipPct, Cost: round(a.Cost, in.Currency),
-			OpeningCarrying: round(a.Associate.OpeningCarrying, in.Currency), ShareOfProfit: eq.ShareOfProfit, Dividends: round(a.Associate.DividendsReceived, in.Currency),
+			OpeningCarrying: eq.OpeningCarrying, ShareOfProfit: eq.ShareOfProfit, Dividends: eq.Dividends,
 			ClosingCarrying: eq.ClosingCarrying, UnrecognizedLoss: eq.UnrecognizedLoss}
 		if f := a.Associate.Foreign; f != nil {
 			line.UnitCurrency, line.ClosingCarryingUnit, line.FXDifference = f.UnitCurrency, eq.ClosingCarryingUnit, eq.FXDifference

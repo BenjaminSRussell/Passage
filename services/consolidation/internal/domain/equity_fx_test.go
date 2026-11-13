@@ -94,4 +94,26 @@ func TestDeriveRun_ForeignAssociateStartsFromTheRegistersUnitAmount(t *testing.T
 	if f := d.Associates[0].Associate.Foreign; !f.OpeningCarrying.Round(2).Equal(dec("314285.71")) {
 		t.Fatalf("from the cost: %s, want 330,000 / 1.05", f.OpeningCarrying.Round(2))
 	}
+	// From the cost the opening is translated at the acquisition rate, not the opening rate of the period, so the run opens at the
+	// booked cost (330,000.00 USD) and the move from 1.05 to the closing rate goes to the translation reserve.
+	if a := d.Associates[0].Associate; !a.OpeningCarrying.Equal(dec("330000")) || !a.Foreign.OpeningRate.Equal(dec("1.05")) {
+		t.Fatalf("from the cost: opening %s at %s, want the cost 330000 at 1.05", a.OpeningCarrying, a.Foreign.OpeningRate)
+	}
+}
+
+// The register line of a foreign associate adds up in the group currency: its opening and dividends are the amounts the entries
+// were computed from, translated once, not the request's own roundings.
+func TestComputeRun_ForeignAssociateRegisterLineAddsUp(t *testing.T) {
+	in := RunInput{GroupID: "G", Period: "2027-03", Currency: "USD", Associates: []RunAssociate{{ID: "A1", Cost: dec("330000"), Associate: Associate{
+		Currency: "USD", OwnershipPct: dec("33.3333"), OpeningCarrying: dec("330000.004"), DividendsReceived: dec("1.01"),
+		Foreign: &ForeignAssociate{UnitCurrency: "EUR", OpeningCarrying: dec("314285.714285"), NetIncome: dec("123456.78"), Dividends: dec("3333.335"),
+			OpeningRate: dec("1.05"), AverageRate: dec("1.1234"), ClosingRate: dec("1.1789")}}}}}
+	res, err := ComputeRun(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := res.Investments[0]
+	if got := l.OpeningCarrying.Add(l.ShareOfProfit).Sub(l.Dividends).Add(l.FXDifference); !got.Equal(l.ClosingCarrying) {
+		t.Fatalf("opening %s + share %s - dividends %s + fx %s = %s, closing %s", l.OpeningCarrying, l.ShareOfProfit, l.Dividends, l.FXDifference, got, l.ClosingCarrying)
+	}
 }

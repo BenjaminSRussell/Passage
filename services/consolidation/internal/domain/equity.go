@@ -60,6 +60,10 @@ type EquityResult struct {
 	// retranslation booked to the translation reserve.
 	ClosingCarryingUnit decimal.Decimal
 	FXDifference        decimal.Decimal
+	// OpeningCarrying and Dividends are the group amounts the entries were computed from (for a foreign associate, its amounts in
+	// its own currency translated once), so the register line adds up: opening + share - dividends + FX difference = closing.
+	OpeningCarrying decimal.Decimal
+	Dividends       decimal.Decimal
 }
 
 // EquityMethod applies the equity method (FR-40.18). Share of profit is ownership
@@ -100,6 +104,8 @@ func EquityMethod(a Associate) (EquityResult, error) {
 		ShareOfProfit:    share,
 		UnrecognizedLoss: unrecognized,
 		ClosingCarrying:  closing,
+		OpeningCarrying:  opening,
+		Dividends:        div,
 	}
 	res.Entries = leg(res.Entries, RuleEquity, AcctInvestmentAssociate, share)
 	res.Entries = leg(res.Entries, RuleEquity, AcctShareOfAssociates, share.Neg())
@@ -157,6 +163,8 @@ func foreignEquityMethod(a Associate) (EquityResult, error) {
 		ClosingCarrying:     closing,
 		ClosingCarryingUnit: closeFC,
 		FXDifference:        fx,
+		OpeningCarrying:     open,
+		Dividends:           div,
 	}
 	res.Entries = leg(res.Entries, RuleEquity, AcctInvestmentAssociate, share)
 	res.Entries = leg(res.Entries, RuleEquity, AcctShareOfAssociates, share.Neg())
