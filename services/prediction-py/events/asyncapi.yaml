@@ -1,0 +1,31 @@
+asyncapi: 3.0.0
+info:
+  title: Passage payment prediction events
+  version: 0.1.0
+  description: |
+    PRD 9.47 FR-47.15 events, CloudEvents 1.0 envelope; the schema below is the data member, snake_case as in the
+    other services' events. `POST /api/v1/predictions/payment/score` writes one
+    dev.passage.prediction.payment.scored.v1 row per invoice to this service's outbox in the scoring transaction
+    (src/prediction/store.py). The relay connector for this outbox is not deployed yet (NOT-IMPLEMENTED.md), so
+    `channels` and `operations` stay empty until it is.
+defaultContentType: application/cloudevents+json
+channels: {}
+operations: {}
+components:
+  messages: {}
+  schemas:
+    EventTypes:
+      type: string
+      enum:
+        - dev.passage.prediction.payment.scored.v1
+    PaymentScoredData:
+      type: object
+      description: The prediction only; no customer, amount or invoice text.
+      required: [invoice_id, model_version, predicted_payment_date, p_late_30d, scored_at]
+      additionalProperties: false
+      properties:
+        invoice_id: { type: string, minLength: 1, maxLength: 64 }
+        model_version: { type: string }
+        predicted_payment_date: { type: string, format: date }
+        p_late_30d: { type: string, pattern: "^[01]\\.[0-9]{4}$" }
+        scored_at: { type: string, format: date-time }

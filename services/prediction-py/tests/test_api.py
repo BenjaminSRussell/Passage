@@ -94,3 +94,33 @@ def test_validation_is_a_400_problem(client):
     r = client.post("/api/v1/predictions/payment/retrain", json=bad, headers=h())
     assert r.status_code == 400 and r.json()["code"] == "PRD-0400"
     assert r.headers["content-type"].startswith("application/problem+json")
+
+
+def test_settings_are_per_tenant_and_need_the_admin_duty(client):
+    assert client.get("/api/v1/predictions/payment/settings", headers=h()).json() == {"minRows": 500, "maeMaxDays": 6.0, "tenantOverride": False}
+    r = client.put("/api/v1/predictions/payment/settings", json={"minRows": 200}, headers=h())
+    assert r.status_code == 200 and r.json() == {"minRows": 200, "maeMaxDays": 6.0, "tenantOverride": True}
+    assert client.get("/api/v1/predictions/payment/settings", headers=h(TENANT_B)).json()["minRows"] == 500
+    assert client.put("/api/v1/predictions/payment/settings", json={"minRows": 99}, headers=h()).status_code == 400
+    assert client.put("/api/v1/predictions/payment/settings", json={"maeMaxDays": 31}, headers=h()).status_code == 400
+    assert client.put("/api/v1/predictions/payment/settings", json={"tenantId": TENANT_B}, headers=h()).status_code == 400
+    assert client.put("/api/v1/predictions/payment/settings", json={"minRows": 200}, headers=h(duties="collections.view")).status_code == 403
+    # The tenant's min_rows now applies: 250 paid invoices train a model for A, not for B.
+    assert client.post("/api/v1/predictions/payment/retrain", json=paid_body(250), headers=h()).status_code == 201
+    assert client.post("/api/v1/predictions/payment/retrain", json=paid_body(250), headers=h(TENANT_B)).status_code == 422
+
+
+def test_accuracy_report_reads_predictions_whose_invoices_were_paid(client):
+    assert client.post("/api/v1/predictions/payment/retrain", json=paid_body(600), headers=h()).status_code == 201
+    opened = open_body(2)
+    pred = client.post("/api/v1/predictions/payment/score", json=opened, headers=h()).json()["items"][0]
+    empty = client.get("/api/v1/predictions/payment/accuracy", headers=h())
+    assert empty.status_code == 200 and empty.json()["count"] == 0 and empty.json()["maeDays"] is None
+    paid = paid_body(600)
+    first = opened["openInvoices"][0]
+    paid["paidInvoices"].append({**first, "paidDate": pred["predictedPaymentDate"]})
+    assert client.post("/api/v1/predictions/payment/retrain", json=paid, headers=h()).status_code == 201
+    report = client.get("/api/v1/predictions/payment/accuracy", headers=h()).json()
+    assert report["count"] == 1 and report["maeDays"] == "0.00" and report["withinShare"] == "1.0000"
+    assert client.get("/api/v1/predictions/payment/accuracy", headers=h(TENANT_B)).json()["count"] == 0
+    assert client.get("/api/v1/predictions/payment/accuracy", headers=h(duties="collections.view")).status_code == 403

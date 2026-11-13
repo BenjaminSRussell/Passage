@@ -1,0 +1,246 @@
+openapi: 3.1.0
+info:
+  title: Passage payment prediction
+  version: 0.1.0
+  description: |
+    Payment-date prediction per tenant (PRD 9.47 FR-47.15). The caller comes from the edge headers
+    x-passage-tenant, x-passage-user and x-passage-duties (401 AGT-0401 when missing or malformed); the tenant is
+    never read from a body. Errors are RFC 9457 problems with a stable `code`. Models, predictions and per-tenant
+    settings are stored in Postgres under tenant row-level security.
+servers:
+  - url: https://api.passage.dev
+paths:
+  /api/v1/predictions/payment/retrain:
+    post:
+      operationId: retrainPaymentModel
+      summary: Train the tenant's payment-date model on paid invoices
+      description: |
+        Fewer paid invoices than the tenant's min_rows is 422 AGT-0213. The model is ACTIVE when its held-out MAE is
+        within the tenant's mae_max_days and retires the previous ACTIVE model; otherwise it is stored as CANDIDATE
+        and the previous one keeps serving (AC-47.12). Paid invoices that had a stored prediction are recorded as its
+        outcome for the accuracy report. A retrain that races another for the same tenant is 409 AGT-0409.
+      x-passage-duty: agents.admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RetrainRequest"}
+      responses:
+        "201":
+          description: The stored model.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Model"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /api/v1/predictions/payment/score:
+    post:
+      operationId: scorePaymentDates
+      summary: Score open invoices with the tenant's ACTIVE model
+      description: |
+        Stores the latest prediction per invoice and writes one dev.passage.prediction.payment.scored.v1 event per
+        invoice to the outbox in the same transaction. 422 AGT-0213 without an ACTIVE model.
+      x-passage-duty: agents.admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ScoreRequest"}
+      responses:
+        "200":
+          description: One prediction per invoice, in request order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/Prediction"}}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /api/v1/ar/invoices/{invoice_id}/prediction:
+    get:
+      operationId: getInvoicePaymentPrediction
+      summary: The stored payment prediction of one invoice
+      description: The latest prediction, with `stale` true when it is older than 7 days (BR-47.12). 404 AGT-0404 when the invoice was never scored.
+      x-passage-duty: collections.view
+      parameters:
+        - {name: invoice_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+      responses:
+        "200":
+          description: The prediction.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/Prediction"}
+                  - type: object
+                    required: [stale]
+                    properties:
+                      stale: {type: boolean}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /api/v1/predictions/payment/settings:
+    get:
+      operationId: getPaymentPredictionSettings
+      summary: The tenant's prediction.payment parameters (9.47.20)
+      description: The tenant's own min_rows and mae_max_days, or the service defaults when the tenant has none (`tenantOverride` false).
+      x-passage-duty: agents.admin
+      responses:
+        "200":
+          description: The parameters in force for the tenant.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Settings"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    put:
+      operationId: putPaymentPredictionSettings
+      summary: Set the tenant's prediction.payment parameters
+      description: A field left out keeps its current value. min_rows is 100 to 10000 and mae_max_days 1 to 30 (400 PRD-0400 otherwise). The next retrain uses them.
+      x-passage-duty: agents.admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                minRows: {type: integer, minimum: 100, maximum: 10000}
+                maeMaxDays: {type: number, minimum: 1, maximum: 30}
+      responses:
+        "200":
+          description: The parameters now in force.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Settings"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /api/v1/predictions/payment/accuracy:
+    get:
+      operationId: getPaymentPredictionAccuracy
+      summary: Prediction accuracy report (FR-47.15, 9.47.15)
+      description: |
+        Over the stored predictions whose invoices have since been paid: MAE in days between predicted and actual
+        payment date, the share within 7 days, and p_late_30d calibration per probability bucket, overall and per
+        model version. Ratios are decimal text; null when there is nothing to measure.
+      x-passage-duty: agents.admin
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/AccuracySummary"}
+                  - type: object
+                    required: [byModel]
+                    properties:
+                      byModel:
+                        type: array
+                        items:
+                          allOf:
+                            - {$ref: "#/components/schemas/AccuracySummary"}
+                            - {type: object, required: [modelVersion], properties: {modelVersion: {type: string}}}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+components:
+  responses:
+    Problem:
+      description: RFC 9457 problem with a stable code.
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            required: [type, status, code, detail]
+            properties:
+              type: {type: string}
+              status: {type: integer}
+              code: {type: string}
+              detail: {type: string}
+              instance: {type: string}
+  schemas:
+    Invoice:
+      type: object
+      additionalProperties: false
+      required: [invoiceId, customerId, amount, invoiceDate, dueDate]
+      properties:
+        invoiceId: {type: string, minLength: 1, maxLength: 64}
+        customerId: {type: string, minLength: 1, maxLength: 64}
+        amount: {type: number, minimum: 0}
+        invoiceDate: {type: string, format: date}
+        dueDate: {type: string, format: date}
+        dunningCount: {type: integer, minimum: 0, maximum: 20}
+        disputes: {type: integer, minimum: 0, maximum: 20}
+    RetrainRequest:
+      type: object
+      additionalProperties: false
+      required: [paidInvoices]
+      properties:
+        paidInvoices:
+          type: array
+          maxItems: 50000
+          items:
+            allOf:
+              - {$ref: "#/components/schemas/Invoice"}
+              - {type: object, required: [paidDate], properties: {paidDate: {type: string, format: date}}}
+    ScoreRequest:
+      type: object
+      additionalProperties: false
+      required: [openInvoices]
+      properties:
+        openInvoices: {type: array, minItems: 1, maxItems: 5000, items: {$ref: "#/components/schemas/Invoice"}}
+    Model:
+      type: object
+      required: [modelVersion, trainedAt, rows, maeDays, maeMaxDays, status]
+      properties:
+        modelVersion: {type: string}
+        trainedAt: {type: string, format: date-time}
+        rows: {type: integer}
+        maeDays: {type: number}
+        maeMaxDays: {type: number}
+        status: {type: string, enum: [CANDIDATE, ACTIVE, RETIRED]}
+    Prediction:
+      type: object
+      required: [invoiceId, modelVersion, predictedPaymentDate, pLate30d, featuresHash, scoredAt]
+      properties:
+        invoiceId: {type: string}
+        modelVersion: {type: string}
+        predictedPaymentDate: {type: string, format: date}
+        pLate30d: {type: string, description: "numeric(5,4) as text"}
+        featuresHash: {type: string}
+        scoredAt: {type: string, format: date-time}
+    Settings:
+      type: object
+      required: [minRows, maeMaxDays, tenantOverride]
+      properties:
+        minRows: {type: integer}
+        maeMaxDays: {type: number}
+        tenantOverride: {type: boolean}
+    AccuracySummary:
+      type: object
+      required: [count, maeDays, withinDays, withinShare, calibration]
+      properties:
+        count: {type: integer}
+        maeDays: {type: [string, "null"]}
+        withinDays: {type: integer}
+        withinShare: {type: [string, "null"]}
+        calibration:
+          type: array
+          items:
+            type: object
+            required: [from, to, count, meanPLate30d, observedLateRate]
+            properties:
+              from: {type: string}
+              to: {type: string}
+              count: {type: integer}
+              meanPLate30d: {type: [string, "null"]}
+              observedLateRate: {type: [string, "null"]}

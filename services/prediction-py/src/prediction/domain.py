@@ -94,6 +94,40 @@ class Model:
     features: list[str] = field(default_factory=lambda: list(FEATURES))
 
 
+def model_artifact(m: Model) -> dict[str, object]:
+    """Everything scoring needs, as JSON (prediction_model.artifact)."""
+    return {
+        "features": list(m.features),
+        "regressor": m.regressor.to_dict(),
+        "classifier": m.classifier.to_dict(),
+        "customers": {k: [s.total, s.n] for k, s in sorted(m.customers.items())},
+        "global_mean": m.global_mean,
+    }
+
+
+def model_from_artifact(
+    artifact: dict[str, object], *, model_version: str, trained_at: datetime, rows: int, mae_days: float, status: str, min_rows: int, mae_max_days: float
+) -> Model:
+    features = list(artifact["features"])  # type: ignore[call-overload]
+    if features != FEATURES:
+        raise ValueError(f"model {model_version} was trained on features {features}, this build scores {FEATURES}")
+    customers = {k: CustomerStats(float(v[0]), int(v[1])) for k, v in artifact["customers"].items()}  # type: ignore[union-attr]
+    return Model(
+        model_version=model_version,
+        trained_at=trained_at,
+        rows=rows,
+        mae_days=mae_days,
+        status=status,
+        regressor=Booster.from_dict(artifact["regressor"]),  # type: ignore[arg-type]
+        classifier=Booster.from_dict(artifact["classifier"]),  # type: ignore[arg-type]
+        customers=customers,
+        global_mean=float(artifact["global_mean"]),  # type: ignore[arg-type]
+        min_rows=min_rows,
+        mae_max_days=mae_max_days,
+        features=features,
+    )
+
+
 def _vector(inv: OpenInvoice, customer_mean: float) -> list[float]:
     return [
         float(inv.terms_days),
@@ -181,6 +215,7 @@ class Prediction:
     p_late_30d: str  # numeric(5,4) as text, never a float on the wire
     features_hash: str
     scored_at: datetime
+    due_date: date | None = None  # kept so the accuracy report can tell late from on time
 
 
 def score(model: Model, invoices: list[OpenInvoice], now: datetime) -> list[Prediction]:
@@ -197,6 +232,7 @@ def score(model: Model, invoices: list[OpenInvoice], now: datetime) -> list[Pred
                 p_late_30d=f"{p:.4f}",
                 features_hash=features_hash(x),
                 scored_at=now,
+                due_date=inv.due_date,
             )
         )
     return out
@@ -209,3 +245,57 @@ def is_stale(scored_at: datetime, now: datetime) -> bool:
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+CALIBRATION_BUCKETS = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+WITHIN_DAYS = 7
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """A stored prediction whose invoice has since been paid."""
+
+    model_version: str
+    predicted_payment_date: date
+    p_late_30d: str
+    due_date: date
+    paid_date: date
+
+
+def _ratio(n: int, d: int) -> str | None:
+    return None if d == 0 else f"{n / d:.4f}"
+
+
+def accuracy_report(outcomes: list[Outcome]) -> dict[str, object]:
+    """The prediction accuracy report (FR-47.15, 9.47.15): MAE in days between predicted and actual payment date,
+    the share within 7 days, and p_late_30d calibration (mean predicted probability against the observed late
+    rate per probability bucket), overall and per model version. Ratios are decimal text, never floats."""
+
+    def summary(rows: list[Outcome]) -> dict[str, object]:
+        errors = [abs((o.paid_date - o.predicted_payment_date).days) for o in rows]
+        buckets = []
+        for lo, hi in zip(CALIBRATION_BUCKETS, CALIBRATION_BUCKETS[1:]):
+            inside = [o for o in rows if lo <= float(o.p_late_30d) < hi or (hi == 1.0 and float(o.p_late_30d) == 1.0)]
+            late = sum(1 for o in inside if (o.paid_date - o.due_date).days > LATE_DAYS)
+            buckets.append(
+                {
+                    "from": f"{lo:.1f}",
+                    "to": f"{hi:.1f}",
+                    "count": len(inside),
+                    "meanPLate30d": None if not inside else f"{sum(float(o.p_late_30d) for o in inside) / len(inside):.4f}",
+                    "observedLateRate": _ratio(late, len(inside)),
+                }
+            )
+        return {
+            "count": len(rows),
+            "maeDays": None if not rows else f"{sum(errors) / len(rows):.2f}",
+            "withinDays": WITHIN_DAYS,
+            "withinShare": _ratio(sum(1 for e in errors if e <= WITHIN_DAYS), len(rows)),
+            "calibration": buckets,
+        }
+
+    versions = sorted({o.model_version for o in outcomes})
+    return {
+        **summary(outcomes),
+        "byModel": [{"modelVersion": v, **summary([o for o in outcomes if o.model_version == v])} for v in versions],
+    }
