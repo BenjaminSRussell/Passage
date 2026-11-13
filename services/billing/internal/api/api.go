@@ -155,6 +155,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}:bill", a.billSubscription)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions/{id}/usage", a.recordUsage)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/subscriptions:bill-due", a.billDue)
+	a.registerBillingRules(r)
 	a.registerCustomerPortal(r)
 }
 
@@ -349,7 +350,7 @@ func toDTO(inv store.Invoice) invoiceDTO {
 func fixed(v decimal.Decimal, exp int32) string { return v.StringFixed(exp) }
 
 func invalidIdempotencyKey(key string) bool {
-	return key == "" || len(key) > 255 || strings.HasPrefix(key, subscriptionKeyPrefix) || strings.HasPrefix(key, store.ModificationKeyPrefix)
+	return key == "" || len(key) > 255 || strings.HasPrefix(key, subscriptionKeyPrefix) || strings.HasPrefix(key, store.ModificationKeyPrefix) || strings.HasPrefix(key, store.ICChargeKeyPrefix)
 }
 
 func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {

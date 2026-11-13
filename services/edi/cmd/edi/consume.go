@@ -31,8 +31,8 @@ func consumerConfig(h map[string]eventing.Handler) eventing.Config {
 	return eventing.Config{Name: autosend.ConsumerName, Idempotent: true, Handlers: h, DeadLetterTopic: autosend.DeadLetterTopic, Log: slog.Default()}
 }
 
-// consume runs the outbound consumer (#35, 35-1): it sends the 856, DESADV, 810 or INVOIC of fulfillment's asn.issued and billing's
-// invoice.posted to the partners that asked for them, and serves only its admin port.
+// consume runs the outbound consumer (#35, 35-1): it sends the 856, DESADV, 810 or INVOIC of fulfillment's asn.issued, the
+// warehouse's shipment.shipped and billing's invoice.posted to the partners that asked for them, and serves only its admin port.
 func consume(ctx context.Context, getenv func(string) string) error {
 	if !consumerSeeded(tenant.ServicePrincipalTable()) {
 		return errors.New("outbound consumer not started: service principal " + tenant.ServiceActor(autosend.ConsumerName) + " is not seeded")
@@ -49,7 +49,7 @@ func consume(ctx context.Context, getenv func(string) string) error {
 	if signer == nil || fulfillmentURL == "" || billingURL == "" || salesURL == "" {
 		return errors.New("outbound consumer needs PASSAGE_SERVICE_SIGNING_KEY and EDI_FULFILLMENT_URL, EDI_BILLING_URL and EDI_SALES_URL")
 	}
-	kcfg, err := kafka.ConfigFromEnv(getenv, autosend.ConsumerName, autosend.ConsumerName, []string{autosend.FulfillmentTopic, autosend.BillingTopic})
+	kcfg, err := kafka.ConfigFromEnv(getenv, autosend.ConsumerName, autosend.ConsumerName, []string{autosend.FulfillmentTopic, autosend.WarehouseTopic, autosend.BillingTopic})
 	if err != nil {
 		return err
 	}

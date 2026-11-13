@@ -47,7 +47,7 @@ channels:
       chargePosted:
         $ref: "#/components/messages/ChargePosted"
   chargeInvoiceRequested:
-    address: passage.interco.charge
+    address: passage.interco.chargeinvoice
     messages:
       chargeInvoiceRequested:
         $ref: "#/components/messages/ChargeInvoiceRequested"
@@ -107,7 +107,7 @@ components:
           journalId: { type: string, format: uuid }
     ChargeInvoiceRequested:
       name: dev.passage.interco.chargeinvoice.requested.v1
-      title: IC charge in Invoice settlement mode, to be settled by the pairing's invoice documents (FR-40.13)
+      title: IC charge in Invoice settlement mode, to be settled by the pairing's invoice documents (FR-40.13); billing and payables consume it
       payload:
         type: object
         required: [id, sourceId, version, lender, borrower, category, transactionDate, currency, cost, price, margin, tax]
@@ -126,6 +126,10 @@ components:
           margin: { type: string }
           tax: { type: string, description: Cross-border tax the tax service worked out; 0 when none applies }
           taxCode: { type: string }
+          lenderLegalEntityId: { type: string, format: uuid, description: "The lender's legal entity: billing raises the sales invoice there (#40)" }
+          borrowerLegalEntityId: { type: string, format: uuid, description: "The borrower's legal entity: payables takes in the vendor invoice there" }
+          customerAccount: { type: string, description: "The borrower as customer of the lender, from the active pairing" }
+          vendorAccount: { type: string, description: "The lender as vendor of the borrower, from the active pairing" }
     ReconciliationFlagged:
       name: dev.passage.interco.reconciliation.flagged.v1
       title: A reconciliation run left Timing or Mismatch items (FR-40.6)

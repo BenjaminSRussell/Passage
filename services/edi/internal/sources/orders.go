@@ -21,10 +21,12 @@ import (
 // the grant edi -> service (policies/authz/data.json service_grants, platform/go/tenant).
 const (
 	audReceiving = "receiving"
+	audPayables  = "payables"
 
 	DutyPurchaseOrderRead    = "procurement.purchase-order.lookup"
 	DutyPurchaseOrderConfirm = "procurement.purchase-order.vendor-confirm"
 	DutyASNMaintain          = "receiving.asn.maintain"
+	DutyVendorInvoiceIntake  = "payables.vendor-invoice.intake"
 )
 
 // PurchaseOrderLine and PurchaseOrder are the parts of purchasing's PurchaseOrder the exchange reads.
@@ -73,6 +75,35 @@ type ASNRef struct {
 	Status string `json:"status"`
 }
 
+// VendorInvoiceLine and VendorInvoiceRequest are the body of payables' POST /v1/payables/vendor-invoice-intake.
+type VendorInvoiceLine struct {
+	LineNo    string `json:"lineNo"`
+	Item      string `json:"item,omitempty"`
+	Quantity  string `json:"quantity"`
+	Unit      string `json:"unit,omitempty"`
+	UnitPrice string `json:"unitPrice"`
+}
+
+type VendorInvoiceRequest struct {
+	LegalEntityID       string              `json:"legalEntityId"`
+	Source              string              `json:"source"`
+	SourceRef           string              `json:"sourceRef"`
+	VendorID            string              `json:"vendorId"`
+	InvoiceNumber       string              `json:"invoiceNumber"`
+	InvoiceDate         string              `json:"invoiceDate"`
+	Purpose             string              `json:"purpose,omitempty"`
+	PurchaseOrderID     string              `json:"purchaseOrderId,omitempty"`
+	PurchaseOrderNumber string              `json:"purchaseOrderNumber,omitempty"`
+	Currency            string              `json:"currency"`
+	Gross               string              `json:"gross,omitempty"`
+	Lines               []VendorInvoiceLine `json:"lines"`
+}
+
+type VendorInvoiceRef struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
 // DownstreamRefusedError is a service refusing a call for a reason in the document itself (validation, a rule, a conflict): sending
 // it again fails the same way, so the message is parked with the code.
 type DownstreamRefusedError struct {
@@ -90,6 +121,23 @@ func (e *DownstreamRefusedError) Error() string {
 func (c *Client) WithReceiving(url string) *Client {
 	c.receiving = strings.TrimRight(url, "/")
 	return c
+}
+
+// WithPayables sets the payables base URL the vendor-invoice intake calls go to.
+func (c *Client) WithPayables(url string) *Client {
+	c.payables = strings.TrimRight(url, "/")
+	return c
+}
+
+// ReceiveVendorInvoice puts a vendor invoice into payables' intake; the same key (the message id, also sent as sourceRef) returns the
+// intake row already created.
+func (c *Client) ReceiveVendorInvoice(ctx context.Context, legalEntityID, key string, body VendorInvoiceRequest) (VendorInvoiceRef, error) {
+	var out VendorInvoiceRef
+	err := c.post(ctx, "payables", audPayables, DutyVendorInvoiceIntake, c.payables, legalEntityID, "/v1/payables/vendor-invoice-intake", key, nil, body, &out)
+	if err == nil && out.ID == "" {
+		return VendorInvoiceRef{}, errors.New("payables: response is not a vendor invoice")
+	}
+	return out, err
 }
 
 // PurchaseOrder reads one purchase order.

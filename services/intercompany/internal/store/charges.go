@@ -126,11 +126,20 @@ func (s *Postgres) FinishCharge(ctx context.Context, id string, status domain.Ch
 			return err
 		}
 		if status == domain.ChargeInvoiceRequested {
-			return enqueue(ctx, tx, "ic_charge", out.ID, icevents.ChargeInvoiceRequested, pr.TenantID, icevents.ChargeInvoiceRequestedData{
+			data := icevents.ChargeInvoiceRequestedData{
 				ID: out.ID, SourceID: out.SourceID, Version: out.Version, Lender: out.Lender, Borrower: out.Borrower, Category: out.Category, Role: out.Role,
 				Date: out.TransactionDate.Format("2006-01-02"), Currency: out.Currency, Cost: out.Cost.String(), Price: out.Price.String(), Margin: out.Margin.String(),
 				Tax: out.TaxAmount.String(), TaxCode: out.TaxCode,
-			})
+			}
+			// The invoice documents are raised in the two legal entities for the pairing's customer and vendor accounts (#40).
+			if err := tx.QueryRow(ctx, `select coalesce((select legal_entity_id::text from ic_entity where entity = $1), ''),
+					coalesce((select legal_entity_id::text from ic_entity where entity = $2), ''),
+					coalesce((select customer_account from intercompany_partner where seller_entity = $1 and buyer_entity = $2 and active order by version desc limit 1), ''),
+					coalesce((select vendor_account from intercompany_partner where seller_entity = $1 and buyer_entity = $2 and active order by version desc limit 1), '')`,
+				out.Lender, out.Borrower).Scan(&data.LenderLegalEntityID, &data.BorrowerLegalEntityID, &data.CustomerAccount, &data.VendorAccount); err != nil {
+				return err
+			}
+			return enqueue(ctx, tx, "ic_charge", out.ID, icevents.ChargeInvoiceRequested, pr.TenantID, data)
 		}
 		if status != domain.ChargePosted {
 			return nil

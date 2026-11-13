@@ -54,6 +54,10 @@ const (
 // (modification id, then ":invoice" or ":credit:<original invoice>"); a person's request may not use it.
 const ModificationKeyPrefix = "revrec-modification:"
 
+// ICChargeKeyPrefix starts the Idempotency-Key of the invoice proposal billing raises for an intercompany charge in Invoice
+// settlement mode (charge id and version, #40); a person's request may not use it.
+const ICChargeKeyPrefix = "ic-charge:"
+
 // ModificationOfKey returns the contract modification id a document key names, or "".
 func ModificationOfKey(key string) string {
 	rest, ok := strings.CutPrefix(key, ModificationKeyPrefix)

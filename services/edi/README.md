@@ -479,6 +479,39 @@ Sample files: `testdata/cxml/` (the three network documents, a punchout cart and
 - **35-5.** The self-billing sweep runs on a schedule with the transport workers (`EDI_SELFBILL_SWEEP_MINUTES`). Web:
   `/integration/self-billing/disputes`.
 
+## Slice 12 scope: B2B round 3 (#35, #40)
+
+- **35-1 shipped without a packing slip.** The warehouse publishes `dev.passage.wms.shipment.shipped.v1` (topic `passage.wms.shipment`)
+  when it confirms that a fulfillment shipment left the dock without a packing slip (`POST /v1/warehouse/shipments/{id}:ship`). The
+  consumer reads the shipment from fulfillment and sends the whole shipment's 856 or DESADV under the route's whole-shipment key, with the
+  warehouse's ship time as the ship date, its carrier when it named one, and only the containers that left (a named pallet takes its
+  cartons along). A shipment fulfillment already shipped by a packing slip, a container already on a slip, or an SSCC the shipment does not
+  hold is skipped with EDI-0007: the slip's `asn.issued` sends those notices.
+  Each container is notified to a partner once (`notified_sscc`, migration 0019, unique per partner, set and SSCC): the notice that
+  claims it first owns it, so a packing slip posted after the warehouse confirmed the shipment lists only the containers not sent
+  yet, sends nothing when none are left (EDI-0007), and registers no self-billing line twice. The consumer's inbox is
+  `consumer_inbox` (migration 0018).
+- **35-4 cXML invoices into payables.** An inbound InvoiceDetailRequest of exactly one purchase order is put into payables'
+  vendor-invoice intake (`POST /v1/payables/vendor-invoice-intake`, grant edi -> payables `payables.vendor-invoice.intake`, principal
+  `edi-cxml`) for the vendor of that purchase order (read from purchasing), with the invoice number, date, purpose, currency, gross and
+  lines as sent, keyed by the message id; the message becomes POSTED with downstream kind `VENDOR_INVOICE` (migration 0016). The intake
+  posts nothing: an AP clerk matches it to receipts. An invoice of several orders, or with `EDI_PAYABLES_URL` (chart
+  `sources.payablesUrl`) unset, is parked with EDI-0038; a refusal by payables (a changed resend, the vendor's invoice number taken)
+  with EDI-0039. The payables chart must list edi's public key.
+- **35-5 self-billing.** An inbound X12 810 is read as the customer's self-billed invoice (Passage sends its own 810s and takes vendor
+  invoices through cXML and AP): BIG (date, document number, PO), CUR, REF*PK or REF*BM (delivery note), REF*LI (PO line, else IT101),
+  IT1, line TXI and TDS; it is matched right after receipt (only the messages of that interchange; other pending ones are left to
+  the sweep), and by the sweep, exactly like an INVOIC 389. A partner with a `taxCountry`
+  (plus `taxGroup` and `itemTaxGroup`) in `PUT /partners/{id}/self-billing` has its self-billed lines checked at the VAT rate the tax
+  service determines (`POST /v1/tax/calculate` with the stored configuration, on the document date and in its currency, as service
+  principal `edi-selfbill`, grant edi -> tax `tax.tax.calculate`; `EDI_TAX_URL`, chart `sources.taxUrl`); a tax outage leaves the
+  message MAPPED for the next run, and the document records which rate it used (`tax_rate_source`, migration 0017). Without a tax
+  country, or without the tax service, `taxRatePct` still applies. VDA 4908 is not built: there is no record layout or sample in the
+  repository. Billing's `SELF_BILLED` rule keeps billing from invoicing the shipments of a self-billing customer.
+- **35-3 punchout to requisition.** The requisition lines a returned cart becomes carry `catalogSource: PUNCHOUT`, the supplier part id
+  and the BR-35.13 approval flag, so purchasing never approves a flagged requisition automatically. Web: `/purchasing/punchout`
+  opens a supplier's catalog, shows the returned cart and creates the requisition.
+
 ## Wave 35 proof
 
 - **Partner simulator round trip** (`internal/api/partnersim_test.go`,
@@ -516,7 +549,7 @@ internal/transport/ AS2 (CMS signing and encryption, sync and async MDN), SFTP a
 internal/delivery/  dispatcher (outbound AS2/SFTP deliveries) and SFTP poller
 internal/secrets/   resolves transport secret references from EDI_SECRETS_DIR
 internal/certtrust/ partner AS2 certificate chain and CRL checks (EDI_AS2_TRUST_ROOTS, EDI_AS2_CRL_DIR)
-internal/autosend/  the outbound consumer's handlers (asn.issued, invoice.posted) and the Sender seam (35-1)
+internal/autosend/  the outbound consumer's handlers (asn.issued, shipment.shipped, invoice.posted) and the Sender seam (35-1)
 internal/events/    event type constants and payloads
 migrations/         0001_init.sql (trading_partner, control_number_counter, interchange, message, outbox, idempotency_keys), 0002_monitor.sql (interchange.acked_at, monitor indexes), 0004/0005 trade profile, 0006_partner_transport.sql (partner_transport, transport_delivery, transport_inbound, transport_work index), 0007_as2_mdn_queue.sql (transport_mdn, the MDN wait on transport_delivery), 0008_edifact_inbound.sql (partner EDIFACT identity and CONTRL mode, interchange.refusal), 0009_partner_update.sql (partner UPDATE column grant, partner_entity_index and edi_partner_in_entity_scope())
 api/openapi.yaml    OpenAPI 3.1 for the routes above

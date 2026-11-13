@@ -38,6 +38,13 @@ export const routeHelp: readonly RouteHelp[] = [
     guide: "buyer.md#ask-for-what-you-need",
   },
   {
+    patterns: ["/purchasing/punchout"],
+    title: "Punchout catalogs",
+    purpose: "Shop a supplier's own catalog and bring the cart back as a draft requisition.",
+    howTo: ["Choose the supplier and select Open catalog.", "Shop in the new tab and check out there.", "Select Check for returned carts, view the cart, then Create requisition."],
+    guide: "buyer.md#ask-for-what-you-need",
+  },
+  {
     patterns: ["/purchasing/consolidation"],
     title: "Consolidation",
     purpose: "Approved request lines waiting to be ordered. Group them by vendor into purchase orders or ask vendors for prices.",

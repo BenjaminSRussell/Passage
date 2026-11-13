@@ -823,12 +823,14 @@ paths:
   /edi/v1/messages/{id}:post:
     post:
       operationId: postMessage
-      summary: Post an inbound 850 or ORDERS to sales as an order, or put an inbound cXML document onto purchasing or receiving
+      summary: Post an inbound 850 or ORDERS to sales as an order, or put an inbound cXML document onto purchasing, receiving or payables
       description: >
         For an inbound cXML document (35-4) the route puts it onto the service that owns the object, as service:edi-cxml: a ConfirmationRequest that accepts
-        the order as sent confirms the purchase order in purchasing, and a ShipNoticeRequest becomes the ASN of the purchase order in receiving; the order is
+        the order as sent confirms the purchase order in purchasing, a ShipNoticeRequest becomes the ASN of the purchase order in receiving, and an
+        InvoiceDetailRequest of one order lands in payables' vendor-invoice intake for the order's vendor (downstreamKind VENDOR_INVOICE); the order is
         found by the orderID the OrderRequest was sent under. The message becomes POSTED. A rejected or changed line (EDI-0037), an orderID nothing was sent
-        under (EDI-0036), an invoice (EDI-0038: payables matches it against receipts) or a refusal by the service (EDI-0039) parks the message with that code
+        under (EDI-0036), an invoice of several orders or with payables not configured (EDI-0038: an AP clerk matches it) or a refusal by the service
+        (EDI-0039) parks the message with that code
         (422) and the route posts it again once the cause is fixed. The same mapping runs right after receipt on the public listener.
         Builds the sales intake order (channel EDI) from the stored canonical order, the partner's
         item cross-references and sales defaults, and places it with sales under the service grant
@@ -941,7 +943,8 @@ paths:
         Identifies the partner by ISA sender, rejects duplicate ISA13 values inside the
         duplicate window (EDI-0102), records every transaction and returns the 997 generated in the
         same transaction. Unknown senders are EDI-0101. The 850 is mapped onto the canonical order,
-        the 820 onto the remittance and the 214 onto the shipment status, each published with
+        the 820 onto the remittance, the 214 onto the shipment status and the 810 onto the customer's self-billed
+        invoice (matched right away against the shipments our 856s registered, like an INVOIC 389), each published with
         dev.passage.edi.message.received.v1 (and message.failed when a rule breaks, AK5 R or E);
         other sets are rejected (AK5 R, EDI-0006). A 997 group (GS01 FA) from the partner is
         matched by AK102 to the outbound interchange with that control number: answered messages
@@ -1262,7 +1265,7 @@ paths:
       operationId: putAutoOutbound
       summary: Set the documents the partner receives when a shipment ships or an invoice posts
       description: >
-        The consumer of fulfillment asn.issued and billing invoice.posted (`edi consume`) sends the 856 or DESADV and the 810 or INVOIC listed here to this
+        The consumer of fulfillment asn.issued, warehouse shipment.shipped and billing invoice.posted (`edi consume`) sends the 856 or DESADV and the 810 or INVOIC listed here to this
         partner, generated from the source document as outbound:from-source does (same idempotency key, so a redelivered event, a replay and a route call
         made by hand yield one interchange). An empty list switches it off. The partner needs a trade profile (EDI-0012); the legal entity is its profile's.
       x-passage-duty: edi.admin
@@ -1321,13 +1324,16 @@ paths:
                 quantityTolerance: { type: string, default: '0' }
                 priceTolerance: { type: string, default: '0.01', description: per unit }
                 waitDays: { type: integer, minimum: 1, maximum: 120, default: 30 }
-                taxRatePct: { type: string, default: '0', description: the VAT rate the partner's shipments are recomputed at (BR-35.15) }
+                taxRatePct: { type: string, default: '0', description: the VAT rate the partner's shipments are recomputed at (BR-35.15) when no taxCountry is set or the tax service is not configured }
+                taxCountry: { type: string, pattern: '^[A-Z]{2}$', description: "the customer's tax country; set, the VAT rate is determined by the tax service (EDI_TAX_URL) on the document date" }
+                taxGroup: { type: string, maxLength: 40, description: the customer's tax group in the tax configuration }
+                itemTaxGroup: { type: string, maxLength: 40, description: the item tax group of the deliveries }
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string } } }
+              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string }, taxCountry: { type: string }, taxGroup: { type: string }, itemTaxGroup: { type: string } } }
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409':
@@ -1346,7 +1352,7 @@ paths:
           description: OK
           content:
             application/json:
-              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string } } }
+              schema: { type: object, properties: { quantityTolerance: { type: string }, priceTolerance: { type: string }, waitDays: { type: integer }, taxRatePct: { type: string }, taxCountry: { type: string }, taxGroup: { type: string }, itemTaxGroup: { type: string } } }
         '404': { $ref: '#/components/responses/Problem' }
   /edi/v1/self-billing:sweep:
     post:
@@ -1757,6 +1763,30 @@ paths:
             application/json:
               schema: { type: object }
         '404': { $ref: '#/components/responses/Problem' }
+  /edi/v1/punchout/suppliers:
+    get:
+      operationId: listPunchoutSuppliers
+      summary: List the suppliers whose punchout catalog the caller can open (active partners with punchout settings, by name)
+      x-passage-duty: edi.requisition.create
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        partnerId: { type: string, format: uuid }
+                        name: { type: string }
+                        legalEntityId: { type: string, format: uuid }
+                        currencies: { type: array, items: { type: string } }
   /edi/v1/punchout/sessions:
     post:
       operationId: createPunchoutSession

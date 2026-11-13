@@ -44,6 +44,9 @@ func (f *fakeStore) UpdateRequisition(_ context.Context, id string, version int,
 	r.Version++
 	if edit.Lines != nil {
 		r.Lines, r.Total = edit.Lines, edit.Total
+		for _, l := range edit.Lines { // as the store: an edit can set the requisition's punchout approval flag, never clear it
+			r.NeedsApproval = r.NeedsApproval || l.NeedsApproval
+		}
 	}
 	f.requisitions[id] = r
 	return r, nil

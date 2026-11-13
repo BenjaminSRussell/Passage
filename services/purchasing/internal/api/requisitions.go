@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
@@ -44,6 +45,11 @@ type requisitionLineBody struct {
 	CostCenter string `json:"costCenter,omitempty"`
 	// CatalogEntryID picks the line from a published procurement catalog (FR-17.18).
 	CatalogEntryID string `json:"catalogEntryId,omitempty"`
+	// CatalogSource PUNCHOUT marks a line returned from a supplier's punchout catalog (#35, 35-3), with SupplierPartID; NeedsApproval
+	// is its BR-35.13 approval flag, which keeps the requisition from being approved automatically.
+	CatalogSource  string `json:"catalogSource,omitempty"`
+	SupplierPartID string `json:"supplierPartId,omitempty"`
+	NeedsApproval  bool   `json:"needsApproval,omitempty"`
 }
 
 func (a *API) createRequisition(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +75,10 @@ func (a *API) createRequisition(w http.ResponseWriter, r *http.Request) {
 			fail(w, r, err)
 			return
 		}
+	}
+	if err := punchoutFieldsAllowed(p, body.Lines); err != nil {
+		fail(w, r, err)
+		return
 	}
 	resolved, err := a.applyCatalogEntries(r, body)
 	if err != nil {
@@ -177,6 +187,15 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 	if err != nil {
 		return store.RequisitionLine{}, invalid(field("requestedDate"), "must be YYYY-MM-DD")
 	}
+	partID := strings.TrimSpace(l.SupplierPartID)
+	switch {
+	case l.CatalogSource != "" && l.CatalogSource != store.CatalogSourcePunchout:
+		return store.RequisitionLine{}, invalid(field("catalogSource"), "must be PUNCHOUT or left out")
+	case l.CatalogSource == "" && (partID != "" || l.NeedsApproval):
+		return store.RequisitionLine{}, invalid(field("catalogSource"), "is required with supplierPartId or needsApproval: they describe a punchout line")
+	case len(partID) > 100:
+		return store.RequisitionLine{}, invalid(field("supplierPartId"), "must be at most 100 characters")
+	}
 	return store.RequisitionLine{
 		LineNo:             no,
 		ProductID:          l.ProductID,
@@ -193,6 +212,9 @@ func buildRequisitionLine(no int, l requisitionLineBody, minor int32) (store.Req
 		CatalogEntryID:     l.CatalogEntryID,
 		GLAccount:          l.GLAccount,
 		CostCenter:         l.CostCenter,
+		CatalogSource:      l.CatalogSource,
+		SupplierPartID:     partID,
+		NeedsApproval:      l.NeedsApproval,
 	}, nil
 }
 
@@ -405,5 +427,79 @@ func (a *API) approvalChain(r store.Requisition) []string {
 			chain = c
 		}
 	}
+	// A punchout line priced above its catalog price plus tolerance (BR-35.13) is never approved automatically, nor is a requisition
+	// that held one when it was created (an edit cannot drop the approval).
+	if len(chain) == 0 && (r.NeedsApproval || slices.ContainsFunc(r.Lines, func(l store.RequisitionLine) bool { return l.NeedsApproval })) {
+		chain = []string{domain.RoleManager}
+	}
 	return chain
+}
+
+// punchoutIssuer is the service whose token may create punchout lines: the EDI engine turning a returned cart into a requisition.
+const punchoutIssuer = "edi"
+
+func hasPunchoutFields(l requisitionLineBody) bool {
+	return l.CatalogSource != "" || strings.TrimSpace(l.SupplierPartID) != "" || l.NeedsApproval
+}
+
+// punchoutFieldsAllowed refuses punchout fields from anyone but the EDI engine: only a returned punchout cart says a line came from
+// a supplier's catalog and whether its price needs approval (#35, 35-3).
+func punchoutFieldsAllowed(p tenant.Principal, lines []requisitionLineBody) error {
+	if p.Service == punchoutIssuer {
+		return nil
+	}
+	for i, l := range lines {
+		if hasPunchoutFields(l) {
+			return invalid("lines["+strconv.Itoa(i)+"].catalogSource", "is set by the punchout return only")
+		}
+	}
+	return nil
+}
+
+// keepPunchoutFields makes the punchout fields of an edited requisition sticky (#35, 35-3). An edited line that is a punchout line of
+// the requisition (by supplierPartId when the edit names one, else by description and unit, as the requisition editor sends lines
+// back without the punchout fields) takes the catalog source, supplier part and approval flag from it, whatever the edit sent. A
+// line that names punchout fields but matches no punchout line is refused: only the punchout return adds punchout lines. A punchout
+// line whose price the edit raises above the returned price, or leaves blank, or whose requisition changes currency, is flagged
+// (BR-35.13): the price check the punchout return made no longer holds for it.
+func keepPunchoutFields(cur store.Requisition, lines []requisitionLineBody, currency string) ([]requisitionLineBody, error) {
+	byPart := map[string]store.RequisitionLine{}
+	byText := map[string]store.RequisitionLine{}
+	textKey := func(desc, unit string) string {
+		return strings.ToLower(strings.TrimSpace(desc)) + "|" + strings.ToLower(strings.TrimSpace(unit))
+	}
+	for _, l := range cur.Lines {
+		if l.CatalogSource != store.CatalogSourcePunchout {
+			continue
+		}
+		if l.SupplierPartID != "" {
+			byPart[l.SupplierPartID] = l
+		}
+		byText[textKey(l.Description, l.Unit)] = l
+	}
+	sameCurrency := strings.EqualFold(strings.TrimSpace(currency), cur.Currency)
+	out := make([]requisitionLineBody, len(lines))
+	for i, l := range lines {
+		var (
+			src store.RequisitionLine
+			ok  bool
+		)
+		if part := strings.TrimSpace(l.SupplierPartID); part != "" {
+			src, ok = byPart[part]
+		} else {
+			src, ok = byText[textKey(l.Description, l.Unit)]
+		}
+		if !ok && hasPunchoutFields(l) {
+			return nil, invalid("lines["+strconv.Itoa(i)+"].catalogSource", "names no punchout line of this requisition; only the punchout return adds punchout lines")
+		}
+		if ok {
+			l.CatalogSource, l.SupplierPartID, l.NeedsApproval = src.CatalogSource, src.SupplierPartID, src.NeedsApproval
+			price, err := decimal.NewFromString(strings.TrimSpace(l.EstimatedUnitPrice))
+			if !sameCurrency || err != nil || price.GreaterThan(src.EstimatedUnitPrice) {
+				l.NeedsApproval = true
+			}
+		}
+		out[i] = l
+	}
+	return out, nil
 }

@@ -1,7 +1,7 @@
 // The B2B exchange screens (/api/v1/edi): e-invoices per mandate with submit, the network's answer, the Peppol rule check and the Factur-X
-// PDF, and the self-billing dispute worklist. Cedar Ridge Pumps Europe invoices a German distributor under Peppol and Factur-X and a
+// PDF, the self-billing dispute worklist, and the punchout catalogs of the purchasing screen. Cedar Ridge Pumps Europe invoices a German distributor under Peppol and Factur-X and a
 // Spanish one under Peppol; Bluewater and Summit self-bill their purchases from the US plant.
-import { CUSTOMERS, LEGAL_ENTITY_DE, LEGAL_ENTITY_ES } from "../company";
+import { CUSTOMERS, LEGAL_ENTITY, LEGAL_ENTITY_DE, LEGAL_ENTITY_ES, VENDORS } from "../company";
 import { reply, route } from "../backend";
 import { at, table, uid } from "../store";
 
@@ -208,3 +208,99 @@ route("POST", `${EDI}/self-billing/disputes/{id}:resolve`, ({ params, body }) =>
 
 route("POST", `${EDI}/self-billing:sweep`, () => ({ reconciled: 0, unbilled: [] }));
 
+
+// Punchout (#35, 35-3): the Cedar Ridge Pumps buyer shops Keystone Seals & Gaskets' and Allied Fastener Supply's own catalogs. One
+// session is open, one returned a cart with a line priced above the catalog price, and one already became the draft requisition.
+const PUNCHOUT_KIND = 474;
+const punchoutSuppliers = [
+  { partnerId: uid(PUNCHOUT_KIND, 1), name: VENDORS[2]!.name, legalEntityId: LEGAL_ENTITY.id, currencies: ["USD"] },
+  { partnerId: uid(PUNCHOUT_KIND, 2), name: VENDORS[3]!.name, legalEntityId: LEGAL_ENTITY.id, currencies: ["USD"] },
+];
+
+interface DemoCartLine {
+  line: number;
+  supplierPartId: string;
+  description: string;
+  quantity: string;
+  unitCode: string;
+  unitPrice: string;
+  currency: string;
+  unspsc: string;
+  leadTimeDays: number;
+  catalog: boolean;
+  needsApproval: boolean;
+}
+
+const cartLine = (line: number, part: string, description: string, qty: string, price: string, needsApproval = false): DemoCartLine => ({
+  line, supplierPartId: part, description, quantity: qty, unitCode: "EA", unitPrice: price, currency: "USD", unspsc: "31411700", leadTimeDays: 5, catalog: true, needsApproval,
+});
+
+interface DemoSession {
+  id: string;
+  partnerId: string;
+  legalEntityId: string;
+  requesterId: string;
+  format: "CXML" | "OCI";
+  status: "OPEN" | "RETURNED" | "REJECTED" | "CANCELLED";
+  startUrl?: string;
+  expiresAt: string;
+  returnedAt?: string;
+  cart?: { lines: DemoCartLine[]; issues: { code: string; detail: string; reject: boolean }[]; cartRejected: boolean; computedTotal: string };
+  requisitionId?: string;
+  createdAt: string;
+}
+
+const BUYER = uid(PUNCHOUT_KIND + 1, 1);
+const punchoutSessions = table<DemoSession>([
+  {
+    id: uid(PUNCHOUT_KIND + 2, 1), partnerId: punchoutSuppliers[0]!.partnerId, legalEntityId: LEGAL_ENTITY.id, requesterId: BUYER, format: "CXML", status: "OPEN",
+    startUrl: "https://catalog.keystone-seals.example/punchout/start?s=7f3a", expiresAt: at(0.04), createdAt: at(-0.01),
+  },
+  {
+    id: uid(PUNCHOUT_KIND + 2, 2), partnerId: punchoutSuppliers[0]!.partnerId, legalEntityId: LEGAL_ENTITY.id, requesterId: BUYER, format: "CXML", status: "RETURNED",
+    expiresAt: at(-0.9), returnedAt: at(-0.95), createdAt: at(-1),
+    cart: {
+      lines: [cartLine(1, "KS-MS-125", "Mechanical seal kit, 1.25 in", "12", "38.50"), cartLine(2, "KS-OR-VITON", "Viton O-ring assortment", "4", "64.00", true)],
+      issues: [{ code: "EDI-0133", detail: "Line 3 (KS-GSK-XL) was left out: its unit BX has no UN/ECE code mapping.", reject: false }],
+      cartRejected: false, computedTotal: "718.00",
+    },
+  },
+  {
+    id: uid(PUNCHOUT_KIND + 2, 3), partnerId: punchoutSuppliers[1]!.partnerId, legalEntityId: LEGAL_ENTITY.id, requesterId: BUYER, format: "OCI", status: "RETURNED",
+    expiresAt: at(-4.9), returnedAt: at(-4.95), createdAt: at(-5), requisitionId: uid(300, 5),
+    cart: { lines: [cartLine(1, "AF-HHCS-0508", "Hex cap screw 5/16-18 x 1, zinc", "500", "0.21")], issues: [], cartRejected: false, computedTotal: "105.00" },
+  },
+]);
+
+route("GET", `${EDI}/punchout/suppliers`, () => ({ items: punchoutSuppliers }));
+route("GET", `${EDI}/punchout/sessions`, () => ({ items: punchoutSessions.all().sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }));
+route("GET", `${EDI}/punchout/sessions/{id}`, ({ params }) => punchoutSessions.get(params.id) ?? reply.problem(404, "EDI-0005", "punchout session not found"));
+route("POST", `${EDI}/punchout/sessions`, ({ body }) => {
+  const input = body as { partnerId?: string; format?: "CXML" | "OCI" };
+  const supplier = punchoutSuppliers.find((s) => s.partnerId === input.partnerId);
+  if (!supplier) return reply.problem(404, "EDI-0005", "punchout settings of the partner not found");
+  const n = punchoutSessions.all().length + 1;
+  const created: DemoSession = {
+    id: uid(PUNCHOUT_KIND + 2, n), partnerId: supplier.partnerId, legalEntityId: supplier.legalEntityId, requesterId: BUYER, format: input.format ?? "CXML", status: "OPEN",
+    startUrl: `https://catalog.${supplier.partnerId === punchoutSuppliers[0]!.partnerId ? "keystone-seals" : "allied-fastener"}.example/punchout/start?s=${n}`,
+    expiresAt: at(0.04), createdAt: at(0),
+  };
+  punchoutSessions.insert(created);
+  return reply.created(created);
+});
+route("POST", `${EDI}/punchout/sessions/{id}:cancel`, ({ params }) => {
+  const s = punchoutSessions.get(params.id);
+  if (!s) return reply.problem(404, "EDI-0005", "punchout session not found");
+  if (s.status !== "OPEN") return reply.problem(409, "EDI-0035", "only an open session can be cancelled");
+  return punchoutSessions.update(s.id, { status: "CANCELLED", startUrl: undefined });
+});
+route("POST", `${EDI}/punchout/sessions/{id}:create-requisition`, ({ params }) => {
+  const s = punchoutSessions.get(params.id);
+  if (!s) return reply.problem(404, "EDI-0005", "punchout session not found");
+  if (s.requisitionId) return { sessionId: s.id, requisitionId: s.requisitionId };
+  if (s.status !== "RETURNED") return reply.problem(409, "EDI-0035", "only a session whose cart was returned and accepted becomes a requisition");
+  // The demo's draft requisition stands in for the one purchasing creates from the cart.
+  const requisitionId = uid(300, 5);
+  punchoutSessions.update(s.id, { requisitionId });
+  return reply.created({ sessionId: s.id, requisitionId });
+});
