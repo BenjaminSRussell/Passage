@@ -248,7 +248,7 @@ export function SigningLimitRequestsPage() {
       singular="signing limit request"
       columns={requestColumns}
       filters={requestFilters}
-      initialFilters={PENDING_FIRST}
+      defaultFilters={PENDING_FIRST}
       useRows={useRequestRows}
       getRowKey={(r) => r.id}
       onRowOpen={(r) => navigate(`/purchasing/signing-limit-requests/${r.id}`)}

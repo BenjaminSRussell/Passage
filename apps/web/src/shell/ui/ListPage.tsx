@@ -80,6 +80,11 @@ export interface ListPageProps<T> {
    * default view's filters for this visit; the default view's columns still apply.
    */
   initialFilters?: FilterValues;
+  /**
+   * The working set the list opens on when no link asked for filters and the person has no default view, such as
+   * open cases. Unlike `initialFilters` it never overrides a default view the person saved.
+   */
+  defaultFilters?: FilterValues;
   storage?: PreferenceStorage;
 }
 
@@ -155,6 +160,7 @@ export function ListPage<T>({
   serverSort = NO_SORTS,
   search,
   initialFilters,
+  defaultFilters,
   storage: preferred = localPreferenceStorage,
 }: ListPageProps<T>) {
   const { identity } = useWorkContext();
@@ -175,7 +181,7 @@ export function ListPage<T>({
     if (preset) {
       return { store, ...reconcileView(preset, columns, filterKeys, filters), activeId: preset.id };
     }
-    return { store, query: emptyQuery(), visible: defaultVisible(columns), activeId: null };
+    return { store, query: { ...emptyQuery(), filters: defaultFilters ? cleanFilters(filters, defaultFilters) : {} }, visible: defaultVisible(columns), activeId: null };
   });
   const [store, setStore] = useState(start.store);
   const [query, setQuery] = useState(start.query);

@@ -107,7 +107,7 @@ export function CasesPage() {
       singular="case"
       columns={columns}
       filters={caseFilters}
-      initialFilters={OPEN_FIRST}
+      defaultFilters={OPEN_FIRST}
       useRows={(query) => useCaseRows(query, setCapped)}
       search={(row) => ({ number: row.documentNumber ?? "", name: row.reason })}
       getRowKey={(row) => row.id}

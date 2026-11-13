@@ -108,7 +108,7 @@ export function DisputesPage() {
       singular="dispute"
       columns={columns}
       filters={disputeFilters}
-      initialFilters={ACTIVE_FIRST}
+      defaultFilters={ACTIVE_FIRST}
       useRows={(query) => useDisputeRows(query, setCapped)}
       search={(row) => ({ number: row.documentNumber, name: row.reasonCode })}
       getRowKey={(row) => row.id}
