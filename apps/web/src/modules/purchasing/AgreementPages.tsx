@@ -19,6 +19,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   changePurchaseAgreement,
@@ -221,6 +227,14 @@ function toInput(h: HeaderDraft, lines: LineDraft[]): PurchaseAgreementInput {
   };
 }
 
+const PURCHASE_AGREEMENT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "pa-legal-entity", label: "Legal entity" },
+  vendorId: { id: "pa-vendor", label: "Vendor" },
+  currency: { id: "pa-currency", label: "Currency" },
+  validFrom: { id: "pa-valid-from", label: "Valid from" },
+  validTo: { id: "pa-valid-to", label: "Valid to" },
+};
+
 /** New purchase agreement: header, validity and commitment lines (FR-17.5). */
 export function PurchaseAgreementCreatePage() {
   const navigate = useNavigate();
@@ -237,6 +251,8 @@ export function PurchaseAgreementCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [header, lines]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([header, lines]));
   const setH = (patch: Partial<HeaderDraft>) => setHeader((h) => ({ ...h, ...patch }));
   const update = (index: number, patch: Partial<LineDraft>) => setLines((ls) => ls.map((l, i) => (i === index ? { ...l, ...patch } : l)));
 
@@ -249,6 +265,7 @@ export function PurchaseAgreementCreatePage() {
     setBusy(true);
     try {
       const { body } = await createPurchaseAgreement(toInput(header, lines), key);
+      release();
       navigate(`/purchasing/agreements/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -266,6 +283,7 @@ export function PurchaseAgreementCreatePage() {
         description="Commit a quantity or a spend with one vendor. Purchase order lines that reference an agreement line release against it."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, PURCHASE_AGREEMENT_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Agreement">
           <div className={styles.grid}>
             <FormField id="pa-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -389,6 +407,7 @@ export function PurchaseAgreementCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

@@ -1,6 +1,24 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  StatusPill,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   BillingApiError,
   createShipmentProposals,
@@ -186,6 +204,12 @@ type HeaderField = "legalEntityId" | "customerId" | "invoiceAccountId" | "curren
 type SlipField = Exclude<keyof SlipValues, "lines">;
 type FieldOpts = { hint?: string; optional?: boolean; mono?: boolean; decimal?: boolean; type?: string; lookup?: LookupEntityKey };
 
+const NEW_SHIPMENT_PROPOSAL_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "sp-legal-entity", label: "Legal entity" },
+  customerId: { id: "sp-customer", label: "Customer" },
+  invoiceAccountId: { id: "sp-account", label: "Invoice account" },
+};
+
 /** Invoice shipments (FR-29.1, FR-29.2): turn posted packing slips into invoice proposals, one per order or consolidated. */
 export function NewShipmentProposalPage() {
   const navigate = useNavigate();
@@ -196,6 +220,8 @@ export function NewShipmentProposalPage() {
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<Invoice[] | null>(null);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]) && created === null);
 
   function update(patch: Partial<ShipmentValues>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -219,6 +245,7 @@ export function NewShipmentProposalPage() {
     setBusy(true);
     try {
       const invoices = await createShipmentProposals(toShipmentInput(values), key.current);
+      release();
       if (invoices.length === 1) navigate(`/billing/invoices/${invoices[0].id}`);
       else setCreated(invoices);
     } catch (error) {
@@ -292,6 +319,7 @@ export function NewShipmentProposalPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_SHIPMENT_PROPOSAL_FIELDS)} attempt={attempt} />
           <LookupFormField id="sp-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           <LookupFormField
             id="sp-customer"
@@ -396,6 +424,7 @@ export function NewShipmentProposalPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

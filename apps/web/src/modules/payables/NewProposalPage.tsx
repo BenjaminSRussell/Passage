@@ -4,7 +4,22 @@ import { Link, useNavigate } from "react-router-dom";
 import { newKey } from "../../shell/api/http";
 import { ProblemMessage } from "../../shell/errors";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import styles from "../../shell/pageLayout.module.css";
 import { createProposal, PAYMENT_METHODS, type PaymentMethod } from "./api/client";
 import { METHOD_LABELS, utcToday } from "./format";
@@ -34,17 +49,26 @@ export function validateDraft(draft: Draft, day: string): Record<string, string>
   return errors;
 }
 
+const NEW_PROPOSAL_FIELDS: Record<string, FormFieldTarget> = {
+  currency: { id: "np-currency", label: "Company currency" },
+  runDate: { id: "np-run", label: "Payment date" },
+  dueBy: { id: "np-due", label: "Include invoices due by" },
+};
+
 export function NewProposalPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const runId = useRef(newKey());
   const [draft, setDraft] = useState<Draft>({ legalEntityId: "", currency: "", runDate: utcToday(), dueBy: "", method: "TRANSFER", exceptions: [] });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([draft]));
 
   const create = useMutation({
     mutationFn: createProposal,
     onSuccess: (proposal) => {
       void queryClient.invalidateQueries({ queryKey: ["payables", "proposals"] });
+      release();
       navigate(`/payables/proposals/${proposal.id}`);
     },
   });
@@ -86,6 +110,7 @@ export function NewProposalPage() {
       <PageHeader title="New payment proposal" description="Selects every vendor invoice that is due, groups them per vendor and currency, and saves the list as a draft for approval." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New payment proposal">
+          <FormErrorSummary items={summaryItems(errors, NEW_PROPOSAL_FIELDS)} attempt={attempt} />
           <FormField id="np-entity" label="Legal entity" optional hint="Defaults to the entity you are working in.">
             {(c) => <EntityLookup entity="legalEntity" {...c} value={draft.legalEntityId} onChange={(e) => edit({ legalEntityId: e.target.value })} />}
           </FormField>
@@ -144,6 +169,7 @@ export function NewProposalPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

@@ -24,6 +24,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   actOnPurchaseOrder,
@@ -645,6 +651,12 @@ function ChargesCard({
   );
 }
 
+const PURCHASE_ORDER_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "po-legal-entity", label: "Legal entity" },
+  vendorId: { id: "po-vendor", label: "Vendor" },
+  currency: { id: "po-currency", label: "Currency" },
+};
+
 /** New purchase order: header, lines (blank price = trade agreement) and header charges. */
 export function PurchaseOrderCreatePage() {
   const navigate = useNavigate();
@@ -658,6 +670,8 @@ export function PurchaseOrderCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [legalEntityId, vendorId, currency, lines, charges, applyAuto]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([legalEntityId, vendorId, currency, lines, charges, applyAuto]));
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -670,6 +684,7 @@ export function PurchaseOrderCreatePage() {
     setBusy(true);
     try {
       const { body } = await createPurchaseOrder(toInput({ legalEntityId: le, vendorId: vendor, currency }, lines, charges, applyAuto), key);
+      release();
       navigate(`/purchasing/purchase-orders/${body.id}`, { state: { warnings: body.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
@@ -687,6 +702,7 @@ export function PurchaseOrderCreatePage() {
         description="Leave a unit price blank to take the agreement line's price when it overrides, else the most specific trade agreement price for the vendor, product and quantity."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, PURCHASE_ORDER_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Order">
           <div className={styles.grid}>
             <FormField id="po-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -730,6 +746,7 @@ export function PurchaseOrderCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

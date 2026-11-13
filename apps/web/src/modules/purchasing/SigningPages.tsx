@@ -17,6 +17,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   createSigningLimitRequest,
@@ -251,6 +257,15 @@ export function SigningLimitRequestsPage() {
   );
 }
 
+const SIGNING_LIMIT_REQUEST_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "slr-legal-entity", label: "Legal entity" },
+  workerId: { id: "slr-worker", label: "Worker" },
+  documentType: { id: "slr-doc", label: "Document" },
+  currency: { id: "slr-currency", label: "Currency" },
+  spendingLimit: { id: "slr-spending", label: "Spending limit" },
+  approvalLimit: { id: "slr-approval", label: "Approval limit" },
+};
+
 /** Create form: request a worker's limit for a document type and currency. */
 export function SigningLimitRequestCreatePage() {
   const navigate = useNavigate();
@@ -267,6 +282,8 @@ export function SigningLimitRequestCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form]));
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   async function onSubmit(event: FormEvent) {
@@ -294,6 +311,7 @@ export function SigningLimitRequestCreatePage() {
         },
         key,
       );
+      release();
       navigate(`/purchasing/signing-limit-requests/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -311,6 +329,7 @@ export function SigningLimitRequestCreatePage() {
         description="The spending limit is what the worker may request before one more approval level is added. The approval limit is what the worker may approve."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, SIGNING_LIMIT_REQUEST_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Limit">
           <div className={styles.grid}>
             <FormField id="slr-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -356,6 +375,7 @@ export function SigningLimitRequestCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

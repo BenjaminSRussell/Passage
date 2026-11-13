@@ -1,6 +1,25 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  EmptyState,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createSupplementaryRule,
   deleteSupplementaryRule,
@@ -274,6 +293,19 @@ export function SupplementaryRulesPage() {
   );
 }
 
+const NEW_SUPPLEMENTARY_RULE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "rule-legalEntityId", label: "Legal entity" },
+  parentProductId: { id: "rule-parentProductId", label: "Ordered product" },
+  customerId: { id: "rule-customerId", label: "Customer" },
+  supplementaryProductId: { id: "rule-supplementaryProductId", label: "Supplementary product" },
+  baseQuantity: { id: "rule-baseQuantity", label: "Per ordered quantity" },
+  quantityPerBase: { id: "rule-quantityPerBase", label: "Supplementary quantity" },
+  unit: { id: "rule-unit", label: "Unit" },
+  unitPrice: { id: "rule-unitPrice", label: "Unit price" },
+  productId: { id: "evaluate-productId", label: "Ordered product" },
+  quantity: { id: "evaluate-quantity", label: "Ordered quantity" },
+};
+
 /** Creates a supplementary item rule (duty sales.listing.maintain). */
 export function NewSupplementaryRulePage() {
   const navigate = useNavigate();
@@ -292,6 +324,8 @@ export function NewSupplementaryRulePage() {
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -302,6 +336,7 @@ export function NewSupplementaryRulePage() {
     setBusy(true);
     try {
       await createSupplementaryRule(input);
+      release();
       navigate("/sales/supplementary-items");
     } catch (error) {
       const problem = describeProblem(error);
@@ -332,6 +367,7 @@ export function NewSupplementaryRulePage() {
       <PageHeader title="New supplementary item rule" description="For every whole base quantity of the ordered product, the line brings the given quantity of the supplementary product." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New supplementary item rule">
+          <FormErrorSummary items={summaryItems(errors, NEW_SUPPLEMENTARY_RULE_FIELDS)} attempt={attempt} />
           {field("legalEntityId", "Legal entity", "UUID of the selling legal entity.", { mono: true })}
           {field("parentProductId", "Ordered product", "UUID of the product the rule applies to.", { mono: true })}
           {field("customerId", "Customer", "Leave empty for every customer.", { mono: true, optional: true })}
@@ -379,6 +415,7 @@ export function NewSupplementaryRulePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

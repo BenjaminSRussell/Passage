@@ -1,6 +1,26 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, ListPage, loadedRows, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  ListPage,
+  loadedRows,
+  PageHeader,
+  Select,
+  Skeleton,
+  StatusPill,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createScheduleRelease,
   describeProblem,
@@ -184,6 +204,12 @@ export function ScheduleReleasesPage() {
   );
 }
 
+const NEW_SCHEDULE_RELEASE_FIELDS: Record<string, FormFieldTarget> = {
+  releaseNo: { id: "release-no", label: "Release number" },
+  releaseType: { id: "release-type", label: "Type" },
+  cumReceived: { id: "release-received", label: "Cumulative received (customer)" },
+};
+
 /** Stores a new release. A held release (cumulative mismatch) is a result to review, not a failure. */
 export function NewScheduleReleasePage() {
   const { id = "" } = useParams();
@@ -193,6 +219,8 @@ export function NewScheduleReleasePage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<ScheduleReleaseValues>) {
     setValues((v) => ({ ...v, ...patch }));
@@ -211,6 +239,7 @@ export function NewScheduleReleasePage() {
     setBusy(true);
     try {
       const saved = await createScheduleRelease(id, input, key.current);
+      release();
       navigate(`/sales/agreements/${id}/schedule-releases/${saved.value.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -227,6 +256,7 @@ export function NewScheduleReleasePage() {
       <PageHeader title="New scheduling release" description="Enter the customer's release as received. It is reconciled against the shipped quantity when you save." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New scheduling release">
+          <FormErrorSummary items={summaryItems(errors, NEW_SCHEDULE_RELEASE_FIELDS)} attempt={attempt} />
           <FormField id="release-no" label="Release number" hint="The customer's number for this release." error={errors.releaseNo}>
             {(control) => <Input {...control} value={values.releaseNo} onChange={(e) => update({ releaseNo: e.target.value })} invalid={Boolean(errors.releaseNo)} />}
           </FormField>
@@ -289,6 +319,7 @@ export function NewScheduleReleasePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

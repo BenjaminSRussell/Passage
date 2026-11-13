@@ -1,7 +1,23 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  useFormBaseline,
+  useUnsavedChanges,
+  FormErrorSummary,
+  summaryItems,
+  useSubmitAttempt,
+  type FormFieldTarget,
+  FormSection,
+} from "../../shell/ui";
 import { createOrder, describeProblem, getCustomerGroup, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem, type Proposal } from "./api/client";
 import { sentence, today, UUID } from "./format";
 import { emptyLine, validateLines, type LineValues } from "./lines";
@@ -65,6 +81,17 @@ export function validateOrder(values: OrderValues): { errors: Errors; input?: Ne
   };
 }
 
+const NEW_ORDER_FIELDS: Record<string, FormFieldTarget> = {
+  currency: { id: "order-currency", label: "Currency" },
+  legalEntityId: { id: "order-legalEntityId", label: "Legal entity" },
+  customerId: { id: "order-customerId", label: "Customer" },
+  invoiceAccountId: { id: "order-invoiceAccountId", label: "Invoice account" },
+  orderType: { id: "order-orderType", label: "Order type" },
+  requestedShipDate: { id: "order-requestedShipDate", label: "Requested ship date" },
+  externalRef: { id: "order-externalRef", label: "Customer reference" },
+  listingOverrideReason: { id: "order-listingOverrideReason", label: "Listing override reason" },
+};
+
 /** Order entry: header and lines, stored as a DRAFT order (FR-27.2). */
 export function NewOrderPage() {
   const navigate = useNavigate();
@@ -99,6 +126,7 @@ export function NewOrderPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
 
   function update(patch: Partial<OrderValues>) {
     setValues((v) => ({ ...v, ...patch }));
@@ -172,6 +200,7 @@ export function NewOrderPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New sales order">
+          <FormErrorSummary items={summaryItems(errors, NEW_ORDER_FIELDS)} attempt={attempt} />
           {lookup("legalEntityId", "legalEntity", "Legal entity", "The selling legal entity.")}
           {lookup("customerId", "customer", "Customer", "Search by name or account number.", { legalEntityId: values.legalEntityId || undefined })}
           {lookup("invoiceAccountId", "customer", "Invoice account", "Leave empty to invoice the customer.", { legalEntityId: values.legalEntityId || undefined }, true)}
@@ -190,7 +219,9 @@ export function NewOrderPage() {
           {header("currency", "Currency")}
           {header("requestedShipDate", "Requested ship date", undefined, { type: "date" })}
           {header("externalRef", "Customer reference", "For example the customer's PO number.", { optional: true })}
-          {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
+          <FormSection collapse="advanced">
+            {header("listingOverrideReason", "Listing override reason", "Needs the sales.order.approve duty. Accepts lines the product listing denies and logs the reason.", { optional: true })}
+          </FormSection>
           <FormField id="order-oneTime" label="One-time customer" hint="Walk-in buyer sold to the shared one-time account, with the name and address on the invoice." optional>
             {(control) => (
               <Input

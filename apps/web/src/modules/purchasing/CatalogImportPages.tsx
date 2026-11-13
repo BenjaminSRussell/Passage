@@ -19,6 +19,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   actOnCatalogImport,
@@ -128,6 +134,11 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const CSV_HINT =
   "Vendor part number,Name,Category,Unit,Unit price,Currency,Lead time days\nG-100,Safety gloves,MRO,PR,4.25,USD,3";
 
+const CATALOG_IMPORT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  vendorId: { id: "import-vendor", label: "Vendor" },
+  csv: { id: "import-csv", label: "Rows" },
+};
+
 /** Stage a vendor CSV against a catalog: choose a file or paste the rows (FR-17.18). */
 export function CatalogImportCreatePage() {
   const { id = "" } = useParams();
@@ -139,6 +150,8 @@ export function CatalogImportCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [vendorId, fileName, csv]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([vendorId, fileName, csv]));
 
   async function onFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -173,6 +186,7 @@ export function CatalogImportCreatePage() {
         },
         key,
       );
+      release();
       navigate(`/purchasing/catalog-imports/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -201,6 +215,7 @@ export function CatalogImportCreatePage() {
         {failure ? <ProblemMessage problem={failure} /> : null}
       </Alert>
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, CATALOG_IMPORT_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Vendor file">
           <div className={styles.grid}>
             <FormField
@@ -256,6 +271,7 @@ export function CatalogImportCreatePage() {
           </div>
         </Card>
       </form>
+      {prompt}
     </div>
   );
 }

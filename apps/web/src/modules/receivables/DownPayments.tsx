@@ -20,6 +20,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   createDownPayment,
@@ -145,6 +151,14 @@ export function toDownPaymentInput(v: DownPaymentDraft): DownPaymentInput {
   };
 }
 
+const NEW_DOWN_PAYMENT_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "nd-entity", label: "Legal entity" },
+  customerId: { id: "nd-customer", label: "Customer" },
+  salesOrderId: { id: "nd-order", label: "Sales order" },
+  currency: { id: "nd-currency", label: "Currency" },
+  amount: { id: "nd-amount", label: "Amount" },
+};
+
 /** Request a down payment or a security deposit. Nothing posts until the money is received. */
 export function NewDownPaymentPage() {
   const navigate = useNavigate();
@@ -161,6 +175,8 @@ export function NewDownPaymentPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<DownPaymentDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -176,6 +192,7 @@ export function NewDownPaymentPage() {
     setBusy(true);
     try {
       const created = await createDownPayment(toDownPaymentInput(values), key.current);
+      release();
       navigate(`/receivables/down-payments/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -219,6 +236,7 @@ export function NewDownPaymentPage() {
       <PageHeader title="Request down payment" description="A request is a noted item: it posts nothing until you record the money as received." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_DOWN_PAYMENT_FIELDS)} attempt={attempt} />
           <FormField id="nd-kind" label="Kind">
             {(c) => (
               <Select {...c} value={values.kind} onChange={(e) => update({ kind: e.target.value as DownPaymentKind })}>
@@ -250,6 +268,7 @@ export function NewDownPaymentPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

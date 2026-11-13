@@ -17,6 +17,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   changeAutoCharge,
@@ -307,6 +313,17 @@ function CodeFields({ id, form, set, errors, creating }: { id: string; form: Cod
   );
 }
 
+const CHARGE_CODE_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "cc-legal-entity", label: "Legal entity" },
+  code: { id: "cc-code", label: "Code" },
+  name: { id: "cc-name", label: "Name" },
+  defaultValue: { id: "cc-default", label: "Default value" },
+  debitAccountId: { id: "cc-debit-account", label: "Debit account" },
+  creditType: { id: "cc-credit", label: "Credit side" },
+  creditAccountId: { id: "cc-credit-account", label: "Credit account" },
+  vendorId: { id: "cc-vendor", label: "Vendor" },
+};
+
 /** Create form for a charge code. */
 export function ChargeCodeCreatePage() {
   const navigate = useNavigate();
@@ -315,6 +332,8 @@ export function ChargeCodeCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form]));
   const set = (patch: Partial<CodeForm>) => setForm((f) => ({ ...f, ...patch }));
 
   async function onSubmit(event: FormEvent) {
@@ -326,6 +345,7 @@ export function ChargeCodeCreatePage() {
     setBusy(true);
     try {
       const { body } = await createChargeCode(toCodeInput(form), key);
+      release();
       navigate(`/purchasing/charge-codes/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -340,6 +360,7 @@ export function ChargeCodeCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New charge code" description="A code is unique within its legal entity and cannot be renamed; deactivate it instead of deleting it." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, CHARGE_CODE_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Charge code">
           <CodeFields id="cc" form={form} set={set} errors={errors} creating />
         </Card>
@@ -355,6 +376,7 @@ export function ChargeCodeCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }
@@ -644,6 +666,11 @@ function AutoWindowFields({ id, form, set, errors }: { id: string; form: AutoFor
   );
 }
 
+const AUTO_CHARGE_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "ac-legal-entity", label: "Legal entity" },
+  chargeCodeId: { id: "ac-code", label: "Charge code" },
+};
+
 /** Create form for an auto charge; ?chargeCodeId= preselects the code. */
 export function AutoChargeCreatePage() {
   const navigate = useNavigate();
@@ -668,6 +695,8 @@ export function AutoChargeCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form]));
   const set = (patch: Partial<AutoForm>) => setForm((f) => ({ ...f, ...patch }));
   const available = (codes.data ?? []).filter((c) => !uuidPattern.test(form.legalEntityId.trim()) || c.legalEntityId === form.legalEntityId.trim());
   const chosen = (codes.data ?? []).find((c) => c.id === form.chargeCodeId);
@@ -681,6 +710,7 @@ export function AutoChargeCreatePage() {
     setBusy(true);
     try {
       const { body } = await createAutoCharge(toAutoInput(form), key);
+      release();
       navigate(`/purchasing/auto-charges/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -696,6 +726,7 @@ export function AutoChargeCreatePage() {
       <PageHeader title="New auto charge" description="The charge is added to a purchase order saved with automatic charges when the vendor, currency and order total match." />
       {codes.error ? <LoadError what="the charge codes" error={codes.error} onRetry={codes.reload} /> : null}
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, AUTO_CHARGE_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Auto charge">
           <div className={styles.grid}>
             <FormField id="ac-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -766,6 +797,7 @@ export function AutoChargeCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

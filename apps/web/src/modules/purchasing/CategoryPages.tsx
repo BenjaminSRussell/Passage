@@ -18,6 +18,13 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+  FormSection,
 } from "../../shell/ui";
 import {
   changeCategoryVendor,
@@ -105,6 +112,15 @@ export function CategoryVendorsPage() {
   );
 }
 
+const CATEGORY_VENDOR_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "cv-legal-entity", label: "Legal entity" },
+  category: { id: "cv-category", label: "Category" },
+  vendorId: { id: "cv-vendor", label: "Vendor" },
+  status: { id: "cv-status", label: "Status" },
+  validFrom: { id: "cv-valid-from", label: "Valid from" },
+  validTo: { id: "cv-valid-to", label: "Valid to" },
+};
+
 /** Create form: assign a vendor to a category with a status and validity window. */
 export function CategoryVendorCreatePage() {
   const navigate = useNavigate();
@@ -121,6 +137,8 @@ export function CategoryVendorCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form]));
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   async function onSubmit(event: FormEvent) {
@@ -150,6 +168,7 @@ export function CategoryVendorCreatePage() {
         },
         key,
       );
+      release();
       navigate(`/purchasing/category-vendors/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -167,6 +186,7 @@ export function CategoryVendorCreatePage() {
         description="A vendor has one assignment per category. Change its status or window afterwards instead of adding another."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, CATEGORY_VENDOR_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Assignment">
           <div className={styles.grid}>
             <FormField id="cv-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -195,9 +215,11 @@ export function CategoryVendorCreatePage() {
             <FormField id="cv-valid-to" label="Valid to" optional hint="Blank is open-ended" error={errors.validTo}>
               {(c) => <Input {...c} type="date" value={form.validTo} onChange={(e) => set({ validTo: e.target.value })} />}
             </FormField>
-            <FormField id="cv-notes" label="Notes" optional>
-              {(c) => <Input {...c} value={form.notes} onChange={(e) => set({ notes: e.target.value })} />}
-            </FormField>
+            <FormSection collapse="more">
+              <FormField id="cv-notes" label="Notes" optional>
+                {(c) => <Input {...c} value={form.notes} onChange={(e) => set({ notes: e.target.value })} />}
+              </FormField>
+            </FormSection>
           </div>
         </Card>
         <Alert tone="danger" live="alert">
@@ -212,6 +234,7 @@ export function CategoryVendorCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

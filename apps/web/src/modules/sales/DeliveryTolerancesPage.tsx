@@ -3,7 +3,26 @@ import { PlainName } from "./OrderNumber";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Button, buttonClassName, Card, ConfirmDialog, DataTable, FormField, Input, PageHeader, Select, Skeleton, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  ConfirmDialog,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createDeliveryTolerance,
   deleteDeliveryTolerance,
@@ -268,6 +287,15 @@ export function DeliveryTolerancesListPage() {
   );
 }
 
+const NEW_DELIVERY_TOLERANCE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "tol-legalEntityId", label: "Legal entity" },
+  productId: { id: "tol-productId", label: "Product" },
+  customerId: { id: "tol-customerId", label: "Customer" },
+  overdeliveryPct: { id: "tol-overdeliveryPct", label: "Over-delivery tolerance (%)" },
+  underdeliveryPct: { id: "tol-underdeliveryPct", label: "Under-delivery tolerance (%)" },
+  orderedQty: { id: "resolve-orderedQty", label: "Ordered quantity" },
+};
+
 /** Sets the tolerance of a product for a customer or for every customer (duty sales.parameter.maintain). */
 export function NewDeliveryTolerancePage() {
   const navigate = useNavigate();
@@ -276,6 +304,8 @@ export function NewDeliveryTolerancePage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<ToleranceValues>) {
     setValues((v) => ({ ...v, ...patch }));
@@ -291,6 +321,7 @@ export function NewDeliveryTolerancePage() {
     setBusy(true);
     try {
       const saved = await createDeliveryTolerance(input, key.current);
+      release();
       navigate(`/sales/delivery-tolerances/${saved.value.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -313,6 +344,7 @@ export function NewDeliveryTolerancePage() {
       <PageHeader title="New delivery tolerance" description="A product has one rule per customer and one for every customer; change an existing rule from its page." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New delivery tolerance">
+          <FormErrorSummary items={summaryItems(errors, NEW_DELIVERY_TOLERANCE_FIELDS)} attempt={attempt} />
           {party("legalEntityId", "Legal entity", "UUID of the selling legal entity.")}
           {party("productId", "Product", "UUID of the product.")}
           {party("customerId", "Customer", "UUID of the customer; empty makes the rule apply to every customer.", true)}
@@ -334,6 +366,7 @@ export function NewDeliveryTolerancePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

@@ -19,6 +19,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   describeProblem,
@@ -147,6 +153,14 @@ function toDisputeInput(v: DisputeDraft): DisputeInput {
   };
 }
 
+const NEW_DISPUTE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "nd-entity", label: "Legal entity" },
+  openItemId: { id: "nd-item", label: "Open item" },
+  reasonCode: { id: "nd-reason", label: "Reason code" },
+  disputedAmount: { id: "nd-amount", label: "Disputed amount" },
+  owner: { id: "nd-owner", label: "Owner" },
+};
+
 /** Open a dispute on an open item. The open items page links here with the item and entity filled in. */
 export function NewDisputePage() {
   const navigate = useNavigate();
@@ -162,6 +176,8 @@ export function NewDisputePage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<DisputeDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -177,6 +193,7 @@ export function NewDisputePage() {
     setBusy(true);
     try {
       const created = await openDispute(toDisputeInput(values), key.current);
+      release();
       navigate(`/receivables/disputes/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -219,6 +236,7 @@ export function NewDisputePage() {
       <PageHeader title="Open dispute" description="The item leaves dunning and interest until the dispute is resolved or rejected. The SLA is 120 hours." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_DISPUTE_FIELDS)} attempt={attempt} />
           {text("nd-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true })}
           {text("nd-item", "openItemId", "Open item", { entity: "openItem" })}
           {text("nd-reason", "reasonCode", "Reason code", { mono: true, hint: "For example PRICE, QUANTITY, DAMAGE or DELIVERY." })}
@@ -239,6 +257,7 @@ export function NewDisputePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

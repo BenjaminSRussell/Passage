@@ -19,6 +19,12 @@ import {
   type ListFilterDef,
   type ListQuery,
   loadedRows,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   createDunningRun,
@@ -106,6 +112,12 @@ export function validateRun(v: RunDraft): Errors {
   return errors;
 }
 
+const NEW_DUNNING_RUN_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "nr-entity", label: "Legal entity" },
+  runDate: { id: "nr-date", label: "Run date" },
+  graceDays: { id: "nr-grace", label: "Grace days" },
+};
+
 /** Propose a dunning run. Nothing changes on the items until the run is issued. */
 export function NewDunningRunPage() {
   const navigate = useNavigate();
@@ -114,6 +126,8 @@ export function NewDunningRunPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<RunDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -132,6 +146,7 @@ export function NewDunningRunPage() {
         { legalEntityId: values.legalEntityId.trim(), runDate: values.runDate, graceDays: Number(values.graceDays) },
         key.current,
       );
+      release();
       navigate(`/receivables/dunning-runs/${run.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -151,6 +166,7 @@ export function NewDunningRunPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_DUNNING_RUN_FIELDS)} attempt={attempt} />
           <FormField id="nr-entity" label="Legal entity" error={errors.legalEntityId}>
             {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
@@ -175,6 +191,7 @@ export function NewDunningRunPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

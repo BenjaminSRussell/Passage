@@ -15,6 +15,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   createTradeAgreement,
@@ -169,6 +175,19 @@ function toInput(d: Draft): TradeAgreementInput {
   };
 }
 
+const TRADE_AGREEMENT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  accountId: { id: "ta-account-id", label: "Vendor or vendor group" },
+  itemId: { id: "ta-item-id", label: "Product or item group" },
+  price: { id: "ta-price", label: "Price" },
+  priceUnit: { id: "ta-price-unit", label: "Per quantity" },
+  currency: { id: "ta-currency", label: "Currency" },
+  unit: { id: "ta-unit", label: "Unit" },
+  fromQty: { id: "ta-from-qty", label: "From quantity" },
+  toQty: { id: "ta-to-qty", label: "To quantity" },
+  validFrom: { id: "ta-valid-from", label: "Valid from" },
+  validTo: { id: "ta-valid-to", label: "Valid to" },
+};
+
 /** New price row; the service refuses an equal-specificity overlap with PRC-TA-002. */
 export function TradeAgreementCreatePage() {
   const navigate = useNavigate();
@@ -191,6 +210,8 @@ export function TradeAgreementCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [draft]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([draft]));
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   async function onSubmit(event: FormEvent) {
@@ -202,6 +223,7 @@ export function TradeAgreementCreatePage() {
     setBusy(true);
     try {
       const { body } = await createTradeAgreement(toInput(draft), key);
+      release();
       navigate(`/purchasing/trade-agreements/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -216,6 +238,7 @@ export function TradeAgreementCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New price row" description="A purchase price for a vendor (or group, or all vendors) and a product (or group, or all products)." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, TRADE_AGREEMENT_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Applies to">
           <div className={styles.grid}>
             <FormField id="ta-account-code" label="Vendor level">
@@ -310,6 +333,7 @@ export function TradeAgreementCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

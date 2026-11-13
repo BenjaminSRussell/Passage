@@ -17,6 +17,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   changeRFQType,
@@ -279,6 +285,12 @@ function TypeFields({ id, form, set, errors, creating }: { id: string; form: Typ
   );
 }
 
+const RFQTYPE_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "rt-legal-entity", label: "Legal entity" },
+  code: { id: "rt-code", label: "Code" },
+  name: { id: "rt-name", label: "Name" },
+};
+
 /** Create form for an RFQ type. */
 export function RFQTypeCreatePage() {
   const navigate = useNavigate();
@@ -287,6 +299,8 @@ export function RFQTypeCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form]));
   const set = (patch: Partial<TypeForm>) => setForm((f) => ({ ...f, ...patch }));
 
   async function onSubmit(event: FormEvent) {
@@ -298,6 +312,7 @@ export function RFQTypeCreatePage() {
     setBusy(true);
     try {
       const { body } = await createRFQType(toInput(form), key);
+      release();
       navigate(`/purchasing/rfq-types/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -312,6 +327,7 @@ export function RFQTypeCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New RFQ type" description="A code is unique within its legal entity and cannot be renamed; deactivate it instead of deleting it." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, RFQTYPE_CREATE_FIELDS)} attempt={attempt} />
         <TypeFields id="rt" form={form} set={set} errors={errors} creating />
         <Alert tone="danger" live="alert">
           {failure ? <ProblemMessage problem={failure} /> : null}
@@ -325,6 +341,7 @@ export function RFQTypeCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

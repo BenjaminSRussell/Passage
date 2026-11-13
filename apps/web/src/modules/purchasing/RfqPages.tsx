@@ -20,6 +20,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   awardRFQ,
@@ -228,6 +234,12 @@ function toInput(h: HeaderDraft, lines: LineDraft[]): RFQInput {
   };
 }
 
+const RFQ_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "rfq-legal-entity", label: "Legal entity" },
+  replyDeadline: { id: "rfq-deadline", label: "Reply deadline" },
+  rankingRule: { id: "rfq-ranking", label: "Rank replies by" },
+};
+
 /** New RFQ: legal entity, reply deadline, ranking rule and the lines to quote (FR-17.4). */
 export function RFQCreatePage() {
   const navigate = useNavigate();
@@ -267,6 +279,8 @@ export function RFQCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [header, lines]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([header, lines]));
   const setH = (patch: Partial<HeaderDraft>) => setHeader((h) => ({ ...h, ...patch }));
   const update = (index: number, patch: Partial<LineDraft>) => setLines((ls) => ls.map((l, i) => (i === index ? { ...l, ...patch } : l)));
 
@@ -279,6 +293,7 @@ export function RFQCreatePage() {
     setBusy(true);
     try {
       const { body } = await createRFQ(toInput(header, lines), key);
+      release();
       navigate(`/purchasing/rfqs/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -296,6 +311,7 @@ export function RFQCreatePage() {
         description="The RFQ is saved as a draft. Send it to vendors from its page; replies after the deadline are kept but left out of the ranking, or refused when the RFQ is sealed."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, RFQ_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Request">
           <div className={styles.grid}>
             <FormField id="rfq-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -431,6 +447,7 @@ export function RFQCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

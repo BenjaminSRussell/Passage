@@ -1,7 +1,24 @@
 import { useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import { createPromise, describeProblem, listPromises, newKey, type PaymentPromise, type Problem, type PromiseInput } from "./api/client";
 import { DAY, DECIMAL, money, today, UUID } from "./format";
 import { CommandFailure, keepKeyAfter, LoadFailure } from "./parts";
@@ -91,6 +108,13 @@ export function validatePromise(v: PromiseDraft, day: string = today()): Errors 
   return errors;
 }
 
+const NEW_PROMISE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "np-entity", label: "Legal entity" },
+  openItemId: { id: "np-item", label: "Open item" },
+  amount: { id: "np-amount", label: "Promised amount" },
+  promiseDate: { id: "np-date", label: "Promise date" },
+};
+
 /** Record a promise to pay on one open item. */
 export function NewPromisePage() {
   const navigate = useNavigate();
@@ -106,6 +130,8 @@ export function NewPromisePage() {
   const [created, setCreated] = useState<PaymentPromise | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt } = useUnsavedChanges(useFormBaseline([values]) && created === null);
 
   function update(patch: Partial<PromiseDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -157,6 +183,7 @@ export function NewPromisePage() {
       ) : null}
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_PROMISE_FIELDS)} attempt={attempt} />
           <FormField id="np-entity" label="Legal entity" error={errors.legalEntityId}>
             {(c) => <EntityLookup entity="legalEntity" {...c} value={values.legalEntityId} onChange={(e) => update({ legalEntityId: e.target.value })} invalid={Boolean(errors.legalEntityId)} />}
           </FormField>
@@ -184,6 +211,7 @@ export function NewPromisePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

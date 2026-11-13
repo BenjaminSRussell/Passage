@@ -21,6 +21,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   CLAIM_TYPES,
@@ -165,6 +171,14 @@ export function toDeductionInput(v: DeductionDraft): DeductionInput {
   };
 }
 
+const NEW_DEDUCTION_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "nde-entity", label: "Legal entity" },
+  openItemId: { id: "nde-item", label: "Open item" },
+  paymentId: { id: "nde-payment", label: "Payment" },
+  reasonCode: { id: "nde-reason", label: "Customer's reason" },
+  amount: { id: "nde-amount", label: "Amount" },
+};
+
 /** Record a deduction: the amount moves off the short-paid item into the workbench. */
 export function NewDeductionPage() {
   const navigate = useNavigate();
@@ -182,6 +196,8 @@ export function NewDeductionPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<DeductionDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -197,6 +213,7 @@ export function NewDeductionPage() {
     setBusy(true);
     try {
       const created = await createDeduction(toDeductionInput(values), key.current);
+      release();
       navigate(`/receivables/deductions/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -242,6 +259,7 @@ export function NewDeductionPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_DEDUCTION_FIELDS)} attempt={attempt} />
           {text("nde-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
           {text("nde-item", "openItemId", "Open item", { entity: "openItem", hint: "The short-paid invoice; the deduction takes its customer and currency." })}
           {text("nde-payment", "paymentId", "Payment", { entity: "arPayment", optional: true, hint: "The short payment, if it is recorded." })}
@@ -273,6 +291,7 @@ export function NewDeductionPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

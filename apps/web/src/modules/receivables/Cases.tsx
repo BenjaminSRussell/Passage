@@ -19,6 +19,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   assignCase,
@@ -162,6 +168,16 @@ export function toCaseInput(v: CaseDraft): CaseInput {
   };
 }
 
+const NEW_CASE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "nc-entity", label: "Legal entity" },
+  customerId: { id: "nc-customer", label: "Customer" },
+  owner: { id: "nc-owner", label: "Owner" },
+  openItemId: { id: "nc-item", label: "Open item" },
+  currency: { id: "nc-currency", label: "Currency" },
+  attachedAmount: { id: "nc-amount", label: "Amount" },
+  reason: { id: "nc-reason", label: "Reason" },
+};
+
 /** Open a collection case. The open items page can link here with the customer, entity and item filled in. */
 export function NewCasePage() {
   const navigate = useNavigate();
@@ -181,6 +197,8 @@ export function NewCasePage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<CaseDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -196,6 +214,7 @@ export function NewCasePage() {
     setBusy(true);
     try {
       const created = await createCase(toCaseInput(values), key.current);
+      release();
       navigate(`/receivables/cases/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -238,6 +257,7 @@ export function NewCasePage() {
       <PageHeader title="Open collection case" description={`The SLA follows the category: ${SLA_HOURS[values.category]} hours for ${CASE_CATEGORY_LABELS[values.category].toLowerCase()} cases.`} />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_CASE_FIELDS)} attempt={attempt} />
           {text("nc-entity", "legalEntityId", "Legal entity", { entity: "legalEntity", mono: true })}
           {text("nc-customer", "customerId", "Customer", { entity: "customer", mono: true })}
           <FormField id="nc-category" label="Category">
@@ -286,6 +306,7 @@ export function NewCasePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

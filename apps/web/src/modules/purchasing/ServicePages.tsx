@@ -19,6 +19,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   ProcurementApiError,
@@ -663,6 +669,13 @@ function ModelFields({ id, form, set, errors, creating }: { id: string; form: Mo
   );
 }
 
+const MODEL_SERVICE_SPEC_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "ms-legal-entity", label: "Legal entity" },
+  code: { id: "ms-code", label: "Code" },
+  name: { id: "ms-name", label: "Name" },
+  currency: { id: "ms-currency", label: "Currency" },
+};
+
 /** Create form for a model service specification. */
 export function ModelServiceSpecCreatePage() {
   const navigate = useNavigate();
@@ -672,6 +685,8 @@ export function ModelServiceSpecCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form, rows]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form, rows]));
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -682,6 +697,7 @@ export function ModelServiceSpecCreatePage() {
     setBusy(true);
     try {
       const { body } = await createModelServiceSpec(built.input, key);
+      release();
       navigate(`/purchasing/model-service-specs/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -696,6 +712,7 @@ export function ModelServiceSpecCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New model service specification" description="A code is unique within its legal entity and cannot be renamed; deactivate a model instead of deleting it." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, MODEL_SERVICE_SPEC_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Model">
           <ModelFields id="ms" form={form} set={(patch) => setForm((f) => ({ ...f, ...patch }))} errors={errors} creating />
         </Card>
@@ -714,6 +731,7 @@ export function ModelServiceSpecCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

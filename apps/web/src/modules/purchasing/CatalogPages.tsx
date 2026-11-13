@@ -17,6 +17,13 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+  FormSection,
 } from "../../shell/ui";
 import {
   actOnCatalog,
@@ -233,6 +240,14 @@ function EntryFields({
   );
 }
 
+const CATALOG_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "cat-legal-entity", label: "Legal entity" },
+  name: { id: "cat-name", label: "Name" },
+  validFrom: { id: "cat-valid-from", label: "Valid from" },
+  validTo: { id: "cat-valid-to", label: "Valid to" },
+  orgUnitIds: { id: "cat-units", label: "Operating unit ids" },
+};
+
 /** New catalog: header, validity, operating units and optional first entries (FR-17.18). */
 export function CatalogCreatePage() {
   const navigate = useNavigate();
@@ -242,6 +257,8 @@ export function CatalogCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [header, entries]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([header, entries]));
   const setH = (patch: Partial<typeof header>) => setHeader((h) => ({ ...h, ...patch }));
   const units = header.orgUnits.split(/[\s,]+/).filter((u) => u !== "");
 
@@ -271,6 +288,7 @@ export function CatalogCreatePage() {
     setBusy(true);
     try {
       const { body } = await createCatalog(input, key);
+      release();
       navigate(`/purchasing/catalogs/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -288,6 +306,7 @@ export function CatalogCreatePage() {
         description="A catalog starts as a draft. Add items, then publish it so requesters can pick from it."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, CATALOG_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Catalog">
           <div className={styles.grid}>
             <FormField id="cat-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -305,9 +324,11 @@ export function CatalogCreatePage() {
             <FormField id="cat-valid-to" label="Valid to" optional hint="Blank is open-ended" error={errors.validTo}>
               {(c) => <Input {...c} type="date" value={header.validTo} onChange={(e) => setH({ validTo: e.target.value })} />}
             </FormField>
-            <FormField id="cat-units" label="Operating unit ids" optional hint="Blank publishes to every unit" error={errors.orgUnitIds}>
-              {(c) => <Input {...c} value={header.orgUnits} onChange={(e) => setH({ orgUnits: e.target.value })} />}
-            </FormField>
+            <FormSection collapse="more">
+              <FormField id="cat-units" label="Operating unit ids" optional hint="Blank publishes to every unit" error={errors.orgUnitIds}>
+                {(c) => <Input {...c} value={header.orgUnits} onChange={(e) => setH({ orgUnits: e.target.value })} />}
+              </FormField>
+            </FormSection>
           </div>
         </Card>
         <Card
@@ -348,6 +369,7 @@ export function CatalogCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

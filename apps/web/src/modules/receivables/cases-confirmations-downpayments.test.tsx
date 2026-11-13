@@ -234,7 +234,7 @@ describe("Balance confirmations", () => {
     fill("Key date", "2027-03-31");
     fill("Sample size", "0");
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-    expect(await screen.findByText(/Enter a sample of 1 to 500 customers/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Enter a sample of 1 to 500 customers/)).length).toBeGreaterThan(0);
     fill("Sample size", "");
     fireEvent.change(screen.getByLabelText("Zero balances"), { target: { value: "yes" } });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));

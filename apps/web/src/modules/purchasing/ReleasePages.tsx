@@ -16,6 +16,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   describeProblem,
@@ -112,6 +118,12 @@ export function ReleaseRunsPage() {
   );
 }
 
+const RELEASE_RUN_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "rel-legal-entity", label: "Legal entity" },
+  windowDays: { id: "rel-window", label: "Delivery window (days)" },
+  maxLines: { id: "rel-max", label: "Most lines to read" },
+};
+
 /** Starts a release run for a legal entity and opens its record. */
 export function ReleaseRunCreatePage() {
   const navigate = useNavigate();
@@ -123,6 +135,8 @@ export function ReleaseRunCreatePage() {
   const [busy, setBusy] = useState(false);
   // One key per distinct request, so a retry after a dropped response replays the stored run instead of ordering twice.
   const key = useMemo(() => newIdempotencyKey(), [legalEntityId, windowDays, maxLines]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([legalEntityId, windowDays, maxLines]));
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -136,6 +150,7 @@ export function ReleaseRunCreatePage() {
         { legalEntityId: legalEntityId.trim(), windowDays: Number(windowDays), maxLines: Number(maxLines) },
         key,
       );
+      release();
       navigate(`/purchasing/releases/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -153,6 +168,7 @@ export function ReleaseRunCreatePage() {
         description="Orders every approved requisition line of the legal entity that has a vendor, one vendor at a time, as draft purchase orders. Lines without a vendor, and vendors whose orders cannot be made, stay in the consolidation queue with the reason."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, RELEASE_RUN_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Run">
           <div className={styles.grid}>
             <FormField id="rel-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -178,6 +194,7 @@ export function ReleaseRunCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

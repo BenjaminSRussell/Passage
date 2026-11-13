@@ -2,7 +2,32 @@ import { useRef, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type FormFieldControlProps, Skeleton, StatGroup, StatTile, Textarea, type DataTableColumn, ListPage, loadedRows } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  type FormFieldControlProps,
+  Skeleton,
+  StatGroup,
+  StatTile,
+  Textarea,
+  type DataTableColumn,
+  ListPage,
+  loadedRows,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createConfirmationRun,
   describeProblem,
@@ -116,6 +141,14 @@ export function toRunInput(v: RunDraft): ConfirmationRunInput {
   };
 }
 
+const NEW_CONFIRMATION_RUN_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "bc-entity", label: "Legal entity" },
+  asOfDate: { id: "bc-date", label: "Key date" },
+  threshold: { id: "bc-threshold", label: "Threshold" },
+  sampleSize: { id: "bc-sample", label: "Sample size" },
+  reminderDays: { id: "bc-reminder", label: "Reminder after (days)" },
+};
+
 /** Start a confirmation run: everyone at or above the threshold, or a reproducible sample of them. */
 export function NewConfirmationRunPage() {
   const navigate = useNavigate();
@@ -131,6 +164,8 @@ export function NewConfirmationRunPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<RunDraft>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -146,6 +181,7 @@ export function NewConfirmationRunPage() {
     setBusy(true);
     try {
       const created = await createConfirmationRun(toRunInput(values), key.current);
+      release();
       navigate(`/receivables/balance-confirmations/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -191,6 +227,7 @@ export function NewConfirmationRunPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_CONFIRMATION_RUN_FIELDS)} attempt={attempt} />
           {text("bc-entity", "legalEntityId", "Legal entity", { entity: "legalEntity" })}
           {text("bc-date", "asOfDate", "Key date", { type: "date" })}
           {text("bc-threshold", "threshold", "Threshold", { hint: "Customers whose balance reaches this amount, debit or credit." })}
@@ -219,6 +256,7 @@ export function NewConfirmationRunPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

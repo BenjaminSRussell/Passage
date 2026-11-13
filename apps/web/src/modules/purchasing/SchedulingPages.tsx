@@ -19,6 +19,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   createSchedulingAgreement,
@@ -232,6 +238,19 @@ function toCreateInput(h: SAHeaderDraft, p: ProfileDraft, rows: RowDraft[]): Sch
   };
 }
 
+const SCHEDULING_AGREEMENT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "sa-legal-entity", label: "Legal entity" },
+  vendorId: { id: "sa-vendor", label: "Vendor" },
+  productId: { id: "sa-product", label: "Product" },
+  siteId: { id: "sa-site", label: "Site" },
+  currency: { id: "sa-currency", label: "Currency" },
+  unit: { id: "sa-unit", label: "Unit" },
+  unitPrice: { id: "sa-price", label: "Unit price" },
+  targetQty: { id: "sa-target", label: "Target quantity" },
+  validFrom: { id: "sa-valid-from", label: "Valid from" },
+  validTo: { id: "sa-valid-to", label: "Valid to" },
+};
+
 /** New scheduling agreement: header, price term, release profile and the first schedule (FR-17.15). */
 export function SchedulingAgreementCreatePage() {
   const navigate = useNavigate();
@@ -253,6 +272,8 @@ export function SchedulingAgreementCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [header, profile, rows]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([header, profile, rows]));
   const setH = (patch: Partial<SAHeaderDraft>) => setHeader((h) => ({ ...h, ...patch }));
   const setP = (patch: Partial<ProfileDraft>) => setProfile((p) => ({ ...p, ...patch }));
   const update = (index: number, patch: Partial<RowDraft>) => setRows((rs) => rs.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -266,6 +287,7 @@ export function SchedulingAgreementCreatePage() {
     setBusy(true);
     try {
       const { body } = await createSchedulingAgreement(toCreateInput(header, profile, rows), key);
+      release();
       navigate(`/purchasing/scheduling-agreements/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -294,6 +316,7 @@ export function SchedulingAgreementCreatePage() {
         description="One vendor, product and site with an agreed price, a release profile and the dated quantities to deliver."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, SCHEDULING_AGREEMENT_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Agreement">
           <div className={styles.grid}>
             <LookupFormField id="sa-legal-entity" label="Legal entity" entity="legalEntity" value={header.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setH({ legalEntityId })} />
@@ -401,6 +424,7 @@ export function SchedulingAgreementCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

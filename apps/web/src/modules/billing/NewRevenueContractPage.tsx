@@ -1,6 +1,21 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   BillingApiError,
   createContract,
@@ -118,6 +133,16 @@ export function toContractInput(v: ContractValues): RevenueContractInput {
 type HeaderField = Exclude<keyof ContractValues, "obligations" | "residualRule" | "ratableBasis">;
 type ObligationText = "ssp" | "termStart" | "termEnd" | "satisfiedOn";
 
+const NEW_REVENUE_CONTRACT_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "rc-legal-entity", label: "Legal entity" },
+  orderId: { id: "rc-order", label: "Sales order" },
+  customerId: { id: "rc-customer", label: "Customer" },
+  currency: { id: "rc-currency", label: "Currency" },
+  transactionPrice: { id: "rc-price", label: "Contract price" },
+  contractDate: { id: "rc-date", label: "Contract date" },
+  ratableBasis: { id: "rc-basis", label: "Ratable basis" },
+};
+
 /** Revenue contract (FR-29.7): allocate a contract price across its obligations by SSP and plan their recognition. */
 export function NewRevenueContractPage() {
   const navigate = useNavigate();
@@ -126,6 +151,8 @@ export function NewRevenueContractPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<ContractValues>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -145,6 +172,7 @@ export function NewRevenueContractPage() {
     setBusy(true);
     try {
       const created = await createContract(toContractInput(values), key.current);
+      release();
       navigate(`/billing/revenue-contracts/${created.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -202,6 +230,7 @@ export function NewRevenueContractPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_REVENUE_CONTRACT_FIELDS)} attempt={attempt} />
           <LookupFormField id="rc-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           <LookupFormField id="rc-order" label="Sales order" entity="salesOrder" scope={{ legalEntityId: values.legalEntityId || undefined }} value={values.orderId} error={errors.orderId} onChange={(orderId) => update({ orderId })} />
           <LookupFormField
@@ -318,6 +347,7 @@ export function NewRevenueContractPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

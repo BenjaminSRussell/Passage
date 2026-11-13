@@ -1,6 +1,20 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, useFormBaseline, useUnsavedChanges } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  useFormBaseline,
+  useUnsavedChanges,
+  FormErrorSummary,
+  summaryItems,
+  useSubmitAttempt,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import { BillingApiError, createFreeTextInvoice, describeProblem, newKey, type FreeTextInvoiceInput, type Problem } from "./api/client";
 import { ACCOUNT, CURRENCY, DAY, DECIMAL, TAX_CODE, today, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -118,6 +132,16 @@ export function toFreeTextInput(v: FreeTextValues): FreeTextInvoiceInput {
 
 type HeaderField = Exclude<keyof FreeTextValues, "lines" | "installments">;
 
+const NEW_FREE_TEXT_INVOICE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "ft-legal-entity", label: "Legal entity" },
+  customerId: { id: "ft-customer", label: "Customer" },
+  invoiceAccountId: { id: "ft-account", label: "Invoice account" },
+  currency: { id: "ft-currency", label: "Currency" },
+  invoiceDate: { id: "ft-date", label: "Invoice date" },
+  paymentTermDays: { id: "ft-terms", label: "Payment terms (days)" },
+  chargeAmount: { id: "ft-charge", label: "Header charge" },
+};
+
 /** Free-text invoice (FR-29.4): account-driven lines with a tax code each, saved as a proposal. */
 export function NewFreeTextInvoicePage() {
   const navigate = useNavigate();
@@ -126,6 +150,7 @@ export function NewFreeTextInvoicePage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
 
   function update(patch: Partial<FreeTextValues>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -225,6 +250,7 @@ export function NewFreeTextInvoicePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, NEW_FREE_TEXT_INVOICE_FIELDS)} attempt={attempt} />
           <LookupFormField id="ft-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           <LookupFormField
             id="ft-customer"

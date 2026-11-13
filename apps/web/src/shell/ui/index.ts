@@ -7,7 +7,7 @@ export { ListPage, entityText, isForbidden, loadedRows, type ListColumn, type Li
 export { usePagedRows, type RowPage } from "./usePagedRows";
 export type { FilterValues, ListFilterDef, ListQuery, ListSort } from "./listViews";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
-export { FormErrorSummary, focusField, summaryItems, type FormErrorItem, type FormErrorSummaryProps, type FormFieldTarget } from "./FormErrorSummary";
+export { FormErrorSummary, focusField, summaryItems, useSubmitAttempt, type FormErrorItem, type FormErrorSummaryProps, type FormFieldTarget } from "./FormErrorSummary";
 export { FormField, type FormFieldControlProps, type FormFieldProps } from "./FormField";
 export { FormSection, type FormSectionProps } from "./FormSection";
 export { useFormBaseline, useUnsavedChanges } from "./useUnsavedChanges";

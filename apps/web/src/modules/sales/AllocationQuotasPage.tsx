@@ -1,7 +1,23 @@
 import { useRef, useState, type FormEvent } from "react";
 import { PlainName } from "./OrderNumber";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createAllocationQuota,
   describeProblem,
@@ -134,6 +150,15 @@ export function AllocationQuotasPage() {
   );
 }
 
+const NEW_ALLOCATION_QUOTA_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "quota-legalEntityId", label: "Legal entity" },
+  productId: { id: "quota-productId", label: "Product" },
+  customerId: { id: "quota-customerId", label: "Customer" },
+  periodStart: { id: "quota-periodStart", label: "Period start" },
+  periodEnd: { id: "quota-periodEnd", label: "Period end" },
+  quotaQty: { id: "quota-quotaQty", label: "Quota quantity" },
+};
+
 /** Sets one quota (FR-27.16, duty sales.allocation.maintain). */
 export function NewAllocationQuotaPage() {
   const navigate = useNavigate();
@@ -142,6 +167,8 @@ export function NewAllocationQuotaPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<QuotaValues>) {
     setValues((v) => ({ ...v, ...patch }));
@@ -157,6 +184,7 @@ export function NewAllocationQuotaPage() {
     setBusy(true);
     try {
       const saved = await createAllocationQuota(input, key.current);
+      release();
       navigate(`/sales/allocation-quotas/${saved.value.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -189,6 +217,7 @@ export function NewAllocationQuotaPage() {
       <PageHeader title="New allocation quota" description="Cap the quantity of a product that can be confirmed in a period. A customer's own quota replaces the quota for every customer." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New allocation quota">
+          <FormErrorSummary items={summaryItems(errors, NEW_ALLOCATION_QUOTA_FIELDS)} attempt={attempt} />
           {field("legalEntityId", "Legal entity", { mono: true, hint: "UUID of the selling legal entity." })}
           {field("productId", "Product", { mono: true, hint: "UUID of the product." })}
           {field("customerId", "Customer", { mono: true, optional: true, hint: "Leave empty for a quota shared by every customer." })}
@@ -212,6 +241,7 @@ export function NewAllocationQuotaPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

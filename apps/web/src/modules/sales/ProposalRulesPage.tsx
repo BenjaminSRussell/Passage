@@ -1,6 +1,24 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  EmptyState,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createProposalRule,
   deleteProposalRule,
@@ -256,6 +274,15 @@ export function ProposalRulesPage() {
   );
 }
 
+const NEW_PROPOSAL_RULE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "proposal-legalEntityId", label: "Legal entity" },
+  orderedProductId: { id: "proposal-orderedProductId", label: "Ordered product" },
+  proposedProductId: { id: "proposal-proposedProductId", label: "Proposed product" },
+  customerId: { id: "proposal-customerId", label: "Customer" },
+  productIds: { id: "proposal-check-productIds", label: "Products being ordered" },
+  currentProductIds: { id: "proposal-check-currentProductIds", label: "Products already on the order" },
+};
+
 /** Creates a product proposal rule (duty sales.listing.maintain). */
 export function NewProposalRulePage() {
   const navigate = useNavigate();
@@ -263,6 +290,8 @@ export function NewProposalRulePage() {
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -273,6 +302,7 @@ export function NewProposalRulePage() {
     setBusy(true);
     try {
       await createProposalRule(input);
+      release();
       navigate("/sales/product-proposals");
     } catch (error) {
       const problem = describeProblem(error);
@@ -296,6 +326,7 @@ export function NewProposalRulePage() {
       <PageHeader title="New product proposal rule" description="When the ordered product is entered on an order, the proposed product is offered to the user." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New product proposal rule">
+          <FormErrorSummary items={summaryItems(errors, NEW_PROPOSAL_RULE_FIELDS)} attempt={attempt} />
           {field("legalEntityId", "Legal entity", "UUID of the selling legal entity.")}
           {field("orderedProductId", "Ordered product", "UUID of the product that triggers the proposal.")}
           {field("proposedProductId", "Proposed product", "UUID of the product to offer.")}
@@ -328,6 +359,7 @@ export function NewProposalRulePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }
