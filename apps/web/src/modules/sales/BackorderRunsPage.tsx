@@ -1,6 +1,26 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, Textarea, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Textarea,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+  FormSection,
+} from "../../shell/ui";
 import {
   BACKORDER_RUN_STATUSES,
   BACKORDER_STRATEGIES,
@@ -176,6 +196,18 @@ export function BackorderRunsPage() {
   );
 }
 
+const NEW_BACKORDER_RUN_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "run-legalEntityId", label: "Legal entity" },
+  productId: { id: "run-productId", label: "Product" },
+  siteId: { id: "run-siteId", label: "Site" },
+  warehouseId: { id: "run-warehouseId", label: "Warehouse" },
+  supply: { id: "run-supply", label: "Supply" },
+  supplyDate: { id: "run-supplyDate", label: "Supply date" },
+  loseThreshold: { id: "run-loseThreshold", label: "Lose threshold" },
+  defaultPriorityClass: { id: "run-defaultPriorityClass", label: "Default priority class" },
+  priorities: { id: "run-priorities", label: "Customer priority classes" },
+};
+
 /** Plans a run over the open lines the service holds for a product at a site and warehouse (FR-27.17, BR-27.11). */
 export function NewBackorderRunPage() {
   const navigate = useNavigate();
@@ -184,6 +216,8 @@ export function NewBackorderRunPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<RunValues>) {
     setValues((v) => ({ ...v, ...patch }));
@@ -199,6 +233,7 @@ export function NewBackorderRunPage() {
     setBusy(true);
     try {
       const saved = await createBackorderRun(input, key.current);
+      release();
       navigate(`/sales/backorder-processing/${saved.value.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -234,6 +269,7 @@ export function NewBackorderRunPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New backorder run">
+          <FormErrorSummary items={summaryItems(errors, NEW_BACKORDER_RUN_FIELDS)} attempt={attempt} />
           {text("legalEntityId", "Legal entity", { mono: true })}
           {text("productId", "Product", { mono: true })}
           {text("siteId", "Site", { mono: true })}
@@ -251,20 +287,22 @@ export function NewBackorderRunPage() {
           </FormField>
           {text("supply", "Supply", { decimal: true, hint: "The whole quantity available for these lines, including what they hold today." })}
           {text("supplyDate", "Supply date", { type: "date", hint: "A line that gains quantity is promised no earlier than this." })}
-          {text("loseThreshold", "Lose threshold", { optional: true, hint: "Priority class from which LOSE may deconfirm. Default 3." })}
-          {text("defaultPriorityClass", "Default priority class", { optional: true, hint: "For customers not listed below. Default 5; 1 is the highest." })}
-          <FormField id="run-priorities" label="Customer priority classes" optional error={errors.priorities} hint="One per line: customer UUID, a space, a class from 1 to 9.">
-            {(control) => (
-              <Textarea
-                {...control}
-                className={styles.mono}
-                rows={3}
-                value={values.priorities}
-                onChange={(e) => update({ priorities: e.target.value })}
-                invalid={Boolean(errors.priorities)}
-              />
-            )}
-          </FormField>
+          <FormSection collapse="advanced">
+            {text("loseThreshold", "Lose threshold", { optional: true, hint: "Priority class from which LOSE may deconfirm. Default 3." })}
+            {text("defaultPriorityClass", "Default priority class", { optional: true, hint: "For customers not listed below. Default 5; 1 is the highest." })}
+            <FormField id="run-priorities" label="Customer priority classes" optional error={errors.priorities} hint="One per line: customer UUID, a space, a class from 1 to 9.">
+              {(control) => (
+                <Textarea
+                  {...control}
+                  className={styles.mono}
+                  rows={3}
+                  value={values.priorities}
+                  onChange={(e) => update({ priorities: e.target.value })}
+                  invalid={Boolean(errors.priorities)}
+                />
+              )}
+            </FormField>
+          </FormSection>
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title={failure.code === "SLS-0027" ? "The run cannot be planned" : "Could not plan the run"} live="alert">
@@ -282,6 +320,7 @@ export function NewBackorderRunPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

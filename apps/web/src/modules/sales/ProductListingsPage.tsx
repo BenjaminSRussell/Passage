@@ -1,6 +1,24 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createProductListing,
   deleteProductListing,
@@ -179,6 +197,14 @@ export function ProductListingsPage() {
   );
 }
 
+const NEW_PRODUCT_LISTING_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "listing-legalEntityId", label: "Legal entity" },
+  productId: { id: "listing-productId", label: "Product" },
+  scopeKey: { id: "listing-scopeKey", label: "Customer or customer group" },
+  validFrom: { id: "listing-validFrom", label: "Valid from" },
+  validTo: { id: "listing-validTo", label: "Valid to" },
+};
+
 /** Adds one allow or deny entry (FR-27.15, duty sales.listing.maintain). */
 export function NewProductListingPage() {
   const navigate = useNavigate();
@@ -186,6 +212,8 @@ export function NewProductListingPage() {
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
   const update = (patch: Partial<ListingValues>) => setValues((v) => ({ ...v, ...patch }));
 
   async function submit(event: FormEvent) {
@@ -197,6 +225,7 @@ export function NewProductListingPage() {
     setBusy(true);
     try {
       await createProductListing(input);
+      release();
       navigate("/sales/product-listings");
     } catch (error) {
       const problem = describeProblem(error);
@@ -223,6 +252,7 @@ export function NewProductListingPage() {
       <PageHeader title="New listing entry" description="Deny a product to a customer or group, or list it for them only. Leave the dates empty for an entry that always applies." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New listing entry">
+          <FormErrorSummary items={summaryItems(errors, NEW_PRODUCT_LISTING_FIELDS)} attempt={attempt} />
           {text("legalEntityId", "Legal entity", "UUID of the selling legal entity.")}
           <FormField id="listing-listingType" label="Entry type">
             {(control) => (
@@ -268,6 +298,7 @@ export function NewProductListingPage() {
         </form>
       </Card>
       <p className={styles.note}>Orders that already accepted a denied line keep their logged override when an entry is removed.</p>
+      {prompt}
     </div>
   );
 }

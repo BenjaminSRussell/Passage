@@ -106,6 +106,7 @@ describe("Collection cases", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "DISPUTE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("category") === "DISPUTE")).toBe(true));
     fireEvent.click(within(await findTable({ name: "Collection cases" })).getAllByRole("button", { name: "Collection" })[0]);
     expect(await screen.findByRole("heading", { name: "Collection case" })).toBeInTheDocument();
@@ -114,13 +115,12 @@ describe("Collection cases", () => {
   it("shows the empty and error states", async () => {
     server.handler = () => json(200, { items: [] });
     const first = renderAt("/receivables/cases");
-    expect(await screen.findByText("No cases")).toBeInTheDocument();
+    expect(await screen.findByText("No cases match these filters")).toBeInTheDocument();
     first.unmount();
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty receivables.view" });
     renderAt("/receivables/cases");
     const alert = await findAlert();
-    expect(alert).toHaveTextContent("Could not load the cases");
-    expect(alert).toHaveTextContent("AUTH-0003");
+    expect(alert).toHaveTextContent("You can't view cases");
   });
 
   it("opens a case from an open item with an Idempotency-Key", async () => {
@@ -234,7 +234,7 @@ describe("Balance confirmations", () => {
     fill("Key date", "2027-03-31");
     fill("Sample size", "0");
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
-    expect(await screen.findByText(/Enter a sample of 1 to 500 customers/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Enter a sample of 1 to 500 customers/)).length).toBeGreaterThan(0);
     fill("Sample size", "");
     fireEvent.change(screen.getByLabelText("Zero balances"), { target: { value: "yes" } });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
@@ -327,6 +327,7 @@ describe("Down payments and deposits", () => {
     expect(table).toHaveTextContent("Requested");
     expect(pageViolations(first.container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Kind"), { target: { value: "SECURITY_DEPOSIT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(server.calls.some((c) => c.url.searchParams.get("kind") === "SECURITY_DEPOSIT")).toBe(true));
     first.unmount();
     server.handler = () => json(200, { items: [] });
@@ -335,7 +336,7 @@ describe("Down payments and deposits", () => {
     second.unmount();
     server.handler = () => json(500, { code: "COM-0500", detail: "internal error" });
     renderAt("/receivables/down-payments");
-    expect(await findAlert()).toHaveTextContent("Could not load the down payments");
+    expect(await findAlert()).toHaveTextContent("Could not load down payments");
   });
 
   it("records a request with an Idempotency-Key", async () => {

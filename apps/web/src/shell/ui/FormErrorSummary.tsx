@@ -35,6 +35,21 @@ export interface FormErrorSummaryProps {
   attempt: number;
 }
 
+/**
+ * The `attempt` counter for a form whose field errors are set when it is submitted, client side or from the service:
+ * each new errors object that holds a message counts as one more failed submit. Use `setAttempt` by hand instead when
+ * a form also sets errors while the person types, or focus would jump to the summary mid-edit.
+ */
+export function useSubmitAttempt(errors: Record<string, string | undefined>): number {
+  const last = useRef(errors);
+  const count = useRef(0);
+  if (errors !== last.current) {
+    last.current = errors;
+    if (Object.values(errors).some(Boolean)) count.current += 1;
+  }
+  return count.current;
+}
+
 export function focusField(fieldId: string): boolean {
   const field = document.getElementById(fieldId);
   if (!field) {

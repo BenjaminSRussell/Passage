@@ -1102,6 +1102,9 @@ portal_method_ok(_, perm) if perm.methods == ["GET"]
 
 portal_method_ok(duty, _) if duty in customer_portal_writes
 
+# Print's renderer for the invoice and statement PDFs: a POST that reads no business data.
+portal_method_ok("print.customer-portal.render", perm) if perm.methods == ["POST"]
+
 test_customer_portal_holds_only_service_only_customer_duties if {
 	every _, duties in data.service_grants["customer-portal"] {
 		every duty in duties {
@@ -1117,6 +1120,16 @@ test_customer_portal_holds_only_service_only_customer_duties if {
 	data.service_grants["customer-portal"].sales == ["sales.customer-portal.read", "sales.customer-portal.order", "sales.customer-portal.return"]
 	data.service_grants["customer-portal"].party == ["party.customer-portal.read"]
 	data.service_grants["customer-portal"].identity == ["identity.customer-portal.read"]
+	data.service_grants["customer-portal"].print == ["print.customer-portal.render"]
+}
+
+test_customer_portal_render_duty_opens_only_the_renderer if {
+	data.duties["print.customer-portal.render"].service_only
+	count(data.duties["print.customer-portal.render"].permissions) == 1
+	allowed("print.customer-portal.render", "POST", "/print/v1/documents:render")
+	not allowed("print.customer-portal.render", "POST", "/print/v1/jobs")
+	not allowed("print.customer-portal.render", "GET", "/print/v1/document-templates")
+	allowed("print.document.render", "POST", "/print/v1/documents:render")
 }
 
 # A write duty of the portal is one POST on one route and nothing else.

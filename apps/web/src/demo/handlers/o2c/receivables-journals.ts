@@ -129,14 +129,15 @@ route("DELETE", "/api/v1/receivables/bank-accounts", ({ query }) => {
   return reply.noContent();
 });
 
-let fxSetting = { legalEntityId: LEGAL_ENTITY.id, crossCurrencyEnabled: true, functionalCurrency: "USD", gainAccount: "7100", lossAccount: "7200" };
+let fxSetting: Record<string, unknown> = { legalEntityId: LEGAL_ENTITY.id, crossCurrencyEnabled: true, functionalCurrency: "USD", gainAccount: "7100", lossAccount: "7200", tolerancePercent: "0.5" };
 
 route("GET", "/api/v1/receivables/fx-settings", ({ query }) =>
   query.get("legalEntityId") === fxSetting.legalEntityId ? fxSetting : { legalEntityId: query.get("legalEntityId") ?? "", crossCurrencyEnabled: false, functionalCurrency: "", gainAccount: "7100", lossAccount: "7200" },
 );
 
 route("PUT", "/api/v1/receivables/fx-settings", ({ body }) => {
-  fxSetting = { ...fxSetting, ...((body ?? {}) as typeof fxSetting) };
+  // A PUT replaces the setting: a tolerance left out goes back to the default.
+  fxSetting = { legalEntityId: fxSetting.legalEntityId, ...((body ?? {}) as Record<string, unknown>) };
   return fxSetting;
 });
 

@@ -27,7 +27,7 @@ describe("category vendors list", () => {
     let resolve: (r: Response) => void = () => undefined;
     stubFetch(() => new Promise<Response>((r) => (resolve = r)));
     const { router } = renderAt("/purchasing/category-vendors");
-    expect(await screen.findByRole("table", { name: "Category vendor assignments" })).toHaveAttribute("aria-busy", "true");
+    expect(await screen.findByRole("table", { name: "Category vendors" })).toHaveAttribute("aria-busy", "true");
     resolve(json({ items: [assignment] }));
     const row = await screen.findByText("IT hardware");
     expect(screen.getByText("From 2026-03-01, open-ended")).toBeInTheDocument();
@@ -43,9 +43,9 @@ describe("category vendors list", () => {
   });
 
   it("shows the problem code and retries", async () => {
-    const mock = stubFetch(() => problem(403, "AUTH-0003", "missing duty"));
+    const mock = stubFetch(() => problem(500, "PRC-0500", "store unavailable"));
     renderAt("/purchasing/category-vendors");
-    expect(await screen.findByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/PRC-0500/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
   });
@@ -55,8 +55,10 @@ describe("category vendors list", () => {
     renderAt("/purchasing/category-vendors");
     await screen.findByText("No assignments yet");
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "BLOCKED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(mock.mock.calls.some(([url]) => String(url).includes("status=BLOCKED"))).toBe(true));
-    fireEvent.change(document.getElementById("cv-category-filter") as HTMLInputElement, { target: { value: "IT hardware" } });
+    fireEvent.change(document.getElementById("purchasing-category-vendors-filter-category") as HTMLInputElement, { target: { value: "IT hardware" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(mock.mock.calls.some(([url]) => String(url).includes("category=IT+hardware"))).toBe(true));
   });
 
@@ -66,7 +68,7 @@ describe("category vendors list", () => {
       String(url).includes("cursor=") ? json({ items: [second] }) : json({ items: [assignment], nextCursor: ID }),
     );
     renderAt("/purchasing/category-vendors");
-    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more category vendors" }));
     expect(await screen.findByText("MRO")).toBeInTheDocument();
     expect(screen.getByText("IT hardware")).toBeInTheDocument();
     expect(mock).toHaveBeenCalledTimes(2);

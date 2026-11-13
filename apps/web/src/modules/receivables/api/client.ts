@@ -1124,6 +1124,9 @@ export interface FXSetting {
   functionalCurrency: string;
   gainAccount: string;
   lossAccount: string;
+  /** How far a cross-currency settlement may miss the item amount: the larger of this amount and tolerancePercent of the item. Both absent: 5.00 and 0.5%. */
+  toleranceAmount?: string | null;
+  tolerancePercent?: string | null;
 }
 
 /** GET /fx-settings - how a legal entity settles across currencies (the default when none is stored). */
@@ -1157,6 +1160,25 @@ export interface BackfillResult {
 /** POST /gl-journals:backfill - queues the journals owed for what happened before receivables posted to the ledger. */
 export function backfillGLJournals(input: BackfillInput): Promise<BackfillResult> {
   return send<BackfillResult>("/gl-journals:backfill", { method: "POST", body: JSON.stringify(input) });
+}
+
+export interface UnappliedSettlement {
+  settlementId: string;
+  openItemId: string;
+  amount: string;
+  itemAmount: string;
+  openAfter: string;
+  itemStatus: string;
+}
+
+export interface UnapplyResult {
+  payment: Payment;
+  reversed: UnappliedSettlement[];
+}
+
+/** POST /payments/{id}:unapply - reverses every live application of a payment: its items open again by what it took off them. */
+export function unapplyPayment(id: string, version: number, reason: string): Promise<UnapplyResult> {
+  return send<UnapplyResult>(`/payments/${id}:unapply`, { method: "POST", headers: { "If-Match": `"${version}"` }, body: JSON.stringify(reason ? { reason } : {}) });
 }
 
 /** POST /payments/{id}:reverse - undoes the cash receipt of a payment that was never applied. */

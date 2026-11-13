@@ -28,8 +28,10 @@ upstreams:
   sales: http://sales.sales.svc:8080
   party: http://party.party.svc:8080
   identity: http://identity.identity.svc:8080
+  # Renders the invoice and statement PDFs from what the portal read (print.customer-portal.render).
+  print: http://print.print.svc:8080
 # Secret holding this service's Ed25519 seed under the key "signing-key". Its public key is added to
-# PASSAGE_SERVICE_PUBLIC_KEYS of receivables, billing, sales, party and identity as customer-portal=...
+# PASSAGE_SERVICE_PUBLIC_KEYS of receivables, billing, sales, party, identity and print as customer-portal=...
 serviceSigningSecretName: customer-portal-signing
 resources:
   requests: { cpu: 25m, memory: 96Mi }
@@ -39,6 +41,6 @@ networkPolicy:
   dnsNamespace: kube-system
   # The edge (Envoy) namespace, the only caller.
   edgeNamespace: envoy-gateway-system
-  upstreamNamespaces: [receivables, billing, sales, party, identity]
+  upstreamNamespaces: [receivables, billing, sales, party, identity, print]
   # Keycloak is reached on 443.
   identityProviderCidr: 0.0.0.0/0

@@ -21,6 +21,7 @@ Shared pieces live in `src/shell/ui` and are exported from `src/shell/ui/index.t
 - Keep field errors in `FormField error` (plain message, shown under the field with `role="alert"`).
 - Render `<FormErrorSummary items={...} attempt={attempt} />` at the top of the form. `items` is `{ fieldId, label, message }` for each error in form order; `attempt` is a counter the page increments each time a submit fails (client or server field errors).
 - Declare each field's `{ id, label }` once per form in a map keyed by error key, in form order, and build `items` with `summaryItems(errors, fields, dynamic?)`. Entries without an `id` (a form-level problem) are listed but cannot be focused; `dynamic(key)` resolves repeated rows such as `lines[2].qty`. Do not hand-write labels at the call site.
+- A form that sets its field errors only when it is submitted (client checks or the service's field errors) can take `attempt` from `useSubmitAttempt(errors)`: each new errors object with a message counts as one failed submit. Keep a hand-made counter when the form also sets errors while the person types.
 - When `attempt` increases, focus moves to the first item that has a field (or to the summary itself when none does; it is an alert, so it is announced) and opens any collapsed section holding it. Each summary entry is a button that focuses its field. The summary is hidden when there are no items.
 
 ## Unsaved changes
@@ -43,5 +44,7 @@ return <div>...{prompt}</div>;
 - `src/modules/receivables/NewPaymentPage.tsx` (record a payment).
 - `src/modules/purchasing/RequisitionPages.tsx` (`RequisitionForm`).
 - `src/modules/sales/NewOrderPage.tsx`, `src/modules/sales/QuotationsPage.tsx` (`NewQuotationPage`), `src/modules/billing/NewFreeTextInvoicePage.tsx` and `src/modules/receiving/NewArrivalPage.tsx` (the unsaved-changes guard on a create form).
+
+Every procure-to-pay and order-to-cash page exported as `New…Page` or `…CreatePage` renders `FormErrorSummary` and calls `useUnsavedChanges`; `src/shell/ui/consistency.test.ts` checks it.
 
 Tests: `src/shell/ui/forms.test.tsx`.

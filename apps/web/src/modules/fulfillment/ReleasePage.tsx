@@ -1,6 +1,23 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import { describeProblem, newKey, ORDER_TYPES, runRelease, type OrderType, type Problem, type ReleaseInput, type ReleaseResult, type ReleaseSkip, type Shipment } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
 import { DECIMAL, formatDate, LOGISTICS_CODE, SKIP_LABELS, today, UUID } from "./format";
@@ -118,6 +135,32 @@ const skipColumns: DataTableColumn<ReleaseSkip>[] = [
   { key: "reason", header: "Why it was not released", render: (row) => SKIP_LABELS[row.reason] ?? row.reason },
 ];
 
+const RELEASE_FIELDS: Record<string, FormFieldTarget> = {
+  warehouseId: { id: "release-warehouseId", label: "Warehouse" },
+  horizonDays: { id: "release-horizonDays", label: "Horizon (days)" },
+};
+
+const LINE_LABELS: Record<string, string> = {
+  ...Object.fromEntries([...ID_FIELDS, ...LOOKUP_FIELDS].map(([name, label]) => [name, label.toLowerCase()])),
+  unit: "unit",
+  qty: "quantity",
+  confirmedShipDate: "confirmed ship date",
+  carrierCode: "carrier",
+  zone: "pick zone",
+  priority: "priority",
+  atpQty: "available quantity (ATP)",
+};
+
+/** A line's error is keyed `lines[i].field`; the text fields' ids come from that key, the lookups' from the line and field. */
+function releaseLineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const label = LINE_LABELS[field];
+  const lookup = LOOKUP_FIELDS.some(([name]) => name === field);
+  return { id: label ? (lookup ? `release-lines-${i}-${field}` : `release-${key.replace(/[^\w-]/g, "-")}`) : undefined, label: `Line ${Number(i) + 1}${label ? ` ${label}` : ""}` };
+}
+
 /** Release board (FR-28.1): run the release rules over confirmed order lines for one warehouse. */
 export function ReleasePage() {
   const [values, setValues] = useState<Values>({ warehouseId: "", horizonDays: "", requireFullAtp: true, lines: [emptyLine()] });
@@ -126,6 +169,8 @@ export function ReleasePage() {
   const [result, setResult] = useState<ReleaseResult | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt } = useUnsavedChanges(useFormBaseline([values]) && result === null);
 
   function update(patch: Partial<Values>) {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -176,6 +221,7 @@ export function ReleasePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
+          <FormErrorSummary items={summaryItems(errors, RELEASE_FIELDS, releaseLineTarget)} attempt={attempt} />
           <LookupFormField
             id="release-warehouseId"
             label="Warehouse"
@@ -275,6 +321,7 @@ export function ReleasePage() {
           </div>
         </Card>
       ) : null}
+      {prompt}
     </div>
   );
 }

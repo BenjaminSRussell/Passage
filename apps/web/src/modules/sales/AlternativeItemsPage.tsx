@@ -1,6 +1,25 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, FormField, Input, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  EmptyState,
+  FormField,
+  Input,
+  PageHeader,
+  Textarea,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createAlternativeRule,
   deleteAlternativeRule,
@@ -346,6 +365,16 @@ export function AlternativeItemsPage() {
   );
 }
 
+const NEW_ALTERNATIVE_RULE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "alt-legalEntityId", label: "Legal entity" },
+  orderedProductId: { id: "alt-orderedProductId", label: "Ordered product" },
+  alternativeProductId: { id: "alt-alternativeProductId", label: "Alternative product" },
+  customerId: { id: "alt-customerId", label: "Customer" },
+  priority: { id: "alt-priority", label: "Priority" },
+  validFrom: { id: "alt-validFrom", label: "Valid from" },
+  validTo: { id: "alt-validTo", label: "Valid to" },
+};
+
 /** Creates an alternative item rule (duty sales.listing.maintain). */
 export function NewAlternativeRulePage() {
   const navigate = useNavigate();
@@ -353,6 +382,8 @@ export function NewAlternativeRulePage() {
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -363,6 +394,7 @@ export function NewAlternativeRulePage() {
     setBusy(true);
     try {
       await createAlternativeRule(input);
+      release();
       navigate("/sales/alternative-items");
     } catch (error) {
       const problem = describeProblem(error);
@@ -393,6 +425,7 @@ export function NewAlternativeRulePage() {
       <PageHeader title="New alternative item rule" description="When the ordered product cannot ship the whole quantity by the requested date, the alternative is offered." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New alternative item rule">
+          <FormErrorSummary items={summaryItems(errors, NEW_ALTERNATIVE_RULE_FIELDS)} attempt={attempt} />
           {field("legalEntityId", "Legal entity", "UUID of the selling legal entity.")}
           {field("orderedProductId", "Ordered product", "UUID of the product that may fall short.")}
           {field("alternativeProductId", "Alternative product", "UUID of the product to offer instead.")}
@@ -417,6 +450,7 @@ export function NewAlternativeRulePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

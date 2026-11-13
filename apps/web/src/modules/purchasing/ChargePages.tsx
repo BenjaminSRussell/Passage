@@ -1,7 +1,29 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  buttonClassName,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   changeAutoCharge,
   changeChargeCode,
@@ -24,7 +46,22 @@ import {
   type ChargeSide,
   type ChargeStatus,
 } from "./api/client";
-import { Details, LoadError, ShortId, StatusBadge, currencyPattern, datePattern, decimalPattern, statusLabel, todayIso, useResource, uuidPattern, type Failure, Named } from "./parts";
+import {
+  Details,
+  LoadError,
+  ShortId,
+  StatusBadge,
+  currencyPattern,
+  datePattern,
+  decimalPattern,
+  statusLabel,
+  todayIso,
+  useResource,
+  uuidPattern,
+  type Failure,
+  Named,
+  useProcurementPages,
+} from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -54,7 +91,7 @@ const ITEM_KEYS: { value: AutoChargeItemKey; label: string }[] = [
 const calcLabel = (calc: ChargeCalc, value: string) =>
   calc === "PERCENT" ? `${value}% of lines` : calc === "PER_UNIT" ? `${value} per unit` : `${value} fixed`;
 
-const codeColumns: DataTableColumn<ChargeCode>[] = [
+const codeColumns: ListColumn<ChargeCode>[] = [
   { key: "code", header: "Code", mono: true },
   { key: "name", header: "Name" },
   { key: "calc", header: "Default", render: (c) => calcLabel(c.calc, c.defaultValue) },
@@ -64,92 +101,45 @@ const codeColumns: DataTableColumn<ChargeCode>[] = [
   { key: "status", header: "Status", render: (c) => <StatusBadge status={c.status} /> },
 ];
 
+const codeFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+  { kind: "text", key: "q", label: "Code or name" },
+];
+
+function useCodeRows(query: ListQuery): ListData<ChargeCode> {
+  const status = (query.filters.status ?? "") as ChargeStatus | "";
+  const q = query.filters.q ?? "";
+  return useProcurementPages(`${status}|${q}`, (cursor, signal) => listChargeCodes({ status, q }, { cursor, signal }));
+}
+
 /** Charge codes with status and text filters and load-more paging (FR-17.9). */
 export function ChargeCodesPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<ChargeStatus | "">("");
-  const [q, setQ] = useState("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<ChargeCode[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listChargeCodes({ status, q }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, q, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Charge codes"
-        description="Kinds of charge such as freight, handling and customs: how each is calculated, where it is debited and credited, and how it is spread over the lines at invoice time. A purchase order copies the sides when a charge is entered, so changing a code does not move an order already placed."
-        actions={
-          <>
-            <Link className={buttonClassName("secondary")} to="/purchasing/auto-charges">
-              Auto charges
-            </Link>
-            <Link className={buttonClassName("primary")} to="/purchasing/charge-codes/new">
-              New charge code
-            </Link>
-          </>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="cc-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as ChargeStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-        <div className={styles.filter}>
-          <FormField id="cc-text-filter" label="Code or name" optional>
-            {(control) => (
-              <Input
-                {...control}
-                value={q}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setQ(e.target.value);
-                }}
-              />
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="charge codes" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Charge codes"
-        columns={codeColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(c) => c.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No charge codes yet", description: "Create FREIGHT, HANDLING or CUSTOMS so buyers can pick them on a purchase order." }}
-        onRowOpen={(c) => navigate(`/purchasing/charge-codes/${c.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-charge-codes"
+      title="Charge codes"
+      description="Kinds of charge such as freight, handling and customs: how each is calculated, where it is debited and credited, and how it is spread over the lines at invoice time. A purchase order copies the sides when a charge is entered, so changing a code does not move an order already placed."
+      actions={
+        <>
+          <Link className={buttonClassName("secondary")} to="/purchasing/auto-charges">
+            Auto charges
+          </Link>
+          <Link className={buttonClassName("primary")} to="/purchasing/charge-codes/new">
+            New charge code
+          </Link>
+        </>
+      }
+      noun="charge codes"
+      singular="charge code"
+      columns={codeColumns}
+      filters={codeFilters}
+      useRows={useCodeRows}
+      search={(c) => ({ number: c.code, name: c.name })}
+      getRowKey={(c) => c.id}
+      onRowOpen={(c) => navigate(`/purchasing/charge-codes/${c.id}`)}
+      empty={{ title: "No charge codes yet", description: "Create FREIGHT, HANDLING or CUSTOMS so buyers can pick them on a purchase order." }}
+    />
   );
 }
 
@@ -323,6 +313,17 @@ function CodeFields({ id, form, set, errors, creating }: { id: string; form: Cod
   );
 }
 
+const CHARGE_CODE_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "cc-legal-entity", label: "Legal entity" },
+  code: { id: "cc-code", label: "Code" },
+  name: { id: "cc-name", label: "Name" },
+  defaultValue: { id: "cc-default", label: "Default value" },
+  debitAccountId: { id: "cc-debit-account", label: "Debit account" },
+  creditType: { id: "cc-credit", label: "Credit side" },
+  creditAccountId: { id: "cc-credit-account", label: "Credit account" },
+  vendorId: { id: "cc-vendor", label: "Vendor" },
+};
+
 /** Create form for a charge code. */
 export function ChargeCodeCreatePage() {
   const navigate = useNavigate();
@@ -331,6 +332,8 @@ export function ChargeCodeCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form]));
   const set = (patch: Partial<CodeForm>) => setForm((f) => ({ ...f, ...patch }));
 
   async function onSubmit(event: FormEvent) {
@@ -342,6 +345,7 @@ export function ChargeCodeCreatePage() {
     setBusy(true);
     try {
       const { body } = await createChargeCode(toCodeInput(form), key);
+      release();
       navigate(`/purchasing/charge-codes/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -356,6 +360,7 @@ export function ChargeCodeCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New charge code" description="A code is unique within its legal entity and cannot be renamed; deactivate it instead of deleting it." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, CHARGE_CODE_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Charge code">
           <CodeFields id="cc" form={form} set={set} errors={errors} creating />
         </Card>
@@ -371,6 +376,7 @@ export function ChargeCodeCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }
@@ -522,7 +528,7 @@ const keyLabel = (a: AutoCharge) =>
 const itemLabel = (a: AutoCharge) =>
   a.itemCode === "PRODUCT" ? <Named entity="product" id={a.itemId} /> : a.itemCode === "GROUP" ? `Product group ${(a.itemId ?? "").slice(0, 8)}` : "Whole order";
 
-function autoColumns(codes: Map<string, ChargeCode>): DataTableColumn<AutoCharge>[] {
+function autoColumns(codes: Map<string, ChargeCode>): ListColumn<AutoCharge>[] {
   return [
     {
       key: "chargeCodeId",
@@ -543,79 +549,42 @@ function autoColumns(codes: Map<string, ChargeCode>): DataTableColumn<AutoCharge
   ];
 }
 
+const autoFilters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }];
+
+function useAutoChargeRows(query: ListQuery): ListData<AutoCharge> {
+  const status = (query.filters.status ?? "") as ChargeStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listAutoCharges({ status }, { cursor, signal }));
+}
+
 /** Auto charges with a status filter and load-more paging (FR-17.9). */
 export function AutoChargesPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<ChargeStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<AutoCharge[]>([]);
   const codes = useResource(async (signal) => (await listChargeCodes({}, { signal })).items, []);
-  const page = useResource(
-    async (signal) => {
-      const result = await listAutoCharges({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
-  const byId = useMemo(() => new Map((codes.data ?? []).map((c) => [c.id, c])), [codes.data]);
+  const columns = useMemo(() => autoColumns(new Map((codes.data ?? []).map((c) => [c.id, c]))), [codes.data]);
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Auto charges"
-        description="Charges that are added to a purchase order when it is saved with automatic charges: by vendor, vendor group or for every vendor, optionally above a minimum order amount."
-        actions={
-          <>
-            <Link className={buttonClassName("secondary")} to="/purchasing/charge-codes">
-              Charge codes
-            </Link>
-            <Link className={buttonClassName("primary")} to="/purchasing/auto-charges/new">
-              New auto charge
-            </Link>
-          </>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="ac-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as ChargeStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="auto charges" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Auto charges"
-        columns={autoColumns(byId)}
-        rows={page.error ? [] : rows}
-        getRowKey={(a) => a.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No auto charges yet", description: "Add one to put a charge on matching orders without typing it." }}
-        onRowOpen={(a) => navigate(`/purchasing/auto-charges/${a.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-auto-charges"
+      title="Auto charges"
+      description="Charges that are added to a purchase order when it is saved with automatic charges: by vendor, vendor group or for every vendor, optionally above a minimum order amount."
+      actions={
+        <>
+          <Link className={buttonClassName("secondary")} to="/purchasing/charge-codes">
+            Charge codes
+          </Link>
+          <Link className={buttonClassName("primary")} to="/purchasing/auto-charges/new">
+            New auto charge
+          </Link>
+        </>
+      }
+      noun="auto charges"
+      singular="auto charge"
+      columns={columns}
+      filters={autoFilters}
+      useRows={useAutoChargeRows}
+      getRowKey={(a) => a.id}
+      onRowOpen={(a) => navigate(`/purchasing/auto-charges/${a.id}`)}
+      empty={{ title: "No auto charges yet", description: "Add one to put a charge on matching orders without typing it." }}
+    />
   );
 }
 
@@ -697,6 +666,18 @@ function AutoWindowFields({ id, form, set, errors }: { id: string; form: AutoFor
   );
 }
 
+const AUTO_CHARGE_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "ac-legal-entity", label: "Legal entity" },
+  chargeCodeId: { id: "ac-code", label: "Charge code" },
+  accountId: { id: "ac-account", label: "Vendor or vendor group" },
+  itemId: { id: "ac-item", label: "Product or product group" },
+  value: { id: "ac-value", label: "Value" },
+  minOrderAmount: { id: "ac-min", label: "Minimum order amount" },
+  currency: { id: "ac-currency", label: "Currency" },
+  validFrom: { id: "ac-from", label: "Valid from" },
+  validTo: { id: "ac-to", label: "Valid to" },
+};
+
 /** Create form for an auto charge; ?chargeCodeId= preselects the code. */
 export function AutoChargeCreatePage() {
   const navigate = useNavigate();
@@ -721,6 +702,8 @@ export function AutoChargeCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [form]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([form]));
   const set = (patch: Partial<AutoForm>) => setForm((f) => ({ ...f, ...patch }));
   const available = (codes.data ?? []).filter((c) => !uuidPattern.test(form.legalEntityId.trim()) || c.legalEntityId === form.legalEntityId.trim());
   const chosen = (codes.data ?? []).find((c) => c.id === form.chargeCodeId);
@@ -734,6 +717,7 @@ export function AutoChargeCreatePage() {
     setBusy(true);
     try {
       const { body } = await createAutoCharge(toAutoInput(form), key);
+      release();
       navigate(`/purchasing/auto-charges/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -749,6 +733,7 @@ export function AutoChargeCreatePage() {
       <PageHeader title="New auto charge" description="The charge is added to a purchase order saved with automatic charges when the vendor, currency and order total match." />
       {codes.error ? <LoadError what="the charge codes" error={codes.error} onRetry={codes.reload} /> : null}
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, AUTO_CHARGE_CREATE_FIELDS)} attempt={attempt} />
         <Card title="Auto charge">
           <div className={styles.grid}>
             <FormField id="ac-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -819,6 +804,7 @@ export function AutoChargeCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

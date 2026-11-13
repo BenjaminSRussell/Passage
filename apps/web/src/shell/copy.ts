@@ -131,6 +131,8 @@ export const copy = {
     paymentPayerAccount: "IBAN or routing and account from the check or advice. Only a hash is kept, to recognise the payer next time.",
     paymentShortReason: "Why the payer paid less than the invoice, if they said.",
     requisitionOperatingUnit: "Decides which catalogs you can pick from",
+    fxToleranceAmount: "In the invoice's currency, such as 5.00.",
+    fxTolerancePercent: "Percent of the invoice amount, such as 0.5.",
   },
   offlineBanner: "You're offline. Pages you've opened still work, but searches and saves will fail until you reconnect.",
   palette: {

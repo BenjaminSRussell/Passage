@@ -1,7 +1,21 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import { newKey, postVendorInvoice, type Invoice, type InvoiceInput } from "./api/client";
 import { fieldErrors } from "../../shell/api/http";
 import { DECIMAL, UUID, type InvoiceNavState } from "./parts";
@@ -96,6 +110,28 @@ function initialDraft(state: InvoiceNavState | null): InvoiceDraft {
   };
 }
 
+const POST_INVOICE_FIELDS: Record<string, FormFieldTarget> = {
+  vendorId: { id: "invoice-vendorId", label: "Vendor" },
+  legalEntityId: { id: "invoice-legalEntityId", label: "Legal entity" },
+  invoiceNumber: { id: "invoice-invoiceNumber", label: "Invoice number" },
+  invoiceDate: { id: "invoice-invoiceDate", label: "Invoice date" },
+  postingDate: { id: "invoice-postingDate", label: "Posting date" },
+  currency: { id: "invoice-currency", label: "Currency" },
+  ledgerId: { id: "invoice-ledgerId", label: "Ledger" },
+  lines: { label: "Lines" },
+};
+
+const INVOICE_LINE_LABELS: Record<string, string> = { receiptId: "receipt", receiptLineNo: "receipt line", qty: "quantity", unitPrice: "unit price" };
+
+/** A line's error is keyed `lines[i].field`. */
+function invoiceLineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const label = INVOICE_LINE_LABELS[field];
+  return label ? { id: `inv-line-${i}-${field}`, label: `Line ${Number(i) + 1} ${label}` } : { label: `Line ${Number(i) + 1}` };
+}
+
 /** Post a vendor invoice against GR/IR items (POST /invoices:post). */
 export function PostInvoicePage() {
   const location = useLocation();
@@ -106,6 +142,9 @@ export function PostInvoicePage() {
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [posted, setPosted] = useState<Invoice | null>(null);
+  const attempt = useSubmitAttempt(errors);
+  // A posted invoice shows its result instead of the form, so leaving it then loses nothing.
+  const { prompt } = useUnsavedChanges(useFormBaseline([values]) && posted === null);
 
   const update = (patch: Partial<InvoiceDraft>) => setValues((prev) => ({ ...prev, ...patch }));
   const updateLine = (index: number, patch: Partial<InvoiceLineDraft>) =>
@@ -177,6 +216,7 @@ export function PostInvoicePage() {
       <PageHeader title="Post vendor invoice" description="Checks the AP period, clears GR/IR for the quantities invoiced and posts the vendor liability. A price difference goes to inventory, or to PPV for standard-cost lines." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Vendor invoice">
+          <FormErrorSummary items={summaryItems(errors, POST_INVOICE_FIELDS, invoiceLineTarget)} attempt={attempt} />
           {lookup("legalEntityId", "Legal entity")}
           {lookup("vendorId", "Vendor")}
           {text("invoiceNumber", "Invoice number", { hint: "Unique per vendor, ignoring case." })}
@@ -246,6 +286,7 @@ export function PostInvoicePage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

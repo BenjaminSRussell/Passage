@@ -24,6 +24,12 @@ import {
   type ListData,
   type ListFilterDef,
   type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   actOnPurchaseOrder,
@@ -645,6 +651,40 @@ function ChargesCard({
   );
 }
 
+const PURCHASE_ORDER_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "po-legal-entity", label: "Legal entity" },
+  vendorId: { id: "po-vendor", label: "Vendor" },
+  currency: { id: "po-currency", label: "Currency" },
+};
+
+const PO_ROW_TARGETS: Record<string, Record<string, [string, string]>> = {
+  lines: {
+    productId: ["product", "product"],
+    description: ["description", "description"],
+    category: ["category", "category"],
+    qty: ["qty", "quantity"],
+    unit: ["unit", "unit"],
+    unitPrice: ["price", "unit price"],
+    priceUnit: ["price-unit", "price unit"],
+    discountPct: ["discount", "discount %"],
+    taxAmount: ["tax", "tax amount"],
+    deliveryDate: ["delivery", "delivery date"],
+    siteId: ["site", "site"],
+    warehouseId: ["warehouse", "warehouse"],
+  },
+  charges: { lineNo: ["line", "charged on"], value: ["value", "value"] },
+};
+
+/** A line's error is keyed `lines[i].field`, a charge's `charges[i].field`. */
+function purchaseOrderRowTarget(key: string): FormFieldTarget | undefined {
+  const match = /^(lines|charges)\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, group, i, field] = match;
+  const target = PO_ROW_TARGETS[group][field];
+  const row = `${group === "lines" ? "Line" : "Charge"} ${Number(i) + 1}`;
+  return target ? { id: `po-${group === "lines" ? "line" : "charge"}-${i}-${target[0]}`, label: `${row} ${target[1]}` } : { label: row };
+}
+
 /** New purchase order: header, lines (blank price = trade agreement) and header charges. */
 export function PurchaseOrderCreatePage() {
   const navigate = useNavigate();
@@ -658,6 +698,8 @@ export function PurchaseOrderCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [legalEntityId, vendorId, currency, lines, charges, applyAuto]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([legalEntityId, vendorId, currency, lines, charges, applyAuto]));
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -670,6 +712,7 @@ export function PurchaseOrderCreatePage() {
     setBusy(true);
     try {
       const { body } = await createPurchaseOrder(toInput({ legalEntityId: le, vendorId: vendor, currency }, lines, charges, applyAuto), key);
+      release();
       navigate(`/purchasing/purchase-orders/${body.id}`, { state: { warnings: body.warnings ?? [] } });
     } catch (error) {
       const problem = describeProblem(error);
@@ -687,6 +730,7 @@ export function PurchaseOrderCreatePage() {
         description="Leave a unit price blank to take the agreement line's price when it overrides, else the most specific trade agreement price for the vendor, product and quantity."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, PURCHASE_ORDER_CREATE_FIELDS, purchaseOrderRowTarget)} attempt={attempt} />
         <Card title="Order">
           <div className={styles.grid}>
             <FormField id="po-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -730,6 +774,7 @@ export function PurchaseOrderCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

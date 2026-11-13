@@ -197,7 +197,7 @@ describe("Delivery tolerance on reports and on the form", () => {
     fireEvent.click(screen.getByLabelText("Close line 1 after this delivery"));
     fireEvent.change(screen.getByLabelText("Quantity on line 1"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Record delivery" }));
-    expect(await screen.findByText(/A last delivery must bring the line to at least 9.5/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/A last delivery must bring the line to at least 9.5/)).length).toBeGreaterThan(0);
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     fireEvent.change(screen.getByLabelText("Quantity on line 1"), { target: { value: "5.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Record delivery" }));

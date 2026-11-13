@@ -64,9 +64,9 @@ describe("charge codes list", () => {
   });
 
   it("shows the problem code and retries", async () => {
-    const mock = stubFetch(() => problem(403, "AUTH-0003", "missing duty"));
+    const mock = stubFetch(() => problem(500, "PRC-0500", "store unavailable"));
     renderAt("/purchasing/charge-codes");
-    expect(await screen.findByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/PRC-0500/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
   });
@@ -75,11 +75,13 @@ describe("charge codes list", () => {
     const second = { ...code, id: "66666666-6666-4666-8666-666666666666", code: "HANDLING", name: "Handling" };
     const mock = stubFetch((url) => (String(url).includes("cursor=") ? json({ items: [second] }) : json({ items: [code], nextCursor: ID })));
     renderAt("/purchasing/charge-codes");
-    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more charge codes" }));
     expect(await screen.findByText("HANDLING")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "INACTIVE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(mock.mock.calls.some(([url]) => String(url).includes("status=INACTIVE"))).toBe(true));
-    fireEvent.change(document.getElementById("cc-text-filter") as HTMLInputElement, { target: { value: "fre" } });
+    fireEvent.change(document.getElementById("purchasing-charge-codes-filter-q") as HTMLInputElement, { target: { value: "fre" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(mock.mock.calls.some(([url]) => String(url).includes("q=fre"))).toBe(true));
   });
 });

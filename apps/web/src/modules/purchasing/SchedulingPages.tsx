@@ -14,6 +14,17 @@ import {
   buttonClassName,
   type BadgeTone,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
 } from "../../shell/ui";
 import {
   createSchedulingAgreement,
@@ -51,6 +62,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -72,7 +84,7 @@ const qty = (value: string, unit: string) => `${value} ${unit}`;
 
 // --- Release monitor -------------------------------------------------------
 
-const monitorColumns: DataTableColumn<SchedulingAgreementRow>[] = [
+const monitorColumns: ListColumn<SchedulingAgreementRow>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
   { key: "productId", header: "Product", render: (a) => <Named entity="product" id={a.productId} /> },
@@ -88,48 +100,36 @@ const monitorColumns: DataTableColumn<SchedulingAgreementRow>[] = [
   },
 ];
 
+const monitorFilters: ListFilterDef[] = [{ kind: "entity", key: "vendorId", label: "Vendor", entity: "vendor" }];
+
+function useMonitorRows(query: ListQuery): ListData<SchedulingAgreementRow> {
+  const vendorId = query.filters.vendorId ?? "";
+  return useProcurementPages(vendorId, (cursor, signal) => listSchedulingAgreements({ vendorId: vendorId || undefined }, { cursor, signal }));
+}
+
 /** Monitor scheduling agreement releases (FR-17.15, SAP ME85): open quantity, last release, next due. */
 export function SchedulingAgreementsPage() {
   const navigate = useNavigate();
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<SchedulingAgreementRow[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listSchedulingAgreements({}, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Scheduling agreements"
-        description="Dated delivery schedules with a vendor for one product and site. Release runs send the schedule as forecast (FRC) or just-in-time (JIT) releases with cumulative quantities."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/scheduling-agreements/new">
-            New scheduling agreement
-          </Link>
-        }
-      />
-      {page.error ? <LoadError what="scheduling agreements" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Scheduling agreements"
-        columns={monitorColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(a) => a.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No scheduling agreements yet", description: "Agree a delivery schedule with a vendor, then release it to them on the agreed rhythm." }}
-        onRowOpen={(a) => navigate(`/purchasing/scheduling-agreements/${a.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-scheduling-agreements"
+      title="Scheduling agreements"
+      description="Dated delivery schedules with a vendor for one product and site. Release runs send the schedule as forecast (FRC) or just-in-time (JIT) releases with cumulative quantities."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/scheduling-agreements/new">
+          New scheduling agreement
+        </Link>
+      }
+      noun="scheduling agreements"
+      singular="scheduling agreement"
+      columns={monitorColumns}
+      filters={monitorFilters}
+      useRows={useMonitorRows}
+      search={(a) => ({ number: a.number })}
+      getRowKey={(a) => a.id}
+      onRowOpen={(a) => navigate(`/purchasing/scheduling-agreements/${a.id}`)}
+      empty={{ title: "No scheduling agreements yet", description: "Agree a delivery schedule with a vendor, then release it to them on the agreed rhythm." }}
+    />
   );
 }
 
@@ -238,6 +238,35 @@ function toCreateInput(h: SAHeaderDraft, p: ProfileDraft, rows: RowDraft[]): Sch
   };
 }
 
+const SCHEDULING_AGREEMENT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "sa-legal-entity", label: "Legal entity" },
+  vendorId: { id: "sa-vendor", label: "Vendor" },
+  productId: { id: "sa-product", label: "Product" },
+  siteId: { id: "sa-site", label: "Site" },
+  currency: { id: "sa-currency", label: "Currency" },
+  unit: { id: "sa-unit", label: "Unit" },
+  unitPrice: { id: "sa-price", label: "Unit price" },
+  targetQty: { id: "sa-target", label: "Target quantity" },
+  validFrom: { id: "sa-valid-from", label: "Valid from" },
+  validTo: { id: "sa-valid-to", label: "Valid to" },
+  "profile.firmZoneDays": { id: "sa-firm", label: "Firm zone (days)" },
+  "profile.tradeoffZoneDays": { id: "sa-tradeoff", label: "Trade-off zone (days)" },
+  "profile.jitHorizonDays": { id: "sa-jit", label: "JIT horizon (days)" },
+  "profile.frcHorizonDays": { id: "sa-frc", label: "FRC horizon (days)" },
+  lines: { label: "Deliveries" },
+};
+
+/** A delivery's error is keyed `lines[i].deliveryDate` or `lines[i].qty`. */
+function deliveryTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const row = `Delivery ${Number(i) + 1}`;
+  if (field === "deliveryDate") return { id: `sa-line-${i}-date`, label: `${row} date` };
+  if (field === "qty") return { id: `sa-line-${i}-qty`, label: `${row} quantity` };
+  return { label: row };
+}
+
 /** New scheduling agreement: header, price term, release profile and the first schedule (FR-17.15). */
 export function SchedulingAgreementCreatePage() {
   const navigate = useNavigate();
@@ -259,6 +288,8 @@ export function SchedulingAgreementCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [header, profile, rows]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([header, profile, rows]));
   const setH = (patch: Partial<SAHeaderDraft>) => setHeader((h) => ({ ...h, ...patch }));
   const setP = (patch: Partial<ProfileDraft>) => setProfile((p) => ({ ...p, ...patch }));
   const update = (index: number, patch: Partial<RowDraft>) => setRows((rs) => rs.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -272,6 +303,7 @@ export function SchedulingAgreementCreatePage() {
     setBusy(true);
     try {
       const { body } = await createSchedulingAgreement(toCreateInput(header, profile, rows), key);
+      release();
       navigate(`/purchasing/scheduling-agreements/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -300,6 +332,7 @@ export function SchedulingAgreementCreatePage() {
         description="One vendor, product and site with an agreed price, a release profile and the dated quantities to deliver."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, SCHEDULING_AGREEMENT_CREATE_FIELDS, deliveryTarget)} attempt={attempt} />
         <Card title="Agreement">
           <div className={styles.grid}>
             <LookupFormField id="sa-legal-entity" label="Legal entity" entity="legalEntity" value={header.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setH({ legalEntityId })} />
@@ -407,6 +440,7 @@ export function SchedulingAgreementCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

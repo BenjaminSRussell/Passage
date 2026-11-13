@@ -1,7 +1,23 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, Skeleton } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   describeProblem,
   etagOf,
@@ -153,6 +169,28 @@ interface FormProps {
   updatedAt?: string;
 }
 
+const PROFILE_FIELDS: Record<string, FormFieldTarget> = {
+  currency: { id: "profile-currency", label: "Currency" },
+  legalEntityId: { id: "profile-legalEntityId", label: "Legal entity" },
+  customerId: { id: "profile-customerId", label: "Customer" },
+  limit: { id: "profile-limit", label: "Credit limit" },
+  limitType: { id: "profile-limitType", label: "Limit type" },
+  tolerancePct: { id: "profile-tolerancePct", label: "Tolerance %" },
+  toleranceAmount: { id: "profile-toleranceAmount", label: "Tolerance amount" },
+  oldestItemDaysMax: { id: "profile-oldestItemDaysMax", label: "Oldest open item, max days" },
+  maxDunningLevel: { id: "profile-maxDunningLevel", label: "Max dunning level" },
+  reviewDate: { id: "profile-reviewDate", label: "Review date" },
+  customerSince: { id: "profile-customerSince", label: "Customer since" },
+  openAr: { id: "profile-openAr", label: "Open AR" },
+  unapplied: { id: "profile-unapplied", label: "Unapplied cash" },
+  deliveredNotInvoiced: { id: "profile-deliveredNotInvoiced", label: "Delivered, not invoiced" },
+  openOrders: { id: "profile-openOrders", label: "Confirmed open orders" },
+  overdueAr: { id: "profile-overdueAr", label: "Overdue AR" },
+  oldestItemDays: { id: "profile-oldestItemDays", label: "Oldest item, days overdue" },
+  dunningLevel: { id: "profile-dunningLevel", label: "Dunning level" },
+  exposure: { id: "profile-openAr", label: "Exposure" },
+};
+
 function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
   const navigate = useNavigate();
   const [values, setValues] = useState<ProfileValues>(initial);
@@ -166,6 +204,9 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
     setValues(initial);
     setCurrent({ etag, updatedAt });
   }, [initial, etag, updatedAt]);
+  const attempt = useSubmitAttempt(errors);
+  // Guards the create form only: an edit saves in place and stays on the page.
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]) && !existing);
 
   const update = (patch: Partial<ProfileValues>) => setValues((v) => ({ ...v, ...patch }));
 
@@ -180,6 +221,7 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
     try {
       const res = await putCreditProfile(values.legalEntityId.trim(), values.customerId.trim(), input, current.etag);
       if (!existing) {
+        release();
         navigate(`/sales/credit-profiles/${res.value.legalEntityId}/${res.value.customerId}`);
         return;
       }
@@ -229,6 +271,7 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
 
   return (
     <form className={styles.stack} onSubmit={submit} noValidate aria-label="Credit profile">
+      <FormErrorSummary items={summaryItems(errors, PROFILE_FIELDS)} attempt={attempt} />
       <Card title="Customer and limit">
         <div className={styles.form}>
           {pick("legalEntityId", "legalEntity", "Legal entity")}
@@ -307,6 +350,7 @@ function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {
         </Link>
         {current.updatedAt ? <span className={styles.muted}>Last changed {formatDateTime(current.updatedAt)}</span> : null}
       </div>
+      {prompt}
     </form>
   );
 }

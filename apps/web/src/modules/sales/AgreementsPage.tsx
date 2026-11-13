@@ -1,6 +1,29 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, ListPage, loadedRows, PageHeader, Select, StatusPill, type DataTableColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  FormField,
+  Input,
+  ListPage,
+  loadedRows,
+  PageHeader,
+  Select,
+  StatusPill,
+  type DataTableColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+  FormSection,
+} from "../../shell/ui";
 import {
   AGREEMENT_STATUSES,
   COMMITMENT_TYPES,
@@ -153,6 +176,22 @@ export function AgreementsPage() {
   );
 }
 
+const NEW_AGREEMENT_FIELDS: Record<string, FormFieldTarget> = {
+  currency: { id: "agreement-currency", label: "Currency" },
+  legalEntityId: { id: "agreement-legalEntityId", label: "Legal entity" },
+  customerId: { id: "agreement-customerId", label: "Customer" },
+  invoiceAccountId: { id: "agreement-invoiceAccountId", label: "Invoice account" },
+  productId: { id: "agreement-productId", label: "Product" },
+  commitmentAmount: { id: "agreement-commitmentAmount", label: "Committed amount" },
+  commitmentQty: { id: "agreement-commitmentQty", label: "Committed quantity" },
+  unit: { id: "agreement-unit", label: "Unit" },
+  unitPrice: { id: "agreement-unitPrice", label: "Unit price" },
+  overdeliveryPct: { id: "agreement-overdeliveryPct", label: "Over-delivery tolerance (%)" },
+  validFrom: { id: "agreement-validFrom", label: "Valid from" },
+  validTo: { id: "agreement-validTo", label: "Valid to" },
+  cumTolerance: { id: "agreement-cumTolerance", label: "Cumulative tolerance" },
+};
+
 /** Creates an ACTIVE agreement numbered SA- (duty sales.agreement.maintain). */
 export function NewAgreementPage() {
   const navigate = useNavigate();
@@ -176,6 +215,8 @@ export function NewAgreementPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<AgreementValues>) {
     setValues((v) => ({ ...v, ...patch }));
@@ -191,6 +232,7 @@ export function NewAgreementPage() {
     setBusy(true);
     try {
       const created = await createAgreement(input, key.current);
+      release();
       navigate(`/sales/agreements/${created.value.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -223,6 +265,7 @@ export function NewAgreementPage() {
       <PageHeader title="New sales agreement" description="Commit a customer to a quantity or an amount of one product at an agreed price. Releases against it create orders at this price." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New sales agreement">
+          <FormErrorSummary items={summaryItems(errors, NEW_AGREEMENT_FIELDS)} attempt={attempt} />
           {field("legalEntityId", "Legal entity", "UUID of the selling legal entity.", { mono: true })}
           {field("customerId", "Customer", "UUID of the customer party.", { mono: true })}
           {field("invoiceAccountId", "Invoice account", "Leave empty to invoice the customer.", { mono: true, optional: true })}
@@ -247,7 +290,9 @@ export function NewAgreementPage() {
           {field("overdeliveryPct", "Over-delivery tolerance (%)", "Releases may go this many percent above the committed quantity. Default 0.", { decimal: true, optional: true })}
           {field("validFrom", "Valid from", undefined, { type: "date", optional: true })}
           {field("validTo", "Valid to", undefined, { type: "date", optional: true })}
-          {field("cumTolerance", "Cumulative tolerance", "How far a scheduling release's cumulative received quantity may differ from shipped before it is held. Default 0.", { decimal: true, optional: true })}
+          <FormSection collapse="advanced">
+            {field("cumTolerance", "Cumulative tolerance", "How far a scheduling release's cumulative received quantity may differ from shipped before it is held. Default 0.", { decimal: true, optional: true })}
+          </FormSection>
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the agreement" live="alert">
@@ -265,6 +310,7 @@ export function NewAgreementPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

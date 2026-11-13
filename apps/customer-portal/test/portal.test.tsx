@@ -75,6 +75,29 @@ describe("invoices", () => {
     await accessible(container);
   });
 
+  it("downloads the invoice PDF with the legal entity header and the BFF's file name", async () => {
+    routes[`GET /api/v1/invoices/${ID}`] = invoice;
+    routes[`GET /api/v1/invoices/${ID}/pdf`] = new Response("%PDF-1.7", { status: 200, headers: { "content-type": "application/pdf", "content-disposition": 'attachment; filename="INV-2027-1.pdf"' } });
+    const created = vi.fn(() => "blob:pdf");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: created, revokeObjectURL: vi.fn() }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    at(`/invoices/${ID}`, "/invoices/:id", <InvoiceDetail />);
+    await userEvent.click(await screen.findByRole("button", { name: "Download invoice PDF" }));
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    const call = calls.find((c) => c.url === `/api/v1/invoices/${ID}/pdf`)!;
+    expect(call.headers["x-legal-entity"]).toBe("le-1");
+    expect((click.mock.instances[0] as unknown as HTMLAnchorElement).download).toBe("INV-2027-1.pdf");
+    click.mockRestore();
+  });
+
+  it("says why a PDF could not be made", async () => {
+    routes[`GET /api/v1/invoices/${ID}`] = invoice;
+    routes[`GET /api/v1/invoices/${ID}/pdf`] = new Response(JSON.stringify({ code: "CUS-BFF-409", detail: "the document could not be rendered; try again later" }), { status: 502 });
+    at(`/invoices/${ID}`, "/invoices/:id", <InvoiceDetail />);
+    await userEvent.click(await screen.findByRole("button", { name: "Download invoice PDF" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("the document could not be rendered");
+  });
+
   it("shows the problem when the invoice is not the customer's", async () => {
     routes[`GET /api/v1/invoices/${ID}`] = new Response(JSON.stringify({ code: "BIL-0100", detail: "invoice not found" }), { status: 404 });
     at(`/invoices/${ID}`, "/invoices/:id", <InvoiceDetail />);
@@ -111,6 +134,7 @@ describe("account", () => {
     routes["GET /api/v1/statement"] = { asOf: "2027-03-31", sections: [{ currency: "USD", closingBalance: "100.00", aging: [], lines: [{ sourceType: "INVOICE", documentNumber: "INV-9", documentDate: "2027-03-01", amount: "100.00", openAmount: "100.00", runningBalance: "100.00" }] }] };
     const { container } = at("/statement", "/statement", <Statement />);
     expect(await screen.findByText("INV-9")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download statement PDF" })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("As of"), "2027-03-31");
     await waitFor(() => expect(calls.some((c) => c.url === "/api/v1/statement?asOf=2027-03-31")).toBe(true));
     expect(JSON.stringify(calls)).not.toMatch(/customer/i);

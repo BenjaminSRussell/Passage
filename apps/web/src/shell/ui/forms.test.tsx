@@ -1,10 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { useEffect, useState } from "react";
 import { createMemoryRouter, Link, MemoryRouter, RouterProvider, useNavigate } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { FormErrorSummary, FormField, FormSection, Input, summaryItems, useFormBaseline, useUnsavedChanges } from "./index";
+import { FormErrorSummary, FormField, FormSection, Input, summaryItems, useFormBaseline, useSubmitAttempt, useUnsavedChanges } from "./index";
 
 function Demo() {
   const [name, setName] = useState("");
@@ -247,6 +247,24 @@ function renderGuarded() {
   render(<RouterProvider router={router} />);
   return router;
 }
+
+describe("submit attempt counter", () => {
+  it("counts each new errors object that holds a message, and nothing else", () => {
+    const empty = {};
+    const { result, rerender } = renderHook(({ errors }: { errors: Record<string, string | undefined> }) => useSubmitAttempt(errors), { initialProps: { errors: empty } });
+    expect(result.current).toBe(0);
+    const first = { name: "Enter a name." };
+    rerender({ errors: first });
+    expect(result.current).toBe(1);
+    rerender({ errors: first });
+    expect(result.current).toBe(1);
+    rerender({ errors: { name: "Enter a name." } });
+    expect(result.current).toBe(2);
+    rerender({ errors: {} });
+    rerender({ errors: { name: undefined } });
+    expect(result.current).toBe(2);
+  });
+});
 
 describe("unsaved-changes guard", () => {
   it("lets a clean form navigate away", async () => {

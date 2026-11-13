@@ -10,9 +10,20 @@ import {
   FormField,
   Input,
   PageHeader,
-  Select,
   buttonClassName,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+  FormSection,
 } from "../../shell/ui";
 import {
   actOnCatalog,
@@ -48,6 +59,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -56,7 +68,7 @@ const STATUSES: CatalogStatus[] = ["DRAFT", "PUBLISHED", "RETIRED"];
 
 const validity = (c: { validFrom: string; validTo?: string }) => (c.validTo ? `${c.validFrom} to ${c.validTo}` : `From ${c.validFrom}, open-ended`);
 
-const listColumns: DataTableColumn<CatalogSummary>[] = [
+const listColumns: ListColumn<CatalogSummary>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "name", header: "Name" },
   { key: "status", header: "Status", render: (c) => <StatusBadge status={c.status} /> },
@@ -65,77 +77,41 @@ const listColumns: DataTableColumn<CatalogSummary>[] = [
   { key: "legalEntityId", header: "Legal entity", render: (c) => <Named entity="legalEntity" id={c.legalEntityId} /> },
 ];
 
+const listFilters: ListFilterDef[] = [{ kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) }];
+
+function useCatalogRows(query: ListQuery): ListData<CatalogSummary> {
+  const status = (query.filters.status ?? "") as CatalogStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listCatalogs({ status }, { cursor, signal }));
+}
+
 /** Procurement catalog list with a status filter and load-more paging (FR-17.18). */
 export function CatalogsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<CatalogStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<CatalogSummary[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listCatalogs({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Procurement catalogs"
-        description="Vendor products with agreed prices that requesters pick from when they raise a requisition."
-        actions={
-          <>
-            <Link className={buttonClassName("secondary")} to="/purchasing/catalog-imports">
-              Vendor imports
-            </Link>
-            <Link className={buttonClassName("primary")} to="/purchasing/catalogs/new">
-              New catalog
-            </Link>
-          </>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="catalog-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as CatalogStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="catalogs" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Procurement catalogs"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(c) => c.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No catalogs yet", description: "Create a catalog, add vendor items and publish it to your operating units." }}
-        onRowOpen={(c) => navigate(`/purchasing/catalogs/${c.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-catalogs"
+      title="Procurement catalogs"
+      description="Vendor products with agreed prices that requesters pick from when they raise a requisition."
+      actions={
+        <>
+          <Link className={buttonClassName("secondary")} to="/purchasing/catalog-imports">
+            Vendor imports
+          </Link>
+          <Link className={buttonClassName("primary")} to="/purchasing/catalogs/new">
+            New catalog
+          </Link>
+        </>
+      }
+      noun="catalogs"
+      singular="catalog"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useCatalogRows}
+      search={(c) => ({ number: c.number, name: c.name })}
+      getRowKey={(c) => c.id}
+      onRowOpen={(c) => navigate(`/purchasing/catalogs/${c.id}`)}
+      empty={{ title: "No catalogs yet", description: "Create a catalog, add vendor items and publish it to your operating units." }}
+    />
   );
 }
 
@@ -264,6 +240,36 @@ function EntryFields({
   );
 }
 
+const CATALOG_CREATE_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "cat-legal-entity", label: "Legal entity" },
+  name: { id: "cat-name", label: "Name" },
+  validFrom: { id: "cat-valid-from", label: "Valid from" },
+  validTo: { id: "cat-valid-to", label: "Valid to" },
+  orgUnitIds: { id: "cat-units", label: "Operating unit ids" },
+};
+
+const ENTRY_TARGETS: Record<string, [string, string]> = {
+  name: ["name", "item name"],
+  vendorId: ["vendor", "vendor"],
+  productId: ["product", "product"],
+  category: ["category", "category"],
+  unit: ["unit", "unit"],
+  unitPrice: ["price", "unit price"],
+  currency: ["currency", "currency"],
+  leadTimeDays: ["lead", "lead time (days)"],
+  imageUrl: ["image", "image link"],
+};
+
+/** An entry's error is keyed `entries[i].field`; its field ids come from that prefix, as EntryFields builds them. */
+function entryTarget(key: string): FormFieldTarget | undefined {
+  const match = /^(entries\[(\d+)\])\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, prefix, i, field] = match;
+  const target = ENTRY_TARGETS[field];
+  const row = `Item ${Number(i) + 1}`;
+  return target ? { id: `${prefix.replace(/[^a-z0-9]+/gi, "-")}-${target[0]}`, label: `${row} ${target[1]}` } : { label: row };
+}
+
 /** New catalog: header, validity, operating units and optional first entries (FR-17.18). */
 export function CatalogCreatePage() {
   const navigate = useNavigate();
@@ -273,6 +279,8 @@ export function CatalogCreatePage() {
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useMemo(() => newIdempotencyKey(), [header, entries]);
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([header, entries]));
   const setH = (patch: Partial<typeof header>) => setHeader((h) => ({ ...h, ...patch }));
   const units = header.orgUnits.split(/[\s,]+/).filter((u) => u !== "");
 
@@ -302,6 +310,7 @@ export function CatalogCreatePage() {
     setBusy(true);
     try {
       const { body } = await createCatalog(input, key);
+      release();
       navigate(`/purchasing/catalogs/${body.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -319,6 +328,7 @@ export function CatalogCreatePage() {
         description="A catalog starts as a draft. Add items, then publish it so requesters can pick from it."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
+        <FormErrorSummary items={summaryItems(errors, CATALOG_CREATE_FIELDS, entryTarget)} attempt={attempt} />
         <Card title="Catalog">
           <div className={styles.grid}>
             <FormField id="cat-legal-entity" label="Legal entity" error={errors.legalEntityId}>
@@ -336,9 +346,11 @@ export function CatalogCreatePage() {
             <FormField id="cat-valid-to" label="Valid to" optional hint="Blank is open-ended" error={errors.validTo}>
               {(c) => <Input {...c} type="date" value={header.validTo} onChange={(e) => setH({ validTo: e.target.value })} />}
             </FormField>
-            <FormField id="cat-units" label="Operating unit ids" optional hint="Blank publishes to every unit" error={errors.orgUnitIds}>
-              {(c) => <Input {...c} value={header.orgUnits} onChange={(e) => setH({ orgUnits: e.target.value })} />}
-            </FormField>
+            <FormSection collapse="more">
+              <FormField id="cat-units" label="Operating unit ids" optional hint="Blank publishes to every unit" error={errors.orgUnitIds}>
+                {(c) => <Input {...c} value={header.orgUnits} onChange={(e) => setH({ orgUnits: e.target.value })} />}
+              </FormField>
+            </FormSection>
           </div>
         </Card>
         <Card
@@ -379,6 +391,7 @@ export function CatalogCreatePage() {
           </Link>
         </div>
       </form>
+      {prompt}
     </div>
   );
 }

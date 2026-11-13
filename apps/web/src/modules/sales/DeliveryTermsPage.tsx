@@ -3,7 +3,24 @@ import { PlainName } from "./OrderNumber";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  DataTable,
+  FormField,
+  Input,
+  PageHeader,
+  Skeleton,
+  type DataTableColumn,
+  FormErrorSummary,
+  summaryItems,
+  useFormBaseline,
+  useSubmitAttempt,
+  useUnsavedChanges,
+  type FormFieldTarget,
+} from "../../shell/ui";
 import {
   createDeliveryTerms,
   describeProblem,
@@ -173,6 +190,13 @@ export function DeliveryTermsListPage() {
   );
 }
 
+const NEW_DELIVERY_TERMS_FIELDS: Record<string, FormFieldTarget> = {
+  legalEntityId: { id: "terms-legalEntityId", label: "Legal entity" },
+  customerId: { id: "terms-customerId", label: "Customer" },
+  transportDays: { id: "terms-transportDays", label: "Transport days" },
+  receivingDays: { id: "terms-day-1", label: "Receiving weekdays" },
+};
+
 /** Sets a customer's delivery terms (FR-27.3, duty sales.parameter.maintain). */
 export function NewDeliveryTermsPage() {
   const navigate = useNavigate();
@@ -181,6 +205,8 @@ export function NewDeliveryTermsPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useRef(newKey());
+  const attempt = useSubmitAttempt(errors);
+  const { prompt, release } = useUnsavedChanges(useFormBaseline([values]));
 
   function update(patch: Partial<TermsValues>) {
     setValues((v) => ({ ...v, ...patch }));
@@ -196,6 +222,7 @@ export function NewDeliveryTermsPage() {
     setBusy(true);
     try {
       const saved = await createDeliveryTerms(input, key.current);
+      release();
       navigate(`/sales/delivery-terms/${saved.value.id}`);
     } catch (error) {
       const problem = describeProblem(error);
@@ -218,6 +245,7 @@ export function NewDeliveryTermsPage() {
       <PageHeader title="New delivery terms" description="A customer has one set of terms per legal entity; change existing terms from their page." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New delivery terms">
+          <FormErrorSummary items={summaryItems(errors, NEW_DELIVERY_TERMS_FIELDS)} attempt={attempt} />
           {party("legalEntityId", "Legal entity", "UUID of the selling legal entity.")}
           {party("customerId", "Customer", "UUID of the customer.")}
           <WeekdayFields values={values} errors={errors} onChange={update} />
@@ -238,6 +266,7 @@ export function NewDeliveryTermsPage() {
           </div>
         </form>
       </Card>
+      {prompt}
     </div>
   );
 }

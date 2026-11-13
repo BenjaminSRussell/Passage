@@ -59,8 +59,10 @@ describe("changes from other services", () => {
     expect(pageViolations(container)).toEqual([]);
 
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "REFUSED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/inbound-changes?status=REFUSED"));
     fireEvent.change(screen.getByLabelText("From"), { target: { value: "DROPSHIP_CLOSED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
       expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/inbound-changes?source=DROPSHIP_CLOSED&status=REFUSED"),
     );
@@ -91,7 +93,7 @@ describe("changes from other services", () => {
     vi.unstubAllGlobals();
     const fetchMock = stubFetch((url) => (url.includes("cursor=") ? json({ items: [change(2)] }) : json({ items: [change(1)], nextCursor: "c1" })));
     renderAt("/purchasing/inbound-changes");
-    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more changes" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("cursor=c1"));
   });
 
@@ -99,7 +101,7 @@ describe("changes from other services", () => {
     let fail = true;
     stubFetch(() => (fail ? problem(503, "COM-0503", "unavailable") : json({ items: [change(1)] })));
     renderAt("/purchasing/inbound-changes");
-    expect(await screen.findByText(/Could not load the changes/)).toBeInTheDocument();
+    expect(await screen.findByText(/Could not load changes/)).toBeInTheDocument();
     expect(screen.getByText(/COM-0503/)).toBeInTheDocument();
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -171,6 +173,7 @@ describe("changes from other services", () => {
     expect(within(table).getByText("Drop-ship cancelled")).toBeInTheDocument();
     expect(within(table).getByText("Cancel dropship")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Settled"), { target: { value: "NONE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/inbound-changes?resolution=NONE"));
   });
 

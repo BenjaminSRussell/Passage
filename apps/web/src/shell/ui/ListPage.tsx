@@ -75,6 +75,16 @@ export interface ListPageProps<T> {
    * searched by; a row without a name is searched by its number alone.
    */
   search?(row: T): SearchText;
+  /**
+   * Filters a link asked for, such as `?status=REFUSED` from a work queue. When any is set they replace the saved
+   * default view's filters for this visit; the default view's columns still apply.
+   */
+  initialFilters?: FilterValues;
+  /**
+   * The working set the list opens on when no link asked for filters and the person has no default view, such as
+   * open cases. Unlike `initialFilters` it never overrides a default view the person saved.
+   */
+  defaultFilters?: FilterValues;
   storage?: PreferenceStorage;
 }
 
@@ -149,6 +159,8 @@ export function ListPage<T>({
   empty,
   serverSort = NO_SORTS,
   search,
+  initialFilters,
+  defaultFilters,
   storage: preferred = localPreferenceStorage,
 }: ListPageProps<T>) {
   const { identity } = useWorkContext();
@@ -161,10 +173,15 @@ export function ListPage<T>({
   const [start] = useState<Start>(() => {
     const store = loadViewStore(storage, storeKey);
     const preset = store.views.find((v) => v.id === store.defaultId);
+    const asked = initialFilters ? cleanFilters(filters, initialFilters) : {};
+    if (Object.keys(asked).length > 0) {
+      const visible = preset ? reconcileView(preset, columns, filterKeys, filters).visible : defaultVisible(columns);
+      return { store, query: { ...emptyQuery(), filters: asked }, visible, activeId: null };
+    }
     if (preset) {
       return { store, ...reconcileView(preset, columns, filterKeys, filters), activeId: preset.id };
     }
-    return { store, query: emptyQuery(), visible: defaultVisible(columns), activeId: null };
+    return { store, query: { ...emptyQuery(), filters: defaultFilters ? cleanFilters(filters, defaultFilters) : {} }, visible: defaultVisible(columns), activeId: null };
   });
   const [store, setStore] = useState(start.store);
   const [query, setQuery] = useState(start.query);

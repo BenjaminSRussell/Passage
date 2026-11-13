@@ -49,7 +49,7 @@ describe("service tokens", () => {
 });
 
 describe("grants", () => {
-  it("match policies/authz/data.json and the Go table, and hold only service-only customer-portal duties, with no write but an order and a return", () => {
+  it("match policies/authz/data.json and the Go table, and hold only service-only customer-portal duties, with no write but an order and a return (and print's renderer, a POST that reads nothing)", () => {
     expect(data.service_grants[SERVICE_NAME]).toEqual(SERVICE_GRANTS);
     const src = readFileSync(new URL("platform/go/tenant/service.go", root), "utf8");
     const block = src.slice(src.indexOf(`"${SERVICE_NAME}": {`), src.indexOf("}\n}\n", src.indexOf(`"${SERVICE_NAME}": {`)));
@@ -59,7 +59,7 @@ describe("grants", () => {
       for (const d of duties) {
         expect(data.duties[d]?.service_only, d).toBe(true);
         expect(d).toContain("customer-portal");
-        const write = d === "sales.customer-portal.order" || d === "sales.customer-portal.return";
+        const write = d === "sales.customer-portal.order" || d === "sales.customer-portal.return" || d === "print.customer-portal.render";
         for (const perm of data.duties[d]?.permissions ?? []) expect(perm.methods, d).toEqual(write ? ["POST"] : ["GET"]);
       }
     }

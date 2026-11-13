@@ -102,6 +102,7 @@ describe("purchase agreement list", () => {
     renderAt("/purchasing/agreements");
     expect(await screen.findByRole("heading", { name: "No purchase agreements yet" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "ON_HOLD" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/agreements?status=ON_HOLD"));
   });
 

@@ -5,9 +5,10 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { authorizationUrl, endSessionUrl, exchangeCode, LoginRefused, pkcePair, randomToken, verifyIdToken, verifyLogoutToken, type Fetch, type Jwks, type OidcConfig } from "./oidc.ts";
+import { invoiceDocument, statementDocument, type DocumentRequest, type PortalInvoice, type PortalStatement } from "./documents.ts";
 import { FORBIDDEN_BODY_FIELDS, IDEMPOTENCY_KEY, matchRoute, QUERY_ALLOWLIST, type Route } from "./routes.ts";
 import type { Audience, ServiceTokenSigner } from "./serviceToken.ts";
-import { LOGIN_TTL_MS, parseCookies, SESSION_COOKIE, sameToken, StoreUnavailable, type RateLimiter, type Session, type SessionStore } from "./session.ts";
+import { LOGIN_TTL_MS, parseCookies, SESSION_COOKIE, sameToken, StoreUnavailable, type Limiter, type Session, type SessionStore } from "./session.ts";
 
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -15,6 +16,8 @@ const ACCOUNTS_TTL_MS = 60_000;
 const NAMES_TTL_MS = 10 * 60_000;
 const CACHE_MAX = 5000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 export interface ServerDeps {
   oidc: OidcConfig;
@@ -27,7 +30,7 @@ export interface ServerDeps {
   appOrigin: string;
   /** False only for local development over plain http. */
   cookieSecure: boolean;
-  limiter: RateLimiter;
+  limiter: Limiter;
   now?: () => number;
   log?: (entry: Record<string, unknown>) => void;
 }
@@ -172,12 +175,14 @@ export function createHttpServer(deps: ServerDeps): Server {
   async function api(req: IncomingMessage, res: ServerResponse, url: URL, session: Session): Promise<void> {
     const method = req.method ?? "GET";
     if (method === "GET" && url.pathname === "/api/v1/companies") return companies(res, session);
+    const invoicePdf = method === "GET" ? /^\/api\/v1\/invoices\/([^/]+)\/pdf$/.exec(url.pathname) : null;
+    if (invoicePdf || (method === "GET" && url.pathname === "/api/v1/statement/pdf")) return pdf(req, res, url, session, invoicePdf?.[1]);
     const matched = matchRoute(method, url.pathname);
     if (!matched) return problem(res, 404, "CUS-BFF-404", "no such route");
     const { route, upstreamPath } = matched;
     const le = legalEntity(session, req);
     if (!le) return problem(res, 400, "CUS-BFF-401", "name one of your legal entities in X-Legal-Entity");
-    if (!deps.limiter.allow(session.id, now())) return problem(res, 429, "CUS-BFF-429", "too many requests");
+    if (!(await deps.limiter.allow(session.id, now()))) return problem(res, 429, "CUS-BFF-429", "too many requests");
     let body: string | undefined;
     const extra: Record<string, string> = {};
     if (route.method === "POST") {
@@ -228,33 +233,102 @@ export function createHttpServer(deps: ServerDeps): Server {
     res.end(status === 502 && upstream.status === 401 ? JSON.stringify({ code: "CUS-BFF-502", status: 502, detail: "the service refused this portal" }) : text);
   }
 
+  /** A legal entity's customer-facing name from identity, cached per tenant and entity; null when identity has none or failed. */
+  async function entityName(session: Session, le: string): Promise<string | null> {
+    const key = `${session.identity.tenantId}:${le}`;
+    const hit = nameCache.get(key);
+    if (hit && hit.expires >= now()) return hit.name;
+    let name: string | null = null;
+    try {
+      const target = new URL("/v1/identity/customer-portal/legal-entity", deps.upstreams.identity);
+      const r = await call(mint(session, "identity", "identity.customer-portal.read", le, session.identity.customerId), "GET", target, {});
+      if (r.ok) {
+        const shown = ((await r.json()) as { displayName?: unknown }).displayName;
+        name = typeof shown === "string" && shown !== "" ? shown : null;
+      } else log({ msg: "legal entity name unavailable", status: r.status });
+    } catch (err) {
+      log({ msg: "legal entity name unreachable", err: String(err) });
+    }
+    // A failed read is not cached for long: the selector falls back to a numbered name and the next load tries again.
+    bounded(nameCache);
+    nameCache.set(key, { name, expires: now() + (name === null ? 15_000 : NAMES_TTL_MS) });
+    return name;
+  }
+
   /** The contact's companies with their customer-facing names, one small read of identity per legal entity (cached). */
   async function companies(res: ServerResponse, session: Session): Promise<void> {
-    if (!deps.limiter.allow(session.id, now())) return problem(res, 429, "CUS-BFF-429", "too many requests");
-    const items = await Promise.all(
-      session.identity.legalEntityIds.map(async (le) => {
-        const key = `${session.identity.tenantId}:${le}`;
-        const hit = nameCache.get(key);
-        if (hit && hit.expires >= now()) return { legalEntityId: le, name: hit.name };
-        let name: string | null = null;
-        try {
-          const target = new URL("/v1/identity/customer-portal/legal-entity", deps.upstreams.identity);
-          const r = await call(mint(session, "identity", "identity.customer-portal.read", le, session.identity.customerId), "GET", target, {});
-          if (r.ok) {
-            const shown = ((await r.json()) as { displayName?: unknown }).displayName;
-            name = typeof shown === "string" && shown !== "" ? shown : null;
-          }
-          else log({ msg: "legal entity name unavailable", status: r.status });
-        } catch (err) {
-          log({ msg: "legal entity name unreachable", err: String(err) });
-        }
-        // A failed read is not cached for long: the selector falls back to a numbered name and the next load tries again.
-        bounded(nameCache);
-        nameCache.set(key, { name, expires: now() + (name === null ? 15_000 : NAMES_TTL_MS) });
-        return { legalEntityId: le, name };
-      }),
-    );
+    if (!(await deps.limiter.allow(session.id, now()))) return problem(res, 429, "CUS-BFF-429", "too many requests");
+    const items = await Promise.all(session.identity.legalEntityIds.map(async (le) => ({ legalEntityId: le, name: await entityName(session, le) })));
     send(res, 200, { items });
+  }
+
+  /**
+   * An invoice or the statement as a PDF (FR-30.26): the same customer-scoped read the app makes (billing's invoice, receivables'
+   * statement, for the account in X-Customer), turned into print's document request and rendered by print with the portal's own
+   * render duty. Nothing is stored; a refusal of the read (404, 403) is passed on as it came.
+   */
+  async function pdf(req: IncomingMessage, res: ServerResponse, url: URL, session: Session, invoiceId: string | undefined): Promise<void> {
+    const le = legalEntity(session, req);
+    if (!le) return problem(res, 400, "CUS-BFF-401", "name one of your legal entities in X-Legal-Entity");
+    if (!(await deps.limiter.allow(session.id, now()))) return problem(res, 429, "CUS-BFF-429", "too many requests");
+    if (invoiceId !== undefined && !UUID.test(invoiceId)) return problem(res, 404, "CUS-BFF-404", "no such invoice");
+    const asOf = url.searchParams.get("asOf");
+    if (asOf !== null && !DAY.test(asOf)) return problem(res, 400, "CUS-BFF-408", "asOf must be a YYYY-MM-DD date");
+    const chosen = await customerFor(session, req, le);
+    if ("refused" in chosen) return problem(res, 403, "CUS-BFF-407", chosen.refused);
+    const read =
+      invoiceId !== undefined
+        ? { audience: "billing" as const, duty: "billing.customer-portal.read", path: `/v1/billing/customer-portal/invoices/${invoiceId}` }
+        : { audience: "receivables" as const, duty: "receivables.customer-portal.read", path: "/v1/receivables/customer-portal/statement" };
+    const source = new URL(read.path, deps.upstreams[read.audience]);
+    if (asOf !== null && invoiceId === undefined) source.searchParams.set("asOf", asOf);
+    let document: DocumentRequest;
+    let fileName: string;
+    try {
+      const r = await call(mint(session, read.audience, read.duty, le, chosen.customerId), "GET", source, {});
+      if (!r.ok) {
+        // As in forward: a rejected service token is the portal's fault, never the user's, and says nothing of the read.
+        log({ msg: "pdf read refused", audience: read.audience, status: r.status });
+        if (r.status === 401) return problem(res, 502, "CUS-BFF-502", "the service refused this portal");
+        const type = r.headers.get("content-type") ?? "";
+        res.writeHead(r.status, { "content-type": type.includes("json") ? type : "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+        res.end(await r.text());
+        return;
+      }
+      const seller = await entityName(session, le);
+      if (invoiceId !== undefined) {
+        const invoice = (await r.json()) as PortalInvoice;
+        document = invoiceDocument(invoice, seller);
+        fileName = `${invoice.number || "invoice"}.pdf`;
+      } else {
+        const statement = (await r.json()) as PortalStatement;
+        document = statementDocument(statement, seller);
+        fileName = `statement-${statement.asOf}.pdf`;
+      }
+    } catch (err) {
+      log({ msg: "upstream unreachable", audience: read.audience, path: url.pathname, err: String(err) });
+      return problem(res, 502, "CUS-BFF-502", "the service did not answer");
+    }
+    let rendered: Response;
+    try {
+      const target = new URL("/print/v1/documents:render", deps.upstreams.print);
+      rendered = await call(mint(session, "print", "print.customer-portal.render", le, chosen.customerId), "POST", target, { "content-type": "application/json", accept: "application/pdf" }, JSON.stringify(document));
+    } catch (err) {
+      log({ msg: "upstream unreachable", audience: "print", err: String(err) });
+      return problem(res, 502, "CUS-BFF-502", "the document could not be rendered; try again");
+    }
+    log({ msg: "pdf", userId: session.identity.userId, customerId: chosen.customerId, kind: invoiceId !== undefined ? "invoice" : "statement", status: rendered.status });
+    if (!rendered.ok) return problem(res, 502, "CUS-BFF-409", "the document could not be rendered; try again later");
+    const bytes = Buffer.from(await rendered.arrayBuffer());
+    if (bytes.length > MAX_PDF_BYTES) return problem(res, 502, "CUS-BFF-409", "the document could not be rendered; try again later");
+    res.writeHead(200, {
+      "content-type": "application/pdf",
+      "content-disposition": `attachment; filename="${fileName.replace(/[^A-Za-z0-9._-]/g, "_")}"`,
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer",
+    });
+    res.end(bytes);
   }
 
   /**

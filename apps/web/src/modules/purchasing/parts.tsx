@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, Badge, Button, statusTone } from "../../shell/ui";
-import { describeProblem, type RankingRule } from "./api/client";
+import { Alert, Badge, Button, isForbidden, loadedRows, statusTone, usePagedRows, type ListData, type RowPage } from "../../shell/ui";
+import { describeProblem, ProcurementApiError, type RankingRule } from "./api/client";
 import { formatOption, resolveOption, type LookupEntityKey } from "../../shell/lookup/entities";
 import { Named } from "./Named";
 import styles from "./pages.module.css";
@@ -63,6 +63,22 @@ export function useResource<T>(load: (signal: AbortSignal) => Promise<T>, deps: 
 
   const reload = useCallback(() => setTick((n) => n + 1), []);
   return { ...state, reload };
+}
+
+/**
+ * ListData for a cursor-paged procurement list, for `ListPage`'s `useRows`. A new `key` (the filters) starts from the
+ * first page; a 403 shows ListPage's no-access message.
+ */
+export function useProcurementPages<T>(key: string, fetchPage: (cursor: string | undefined, signal: AbortSignal) => Promise<RowPage<T>>): ListData<T> {
+  const data = usePagedRows(key, fetchPage);
+  const denied = data.error instanceof ProcurementApiError && data.error.problem.status === 403;
+  return denied ? { ...data, forbidden: true } : data;
+}
+
+/** ListData for a procurement list loaded in full with `useResource`; a 403 shows ListPage's no-access message. */
+export function resourceRows<T>(resource: Resource<T[]>): ListData<T> {
+  const error = resource.error ?? undefined;
+  return loadedRows({ data: resource.data, loading: resource.loading, error, reload: resource.reload }, error?.code === "403" || isForbidden(error));
 }
 
 /** Sentence-case label for an upper-snake status, e.g. IN_REVIEW → In review. */

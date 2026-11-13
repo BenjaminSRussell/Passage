@@ -17,10 +17,24 @@ import {
 } from "./api/client";
 import { CURRENCY, DAY, UUID } from "./format";
 import { CommandFailure, LoadFailure } from "./parts";
+import { copy } from "../../shell/copy";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const ACCOUNT = /^[0-9A-Za-z._-]{1,20}$/;
+/** The service's bounds: an amount up to 1,000,000 with 6 decimals, a percent up to 100 with 4. */
+const TOLERANCE_AMOUNT = /^\d{1,7}(\.\d{1,6})?$/;
+const TOLERANCE_PERCENT = /^\d{1,3}(\.\d{1,4})?$/;
+
+/** The FX form's values: the tolerance fields are text, empty meaning the default. */
+export interface FXValues {
+  crossCurrencyEnabled: boolean;
+  functionalCurrency: string;
+  gainAccount: string;
+  lossAccount: string;
+  toleranceAmount: string;
+  tolerancePercent: string;
+}
 
 type Errors = Record<string, string>;
 
@@ -33,13 +47,43 @@ export function validateMapping(v: { currency: string; accountRef: string; glAcc
   return errors;
 }
 
-export function validateFX(v: Pick<FXSetting, "crossCurrencyEnabled" | "functionalCurrency" | "gainAccount" | "lossAccount">): Errors {
+export function validateFX(v: Pick<FXValues, "crossCurrencyEnabled" | "functionalCurrency" | "gainAccount" | "lossAccount"> & Partial<Pick<FXValues, "toleranceAmount" | "tolerancePercent">>): Errors {
   const errors: Errors = {};
   if (v.functionalCurrency.trim() !== "" && !CURRENCY.test(v.functionalCurrency.trim())) errors.functionalCurrency = "Enter the three-letter currency, such as USD.";
   else if (v.crossCurrencyEnabled && v.functionalCurrency.trim() === "") errors.functionalCurrency = "Enter the functional currency to settle across currencies.";
   if (!ACCOUNT.test(v.gainAccount.trim())) errors.gainAccount = "Enter a ledger account number, such as 7100.";
   if (!ACCOUNT.test(v.lossAccount.trim())) errors.lossAccount = "Enter a ledger account number, such as 7200.";
+  const amount = (v.toleranceAmount ?? "").trim();
+  if (amount !== "" && (!TOLERANCE_AMOUNT.test(amount) || Number(amount) > 1_000_000)) errors.toleranceAmount = "Enter an amount from 0 to 1000000 with at most 6 decimals, or leave it empty.";
+  const percent = (v.tolerancePercent ?? "").trim();
+  if (percent !== "" && (!TOLERANCE_PERCENT.test(percent) || Number(percent) > 100)) errors.tolerancePercent = "Enter a percent from 0 to 100 with at most 4 decimals, or leave it empty.";
   return errors;
+}
+
+export function fxValues(setting: FXSetting): FXValues {
+  return {
+    crossCurrencyEnabled: setting.crossCurrencyEnabled,
+    functionalCurrency: setting.functionalCurrency,
+    gainAccount: setting.gainAccount,
+    lossAccount: setting.lossAccount,
+    toleranceAmount: setting.toleranceAmount ?? "",
+    tolerancePercent: setting.tolerancePercent ?? "",
+  };
+}
+
+/** The PUT body: an empty tolerance field is left out, so the service keeps the default for it. */
+export function toFXSetting(legalEntityId: string, v: FXValues): FXSetting {
+  const amount = v.toleranceAmount.trim();
+  const percent = v.tolerancePercent.trim();
+  return {
+    legalEntityId,
+    crossCurrencyEnabled: v.crossCurrencyEnabled,
+    functionalCurrency: v.functionalCurrency.trim(),
+    gainAccount: v.gainAccount.trim(),
+    lossAccount: v.lossAccount.trim(),
+    ...(amount !== "" ? { toleranceAmount: amount } : {}),
+    ...(percent !== "" ? { tolerancePercent: percent } : {}),
+  };
 }
 
 export function validateBackfill(v: { openingAccount: string; openingDate: string }): Errors {
@@ -198,7 +242,7 @@ function FXProfile({ legalEntityId }: { legalEntityId: string }) {
 }
 
 function FXForm({ initial }: { initial: FXSetting }) {
-  const [values, setValues] = useState(initial);
+  const [values, setValues] = useState<FXValues>(() => fxValues(initial));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [saved, setSaved] = useState(false);
@@ -213,7 +257,7 @@ function FXForm({ initial }: { initial: FXSetting }) {
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      await putFXSetting({ ...values, functionalCurrency: values.functionalCurrency.trim(), gainAccount: values.gainAccount.trim(), lossAccount: values.lossAccount.trim() });
+      await putFXSetting(toFXSetting(initial.legalEntityId, values));
       setSaved(true);
     } catch (error) {
       const problem = describeProblem(error);
@@ -241,6 +285,15 @@ function FXForm({ initial }: { initial: FXSetting }) {
       </FormField>
       <FormField id="fx-loss" label="Realized loss account" error={errors.lossAccount}>
         {(c) => <Input {...c} value={values.lossAccount} onChange={(e) => setValues({ ...values, lossAccount: e.target.value })} invalid={Boolean(errors.lossAccount)} />}
+      </FormField>
+      <p className={`${styles.note} ${styles.wide}`}>
+        The tolerance is how far a cross-currency payment may be from the invoice amount and still settle it: the larger of the amount and the percent of the invoice. Leave both empty for the default, the larger of 5.00 and 0.5%. Zero demands the exact market value.
+      </p>
+      <FormField id="fx-tolerance-amount" label="Tolerance amount" optional hint={copy.fieldHelp.fxToleranceAmount} error={errors.toleranceAmount}>
+        {(c) => <Input {...c} inputMode="decimal" className={styles.mono} value={values.toleranceAmount} onChange={(e) => setValues({ ...values, toleranceAmount: e.target.value })} invalid={Boolean(errors.toleranceAmount)} />}
+      </FormField>
+      <FormField id="fx-tolerance-percent" label="Tolerance percent" optional hint={copy.fieldHelp.fxTolerancePercent} error={errors.tolerancePercent}>
+        {(c) => <Input {...c} inputMode="decimal" className={styles.mono} value={values.tolerancePercent} onChange={(e) => setValues({ ...values, tolerancePercent: e.target.value })} invalid={Boolean(errors.tolerancePercent)} />}
       </FormField>
       <div className={styles.formActions}>
         <Button type="submit" variant="primary" loading={busy}>

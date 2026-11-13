@@ -1,27 +1,3 @@
 {
-  "pages": [
-    "modules/purchasing/AgreementPages.tsx",
-    "modules/purchasing/ApprovalPages.tsx",
-    "modules/purchasing/CatalogImportPages.tsx",
-    "modules/purchasing/CatalogPages.tsx",
-    "modules/purchasing/CategoryPages.tsx",
-    "modules/purchasing/ChargePages.tsx",
-    "modules/purchasing/InboundPages.tsx",
-    "modules/purchasing/PolicyPages.tsx",
-    "modules/purchasing/ReleasePages.tsx",
-    "modules/purchasing/RequisitionPages.tsx",
-    "modules/purchasing/RfqPages.tsx",
-    "modules/purchasing/RfqTypePages.tsx",
-    "modules/purchasing/SchedulingPages.tsx",
-    "modules/purchasing/ServicePages.tsx",
-    "modules/purchasing/SigningPages.tsx",
-    "modules/purchasing/TradeAgreementPages.tsx",
-    "modules/receivables/Cases.tsx",
-    "modules/receivables/Deductions.tsx",
-    "modules/receivables/Disputes.tsx",
-    "modules/receivables/DownPayments.tsx",
-    "modules/receivables/Dunning.tsx",
-    "modules/receivables/GLJournals.tsx",
-    "modules/receivables/Statements.tsx"
-  ]
+  "pages": []
 }
